@@ -1,0 +1,36 @@
+{
+  "number": 37363,
+  "kind": "issue",
+  "title": "记录 AI 问询 10 前置：ADR-0160 D9 引用格式加可选 context，并写入引用核对的三条裁决",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-25T23:21:25Z",
+  "updated_at": "2026-11-26T01:12:05Z",
+  "closed_at": "2026-11-26T01:10:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37363",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ③ maintainer-ruled. Ruling 7177410380 on #37144 (Q2 = A, the maintainer on the decision card, 2026-11-25T23:18Z, 「生成时核·D9加context·开主」; four-axis analysis 7177223845).\nGrading: area:ai · Task (ADR amendment) · p2 (blocks row 10a) · reach: n/a (contract text) · evidence: read.\n\n## 维护者速读\n- 做什么：在 ADR-0160 的引用格式（D9）里加一个可选的包名 `context`，并把 #37144 的三条裁决写进 D9：生成时按提问人核一次、关联记录的摘句指向主记录。\n- 谁受益：后面三张施工卡（10a/10b/10c）照这段文字做，不再各自解释。\n- 不做会怎样：一个对象有多个资料包时，引用无法核对。\n- 需要你做的：这是受管文件（Tier H），合并需要 os-zhuang 与 hotlong 批准。\n\n## What\nAmend `docs/adr/0160-record-scoped-ai-inquiry.md` D9 (the citation shape `{object, id, anchor?, quote}`) with the three rulings of 7177410380:\n1. **Shape (Q2 = A).** Add optional `context`: the pack's face, spelt exactly as `get_record_context`'s input `context` argument takes it. A citation without `context` on an object with several packs is not verified (the tool's refusal stands). On an object with one pack it verifies as before.\n2. **When it is verified (Q1 = A).** Once, when the answer is produced, by the platform as the asking user. A citation whose `quote` is not found verbatim in the data member of `get_record_context`'s answer for its `object`, `id`, `context` and `anchor` is dropped before the answer is shown. The verified list is persisted with the message, and a surface never re-verifies on display. This replaces D9's sentence that leaves \"whether a surface verifies before it renders\" to row 10.\n3. **A quote from a related row (Q3 = A).** `object`/`id` name the pack's root record. The quote is matched across that answer's data member, related-list cells included. The surface opens the root record. `anchor` keeps its one meaning: a heading of the root record's body.\n\nRecord the amendment in the ADR's amendment log, with the ruling id. Text only; no code.\n\n## Acceptance\n- D9 states the three points above. Nothing else in the ADR changes.\n- `Rule-change:` line and governed-surface review per AGENTS.md: Tier H, reviewers os-zhuang + hotlong.\n\nGoverning text: ADR-0160 D9, D4, D3; ruling 7177410380.\nParent: #36996 (row 10). Unblocks: row 10a.\nSize: S\nDedupe (objectstack, is:issue): `ADR-0160 amendment` → #37196 and #37202 (both merged/closed, other points); none carries D9 `context`.\n"
+}

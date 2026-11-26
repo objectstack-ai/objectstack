@@ -2,8 +2,8 @@
   "number": 37100,
   "kind": "issue",
   "title": "knowledge-pgvector: an open vector store on PostgreSQL — tables, exact search, listing, chunks",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T19:37:42Z",
-  "updated_at": "2026-11-25T19:17:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T23:26:08Z",
+  "closed_at": "2026-11-25T23:25:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37100",
   "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed (topic child). Source: topic #37000 (phase 2 row 8); boundary cloud ADR-0119 D5 (objectstack-ai/cloud#4968: 「都放开源」); maintainer 2026-11-24 「用fable评审，并分拆第二阶段的任务」. Reviewed by an independent Fable pass before filing.\nGrading: area:ai · Feature · p2 (topic) · reach: self-hosted deployments on PostgreSQL · evidence: read.\n\n## 维护者速读\n- 做什么：新增开源包 `knowledge-pgvector`。自建部署用 PostgreSQL 时，不装外部检索引擎也有向量检索，多组织的数据互不串。\n- 要知道的：\n  - 数据库要装 pgvector 扩展。\n  - 要配置嵌入服务商，文本会发给它。\n  - 换模型后要重建，重建期间检索暂不可用（重建在另一张卡）。\n- 谁受益：企业版和开源版的 PostgreSQL 部署；BrightRule 可以删掉自己写的 pgvector 代码。\n- 需要你做的：无（它依赖的 CI 镜像卡要你手工合并）。\n\n## What\n1. `packages/plugins/knowledge-pgvector` (new, Apache-2.0), rewritten from BrightRule's store (objectstack-ai/brightrule `src/qa/vector/pgvector-store.ts`, `adapter.ts`), not lifted.\n2. Storage: one table per vector dimension, `knowledge_vec_d<dim>`: `source_id`, `generation`, `chunk_id`, `document_id`, `source_record_id`, `organization_id`, `content`, `doc_hash`, `chunk_hash`, `metadata jsonb`, `embedding vector(<dim>)`; created only when a new dimension appears. A generation table: `source_id`, `generation`, `fingerprint`, `dim`, `model`, `state`, `created_at`. Check the table names cannot collide with object tables, and that schema-drift checks do not report them (state the result).\n3. Connection: its own small pool built from the platform database's connection settings when that database is PostgreSQL (state how the settings are read), else a configured URL. No pooled connection is held across an embed call. State the schema, and which database is used when organizations have separate databases.\n4. Missing `vector` extension or DDL right: the adapter does not register its tables; knowledge calls answer a readable error carrying the SQL to run by hand; `healthCheck` is false; boot continues.\n5. Search: exact scan (HNSW documented as an operator step, with its dimension limit). Organization filter in SQL from #37097's `organizationIds`. Today's opaque metadata-equality filter applied in SQL before ranking.\n6. Fingerprint: the one #37001 defines (model + dimensions + split config + split algorithm version + content recipe), computed by the service and handed to the adapter (member per #37001; this card is its reader). `IEmbedder.model?` lands here (the fingerprint reads it); `embedder-openai` fills it. A stored fingerprint that differs from the current one marks the source as needing a rebuild, and search answers a clear \"rebuild needed\" error until #37101's build runs.\n7. Unchanged content (same `chunk_hash`, computed by the adapter over the text it embeds) updates metadata only, no re-embedding.\n8. Implements `listDocuments` (#37096), accepts chunks (#37098). Plugin option `queryPrefix` for asymmetric models (BGE).\n9. The #37096 contract suite runs in CI against PostgreSQL with pgvector (#37095); no skip path. Tests use a fixed fake embedder.\n10. Docs: `content/docs/protocol/knowledge.mdx` (lines 87 and 430 say \"planned\" / \"Phase 3\"), `content/docs/ai/knowledge-rag.mdx`; the `content` column is as sensitive as the source data and is in backups.\n\n## Acceptance\n- A 3072-dimension model works.\n- Two organizations in one database never see each other's hits (adapter test and service test).\n- Missing extension → readable error with the SQL, boot continues.\n- Same content re-indexed → no embed call.\n- Changed fingerprint → \"rebuild needed\" error, old rows not served.\n- The #37096 suite passes in CI on real PostgreSQL.\n\n## Out of scope\n- Building a new generation and switching (#37101).\n- Automatic HNSW; `storeContent: false`; the typed filter (row 11).\n- The comparison with BrightRule's own store (on the BrightRule migration card, objectstack-ai/brightrule#21).\n- The libSQL store (#37107).\n\nBlocked-by: #37001, #37096, #37098, #37095, #37097.\nParent: #37000. Reader: `domain:server` lane (`packages/plugins/knowledge-*`).\nDedupe: `pgvector` 5 (open: #37000, #37001, a seat post — no card) · `knowledge generation fingerprint` 12 (open: #37000, #37001, a seat post)."

@@ -15,7 +15,7 @@
     "protocol:data",
     "protocol:system",
     "protocol:ui",
-    "size/m",
+    "size/l",
     "tests",
     "tooling"
   ],
@@ -25,7 +25,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-25T14:42:26Z",
-  "updated_at": "2026-11-25T18:59:36Z",
+  "updated_at": "2026-11-26T01:25:35Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

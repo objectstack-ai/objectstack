@@ -1,0 +1,30 @@
+{
+  "number": 37408,
+  "kind": "issue",
+  "title": "专题：元数据的声明式动作（软件包和各类元数据的按钮用声明挂上，插件和 AI 也能加，不再写死在界面里）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "pm:epic",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T02:12:34Z",
+  "updated_at": "2026-11-26T02:12:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37408",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\n③ maintainer direct order · Source: maintainer, 2026-11-26, seat repo:objectstack#4 session. ④ coordination parent: not dispatched itself; children are split and filed when the topic is picked up. Priority p3 as ordered. ⛔ Not a claim.\n\n## 维护者速读\n\n- **要解决什么**：业务对象的按钮是声明出来的（`actions`），元数据这边大多写死在界面代码里。插件或客户想给软件包、或者给某类元数据加一个动作（例如「同步到 Git」「导出成模板」），现在只能改平台代码。\n- **现状**：机制其实已经有一半。元数据类型可以声明类型级按钮，和业务对象用同一套按钮定义；插件也能追加。但只有「数据源 › 测试连接」一处在用，界面也只接了「调接口」这一种按钮。软件包「⋯」菜单和每个详情页的新建、编辑、删除都写死在界面里。软件包本身不是元数据类型，挂不上按钮。\n- **大方向**（开工时再出决策卡定细节）：① 元数据按钮支持的种类补齐到和业务对象一致（至少跑流程、打开表单）；② 给软件包一个挂按钮的位置，把内置动作逐步改成声明，显示和置灰规则也用声明表达。\n- **优先级 p3**：目前没有具体客户或插件提出要自定义元数据动作，先立专题占位，不派发。\n- **要你做什么**：现在无。开工前先出一张决策卡给你定范围。\n\n## Maintainer's words (2026-11-26)\n\n- 「还有，元数据有类似数据的 action 概念吗？这些动作现在都是写死的吗」\n- 「立一个新的专题 p3」\n\n## Readings (at `ff6f9768d29`)\n\n- **The declaration exists.** `MetadataTypeRegistryEntry.actions` (`packages/spec/src/kernel/metadata-plugin.zod.ts:395`) reuses the business-object `ActionSchema` verbatim. A plugin layers more actions onto any type with `registerMetadataTypeActions()` (`packages/spec/src/kernel/metadata-type-schemas.ts:412`), and `getMetadataTypeActions` merges the two layers.\n- **The renderer exists.** `ui/packages/app-shell/src/views/metadata-admin/MetadataTypeActions.tsx` draws these actions in the record header and the list toolbar.\n- **One consumer.** The only caller is the datasource \"Test connection\" action (`packages/services/service-datasource/src/datasource-admin-plugin.ts:348`).\n- **One action type.** Only `type: 'api'` is wired (`MetadataTypeActions.tsx:171-174`). Any other type shows \"is not supported here yet\".\n- **Package actions are hard-coded.** The package ⋯ menu actions (edit details, export, duplicate, revert, adopt, publish, import) live in `ui/packages/app-shell/src/views/metadata-admin/packageActions.tsx`, and so do their visibility and disabled rules. The built-in new, edit and delete on every metadata detail page are UI code too.\n- **No slot for packages.** A package is not a metadata type, so it has no registry entry and cannot carry declarative actions.\n\n## Direction (to be settled by a decision card when the topic starts)\n\n1. **Close the declared ≠ enforced gap first.** `ActionSchema` lets an author declare `flow`, `modal` and other types on a metadata type, and the runtime refuses them with a toast. Under ADR-0049 enforce-or-remove, either wire the other types in `MetadataTypeActions.tsx` or narrow what a metadata type may declare to the wired set.\n2. **Give packages an action slot.** The decision card must pick where it lives: a registry entry for the package type, or a dedicated package action list in spec.\n3. **Migrate the built-ins.** Move the hard-coded package actions onto the declaration, together with their visibility and disabled rules: read-only packages, revert confirmation, permission greying (#37400).\n\nOpen questions for the decision card:\n- Pull. Is there a named plugin or customer action that needs this? Without one, the four-axis frame recommends step 1 only.\n- Whether built-in actions migrate, or only third-party actions use the declaration.\n- How permission rules are expressed: reuse the object action `visible`/`disabled` expressions, or use a package-specific predicate set.\n- Whether AI authoring (skills) teaches metadata-type actions, and the eval case that pins it.\n\n## Children\n\nNone filed yet. The seat splits them when the topic is picked up, with a decision card first.\n\n## Related\n\n- #37400: the package ⋯ menu gains \"New package\", and \"Manage in settings\" greys out for users without access. These are hard-coded today and become migration input for step 3.\n- #37401: retire the developer face of the package view. It is blocked by #37400."
+}

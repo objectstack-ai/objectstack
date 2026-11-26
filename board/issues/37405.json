@@ -1,0 +1,31 @@
+{
+  "number": 37405,
+  "kind": "issue",
+  "title": "adr: field write locks are two tiers, two forms and two levels (readonly / readonlyWhen vs uiReadonly / uiReadonlyWhen, field over object); the data skill teaches the four spellings",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T02:04:02Z",
+  "updated_at": "2026-11-26T02:04:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37405",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbcAmwZGHVnPE8xJwr\n\nFiling gate: ③ · Source: maintainer — ruling on objectstack-ai/objectstack#36806 (2026-11-26, decision thread 「裁决 #36806 只读字段命名」): 「按长远模型」, with the instruction that the model is a contract rule and must not live only in field describes. Sub-issue of #36806.\nGrade: area:data · Documentation · p2 (takes the parent's grade).\nReader: triage — the fix lands in `docs/adr/**` and `skills/**` (governed, Tier H), so the lane is `domain:skills`, not the parent's `domain:spec`; the filing seat asks triage to confirm the label. Card thread must start on the contract-review tier.\nBlocked-by: none — the ADR can be written beside #36806's PR and should land first or with it.\n\n## 维护者速读\n\n- 用户能看到什么变化:平台文档里有一页说清「一个字段谁能改、什么时候能改」的完整模型,数据技能多一节教 AI 作者四种锁法怎么选;写元数据的人不再在只读、条件只读、界面只读之间猜。\n- 为什么做:#36806 裁决把两层两形两级的模型定了下来,它是契约规则,不该只活在字段描述里;ui 前缀只许用在界面与服务端答案不同的概念上这条命名规则也要有出处可引。\n- 出错会怎样:没有这页,后面的卡会各自发明 uiVisibleWhen、uiRequiredWhen 一类的键,或者把界面锁当服务端锁用。\n- 要你做什么:ADR 是受管面,PR 要你批合。\n\n## Asked\n\n1. A short ADR under `docs/adr/` recording the ruling on #36806:\n   - two tiers: server lock (`readonly`, `readonlyWhen`; `readonlyWhen: P\\`true\\`` is set-once, the RAP `readonly:update` / OData `Core.Immutable` shape) and hand lock (`uiReadonly`, `uiReadonlyWhen`: every console surface, writes through API, import, actions and flows keep it, judged by validations);\n   - two levels: field and object, a field's own declaration wins over the object's default;\n   - what counts as \"by hand\": forms, inline edit, multi-row grid save, kanban and calendar drag, the highlight chip, duplicating a record, and an in-app assistant acting for a person; what does not: API, import, actions, flows;\n   - the admission rule for `ui`-prefixed keys: only where the console's and the server's answers to the same question legitimately differ; visibility has one tier (server-side is permission masking, a different key) and required-ness has one tier (server), so `uiVisibleWhen` and `uiRequiredWhen` are refused by this rule;\n   - contradiction handling: `uiReadonly` beside `readonly: true` is refused at validate; `uiReadonlyWhen` beside `readonlyWhen` is allowed and documented;\n   - the server strip stays a strip with the dropped-fields header; a refusal mode is out of scope.\n2. The data skill (`skills/**`) gains one section, \"locking a field: the four spellings and when to use which\", with the sales-order status example from hotcrm#2716.\n\n## Done when\n\nThe ADR is accepted on `main`; the data skill section is in place and its eval exercises a `uiReadonly` status field; `objectstack validate`'s refusal text for `uiReadonly` + `readonly` points at the ADR.\n\n## Governing text\n\n- Ruling on #36806 (2026-11-26) — the model, the phases and the naming rule.\n- ADR-0085 §2 (admission test for future keys), ADR-0049 (declared keys are enforced), ADR-0092 (history: `readonly` promoted from a UI hint to a server boundary)."
+}

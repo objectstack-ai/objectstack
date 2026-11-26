@@ -1,0 +1,32 @@
+{
+  "number": 37390,
+  "kind": "pull_request",
+  "title": "fix(plugin-chatbot): the AI quota notice offers an upgrade only when the refusal names one",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T01:18:01Z",
+  "updated_at": "2026-11-26T02:05:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37390",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8P23qC5iZwu8UHz5wao8WP6)_\n\nRefs objectstack-ai/cloud#4853\n\nClause-②: yes (widening) — one new published language-pack key, `chatbotQuota.limitTitle`, in every locale\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:付费团队在 AI 输入框碰到五小时用量上限时,提示改为「AI 额度已用尽」加恢复时间,不再出现「需要升级」和「升级方案」按钮;周额度用完时按钮是「购买额度包」;免费版照旧提示升级。\n- 为什么做:属于云端分区的 AI 额度提示修正,替付费团队解决「已付费却被要求升级」的误导。\n- 出错会怎样:最坏是某类额度提示少了或多了一个按钮,文字仍是服务器原话,可直接撤回本改动。\n- 要你做什么:无\n\n## What changes\n\n- `useAiQuotaCopy` (plugin-chatbot `ChatbotEnhanced.tsx`) now returns a `title` and a nullable `cta`, both read from the refusal's own `upgrade` / `topUp` flags (already parsed by `parseAiQuotaError`):\n  - `topUp: true` → neutral title, \"Buy a credit pack\" action (unchanged action, title no longer says upgrade);\n  - `upgrade: true` → \"Upgrade needed\" + \"Upgrade plan\" (unchanged);\n  - neither (paid five-hour pace; developer organization, which sends `upgrade:false` and no `topUp` key) → neutral title and **no action**; the server's sentence already says when it frees up.\n- `ErrorBanner`'s quota branch and `QuotaBlockedNextStep` (confirm card blocked state) render the action only when `cta` is set, same gating as the dock's `AiUsageIndicator` / `ChatDock` (`pool.upgrade || pool.topUp`).\n- New key `chatbotQuota.limitTitle` (\"AI limit reached\" / 「AI 额度已用尽」) in all 11 `@object-ui/i18n` locales that carry `chatbotQuota.*`.\n- One patch changeset (`@object-ui/plugin-chatbot`, `@object-ui/i18n`).\n\nMechanism check: the composer receives the cloud guardrail's 429 (cloud main e09f45c, `ai-token-guardrail-plugin.ts`), which carries no `planType` / `resetKind`, only `error.details.{messageEn, upgrade, topUp, resetsTonight, resetsAt}`. Test fixtures are that body per plan; the card's usage-door words are in the test names so the acceptance reads 1:1.\n\n## Tests\n\n<details><summary>Targeted + package runs, ablation</summary>\n\n- New describe in `ChatbotEnhanced.quotaResetPromise-7587.test.tsx` (zh pack via `I18nProvider`): paid five-hour `{planType:'paid', resetKind:'fiveHour', upgrade:false, topUp:false}` → no 「需要升级」, no 「升级方案」 button, zero buttons, text exactly `AI 额度已用尽` + server sentence; developer plan → no heading, no button; paid weekly `topUp:true` → 「购买额度包」 calls `onUpgrade`, no 「升级方案」; free `upgrade:true` → heading and 「升级方案」 stay.\n- New describe in `ChatbotEnhanced.quotaBlockedConfirm.test.tsx`: paid five-hour on the confirm card → reason shown, `proposed-changes-quota-upgrade` absent.\n- `pnpm --dir ui exec vitest run packages/plugin-chatbot/ packages/i18n/` → Test Files 214 passed (214), Tests 3103 passed, 13 skipped.\n- `pnpm --filter @object-ui/plugin-chatbot --filter @object-ui/i18n run type-check` → both Done, exit 0.\n- Ablation (fix committed first; `ChatbotEnhanced.tsx` restored to the merge base, `limitTitle` count 0 on disk): 4 failed / 8 passed — the three new non-free banner cases and the confirm-card case red, the free case green as expected; restored with `git checkout HEAD --`, blob hash matched HEAD.\n\n</details>\n\n## Acceptance notes\n\n- When both flags are true (no producer sends that today) `topUp` wins the action, as before.\n- The dispatch asked for a model-named `Co-Authored-By` commit trailer; the pre-push gate `check:commit-card-trailers` refuses model identifiers, so commits carry the model-free pair.\n\n## Verification\n\n<details><summary>Derived gate families at head 935c1d85</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands`: 41 families derived from the merge base b8c8c8897; all 41 run locally, each exit 0 (40 unlocked `check:*` / self-tests; `pnpm --dir ui exec vitest run scripts/` under the verify lock: Test Files 172 passed, 2 skipped; Tests 5130 passed).\n- `--ran` reconciliation: 41 derived, 41 run, 0 NOT-MEASURED, 0 UNRUN.\n- `pnpm --dir ui run check:new-line-citations`: 0 new citations, exit 0.\n- Repo-wide scans and the full UI farm (`Lint UI`, `Test UI`, `Build & E2E UI`, `Live E2E UI`) are CI's.\n\n</details>\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/plugin-chatbot/src/__tests__/ChatbotEnhanced.quotaResetPromise-7587.test.tsx` — expect 6 passed, including the `resetKind fiveHour` case.\n\nRead first: `ChatbotEnhanced.tsx` `useAiQuotaCopy` (the title/cta choice is the risk hunk), then `ErrorBanner`'s quota branch.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbXJvjbLQ6k5N7EjZqb\n\n<!-- signed: repo:cloud#1 · os-warren · session_01JQwxbXJvjbLQ6k5N7EjZqb -->"
+}

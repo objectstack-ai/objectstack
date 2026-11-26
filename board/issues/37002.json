@@ -12,7 +12,6 @@
   },
   "labels": [
     "area:cloud",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -21,7 +20,7 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-24T14:17:23Z",
-  "updated_at": "2026-11-25T17:04:04Z",
+  "updated_at": "2026-11-26T01:12:30Z",
   "closed_at": "2026-11-25T17:04:03Z",
   "closed_by": {
     "login": "os-zhuang",
@@ -29,7 +28,7 @@
     "type": "User"
   },
   "merged_at": null,
-  "comments": 8,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37002",
   "body": "repo:cloud#2 · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed. Source: topic objectstack-ai/cloud#4961.\nGrading: area:cloud · Task · p3 · reach: n/a · evidence: read.\n\n## 维护者速读\n- 做什么：把发布给应用作者的技能文档和协议说明改成实情：应用技能在应用内问数助手里怎么生效、哪些工具拿不到、触发条件能读哪些字段，以及这些字段来自界面、不能当权限用。\n- 需要你做的：这次改动含受管面（技能文档、ADR 指针），PR 要你手工合并。\n\n## What\n1. `skills/objectstack-ai/SKILL.md`: a package skill with `surface` `ask` / `both` is loaded for the app the user is in (the `build` side is not served while in-app build is closed); tools outside the allow-set are dropped with a diagnostic; the context fields a condition can read (`appName`, `objectName`, `recordId`, `selectionKind`, and `userRole`). All of them are client-sent: a `triggerConditions` entry on any of them, `userRole` included, is routing, never access control, and the turn's tools still run under the caller's own permissions (scope addition, comment 7152100136, from the L2 on objectstack-ai/cloud#4985).\n2. `packages/spec/src/ai/skill.zod.ts`: the `triggerConditions` describe adds that the fields are reported by the client and are routing, never access control. Regenerate the reference page and baselines.\n3. `docs/adr/0063-…` and `0064-…`: one add-only pointer line each to the cloud record (cited as `cloud ADR-NNNN`).\n4. Optional, only if the allow-set constant is published in spec by then: a lint warning for an `ask`-surface package skill naming a tool outside it.\n\n## Acceptance\n- The skill's eval case that describes `ask` picking skills up by surface still passes and names the allow-set; the skill reference page regenerated; changeset.\n\nBlocked-by: none. Unlocked by the maintainer on 2026-11-25 (「37002 解锁并通知 #4 座位处理」). objectstack-ai/cloud#4935 is merged (PR objectstack-ai/cloud#4967). objectstack-ai/cloud#4963's PR objectstack-ai/cloud#4985 is L1-accepted at head `73084b09` and is in the merge queue: write the text against that head, and land this card's PR only after #4985 has merged.\nParent: objectstack-ai/cloud#4961. Reader: skills / spec text seat.\nDedupe: `triggerConditions` 23 (all closed).\n"

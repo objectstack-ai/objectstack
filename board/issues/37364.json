@@ -1,0 +1,32 @@
+{
+  "number": 37364,
+  "kind": "issue",
+  "title": "记录 AI 问询 10a：引用格式进入 spec，并交付以提问人身份核对摘句的核对器",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-25T23:22:11Z",
+  "updated_at": "2026-11-26T01:49:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37364",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ③ maintainer-ruled. Split of placeholder #37144 per ruling 7177410380 (the maintainer, decision card, 2026-11-25T23:18Z: Q1 A · Q2 A · Q3 A; analysis 7177223845).\nGrading: area:ai · Feature · p2 (topic child; blocks 10b and cloud 10c) · reach: n/a (new capability) · evidence: read (split analysis on main a182fbe37).\n\n## 维护者速读\n- 做什么：在 spec 里定义\"引用\"的形状（哪条记录、哪个资料包、正文哪一节、原文摘句），同时交付核对器：以提问人的权限重读这条记录，确认摘句确实逐字出现在资料里。\n- 谁受益：所有展示 AI 引用的界面（控制台、cloud 应用内问答），它们只显示核对通过的引用。\n- 不做会怎样：AI 给出的引用无法核对，可能引用不存在的原文。\n- 需要你做的：无（三条裁决已定）。\n\n## What\n1. `packages/spec/src/ai/record-citation.zod.ts` (new):\n   - `RecordCitationSchema`, strict: `object`, `id`, `context?` (the pack face, spelt as `get_record_context`'s input `context` takes it; ruling Q2), `anchor?` (min 1), `quote` (min 1).\n   - `RecordCitationsSchema`: an array with a cap.\n   - `RECORD_CITATIONS_PART_TYPE = 'data-record-citations'`: the answer member is a UI-message data part (precedent `BUILD_PROGRESS_FRAME_TYPE`). Export from `ai/index.ts`.\n2. `packages/spec/src/ai/record-body-anchor.ts` (new): move `headingsOf`/`slugOf` here unchanged from `body-outline.ts`, so the server and the console derive one anchor. `body-outline.ts` re-imports them; `body-outline.test.ts` passes untouched.\n3. `packages/services/service-record-context/src/verify-citations.ts` (new): `verifyRecordCitations(citations, door)`.\n   - One `executeGetRecordContext` per distinct `(object, id, context, anchor)`, as the door's caller (ruling Q1: the platform verifies as the asking user).\n   - `object`/`id` are the pack's root record (ruling Q3). Verified ⇔ `quote` is a substring of a **data-member** string of that answer: a field or related-list cell `value`/`display`, or `body.text`. Notes, framing and labels never count. Whitespace runs collapse. An `html`/`richtext` body is also matched tag-stripped.\n   - A citation without `context` on an object with several packs is not verified (the tool's refusal stands); with one pack it verifies.\n   - Any refusal ⇒ not verified. The function returns the verified subset and never throws per citation.\n4. Export from `src/index.ts`. Tests in `__tests__/verify-citations.test.ts`, reusing `fake-door.ts`.\n\n## Acceptance\n- The spec schema refuses an unknown key, an empty `quote` and `null`, and admits `context`.\n- The verifier:\n  - verifies a quote in a section by its anchor, and refuses a stale anchor;\n  - verifies a quote found in a related-list cell, cited on the root record (Q3);\n  - refuses a quote that appears only in a note;\n  - refuses a quote from a field the caller has withheld or hidden;\n  - for a body that came back as an outline, refuses a quote cited without an anchor;\n  - refuses a citation without `context` on an object with two packs, and verifies it on an object with one (Q2).\n- A caller with no read access gets \"not verified\", and nothing that reveals existence.\n- `Metadata-protocol: added` (new exported schema → `authorable-surface/ai.json` rows; ADR-0160 expects `added`) with its `Skills-docs:` line. `Clause-②: yes`.\n\n**Out of scope:** an MCP verify tool; rendering (10b); producing and persisting citations (cloud 10c).\n\nGoverning text: ADR-0160 D9 as amended by #37363, D3, D4; ADR-0049 (the schema lands with its first reader); ruling 7177410380.\nBlocked-by: #37363\nParent: #36996 (row 10a; replaces placeholder #37144)\nSize: M\nDedupe (objectstack, is:issue): `citation in:title` → #37144 (this placeholder, closed in favour of these cards); no other citation-shape card.\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 37385,
+  "kind": "issue",
+  "title": "平台对象的下拉选项自己声明颜色（如通知的严重程度），配合 #36882 去掉默认配色",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-26T00:44:58Z",
+  "updated_at": "2026-11-26T01:16:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37385",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca6EBDpTBZk8v46Jjv\n\nFiling gate: ③ maintainer-ruled, term (6) of the ruling on #36882 (comment 7178358629; Bill, decision card 2026-11-26T00:01Z, option verbatim 「A 全部去掉，没配就灰」), filed by the owning zone under the parent. Source: maintainer.\nGrading: area:ux · Feature · p2 (with the parent) · reach: every platform-object select that today gets its colour from the renderer's value table · evidence: ruling text; enumeration on claim.\n\n## 维护者速读\n\n- 做什么：#36882 去掉按选项值自动配色后，平台自带对象里原本靠那张表上色的下拉（例如通知的「严重程度」）要在定义里自己声明颜色，否则会全变灰。\n- 谁受益：所有用户；平台自带的严重程度、状态类徽章保持有意义的颜色。\n- 不做会怎样：#36882 落地后这些徽章全部变灰。\n- 需要你做的：无。\n\n## What\n\nRuling on #36882, term (6), verbatim: \"Server follow-up card under this one (`domain:server`, size S): platform-object selects that relied on the table (`sys_notification.severity` is one; enumerate on claim) declare their colours, landed before or with the ui PR.\"\n\n- Enumerate the platform-object select options (platform objects and service/plugin objects shipped by the platform) whose value today hits `SEMANTIC_COLOR_MAP` and that carry no declared `color`; declare the colour each renders with today on its option (`SelectOption.color`).\n\n## Acceptance\n\n- Every enumerated option declares its colour; the PR lists them.\n- Lands before or with the #36882 ui PR, so no platform badge turns neutral in between.\n\nReader: zone o5-U (seat repo:objectstack#5); carried by the same dispatch as #36882 (one PR, or this card's PR first).\nNote: `domain:*` is triage's to set (the ruling names `domain:server`); first-touch audit requested.\nDedupe: open issues for \"severity colour select platform\" return 4 (#36882, the parent; #25921 unrelated retirement; two seat posts); none covers this."
+}

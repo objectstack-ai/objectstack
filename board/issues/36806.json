@@ -14,18 +14,20 @@
     "area:data",
     "domain:spec",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T01:20:35Z",
-  "updated_at": "2026-11-24T01:33:19Z",
+  "updated_at": "2026-11-26T02:19:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36806",
   "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAmQQaqVXpJepCqm4Xa\n\nFiling gate: ③ · Source: maintainer — her answer in the hotcrm project thread on 2026-11-24 to the seat's question 「订单状态做不成只读,#2716 先上三个按钮吗?」, choosing 「先上按钮,只读等平台」 (ship the three actions now; the read-only half waits for a platform capability, filed here). Ruling recorded on objectstack-ai/hotcrm#2716.\nGrade: area:data · Feature · p2 (inherits the p2 of the hotcrm card it blocks part of) · reach: measured on @objectstack 18.6.0 by the hotcrm lane (report objectstack-ai/hotcrm#2716 comment 7101256352) · evidence measured.\nReader: whichever seat triages `domain:spec` / `area:data`; on landing, the hotcrm seat adds the read-only line to the sales order (hotcrm#2716's remaining half).\nDedupe: searched `readonly field action writable`, `readonlyWhen drops action write`, `field editable only through action`, `ui readonly field api writable` (24 hits incl. closed). Nearest: #35068 (closed; taught \"gated action + field lock\", see below), #35403 (closed; owner_id read-only on the default form, a built-in special case, not an authorable key), #32666 (closed; flow writing a readonly field). None asks for this key.\n\n## 维护者速读\n\n- 用户能看到什么变化:作者可以把一个字段(比如订单状态)标成「界面只读」,表单、行内编辑、看板拖拽、高亮条都不能改,只能点「确认订单」这类按钮改;接口和导入照常能写,仍由校验规则(状态机)把关。\n- 为什么做:业务对象的状态普遍应该只经按钮流转(Salesforce Activate、Odoo/SAP Confirm),今天的 `readonly` 会连按钮、接口、导入的写入一起静默丢掉。\n- 出错会怎样:漏掉某个界面入口,用户仍能直接改状态(数据仍由状态机兜底,不会错);回滚即去掉这个键。\n- 要你做什么:无,已由你在 hotcrm 线程里选定。\n\n## What happens today (18.6.0, read again on `main` 4c93f8807e)\n\n- `readonly: true` (`packages/spec/src/data/field.zod.ts`, the `readonly` describe) strips every **non-system** write on update and insert. Measured on `crm_sales_order.status`: a declarative `operation: 'update'` action answers success while status stays draft; `PATCH` answers 200 with `x-objectstack-dropped-fields: status;reason=readonly`; an import update reports `droppedFields: status`. The state machine never sees any of them.\n- `readonlyWhen` does the same with `reason=readonly_when`, and per the #35068 measurement it binds a script action body too.\n- A **script** action body runs `isSystem` and keeps its write to a static `readonly` field (#35068's measurement, `action-execution.ts` `buildActionExecutionContext`). That gives \"UI read-only + action works\" today, but the API and import doors are still stripped. The hotcrm card needs those doors open and judged by the state machine, so this route does not meet it.\n- A form-field `readonly` needed an internal form; #36425 (closed 2026-11-22) stopped loading internal forms.\n\n## Asked\n\nA field-level authoring key (name is the spec owner's call; for example `editable: 'actions'` or `uiReadonly: true`) meaning:\n\n1. Every console surface treats the field as read-only: create and edit dialogs, the record page's inline edit, the highlight-strip chip, grid inline edit, kanban drag between columns grouped by this field, bulk edit.\n2. Write paths keep it: REST create/update, import, declarative and script action writes, flows. Each write is judged by the object's validations (a `state_machine` rule included), exactly as an ordinary field.\n3. Optional, the spec owner's call: whether an insert may set it, or only its `defaultValue` applies on create from the UI.\n4. `objectstack validate` refuses it together with `readonly: true` (contradictory), and the field describe and the data skill say when to use which.\n\n## Done when\n\nOn a test object with a `state_machine` rule on `status` and the new key: the console offers no way to edit `status` (all surfaces in 1.); a declarative update action, a `PATCH` and an import update each change it when the machine allows and are refused with the machine's message when it does not; `describe_object` (MCP) reports the field as not UI-editable.\n\nBlocks part of: objectstack-ai/hotcrm#2716 (Status read-only on the sales order)."

@@ -1,0 +1,36 @@
+{
+  "number": 37349,
+  "kind": "issue",
+  "title": "Studio: remove the unread engine.studio.newApp.* rows and engine.studio.menu.typeCount (never released)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-25T20:44:37Z",
+  "updated_at": "2026-11-26T01:42:56Z",
+  "closed_at": "2026-11-26T01:25:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37349",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYkkwuF6UuFtu85Yd5H\n\n④ sub-issue of #36890 · Source: the open questions of the os-dev reports on #37134 (7171588755, Q1) and #37201 (7172557196, Q3), and seat repo:objectstack#4's L1 notes on PR #37338 (N1) and PR #37341. Part of #36890.\n\n## 维护者速读\n\n- 两次 Studio 改动之后，有一批界面文案已经没有任何页面在用：「新建软件包」对话框里那套以应用口吻写的标题和说明，以及左侧菜单分组上的「N 种类型」。\n- 这些文案都没有进过正式发布的语言包，所以直接删掉即可，不需要按「已发布文案下线」的流程申报。\n- 不改任何界面行为，只清理文案目录。\n\n## What (read on origin/main `49ad529d`)\n\n- `ui/packages/i18n/src/namespaces/studio/en.ts` and `zh.ts` still carry:\n  - `engine.studio.menu.typeCount` (:3552). It has no reader since PR #37341 (#37201) removed group-header counts.\n  - The `engine.studio.newApp.*` rows (:3658-3675). The app-worded face of `PackageFormDialog` was removed by PR #37338 (#37134), so most of them have no reader: `title`, `description`, `advancedHint`, `id`, `help.*`, `nsDerived`, `created` (seat N1), `exists`, `failed`. Rows that still have a reader stay; `nameTaken` and `appFailed` are likely live. Decide each row by `ui/scripts/check-i18n-dead-keys.mjs` and a grep, not by this list.\n- **Released-ness, measured:** none of these keys is in the published `@object-ui/i18n@18.6.0`.\n  - Its `dist/namespaces/studio/en.js` has no `engine.studio.menu.typeCount` and no `engine.studio.newApp.*` row; it has only `engine.studio.landing.newApp` and `engine.studio.landing.newAppDescription`, which are different keys.\n  - `typeCount` came with #36985, after 18.6.0 (seat ruling on PR #37341).\n  - So this is a plain removal of unreleased keys: `Clause-②: no`, no 「Removed translation keys」 list. Re-check against the tarball on claim; if any row turns out to be released, that row follows the 19.0.0 released-key rule instead (`Clause-②: yes (narrowing)` + the list).\n\n## Done when\n\n- Every key above that has no reader is gone from en and zh (and any other locale that carries it), and `check-i18n-dead-keys` no longer lists them.\n- `check:i18n-keys` and the app-shell suites stay green; nothing on screen changes.\n\n## Notes\n\n- Size XS. `Metadata-protocol: none`.\n- Reader: zone a4-S of seat repo:objectstack#4, one os-dev card.\n- Dedupe (`gh api search/issues`): `engine.studio.newApp`, `typeCount i18n dead keys`, `studio dead translation keys`. None open for these keys.\n\nGrading: `area:ux · Task · dead catalogue rows after #37134 and #37201 · builders (none visible) · evidence: read from code and the 18.6.0 tarball` · `priority:p2` (topic child ⇒ p2)."
+}

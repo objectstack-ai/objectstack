@@ -2,8 +2,8 @@
   "number": 37273,
   "kind": "issue",
   "title": "Print-path English sentences outside #37260: the /actions door's forward-unavailable 503 and the own-door bridge's 501 ignore the request locale",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-25T10:20:19Z",
-  "updated_at": "2026-11-25T19:46:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T21:01:22Z",
+  "closed_at": "2026-11-25T20:51:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37273",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYnagJvGbCtNg2PhvgW\n\nFiling gate ① — a defect with named locations. Source: the #37260 dev's out-of-scope findings (os-dev-report 7159457263 on #37260, PR #37272). The seat filed it as one follow-up in the same family (seat direction 7159533198).\n\n## What happens\n\n#37260 (PR #37272) localizes the print door's own 5xx sentences by `Accept-Language`, through the platform's operation-message catalog (`BUILTIN_OPERATION_MESSAGES` + `operationUserMessage`). Two more sentences on the print path stay hard-coded English in a non-English console:\n\n1. **The `/actions` door's forward-unavailable 503.** `packages/runtime/src/action-execution.ts:2160`, `apiActionForwardUnavailableError(action, door)`, is relayed at `packages/runtime/src/action-dispatch.ts:754` as a `503` refusal. A print action (HotCRM `crm_quote.print_quote`) clicked while its forward target is unavailable shows this English sentence in a zh-CN console.\n2. **The own-door bridge's 501.** `packages/runtime/src/domains/own-door-bridge.ts:162–181` answers `501` with English text when no service is registered for the slot (\"… is not available: no … service is registered on this kernel. … registers it.\") or when the registered service lacks the member. The print door uses it (`packages/runtime/src/domains/print.ts`).\n\nNeither was reproduced in a browser by the #37260 dev; both were read from code on `main`.\n\n## Expected\n\nBoth sentences follow the request locale the same way #37260's do: keys in the same operation-message catalog, in its full locale set (en, zh-CN, ja-JP, es-ES), with English byte-identical. Follow seat direction 7159533198: localize the wire `message`, and add no `userMessage` to a fault. Code and status are unchanged.\n\n## Done when\n\n- Under `accept-language: zh-CN`, each site answers in Chinese, with an English or absent-locale control that keeps today's text. One pin per site.\n- An ablation that restores the hard-coded English turns each site's zh pin red.\n\n## Also in scope (nits carried from PR #37272's reviews)\n\nFrom the contract review 7160535636:\n- The catalog header's `print_*` paragraph should say that a `translation` item's `errors.print_*` override is not consulted for these keys, because the door holds no i18n service.\n- A throw with an empty message puts the localized sentence into the fault-log line; any other throw logs its own message. Say so, or keep the log line in English.\n- `Accept-Language` is read by its top tag only (`preferredLocaleFromHeader`, no q-value negotiation), which is the platform's existing reading. Note it where these sentences are documented.\n\nFrom the L1 7160466229 (wording and test, details in comment 7160569088): the zh-CN / ja-JP / es-ES phrasing in N1–N3, and the `/srv/secret` assertion in N4.\n\nGrade: area:ux · Bug · p2 (the same family as #37260 p1, on rarer paths: a forward that is unavailable and a kernel that lacks the print service). Size S.\nReader: zone a4-C of seat repo:objectstack#4, after PR #37272 merges, because it reuses the catalog keys and the helper that PR adds.\nBlocked-by: #37272\nDedupe: `apiActionForwardUnavailableError` (open objectstack issues) → 1 hit, #37260 itself. `own-door bridge 501 locale` → 0.\n"

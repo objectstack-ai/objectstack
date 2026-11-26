@@ -2,8 +2,8 @@
   "number": 37236,
   "kind": "issue",
   "title": "「已定制」有两种算法：Setup 详情计入排列调整，全部元数据页头和列表筛选不计",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-25T05:45:05Z",
-  "updated_at": "2026-11-25T18:42:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T22:42:01Z",
+  "closed_at": "2026-11-25T22:29:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37236",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYkkwuF6UuFtu85Yd5H\n\n④ sub-issue of #36890 · Source: #36908's os-dev report 7153865833, open question N3. Seat repo:objectstack#4 ruled 「A: file a follow-up card」. Part of #36890.\n\n## 维护者速读\n\n- 同一个「已定制」，两处数法不一样。Setup > 软件包详情里，「排列调整」（arrangements）算作定制。全部元数据页头的总数、两处列表的「已定制」筛选用的是 `customizationTotal`（覆盖 + 扩展），不算排列调整。\n- 结果：一个只改了排列的基础包，在 Setup 里显示「已定制」，到了全部元数据页头却是 0，列表的「已定制」筛选也筛不出它。\n- 这一张要先定一个产品口径，再改代码。\n\n## What (measured at #37166's head `329ddefc`; re-measure on main when claimed)\n\n- `customizationMarks.ts:96-97`: `customizationTotal` = overrides + extensions.\n- `DirectoryPage.tsx:246-249`: the All metadata header reads it.\n- `ResourceListPage:734` and `useListOrderedNames:173`: the same total gates the 「customized」 filter.\n- The Setup package detail counts arrangements as customizations.\n\n## The decision this needs (put to the maintainer through the seat)\n\n- **A.** Arrangements join `customizationTotal`. The header no longer equals the sum of its per-type tiles, because arrangements have no type tile, and lists offer the 「customized」 filter on a base whose only change is an arrangement.\n- **B.** The Setup detail stops calling arrangements customizations, or names them separately.\n- **C.** Both surfaces keep their arithmetic but use different words.\n\n## Done when\n\n- One meaning is ruled, every surface above follows it, and a pin holds each surface to it.\n\n## Notes\n\n- Size S once ruled.\n- **Blocked-by:** #36908 (PR #37166), which adds the Setup detail's count this card compares against."

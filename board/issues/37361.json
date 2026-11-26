@@ -1,0 +1,32 @@
+{
+  "number": 37361,
+  "kind": "issue",
+  "title": "37203 跟进：get_record_context 无权的关联子对象改为省略、真实通道交出可查询字段，并补筛选排序的双通道比对",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-25T23:03:48Z",
+  "updated_at": "2026-11-26T01:22:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37361",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37203 (os-dev report 7177026930), filed by the owning area under the parent, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Bug (conformance gap against ADR-0160 as amended) · p2 · reach: every `get_record_context` call through the real MCP doors · evidence: read and measured (implemented and reverted on the #37203 branch).\n\n## 维护者速读\n\n- 做什么：外接 AI 读一条记录的资料时，如果某个关联子对象提问人无权看，现在整次调用报错；按已同意的 ADR 应该省略这一段并说明。同时让真实通道把“这个人能按哪些字段查询”的安全答案交给资料服务，筛选条件里有不能查的字段时也是省略，而不是整次报错。\n- 谁受益：用外接 AI 在记录上提问的用户，资料少看一段，不会整次失败。\n- 不做会怎样：带关联列表的资料包，只要有一个子对象或一个筛选字段提问人无权用，整次问答失败。\n- 需要你做的：无。\n\n## What\n\n1. **A related child this caller is not served is left out, not refused** (triage row 7154563681 on #37203, ADR-0160 D3 \"Object level\" as amended):\n   - In `executeGetRecordContext` (`packages/services/service-record-context/src/record-context-tools.ts`, step 4a), a child for which `servedObjectDefinitionOf` answers `null` for this caller is left out. The answer carries the single `not_visible` statement. Per D3, the section is not named. The triage row asked for the child to be named, and the ADR wins.\n   - Call `assertApiExposed` first. On the real kernel, a disabled-package child also comes back `null` from `servedObjectDefinitionOf`. `OBJECT_PACKAGE_DISABLED` and API-exposure refusals still refuse, as the ADR says.\n   - Flip, in the same PR, the real-kernel parity pin in `packages/runtime/src/mcp-record-context-tools-bridge.test.ts`, landed by #37350. The case is titled \"[today; ADR-0160 as amended says left out and stated]\".\n2. **Both real doors supply `queryableFieldsOf`.** `packages/runtime/src/domains/mcp.ts#recordContextMembers` and `packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge` build the `RecordContextDoor` without it, so the executor uses the fallback that runs when `getQueryableFields` is absent. ADR-0160 D3 (second amendment) says the fields a caller can query on are the security service's answer for that caller (`getQueryableFields`), judged before the read. When the fallback admits a field that the security service's answer excludes, plugin-security's `assertReadableQueryFields` refuses the whole call. Examples are an agent acting for a person, or a computed field reading a hidden one.\n3. **Parity pin for `where` / `orderBy` / `limit`.** Add one case to the real-kernel harness: a pack whose related entry carries all three answers byte-identically on both doors, including the drop when the caller cannot query a `where` field.\n\n## Acceptance\n\n- An unserved related child gives the root plus the served children, with one `not_visible` statement. The child is named nowhere. Pinned on both doors, with a served control.\n- A disabled-package child still refuses with `OBJECT_PACKAGE_DISABLED`.\n- On both doors, a `where` field that `getQueryableFields` excludes for this caller drops the section with the statement and never refuses. Pinned with a field that the fallback would admit.\n- The where/orderBy/limit parity case is green on both doors.\n- `Clause-②: no`. This is a behaviour fix under existing ADR text.\n\n## Notes\n\n- Surface: `packages/services/service-record-context/**`, `packages/runtime/src/domains/mcp.ts` plus the real-kernel harness, and `packages/mcp/src/stdio-data-bridge.ts` plus its test. Holding #37233 (`service-record-context`) until this lands is not required: the two cards touch different functions. Overlap is checked at dispatch.\n- Also noted, not part of this card: the doc line of `RecordContextNoteKind` (`packages/spec/src/ai/record-context-tools.zod.ts`) says `related_truncated` means a cut \"at the row cap\". It now also fires at `limit`.\n\nParent: #36996\nDedupe (objectstack, is:issue): `queryableFieldsOf` 1 (#37203, the source) · `\"left out\" related child record context` 0 new (#37175 and #37202 are the siblings; the triage row sits on #37203, which ships without it).\n"
+}

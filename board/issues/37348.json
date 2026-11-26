@@ -1,0 +1,36 @@
+{
+  "number": 37348,
+  "kind": "pull_request",
+  "title": "fix(studio): a customization pair's dashboard or report opens in its base app's edit state",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T20:41:52Z",
+  "updated_at": "2026-11-25T22:26:38Z",
+  "closed_at": "2026-11-25T22:26:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-25T22:26:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37348",
+  "body": "Fixes #37237\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 在 Studio 里打开定制包（某个已安装应用的定制都存在这个配对包里）的仪表盘或报表，之前停在通用条目页，现在直接进基础包应用的编辑状态（仪表盘进编辑、报表进构建器），右上角关闭回到原来的列表。\n- 属于「Studio 重构」专题，是上一张「仪表盘和报表在所属应用里打开」改动留下的配对包缺口。\n- 出错时作者会落到通用条目页或基础包的另一个应用里，不会改动任何数据；撤回本次改动即恢复原样。\n- 无。\n\n## What changes\n\n`StudioAreaAppOpen` (the area's step between a Studio list and an app page) reads the open package's published apps. When the open package is a customization pair (`<base>.custom`, by `customizationPairBaseOf`, the shipped pairing rule) and it has no published app of its own, it now reads the **base's** published apps (one extra read, on the pair leg only, and only for an item open) and runs the same decision-6 rule (`studioAppEditSegment`) over them with the base's id: the remembered app when it is one of the base's (or its menu opens the item), else the base's first app.\n\n- A pair's dashboard opens at `/apps/BASE/dashboard/NAME` in its edit state; a pair's report opens the base app's builder. `?studio=` carries the pair's list, so × returns to it.\n- A pair whose base has no published app keeps the generic item page (decision 3).\n- A pair that publishes an app of its own opens there, and the base is not read.\n- A plain package is unchanged: one app read, as before.\n- The item read (does it have a published version?) is still asked of the pair.\n- The report list's New (decision 13) is unchanged on the pair leg (see Acceptance notes).\n\nNo server, spec or route change. `studioAppEdit.ts` only gains a doc paragraph naming the pair leg.\n\n## Tests\n\n`ui/packages/app-shell/src/views/studio-design/StudioAreaAppOpen-36906.test.tsx`, a new top-level `describe` in the shared harness (through the real `StudioMetadataArea` and its routes):\n\n- a pair dashboard opens in the base app's edit state, × returns to the pair's list, the reads are exactly `[app PAIR]`, `[app BASE]`, and the item is read from the pair;\n- reached from the base's list: a pair row's `?package=PAIR` link re-roots the area onto the pair and opens the base app;\n- a pair report opens the base app's builder, picked by decision 6 among several base apps (remembered app, then first app);\n- a pair whose base has no app keeps the generic item page;\n- a pair with its own app opens there, with no base read;\n- CONTROL: the existing \"package with no published app\" case now also pins a single app read.\n\nThe old pin \"a pair row keeps the generic item page\" is replaced: that is the behaviour this card changes.\n\n<details><summary>Test run and ablations (4 legs, each red, each restored to HEAD)</summary>\n\n`pnpm --filter @object-ui/app-shell exec vitest run --root ../.. --maxWorkers=2 …/StudioAreaAppOpen-36906.test.tsx …/studioAppEdit.test.ts` → `Test Files 2 passed (2)`, `Tests 29 passed (29)`.\n\n`pnpm --filter @object-ui/app-shell run type-check` → exit 0.\n\nAblations via `scripts/ablation-replace.mjs` on `StudioAreaAppOpen.tsx` (vitest resolves the source directly; no dist leg):\n\n| leg | mutation | red |\n|---|---|---|\n| A1 no pair leg | `customizationPairBaseOf(packageId) : null` → `null : null` | 3 failed: pair dashboard, pair report, base-without-app |\n| A2 pair id in segment | `packageId: appPackageId, apps` → `packageId, apps` | 1 failed: pair dashboard (`/apps/PAIR/…`) |\n| A3 own app ignored | `&& apps.length === 0 ?` → `&& true ?` | 1 failed: pair with its own app |\n| A4 CONTROL, leg on any package | `?? 'com.example.hr'` fallback | 1 failed: plain package's single read |\n\nEach leg printed `ok restored: blob == HEAD … git diff HEAD is empty`. A first A3 try missed its anchor (refused, exit 3, nothing ran) and a second was refused for an ambiguous marker; the third run above is the reading.\n</details>\n\n## Acceptance notes\n\n- Reachability (the card's confirmation): the pair-as-scope case is reachable from Studio's menu through a package's list. A pair's row links `./NAME?package=PAIR` (`ResourceListPage` `metadataRowInfo`), and `areaLocationRedirect` re-roots any leg whose `?package=` names another package onto that package, so the area mounts on the pair. The new reach pin drives that redirect. The menu's environment entry (`~all` with `?scope=environment`) keeps rows in the environment scope and does not re-root; the plain `~all` leg does. Confirmed with a pin, not in a browser.\n- The report list's New on a pair's own area still uses the area's create. It does not go to the base app's new-report page. The card names opening items only.\n\n## Verification\n\nTwo-minute check: run the test file above. Expected: 29 passed. Or in a HotCRM-shaped stack, open Studio → the base package → Dashboards → a row from `.custom`. Expected: the base app's dashboard opens in edit mode, and × lands back on the list.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYnbST7agSKJw3XyNc3)_\n\n<!-- signed: repo:objectstack#4 · os-justin · session_01QSeKYkkwuF6UuFtu85Yd5H -->\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 37358,
+  "kind": "pull_request",
+  "title": "docs(skills): objectstack-ui teaches navigation: { openNewTab: true } for a list that opens records in a new tab",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T22:52:13Z",
+  "updated_at": "2026-11-26T00:56:56Z",
+  "closed_at": "2026-11-26T00:56:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T00:56:54Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37358",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\nCloses #36334\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：客户项目里的 AI 照着界面技能包配置对象列表时，会写对「在新标签页打开记录」。以前技能只说旧的 `navigation.mode: 'new_window'` 在列表上不生效，却没说该怎么写；现在明确写 `navigation: { openNewTab: true }`，并说明手机上总是在当前页打开。\n- 为什么做：协议早已支持 `openNewTab`，`new_window` 在对象列表上已废弃（D3 条目 navigation-mode-record-open-deprecated），技能文字没跟上，AI 只知道删掉旧写法、不知道新写法。\n- 出错会怎样：只改技能文字，不改任何代码和校验；写错了 AI 会学到错的配置，撤回即恢复原文。\n- 要你做什么：这是受管的技能包改动，两级审核通过后请你批准或合并（审核记录会贴在本 PR 上）。\n\n## What changes\n\n- `skills/objectstack-ui/rules/record-page.md`, step 5 now reads: \"`navigation.mode` is deprecated there: `drawer`, `page`, `new_window` change nothing, so omit it; for a new tab write `navigation: { openNewTab: true }`; `none` still opens nothing (prefer `preventNavigation: true`); a page block's `navigation` honours every value; `modal`/`split`/`popover` are refused with their fix. A phone always pages in place.\"\n- The new wording matches the spec at `fbb62e1c`, `packages/spec/src/ui/view.zod.ts`:\n  - line 3061: `new_window` is ignored on an object's list; write `openNewTab: true`.\n  - lines 3111–3112: `openNewTab: true` opens the page in a new tab.\n  - line 3137: rows that open nothing stay that way; a phone opens the page in place.\n  - the D3 entry `navigation-mode-record-open-deprecated`.\n- The bytes are paid for in the same file. Steps 1, 3, 4, 5 and 6 and the intro line are tightened without removing any fact. No ratchet row changes and no eval changes; no case asks about new tabs.\n- `.changeset/36334-skills-list-open-new-tab.md`: `@objectstack/skills` patch.\n\n## Tests\n\nThe change is text only, so there is no ablation.\n- Token ratchet for `rules/record-page.md`: 990 tokens before and 990 after (3958 → 3959 bytes), against a ceiling of 991.\n- The ratcheted authored total (198146), the bundle total (297002) and all SKILL.md lines (4941) are unchanged.\n\n## Verification\n\nLocal gates at `a4a892ac`:\n- `dispatch-gates --commands` derived 47 commands. 43 exited 0. 4 are not measured because they need a whole-workspace build: `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure` and `check:sourcemap-no-sources-content`.\n- These also exit 0: `check-skills-token-ratchet` (plus its self-test), `check:skill-links`, `check:skill-identifier-liveness`, `check:skill-compatibility`, `check:skill-frame-sync`, `check:skill-served-sections`, `check:skill-examples` (350 examples), `check:skill-top-level-keys`, `check:changeset-fixed` and `check:doc-authoring`.\n- `overlap-check`: clean.\n\nCI runs on this PR.\n\n## Provenance\n\nOpened by seat repo:objectstack#4 on the maintainer's authorization in the seat session (「#36334 开 PR 放行」).\n\nThe dev session (`session_01QSeKYnhLATxR6d945JshvJ`, zone a4-A) had its relay `pr_create` refused by its permission check, and it did not retry. Its prepared body exists only in that session's container, so the seat wrote this body from the dev's final report and the branch diff.\n\nBranch `claude/issue-36334-ui-skill-open-new-tab` @ `a4a892ac`.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QSeKYpEsWWE9Y5YtSsDgqZ\n"
+}

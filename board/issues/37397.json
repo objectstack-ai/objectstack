@@ -1,0 +1,32 @@
+{
+  "number": 37397,
+  "kind": "issue",
+  "title": "lint: refuse the three never-offered transferBehavior: 'cascade' shapes at the runtime publish gate too (Studio and MCP saves), not only in os validate / build / lint",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T01:56:39Z",
+  "updated_at": "2026-11-26T01:56:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37397",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbdHk3orAeensH6EzS\n\nFiling gate: ① a declared-but-not-enforced authoring path with a named landing (ADR-0049) · Source: fleet (L1 S2 of seat repo:objectstack#5 on PR #37382, comment 7180284087; contract record 7180267565). Follow-up of #36714; carries the publish-gate half #36714 left out.\n\nGrading: `area:data` · Task · p3 · reach: read on PR #37382's diff — `validateTransferCascades` is registered `surfaces: CLI_ONLY` with a written `surfaceReason`, so a Studio or MCP save of the three shapes still succeeds; the runtime never offers them (Change Owner re-judges every relation), so nothing wrong happens at runtime · evidence: read.\nSuggested-grade: p3 · author-time signal missing on two save doors; runtime safe.\n\n## What\nPR #37382 (#36714) adds the lint rule `validateTransferCascades`, refusing at error in `os validate` / `os build` / `os lint`:\n- `transfer-cascade-parent-without-change-owner`\n- `transfer-cascade-extension-child-ineligible`\n- `transfer-cascade-child-update-unexposed`\nIt is CLI-only because the served objects at the publish door carry the injected `owner_id`, which the eligibility predicate reads; the dev did not measure whether the verdict is stable there.\n\n## Ask\n1. Measure on the publish door's served definitions whether `transferIneligibilityReason` / `changeOwnerOffReason` give the same verdict as on the authored stack. The contract record's reading: `resolveInjectedSystemColumns` / `resolveInjectedColumnProvenance` are built to give one verdict pre- and post-injection, so the obstacle may be smaller than the rule's `surfaceReason` says.\n2. If stable, move the rule onto the runtime publish gate (the surfaces Studio and MCP saves pass through) and update the three places that say it is CLI-only: the rule's `surfaceReason`, its `os explain` entry, and the changeset / docs line PR #37382 wrote.\n3. If not stable, record the measured reason in the `surfaceReason` and close this card.\n\n## Done when\nA Studio or MCP save of each of the three shapes is refused with the same rule id and message as `os validate`, or the card closes with the measured reason recorded.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue transferBehavior publish gate` → checked before filing; none open (nearest: #36714 itself, #36713 closed skills).\nReader: triage first touch; then any seat taking area:data.\nOrder: after PR #37382 merges."
+}

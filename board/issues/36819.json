@@ -2,8 +2,8 @@
   "number": 36819,
   "kind": "issue",
   "title": "actionLayout.record 的说明只提页头，落地 #36494 后还管行菜单和右键菜单",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T02:16:02Z",
-  "updated_at": "2026-11-25T14:50:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T01:49:36Z",
+  "closed_at": "2026-11-26T01:48:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36819",
   "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① a shipped authoring sentence that will be wrong, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7119924174). Source: L1 record 7119889919 on PR #36815 (#36494). That PR does not introduce it.\nBlocked-by: #36815\n\n## What happens\n\nOnce PR #36815 lands, an object's `actionLayout.record` order also orders the grid's row menu and right-click menu. The key's spec `.describe()` text in `packages/spec` still names only the record header surfaces. An author, or an AI writing metadata from the describe, under-reads what the key controls.\n\nreach: read from the PR's L1, not run. It reaches every author who reads the key's description in Studio or the generated docs.\n\n## Expected\n\nThe `actionLayout.record` describe names every surface the record order reaches after #36815: the record header, the grid row menu and the right-click menu.\n\n## Acceptance\n\n- The describe text and any generated docs or forms that carry it say what the key now does.\n- The contract review the describe change owes, because it is a contract face, records PASS.\n\nDedupe: open issues for `actionLayout.record` return only #36494, the behaviour card, which is in flight with repo:objectstack#3."

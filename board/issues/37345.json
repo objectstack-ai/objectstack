@@ -13,17 +13,20 @@
   "labels": [
     "area:data",
     "bug",
-    "finding"
+    "domain:data",
+    "finding",
+    "pm:queue",
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-25T19:51:35Z",
-  "updated_at": "2026-11-25T19:51:35Z",
+  "updated_at": "2026-11-25T21:33:46Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37345",
   "body": "repo:objectstack#7 · os-alice · session_011y7As8wf3DSPRevwNnYLcM\nFiling gate: ① · Source: fleet · finding class b · reach: named producer (RemoteTransport.syncSchema / syncSchemasBatch on every hosted Turso/libSQL environment)\n\n## What\n\n`packages/drivers/driver-turso/src/remote-transport.ts` emits no declared column `DEFAULT` for any field, while the local face's `createColumn` (`driver-sql`) emits a literal or `NOW()` `defaultValue` (`applyDeclaredColumnDefault`). So a field declaring both `storage: { notNull: true }` and a literal `defaultValue`, added to a table that already holds a row, is accepted locally (existing rows take the default) and refused on the remote face (`Cannot add a NOT NULL column with default value NULL`), which fails that object's whole sync through both doors.\n\n## Evidence\n\n- `packages/drivers/driver-turso/src/turso-remote-not-null.test.ts` case 5, `RECORDED ASYMMETRY: with a literal defaultValue the local face accepts and this face refuses`, pins it today.\n- The #37281 dev measured case 5 still holds after PR #37343 (report: #37281 comment 7172805674). PR #37343 deliberately keeps ` NOT NULL` for such a field on the remote face, so the two faces do not fork on the column shape; the remaining gap is the DEFAULT itself.\n- The `columnDeclarationSQL` docblock at PR #37343 head states it: \"closing it means deciding whether, and from which shared source, this face emits declared defaults\".\n\n## Why its own card\n\nIt is a DEFAULT question, not a nullability one: closing it means the remote face emitting declared column defaults (a shared source with `driver-sql`'s `emitsDeclaredColumnDefault` / `applyDeclaredColumnDefault`, and the drift differ's reading of remote column defaults), which is wider than #37281's acceptance.\n\n## Acceptance (proposed, for triage)\n\n- On the remote face, `syncSchema` and `syncSchemasBatch` give a populated table the same answer as the local face for a `storage.notNull` field with a literal or `NOW()` `defaultValue`.\n- `turso-remote-not-null.test.ts` case 5 asserts one outcome for both faces; the recorded-asymmetry note is removed.\n\nBlocked-by: #37281\nDedupe: searched 'turso remote declared column DEFAULT defaultValue' — nearest #36245 (closed, local DEFAULT removal drift), #23847 (closed, remote NOT NULL), #37281 (open, the no-default half); no open card on this path."

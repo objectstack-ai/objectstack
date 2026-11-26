@@ -2,8 +2,8 @@
   "number": 37227,
   "kind": "issue",
   "title": "首页（手机与「暂无应用」空状态）去掉「用 AI 搭建」和「搭建应用」两个入口",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-justin"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-25T04:58:50Z",
-  "updated_at": "2026-11-25T19:23:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T23:26:30Z",
+  "closed_at": "2026-11-25T23:25:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37227",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYnagJvGbCtNg2PhvgW\n\nPart of #36107. This follows the maintainer's ruling on 「Build with AI」 (7153161067 on #36908, 「「用 AI 搭建」 应该去掉」). The maintainer extended it in seat repo:objectstack#4's session, verbatim: 「手机首页和「暂无应用」空页面上的「用 AI 搭建」和「搭建应用」： A，一并去掉。」\n\n## Context\n\nFrom 768px up, the platform home page is retired (#36732). It renders only on a phone, or as the no-apps empty state (`App.tsx` `HomeRoute`). Two of its entries are covered by this card:\n- the 「Build with AI」 call-to-action, shown when a build agent is deployed (`HomePage.tsx` ~289-334);\n- the 「Build an app」 chip, which links to bare `/studio`.\n\n## What\n\n- Remove both entries from the home page, on the phone and in the desktop no-apps empty state.\n- Keep 「Start from a template」, and any other entry that is not one of these two.\n- Remove the now-unread i18n keys. They retire in 19.0.0 under 7153171432 / 7153326968. Declare them in this PR's changeset under 「Removed translation keys」, with `Clause-②: yes (narrowing)`.\n\n## Done when\n\n- Neither entry renders in either state. The pins go red if either entry is restored.\n- The no-apps empty state still offers a way to start an app, through the template entry.\n\nSize S.\n\n\n"

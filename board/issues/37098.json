@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,7 +21,7 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T19:37:32Z",
-  "updated_at": "2026-11-25T17:07:27Z",
+  "updated_at": "2026-11-26T01:12:24Z",
   "closed_at": "2026-11-25T17:07:27Z",
   "closed_by": {
     "login": "os-zhuang",
@@ -30,7 +29,7 @@
     "type": "User"
   },
   "merged_at": null,
-  "comments": 9,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37098",
   "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed (topic child). Source: topic #37000 (phase 2 row 6); maintainer 2026-11-24 「用fable评审，并分拆第二阶段的任务」. Reviewed by an independent Fable pass before filing.\nGrading: area:ai · Feature · p2 (topic) · reach: apps that mount `service-knowledge` · evidence: read.\n\n## 维护者速读\n- 做什么：平台统一把文档切成检索片段，有三种切法：整篇、逐级切（段落→换行→句末→分号）、按 Markdown 标题切。中文按句号、问号断句，不切在半句话中间，不切开表格。\n- 谁受益：长制度按章、条切开后搜得准；接受平台切分的存储，切出来的片段都一样。\n- 要知道的：用「整篇」切法时，超过模型上限的文档会从检索里消失并报失败，不会被截断。\n- 需要你做的：无。\n\n## What\n1. `packages/services/service-knowledge/src/split/` (new), strategies:\n   - `recursive`: blank line → newline → sentence end (`。？！` and `. ? !`; an English `.` counts only before whitespace or line end, so 「3.2 条」「400.50 元」 stay whole; no split right after a closing quote or bracket) → `；` / `;` → character. Never inside a Markdown table or list item. Adjacent short pieces merged up to `minChars` (default 200).\n   - `markdown`: by heading level; each chunk carries `headingPath`; a heading with no body joins the next chunk; the heading path counts toward length and is embedded.\n   - `whole`: one chunk per document.\n2. Limits: the service learns the embedder input limit from the adapter (a descriptor member per #37001, e.g. `embedding?: { maxInputTokens? }`), not from `EMBEDDER_SERVICE`. `IEmbedder.maxInputTokens?` (optional) is added so an adapter can report its embedder's limit; `embedder-openai` fills it from #37093's table. `maxChars = min(configured, limit × 0.8 by #37093's estimate)`; 800 when nothing is configured or no limit is known.\n3. `whole` over the limit: the document is removed from the index and reported — `reindexSource`'s result gains `failed` and a bounded `failures: [{ documentId, reason }]`; the event path logs at error with source, record id, estimate and limit. No limit known → no check. The estimate overcounts, so a whole document's usable length is about 60% of the model limit; the doc page says so.\n4. Chunk channel, shape per #37001: `KnowledgeDocument.chunks?` uses the existing `KnowledgeChunkSchema` (`packages/spec/src/ai/knowledge-document.zod.ts:58`, today without a reader), reshaped as #37001 decides (it has `content`, not `text`; add `headingPath?`) — changed, not duplicated. An adapter capability flag says whether it accepts pre-split chunks; an adapter that does not declare it keeps receiving whole documents. A document indexed directly without `chunks` is split by the service the same way.\n5. Source key `split?: { strategy, maxChars?, minChars? }` on the object source (`packages/spec/src/ai/knowledge-source.zod.ts`), read by the splitter here (ADR-0049). Precedence: `split.maxChars` over the settings page's `knowledge.chunk_target` (which gains its reader here). `chunk_overlap` has no meaning in this splitter: removed from the settings page in this PR.\n6. `knowledge-memory` drops its own chunking (`src/index.ts:104`) and takes the service's chunks.\n\n## Acceptance\n- Golden files: a Chinese regulation with chapters and articles, a Markdown table, a long run with no punctuation, mixed Chinese and English, 「3.2 条」 and 「400.50 元」.\n- Property test: no chunk's estimate exceeds the limit.\n- The service splits once; an adapter that accepts chunks receives them unchanged (memory and a stub).\n- `whole` over the limit → removed and reported, not truncated.\n- Container run per AGENTS.md.\n\n## Out of scope\n- Per-chunk hashes (an adapter hashes the text it embeds; #37100).\n- `IEmbedder.model?` and the index fingerprint (#37100).\n- Overlap between chunks.\n\nBlocked-by: #37001 (chunk channel, capability flag, adapter limit member), #37096 (same file; its suite gains the chunk cases), #37093 (limits table and estimate).\nParent: #37000. Reader: `domain:server` lane (spec edits per `spec.md`).\nDedupe: `splitter knowledge` 4 (open 3: #37000, #37001, a seat post) · `KnowledgeChunk` 0 · `chunk_overlap` 0.\n"

@@ -1,0 +1,32 @@
+{
+  "number": 37379,
+  "kind": "issue",
+  "title": "spec(automation): approver `value` for `type: 'expression'` is a raw `z.string()`, while ADR-0032 §2 says expression fields are typed, \"never a raw string\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:spec",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T00:27:20Z",
+  "updated_at": "2026-11-26T00:34:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37379",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZmwqAVSYHM1nQUDTq\n\nFiling gate ① (finding) · Source: fleet · from the L1 of PR #37369 (#37353), seat record 7178750958 §5 (\"goes to a follow-up card the area files ... for the spec lane to judge\") and contract review 7178736042 §③ · Area: o5-A · Seat: repo:objectstack#5\n\n## What happens\n- `docs/adr/0032-unified-expression-layer.md:71` (Decision 2, Accepted): \"**Expression fields** (predicate, computed value) = whole-field CEL, no delimiters ... Never a raw `string`.\" The rationale is that the field type names the dialect, so a wrong shape is a type error.\n- `packages/spec/src/automation/approval.zod.ts:588` declares `ApprovalNodeApproverSchema.value` as `z.string().optional()`. For `type: 'expression'` that string *is* a CEL expression (its describe: \"write the CEL expression that returns the approvers\"). The `cel` tag (`packages/spec/src/shared/expression.zod.ts:490`) builds `{ dialect, source }`, which this slot refuses.\n- The runtime wraps the text itself: `resolveExpressionApprovers` reads `String(a.value ?? '').trim()` and builds the envelope (`packages/plugins/plugin-approvals/src/approval-service.ts:3610`, `:3634`). The showcase flow (`examples/app-showcase/src/automation/flows/dynamic-approval.flow.ts:58`) and the lint fixtures pass strings.\n- The published skill taught `` value: cel`…` `` here, and copies failed validation. PR #37369 corrects the skill to the plain string. The mismatch between the ADR rule and this slot is what let the wrong example look right.\n\n## The question for the spec lane\nIs the approver `value` slot a deliberate exception to ADR-0032 §2? It is one slot holding user ids, positions, departments and so on, typed by `type`. If it is, record that exception where the ADR or the schema says so. If it isn't, the `expression` arm should take the typed expression shape. Narrowing the accepted set is a contract change, so it needs its own decision before any build.\n\n## Done when\nThe spec lane records one answer: either the exception, written in the ADR-0032 text or the schema describe, or a decision card for typing the `expression` arm. The skill text then follows whichever answer.\n\nreach: the ADR's own reader (an author or agent who trusts \"never a raw string\" and writes the `cel` tag); read from the ADR, the schema and the skill example that #37353 fixed.\nBusiness reason: AI-written approval flows. The rule an AI reads in the ADR and the shape the schema accepts disagree in this slot, and that disagreement produced a wrong published example.\nReader: triage, which routes it to the spec lane (`domain:spec` judgement).\nDedupe: `approver value expression string ADR-0032`, `ApprovalNodeApproverSchema` (open and closed). The only hit on the same mechanism is #37353, the skills half, which closes with PR #37369.\nGrading: area:workflow · Task · suggested p3 (no runtime failure; the docs half is fixed) · evidence: read."
+}

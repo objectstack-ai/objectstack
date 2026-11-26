@@ -2,8 +2,8 @@
   "number": 37203,
   "kind": "issue",
   "title": "ai_context: related lists filter, order and limit (where / orderBy / limit) with the render-service reader",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-25T03:31:54Z",
-  "updated_at": "2026-11-25T20:05:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T01:19:45Z",
+  "closed_at": "2026-11-26T01:19:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37203",
   "body": "repo:cloud#2 · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed (topic child). Source: topic #36996 (ADR-0160 Implementation split, row 11); maintainer 2026-11-25, verbatim: 「related 的筛选和排序 同意」.\nGrading: area:ai · Feature · p2 (topic) · reach: every `ai_context` pack with a related list · evidence: read.\n\n## 维护者速读\n- 做什么：情境包的关联列表（`related`）可以筛选、排序、限条数：`where`（只能用子对象自己的字段，少量运算符）、`orderBy`、`limit`。\n- 例子：BrightRule 的制度包只带现行版本的文档，正文在前、附件按序号排：`where: { is_current: { $eq: true } }`，`orderBy: [{ field: 'sort_no', order: 'asc' }]`。CRM 的客户包只带未关闭的商机、按金额倒序。\n- 安全：筛选是作者写的，只是「选取」，不授予也不收回权限，提问人的行级规则照旧生效；筛选或排序用到的字段是提问人不能用来查询的字段时，整个关联段落省略并附一句「部分资料对你不可见」，不报错、不点名。\n- 需要你做的：无（规则已在 ADR-0160 修订中裁定，见 #37202）。\n\n## What\n1. Spec (`packages/spec/src/ai/ai-context.zod.ts`, as landed by #37140): `related[]` gains optional\n   - `where`: the object-filter form (`packages/spec/src/data/filter.zod.ts`) restricted to the child's own fields, operators `$eq $ne $in $nin $gt $gte $lt $lte $null $exists`, joined by `$and` / `$or`. A bare value is read as `$eq`. Refused at parse: dotted paths, field-to-field comparands, a comparand that is one whole `{token}` (v1), `$now` anchors, formulas, any other operator.\n   - `orderBy`: `SortNodeSchema[]` (`packages/spec/src/data/query.zod.ts`), that is `{ field, order }[]`, on the child's own fields. The direction is spelled `order`; `SortNodeSchema` refuses `direction`.\n   - `limit`: positive integer, at most the service's per-list cap.\n   - Liveness rows for the three keys with this card's reader; the `KIND_COVERAGE` example pack gains one filtered, ordered list; generated baselines refreshed.\n2. Render service (`packages/services/service-record-context`): the one capped child query joins the link filter and `where` with `$and`, applies `orderBy` and `limit`, as the caller. No second query.\n3. Field-level rule (ADR-0160 D3, amended): a `where` or `orderBy` field the caller cannot query on (every field outside `getQueryableFields`) drops the whole related section, with the single not-visible statement; the field is never named; never a refusal.\n4. Author surfaces (ADR-0160 D1): a `where` / `orderBy` field the child does not have is reported at save and by `os validate`; an operator outside the set is refused at parse.\n5. Read set (ADR-0160 D4): unchanged by these keys — the exported read-set function takes no new input from them.\n\n## Acceptance\n- Filter and order applied: a pack with `where` + `orderBy` + `limit` returns only matching child rows, in order, cut at `limit`; the cut is stated in the notes.\n- A row the caller's row rules hide stays absent even when it matches `where` (the filter grants nothing).\n- A `where` field and an `orderBy` field the caller cannot query on each drop the section with the not-visible statement, for an ordinary caller; the field name appears nowhere in the answer.\n- An unknown operator, a dotted path, a field-to-field comparand and a whole-`{token}` comparand are refused at parse; a bare value reads as `$eq`; an unknown field is reported by `os validate`.\n- The read-set function returns the same set with and without the three keys (pinned by test).\n- Same answer on MCP stdio and HTTP for one caller (the #37140 parity harness).\n- Container run per AGENTS.md.\n\n## Out of scope\n- Reads through a parent lookup or deeper than one level; relation traversal in `where` (ADR-0160 \"Later work\").\n- Studio controls for the three keys (#37143 picks them up when both land; note it there).\n\nBlocked-by: #37140, #37202 (ADR-0160 amendment carrying this decision)\nParent: #36996. Reader: the server lane for `service-record-context`, with one spec file.\nDedupe: `related where orderBy ai_context` 0 · `ai_context related filter` 1 (the epic) · `get_record_context related orderBy` 1 (the seat post, no card).\n"

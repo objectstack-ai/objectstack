@@ -14,18 +14,20 @@
     "area:ux",
     "bug",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T09:26:58Z",
-  "updated_at": "2026-11-24T11:37:41Z",
+  "updated_at": "2026-11-26T02:19:07Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36927",
   "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① a wrong authoring sentence, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7127407670). Source: L2 7127384605 on PR #36919 (#36865), point S3, a finding outside that PR's files.\n\nBlocked-by: #36919\n\n## What happens\n\nWhen an author puts a widget-config key on a bulk action param, `packages/spec/src/ui/bulk-action.zod.ts` refuses it with the `BULK_PARAM_WIDGET_CONFIG_KEYS` prescription. That text lists the field keys that reach the dialog through a promoted action (a field-backed `{ field }` param), and leaves `allowCreate` off that list. So it tells the author that a field's `allowCreate` does not reach the dialog.\n\nPR #36919 makes an action's lookup param honour the borrowed field's `allowCreate`. Once it merges, the refusal tells authors (and the AI building through the same contract) the opposite of what the platform does.\n\nreach: every author or AI client who puts `allowCreate` on a bulk action param and reads the refusal.\n\n## Expected\n\nThe prescription names `allowCreate` among the keys that a promoted action carries, worded to match what #36919 ships. Any test or pin that quotes the prescription text is updated with it.\n\n## Acceptance\n\n- The prescription matches #36919's behaviour for `allowCreate`, and every other key it names is still true on main.\n- The pins that quote the text are updated in the same PR.\n\nDedupe: no open issue names `BULK_PARAM_WIDGET_CONFIG_KEYS`."

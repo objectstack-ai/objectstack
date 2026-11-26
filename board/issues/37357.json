@@ -1,0 +1,36 @@
+{
+  "number": 37357,
+  "kind": "pull_request",
+  "title": "fix(app-shell): a new report from an app's reports list saves into the app's package, as a new view does",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T22:50:51Z",
+  "updated_at": "2026-11-26T01:19:46Z",
+  "closed_at": "2026-11-26T01:19:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T01:19:43Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37357",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\nFixes #37261\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：管理员在应用的报表列表里点「新建」做的报表，以后会和在同一个应用里新建的视图存到同一个地方。可写的应用存进应用自己的包；已安装（只读）的应用存进它的定制包。所以 Studio 的报表列表能看到这些报表。已有的报表不搬动。\n- 为什么做：属于 Studio 重构专题。从 Studio 打开的新建报表已经按这条规则存，这次让应用自己的「新建」入口也用同一条规则，两条路不再各做各的。\n- 出错会怎样：新报表可能落在错误的包里，或不属于任何包，这时 Studio 列表里看不到它。改动只影响以后新建的报表，撤回这次改动即恢复原来的做法。\n- 要你做什么：无。\n\n## What changes\n\n- `ReportNewPage`'s save no longer makes the package lookup depend on `studioReturn`. Both entry points call `resolveRuntimeCreatePackage(appPackageId, 'report')`:\n  - Studio's report list;\n  - the New button on the app's own reports index.\n\n  When that call names a package, the report saves through `saveAndPublishInPackage`. The package is the app's own when it is writable; otherwise it is the `.custom` pair, created through the ensure door.\n- When the call answers `null`, the report is saved with no package through `saveAndPublishRuntimeMetadata`. That happens when the package is not listed, the ensure door refuses, or the door answers with a pair that is not writable. It is the same condition under which `createRuntimeMetadata` falls back for a view (`app?.packageId && !packageId`).\n- The `report.builder.savedOutsideApp` notice used to show only from Studio. It now shows on the no-package fallback from either entry point. Its text (\"…so the Studio list does not show it\") is true for both, so no string changes.\n- `resolveRuntimeCreatePackage`'s console warning already names the type being saved; #36906 did that.\n- Existing reports are not moved. Only the target of a new report's first save changes.\n\n## Tests\n\n`ui/packages/app-shell/src/views/ReportNewPage-36692.test.tsx` gains a new top-level describe, *the app's own New saves into the app's package, as a new view does (objectstack#37261)*, with three pins:\n\n- **writable package:** a new report from an app on a writable package names `packageId: P`.\n- **read-only app:** on an installed (read-only) app, it names the `P.custom` pair.\n- **CONTROL:** when the ensure door refuses (403), the report saves with no package, shows `report.builder.savedOutsideApp`, and the warning names `report`.\n\n**Replaced pin:** *Save creates and publishes the report and lands on its page; nothing speaks of a menu*. Its assertions that the report saves with no package outside Studio are removed. It now asserts one save and one publish.\n\nRun at `9ded3000`: `Test Files 1 passed (1)`, `Tests 16 passed (16)`.\n\n<details><summary>Ablations (scripts/ablation-replace.mjs; restored blob == HEAD)</summary>\n\n- A1, the old `studioReturn` gate put back: 4 failed | 12 passed.\n- A2, the notice limited to Studio again: 1 failed | 15 passed.\n- A3, the fallback removed: 2 failed | 14 passed.\n\n</details>\n\n## Acceptance notes\n\n- Done-when: a report made from any app's New lands in the same package a view made there would, and Studio's report list shows it.\n  - The package is resolved by the same function as for a view, with the same `draftBarPackageOf` input as `useRuntimeCreateApp`.\n  - The fallback condition is the same expression as `createRuntimeMetadata`'s.\n- No route change, and no change to how existing reports are stored.\n\n## Verification\n\nTwo-minute check: in an app on a writable package, open Reports, click New, pick a data source and save. The report should then appear in Studio's report list for that package.\n\nLocal gates at `9ded3000`:\n- `check:test-source-alias`, `check:i18n-keys`, `overlap-check` (clean) and the app-shell type-check all exit 0.\n- `dispatch-gates --commands` derives 38 families; all were run and all exit 0.\n- `check:changeset-fixed` exits 0.\n\nCI runs on this PR.\n\n## Provenance\n\nOpened by seat repo:objectstack#4 on the maintainer's authorization in the seat session (「#37261 开 PR 放行」).\n- The dev session (`session_01QSeKYprGz1KcPK6n5ZfCZQ`, zone a4-S) tried to open this PR and post its os-dev-report through the relay. Its permission check refused both writes, and it did not retry either one.\n- The seat took this body from that session's final report.\n- Branch `claude/issue-37261-app-new-report-package` @ `9ded3000`.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QSeKYpEsWWE9Y5YtSsDgqZ\n"
+}

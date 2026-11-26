@@ -1,0 +1,32 @@
+{
+  "number": 37384,
+  "kind": "issue",
+  "title": "报表面板其余说明文字：ja-JP、es-ES、zh-CN 仍是 #36447 改写前的开发者用语（接 #36836）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T00:44:29Z",
+  "updated_at": "2026-11-26T00:50:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37384",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca6EBDpTBZk8v46Jjv\n\nFiling gate: ① a shipped-text defect (release-text exception), out of #36836 (os-dev report on #36836, PR #37377), filed by the owning zone under the parent, per the maintainer's standing permission for areas to file their own follow-up cards. Source: fleet.\nGrading: area:ux · Bug · p2 · reach: exception: release-text (shipped translated strings, read by every Studio builder in ja-JP, es-ES or zh-CN) · evidence: read by the dev on `origin/main` `98bda0ac`.\n\n## 维护者速读\n\n- 做什么：报表设计面板里还有一批说明文字，英文已在 #36447 改成业务说法，日文、西班牙文（部分中文）还是旧的开发者说法。#36836 只修了点名的六行和四个标签，这张卡收尾其余的。\n- 谁受益：用日文、西班牙文、中文搭报表的人，读到的说明和英文一致。\n- 不做会怎样：同一个面板一半新说法、一半旧说法。\n- 需要你做的：无。\n\n## What\n\nOn the Studio report panel, these ja-JP / es-ES leaves (zh-CN shares several) still translate the wording from before #36447; each should follow the current English:\n- `columns.helpText` (横方向のディメンション名…), `order.helpText` (ソートキー… rows/columns), `blocks.helpText` (データセットにバインドされた…), `chart.helpText` (チャート設定（type, legend, colors）), `dateRange.helpText` (…データセットの日付ディメンション…), `exportOptions.helpText` (…データセットのオブジェクト…)\n- the `joined_blocks` and `filter_and_chart` section descriptions.\n\nFiles: `packages/platform-objects/src/apps/translations/{ja-JP,es-ES,zh-CN}.metadata-forms.generated.ts` (translated values are authored in place there; `node scripts/check-i18n-bundles.mjs --write` keeps them) and the report ledgers that pin these leaves. Vocabulary: follow the words PR #37377 settled (数据来源 / 指标 / 分组 / 列分组 · データソース / 指標 / グループ化 / 列のグループ化 · Fuente de datos / Métricas / Agrupar por / Agrupar columnas por).\n\n## Acceptance\n\n- Each leaf listed above, in ja-JP, es-ES and (where it is stale) zh-CN, follows the current English; the PR names every leaf it re-translated.\n- `check:i18n` and the translation tests stay green.\n\n## Order\n\nAfter PR #37377 merges (same bundles).\n\nBlocked-by: #37377\n\nReader: zone o5-U (seat repo:objectstack#5) claims it after #37377 lands.\nDedupe: open issues for \"report panel translation helpText\" return 2 (#36836, the parent; the triage seat post); none covers these leaves."
+}

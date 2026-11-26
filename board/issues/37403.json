@@ -1,0 +1,31 @@
+{
+  "number": 37403,
+  "kind": "issue",
+  "title": "控制台：一次拒绝带多条原因时，提示框逐行列出全部原因（接 #36877）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T02:03:15Z",
+  "updated_at": "2026-11-26T02:03:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37403",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca6EBDpTBZk8v46Jjv\n\nFiling gate: ③ maintainer-ruled, term (6) of the ruling on #36877 (comment 7178348458; Bill, decision card 2026-11-26T00:01Z, option verbatim 「A 一次抛多条原因逐行翻译」), filed by the owning zone under the parent. Source: maintainer.\nGrading: area:ux · Feature · p2 (with the parent) · reach: every action or hook refusal that lists several reasons, once #36877 ships · evidence: ruling text; premise 4 of the analysis 7178064820.\n\n## 维护者速读\n\n- 做什么：服务端（#36877）可以在一次拒绝里给出多条已翻译的原因，每条一行。控制台现在只显示第一句，其余藏在「更多」里；改成在同一个提示框里逐行列出。\n- 谁受益：批量提交被整体拒绝的用户，一眼看到每一条为什么不行。\n- 不做会怎样：服务端翻好的多条原因，用户只看到第一条。\n- 需要你做的：无。\n\n## What\n\nRuling on #36877, term (6), verbatim: \"Console: a ui follow-up card under this one renders a multi-line `userMessage` as a list in the alert box.\"\n- `ui/packages/app-shell/src/components/RefusalMessage.tsx` today shows a refusal's first sentence with the rest behind \"More\" (analysis premise 4). When a refusal carries several lines (`userMessage` joined by `\\n`, and `details.refusals: [{ reason, message }]` from #36877), render each line as a list item in the same alert box; the entry's closing line stays last.\n\n## Acceptance\n\n- A refusal answer with several lines shows every line, in order, in one alert box, without a \"More\" toggle hiding them; a single-sentence refusal renders as today.\n- A pin for both cases.\n\n## Order\n\nAfter the #36877 server PR merges (it defines the wire shape).\n\nBlocked-by: #36877\n\nReader: zone o5-U (seat repo:objectstack#5).\nDedupe: open issues for \"RefusalMessage\" and \"multi-line refusal\" return none besides #36877."
+}

@@ -2,8 +2,8 @@
   "number": 37261,
   "kind": "issue",
   "title": "应用里「新建报表」保存时不带软件包，而新建视图会带上应用的包：两条路径对同一操作做法不一致",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-25T08:34:01Z",
-  "updated_at": "2026-11-25T17:10:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T01:41:42Z",
+  "closed_at": "2026-11-26T01:19:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37261",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYkkwuF6UuFtu85Yd5H\n\n④ sub-issue of #36890 · Source: #36906's os-dev report 7157110199, open question 1. Seat repo:objectstack#4 ruled 「A for this card; file the B card」: two paths for one operation disagree, so the report side follows the view rule. Part of #36890.\n\n## 维护者速读\n\n- 在应用里用报表列表的「新建」建一张报表，保存时不指定软件包，于是它成了环境级元数据，不属于任何包。在同一个应用里新建视图，却会存进应用的包（可写包存本包，只读包存它的定制包）。\n- #36906（PR #37226）已经让从 Studio 打开的新建报表页存进包里；应用自己的「新建」入口还是老做法。\n- 改法：让应用自己的新建报表也按视图的规则决定存到哪个包。这会改变以后所有应用里新建报表的存放位置，已有的报表不动。\n\n## What\n\n- The app's own new-report save (the reports index's New, outside Studio) resolves the app's package the way views do: `resolveRuntimeCreatePackage`, which gives the package when it is writable and its `.custom` pair through the ensure door otherwise, falling back package-less exactly where views do. Use the same `saveAndPublishInPackage` path #36906 added for the Studio leg, so the two legs share one rule.\n- Pins:\n  - from an app on a writable package, a new report names `packageId: P`;\n  - on an installed (read-only) app it names the pair;\n  - CONTROL: a refusing ensure door falls back as views do.\n  - Replace the existing pin that holds the old package-less behaviour outside Studio (added by #36906), and name it in the PR.\n- Also reword `resolveRuntimeCreatePackage`'s console warning (\"the view is saved naming no package\") so it names the type it is saving (noted in 7157110199).\n\n## Done when\n\n- A report made from any app's New lands in the same package a view made there would, and Studio's report list shows it.\n\n## Notes\n\n- Size S, priority p2.\n- **Blocked-by:** #36906 (PR #37226), which adds the Studio leg this card extends.\n- Data placement changes for new reports only; existing reports are not moved."

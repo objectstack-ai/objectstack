@@ -2,8 +2,8 @@
   "number": 37139,
   "kind": "issue",
   "title": "Studio 重构后续：顶栏应用名右侧加「⋯」软件包菜单（编辑信息、导出、复制、还原、收编散落项、在设置中管理）；「导入」放到「设置 > 软件包」页头",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T22:30:40Z",
-  "updated_at": "2026-11-25T18:44:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T01:42:26Z",
+  "closed_at": "2026-11-26T01:25:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37139",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYkkwuF6UuFtu85Yd5H\n\n③ maintainer direct order · Source: maintainer, in the a4-S zone session (repo:objectstack#4's Studio zone), 2026-11-24. Follow-up of the Studio redesign epic #36890: it gives the Packages page's development face a door once #36908 removes the Studio home. Part of #36890.\n\n## 维护者速读\n\n- Studio 首页（#36908 要删）是「软件包开发视图」唯一的入口。开发视图里有导入、编辑软件包信息、导出、复制、还原、收编散落项。首页删掉后，这些动作在界面上就找不到了。\n- 改法：Studio 顶栏左侧本来显示「‹ 返回应用 · 应用名」（按决定 5，没有应用时显示包名）。在名字右边加一个「⋯」，里面放整个软件包层面的动作。\n- 「导入」是新建一个包，不是对当前包做操作，所以放到「设置 > 软件包」页头，和「新建」并排。\n\n## 维护者原话（按先后）\n\n- 「B:在 Studio 顶部菜单显示软件包（应用名称），右侧加一个 ... 下拉菜单？」\n- 「同意」（回复的是下面这张菜单表，以及「导入放在设置 > 软件包页头」）\n\n## 菜单（已定）\n\n| 菜单项 | 说明 | 什么时候灰掉或隐藏 |\n|---|---|---|\n| 编辑软件包信息 | 名称、版本、说明、依赖 | 只读的安装包（市场装来的）灰掉 |\n| 导出 | 下载包文件，用来搬环境或备份 | — |\n| 复制为新软件包 | 在副本上另做一版 | — |\n| 还原到上次发布 | 丢掉上次发布之后的改动，先二次确认 | 只读包、没有改动时灰掉 |\n| 收编散落项 | 把不属于任何包的元数据收进这个包 | 只读包灰掉 |\n| 在设置中管理… | 跳到「设置 > 软件包」的这一项（启用 / 停用 / 删除） | — |\n\n- 「⋯」只给有 `manage_metadata` 的人显示。\n- 在组织级范围（`~org`）和全部包范围（`~all`）里不显示，因为没有当前包。\n- 「发布全部草稿」不放进菜单：Studio 已经有「变更 / 发布」入口，不出两套。\n- 每一项都复用开发视图里现成的对话框和操作，不另写一套。\n\n## What is on main (read on origin/main 9d707686)\n\n- The Studio top bar's left end is `ui/packages/app-shell/src/views/studio-design/StudioBackToApp.tsx` (objectstack#36501). It holds 「‹ Back to app」, the current package's app name or the package's own label, and the Studio mark.\n- The development face is `ui/packages/app-shell/src/views/metadata-admin/PackagesPage.tsx` with no `face` param. Its detail sheet offers Edit, Publish, Revert, Export, Duplicate and Adopt loose items under `authoring = face !== 'admin'` (:876, actions about :1366-1440). The page header carries Import. The administration face (`?face=admin`, Setup → Packages) offers only View info, Disable / Enable, Delete and 「Open in Studio」.\n- Before #36908, the development face's only served doors are the Studio home's 「All packages」 link and each package card's 「Manage」.\n\n## Done when\n\n- On a package's Studio page, a `manage_metadata` holder sees 「⋯」 beside the app or package name. It has the six items above, each greyed or hidden by the rules in the table, and each one works the way the development face's action does today.\n- On Setup → Packages, Import sits in the header beside New Package. It works as it does on the development face.\n- `~org` and `~all` show no 「⋯」; a user without `manage_metadata` sees none.\n- Pin tests in en and zh-CN for the menu's items and their disabled states, and for Import on the admin face.\n\n## Notes\n\n- Whether the development-face page is then retired is not decided here; ask the maintainer once this lands.\n- Business reason: the people who build and ship apps (implementers, ISVs, internal dev teams) need these whole-package actions to move an app between environments (export → import), ship a package to a customer, gather early loose objects into a package, or roll a package back. Without a door, these work only by typing the address.\n- Reader: zone a4-S of seat repo:objectstack#4. It dispatches one `os-dev`, after #36908 or alongside it: both touch Studio's entry surfaces, and the overlap check decides the order.\n- Dedupe (`gh api search/issues`, is:issue, open and closed): `studio package menu export duplicate` (81 hits), `studio 软件包 菜单 导出` (0), `package actions studio header` (373), `packages development face door` (102). None is this mechanism; the related cards are #36908 (removes the home) and #36834 (Setup → Packages, closed).\n\nGrading: `area:ux · Feature · package-level authoring actions lose their door when the Studio home goes · builders and implementers · evidence: read from code` · `priority:p2` (topic child ⇒ p2). Size M. `Metadata-protocol: none`. The domain is triage's to set."

@@ -1,0 +1,30 @@
+{
+  "number": 37365,
+  "kind": "issue",
+  "title": "记录 AI 问询 10b：控制台显示核对过的引用，点开记录并定位到被引章节",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-25T23:23:25Z",
+  "updated_at": "2026-11-25T23:35:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37365",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ③ maintainer-ruled. Split of placeholder #37144 per ruling 7177410380 (the maintainer, decision card, 2026-11-25T23:18Z: Q1 A · Q2 A · Q3 A).\nGrading: area:ai · Feature · p2 (topic child) · reach: users of the in-app assistant (the open edition has no AI button, so nothing draws there) · evidence: read.\n\n## 维护者速读\n- 做什么：控制台的 AI 回答下方列出引用（记录名 + 摘句）。点一条引用就打开这条记录，滚到被引的那一节并高亮。\n- 谁受益：使用应用内 AI 的用户。\n- 不做会怎样：引用核对过了也看不到，用户无法从回答跳回原文。\n- 需要你做的：无。\n\n## What\n1. `ui/packages/plugin-chatbot/src/mapMessages.ts`: `extractRecordCitations(parts)` lifts the `data-record-citations` part through `RecordCitationsSchema` (10a). A part the parse refuses draws no block (precedent `detectAnswerSource`).\n2. `ui/packages/plugin-chatbot/src/RecordCitations.tsx` (new), drawn in `ChatbotEnhanced.tsx` beside `AnswerSourceBlock`. Each chip shows the quote. A click calls `onOpenRecord({ objectName, recordId, anchor })`.\n3. The citations drawn are the persisted, already-verified list (ruling Q1). The console never re-verifies on display and adds no verify endpoint.\n4. A citation opens its `object`/`id`, the pack's root record, even when the quote came from a related-list cell (ruling Q3).\n5. `ChatbotEnhanced.tsx` and `AiChatPage.tsx` `openRecord` gain an optional `anchor`, written as `?section=ANCHOR`.\n6. `ui/packages/app-shell/src/urlParams.ts`: `RECORD_SECTION_PARAM = 'section'`, added to `RESERVED_URL_PARAMS`.\n7. `RecordDetailView.tsx` reads `section`:\n   - It runs the spec's `headingsOf` on the raw body value and takes the Nth heading element in the field's document face (`MarkdownContent.tsx` / rich text).\n   - It scrolls to that heading and marks it, as `comment` does.\n   - A `textarea` body, or an anchor that does not resolve, scrolls to the field, with no error.\n8. i18n keys in every `ui/packages/i18n` locale.\n\n## Acceptance\n- The chip opens `/apps/APP/OBJ/record/ID?section=A`, with the section in view and marked. The same holds for the dock and the `/ai` page.\n- A citation whose quote came from a related row opens the root record.\n- A stale anchor opens the record top.\n- A part that fails the parse draws nothing.\n- The recordLink grammar is unchanged: fragments are still refused.\n- `Metadata-protocol: none`. `Clause-②: yes` (a new reserved URL parameter).\n\n**Out of scope:** verification (10a); producing the part (cloud 10c); inline citation markers in the answer text.\n\nGoverning text: ADR-0160 D9 as amended by #37363; ruling 7177410380.\nBlocked-by: #37364\nParent: #36996 (row 10b; replaces placeholder #37144)\nSize: M\nDedupe (objectstack, is:issue): `citation in:title` → #37144 only (this placeholder).\n"
+}

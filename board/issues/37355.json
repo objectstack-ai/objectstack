@@ -1,0 +1,37 @@
+{
+  "number": 37355,
+  "kind": "pull_request",
+  "title": "fix(mcp): initialize points at the served SKILL.md; run_action names the no_confirmation_service next step",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T21:51:19Z",
+  "updated_at": "2026-11-25T22:40:28Z",
+  "closed_at": "2026-11-25T22:40:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-25T22:40:25Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37355",
+  "body": "Fixes #35778\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化:连接开放 MCP 入口的 AI 客户端,初始化时会被告知使用指南在哪里下载;执行需人工确认的业务动作被拒时,工具说明会告诉它由人在应用里完成。\n- 为什么做:上一轮把教学文字从工具说明挪进了使用指南,不读指南的客户端失去了指引,这里补回两句提示(属于\"让自带 AI 的客户端在开放入口拿到受治理答案\"这条主线)。\n- 出错会怎样:只是给 AI 读的提示文字,说错了 AI 可能找错地址或多问一句,不会改数据;可直接撤回。\n- 要你做什么:无。\n\n## What changes\nItems 1 and 2 of #35778. **Item 3 (optional slimming of list_datasets / query_dataset, the spec `QueryDatasetInputSchema` and the validate_expression variable descriptions) is not taken**: the card marks it optional and measure-first, and it stays open on the card.\n\n1. `packages/mcp/src/mcp-server-runtime.ts`: the open door's default `initialize` text (`DEFAULT_HTTP_INSTRUCTIONS`) gains one sentence:\n   `Usage guide (SKILL.md): GET this endpoint's path plus /skill (by default /api/v1/mcp/skill).`\n   - Where it is true: the runtime dispatcher mounts `GET PREFIX/mcp/skill` beside `PREFIX/mcp` from the same domain list (`packages/runtime/src/domains/mcp.ts` `createMcpDomains`, mounted in `dispatcher-plugin.ts` with the same `prefix`, default `/api/v1`), behind the same `isMcpServerEnabled()` switch, answered by the same `mcp` service (`renderSkill`), and anonymous, so it holds for every grant. `handleHttpRequest`'s only caller in this repo is that domain. The sentence is relative to the endpoint because the prefix is configurable.\n   - Where it is not added: a host's per-request texts and a configured `instructions` stay whole (existing pins), and the stdio default names no URL, since a stdio server has no HTTP endpoint.\n2. `packages/mcp/src/mcp-http-tools.ts`: `run_action`'s description gains one clause after the ACTION_CONFIRMATION_REQUIRED sentence:\n   `On details.reason \"no_confirmation_service\" a person performs it in the app: do not make the same change with another tool.`\n   - It restores the pre-#35682 in-app hint, and adds the \"not through another tool\" half the qa record on #34325 (6966146204) asks the refusal wording to carry. It is door-neutral: true on stdio and on Streamable HTTP. It does not anticipate #34325's stdio-only sentence (use a client that supports confirmation), which belongs to the refusal text on that card, and stays consistent with ruling 6909391261 (HTTP keeps the hand-off path; cancel/timeout refused).\n\nByte deltas:\n- tools/list on the API-key surface (`tools-list-weight-34689.test.ts`): 36,613 to 36,739 bytes (+126); `run_action` description 1,228 to 1,352 (+124). The ceiling of 38,000 is unchanged and still holds.\n- Default `initialize` text: +93 bytes (a bare bridge answers 533 characters). The 4,096-character bound pin on the longest default text still passes.\n\n## Tests\n- New top-level describes in the existing harness files:\n  - `initialize-selection-rule-34686.test.ts`: the pointer is in the first paragraph for five grants (no scope, data:read, data:write, metadata:write with an authoring injection, data:read with one).\n  - `mcp-action-confirmation-handoff-33690.test.ts`: `run_action`'s tools/list description carries the clause.\n- Ablations, one-off, via `scripts/ablation-replace.mjs` (anchor hit 1 to 0, restored blob equal to HEAD, `git diff HEAD` empty). The tests import the source, so no dist rebuild sits in the path:\n  - pointer removed: the new initialize pin fails (1 failed, 14 passed);\n  - clause removed: the new run_action pin fails (1 failed, 28 passed).\n\n## Acceptance notes\n- Not verified: a cloud host that calls `handleHttpRequest` from its own code and mounts the MCP endpoint without the runtime dispatcher. Such a host gets this default only when it injects no instructions of its own. If it serves no sibling `/skill` path, the sentence would not hold there; nothing in this repo is such a caller.\n\n## Verification\nTwo-minute check: `pnpm --filter @objectstack/mcp exec vitest run src/initialize-selection-rule-34686.test.ts src/mcp-action-confirmation-handoff-33690.test.ts src/tools-list-weight-34689.test.ts`. Expect 3 files passing, and a tools/list table line `| run_action | 1352 | 884 | 2236 |`.\n\nReadings at e3c3ac47a0:\n\n<details><summary>mcp build, typecheck, vitest (under os-verify-lock)</summary>\n\n- `@objectstack/mcp...` build: VERDICT command-exit 0.\n- `pnpm --filter @objectstack/mcp typecheck`, then the full `vitest run --maxWorkers=2`: VERDICT command-exit 0. Test Files 85 passed (85), Tests 1509 passed (1509). check:test-typecheck OK.\n</details>\n\n<details><summary>derived gate families</summary>\n\n- `dispatch-gates --commands --repo objectstack-ai/objectstack`: 68 families.\n- Results: 67 exit 0. `check:dual-build-cjs-loads` exit 3 (PREREQUISITE NOT MET: no whole-repo dist), so it is NOT MEASURED locally and left to CI.\n- `--ran` with exit codes: 68 derived, 67 run, 1 NOT-MEASURED, 0 UNRUN.\n- `overlap-check`: clean against origin/main.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYo86w1wqy2z2fMrryr)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QSeKYo86w1wqy2z2fMrryr\n\n<!-- signed: repo:objectstack#4 · os-justin · session_01QSeKYo86w1wqy2z2fMrryr -->\n"
+}

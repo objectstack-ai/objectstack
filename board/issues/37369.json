@@ -1,0 +1,37 @@
+{
+  "number": 37369,
+  "kind": "pull_request",
+  "title": "docs(skills): objectstack-automation spells an expression approver's value as the plain CEL string the schema accepts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T23:57:40Z",
+  "updated_at": "2026-11-26T01:05:09Z",
+  "closed_at": "2026-11-26T01:05:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-26T01:05:07Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37369",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgFiXLbrG7d8JVydkmtSf4Bt)_\n\nFixes #37353\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：用 AI 搭建审批流程时，AI 读到的技能说明里「动态审批人」的三个示例，现在把表达式写成普通文字；以前照抄旧示例会被校验拒绝。只有文字变化。\n- 为什么做：替照着已发布技能说明写审批流程的 AI 和应用开发者解决问题，他们抄到的示例过不了校验。\n- 出错会怎样：最坏是示例仍写得不准，照抄的人会被校验拦住并看到明确报错；撤回即恢复旧文字。\n- 要你做什么：受治理的技能文件，需要你批准后合并。\n\n## What changes\n\n`skills/objectstack-automation/references/state-machines-and-approvals.md`, *Dynamic approvers*:\n\n- The three fragments wrote an `expression` approver's `value` with the `cel` tag. The tag builds a `{ dialect, source }` object, and `ApprovalNodeApproverSchema.value` is a string, so a node copied from them was refused. They now read `value: 'current.co_review_departments'`, `value: 'vars.lead_review.next_reviewers'` and `value: 'current.picked_departments'`. `type: 'expression'` and `resolveAs` are unchanged.\n- The `expression` row of the approver table now says `value` is \"the expression string\" (it said \"the expression\").\n\nA changeset for `@objectstack/skills` (patch) carries both declaration lines.\n\nSkill size (lines; tokens are the ratchet's `ceil(bytes / 4)`):\n\n| Reading | Before | After |\n|:---|:---|:---|\n| The edited file, lines | 386 | 386 |\n| The edited file, tokens (ceiling 5936, unchanged) | 5934 | 5933 |\n| All `SKILL.md` files, lines | 4948 | 4948 |\n| Ratcheted bundle, tokens | 198145 | 198144 |\n\nNet lines added under `skills/**`: 0 (4 changed in place). The file is 2 bytes shorter, so nothing had to be paid for.\n\n## Tests\n\nNo test file changes: the diff is skill prose and a changeset. The accepted form was measured against the built spec at `5e32f8cc93`:\n\n<details><summary>Schema probe, built @objectstack/spec</summary>\n\n```\n1 string OK\n2 string OK\n3 string cfg OK\n1 cel REFUSED [[\"value\",\"Invalid input: expected string, received object\"]]\n3 cel cfg REFUSED [[\"approvers.0.value\",\"Invalid input: expected string, received object\"]]\n```\n\nRows 1 to 3 are the three fragments as now written, parsed by `ApprovalNodeApproverSchema` (1, 2) and `ApprovalNodeConfigSchema` (3). The two `cel` rows are the old spelling.\n\n</details>\n\n## Acceptance notes\n\n- **The accepted form is a plain CEL string.** `packages/spec/src/automation/approval.zod.ts` declares `value: z.string().optional()`; its description says \"write the CEL expression that returns the approvers\", and the comment above it says the designer renders a plain text input for the CEL source. Every approver-expression fixture in `packages/lint/src/validate-approval-approvers.test.ts` passes a string, the lint hint prescribes `{ type: 'expression', value: 'CEL-SOURCE', … }` (placeholder spelled in words), `examples/app-showcase/src/automation/flows/dynamic-approval.flow.ts` writes a string, and the compiled end-to-end flow a few lines below the fragments in this same file already wrote `value: 'vars.lead_review.next_reviewers'`. Nothing in the tree passes a `cel` object here, so the card's stop condition did not apply.\n- **Possible spec-lane follow-up, not filed.** ADR-0032 §2 says expression fields are typed and \"Never a raw `string`\". The approver `value` is one field shared by every approver type (a user id, a position name, a field name, or CEL), which is why it is a string today. Whether it should accept the `{ dialect, source }` envelope for `expression` is a contract question for the spec lane. This PR does not touch spec.\n- **The sentence at line 76 stays as written.** It says the `cel` tag \"builds each `{ dialect, source }` envelope\" of the flow example above it (start and edge conditions, the `filter`). The approver `value` is not an envelope, so the sentence is still true; the table row now states the approver case where an author reads it.\n- **Serial note.** An open draft pull request for the same skill directory edits other files; the claim's overlap check found this file merges cleanly with it. `origin/main` was still at this branch's base (`98bda0ac17`) when this was opened, so there was nothing to merge.\n\n## Verification\n\nRead first:\n\n1. `skills/objectstack-automation/references/state-machines-and-approvals.md`, the code block under *Dynamic approvers* (the three `value:` lines are the whole risk).\n2. The `expression` row of the approver table in the same file.\n\nTwo-minute check: `node scripts/check-skills-token-ratchet.mjs` prints `state-machines-and-approvals.md   5933 /   5936   (-3)` and exits 0.\n\n<details><summary>Local gates at 5e32f8cc93</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 49 commands. 47 ran and exited 0, among them:\n\n```\n✓ check-skills-token-ratchet: skills/objectstack-automation/references/state-machines-and-approvals.md is 5933 tokens (ceiling 5936; headroom 3).\n✓ check-skill-served-sections: 24 served section(s), each heading exactly once in its file (6 json, 2 json+ts, 16 neutral); 10 JSON fence(s) parse and pass their spec validators.\n✓ check:doc-formula-expressions: 29 record-scoped formula example(s) across 596 files / 1873 TS blocks judged clean by @objectstack/formula.\n✅ 10 generated files in sync with packages/spec   (check:skill-refs)\n✓ doc authoring guard: 23656 customer-facing string(s) across 1879 spec sources clean\n```\n\nNOT MEASURED: `pnpm check:dual-build-cjs-loads` and `pnpm check:lean-entry-closure` both exited 3 with `PREREQUISITE NOT MET` (they load every package's built `dist/`; only spec, formula and lint were built here). Neither reads a skill file. CI runs both.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

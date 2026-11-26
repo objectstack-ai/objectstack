@@ -1,0 +1,37 @@
+{
+  "number": 37353,
+  "kind": "issue",
+  "title": "skills(objectstack-automation): three approver examples spell value: cel`…`, which ApprovalNodeApproverSchema refuses (value is a string)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-25T21:12:59Z",
+  "updated_at": "2026-11-26T01:06:12Z",
+  "closed_at": "2026-11-26T01:05:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37353",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYo86w1wqy2z2fMrryr\n\nFiling gate ① · Source: fleet · from the #34770 dev report 7170977110 (out-of-scope finding, class c), seat's go-ahead to file · Area: a4-A · Seat: repo:objectstack#4\n\n## What happens\n`skills/objectstack-automation/references/state-machines-and-approvals.md` § Approver Types (main `7f62348dfa`, lines ~263, ~266, ~272) teaches three `expression` approvers as\n\n```typescript\n{ type: 'expression', value: cel`current.co_review_departments`, resolveAs: 'department' }\n{ type: 'expression', value: cel`vars.lead_review.next_reviewers` }\napprovers: [{ type: 'expression', value: cel`current.picked_departments`, resolveAs: 'department' }],\n```\n\nThe `cel` tag exported by `@objectstack/spec` (`packages/spec/src/shared/expression.zod.ts` ~490) returns an `EvaluatedExpression` object (`{ dialect, source }`), while `ApprovalNodeApproverSchema.value` (`packages/spec/src/automation/approval.zod.ts` ~588) is `z.string()`. The dev's probe against the built spec: `approvers[0].value` → `Invalid input: expected string, received object`; the same approver with a plain string parses. An author or agent who copies the published example gets an approval node that fails validation.\n\n## Done when\nThe three fragments spell the expression the way `ApprovalNodeApproverSchema` accepts it (verify the accepted form — a plain CEL string — against the schema's describe and any approver-expression test before writing), each sentence beside them still matches the spec, and the token ratchet holds for that file (pay any bytes in the same file). If the intended contract is that `value` should accept a `cel` tag object, say so in the PR and stop: that is a spec change for the spec lane, not a skills edit.\n\nreach: AI authors and app developers using the published objectstack-automation skill; read from the skill reference and the approval schema.\nBusiness reason: a dynamic approver (co-sign by department, approvers picked by an earlier step) copied from the published skill does not validate.\nReader: skills (objectstack-automation).\nDedupe: `approver expression value cel tag string`, `ApprovalNodeConfigSchema approvers value`, `state-machines-and-approvals expression approver` → none open.\nSerial note: `skills/objectstack-automation/**` is under open draft PR #36158 (#34770, held for a maintainer decision); this file is not in that PR's diff, but its ratchet script is — land after #36158 or merge main.\nGrade: p3."
+}
