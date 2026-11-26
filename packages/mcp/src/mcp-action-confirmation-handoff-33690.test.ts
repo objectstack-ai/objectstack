@@ -43,6 +43,7 @@ import {
   actionConfirmationElicitorFor,
   actionConfirmationQuestion,
   type McpActionCallDoor,
+  type McpActionCallDoorFacts,
 } from './action-confirmation-elicitation.js';
 
 const GATED = 'archive_account';
@@ -272,7 +273,7 @@ async function openStdioClient(server: McpServer, opts: { elicitation: boolean; 
 
 /** A bridge double for the stdio door: runs the step-1 half the runtime owns, through whatever `door` the tool handed it. */
 function elicitingBridge() {
-  const calls: Array<{ tool: string; door: McpActionCallDoor | undefined; argCount: number }> = [];
+  const calls: Array<{ tool: string; door: McpActionCallDoor | undefined; facts?: McpActionCallDoorFacts; argCount: number }> = [];
   const confirmWith = async (door: McpActionCallDoor | undefined, name: string) => {
     if (!door) return pendingOf(1);
     const answer = await door.elicitConfirmation({
@@ -288,12 +289,12 @@ function elicitingBridge() {
   const bridge = {
     ...makeBridge('service'),
     calls,
-    async runAction(name: string, _input: any, door?: McpActionCallDoor) {
-      calls.push({ tool: 'run_action', door, argCount: arguments.length });
+    async runAction(name: string, _input: any, door?: McpActionCallDoor, facts?: McpActionCallDoorFacts) {
+      calls.push({ tool: 'run_action', door, ...(facts !== undefined ? { facts } : {}), argCount: arguments.length });
       return confirmWith(door, name);
     },
-    async resumeRun(_runId: string, _input: any, door?: McpActionCallDoor) {
-      calls.push({ tool: 'resume_run', door, argCount: arguments.length });
+    async resumeRun(_runId: string, _input: any, door?: McpActionCallDoor, facts?: McpActionCallDoorFacts) {
+      calls.push({ tool: 'resume_run', door, ...(facts !== undefined ? { facts } : {}), argCount: arguments.length });
       return confirmWith(door, GATED);
     },
   };
@@ -356,11 +357,13 @@ describe('[#33712] stdio: a client that advertises elicitation is asked in place
     expect(JSON.parse(declined.result.content[0].text).error.details.reason).toBe('declined');
   });
 
-  it('a client WITHOUT the capability is never asked: the bridge is called exactly as before and hands off', async () => {
+  it('a client WITHOUT the capability is never asked: the bridge gets no door and hands off', async () => {
     const { result, calls } = await stdioCall({ elicitation: false });
     expect(result.isError).toBeFalsy();
     expect(JSON.parse(result.content[0].text)).toEqual(pendingOf(1));
-    expect(calls).toEqual([{ tool: 'run_action', door: undefined, argCount: 2 }]);
+    // [#34325] No door, as before; the door's facts ride as a fourth,
+    // additive argument a bridge may ignore.
+    expect(calls).toEqual([{ tool: 'run_action', door: undefined, facts: { elicitsCapableClients: true }, argCount: 4 }]);
   });
 });
 
@@ -526,4 +529,52 @@ describe('[#35778] run_action names the next step on a no_confirmation_service r
       'On details.reason "no_confirmation_service" a person performs it in the app: do not make the same change with another tool.',
     );
   });
+});
+
+/**
+ * [#34325] Which door asked, as the bridge is told it: the runtime words the
+ * `no_confirmation_service` refusal from it (pinned in
+ * `packages/runtime/src/action-confirmation-handoff-33690.test.ts`). The
+ * long-lived stdio server read the client's `initialize`, so for a client
+ * without `elicitation` it says it would have asked a client that supports
+ * confirmation (`facts.elicitsCapableClients`, the fourth argument; the door
+ * argument stays as on main), on both tools. The per-request
+ * Streamable HTTP server asks no client and says nothing: the bridge is
+ * called exactly as before, even for a client that advertised the capability
+ * at `initialize`, so the refusal keeps the in-app route alone there.
+ */
+describe('[#34325] the door facts the action tools hand the bridge name whether a client that supports confirmation is asked here', () => {
+  for (const tool of ['run_action', 'resume_run'] as const) {
+    it(`stdio, a client without elicitation: ${tool} hands the bridge no door and the facts { elicitsCapableClients: true }`, async () => {
+      const { calls, asked } = await stdioCall({ elicitation: false }, tool);
+      expect(asked).toEqual([]);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].argCount).toBe(4);
+      expect(calls[0].door).toBeUndefined();
+      expect(calls[0].facts).toStrictEqual({ elicitsCapableClients: true });
+    });
+
+    it(`CONTROL stdio, a client with elicitation: ${tool} hands the bridge main's door (the elicitor alone) and no facts`, async () => {
+      const { calls } = await stdioCall({ elicitation: true, answer: { action: 'accept' } }, tool);
+      expect(Object.keys(calls[0].door ?? {})).toEqual(['elicitConfirmation']);
+      expect(calls[0].argCount).toBe(3);
+      expect(calls[0]).not.toHaveProperty('facts');
+    });
+
+    it(`Streamable HTTP, after an initialize that advertised elicitation: ${tool} calls the bridge with no door at all`, async () => {
+      const runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9' });
+      const bridge = elicitingBridge();
+      const init = {
+        jsonrpc: '2.0', id: 0, method: 'initialize',
+        params: { protocolVersion: '2025-11-25', capabilities: { elicitation: {} }, clientInfo: { name: 'c', version: '1' } },
+      };
+      expect((await runtime.handleHttpRequest(mcpRequest(init), { bridge, parsedBody: init })).status).toBe(200);
+      const args = tool === 'run_action' ? { actionName: GATED, recordId: 'a1' } : { runId: 'run_1', values: { reason: 'x' } };
+      const body = toolsCall(1, tool, args);
+      const req = mcpRequest(body);
+      req.headers.set('mcp-protocol-version', '2025-11-25');
+      await runtime.handleHttpRequest(req, { bridge, parsedBody: body });
+      expect(bridge.calls).toStrictEqual([{ tool, door: undefined, argCount: 2 }]);
+    });
+  }
 });
