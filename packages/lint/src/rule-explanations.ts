@@ -6062,7 +6062,7 @@ const AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION: RuleExplanation = {
 
 const AI_CONTEXT_SORT_FIELD_UNSORTABLE_EXPLANATION: RuleExplanation = {
   rule: 'ai-context-sort-field-unsortable',
-  covers: 'why a related list of a context pack must be ordered by a field offered as a sort',
+  covers: 'which fields may order a related list of a context pack',
   paragraphs: [
     'A related list\'s `orderBy` runs in the one query that reads the list. A field the object does not offer as ' +
       'a sort, a formula (computed on read, no column to order by) or a field whose author declared ' +
