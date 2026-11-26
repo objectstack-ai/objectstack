@@ -235,7 +235,7 @@ A source with `refresh.onRecordChange: false` is left to its external indexer, a
 <Callout type="warn">
 **A build costs money.** A complete build reads every row the source's `where` matches and sends the listed content fields of each one the index does not already hold unchanged to your embedding provider, which bills for them. The first build of a large source, or a rebuild after you change the embedding model or the split, sends all of it. The boot log line that starts a build says so.
 
-The default `memory` adapter holds nothing after a restart, so with it **every boot is a first build**: each boot sends the whole source to the embedding provider again, on every node, because each process keeps its own index. Use a persistent adapter (pgvector, Turso, RAGFlow) for a source you do not want re-embedded on each restart. And "only one node builds a source" holds only with a shared cluster lock driver: the default `memory` cluster driver's lock is a per-process mutex, so with it every node builds the source itself.
+The default `memory` adapter holds nothing after a restart, so with it **every boot is a first build**: each boot sends the whole source to the embedding provider again, on every node, because each process keeps its own index. Use a persistent adapter (pgvector, Turso) for a source you do not want re-embedded on each restart. And "only one node builds a source" holds only with a shared cluster lock driver: the default `memory` cluster driver's lock is a per-process mutex, so with it every node builds the source itself.
 </Callout>
 
 To rebuild a source yourself, as an administrator (an account with `manage_platform_settings`):
