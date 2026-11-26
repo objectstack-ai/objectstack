@@ -21,12 +21,13 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import React from 'react';
-import { render, cleanup, screen, waitFor } from '@testing-library/react';
+import { render, cleanup, screen, waitFor, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { SchemaRendererContext } from '@object-ui/react';
 import { I18nProvider } from '@object-ui/i18n';
 import { getCellRenderer } from '../index';
 import { NumberField } from '../widgets/NumberField';
+import { TextField } from '../widgets/TextField';
 import { formatQuantity, quantityDisplayPlaces } from '../widgets/quantity-format';
 
 afterEach(cleanup);
@@ -34,8 +35,8 @@ afterEach(cleanup);
 const text = (s: string | null | undefined) => (s ?? '').replace(/\u00a0/g, ' ');
 
 const ORG_UNITS = [
-  { code: 'BOX_12', label: 'Box of 12', decimal_places: 1, retired: false, organization_id: 'org_a' },
-  { code: 'JIN1', label: 'Jin', decimal_places: 2, retired: true, organization_id: 'org_a' },
+  { code: 'BOX_12', label: 'Box of 12', decimal_places: 1, dimension: 'package', retired: false, organization_id: 'org_a' },
+  { code: 'JIN1', label: 'Jin', decimal_places: 2, dimension: 'mass', retired: true, organization_id: 'org_a' },
 ];
 const SETTINGS = [
   { code: 'GRM', decimal_places: 3, organization_id: 'org_a' },
@@ -170,11 +171,9 @@ describe('a unit-code field (Open item 8)', () => {
 describe('formatQuantity — the one formatter', () => {
   const field = { name: 'qty', type: 'number' } as any;
 
-  it('marks a stored value with more places than shown, and changes nothing stored', () => {
-    const value = 1.5;
-    const out = formatQuantity(value, field, { code: 'H87', standard: true, label: 'pc', decimals: 0 }, 'en-US');
+  it('marks a stored value with more places than shown', () => {
+    const out = formatQuantity(1.5, field, { code: 'H87', standard: true, label: 'pc', decimals: 0 }, 'en-US');
     expect(out).toEqual({ text: '2\u00a0pc', number: '2', unit: 'pc', hidden: true });
-    expect(value).toBe(1.5);
     expect(formatQuantity(1.5, field, { code: 'GRM', standard: true, label: 'g', decimals: 3 }, 'en-US').hidden).toBe(false);
   });
 
@@ -190,5 +189,41 @@ describe('formatQuantity — the one formatter', () => {
     expect(quantityDisplayPlaces(undefined, field)).toBeUndefined();
     expect(quantityDisplayPlaces(5, { ...field, scale: 2 })).toBe(2);
     expect(quantityDisplayPlaces(1, { ...field, scale: 2 })).toBe(1);
+  });
+});
+
+describe('the unit picker on the form face (ADR-0158 Open item 8, objectstack#37471)', () => {
+  const CODE = { name: 'unit_code', type: 'text', unitConfig: { unitMode: 'code' } } as any;
+  const drawText = (props: Record<string, unknown>) =>
+    render(
+      <SchemaRendererContext.Provider value={{ dataSource: unitSource() } as never}>
+        <div data-testid="face">
+          <TextField value="" onChange={() => {}} field={CODE} dependentValues={{ organization_id: 'org_a' }} {...(props as any)} />
+        </div>
+      </SchemaRendererContext.Provider>,
+    );
+
+  it("read-only, shows the unit's name, not the bare code", async () => {
+    drawText({ value: 'BOX_12', readonly: true });
+    await waitFor(() => expect(faceText()).toBe('Box of 12'));
+    cleanup();
+    drawText({ value: 'H87', readonly: true });
+    expect(faceText()).toBe('piece');
+  });
+
+  it("lists the organization's live units and the standard codes by name, and stores the code picked", async () => {
+    const picked: string[] = [];
+    drawText({ onChange: (code: string) => picked.push(code) });
+    fireEvent.click(screen.getByRole('combobox'));
+    await waitFor(() => expect(screen.getByRole('option', { name: /Box of 12/ })).toBeInTheDocument());
+    // The retired unit is not offered.
+    expect(screen.queryByRole('option', { name: /Jin/ })).toBeNull();
+    fireEvent.click(screen.getByRole('option', { name: /kilogram/ }));
+    expect(picked).toEqual(['KGM']);
+  });
+
+  it('shows the stored unit by name on the closed picker', async () => {
+    drawText({ value: 'BOX_12' });
+    await waitFor(() => expect(screen.getByRole('combobox')).toHaveTextContent('Box of 12'));
   });
 });

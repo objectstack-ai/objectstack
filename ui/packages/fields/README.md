@@ -125,6 +125,12 @@ one quantity identically. The pieces:
 A cell or widget only sees a `record`-mode quantity's code when its host hands it the row
 (`dependentValues`). The grid, list, detail and form hosts do.
 
+A unit code field is chosen, not typed: `TextField` draws `UnitCodeField`, a searchable picker over
+`unitPickerOptions` (the organization's non-retired units, then the standard codes, by name and limited to
+the `unitDimension`), for a `text` field declaring `unitMode: 'code'` and for the `unitField` a quantity on
+the same form points at (the form stamps that pointer with `withUnitCodePointer`). It stores the code; read-only,
+it shows the unit's name.
+
 ### Rendering form field widgets outside the form
 
 The full widget surface is exported for consumers that render field widgets

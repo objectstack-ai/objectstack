@@ -23,8 +23,17 @@ function NumberProbe(props: any) {
   return <div data-testid="number-probe">{JSON.stringify(props.dependentValues ?? null)}</div>;
 }
 
+function TextProbe(props: any) {
+  return (
+    <div data-testid={`text-probe-${props.field?.name}`}>
+      {JSON.stringify({ unitConfig: props.field?.unitConfig ?? null, record: props.dependentValues ?? null })}
+    </div>
+  );
+}
+
 beforeAll(() => {
   ComponentRegistry.register('field:number', NumberProbe, { namespace: 'test' });
+  ComponentRegistry.register('field:text', TextProbe, { namespace: 'test' });
 }, 30000);
 
 describe('form renderer — a quantity gets the live record (objectstack#35490)', () => {
@@ -49,5 +58,30 @@ describe('form renderer — a quantity gets the live record (objectstack#35490)'
     await waitFor(() => {
       expect(JSON.parse(screen.getByTestId('number-probe').textContent!)).toMatchObject({ unit_code: 'GRM' });
     });
+  });
+});
+
+describe("form renderer — a quantity's unit field is a unit code field (objectstack#37471)", () => {
+  it('stamps the pointer on the field the quantity names, and hands it the record', () => {
+    const Form = ComponentRegistry.get('form')!;
+    render(
+      <Form
+        schema={{
+          type: 'form',
+          showSubmit: false,
+          showCancel: false,
+          fields: [
+            { name: 'unit_code', label: 'Unit', type: 'text' },
+            { name: 'note', label: 'Note', type: 'text' },
+            { name: 'qty', label: 'Quantity', type: 'number', unitConfig: { unitMode: 'record', unitField: 'unit_code', unitDimension: 'mass' } },
+          ],
+        }}
+      />,
+    );
+    const unit = JSON.parse(screen.getByTestId('text-probe-unit_code').textContent!);
+    expect(unit.unitConfig).toEqual({ unitMode: 'code', unitDimension: 'mass' });
+    expect(unit.record).toHaveProperty('unit_code');
+    // A text field no quantity names is untouched, and gets no record.
+    expect(JSON.parse(screen.getByTestId('text-probe-note').textContent!)).toEqual({ unitConfig: null, record: null });
   });
 });

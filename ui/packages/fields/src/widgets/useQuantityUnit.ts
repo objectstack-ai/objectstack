@@ -56,7 +56,12 @@ const rowsOf = (answer: unknown): readonly Record<string, unknown>[] => {
   return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
 };
 
-/** One read per adapter, kept for the session; a read that fails resolves to "unread". */
+/**
+ * One read per adapter, kept for the session; a read that fails resolves to
+ * "unread" and stays so until a reload. Kept on purpose: an external member's
+ * `sys_unit` refusal is permanent, and re-reading it per mount would cost one
+ * request per cell of a grid.
+ */
 const CATALOG_READS = new WeakMap<object, Promise<UnitCatalog>>();
 
 /**
@@ -67,12 +72,14 @@ const CATALOG_READS = new WeakMap<object, Promise<UnitCatalog>>();
 export function readUnitCatalog(source: UnitSource): Promise<UnitCatalog> {
   const held = CATALOG_READS.get(source);
   if (held) return held;
+  // `$count: false`: no face draws a count of units, so the server need not
+  // count the table (the adapter's opt-out, `countOptOut.test.ts`).
   const read = <R>(object: string, select: string[]): Promise<readonly R[] | undefined> =>
     source
-      .find(object, { $select: select, $top: UNIT_READ_TOP })
+      .find(object, { $select: select, $top: UNIT_READ_TOP, $count: false })
       .then((answer) => rowsOf(answer) as unknown as readonly R[], () => undefined);
   const catalog = Promise.all([
-    read<OrganizationUnitRow>(ORGANIZATION_UNIT_OBJECT, ['code', 'label', 'decimal_places', 'retired', 'organization_id']),
+    read<OrganizationUnitRow>(ORGANIZATION_UNIT_OBJECT, ['code', 'label', 'decimal_places', 'retired', 'dimension', 'organization_id']),
     read<StandardUnitSettingRow>(STANDARD_UNIT_SETTING_OBJECT, ['code', 'decimal_places', 'organization_id']),
   ]).then(([organizationUnits, standardUnitSettings]): UnitCatalog => ({
     ...(organizationUnits ? { organizationUnits } : {}),
@@ -115,11 +122,22 @@ export function useQuantityUnit(
   value?: unknown,
   dataSource?: unknown,
 ): ResolvedUnit | undefined {
-  const ctx = useContext(SchemaRendererContext);
-  const source = (dataSource ?? ctx?.dataSource) as UnitSource | null | undefined;
   const code = quantityUnitCode(field, record, value);
   const standardLabel = useStandardUnitLabel();
-  const canRead = code !== undefined && typeof source?.find === 'function';
+  const rows = useUnitCatalog(code !== undefined, dataSource);
+  if (code === undefined) return undefined;
+  return resolveQuantityUnit(code, rows, record, standardLabel(code));
+}
+
+/**
+ * The unit rows (`readUnitCatalog`) through the data source the surfaces use,
+ * or `dataSource` when given; empty until they are read, or when `enabled` is
+ * false or there is no source to read through.
+ */
+export function useUnitCatalog(enabled: boolean, dataSource?: unknown): UnitCatalog {
+  const ctx = useContext(SchemaRendererContext);
+  const source = (dataSource ?? ctx?.dataSource) as UnitSource | null | undefined;
+  const canRead = enabled && typeof source?.find === 'function';
   const [catalog, setCatalog] = useState<{ source: object; catalog: UnitCatalog } | undefined>(undefined);
   useEffect(() => {
     if (!canRead || !source) return;
@@ -131,7 +149,7 @@ export function useQuantityUnit(
       current = false;
     };
   }, [canRead, source]);
-  if (code === undefined) return undefined;
-  const rows = catalog && catalog.source === source ? catalog.catalog : {};
-  return resolveQuantityUnit(code, rows, record, standardLabel(code));
+  return catalog && catalog.source === source ? catalog.catalog : EMPTY_CATALOG;
 }
+
+const EMPTY_CATALOG: UnitCatalog = Object.freeze({});

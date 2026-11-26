@@ -19,6 +19,10 @@ import {
   quantityUnitReadField,
   resolveQuantityUnit,
   shownQuantityUnitReads,
+  declaresUnitCode,
+  quantityUnitCodePointers,
+  unitPickerOptions,
+  withUnitCodePointer,
 } from '../unit-display';
 
 const FIXED = { type: 'number', unitConfig: { unitMode: 'fixed', unit: 'KGM' } };
@@ -149,5 +153,59 @@ describe('shownQuantityUnitReads — what a projection fetches for shown quantit
   it('asks for nothing when no shown column draws a unit, or the quantity is hidden', () => {
     expect(shownQuantityUnitReads(['name'], fields)).toEqual([]);
     expect(shownQuantityUnitReads([{ field: 'qty', hidden: true }], fields)).toEqual([]);
+  });
+});
+
+describe('the unit picker (ADR-0158 Open item 8, objectstack#37471)', () => {
+  const catalog = {
+    organizationUnits: [
+      { code: 'BOX_12', label: 'Box of 12', dimension: 'package', retired: false, organization_id: 'org_a' },
+      { code: 'JIN1', label: 'Jin', dimension: 'mass', retired: false, organization_id: 'org_a' },
+      { code: 'OLD1', label: 'Old', dimension: 'mass', retired: true, organization_id: 'org_a' },
+      { code: 'BAG_B', label: 'Bag', dimension: 'package', retired: false, organization_id: 'org_b' },
+    ],
+  };
+  const names: Record<string, string> = { KGM: 'kilogram', GRM: 'gram' };
+  const label = (code: string) => names[code];
+
+  it("offers the record's organization's non-retired units first, then every standard code, storing codes", () => {
+    const options = unitPickerOptions(catalog, { organization_id: 'org_a' }, label);
+    const own = options.filter((o) => !o.standard).map((o) => `${o.code}=${o.label}`);
+    expect(own).toEqual(['BOX_12=Box of 12', 'JIN1=Jin']);
+    expect(options.findIndex((o) => o.standard)).toBe(2);
+    expect(options).toContainEqual({ code: 'KGM', label: 'kilogram', standard: true });
+    // A standard code with no name in the reader's language shows its code.
+    expect(options).toContainEqual({ code: 'H87', label: 'H87', standard: true });
+  });
+
+  it("restricts every unit to the field's unitDimension", () => {
+    const options = unitPickerOptions(catalog, { organization_id: 'org_a' }, label, { unitMode: 'code', unitDimension: 'mass' });
+    expect(options.filter((o) => !o.standard).map((o) => o.code)).toEqual(['JIN1']);
+    expect(options.map((o) => o.code)).toContain('GRM');
+    expect(options.map((o) => o.code)).not.toContain('H87');
+  });
+
+  it('offers every readable organization unit when the record names no organization', () => {
+    expect(unitPickerOptions(catalog, {}, label).filter((o) => !o.standard).map((o) => o.code)).toEqual(['BOX_12', 'JIN1', 'BAG_B']);
+  });
+
+  it("names the unit field a record-mode quantity points at, with the quantity's dimension", () => {
+    const pointers = quantityUnitCodePointers([
+      { name: 'qty', type: 'number', unitConfig: { unitMode: 'record', unitField: 'unit_code', unitDimension: 'mass' } },
+      { name: 'w', field: { type: 'number', unitConfig: { unitMode: 'record', unitField: 'w_unit' } } },
+      { name: 'kg', type: 'number', unitConfig: { unitMode: 'fixed', unit: 'KGM' } },
+    ]);
+    expect([...pointers]).toEqual([['unit_code', { unitDimension: 'mass' }], ['w_unit', {}]]);
+  });
+
+  it('stamps the pointer on a copy, and never over a declared unitConfig', () => {
+    const field = { name: 'unit_code', type: 'text' };
+    const stamped = withUnitCodePointer(field, { unitDimension: 'mass' });
+    expect(stamped).toEqual({ name: 'unit_code', type: 'text', unitConfig: { unitMode: 'code', unitDimension: 'mass' } });
+    expect(field).not.toHaveProperty('unitConfig');
+    expect(declaresUnitCode(stamped)).toBe(true);
+    const declared = { type: 'text', unitConfig: { unitMode: 'code' } };
+    expect(withUnitCodePointer(declared, { unitDimension: 'mass' })).toBe(declared);
+    expect(withUnitCodePointer(field, undefined)).toBe(field);
   });
 });

@@ -95,6 +95,10 @@ edited box). A record-mode quantity, for example, declares
   `unitField` holds; the list, grid and related-list reads fetch that field, and the row's
   `organization_id`, even when no column shows them. A `text` field declaring `unitMode: 'code'` shows the
   code's label.
+- **Choosing a unit.** In a form, a `text` field declaring `unitMode: 'code'`, and the `unitField` a
+  `record` quantity on the same form points at, are a searchable unit picker, never a typed box: the
+  organization's non-retired units, then the standard codes, each by name and limited to the declared
+  `unitDimension`. The picker stores the code. Read-only, the field shows the unit's name.
 - **Which label.** A standard code (`KGM`, `H87`, …) shows the platform's name for it in the reader's
   language, served by the platform's i18n service (`messages.standardUnit<CODE>`), falling back to the
   English name in `@objectstack/spec` (`STANDARD_UNIT_NAMES`). An organization's own code shows its

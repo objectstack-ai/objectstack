@@ -1160,9 +1160,9 @@ export const FormFieldSchema = z.looseObject({
   scale: stripImportedDefaults(SpecFieldSchema).shape.scale,
   currencyConfig: stripImportedDefaults(SpecFieldSchema).shape.currencyConfig,
   // objectstack#35490 — the unit a `number` quantity is drawn with:
-  // `NumberField` and the number cell read it (ADR-0158 R1 display). A
-  // unit-code `text` field's `unitMode: 'code'` is read by the text cell
-  // only; on this form face the text widget does not read it yet.
+  // `NumberField` and the number cell read it (ADR-0158 R1 display). On a
+  // `text` field, `unitMode: 'code'` makes the text widget the unit picker
+  // (Open item 8, objectstack#37471), and the text cell draws the unit's name.
   unitConfig: stripImportedDefaults(SpecFieldSchema).shape.unitConfig,
   minLength: stripImportedDefaults(SpecFieldSchema).shape.minLength,
   maxLength: stripImportedDefaults(SpecFieldSchema).shape.maxLength,

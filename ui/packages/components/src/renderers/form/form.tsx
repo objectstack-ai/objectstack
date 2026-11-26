@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { ComponentRegistry, resolveFieldRuleState, evalFieldPredicate, resolveCascadingOptions, resolveDependsOnFields, CASCADE_OPTION_WIDGET_TYPES, EXPANDABLE_FIELD_TYPES, isValueStillOffered, isMissingForRequired, isServerOwnedValue, isActionSwitchedOff, type FieldRulePredicate } from '@object-ui/core';
+import { ComponentRegistry, resolveFieldRuleState, evalFieldPredicate, resolveCascadingOptions, resolveDependsOnFields, CASCADE_OPTION_WIDGET_TYPES, EXPANDABLE_FIELD_TYPES, isValueStillOffered, isMissingForRequired, isServerOwnedValue, isActionSwitchedOff, declaresUnitCode, quantityUnitCodePointers, withUnitCodePointer, type FieldRulePredicate } from '@object-ui/core';
 import type { FormSchema, FormField as FormFieldConfig, FormFieldTab, FormFieldPane, FieldCondition, SelectOption } from '@object-ui/types';
 import { useForm, type RefCallBack } from 'react-hook-form';
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage, FormDescription } from '../../ui/form';
@@ -1446,8 +1446,9 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     // A record-mode amount's symbol and decimals follow the code the user picks
     // in its sibling select, so the amount box needs the live record too.
     ...(RECORD_CURRENCY_WIDGET_TYPES.has(normalizedType) ? { dependentValues } : {}),
-    // A record-mode quantity's unit follows the code in its sibling field.
-    ...(QUANTITY_WIDGET_TYPES.has(normalizedType) ? { dependentValues } : {}),
+    // A record-mode quantity's unit follows the code in its sibling field, and
+    // a unit code field offers its record's organization's units.
+    ...(QUANTITY_WIDGET_TYPES.has(normalizedType) || declaresUnitCode(fieldProps.field as never) ? { dependentValues } : {}),
     // Only the widgets that report unparseable text read it; every other one
     // would spread an unknown handler onto its DOM (objectstack#27483).
     ...(INVALID_INPUT_REPORTING_WIDGET_TYPES.has(normalizedType) ? { onInvalidInputChange } : {}),
@@ -2576,6 +2577,9 @@ ComponentRegistry.register('form',
     // Read once per object and handed down on the field's own metadata.
     const codeFieldNames = React.useMemo(() => currencyCodeFieldNames(fields as unknown[]), [fields]);
     const usedCurrencyCodes = useUsedCurrencyCodes(contextDataSource, schema.objectName, codeFieldNames);
+    // The unit code fields a quantity on this form points at (ADR-0158 Open
+    // item 8): each is drawn as the unit picker (`withUnitCodePointer`).
+    const unitCodePointers = React.useMemo(() => quantityUnitCodePointers(fields as unknown[]), [fields]);
 
     // The record as each visible update action would leave it
     // (objectstack#28382). A declarative update action writes its static
@@ -4289,7 +4293,8 @@ ComponentRegistry.register('form',
                   // metadata was stashed (standalone forms).
                   // A record-currency code field also carries the codes its
                   // object's records already hold (`usedCurrencyCodes`).
-                  field: withUsedCurrencyCodes(field.field || field, usedCurrencyCodes[name]),
+                  // A unit code field a quantity points at carries that pointer.
+                  field: withUnitCodePointer(withUsedCurrencyCodes(field.field || field, usedCurrencyCodes[name]), unitCodePointers.get(name)),
                   ...formField,
                   inputType: fieldProps.inputType,
                   // The field's label, forwarded explicitly because the

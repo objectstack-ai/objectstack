@@ -632,7 +632,8 @@ export { formatNumberFieldValue };
  */
 export { QuantityText, UnitCodeText };
 export { formatQuantity, quantityDisplayPlaces, type QuantityDisplay } from './widgets/quantity-format.js';
-export { useQuantityUnit, useStandardUnitLabel, readUnitCatalog } from './widgets/useQuantityUnit.js';
+export { useQuantityUnit, useStandardUnitLabel, useUnitCatalog, readUnitCatalog } from './widgets/useQuantityUnit.js';
+export { UnitCodeField } from './widgets/UnitCodeField.js';
 
 /**
  * Format currency value in compact form for mobile display.

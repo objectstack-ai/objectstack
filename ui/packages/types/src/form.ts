@@ -2097,10 +2097,11 @@ export interface FormField {
    * `number` field, `{ unitMode: 'fixed', unit: 'KGM' }` gives every value one
    * unit and `{ unitMode: 'record', unitField: 'unit_code' }` reads it off the
    * record's own unit field. On a `text` field, `{ unitMode: 'code' }` marks
-   * the value itself as a unit code; the grid and detail cells show its name,
-   * but on this form face nothing reads that mode yet (the text widget draws
-   * the bare code, and no unit picker exists). The `number` widget shows the
-   * unit's name beside the value, at the unit's display decimal places.
+   * the value itself as a unit code: the text widget draws the unit picker
+   * (the organization's units and the standard codes, by name; read-only, the
+   * unit's name), as it does for the `unitField` a quantity on the same form
+   * points at. The `number` widget shows the unit's name beside the value, at
+   * the unit's display decimal places.
    */
   unitConfig?: SpecField['unitConfig'];
   /**
