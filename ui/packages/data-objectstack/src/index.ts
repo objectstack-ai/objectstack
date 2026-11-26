@@ -3701,7 +3701,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   // Subscribers registered via onMutation(). Emitted after each successful
   // create/update/delete so data-bound views (ListView, ObjectView, kanban,
   // calendar) auto-refresh — the interface ListView relies on to reflect
-  // inline-edit "Save All" writes without a manual reload.
+  // inline-edit cell saves without a manual reload.
   private mutationListeners = new Set<(event: DataSourceMutationEvent<T>) => void>();
   // objectui#13442 — how many `batchMutationEvents` scopes are open, and the
   // events held back while any is. Keyed by type + resource, so a 100-row run
@@ -4370,7 +4370,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   /**
    * Subscribe to create/update/delete events on any resource. Returns an
    * unsubscribe function. Data-bound views use this to auto-refresh after a
-   * mutation (e.g. inline-edit "Save All", which writes through `update` and
+   * mutation (e.g. an inline-edit cell save, which writes through `update` and
    * must repaint the list without a manual reload).
    */
   onMutation(callback: (event: DataSourceMutationEvent<T>) => void): () => void {

@@ -1551,27 +1551,21 @@ export interface DataTableSchema extends BaseSchema {
   onColumnHide?: (columnKey: string) => void;
   /**
    * Enable inline cell editing
-   * When true, cells become editable on double-click or Enter key
+   * When true, a selected cell opens its editor on double-click, Enter, F2 or
+   * typing, and each committed cell saves at once through {@link onRowSave}.
    *
-   * HOST-PAIRED, not an authored flag (objectui#6152 round 5): the table only
-   * STAGES an edit; persisting it is the job of the `onRowSave` / `onCellChange`
-   * / `onBatchSave` slots, which a host supplies in code — `ObjectGrid` sets this
-   * key on the `data-table` node it builds, together with that save path. A JSON
-   * document can supply no function, so an authored `editable: true` stages edits
-   * that nothing saves. To edit records inline from a document, author an
-   * `object-grid`, which carries the save path itself.
+   * HOST-PAIRED, not an authored flag (objectui#6152 round 5): the table edits
+   * only under the select-first cell model a host mounts (`GridCellSelection`
+   * from `@object-ui/components`) AND with an `onRowSave` slot to save each
+   * commit through (objectstack#35827: there is no staged model any more).
+   * `ObjectGrid` supplies both for every grid it renders editable. Without
+   * them `editable: true` is refused: the table draws read-only and says why
+   * once on the console. A JSON document can supply no function, so to edit
+   * records inline from a document, author an `object-grid`, which carries
+   * the save path itself.
    * @default false
    */
   editable?: boolean;
-  /**
-   * Enable single-click editing mode
-   * When true with editable, clicking a cell enters edit mode (instead of double-click)
-   *
-   * HOST-PAIRED with {@link DataTableSchema.editable} (objectui#6152 round 5):
-   * `ObjectGrid` sets it in code; no document authors it.
-   * @default false
-   */
-  singleClickEdit?: boolean;
   /**
    * Arrow-key cell navigation on the WAI-ARIA grid pattern (objectui#11068).
    *
@@ -1758,8 +1752,8 @@ export interface DataTableSchema extends BaseSchema {
    * function, NOT authorable metadata: JSON has no function value, so the zod
    * twin refuses this key by name and points at the node-type spelling. Kept
    * callable here because it is called by `renderers/complex/data-table.tsx`
-   * when an inline edit is staged, with the staged value and the edited record's
-   * row. Supplied by `ObjectGrid` (`@object-ui/plugin-grid`), which forwards the
+   * when an inline edit is committed, with the committed value and the edited
+   * record's row. Supplied by `ObjectGrid` (`@object-ui/plugin-grid`), which forwards the
    * React prop of the same name off `ObjectGridComponentProps`.
    *
    * `rowIndex` is computed when the call is made (objectui#12310): the row's
@@ -1773,56 +1767,35 @@ export interface DataTableSchema extends BaseSchema {
   onCellChange?: (rowIndex: number, columnKey: string, newValue: any, row: any) => void;
   /**
    * Row save handler
-   * Called when saving changes for a single row
+   * Called with one record's committed changes, once per commit
    *
    * RUNTIME SLOT (objectui#6124, declared by `75fca9669`) — a host-supplied
    * function, NOT authorable metadata: JSON has no function value, so the zod
    * twin refuses this key by name and points at the node-type spelling. Kept
    * callable here because it is called by `renderers/complex/data-table.tsx`
-   * from a row's own save button, with that record's staged changes and its
-   * row. Supplied by `ObjectGrid` as `onRowSave ?? defaultRowSave` — the left
-   * limb is the React prop of the same name on `ObjectGridComponentProps`, the
-   * right a dataSource-backed default installed only when no host wired one.
+   * each time a cell is committed (objectstack#35685), with every edit that
+   * record still holds and its row: the table's only save path
+   * (objectstack#35827), and the one {@link editable} needs. Supplied by
+   * `ObjectGrid` as `onRowSave ?? defaultRowSave` — the left limb is the React
+   * prop of the same name on `ObjectGridComponentProps`, the right a
+   * dataSource-backed default installed only when no host wired one.
    *
    * `rowIndex` is the row's global index when the call is made
-   * (objectui#12310). The button is drawn only on a row the table holds, so it
-   * is never negative here.
+   * (objectui#12310), or `-1` when the rows the table holds no longer include
+   * the record.
    */
   onRowSave?: (rowIndex: number, changes: Record<string, any>, row: any) => void | Promise<void>;
   /**
-   * Batch save handler
-   * Called when saving changes for multiple rows
-   *
-   * RUNTIME SLOT (objectui#6124, declared by `75fca9669`) — a host-supplied
-   * function, NOT authorable metadata: JSON has no function value, so the zod
-   * twin refuses this key by name and points at the node-type spelling. Kept
-   * callable here because it is called by `renderers/complex/data-table.tsx`
-   * (`await schema.onBatchSave(changesToSave)`). Supplied by `ObjectGrid` as
-   * `onBatchSave ?? defaultBatchSave`, the same two-limb shape as
-   * {@link onRowSave}.
-   *
-   * The outcome is read PER ROW (objectui#12292). A batch is several
-   * independent writes, so some can land while others are refused, and the
-   * server does not take the landed ones back. A handler that knows which rows
-   * did not persist resolves with `{ failed }`, each entry naming a row by the
-   * `rowIndex` it was handed: the table keeps and flags exactly those rows and
-   * clears the rest. Resolving with nothing means every row persisted.
-   * Rejecting means the handler cannot say which rows landed, so the table
-   * keeps and flags every row, as it always has.
-   *
-   * Each entry is one record's pending edit, resolved by the record, never by
-   * a position (objectui#12310). While the table holds the record, `row` is
-   * its current row and `rowIndex` its global index when Save All is pressed.
-   * A record the table no longer holds (a re-read or a client-side search
-   * dropped it, or it sits on another server page) is still handed over:
-   * `row` is the row the edit was staged against, and `rowIndex` is negative
-   * (`-1`, `-2`, …, distinct within one batch), since no position in the held
-   * rows is that record's. A `{ failed }` entry names its row by the
-   * `rowIndex` it was handed, negatives included.
+   * RETIRED (objectstack#35827, ADR-0049; the zod twin refuses it by name) —
+   * the batch save handler of the staged editing model, which "Save All"
+   * called with every pending row. The staged model is gone: the table saves
+   * each committed cell on its own, through {@link onRowSave} (one call per
+   * record), and no renderer calls this key. Migrate a batch handler to a
+   * per-record `onRowSave`, or let `ObjectGrid` write through its own
+   * `dataSource.update`.
+   * @deprecated Retired with the staged editing model — nothing calls it.
    */
-  onBatchSave?: (
-    changes: Array<{ rowIndex: number; changes: Record<string, any>; row: any }>,
-  ) => void | Promise<void | { failed: Array<{ rowIndex: number; error: unknown }> }>;
+  onBatchSave?: never;
   /**
    * Row click handler
    * Called when a row is clicked
@@ -1970,7 +1943,7 @@ export interface DataTableSchema extends BaseSchema {
    * `packages/plugin-chatbot/src/renderer.tsx` is the kind of prefix hit grep
    * scores. Every read is filed under the TYPE of the object it is read from;
    * this declaration carries none. What the renderer DOES read off this node:
-   * `emptyAction`, `isRowEditable`, `onAddRecord`, `onBatchSave`, `onCellChange`,
+   * `emptyAction`, `isRowEditable`, `onAddRecord`, `onCellChange`,
    * `onColumnResize`, `onColumnsReorder`, `onRowActionDef`, `onRowClick`,
    * `onRowDelete`, `onRowEdit`, `onRowSave`, `onSelectionChange`,
    * `renderCellEditor`, `renderRowContextMenu`, `rowActionDefs`,
@@ -2001,7 +1974,7 @@ export interface DataTableSchema extends BaseSchema {
    * `packages/plugin-chatbot/src/renderer.tsx` is the kind of prefix hit grep
    * scores. Every read is filed under the TYPE of the object it is read from;
    * this declaration carries none. What the renderer DOES read off this node:
-   * `emptyAction`, `isRowEditable`, `onAddRecord`, `onBatchSave`, `onCellChange`,
+   * `emptyAction`, `isRowEditable`, `onAddRecord`, `onCellChange`,
    * `onColumnResize`, `onColumnsReorder`, `onRowActionDef`, `onRowClick`,
    * `onRowDelete`, `onRowEdit`, `onRowSave`, `onSelectionChange`,
    * `renderCellEditor`, `renderRowContextMenu`, `rowActionDefs`,

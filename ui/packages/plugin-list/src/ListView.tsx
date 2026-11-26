@@ -2900,7 +2900,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
   // --- P2: Auto-subscribe to DataSource mutation events ---
   // Refetch whenever the bound object is mutated through the DataSource. This
-  // is the ONLY refresh signal for inline-edit "Save All": ObjectGrid persists
+  // is the ONLY refresh signal for inline-edit cell saves: ObjectGrid persists
   // those edits by calling dataSource.update() directly, with no form-success
   // handler to bump an external refreshTrigger — so subscribing even when
   // `refreshTrigger` is provided is required, not redundant. Form/delete flows
