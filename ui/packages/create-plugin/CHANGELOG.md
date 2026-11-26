@@ -1,5 +1,9 @@
 # @object-ui/create-plugin
 
+## 19.0.0-next.0
+
+No changes in this release.
+
 ## 18.6.0
 
 No changes in this release.

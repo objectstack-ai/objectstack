@@ -1,5 +1,405 @@
 # @object-ui/plugin-report
 
+## 19.0.0-next.0
+
+### Minor Changes
+
+- f98f18c: feat: an object's `userActions.exportCsv: false` hides the console's Export entry
+  
+  Clause-②: yes
+  Metadata-protocol: semantic
+  
+  `userActions.exportCsv` on an object now does what the Studio object form says it does. Set to `false`, the console offers no Export entry for downloading that object's data, in any of its formats (CSV, XLSX, JSON):
+  
+  - the object grid hides its toolbar Export menu, and the table's own CSV button that `operations.export: true` turns on;
+  - the list view hides Export in both toolbar forms, the wide toolbar's button and the Display panel's export footer;
+  - a dataset report hides its Export control when the dataset's base object sets it.
+  
+  A view's export of the picture it draws is not covered: a Gantt view's PNG and PDF buttons stay.
+  
+  Every surface reads one verdict, the new `isObjectExportOffered(objectSchema, effectiveApiOperations)` from `@object-ui/core`: the authored `exportCsv` over the object's `managedBy` default, ANDed with the caller's effective `export` API operation. Before this change the grid's toolbar menu, the list view and the report read the effective operation but not the object's bit, and the grid's table CSV button read neither half (only `operations.export`), so `exportCsv: false` changed nothing. Export is a read, so the verdict is not a row of `AFFORDANCE_GRANTS` and asks no `can(object, verb)`: the caller's export grant reaches the console through the effective `export` operation, which the server derives from `list` and `allowExport`.
+  
+  An object that does not author the key keeps its Export entries, since every `managedBy` bucket still defaults `exportCsv` to `true` (ADR-0103), with one change: the grid's table CSV button (`operations.export: true`) now also follows the effective `export` operation, as the toolbar menu beside it already did. So a viewer whose effective operations exclude `export` no longer sees that button, even on an object that authors nothing. The setting hides the entry and is not a permission: no export request is refused because of it, and who may export is still the permission set's `allowExport`. The report reads the base object's definition through the report's data source, and a report whose source cannot serve one keeps its Export control.
+  
+  The spec's `exportCsv` description and the Studio form's help text now say this; the form's English help text bundle in `@objectstack/platform-objects` is regenerated to match, and the translated locales keep their wording. The liveness ledger grades `userActions.exportCsv` `live`, so an authored `exportCsv: true` no longer raises the `liveness-dead-property` warning at `os lint` / `os validate`. Nothing needs migrating.
+
+### Patch Changes
+
+- 6e643cc: feat(plugin-dashboard): a dashboard or report drill opens a centred dialog over the standard list, and a report's chart marks drill
+  
+  Clause-②: yes (widening) — additive members only, among them the new `PageRegionPostureReset` export of `@object-ui/components`; nothing is removed or renamed
+  Metadata-protocol: none
+  
+  Clicking a number on a dashboard (a chart mark, a metric tile, a table cell) or on a dataset report used to open a full-height side drawer whose table listed every field of the object, with no sort, no filter and no word on which conditions selected the records; a row stacked a second record panel on top. The drill now opens a dialog about 70% wide and 65% tall that dims and blurs nothing behind it, and its body is the standard list the object list page draws (`list-view`): the same row height, column-header sort, filter chips, added columns, record count and column calculations. The drill's conditions (the clicked bucket, the widget's filter, the measure's scope) are the list's own chips and can be changed or removed; a condition no chip can say (a relationship path, an `$or`) still filters the list. The default columns are the record's name, the grouped fields and the measured fields. Nothing done in the dialog is saved, and it writes nothing. A record's name opens the record's full page, whose 「N of M」 stepper walks the drill's rows and whose way back is the dashboard or report; no second panel is stacked. 「Open in list」 is unchanged. On a phone the drill keeps the side drawer, with the same list.
+  
+  A dataset report's chart marks now drill too: a bar opens the same records as the summary line it stands for.
+  
+  Additive members: `DrillNavigationValue.openRecord` and the `DrillRecordOrigin` type (`@object-ui/react`), `DrillDownDrawerProps.defaultColumns` (`@object-ui/plugin-dashboard`), `DatasetDrillArgs.fields` (`@object-ui/plugin-report`), `PageRegionPostureReset` (`@object-ui/components`). A renderer without `@object-ui/plugin-list` registered lists the drilled records in the dashboard's data table. A host that gives no `openRecord` (a page block's metric or pivot) opens the drilled record in a dialog, from either body.
+  
+  Inside a page the drill draws the same standard list: the page region's posture (the compact or capped list a page block draws) is cleared for the drill's dialog by the new `PageRegionPostureReset` (`@object-ui/components`), so a page block's metric or pivot drill shows its chips, its record count and its pager, and no 「View all」 link to a list without the drill's condition. A drill whose filter names no condition any read can carry (a string, a number) lists nothing and says so, instead of listing every record.
+- 3cf6a44: feat(console): the report builder — one page to build a new report or edit an existing one, with the report drawn live on the left and five settings on the right
+  
+  Clause-②: yes (widening) — new public exports from `@object-ui/plugin-report` (`ReportBuilder` and its model types), a new optional `foldTableUnderChart` prop on `DatasetReportRenderer`, and new `@object-ui/i18n` keys (`report.builder.*`, `report.computedValues`) in all 11 locales; no spec or schema change
+  Metadata-protocol: none
+  
+  - **The builder** (`ReportBuilder`, `@object-ui/plugin-report`): the report previewed on the left; report type, data source, measure, grouping and chart on the right. Every pick rewrites the report and the preview draws it again; there is no Generate button. Picking a data source draws a single number at once (the dataset's count measure, no grouping). While a required piece is missing, the preview says what it is where the chart would be (「Choose a data source」, 「Choose a field to group by」) and that setting's picker opens by itself. A second grouping layer splits a bar or line chart; the chart's own switches are Show values and a target line. Grouping by a date adds the report's period chip. The report's table folds under the chart as 「Computed values」.
+  - **The doors** (`@object-ui/app-shell`): the report page's 「Edit」 opens the builder for a dataset-bound report (a joined report, a pre-dataset report, and a dataset report with a cross-tab, a saved filter or several values keep the inspector panel), and the app's `reports/new` address opens it on a new report, created under a name no served report holds. Admin only.
+  - **Save is seen by everyone at once:** the report is written and published in the same press, for the builder and the inspector panel alike. Over any pending draft nothing is written and the builder says so; the draft bar above the preview publishes or discards it.
+- c54aa57: feat(console): the report builder adds 「+ Filter」 under the data source — a report filter on the bound dataset, drawn into the preview at once and kept on Save
+  
+  Clause-②: yes (widening) — a new optional `filter` slot on `ReportBuilder` (`@object-ui/plugin-report`), two exports from `@object-ui/plugin-list` (`conditionCandidatesOf`, `conditionOptionsOf`, and the `ConditionCandidateField` type), and four new `@object-ui/i18n` keys (`report.builder.source.addFilter`, `filterAdvanced`, `filterLoading`, `filterNoFields`) in all 11 locales; no spec, schema or server change
+  Metadata-protocol: none
+  
+  - **The filter** (`@object-ui/app-shell`): under the data source, 「+ Filter」 opens the same condition editor the dataset designer uses, over the fields of the dataset's object (their translated labels, a select's options, a lookup's record picker; hidden fields are not offered). Each condition is written into the report's `runtimeFilter`, the preview redraws with it at once, and Save keeps it; removing the last condition removes the key. Switching the data source clears the filter.
+  - **The fields offered** leave out virtual (formula) fields: the dataset door refuses a filter on one, so a report filtered on it could be saved and then fail for every viewer.
+  - **A filter with `$and` beside other conditions** (`{ $and: [...], amount: {...} }`, or with `$not`) is no longer read as editable rows by the shared filter bridge, so neither the report builder nor the dataset designer opens it where the next edit would drop the conditions beside the `$and`; it keeps the panel / source editor, unchanged.
+  - **Which reports open in the builder:** a dataset report with a saved filter now opens in the builder when its filter is one the builder can edit (field conditions joined by AND); a filter it cannot edit (an OR, a nested group, two operators on one field) keeps the report inspector panel, as before. A filter that turns out not to be editable once the fields are read is shown as kept and saved unchanged.
+- 53257a5: feat(report): 「Compare with previous period」 beside a report's period chip — the chart draws the earlier window beside the current one
+  
+  Clause-②: yes (widening) — one new `@object-ui/i18n` key, `report.dateRange.comparePrevious`, in all 11 locales; no export, spec key, schema or server change
+  Metadata-protocol: none
+  
+  - **The switch**: a report that declares `dateRange` now shows 「Compare with previous period」 next to its period chip when its chart can draw a comparison: bar, column, horizontal bar, line or area over a category axis, or a single number. It is not offered on a `seriesBy` split, nor on a chart whose x axis is the window's own date dimension, where the earlier window's date buckets would not line up with the current ones. Like the period pick it is the viewer's and is not saved into the report. It is off, and cannot be turned on, while the period is All time or a custom range missing an end.
+  - **What it asks for**: the chart's dataset query carries the contract's `compareTo: { kind: 'previousPeriod', dimension }`, on the same dimension and window the period chip already sends. The chart is compared with the same-length window just before the current one (the contract's `previousPeriod`). The table beside the chart is not asked for a comparison.
+  - **What it draws**: a bar or line chart gets one more series, the measure's earlier window, labelled 「<measure> · vs previous period」 and drawn muted by the chart's existing `comparison` styling; a single number shows the previous period's value and the change in percent under it. A click on an earlier-window mark opens no record list, the dashboard's rule for the same series. A comparison the server refuses is shown where the chart was, instead of the chart disappearing.
+- 293c005: fix(plugin-report): a report chart's value axis reads a percent measure in percent, and two value-axis ticks never share a label
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **A report chart over a percent measure labels its value axis in percent.** A dataset measure with a percent `format` (`'0.0%'`) charted in a report drew its value axis in raw fractions (`0`, `0.1`, `0.2`, `0.3`) while the table beside it printed `33.3%`. The report now hands the measure's pattern to the chart as its value-axis `format`, so the axis reads `0.0%` … `34.0%`. This applies to a percent pattern on a measure stored as a 0–1 fraction, which is the table's reading of such a pattern. A measure already in percentage points (`percentScale: 'whole'`), a currency measure, and a plain numeral pattern keep the chart's default axis: the chart's axis `format` cannot say what the table prints for the first two, and a fixed-width numeral pattern (`'0,0.00'`) would outgrow the axis band where the compact default reads the same number.
+  - **Two ticks on a value axis never share a label.** With no axis `format`, the value axis printed at most one fraction digit, so the ticks of a small domain collapsed: a 0–⅓ axis read `0, 0.1, 0.2, 0.3, 0.3`. Each value axis now prints its ticks to the decimal place its tick step needs (`0, 0.085, 0.17, 0.255, 0.34`), in compact notation as before. A declared axis `format` keeps its own places unless they are too coarse for the step, in which case the ticks gain the places the step needs (`'0%'` over a 0.85-point step reads `0.85%`, not two `3%` ticks). Data labels follow their value axis, as they already did.
+  
+  Nothing to migrate: no metadata key changes and no export changes.
+- fa7d94b: fix(plugin-report): a report matrix cell's drill list shows the fields the cell stands for
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A matrix cell's drill now opens its record list with the down dimension's field, the across dimension's field and the measured field as default columns after the record name, the same defaults a summary line's drill already used. Before, the matrix drill listed only the record name. The filter is unchanged: the list still holds exactly the records the measure counted.
+- a386a1d: fix(plugin-report): a report chart hands its chart the measure's format, so the value axis reads `33.3%` and `¥` beside the table
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  A report chart's series now carry the plotted measure's `format`, `percentScale` and single currency as the chart's internal `series[].measureFormat`. The chart's value axis then prints a measure stored in percentage points (`percentScale: 'whole'`) as percents and a currency amount with its symbol, as the table beside it does. A measure with a per-row currency (`currencyField`) hands no currency, so its axis keeps plain numbers. The fraction-scale percent pattern still travels on the value-axis `format` key as before.
+  
+  Nothing to migrate: no metadata key changes.
+- Updated dependencies [a0b4ecf]
+- Updated dependencies [d6d9645]
+- Updated dependencies [1c05546]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [c3fb37a]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [8896822]
+- Updated dependencies [dc53d4a]
+- Updated dependencies [0739dee]
+- Updated dependencies [ad15579]
+- Updated dependencies [89364b4]
+- Updated dependencies [eed422e]
+- Updated dependencies [2df9691]
+- Updated dependencies [bfd6b6b]
+- Updated dependencies [55020c3]
+- Updated dependencies [50f85e9]
+- Updated dependencies [6f2bd4f]
+- Updated dependencies [99a0e4f]
+- Updated dependencies [a9b36ef]
+- Updated dependencies [9f352e8]
+- Updated dependencies [fd471d3]
+- Updated dependencies [1b2cd80]
+- Updated dependencies [6ffa816]
+- Updated dependencies [7702f09]
+- Updated dependencies [05e0eb8]
+- Updated dependencies [c890070]
+- Updated dependencies [5bd7257]
+- Updated dependencies [58d00db]
+- Updated dependencies [3819afe]
+- Updated dependencies [61722e9]
+- Updated dependencies [3d6dea2]
+- Updated dependencies [e6fa510]
+- Updated dependencies [285ad8d]
+- Updated dependencies [bfd1049]
+- Updated dependencies [6a35635]
+- Updated dependencies [9212119]
+- Updated dependencies [cda16d4]
+- Updated dependencies [9b3227f]
+- Updated dependencies [fe75349]
+- Updated dependencies [dab4712]
+- Updated dependencies [141a826]
+- Updated dependencies [8145424]
+- Updated dependencies [83a79e6]
+- Updated dependencies [dda665f]
+- Updated dependencies [98b3f87]
+- Updated dependencies [f71d488]
+- Updated dependencies [ccded86]
+- Updated dependencies [ec24363]
+- Updated dependencies [e01b8be]
+- Updated dependencies [238661f]
+- Updated dependencies [d96c878]
+- Updated dependencies [72d19c4]
+- Updated dependencies [b0c624a]
+- Updated dependencies [1e018d6]
+- Updated dependencies [6d86b43]
+- Updated dependencies [bae933b]
+- Updated dependencies [a3a74f2]
+- Updated dependencies [f98f18c]
+- Updated dependencies [74d3d83]
+- Updated dependencies [227a16a]
+- Updated dependencies [598a34d]
+- Updated dependencies [0585797]
+- Updated dependencies [811858c]
+- Updated dependencies [fac1e7d]
+- Updated dependencies [4609c48]
+- Updated dependencies [8500ee7]
+- Updated dependencies [a6607c7]
+- Updated dependencies [c00be39]
+- Updated dependencies [1c87956]
+- Updated dependencies [5345905]
+- Updated dependencies [af566c2]
+- Updated dependencies [f909734]
+- Updated dependencies [c9b0a23]
+- Updated dependencies [f51578e]
+- Updated dependencies [6b360ab]
+- Updated dependencies [c7174c3]
+- Updated dependencies [78f7160]
+- Updated dependencies [1d7015a]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5a68b57]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [7de1bad]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [dea68e9]
+- Updated dependencies [b113178]
+- Updated dependencies [138faaa]
+- Updated dependencies [411fe24]
+- Updated dependencies [6b51822]
+- Updated dependencies [48c732c]
+- Updated dependencies [52fb30c]
+- Updated dependencies [8807dcb]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [9ed18a5]
+- Updated dependencies [c261a7c]
+- Updated dependencies [76cb366]
+- Updated dependencies [32409a9]
+- Updated dependencies [f548bdc]
+- Updated dependencies [9f6f306]
+- Updated dependencies [c757e07]
+- Updated dependencies [a5a5312]
+- Updated dependencies [c1b35c3]
+- Updated dependencies [9a98a46]
+- Updated dependencies [96b66ca]
+- Updated dependencies [8c8ff0f]
+- Updated dependencies [27e414b]
+- Updated dependencies [eb53d63]
+- Updated dependencies [dda5e74]
+- Updated dependencies [f2a990b]
+- Updated dependencies [035a12c]
+- Updated dependencies [33d0169]
+- Updated dependencies [a23164e]
+- Updated dependencies [f3d0a9f]
+- Updated dependencies [6aacad9]
+- Updated dependencies [8aed508]
+- Updated dependencies [a60740a]
+- Updated dependencies [43580a3]
+- Updated dependencies [cc05e60]
+- Updated dependencies [dc10b3b]
+- Updated dependencies [dca608a]
+- Updated dependencies [baf2678]
+- Updated dependencies [13d1e95]
+- Updated dependencies [15b7f51]
+- Updated dependencies [c297dff]
+- Updated dependencies [1cd4762]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [9ae874a]
+- Updated dependencies [3ae62ac]
+- Updated dependencies [6c7c6db]
+- Updated dependencies [eebb893]
+- Updated dependencies [493ad09]
+- Updated dependencies [3543b51]
+- Updated dependencies [4ab2c82]
+- Updated dependencies [04f9861]
+- Updated dependencies [c30ce97]
+- Updated dependencies [e605773]
+- Updated dependencies [0628e08]
+- Updated dependencies [713545f]
+- Updated dependencies [cbd582f]
+- Updated dependencies [031325d]
+- Updated dependencies [1705ec9]
+- Updated dependencies [a2dc858]
+- Updated dependencies [a6756a2]
+- Updated dependencies [b3bcfef]
+- Updated dependencies [aad35e6]
+- Updated dependencies [0b2118f]
+- Updated dependencies [71e02ff]
+- Updated dependencies [d12ac84]
+- Updated dependencies [5e8e243]
+- Updated dependencies [4099ef2]
+- Updated dependencies [6a73185]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [740720c]
+- Updated dependencies [6e643cc]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [96b7975]
+- Updated dependencies [e8b494a]
+- Updated dependencies [bbc7e03]
+- Updated dependencies [27895d7]
+- Updated dependencies [543585d]
+- Updated dependencies [7e89bc6]
+- Updated dependencies [42e4096]
+- Updated dependencies [a10422d]
+- Updated dependencies [1a2a8a9]
+- Updated dependencies [24366ff]
+- Updated dependencies [f2ef7d8]
+- Updated dependencies [17dbea4]
+- Updated dependencies [ff60149]
+- Updated dependencies [ee651ce]
+- Updated dependencies [dad9b55]
+- Updated dependencies [d076975]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [8a741ab]
+- Updated dependencies [60e79ed]
+- Updated dependencies [3cf6a44]
+- Updated dependencies [5fecc22]
+- Updated dependencies [6cfa758]
+- Updated dependencies [4f19091]
+- Updated dependencies [e377918]
+- Updated dependencies [3b58921]
+- Updated dependencies [9c283a1]
+- Updated dependencies [c45dd80]
+- Updated dependencies [52971ff]
+- Updated dependencies [06c3e5a]
+- Updated dependencies [2da2979]
+- Updated dependencies [ad50d61]
+- Updated dependencies [50bfbb8]
+- Updated dependencies [f26469a]
+- Updated dependencies [7501d0c]
+- Updated dependencies [4ef1ea9]
+- Updated dependencies [41dd132]
+- Updated dependencies [d7411fa]
+- Updated dependencies [c6075a7]
+- Updated dependencies [cd51dbb]
+- Updated dependencies [3f568c1]
+- Updated dependencies [573a376]
+- Updated dependencies [5c2d5cf]
+- Updated dependencies [43916f3]
+- Updated dependencies [f590f3e]
+- Updated dependencies [9fa05c6]
+- Updated dependencies [ed0edb1]
+- Updated dependencies [a10987a]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [fed637c]
+- Updated dependencies [f77d078]
+- Updated dependencies [3110de5]
+- Updated dependencies [1948c5f]
+- Updated dependencies [0e83fe0]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [70f454a]
+- Updated dependencies [9f84e5f]
+- Updated dependencies [368deee]
+- Updated dependencies [6156fdd]
+- Updated dependencies [0d6589d]
+- Updated dependencies [c54aa57]
+- Updated dependencies [53257a5]
+- Updated dependencies [115d387]
+- Updated dependencies [e0050ba]
+- Updated dependencies [14f4d8f]
+- Updated dependencies [183ed23]
+- Updated dependencies [08bf7d2]
+- Updated dependencies [4d4ec16]
+- Updated dependencies [d763ee7]
+- Updated dependencies [8018e00]
+- Updated dependencies [844218f]
+- Updated dependencies [8cce05b]
+- Updated dependencies [0d727b7]
+- Updated dependencies [ff0d1f1]
+- Updated dependencies [021524c]
+- Updated dependencies [4f7d6f7]
+- Updated dependencies [b848b47]
+- Updated dependencies [129e637]
+- Updated dependencies [47ed85d]
+- Updated dependencies [0819cab]
+- Updated dependencies [97e0f93]
+- Updated dependencies [c8d4b90]
+- Updated dependencies [69c3dc4]
+- Updated dependencies [76eea0f]
+- Updated dependencies [62692b7]
+- Updated dependencies [8695703]
+- Updated dependencies [49c6bf3]
+- Updated dependencies [4ed453d]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [66452df]
+- Updated dependencies [00dd362]
+- Updated dependencies [bac4864]
+- Updated dependencies [8c29b81]
+- Updated dependencies [a68b475]
+- Updated dependencies [c75453e]
+- Updated dependencies [1e96009]
+- Updated dependencies [4fb03eb]
+- Updated dependencies [ff04943]
+- Updated dependencies [ab91323]
+- Updated dependencies [fbb62e1]
+- Updated dependencies [57445a6]
+- Updated dependencies [0212714]
+- Updated dependencies [15d2766]
+- Updated dependencies [1f3e9f6]
+- Updated dependencies [305fe60]
+- Updated dependencies [e91149e]
+- Updated dependencies [06c1f54]
+- Updated dependencies [706c8c6]
+- Updated dependencies [c0dd417]
+- Updated dependencies [517e415]
+- Updated dependencies [6ddb97b]
+- Updated dependencies [2af9729]
+- Updated dependencies [f339060]
+- Updated dependencies [40914bd]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [6161010]
+- Updated dependencies [875ae40]
+- Updated dependencies [8316d3d]
+- Updated dependencies [6cc6177]
+- Updated dependencies [5cf9941]
+- Updated dependencies [5f34d65]
+- Updated dependencies [8fe4eaf]
+- Updated dependencies [84a27e7]
+- Updated dependencies [7939732]
+- Updated dependencies [0ad44a3]
+- Updated dependencies [dbc1765]
+- Updated dependencies [2d18ba8]
+- Updated dependencies [6361b99]
+- Updated dependencies [c2f8bff]
+- Updated dependencies [68b2430]
+- Updated dependencies [bbb4ad3]
+- Updated dependencies [276174a]
+- Updated dependencies [c385d3b]
+- Updated dependencies [061e342]
+- Updated dependencies [b89f1b5]
+- Updated dependencies [da7c559]
+- Updated dependencies [e8740c5]
+- Updated dependencies [3aa008d]
+- Updated dependencies [7d3b8d6]
+- Updated dependencies [15f8357]
+- Updated dependencies [378c955]
+- Updated dependencies [56fa31b]
+- Updated dependencies [39e9a82]
+- Updated dependencies [9c5fb3e]
+- Updated dependencies [abb5449]
+- Updated dependencies [d280de9]
+  - @object-ui/i18n@19.0.0-next.0
+  - @object-ui/fields@19.0.0-next.0
+  - @object-ui/types@19.0.0-next.0
+  - @object-ui/core@19.0.0-next.0
+  - @object-ui/components@19.0.0-next.0
+  - @object-ui/react@19.0.0-next.0
+  - @object-ui/permissions@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

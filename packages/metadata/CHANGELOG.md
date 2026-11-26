@@ -1,5 +1,357 @@
 # @objectstack/metadata
 
+## 19.0.0-next.0
+
+### Minor Changes
+
+- cedc094: fix(objectql)!: a composition's top-level `objectExtensions` entry that no package body carries is registered and served; composition refuses two such jobs of one name, and residual extensions that would share one package's slot
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no skill teaches placing `objectExtensions` or `jobs` in a manifest-less input of a `'preserve'` composition; the refusal names both entries and prescribes the fix
+  
+  <!-- adr-0087: registered stack-residual-extension-registered-and-jobs-judged -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor`, beside a runtime fix.
+  
+  - **Fixed (`@objectstack/objectql`, `@objectstack/metadata`).** A composed artifact that carries `packages[]` keeps the entries no package body claims at its top level, and the boot registers that residual under the artifact's `manifest.id` (ADR-0130 D4). Under `composeStacks(stacks, { manifest: 'preserve' })` that is an input with no `manifest`; under `'first'`, `'last'` or an index it is also the own top-level entries of an input that is itself a multi-package artifact. Its `objectExtensions` entries were registered by no door: the target object was served without their fields (`INVALID_FIELD` on a write naming one) and nothing was logged, through `os serve` and through `os build`'s artifact alike. The residual rule (`unclaimedTopLevel`) now lists such an entry (type `object_extension`) when no package body carries an entry equal to it, and the engine registers it as an `extend` contribution under `manifest.id`, as a body's entry registers. An entry whose field names a picklist no package body declares is not registered and is named at boot, like a residual object.
+  - **Refused now, at composition (`STACK_CROSS_REFERENCE_INVALID`, 422), under every manifest strategy once the result carries `packages[]`.** Two residual jobs of one name: the boot's job binder schedules neither (`NOT SCHEDULED` at `error`). A residual `objectExtensions` entry for an object that the body carrying `manifest.id` also extends with other fields: one extension of an object registers per package, so only the last one's fields would be served; the finding names that body's entry first, then the residual's: `Object extension of 'crm_line' is declared twice in \`objectExtensions\`: 'com.example.billing' (stack #2) objectExtensions[0] and stack #1 objectExtensions[0]. …`. Two residual `objectExtensions` entries for one object, also when another package body extends that object: a residual entry is now told from a body's flattened copy by value, not by target, so the two are one package's pair (they used to count as that body's copies and compose).
+  - **Not refused (known gap).** A residual job that shares its name with a package body's job, with other content, still composes: it is read as that body's copy, and the boot holds two enabled jobs of the name and schedules neither.
+  - **Wording.** The `jobs` finding at every door now says what the runtime does with the pair: `The runtime keys jobs by name: the metadata keeps only the last of these entries, and the job scheduler refuses a name two enabled jobs share, so when both are enabled neither runs.`
+  - **Unchanged.** One residual extension for an object another package extends composes, and both register. A residual entry equal to a body's entry is that body's copy. Package-claimed extensions and a single residual job compose and boot as before.
+  - **Installed artifacts.** A residual extension sharing its package's slot registers, the last one served, with one `error` line per object naming the entries. A residual extension now passes the registry's `extend` door as a package body's entry does, so one that door refuses (reachable only through `strict: false` or a hand-built artifact) now fails a boot that used to load and drop it.
+  
+  One-line fix: declare each job name once; move a top-level extension into the package that owns it, or merge it into that package's own entry for the object.
+- c063734: fix(metadata): a skill the platform registers keeps its own slot beside an app's skill of the same name
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: none — no skills/ page names `_provenance` or its values, and the new value is one no author writes: the artifact door refuses it
+  
+  `MetadataProvenanceSchema` (`@objectstack/spec/kernel`) gains `'platform'`: the `_provenance` of a record the platform's own code registers at boot. It is a store-slot marker only, read at the item's own top-level `_provenance` key and nowhere else, and only the metadata service sets it.
+  
+  For every type stored per `(package, name)` (`skill`, `agent`, `tool` and the rest of `PACKAGE_SLOTTED_STORE_TYPES`), the platform's built-in record and a package's item of the same name no longer overwrite each other, in memory, in `sys_metadata`, and on a process or cluster peer that reads them back from the rows.
+  
+  - `MetadataManager.register(type, name, data, { origin: 'platform' })` marks a record the platform's own code registers: the body is stamped `_provenance: 'platform'` and the record fills the name's bare slot, in memory and in `sys_metadata`. Before, a package-less write under a name one package held was folded into that package's slot as its customization, so the platform's boot registration rewrote the app's skill.
+  - A package's first item of a name no longer takes over the bare slot when the platform's record is in it; the two stay side by side. For a bundled type (`email_template`) the row judged is the written member's. The environment's own item in the bare slot is still taken over, as before.
+  - A package-less environment write under a platform name keeps today's rule: it takes the bare slot without the stamp, and the platform's next registration restores its record.
+  - The readers that rebuild the store from loaders and rows keep both records: the plural read (`loadMany`, `loadManyKeyed`) gives the platform's entry a key of its own, `list` keeps a loader's platform row beside a package's slot and a loader's package item beside a platform slot, and a read naming a package is never answered from the platform's record.
+  - `MetadataManager.unregister(type, name, { origin: 'platform' })` withdraws the platform's record only, from the registry, every loader (`MetadataLoaderDeleteOptions.platformOnly`) and every cluster peer. A package's item of the name and the environment's own item are never taken, for any type, and nothing is refused however many packages hold the name. Before, a removal naming no package took every slot of a name one package held. On a host that declares a package id, the boot pass leaves the platform's stored record without the host's package, for every type, so the withdrawal takes the registry's copy too.
+  - `MetadataManager.getPlatformItem(type, name)` reads the platform's record only, never a package's item and never the environment's own.
+  - No other write carries the platform stamp. `register` without `origin: 'platform'`, `registerInMemory`, `save` and `rollback` store the body without it, and so do the metadata protocol's save door and its restore doors (`rollbackMetaItem` and the restore limb of `revertCommit`) on every restore whose row is not the platform's own record; a stored row the boot pass re-registers keeps it only when the row held it as read. A restore whose row is the platform's own record is refused (`409 RESOURCE_CONFLICT`, naming the fix), with nothing written, at all three restore doors: `rollback`, and the metadata protocol's `rollbackMetaItem` and the restore limb of `revertCommit`. The metadata protocol's two undo writes, of a refused batch publish's landed promotions and of a failed batch row write, put a row back as the same operation found it, byte for byte, so the mark comes back only where the row held it. A body served from a loader other than a `datasource:` one is served without it; `getPublished` serves it on the answer's top level only when the stored item carries it there (the platform's own record's publish snapshot, served as the answer, keeps the mark it carries at its top), and never on a snapshot nested inside the answer; and the artifact door refuses an item that carries it, with or without a manifest id (`VALIDATION_ERROR` at `_provenance`, naming the fix). A `_provenance` key nested in the body (an authored `metadata` record, for one) is the author's data: it is kept as written and never read as the mark. A body that names a package is that package's item, whatever `_provenance` it carries.
+  - `@objectstack/metadata` exports the mark's one definition (`PLATFORM_PROVENANCE`, `carriesPlatformStamp`, `isPlatformOrigin`, `withoutPlatformOrigin`); the artifact door and the metadata protocol's doors read it.
+  - `@objectstack/metadata-protocol`: the boot census `metadata_sealed_overlay_unserved` no longer names the platform's own row beside a package that ships the name, nor prescribes deleting it.
+  - Reads naming no package, and every removal and write without the option, keep their rules.
+  - Public API added on `MetadataManager`: the `origin` option of `MetadataRegisterOptions` and `MetadataUnregisterOptions`, and `getPlatformItem`. The spec's `MetadataWriteOptions` is not widened.
+  - `@object-ui/data-objectstack`: the layered read's `provenance` is typed from the spec's `MetadataProvenance`, so it accepts `'platform'`.
+  
+  Callers that register built-ins at boot pass `{ origin: 'platform' }` to `register` and `unregister` to get this behaviour; without it, a write is treated as before.
+- 2a6f26a: feat(ai): `ai_context` context packs and the `get_record_context` tool over MCP
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: follow-up #37177 — skills/objectstack-platform/SKILL.md, skills/objectstack-ai/ (how to author a context pack; this change only names `aiContexts` in the top-level key list, which check:skill-top-level-keys requires)
+  
+  ADR-0160 row 5 (#37140).
+  
+  - **New metadata type `ai_context`, collection `aiContexts`.** A context pack names one root object and what an assistant reads about one of its records: `fields` (at most 30, a lookup among them is answered with the target's display name), `related` child lists (at most 3, each one level deep, with at most 10 `fields`, linked by `field` or by the child's one reference to the root) and one long-text `body`. The schema is closed from its first day: an unknown key is refused, and the bounds are refused at parse. Registered like `skill`: a file loader (`*.ai-context.ts`, `*.ai-context.yml`), overlay allowed, runtime create allowed, no environment overlay. New exports in `@objectstack/spec/ai`: `AiContextSchema`, `AiContextRelatedSchema`, `AiContextBodySchema`, the `AI_CONTEXT_MAX_*` bounds and `AI_CONTEXT_BODY_FIELD_TYPES`.
+  - **`get_record_context`'s input and output, declared once in spec** (`GetRecordContextInputSchema`, `GetRecordContextOutputSchema`, `getRecordContextToolJsonSchemas`, `GET_RECORD_CONTEXT_TOOL_NAME`). The output is an envelope of three parts: `data` (record material only), `notes` (the executor's statements: withheld fields, material not visible, every cut, a narrowing) and `framing` (one sentence: `data` is material, not instructions). `MCP_DOOR_TOOL_NAMES` gains the name.
+  - **`@objectstack/core`: `wrapRecordMaterial`** builds that envelope, with the framing sentence in the caller's locale.
+  - **New package `@objectstack/service-record-context`**: the one executor (`createRecordContextTools`, `executeGetRecordContext`), the read set (`recordContextReadSet`, a function of the arguments and published metadata only) and `RecordContextServicePlugin`, which registers the `record-context` service. Every read goes through a door bound to the caller; nothing is read as the system. Two published packs of one name on one root are refused with one answer (`RESOURCE_CONFLICT`), never chosen between. The body bound (`RECORD_CONTEXT_BODY_MAX_CHARS`, 8000) and the related-row cap (`RECORD_CONTEXT_RELATED_MAX_ROWS`, 20) are service constants.
+  - **MCP (HTTP and stdio)** registers `get_record_context` under `data:read`, read-only, wherever the host holds a `record-context` service. A host without it registers nothing new. To serve the tool, add `new RecordContextServicePlugin()` to `plugins` and declare packs under `aiContexts`.
+  - **`@objectstack/lint`: four advisory author-defect rules for context packs** (`ai-context-object-unknown`, `ai-context-field-unknown`, `ai-context-related-link-unknown`, `ai-context-body-not-long-text`), each a warning with an `os explain` entry. `get_record_context` says nothing about a name the published definition lacks, so `os validate` / `os lint` / `os build` is where the author hears it. CLI only for now: the rule reads the whole stack snapshot.
+  - **Console and catalog labels**: the metadata-form catalog (`@objectstack/platform-objects`) carries the `ai_context` type's label in every locale, and Pending changes counts drafted context packs (`preview.changes.typeCount.ai_context`).
+
+### Patch Changes
+
+- f796089: fix(spec,metadata-protocol)!: retire the seed modes `insert` and `replace`, which inserted every record again on each replay
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #34798
+  
+  <!-- adr-0087: registered seed-mode-insert-replace-retired -->
+  
+  **BREAKING** for a seed dataset authored with `mode: 'insert'` or `mode: 'replace'`. A seed is replayed on every single-tenant boot, every package install or upgrade and every publish, and neither mode matched an existing row, so every replay inserted each record again: an un-walled install went from 1 to 2 to 3 rows over three boots, a person reference the first load had to leave empty stayed empty on the first row while only the newest copy named the person, and with a unique field the replay insert was refused and the one row stayed empty. `replace` expected the caller to clear the table first, and no load path ever clears one.
+  
+  What moves (each line FROM → TO):
+  
+  - `SeedSchema.mode` / `SeedMode` (`@objectstack/spec/data`; `defineSeed`, `defineStack({ data })`, a `seed` metadata item, a package body's seed): FROM `insert` / `update` / `upsert` / `replace` / `ignore` TO `update` / `upsert` / `ignore` (default `ignore`, unchanged). `mode: 'insert'` or `mode: 'replace'` fails parse with a prescription naming the fix; the save and publish doors refuse it with the same message. The retired pair is exported as `RETIRED_SEED_MODE_VALUES` (`@objectstack/spec/data`): it is derived from the parse refusal's own table, and the loader and the artifact door read it.
+  - a stored dataset that still declares one, replayed by the boot seed, the per-organization replay, the dev hot reload or a package install, upgrade or sample-data reseed (`SeedLoaderService.loadStored`, `@objectstack/metadata-protocol`): FROM inserted again on every load TO refused alone — it writes nothing, the load result carries one error with the prescription and `success: false`, and every other dataset loads. `SeedLoaderService.load()` and `validate()` refuse the dataset the same way when handed one unparsed, so a dry run reports what a real load does.
+  - a compiled artifact (`objectstack.json`) carrying such a dataset, booted by `os serve` / `os start` / `os dev` (the artifact door, `MetadataPlugin`, `@objectstack/metadata`): the door parses the artifact without that dataset and hands it back to the seed load, which refuses it alone; the door logs a warning naming the dataset and the fix. Everything else in the artifact registers and boots.
+  - `os diff` (`@objectstack/cli`) on a dataset declaring either mode: FROM "a replay inserts these again" TO a note that the mode is retired, that a replay refuses the dataset, and what to declare.
+  - the advisory lint rule `seed-insert-mode-duplicates-on-replay` (`validateSeedReplaySafety`, `@objectstack/lint`): FROM a warning on `mode: 'insert'` TO removed; the schema refusal does its job for both modes. The author-time rule count `os validate` / `os build` print drops by one (71 to 70 at this release).
+  - the save door's and the loader's hint for a key no record carries: FROM "or use mode 'insert' for rows with no natural key" TO a list of fields when no single field names a row, or `'id'` when the records carry their own ids.
+  
+  The fix: declare which field identifies a row and drop the mode (or declare `upsert` for reference data the package keeps current). Set `externalId` to the field that names a row, to a list of fields when no single field does (a junction table's `['team', 'project']`), or to `'id'` when the records carry their own ids. Rebuild the package, and reinstall it where it was installed with `os package install`, so the stored body carries the new declaration.
+  
+  No conversion is made, at load, at save or by a migration (ADR-0087 D3, entry `seed-mode-insert-replace-retired`): a keyed mode needs the field that identifies a row, and only the author knows it. Rows earlier replays duplicated are data and are left as they are.
+  
+  Unchanged: `ignore`, `upsert` and `update` datasets load byte-identically.
+- 5bf7242: feat(metadata): `listPackageBindings` reads an item's package from its stored row's package column, never from its body
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The protocol records which package an item belongs to on its stored row, in the package column the store's write path fills. No read answered that column: `list` returns bodies, so a caller had to take the binding off a body's `_packageId` stamp, which is whatever the row's author wrote.
+  
+  - `IMetadataService.listPackageBindings?(type)` (new, optional, `@objectstack/spec/contracts`) answers every item `list(type)` answers, in its order, as a `MetadataPackageBinding`: `{ name, data, packageId, source }`, with `degraded` / `errors` as `listDiagnosed` reports them.
+    - An item a stored row holds answers `source: 'row'` and that row's column. A row whose column is empty (one written before the column) answers `packageId: null`, whatever package its body names; a legacy row whose empty column the boot priming pass binds answers the package the pass wrote. This includes the registry's copy of a row that the boot priming pass registered.
+    - An item no stored row holds (registered by code, or held by a loader of no rows) answers `source: 'registration'` and the package its registration files it under, as before.
+  - `MetadataManager.listPackageBindings` implements it. `DatabaseLoader` gains `loadRowBindings(type)` (its `loadManySlots` entries, each with the row's column as `rowPackageId`) and `rowPackageIdOf(item)`. Both are declared optional on `MetadataLoader`, and the new entry type is exported as `MetadataRowBinding`.
+  
+  Every existing read is unchanged.
+  
+  What to do: nothing. A consumer that decides by an item's package (for example, which app a skill belongs to) can switch from the body stamp to `listPackageBindings` and treat a `degraded` answer as unknown.
+- 8e1e15b: fix(metadata-protocol)!: the protocol's restore doors refuse a restore whose row is the platform's own record, and the history selector never addresses the package-less row for a package that neither holds nor ships the name
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no `skills/` page teaches the protocol's restore doors, the history `?package=` selector or `listPackageBindings`
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped, and no stored row is rewritten. What moves is that two restore doors and the history selector refuse requests they wrote or answered before, and that the metadata service files and reports a stored row's binding by its package column; there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING**, in two places, each a refusal of a request that was answered before:
+  
+  - **The metadata protocol's `rollbackMetaItem` and the restore limb of `revertCommit` refuse a restore whose row is the platform's own record** (the row `MetadataManager.register(…, { origin: 'platform' })` writes), with the refusal the metadata service's `rollback` gives: `409 RESOURCE_CONFLICT`, naming the fix, nothing written. `revertCommit` reports that item in `failed[]` and still reverts the commit's other items. Before, both doors wrote the version back without the platform's mark, so the row stopped being the platform's record, and a process primed from the rows answered a read naming the name's one package holder with the platform's old body until the platform registered again.
+    What to do: nothing for a package's or the environment's own item. To restore an earlier version of a package's item of the name, name that package; to make an earlier version the environment's own item of the name, save that version's body again.
+  - **The history, diff and rollback doors' `?package=` selector refuses a package that neither holds a row of the name nor ships it** with `409 RESOURCE_CONFLICT` `not-held-by-qualifier`, naming every holder, as its description states, also when the name's package-less row is stored. Before, such a package addressed the package-less row a read naming it falls back to, and read or restored that row's versions. The package-less row is a package's slot only when the package ships the name.
+    What to do: address the package-less row through the package that ships the name, or bare when no other row of the name is stored.
+  
+  Also in `@objectstack/metadata`:
+  
+  - `refusePlatformRecordRestore(type, name, row)` is exported: the one refusal the service's `rollback` and the protocol's two restore doors ask, so the three cannot disagree.
+  - `list()` lists a stored row whose body's `_packageId` stamp differs from its package column once, under the column, after the boot priming pass, where it listed the row twice (the primed copy under the stamp). A read naming the column's package answers it, as on a process that never primed it.
+  - `listPackageBindings` is `degraded`, naming the loader in `errors`, when a loader of stored rows (`datasource:`) offers no `loadRowBindings`: the items it holds answer their registration's binding, which is not their rows'. No such loader ships in this repository.
+  - A node whose boot priming pass finds a legacy row already bound by another node answers the bound package for that row's item, where it answered `null` (fail-closed) until it restarted.
+  
+  Also in `@objectstack/metadata-protocol`:
+  
+  - `SysMetadataRepository.restoreVersion` takes `refusePlatformRecord: true` to ask `refusePlatformRecordRestore` (`@objectstack/metadata`) on the row it writes; the undo writes do not pass it.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [9abc732]
+- Updated dependencies [52a2398]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [81eae2b]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [ec545de]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [9c57bd2]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [66452df]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [c059e60]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/types@19.0.0-next.0
+  - @objectstack/core@19.0.0-next.0
+  - @objectstack/metadata-core@19.0.0-next.0
+  - @objectstack/metadata-fs@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes
