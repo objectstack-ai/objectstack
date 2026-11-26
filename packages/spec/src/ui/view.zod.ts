@@ -2540,6 +2540,33 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
     'Whether a card leaves out a field that holds no value. Omit for true (left out); false keeps the field with an empty value.',
   ),
   /**
+   * objectstack#36423 — the counts a card shows at its foot. `comments: true`
+   * shows how many comment threads of the record are open (not resolved), the
+   * number the record page's comments icon shows; `attachments: true` shows
+   * how many files are attached to it (an object with `enable.files`). Each is
+   * read for the whole board in ONE grouped read per counted object over the
+   * cards it has loaded, never one read per card, under the reader's
+   * permissions; a count of zero draws nothing. Absent, or a member absent or
+   * `false`: that count is neither read nor drawn — the board as it was before
+   * this key.
+   *
+   * An object, so a later foot item is one more member rather than a second
+   * key. ⛔ No spec-side default.
+   */
+  cardFooter: strictObject({
+    surface: 'this kanban card footer',
+    history: VIEW_HISTORY,
+  }, {
+    comments: z.boolean().optional().describe(
+      'Show how many comment threads of the record are open (not resolved). Omit or false: not shown, and not read.',
+    ),
+    attachments: z.boolean().optional().describe(
+      'Show how many files are attached to the record (objects with enable.files). Omit or false: not shown, and not read.',
+    ),
+  }).optional().describe(
+    'The counts each card shows at its foot, each read once for the whole board over its loaded cards. Omit to show none.',
+  ),
+  /**
    * [#16894] The one item-titled view config of the family that omitted this
    * key. `GalleryConfigSchema`, `TimelineConfigSchema`, `CalendarConfigSchema`,
    * `GanttConfigSchema` and `ListMapConfigSchema` all declare `titleField`

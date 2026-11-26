@@ -1056,6 +1056,8 @@ const ko = {
       kanbanAddCardField: "필드 추가",
       kanbanShowFieldLabels: "필드 이름 표시",
       kanbanHideEmptyFields: "빈 필드 숨기기",
+      kanbanFooterComments: "댓글 수 표시",
+      kanbanFooterAttachments: "첨부 파일 수 표시",
       kanbanSummary: "열 요약",
       kanbanSummaryAvg: "평균",
       kanbanSummaryMin: "최소",
@@ -1114,6 +1116,11 @@ const ko = {
       hideHint: "카드는 「미분류」로 이동합니다",
       createIn: "{{column}}에 새로 만들기",
       create: "새로 만들기",
+    },
+    // objectstack#36423 — a card's foot counts (`kanban.cardFooter`).
+    cardFooter: {
+      comments: "해결되지 않은 댓글: {{count}}",
+      attachments: "첨부 파일: {{count}}",
     },
     uncategorized: "미분류",
     loadMore: "더 보기",

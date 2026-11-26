@@ -307,6 +307,12 @@ export {
   filterCommentThreads,
   unresolvedThreadCount,
   DEFAULT_COMMENT_THREAD_FILTER,
+  // objectstack#36423 — many records' open-thread and attachment counts.
+  useRecordCounts,
+  recordCountIds,
+  compileCommentCountQuery,
+  compileAttachmentCountQuery,
+  readRecordCounts,
   CommentItem,
   CommentThread,
   CommentComposer,
@@ -317,6 +323,9 @@ export {
 } from './comments';
 export type {
   RecordCommentsData,
+  RecordCounts,
+  RecordCountsData,
+  RecordCountsInput,
   CommentThreadData,
   CommentThreadFilter,
   CommentItemProps,
