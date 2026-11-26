@@ -28,7 +28,7 @@ It lands by the maintainer's hand-merge of the PR cut from #30881.
 · **Amended in place** (2026-11-17, card [#34724](https://github.com/objectstack-ai/objectstack/issues/34724) of epic [#34571](https://github.com/objectstack-ai/objectstack/issues/34571), maintainer, verbatim: 「打包动作不是应该在 studio 对应的软件包中自定义吗」, and on platform actions getting no switch, 「同意，立卡」; ruling record [`6944409840`](https://github.com/objectstack-ai/objectstack/issues/34724#issuecomment-6944409840), verbatim: 「保持原状并写明恢复方法」): the action's ledger switch moves onto the action in Studio and Setup › Packaged Actions retires, so the line above that says D4 "keeps the ledger switch" now reads as the switch living in Studio; the platform's own actions carry no switch in the console, a row that already switches one off stays in force, and the activation door is the way to turn it on again ([D4](#d4), [D9](#d9)). It lands by the hand-merge or authorized approval of the PR cut from #34724.
 · **Amended in place** (2026-11-24, card [#36891](https://github.com/objectstack-ai/objectstack/issues/36891) of epic [#36890](https://github.com/objectstack-ai/objectstack/issues/36890), maintainer, verbatim: 「元数据列表如果全部改成点击之后弹出全屏的详情页呢？是不是对象流程这些可以用同一种风格，顶部的导航也不需要了。」, 「我们说的弹出窗口全屏，应该是右侧全屏对吧，左侧菜单和前端一样可以折叠。」, and on the epic's fifteen numbered decisions, twice, 「全部按建议」): the "All metadata" area is Studio's only entry and the four pillars are no longer places — an item opens on its metadata address and fills the content pane beside one collapsible left menu, the object, the flow and the permission set opening their designers there and no longer a pillar; the menu's six groups and its type-to-group table are [ADR-0084](./0084-application-builder-information-architecture.md)'s as amended the same day; the item's address, its ‹ › order, its leave guard, and where a dashboard or a report opens (an app's own edit state) and is created are fixed in [D1](#d1), and the pillar and landing wording of [D2](#d2), [D3](#d3), [D4](#d4), [D8](#d8), [D11](#d11) and the [Consequences](#consequences) is read through it (merge questions 13 to 15). It lands by the hand-merge or authorized approval of the PR cut from #36891.
 · **Amended in place** (2026-11-24, [ADR-0159](./0159-forms-are-their-own-metadata-type-public-forms-are-form-items-view-is-lists-only.md) D4, on the maintainer's ruling 「拆成 form 类型，对外表单并入」, ruling record [`7123091354`](https://github.com/objectstack-ai/objectstack/issues/36444#issuecomment-7123091354)): `form`, the metadata type forms are carved into, joins [D2](#d2)'s "Which types" list as overridable by declaration, with no conditions; its classification row lands in the same change as its registry row, which the pin in `packages/spec/src/kernel/customization-package.test.ts` requires. It lands by an authorized approval or the maintainer's merge of the PR cut from #36868.
-· **Amended in place** (2026-11-26, card [#37451](https://github.com/objectstack-ai/objectstack/issues/37451) of epic [#37424](https://github.com/objectstack-ai/objectstack/issues/37424), maintainer, verbatim, as that epic records them: 「App Studio 就是开发软件包的入口吧」, and on the epic's decision 12, 「同意」): [D1](#d1)'s scope sentence reads Studio as the entry for developing one package, its top-left control beside a restored package switcher; and two things D1 gave Studio, the Diagnostics page and the cross-package environment directory, are to move to Setup — the second's Setup group is open on #37424. Disabling, enabling and deleting a package are not moved. The frame is [ADR-0084](./0084-application-builder-information-architecture.md)'s, amended the same day. It lands by the hand-merge or authorized approval of the PR cut from #37451.
+· **Amended in place** (2026-11-26, card [#37451](https://github.com/objectstack-ai/objectstack/issues/37451) of epic [#37424](https://github.com/objectstack-ai/objectstack/issues/37424), maintainer, verbatim, as that epic records them: 「App Studio 就是开发软件包的入口吧」, and on the epic's decision 12, 「同意」): [D1](#d1)'s scope sentence reads Studio as the entry for developing one package, its top-left control beside a restored package switcher; and one thing D1 gave Studio, the cross-package environment directory, is to move to Setup, to a group that holds access pages. The Diagnostics page stays Studio's, and disabling, enabling and deleting a package stay Setup's: both were put to the maintainer and ruled the same day ([comment 7187264388](https://github.com/objectstack-ai/objectstack/issues/37451#issuecomment-7187264388)), and neither changes this record. The frame is [ADR-0084](./0084-application-builder-information-architecture.md)'s, amended the same day. It lands by the hand-merge or authorized approval of the PR cut from #37451.
 **Decided by**: the maintainer, 2026-10-30, in the desktop session that re-planned the epic, verbatim and
 untranslated as epic #28236 records them — the direction 「方向定为包级覆盖：代码和 Studio 用同一机制，定制都进 .custom。」; the suffix 「同意 后缀改成 .custom」; the eight questions 「等我拍板的 8 个问题，全部同意」; the extension
 fields 「扩展字段用 __c 后缀，只有 .custom 包能用。」; the item toolbar 「同意新增 2h「Studio 项工具栏」并放在 2a 之前」;
@@ -171,8 +171,7 @@ answered it for code and Studio at once: 「方向定为包级覆盖：代码和
 ### D1 — Studio owns all metadata; Setup owns the deployment's administration {#d1}
 
 **Studio = the developer's surface: design, catalog, source, layers, references, history with rollback, audit,
-diagnostics — all 30 types.** *(Narrowed 2026-11-26 for one page, the Diagnostics sweep across types: the amendment
-of that date at the end of this decision.)* The four pillars stay the designers for the types they cover; an **"All metadata"** area
+diagnostics — all 30 types.** The four pillars stay the designers for the types they cover; an **"All metadata"** area
 joins them, per package and across packages, holding what `views/metadata-admin` holds today: the type directory,
 lists, the generic item page. A pillar type opened from the directory opens its pillar. *(These two sentences are
 replaced by the 2026-11-24 amendment at the end of this decision: the area is the only entry, and no item opens a
@@ -314,7 +313,8 @@ Where each of the epic's fifteen decisions is written:
 **Amended 2026-11-26 — Studio is the entry for developing one package; what is global is Setup's** (card
 [#37451](https://github.com/objectstack-ai/objectstack/issues/37451) of epic
 [#37424](https://github.com/objectstack-ai/objectstack/issues/37424); maintainer, verbatim, as that epic records
-them: 「App Studio 就是开发软件包的入口吧」, and on the epic's decision 12, 「同意」). The frame, the menu and the places
+them: 「App Studio 就是开发软件包的入口吧」, and on the epic's decision 12, 「同意」; and the same day, on what that
+decision had left open, 「同意」 again). The frame, the menu and the places
 are [ADR-0084](./0084-application-builder-information-architecture.md)'s, amended the same day. This decision is
 touched in two places, and the rest of it stands. **The amendment declares; the epic's cards implement it.**
 
@@ -324,17 +324,18 @@ touched in two places, and the rest of it stands. **The amendment declares; the 
   switcher — restored, with "New package" — that names the open package and folds a pair under its base, as
   [D3](#d3) says.
 - **What is global is Setup's (the epic's decision 12).** Studio develops one package; Setup runs the organization
-  and holds what is global. Two things this decision gave Studio are to move to Setup on that line: the
-  Diagnostics page, which sweeps every type for items that fail validation, and the cross-package environment
-  directory. The first goes to Setup → Diagnostics. The second's Setup group is open (question 5 on #37424), and
-  until it moves, "Setup carries no metadata editor and no metadata catalog" holds as written. Once it moves, that
-  sentence is narrowed by this one directory and by no editor: an item listed there still opens in Studio. What an
-  item's own row and page say about its validation stays in Studio, and so does every other tool of this decision.
-  The 2026-10-30 ruling quoted above — 「我认为还是应该在 studio」, on the catalog, source, layers, history and
-  diagnostics — is the earlier word on the Diagnostics page. ADR-0084's amendment sets the two side by side for
-  the approver (item 7 of its list).
-- **Not changed here.** Disabling, enabling and deleting a package stay Setup's until the maintainer answers
-  question 1 on #37424. Datasources were Setup's already; Studio's menu is to stop drawing a row for them
+  and holds what is global. One thing this decision gave Studio is to move to Setup on that line: the
+  cross-package environment directory, to a Setup group that holds access pages (question 5 on #37424, ruled the
+  same day: [comment 7187264388](https://github.com/objectstack-ai/objectstack/issues/37451#issuecomment-7187264388)).
+  Until it moves, "Setup carries no metadata editor and no metadata catalog" holds as written. Once it moves, that
+  sentence is narrowed by this one directory and by no editor: an item listed there still opens in Studio.
+- **Diagnostics stays Studio's.** The epic's decision 12 also moved the Diagnostics page to Setup. That was set
+  beside the 2026-10-30 ruling quoted above — 「我认为还是应该在 studio」, on the catalog, source, layers, history
+  and diagnostics — and the maintainer ruled that the earlier word holds (the same record). On a package the
+  page reads that package. Setup → Diagnostics keeps the records of the running system and gains no metadata
+  page.
+- **Not changed here.** Disabling, enabling and deleting a package stay Setup's (question 1 on #37424, ruled the
+  same day; the same record). Datasources were Setup's already; Studio's menu is to stop drawing a row for them
   (ADR-0084).
 
 > **Note (2026-11-24, epic [#36359](https://github.com/objectstack-ai/objectstack/issues/36359)).** D1 and the amendment above
