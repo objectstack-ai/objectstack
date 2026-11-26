@@ -53,6 +53,13 @@
  * maintainer's ruling to keep report editing its own entry, as Twenty does):
  * a new report is made from the reports index, then linked here.
  *
+ * The mode may arrive asking this menu to open first (objectstack#36907, a
+ * Studio dashboard list's 「New」, `useDesignModeOpening`): the picker then
+ * opens at once, on its 「Dashboards」, for an entry at the end of the top
+ * level, as that level's 「Add menu item」 would. A dashboard created from it
+ * opens with the Studio list it came from (`?studio=`), so its × goes back
+ * there; closing the picker drops that, and later adds are plain.
+ *
  * Every edit is staged with the mode (`useDesignModeChange`), under one key
  * for the app's menu: the mode's 「Save」 writes it (`saveAppMenu`), its
  * 「Cancel」 drops it. The menu drawn is the staged one, so it survives a page
@@ -144,7 +151,7 @@ import {
   fetchListedPackageManifests,
   listedCustomizationPairOf,
 } from '../views/studio-design/packages-io.js';
-import { useDesignModeChange } from './designMode.js';
+import { useDesignModeChange, useDesignModeOpening } from './designMode.js';
 import {
   MENU_TARGET_KINDS,
   canMoveBy,
@@ -181,6 +188,7 @@ import {
 } from './designModeMenuSave.js';
 import { freeItemName, isNewMenuItemKind, saveAppMenuWithNewItem, type NewMenuItemKind } from './designModeMenuCreate.js';
 import { dashboardEditArrival } from './designModeArrival.js';
+import { withStudioReturn } from '../views/studio-design/studioAddress.js';
 
 /**
  * The group label's icon-mode hiding, as the sidebar's own labels declare it
@@ -452,10 +460,32 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   const startAdd = (at: AddAt) => {
     setAddAt({ parentId: at.parentId, index: Math.min(at.index, ownEndOf(menu, at.parentId)) });
   };
+
+  // objectstack#36907 — what the mode arrived asking to open: the picker on
+  // its 「Dashboards」, at the end of the top level, taken once. `arrivedFrom`
+  // is the Studio list it came from, kept while that picker is open.
+  const arrivalOpening = useDesignModeOpening();
+  const [pickerKind, setPickerKind] = React.useState<MenuTargetKind | null>(null);
+  const [arrivedFrom, setArrivedFrom] = React.useState<string | null>(null);
+  const takeArrival = arrivalOpening.take;
+  React.useEffect(() => {
+    if (!arrivalOpening.opening) return;
+    const taken = takeArrival();
+    if (!taken) return;
+    startAdd({ parentId: null, index: menu.length });
+    setPickerKind(taken.column);
+    setArrivedFrom(taken.studioReturn);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- answered once per opening
+  }, [arrivalOpening.opening, takeArrival]);
+  const closePicker = () => {
+    setAddAt(null);
+    setPickerKind(null);
+    setArrivedFrom(null);
+  };
   const pick = (entry: MenuEntry) => {
     if (!addAt) return;
     update(insertEntry(menu, addAt.parentId, addAt.index, entry));
-    setAddAt(null);
+    closePicker();
   };
 
   // objectstack#36364 — a new dashboard, in the held place: created, put in
@@ -498,8 +528,9 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
       ),
     );
     if (!saved) return false;
-    setAddAt(null);
-    navigate(resolveHref(entry as unknown as NavigationItem, basePath).href, { state: dashboardEditArrival(name) });
+    const href = resolveHref(entry as unknown as NavigationItem, basePath).href;
+    closePicker();
+    navigate(arrivedFrom ? withStudioReturn(href, arrivedFrom) : href, { state: dashboardEditArrival(name) });
     return true;
   };
 
@@ -622,7 +653,8 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
         <MenuItemPicker
           packageId={packageId}
           inMenu={menuTargets(menu)}
-          onClose={() => setAddAt(null)}
+          initialKind={pickerKind}
+          onClose={closePicker}
           onPick={(kind, name, link) => pick(entryFor(kind, name, newEntryId([...menu, ...(storedMenu ?? [])]), link))}
           onCreate={createItem}
           language={language}
@@ -915,6 +947,7 @@ function useTargetRows(packageId: string, language: string): { rows: TargetRow[]
 function MenuItemPicker({
   packageId,
   inMenu,
+  initialKind = null,
   onClose,
   onPick,
   onCreate,
@@ -922,6 +955,8 @@ function MenuItemPicker({
 }: {
   packageId: string;
   inMenu: ReadonlySet<string>;
+  /** The kind the picker opens on (objectstack#36907); `null`: the list of kinds. */
+  initialKind?: MenuTargetKind | null;
   onClose: () => void;
   onPick: (kind: MenuTargetKind, name: string, link?: { label: string; url: string }) => void;
   /** Create a new `kind` named `label`; `taken` is every name of that kind the picker lists. */
@@ -930,7 +965,7 @@ function MenuItemPicker({
 }) {
   const { t } = useObjectTranslation();
   const { rows, loading } = useTargetRows(packageId, language);
-  const [kind, setKind] = React.useState<MenuTargetKind | null>(null);
+  const [kind, setKind] = React.useState<MenuTargetKind | null>(initialKind);
   const [query, setQuery] = React.useState('');
   const [link, setLink] = React.useState({ label: '', url: '' });
   /** The kind being named for creation (objectstack#36364), `null` while picking. */

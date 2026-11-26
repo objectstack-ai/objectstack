@@ -67,6 +67,15 @@
  * error passes through unchanged, as a host-relayed error does on the body
  * path.
  *
+ * **Several reasons in one refusal (#36877, ruling 7178348458 letter A).** A
+ * throw may name an ordered list of declared reasons instead of one —
+ * `{ code, reasons: [{ reason, params? }, …] }` — and the answer carries each
+ * one's sentence in the caller's locale, in the order thrown, the entry's own
+ * `message` closing it ({@link declaredAnswer}); the lines also ride the error
+ * as `refusals`, which the doors answer as `details.refusals`. Both paths
+ * read the address through one function (`refusalAddressFrom`), so a list is
+ * answered byte-identically on each.
+ *
  * A hook that declares no `refusals` is answered exactly as before.
  */
 
@@ -76,6 +85,9 @@ import {
   undeclaredActionRefusalReasonAtRun,
   undeclaredHookRefusalAtRun,
   undeclaredHookRefusalReasonAtRun,
+  unreadableActionRefusalListAtRun,
+  unreadableHookRefusalListAtRun,
+  type RefusalListProblem,
 } from '@objectstack/spec/data';
 import { actionRefusalMessageKey, hookRefusalMessageKey, resolveBundleLocale } from '@objectstack/spec/system';
 import { templateEngine } from '@objectstack/formula';
@@ -86,6 +98,7 @@ import {
   isHostRelayedSandboxError,
   isRelayedSandboxRefusal,
   isRunnerOwnFault,
+  refusalAddressFrom,
   sandboxRefusalAddressOf,
   type SandboxRefusalAddress,
 } from './quickjs-runner.js';
@@ -153,6 +166,8 @@ interface RefusalOwner {
   messageKey(code: string, reason?: string): string;
   undeclaredAtRun(code: string | undefined, declared: readonly string[]): string;
   undeclaredReasonAtRun(code: string, reason: string, declared: readonly string[]): string;
+  /** [#36877] The fault for a `reasons` list the catalogue cannot answer. */
+  unreadableListAtRun(code: string, problem: RefusalListProblem): string;
 }
 
 function hookOwner(hookName: string): RefusalOwner {
@@ -161,6 +176,7 @@ function hookOwner(hookName: string): RefusalOwner {
     messageKey: (code, reason) => hookRefusalMessageKey(hookName, code, reason),
     undeclaredAtRun: (code, declared) => undeclaredHookRefusalAtRun(hookName, code, declared),
     undeclaredReasonAtRun: (code, reason, declared) => undeclaredHookRefusalReasonAtRun(hookName, code, reason, declared),
+    unreadableListAtRun: (code, problem) => unreadableHookRefusalListAtRun(hookName, code, problem),
   };
 }
 
@@ -193,6 +209,7 @@ function actionOwner(action: ActionRefusalDeclaration): RefusalOwner {
     messageKey: (code, reason) => actionRefusalMessageKey(object, name, code, reason),
     undeclaredAtRun: (code, declared) => undeclaredActionRefusalAtRun(name, code, declared),
     undeclaredReasonAtRun: (code, reason, declared) => undeclaredActionRefusalReasonAtRun(name, code, reason, declared),
+    unreadableListAtRun: (code, problem) => unreadableActionRefusalListAtRun(name, code, problem),
   };
 }
 
@@ -374,11 +391,36 @@ function pickTranslatedSentence(
   return declared;
 }
 
+/** [#36877] One rendered sentence of a refusal thrown as a `reasons` list — an element of the wire's `details.refusals`. */
+export interface DeclaredRefusalLine {
+  reason: string;
+  message: string;
+}
+
+/** What {@link declaredAnswer} answers a declared code with. */
+type DeclaredAnswer =
+  | { fault: SandboxError }
+  | { message: string; status: number; refusals?: DeclaredRefusalLine[] };
+
 /**
  * What a declared code answers with — the picked sentence and the status — or
  * the loud fault for a reason the code does not declare. Shared by the body
  * path and the in-process path so the two cannot answer differently; each
- * builds its `SandboxError` from it with the code it read.
+ * builds its `SandboxError` from it with the code it read, in one shape.
+ *
+ * [#36877, ruling 7178348458 terms 1–3] A throw that names an ordered
+ * `reasons` list instead of one `reason` is answered line by line:
+ *
+ *  - every listed reason is checked against the entry's `reasons` — under a
+ *    code that declares none, every one is undeclared — and ONE undeclared
+ *    reason makes the whole throw the loud fault naming it; a list the address
+ *    could not read (beside a `reason`, empty, malformed) is the fault too;
+ *  - each line is that reason's sentence, translated and filled from its own
+ *    `params` exactly as a single reason is;
+ *  - the message (served as the caller sentence and as `userMessage`) is the
+ *    lines joined by `\n`, then the entry's own `message` — translated, its
+ *    holes filled from the throw's top-level `params` — as the last line;
+ *  - `refusals` carries the lines structured (`details.refusals` on the wire).
  */
 function declaredAnswer(
   owner: RefusalOwner,
@@ -387,24 +429,44 @@ function declaredAnswer(
   address: HookRefusalAddress | undefined,
   locale: unknown,
   opts: { i18n?: HookRefusalI18nSource; logger?: { warn?: (...args: any[]) => void } },
-): { fault: SandboxError } | { message: string; status: number } {
+): DeclaredAnswer {
+  const reasons = entry.reasons && typeof entry.reasons === 'object' ? entry.reasons : undefined;
+  const status = typeof entry.status === 'number' ? entry.status : DEFAULT_HOOK_REFUSAL_STATUS;
+  const pickedLocale = typeof locale === 'string' ? locale : undefined;
+  if (address?.listProblem !== undefined) {
+    return { fault: new SandboxError(owner.unreadableListAtRun(thrownCode, address.listProblem)) };
+  }
+  if (address?.reasons !== undefined) {
+    for (const line of address.reasons) {
+      if (!reasons || !Object.prototype.hasOwnProperty.call(reasons, line.reason)) {
+        return {
+          fault: new SandboxError(owner.undeclaredReasonAtRun(thrownCode, line.reason, reasons ? Object.keys(reasons) : [])),
+        };
+      }
+    }
+    const refusals: DeclaredRefusalLine[] = address.reasons.map((line) => ({
+      reason: line.reason,
+      message: ownerRefusalMessage(owner, thrownCode, entry, pickedLocale, opts.i18n, opts.logger, line),
+    }));
+    const closing = ownerRefusalMessage(
+      owner,
+      thrownCode,
+      entry,
+      pickedLocale,
+      opts.i18n,
+      opts.logger,
+      address.params !== undefined ? { params: address.params } : undefined,
+    );
+    return { message: [...refusals.map((line) => line.message), closing].join('\n'), status, refusals };
+  }
   // A reason is judged only under a code that declares `reasons`; under any
   // other code it is ignored, as it was before `reasons` existed.
   const reason = address?.reason;
-  const reasons = entry.reasons && typeof entry.reasons === 'object' ? entry.reasons : undefined;
   if (reason !== undefined && reasons && !Object.prototype.hasOwnProperty.call(reasons, reason)) {
     return { fault: new SandboxError(owner.undeclaredReasonAtRun(thrownCode, reason, Object.keys(reasons))) };
   }
-  const message = ownerRefusalMessage(
-    owner,
-    thrownCode,
-    entry,
-    typeof locale === 'string' ? locale : undefined,
-    opts.i18n,
-    opts.logger,
-    address,
-  );
-  return { message, status: typeof entry.status === 'number' ? entry.status : DEFAULT_HOOK_REFUSAL_STATUS };
+  const message = ownerRefusalMessage(owner, thrownCode, entry, pickedLocale, opts.i18n, opts.logger, address);
+  return { message, status };
 }
 
 /**
@@ -475,7 +537,12 @@ function resolveSandboxedRefusal(
   }
   const answer = declaredAnswer(owner, code, entry, sandboxRefusalAddressOf(err), locale, opts);
   if ('fault' in answer) return answer.fault;
-  return new SandboxError(err.message, answer.message, { code, status: answer.status, userMessage: answer.message });
+  return new SandboxError(err.message, answer.message, {
+    code,
+    status: answer.status,
+    userMessage: answer.message,
+    ...(answer.refusals !== undefined ? { refusals: answer.refusals } : {}),
+  });
 }
 
 // ── The in-process half (#33214, ruling 6879477573 letter A) ─────────────────
@@ -650,6 +717,7 @@ export function resolveInProcessHookRefusal(
     code?: unknown;
     reason?: unknown;
     params?: unknown;
+    reasons?: unknown;
   };
   const code = typeof thrown.code === 'string' && thrown.code.length > 0 ? thrown.code : undefined;
   const entry = code !== undefined && Object.prototype.hasOwnProperty.call(catalogue, code) ? catalogue[code] : undefined;
@@ -657,16 +725,19 @@ export function resolveInProcessHookRefusal(
   if (code === undefined || !entry) {
     return new SandboxError(owner.undeclaredAtRun(code, Object.keys(catalogue)));
   }
-  const address: HookRefusalAddress = {};
-  if (typeof thrown.reason === 'string' && thrown.reason.length > 0) address.reason = thrown.reason;
-  if (thrown.params !== null && typeof thrown.params === 'object' && !Array.isArray(thrown.params)) {
-    address.params = thrown.params as Record<string, unknown>;
-  }
+  // [#36877] The one address reading the body path makes too (`refusalAddressFrom`).
+  const address = refusalAddressFrom({
+    reason: thrown.reason,
+    params: thrown.params,
+    reasons: thrown.reasons,
+    hasReasons: thrown.reasons !== undefined,
+  });
   const answer = declaredAnswer(owner, code, entry, address, engineCtx?.session?.locale, opts);
   if ('fault' in answer) return answer.fault;
   return new SandboxError(`hook '${String(hook.name)}' threw: ${flattenThrown(err)}`, answer.message, {
     code,
     status: answer.status,
     userMessage: answer.message,
+    ...(answer.refusals !== undefined ? { refusals: answer.refusals } : {}),
   });
 }

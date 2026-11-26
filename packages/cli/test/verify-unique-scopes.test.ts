@@ -44,7 +44,7 @@ const MANIFEST = {
   version: '1.0.0',
   name: 'Verify Unique Scopes',
   type: 'app',
-  engines: { protocol: '^18' },
+  engines: { protocol: '^19' },
 };
 
 const OBJECTS = [

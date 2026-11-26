@@ -23,6 +23,10 @@ export { recoverUnencodedJsonText } from './unencoded-json-text.js';
 // face compiles SQL text with its own compiler, and must regroup by the same
 // rule the knex path does.
 export { FLAT_GROUP_MAX_MEMBERS, joinBalancedGroup } from './sql-driver-balanced-group.js';
+// [#37345] Which declared fields get a column DEFAULT, and that DEFAULT's SQLite
+// text. Exported because the Turso remote face writes its DDL as text, and must
+// give a column the DEFAULT the knex path gives it from the same rule.
+export { emitsDeclaredColumnDefault, sqliteDeclaredColumnDefaultSql, sqliteNowColumnDefaultSql } from './sql-driver-schema-sync.js';
 // [ADR-0155 D2, D4] Where a fixed-read leaf compiles and the predicates of its
 // fixed inner read. Exported because the Turso remote face compiles the leaf
 // with its own compiler, from the same walk and the same predicates.

@@ -63,6 +63,7 @@ vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => nul
 
 import { toast } from 'sonner';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { setupPackagePath } from '../metadata-admin/packageSource';
 import { STUDIO_PACKAGE_MENU_ITEMS } from './StudioPackageMenu';
@@ -200,7 +201,7 @@ function renderAt(entry: string, perms = AUTHOR) {
       <MemoryRouter initialEntries={[entry]}>
         <Routes>
           <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-          <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+          <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
           <Route path="*" element={<Elsewhere />} />
         </Routes>
       </MemoryRouter>

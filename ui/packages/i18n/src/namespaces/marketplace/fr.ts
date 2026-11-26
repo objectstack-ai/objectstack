@@ -87,6 +87,8 @@ const fr = {
       versions: "Versions",
       noApprovedVersions: "Aucune version approuvée.",
       prerelease: "Prélancement",
+      notInstallableHosted: "Non installable sur les environnements hébergés",
+      notInstallableHostedReason: "Un plugin de code : les environnements hébergés n'exécutent pas de plugins de code. Installez-le sur un runtime auto-hébergé ou Enterprise.",
       moreOptions: "Plus d'options d'installation",
       uninstallFromRuntime: "Désinstaller de ce runtime",
       addSampleData: 'Ajouter des données d\'exemple',

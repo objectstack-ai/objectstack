@@ -27,7 +27,7 @@ import { computeI18nCoverage } from '../src/utils/i18n-coverage.js';
 import { authoringRuleUnionStack } from '../src/utils/stack-collections.js';
 
 const I18N = { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'], fallbackLocale: 'en' };
-const engines = { protocol: '^18' };
+const engines = { protocol: '^19' };
 
 const appManifest = {
   id: 'com.example.cnav.app', name: 'Contributed Nav App', namespace: 'cnv', version: '1.0.0', type: 'app', engines,

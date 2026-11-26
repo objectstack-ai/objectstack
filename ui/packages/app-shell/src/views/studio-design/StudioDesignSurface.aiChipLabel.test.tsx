@@ -114,6 +114,7 @@ import '@objectstack/lint';
 // record preview's `lazy()` detail entry: its first load is paid at collection too.
 import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 // The source under test reaches these dynamic imports (the command palette's
 // record preview, the drafts panel's lint, the code editor): their first load
 // is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
@@ -196,7 +197,7 @@ function renderStudio(entry = `/studio/${PACKAGE_ID}/interfaces`) {
       <MemoryRouter initialEntries={[entry]}>
         <Routes>
           <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-          <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+          <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
           {/* objectstack#36905 — a permission set opens at its metadata address. */}
           <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         </Routes>

@@ -1997,6 +1997,16 @@ export const CEILINGS = new Map([
   ['skills/objectstack-platform/references/operations.md', 3394],
   ['skills/objectstack-platform/references/plugin-development.md', 3137],
   ['skills/objectstack-upgrade/references/examples-upgrade.md', 1197],
+  // NEW FILE, pinned AT the measurement: the context pack (`ai_context`, ADR-0160)
+  // is a metadata kind no published skill taught beyond its key name. Card #37177
+  // (the `Skills-docs: follow-up` of the PR that admitted the kind) asks for the
+  // teaching "in references where the ceiling binds", and both SKILL.md rows were
+  // at 14 and 0 tokens of headroom, so the keys, bounds, body outline, pack names
+  // and `os validate` rules live here and each SKILL.md carries a pointer paid by
+  // deleting restatement in the same file (neither SKILL.md row moves). The row is
+  // the seat's claim amendment 7179788843 on that card: one new row for this file.
+  // 5813 bytes -> ceil(5813 / 4) = 1454; zero headroom.
+  ['skills/objectstack-ai/references/context-packs.md', 1454],
 
   // ── 2026-10-26 the objectui bundle joins the catalog — decision C, #25832 ──
   // The maintainer ruled (decision C, 2026-10-25, recorded as item 17d of the

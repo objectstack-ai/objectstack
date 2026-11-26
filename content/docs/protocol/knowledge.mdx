@@ -84,6 +84,8 @@ delegates the rest to plugins.
 │  • Event sync (record.* → upsert)    │    │      (reference impl, REST)  │
 │  • Audit + metrics                   │    │  • knowledge-pgvector │
 │                                      │    │      (PostgreSQL + pgvector) │
+│                                      │    │  • knowledge-turso    │
+│                                      │    │      (libSQL file, local)    │
 │  Registers `knowledge` service       │    │  (llamaindex / dify: planned)│
 └──────────────────────────────────────┘    └──────────────────────────────┘
               ▲
@@ -374,7 +376,8 @@ keeps generations, the switch at the end of a build. `implements` declares the o
 checks the declaration against the adapter. `./testing` is a test-only,
 ESM-only entry that imports `vitest`; nothing in the runtime entry reaches it.
 `knowledge-memory` runs it as the reference implementation; `knowledge-pgvector`
-runs it against a live PostgreSQL in CI.
+runs it against a live PostgreSQL in CI; `knowledge-turso` runs it on libSQL
+`:memory:` and on a `file:` URL in its own unit tests.
 
 ### 3.5 The split
 
@@ -485,6 +488,7 @@ import { KnowledgeServicePlugin } from '@objectstack/service-knowledge';
 import { KnowledgeMemoryPlugin } from '@objectstack/knowledge-memory';
 import { KnowledgeRagflowPlugin } from '@objectstack/knowledge-ragflow';
 import { KnowledgePgvectorPlugin } from '@objectstack/knowledge-pgvector';
+import { KnowledgeTursoPlugin } from '@objectstack/knowledge-turso';
 
 defineStack({
   plugins: [
@@ -495,6 +499,7 @@ defineStack({
       apiKey: process.env.RAGFLOW_KEY!,
     }),
     new KnowledgePgvectorPlugin(),                      // self-hosted, PostgreSQL + pgvector
+    new KnowledgeTursoPlugin(),                         // local / not on PostgreSQL, a libSQL file
   ],
 });
 ```
@@ -568,6 +573,56 @@ an exact scan.
 - **The text is stored.** Each row holds its passage's text: it is as
   sensitive as the record it came from, and it is in every backup of the
   database.
+
+### 4.2 `knowledge-turso` — the open vector store in a libSQL file
+
+`@objectstack/knowledge-turso` keeps a source's passages and vectors in a
+[libSQL](https://github.com/tursodatabase/libsql) database of its own, with
+libSQL's native vectors (`F32_BLOB`, `vector32`, `vector_distance_cos`): the
+store for local development and for a deployment not on PostgreSQL. It takes
+the service's passages, embeds them with the kernel's `embedder` service (or
+the `embedder` it is given), and answers a search by an exact scan.
+
+- **Which database.** The `url` option (`file:`, `:memory:` or a
+  `libsql://` Turso URL), else `knowledge.db` under the project's
+  `.objectstack/data/`, beside the platform database. Never the platform's
+  own file: two engines writing one SQLite file in one process lose rows, so a
+  URL naming `objectstack.db`, `dev.db`, `standalone.db` or the file
+  `OS_DATABASE_URL` names is refused. On a file the store sets WAL and a busy
+  timeout (`busyTimeoutMs`, default 5000); in one process every call of the
+  store runs its database work one at a time.
+- **Tables.** `knowledge_generation`, one row per source and generation
+  (fingerprint, recipe hash, width, model, active or being built; at most one
+  of each per source, by a unique index — a second build joins the one under
+  way when its fingerprint is the same, and replaces it otherwise, so the
+  first builder's writes are then refused), and one passage table per source and generation,
+  `knowledge_<source>_g<n>`, its vector column sized for that generation. A
+  source id that is not snake_case is refused before
+  any SQL.
+- **Search.** An exact scan by cosine distance; the organization filter, the
+  [record scope](#record-scope) and the metadata `filter` (JSON equality per
+  key) run in the same `WHERE`, before ranking. The store creates no DiskANN index: `vector_top_k` ranks
+  before it filters, and with one, 1,000 vectors of 1,536 dimensions grew a
+  file from 8.2 MB to 329 MB and took 21.8 s to index. Without it the same
+  1,000 passages take 8.3 MB and a search about 5 ms; 10,000 take 82 MB and
+  about 50 ms. A larger source belongs on `knowledge-pgvector`.
+- **Rebuilds.** A changed fingerprint is refused (§3.6). A complete reindex
+  under a new fingerprint builds a new generation table beside the active
+  one, which keeps answering its own fingerprint, and switches at the end of
+  the build; the old table is dropped. A build of a third fingerprint
+  abandons one left unfinished. A table of the package's earlier releases
+  (`knowledge_<source>` with exactly their columns) is never served: a search
+  answers `KNOWLEDGE_REBUILD_REQUIRED`, and the table is dropped when the first
+  complete reindex finishes. A table of any other shape under one of the
+  store's names is neither served nor dropped.
+- **Re-embedding.** A passage whose text is unchanged (its `chunk_hash`) is
+  not embedded again within a generation.
+- **When it cannot run.** A database that cannot be opened, or a platform
+  with no native libSQL build (there is none for Windows on ARM): the plugin
+  still registers and boot goes on; it warns with the reason, `healthCheck`
+  answers `ok: false`, and every call answers `SERVICE_UNAVAILABLE`.
+- **The text is stored.** Each row holds its passage's text, as sensitive as
+  the record it came from, and in every copy of the file.
 
 ---
 
@@ -928,6 +983,7 @@ up.
 | `knowledge-llamaindex` | ⏳ Phase 2 |  |
 | `knowledge-dify` | ⏳ Phase 3 / community |  |
 | `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan, organization, record scope and metadata filter in SQL, index fingerprint (§4.1) |
+| `knowledge-turso` | ✅ | A libSQL file of its own; exact scan, organization, record scope and metadata filter in SQL, a generation built beside the active one (§4.2) |
 
 ### 7.1 Non-goals for Phase 1
 

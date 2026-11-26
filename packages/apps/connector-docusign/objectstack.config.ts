@@ -26,7 +26,7 @@ export default defineStack({
     type: 'app',
     name: 'DocuSign eSignature',
     description: 'Send documents for signature, read envelopes and follow their signature status from flows, over DocuSign\'s eSignature OpenAPI document (developer sandbox).',
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
   },
 
   // `automation` materializes the `connectors:` entry at boot, serves the

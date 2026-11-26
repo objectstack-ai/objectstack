@@ -135,7 +135,7 @@ import {
   // context-pack listing before the record-context executor parses it.
   stripReadDecorations,
 } from '@objectstack/spec/kernel';
-import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+import type { IDataEngine, IMetadataService, ISecurityService } from '@objectstack/spec/contracts';
 import { resolveObjectSortability } from '@objectstack/spec/api';
 // [#32442] The ONE reading of `enable.aiReadable` (ruling A, #32865).
 import { isAiReadExposed } from '@objectstack/spec/data';
@@ -172,7 +172,7 @@ import {
   diagnoseObjectListRead,
   type DiagnosedObjectListing,
 } from './metadata-completeness.js';
-import { staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { resolveQueryReadPageCap, staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 // [ADR-0149 D2] The `/meta` list translation and its locale parse, the pair
 // the HTTP door's `loadDatasets` runs — imported, never restated, so both
 // transports localize a saved dataset with one function.
@@ -250,8 +250,12 @@ export interface StdioDataBridgeDeps {
    * use and `undefined` when this host registers none — the deployment then
    * has no field-level posture, and the schema is served as declared, as on
    * every other object-schema exit.
+   *
+   * [ADR-0160 D3, second amendment] The same service answers the fields the
+   * principal may query on (`getQueryableFields`, feature-detected), which
+   * the record-context door hands its executor.
    */
-  security?: () => ObjectSchemaMaskSecuritySurface | undefined;
+  security?: () => (ObjectSchemaMaskSecuritySurface & Pick<Partial<ISecurityService>, 'getQueryableFields'>) | undefined;
   /**
    * [decision 6840464379] Where the object-schema mask finds an object's
    * declared `schemaReadDelegate` ({@link CallerObjectViewDeps.schemaReadDelegates}).
@@ -1917,6 +1921,20 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       get: (object: string, id: string) => self.get(object, id),
       query: (object: string, o: Parameters<McpDataBridge['query']>[1]) => self.query(object, o),
       fieldVisibilityOf: (object: string) => self.fieldVisibilityOf!(object),
+      // [ADR-0160 D3, second amendment] The fields the principal may query
+      // on: the security service's own answer (`getQueryableFields`), judged
+      // on the map its engine guard refuses a filter or sort with, so a
+      // related list's `where` or `orderBy` the guard would refuse is dropped
+      // and stated before the read. No security service, or one predating the
+      // method: `undefined`, and the executor takes the contract's fallback.
+      queryableFieldsOf: async (object: string) => {
+        const surface = security?.();
+        if (typeof surface?.getQueryableFields !== 'function') return undefined;
+        return await surface.getQueryableFields(object, await resolvePrincipal());
+      },
+      // [ADR-0160 D3] The deployment's page cap (`resolveQueryReadPageCap`), the
+      // same value the `/mcp` door answers.
+      pageCap: () => resolveQueryReadPageCap(),
       userTextLocales: () => self.userTextLocales!(),
     });
     bridge.recordContextToolDefinitions = () => service.recordContextTools().definitions;
