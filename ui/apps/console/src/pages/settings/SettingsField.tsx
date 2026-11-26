@@ -1051,8 +1051,39 @@ export function SettingsField(props: SettingsFieldProps) {
     }
     case 'multiselect': {
       const arr = Array.isArray(value) ? (value as (string | number)[]) : [];
+      // Stored members the manifest no longer offers are named, checked, in
+      // the same "no longer available" words as the select and radio arms.
+      // Ticking a current option keeps them in the array (the next set is
+      // built from the whole stored array, as before), and the server refuses
+      // a write of this key while one is in it (`invalid_option`), so each
+      // stays UNTICKABLE: unticking drops it, and once dropped it is gone
+      // from the list, so it cannot be ticked back.
+      const offered = new Set((spec.options ?? []).map((opt) => String(opt.value)));
+      const retiredMembers = Array.from(new Set(arr.map(String))).filter(
+        (v) => v !== '' && !offered.has(v),
+      );
       return wrapper(
         <div role="group" aria-labelledby={labelId} className="grid grid-cols-2 gap-2">
+          {retiredMembers.map((v) => (
+            <label
+              key={`retired-${v}`}
+              className="flex items-center gap-2 text-sm text-muted-foreground"
+              data-testid="settings-multiselect-retired"
+            >
+              <Checkbox
+                checked
+                disabled={disabled}
+                onCheckedChange={(c) => {
+                  if (c) return;
+                  onChange(arr.map(String).filter((m) => m !== v));
+                }}
+              />
+              {t('console.settingsView.selectValueRetired', {
+                value: v,
+                defaultValue: '{{value}} (no longer available)',
+              })}
+            </label>
+          ))}
           {spec.options?.map((opt) => {
             const v = String(opt.value);
             const checked = arr.map(String).includes(v);

@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 
 import { SettingsField } from '../SettingsField';
@@ -118,5 +118,54 @@ describe('objectstack#37480 — a stored radio value outside the current options
     expect(screen.getByRole('radio', { name: 'Dify' })).toBeChecked();
     expect(screen.getAllByRole('radio')).toHaveLength(2);
     expect(screen.queryByTestId('settings-radio-retired')).toBeNull();
+  });
+});
+
+/** The same options drawn as a multiselect. */
+const ADAPTER_MULTI: Specifier = { ...ADAPTER, type: 'multiselect' };
+
+function renderMultiIn(language: string, value: unknown, onChange = vi.fn()) {
+  const instance = createI18n({ defaultLanguage: language, detectBrowserLanguage: false });
+  render(
+    <I18nProvider instance={instance} persistLanguage={false}>
+      <SettingsField spec={ADAPTER_MULTI} value={value} onChange={onChange} />
+    </I18nProvider>,
+  );
+  return instance;
+}
+
+describe('objectstack#37480 — a stored multiselect member outside the current options is named', () => {
+  it('the member shows as a checked checkbox reading the stored code marked "no longer available"', () => {
+    const en = renderMultiIn('en', ['ragflow', 'dify']);
+    const named = en.t('console.settingsView.selectValueRetired', { value: 'ragflow' });
+
+    expect(screen.getByRole('checkbox', { name: named })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Dify' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Built-in' })).not.toBeChecked();
+  });
+
+  it('ticking a current option keeps the retired member in the array, as before', () => {
+    const onChange = vi.fn();
+    renderMultiIn('en', ['ragflow'], onChange);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Dify' }));
+    expect(onChange).toHaveBeenCalledWith(['ragflow', 'dify']);
+  });
+
+  it('unticking the retired member drops it from the array', () => {
+    const onChange = vi.fn();
+    const en = renderMultiIn('en', ['ragflow', 'dify'], onChange);
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: en.t('console.settingsView.selectValueRetired', { value: 'ragflow' }),
+      }),
+    );
+    expect(onChange).toHaveBeenCalledWith(['dify']);
+  });
+
+  it('CONTROL — members all among the options draw only the option checkboxes', () => {
+    renderMultiIn('en', ['dify']);
+    expect(screen.getAllByRole('checkbox')).toHaveLength(2);
+    expect(screen.getByRole('checkbox', { name: 'Dify' })).toBeChecked();
+    expect(screen.queryByTestId('settings-multiselect-retired')).toBeNull();
   });
 });
