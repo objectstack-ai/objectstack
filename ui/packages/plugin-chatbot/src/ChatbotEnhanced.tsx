@@ -7405,8 +7405,16 @@ function formatSizeLimit(bytes: number, locale: string): string {
  * `messageEn`; that pair is server-owned, so we still choose between them — by
  * the in-app locale, not `navigator.language`, which ignored the locale
  * switcher entirely (objectui#2871).
+ *
+ * The title and the action follow the refusal's own next-step flags, never a
+ * default: `topUp` offers a credit pack, `upgrade` offers the plan upgrade, and
+ * a refusal with neither (a paid plan's five-hour pace, a developer
+ * organization) gets a neutral title and NO action — waiting is the only exit,
+ * and the server's sentence already says when it frees up.
  */
-function useAiQuotaCopy(error: unknown): { text: string; cta: string } | null {
+function useAiQuotaCopy(
+  error: unknown,
+): { title: string; text: string; cta: string | null } | null {
   const { language } = useObjectTranslation();
   const tt = useSafeTranslate();
   const quota = React.useMemo(() => parseAiQuotaError(error), [error]);
@@ -7416,9 +7424,15 @@ function useAiQuotaCopy(error: unknown): { text: string; cta: string } | null {
     text:
       (isZh ? quota.message : quota.messageEn ?? quota.message) ||
       tt('chatbotQuota.fallbackMessage', 'You have reached your AI quota.'),
+    title:
+      quota.upgrade && !quota.topUp
+        ? tt('chatbotQuota.title', 'Upgrade needed')
+        : tt('chatbotQuota.limitTitle', 'AI limit reached'),
     cta: quota.topUp
       ? tt('chatbotQuota.buyCredits', 'Buy a credit pack')
-      : tt('chatbotQuota.upgradePlan', 'Upgrade plan'),
+      : quota.upgrade
+        ? tt('chatbotQuota.upgradePlan', 'Upgrade plan')
+        : null,
   };
 }
 
@@ -7426,7 +7440,8 @@ function useAiQuotaCopy(error: unknown): { text: string; cta: string } | null {
  * The next step under a confirm card that a quota refusal blocked
  * (objectui#7253): what happened (the server's own sentence — it names both
  * exits, "resets tomorrow" and "upgrade to keep designing") and, when the host
- * wired one, the upgrade action. Renders nothing when the blocking error is not
+ * wired one, the upgrade or top-up action the refusal names (none when it
+ * names neither). Renders nothing when the blocking error is not
  * a quota refusal, so the badge above it degrades to a bare "not applied"
  * rather than to an invented explanation.
  */
@@ -7447,7 +7462,7 @@ function QuotaBlockedNextStep({
       >
         {copy.text}
       </span>
-      {onUpgrade ? (
+      {onUpgrade && copy.cta ? (
         <button
           type="button"
           onClick={onUpgrade}
@@ -7479,12 +7494,12 @@ function ErrorBanner({
   const { summary, details } = React.useMemo(() => summarizeChatError(error), [error]);
   const [expanded, setExpanded] = React.useState(false);
 
-  // AI quota refusal (429 from the cloud token guardrail) -> friendly upgrade /
-  // top-up CTA instead of a red "Response failed" banner. Copy resolved by the
+  // AI quota refusal (429 from the cloud token guardrail) -> an amber notice
+  // with the upgrade / top-up action the refusal names (none when it names
+  // neither) instead of a red "Response failed" banner. Copy resolved by the
   // shared helper, which the confirm card's blocked state reads too.
   if (quota) {
-    const { text, cta } = quota;
-    const title = tt('chatbotQuota.title', 'Upgrade needed');
+    const { title, text, cta } = quota;
     return (
       <div className="border-t bg-background px-3 py-2 text-sm" role="alert">
         <div className="rounded-md border border-amber-300/40 bg-amber-50/60 px-3 py-2 text-foreground dark:bg-amber-950/20">
@@ -7493,7 +7508,7 @@ function ErrorBanner({
               <div className="font-medium leading-snug text-foreground">{title}</div>
               <div className="mt-0.5 break-words leading-snug text-muted-foreground">{text}</div>
             </div>
-            {onUpgrade ? (
+            {onUpgrade && cta ? (
               <button
                 type="button"
                 onClick={onUpgrade}
