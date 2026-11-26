@@ -8,9 +8,9 @@
 #      breakage would only be found by a real new user.
 #
 # Job 1 (PRs touching the scaffolder / docker example) scaffolds with the
-# repo-built scaffolder and runs the generated project against this checkout's
-# packed tarballs — what the next release would publish, not what the last one did:
-# install → validate → build → test → boot → health probes → docker build/run. That
+# repo-built scaffolder and runs the generated project against this checkout's packed
+# tarballs (what the next release would publish), not the registry: install →
+# validate → build → test → boot → health probes → docker build/run. That
 # run scaffolds with `--skip-install` and installs the project itself, so it
 # exercises the scaffolder's `--skip-install` shape; a second, throwaway
 # project is scaffolded WITHOUT it purely to assert the shape a real user
@@ -51,9 +51,10 @@ jobs:
     name: Scaffold with repo dist
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    # Measured shape of a run: the framework closure build, packing every
-    # publishable package, and three image builds (the official one, the
-    # scaffolded build stage, the candidate layer) on top of the old leg.
+    # Raised from 20 for what the tarball install adds to the old leg: the
+    # framework closure build, packing every publishable package, and three
+    # image builds (the official one, the scaffolded build stage, the
+    # candidate layer).
     timeout-minutes: 45
     steps:
       - name: Checkout repository
@@ -106,7 +107,7 @@ jobs:
       # (`os-create-smoke.yml`) and the release smoke: it owns the publishable
       # population and writes the name → `file:` tarball map the next step pins.
       - name: Pack this checkout's publishable packages
-        run: node "$GITHUB_WORKSPACE/scripts/publish-smoke-pack.mjs" "$RUNNER_TEMP/tarballs"
+        run: node scripts/publish-smoke-pack.mjs "$RUNNER_TEMP/tarballs"
 
       # The generated project's dependency SPECS are left exactly as the
       # scaffolder wrote them — they are what is on trial. Resolution is
@@ -551,7 +552,7 @@ jobs:
             echo "::error::the scaffolded Dockerfile has no 'FROM <image> AS build' stage with a WORKDIR (read: base '${BUILD_BASE:-<none>}', workdir '${BUILD_DIR:-<none>}'), so the tarballs cannot be placed where its frozen install looks"
             exit 1
           fi
-          TARBALL_DIRS=$(grep -o "file:[^'\" ]*\.tgz" pnpm-lock.yaml | sed 's|^file:||; s|/[^/]*$||' | grep -v '^/' | sort -u)
+          TARBALL_DIRS=$(grep -o "file:[^'\" ()]*\.tgz" pnpm-lock.yaml | sed 's|^file:||; s|/[^/]*$||' | { grep -v '^/' || true; } | sort -u)
           if [ -z "$TARBALL_DIRS" ] || [ "$(printf '%s\n' "$TARBALL_DIRS" | wc -l)" -ne 1 ]; then
             echo "::error::expected the lockfile to name every packed tarball under one project-relative directory, read: '${TARBALL_DIRS:-<none>}'"
             exit 1
