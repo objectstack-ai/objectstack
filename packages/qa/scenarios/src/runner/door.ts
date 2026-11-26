@@ -61,7 +61,7 @@ import { basename, relative, resolve, sep } from 'node:path';
 
 import { z } from 'zod';
 
-import { askSkillsText, type AskSkillsBundle, type AskSkillsInfo } from './ask-skills.js';
+import { askSkillsText, readAskSkills, type AskSkillsBundle, type AskSkillsInfo } from './ask-skills.js';
 import { DOOR_RULES_CORPUS } from './door-rules-corpus.js';
 
 /** The variable naming the rules file (or {@link BUILTIN_DOOR_RULES}) when `--door-rules` is not given. */
@@ -275,6 +275,40 @@ export function omitSkills(bundle: AskSkillsBundle, omit: readonly string[]): { 
   return { bundle: { info: { dir: bundle.info.dir, skills }, files }, omitted: bundle.info.skills.filter((s) => drop.has(s.name)).map((s) => s.name) };
 }
 
+/** What a live driver is handed to build a door turn's arm from: `--door-skills`, `--door-skill-omit` and `--door-rules`. */
+export interface DoorArmOptions {
+  doorSkillsDir?: string;
+  doorSkillOmit?: readonly string[];
+  doorRules?: DoorRulesBundle;
+}
+
+/**
+ * Read a live driver's door arm once, when the driver is made: the skills
+ * bundle each door turn is given (less the omissions) and the arm the record
+ * states. Every live driver that takes a door reads it here, so the record's
+ * arm has one shape whichever driver ran it. An omission without a skills
+ * directory, or naming a skill it does not hold, is refused.
+ */
+export function readDoorArm(opts: DoorArmOptions): { skills: AskSkillsBundle | undefined; arm: DoorArm | undefined } {
+  if (opts.doorSkillOmit?.length && opts.doorSkillsDir === undefined) throw new Error('--door-skill-omit leaves skills out of --door-skills, which is not given');
+  let skills: AskSkillsBundle | undefined;
+  let omitted: string[] = [];
+  if (opts.doorSkillsDir !== undefined) {
+    const read = omitSkills(readAskSkills(opts.doorSkillsDir, '--door-skills'), opts.doorSkillOmit ?? []);
+    skills = read.bundle;
+    omitted = read.omitted;
+  }
+  const arm: DoorArm | undefined =
+    skills || opts.doorRules
+      ? {
+          ...(skills ? { skills: skills.info } : {}),
+          ...(omitted.length ? { skillsOmitted: omitted } : {}),
+          ...(opts.doorRules ? { rules: opts.doorRules.info } : {}),
+        }
+      : undefined;
+  return { skills, arm };
+}
+
 /** `skills: objectstack-data (sha256 …), less skill-b · rules: rules.json (sha256 …) 2 active, 1 omitted (set-x)`. */
 export function doorArmText(arm: DoorArm | undefined): string {
   const skills = arm?.skills
@@ -287,7 +321,11 @@ export function doorArmText(arm: DoorArm | undefined): string {
   return `${skills} · ${rules}`;
 }
 
-/** Why `driver` cannot run a door turn: door mode is driven by the live `claude` driver, or replayed. */
+/**
+ * Why `driver` cannot run a door turn: door mode is driven by the live
+ * `claude` driver or an external command on contract
+ * `objectstack-scenario-driver/2` (`drivers/external.ts`), or replayed.
+ */
 export function doorModeRefusal(driver: string): string {
-  return `door mode is driven by the live \`claude\` driver (or a replay of one): it hands the client the app's MCP draft door and no project, and ${driver} is not given a door`;
+  return `door mode is driven by the live \`claude\` driver or an external command that speaks \`objectstack-scenario-driver/2\` (or a replay of either): it hands the client the app's MCP draft door and no project, and ${driver} is not given a door`;
 }

@@ -42,7 +42,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 
 import { SCENARIO_TIERS, type ScenarioTier } from '../schema.js';
 import { placeAskSkills, readAskSkills, SKILL_TOOL, type AskSkillsBundle, type AskSkillsInfo } from './ask-skills.js';
-import { DOOR_WRITE_TOOLS, omitSkills, renderDoorRules, type DoorArm, type DoorRulesBundle } from './door.js';
+import { DOOR_WRITE_TOOLS, readDoorArm, renderDoorRules, type DoorArm, type DoorRulesBundle } from './door.js';
 import { flowRefusalOf } from '../score/scenario-run-grade.js';
 import type { ToolAnswer } from './app.js';
 import { noResult, runTurnProcess } from './drivers/process.js';
@@ -419,21 +419,9 @@ export class ClaudeCodeDriver implements AgentDriver {
     // Read before any process starts: a directory that holds no skill is refused, and every turn gets these bytes.
     this.askSkills = opts.askSkillsDir !== undefined ? readAskSkills(opts.askSkillsDir) : undefined;
     // Door mode's arm, read and judged here too: an omission naming no skill is refused before any process starts.
-    if (opts.doorSkillOmit?.length && opts.doorSkillsDir === undefined) throw new Error('--door-skill-omit leaves skills out of --door-skills, which is not given');
-    let omitted: string[] = [];
-    if (opts.doorSkillsDir !== undefined) {
-      const read = omitSkills(readAskSkills(opts.doorSkillsDir, '--door-skills'), opts.doorSkillOmit ?? []);
-      this.doorSkills = read.bundle;
-      omitted = read.omitted;
-    }
-    this.door =
-      this.doorSkills || opts.doorRules
-        ? {
-            ...(this.doorSkills ? { skills: this.doorSkills.info } : {}),
-            ...(omitted.length ? { skillsOmitted: omitted } : {}),
-            ...(opts.doorRules ? { rules: opts.doorRules.info } : {}),
-          }
-        : undefined;
+    const door = readDoorArm(opts);
+    this.doorSkills = door.skills;
+    this.door = door.arm;
     const ver = spawnSync(this.bin, ['--version'], { encoding: 'utf8', env: subscriptionOnlyEnv() });
     if (ver.status !== 0) throw new Error(`\`${this.bin} --version\` failed: is Claude Code installed? ${ver.stderr ?? ''}`.trim());
     this.version = ver.stdout.trim();
