@@ -3696,7 +3696,7 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
 
   /** Grid Features */
   resizable: z.boolean().optional().describe('Enable column resizing'),
-  compactToolbar: z.boolean().optional().describe('Collapse Group/Color/Density/Hide-fields into a single Display popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key.'),
+  compactToolbar: z.boolean().optional().describe('Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key.'),
 
   /** Selection */
   selection: SelectionConfigSchema.optional().describe('Row selection configuration'),

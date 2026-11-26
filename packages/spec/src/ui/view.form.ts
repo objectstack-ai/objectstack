@@ -106,7 +106,7 @@ export const viewForm = defineForm({
       fields: [
         { field: 'resizable', colSpan: 1, helpText: 'Enable column resizing' },
         // `striped` / `bordered` inputs removed with the keys (#7176 — pass-through-only, retired).
-        { field: 'compactToolbar', colSpan: 1, helpText: 'Collapse Group/Color/Density/Hide-fields into a single Display popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key.' },
+        { field: 'compactToolbar', colSpan: 1, helpText: 'Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key.' },
         { field: 'rowHeight', colSpan: 1, helpText: 'Row height / density setting' },
         {
           field: 'selection',

@@ -1282,7 +1282,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       compactToolbar: {
         label: "간소한 도구 모음",
-        helpText: "그룹/색상/밀도/필드 숨기기를 하나의 '표시' 팝오버로 접기. 기본값은 켜짐: 생략하거나 `true`이면 렌더러가 이 간소한 도구 모음을 그리고, `false`이면 컨트롤마다 버튼이 하나씩 있는 넓은 도구 모음을 그립니다. 간소한 도구 모음에는 새로 고침 버튼이 없으므로 `userActions.refresh`는 넓은 도구 모음에만 적용됩니다. 당겨서 새로 고침은 두 키 모두의 영향을 받지 않습니다."
+        helpText: "그룹/색상/밀도/필드 숨기기를 하나의 '보기 설정' 팝오버로 접기. 기본값은 켜짐: 생략하거나 `true`이면 렌더러가 이 간소한 도구 모음을 그리고, `false`이면 컨트롤마다 버튼이 하나씩 있는 넓은 도구 모음을 그립니다. 간소한 도구 모음에는 새로고침 버튼이 없으므로 `userActions.refresh`는 넓은 도구 모음에만 적용됩니다. 당겨서 새로고침은 두 키 모두의 영향을 받지 않습니다."
       },
       rowHeight: {
         label: "행 높이",
