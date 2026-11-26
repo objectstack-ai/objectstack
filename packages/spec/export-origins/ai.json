@@ -58,6 +58,7 @@
     "BlueprintViewSchema": "src/ai/solution-blueprint.zod.ts#BlueprintViewSchema (const)",
     "BlueprintWidgetCondition": "src/ai/solution-blueprint.zod.ts#BlueprintWidgetCondition (type)",
     "BlueprintWidgetConditionSchema": "src/ai/solution-blueprint.zod.ts#BlueprintWidgetConditionSchema (const)",
+    "BodyHeading": "src/ai/record-body-anchor.ts#BodyHeading (interface)",
     "BuildProgressFrame": "src/ai/build-progress.zod.ts#BuildProgressFrame (type)",
     "BuildProgressFrameSchema": "src/ai/build-progress.zod.ts#BuildProgressFrameSchema (const)",
     "BuildProgressPhase": "src/ai/build-progress.zod.ts#BuildProgressPhase (type)",
@@ -212,6 +213,14 @@
     "QueryDatasetInputSchema": "src/ai/dataset-tools.zod.ts#QueryDatasetInputSchema (const)",
     "QueryDatasetOutput": "src/ai/dataset-tools.zod.ts#QueryDatasetOutput (type)",
     "QueryDatasetOutputSchema": "src/ai/dataset-tools.zod.ts#QueryDatasetOutputSchema (const)",
+    "RECORD_CITATIONS_MAX": "src/ai/record-citation.zod.ts#RECORD_CITATIONS_MAX (const)",
+    "RECORD_CITATIONS_PART_TYPE": "src/ai/record-citation.zod.ts#RECORD_CITATIONS_PART_TYPE (const)",
+    "RecordCitation": "src/ai/record-citation.zod.ts#RecordCitation (type)",
+    "RecordCitationParsed": "src/ai/record-citation.zod.ts#RecordCitationParsed (type)",
+    "RecordCitationSchema": "src/ai/record-citation.zod.ts#RecordCitationSchema (const)",
+    "RecordCitations": "src/ai/record-citation.zod.ts#RecordCitations (type)",
+    "RecordCitationsParsed": "src/ai/record-citation.zod.ts#RecordCitationsParsed (type)",
+    "RecordCitationsSchema": "src/ai/record-citation.zod.ts#RecordCitationsSchema (const)",
     "RecordContextBody": "src/ai/record-context-tools.zod.ts#RecordContextBody (type)",
     "RecordContextBodyParsed": "src/ai/record-context-tools.zod.ts#RecordContextBodyParsed (type)",
     "RecordContextBodySchema": "src/ai/record-context-tools.zod.ts#RecordContextBodySchema (const)",
@@ -286,8 +295,10 @@
     "deriveAiFaceName": "src/ai/face-name.ts#deriveAiFaceName (function)",
     "getDatasetToolJsonSchemas": "src/ai/dataset-tools.zod.ts#getDatasetToolJsonSchemas (function)",
     "getRecordContextToolJsonSchemas": "src/ai/record-context-tools.zod.ts#getRecordContextToolJsonSchemas (function)",
+    "headingsOf": "src/ai/record-body-anchor.ts#headingsOf (function)",
     "scopesToAgentPermissionSets": "src/ai/mcp.zod.ts#scopesToAgentPermissionSets (function)",
     "skillForm": "src/ai/skill.metadata-form.ts#skillForm (const)",
+    "stripBodyTags": "src/ai/record-body-anchor.ts#stripBodyTags (function)",
     "toolForm": "src/ai/tool.metadata-form.ts#toolForm (const)"
   }
 }
