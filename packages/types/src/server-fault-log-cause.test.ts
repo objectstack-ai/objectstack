@@ -151,6 +151,22 @@ describe('a cause is redacted like the error', () => {
         for (const value of ['hunter2', 'sk-live-1', 't-1']) expect(chain[0].message).not.toContain(value);
     });
 
+    it('by whole words, as the logger matches its redact list', () => {
+        const [line] = faultCauseChain(withCause('w', {
+            keys: ['a'], tokens: 3, monkey: 'm', keyword: 'k', secretary: 's',
+            apiKey: 'x', apikey: 'x', refresh_tokens: ['x'], password: 'x',
+        }));
+        expect(JSON.parse(line.message)).toEqual({
+            keys: ['a'], tokens: 3, monkey: 'm', keyword: 'k', secretary: 's',
+            apiKey: '***REDACTED***', apikey: '***REDACTED***', refresh_tokens: '***REDACTED***', password: '***REDACTED***',
+        });
+    });
+
+    it('inside an array in an object cause', () => {
+        const [line] = faultCauseChain(withCause('w', { attempts: [{ host: 'db-1', password: 'x' }, { host: 'db-2' }] }));
+        expect(JSON.parse(line.message)).toEqual({ attempts: [{ host: 'db-1', password: '***REDACTED***' }, { host: 'db-2' }] });
+    });
+
     it('on the console fallback line', () => {
         const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
         try {

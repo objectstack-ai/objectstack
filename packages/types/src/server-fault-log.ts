@@ -305,10 +305,11 @@ export const FAULT_CAUSE_DEPTH_LIMIT = 5;
  * A link whose read throws ends the chain in a marker link too.
  *
  * A non-Error object cause is serialized with `isRedacted` applied key by
- * key, the same rule a logger applies to its own fields. The default is the
- * logger's default redact list (`LoggerConfig.redact`), matched on the
- * lower-cased name, so the console fallback, which has no logger config,
- * errs towards withholding.
+ * key, at every depth. The default is `ObjectLogger`'s own rule over its
+ * default redact list (`LoggerConfig.redact`'s default words, whole-word
+ * matched). ⚠️ Only the default words: the console fallback has no logger
+ * config, so a host's own `redact` list is not applied to the line it writes;
+ * a door handed a configured logger gets that logger's list instead.
  *
  * ⛔ Operator-only. It feeds the log line; no door puts it on the wire, and a
  * 5xx answer withholds even the wrapper's own sentence.
@@ -360,12 +361,84 @@ function causeOf(value: unknown): unknown {
     }
 }
 
-/** `LoggerConfig.redact`'s default words (`@objectstack/spec` `logging.zod.ts`). */
+/**
+ * `LoggerConfig.redact`'s default words (`@objectstack/spec` `logging.zod.ts`),
+ * which `ObjectLogger` also applies when it is given none.
+ */
 const DEFAULT_REDACTED_WORDS = ['password', 'token', 'secret', 'key'] as const;
 
+/**
+ * The default field-name rule, matched the way `ObjectLogger` matches its
+ * redact list: on word boundaries, the maintainer's ruling on #5573, so a bare
+ * `keys` / `tokens` or a `monkey` / `keyword` / `secretary` is not withheld,
+ * while `apiKey`, `refresh_tokens` and `accesstoken` are.
+ *
+ * A copy of `@objectstack/core`'s matcher (`tokenizeFieldName` and
+ * `fieldWordsMatchPattern` in `logger.ts`), for the same reason
+ * {@link faultCauseChain} is one; `logger-error-cause.test.ts` there runs a
+ * fixture of these spellings through both and fails on any drift.
+ */
 function isDefaultRedactedFieldName(key: string): boolean {
-    const lower = key.toLowerCase();
-    return DEFAULT_REDACTED_WORDS.some((word) => lower.includes(word));
+    const nameWords = tokenizeFieldName(key);
+    return DEFAULT_REDACTED_WORDS.some((word) => fieldWordsMatchPattern(nameWords, [word]));
+}
+
+function tokenizeFieldName(name: string): string[] {
+    return name
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+        .replace(/([a-zA-Z])([0-9])/g, '$1 $2')
+        .split(/[^A-Za-z0-9]+/)
+        .filter(Boolean)
+        .map((word) => word.toLowerCase());
+}
+
+function singularizeWord(word: string): string {
+    if (/(?:ss|us|is)$/.test(word)) return word;
+    if (/(?:ch|sh|s|x|z)es$/.test(word)) return word.slice(0, -2);
+    if (/[a-z0-9]s$/.test(word)) return word.slice(0, -1);
+    return word;
+}
+
+/** Glued qualifiers that mark the secret sense: `apikey`, `accesstoken`, `clientsecret`. */
+const CONCATENATED_SECRET_QUALIFIERS = new Set([
+    'access', 'account', 'admin', 'api', 'app', 'auth', 'bearer', 'client', 'csrf', 'db', 'database',
+    'encryption', 'id', 'jwt', 'master', 'oauth', 'private', 'public', 'refresh', 'root', 'secret',
+    'service', 'session', 'shared', 'sign', 'signing', 'ssh', 'token', 'user', 'webhook', 'xsrf',
+]);
+
+function isQualifiedConcatenation(word: string, redactWord: string): boolean {
+    for (const base of [word, singularizeWord(word)]) {
+        if (base.length <= redactWord.length || !base.endsWith(redactWord)) continue;
+        if (CONCATENATED_SECRET_QUALIFIERS.has(base.slice(0, base.length - redactWord.length))) return true;
+    }
+    return false;
+}
+
+function containsWordRun(words: string[], run: string[]): boolean {
+    for (let i = 0; i + run.length <= words.length; i++) {
+        if (run.every((word, offset) => words[i + offset] === word)) return true;
+    }
+    return false;
+}
+
+function fieldWordsMatchPattern(nameWords: string[], patternWords: string[]): boolean {
+    if (patternWords.length === 0 || nameWords.length === 0) return false;
+    if (patternWords.length > 1) {
+        const glued = patternWords.join('');
+        return (
+            containsWordRun(nameWords, patternWords) ||
+            nameWords.some((word) => word === glued || singularizeWord(word) === glued)
+        );
+    }
+    const redactWord = patternWords[0];
+    const isCompound = nameWords.filter((word) => /[a-z]/.test(word)).length > 1;
+    return nameWords.some(
+        (word) =>
+            word === redactWord ||
+            (isCompound && singularizeWord(word) === redactWord) ||
+            isQualifiedConcatenation(word, redactWord),
+    );
 }
 
 function causeLine(cause: unknown, isRedacted: (key: string) => boolean): FaultCauseLine {

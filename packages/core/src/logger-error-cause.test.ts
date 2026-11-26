@@ -132,6 +132,15 @@ describe('parity — the logger and the fault log render one shape', () => {
         ['a string cause', () => new Error('w', { cause: 'socket hang up' })],
         ['an object cause', () => new Error('w', { cause: { code: 'ECONNRESET' } })],
         ['a cause redacted like the error', () => new Error('w', { cause: { code: 'E1', password: 'p', apiKey: 'k' } })],
+        ['field names under the default redact words, whole-word matched', () => new Error('w', {
+            cause: {
+                keys: ['a'], tokens: 3, monkey: 'm', keyword: 'k', secretary: 's', tokenizer: 't',
+                apiKey: 'x', apikey: 'x', accesstoken: 'x', refresh_tokens: ['x'], clientSecret: 'x', password: 'x', API_KEY: 'x',
+            },
+        })],
+        ['an array inside an object cause', () => new Error('w', {
+            cause: { code: 'E3', attempts: [{ host: 'db-1', password: 'x' }, { host: 'db-2', authToken: 'y' }] },
+        })],
         ['an object cause that cannot be serialized', () => {
             const loop: Record<string, unknown> = { code: 'E2' };
             loop.self = loop;

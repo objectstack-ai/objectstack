@@ -201,7 +201,9 @@ const CAUSE_DEPTH_LIMIT = 5;
  * fault log prints on its console fallback. A copy rather than an import:
  * this entry is browser-safe and `@objectstack/client` bundles it without
  * depending on `@objectstack/types`, whose root entry would come along with
- * `@objectstack/spec` behind it. `logger-error-cause.test.ts` pins the two to one output.
+ * `@objectstack/spec` behind it. `logger-error-cause.test.ts` pins the two to one output,
+ * the field-name rule for object causes included (the types copy carries this
+ * file's whole-word matcher for its default list).
  */
 function renderError(
     error: Error,
