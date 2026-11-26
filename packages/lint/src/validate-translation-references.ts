@@ -501,6 +501,12 @@ interface ObjectFacts {
    * only to say so.
    */
   relatedListHidden: Set<string>;
+  /**
+   * The lists whose label (from the owner or a placement) a `.custom`
+   * arrangement entry replaced with none: the tab shows, untitled by any
+   * `label` — read only to name the arrangement in the finding.
+   */
+  relatedListStripped: Set<string>;
 }
 
 /** Everything a `flows.<name>.screens.<node_id>` key may legally name. */
@@ -671,6 +677,7 @@ function emptyFacts(): ObjectFacts {
     relatedListLabels: new Set(),
     relatedListNames: new Set(),
     relatedListHidden: new Set(),
+    relatedListStripped: new Set(),
   };
 }
 
@@ -1451,22 +1458,32 @@ function buildUniverse(stack: AnyRec): Universe {
     // `relatedListTitle`, and `{ list, hidden: true }` leaves no tab, whatever
     // label the owner or a placement gave the lists it covers. Lists it does
     // not cover keep what they had.
+    //
+    // Two passes per arrangement, as the registry reads one: it collects the
+    // arrangement's entries first and only then drops what they cover from the
+    // tab list steps 1–2 gave, so one entry never strips a label or a `hidden`
+    // a sibling entry of the SAME arrangement wrote, in either order.
     for (const extension of extensions) {
-      for (const entry of extension.relatedListArrangement ?? []) {
-        const list = relatedListEntryName(entry);
-        if (!list) continue;
+      const arrangement = (extension.relatedListArrangement ?? [])
+        .map((entry) => ({ entry, list: relatedListEntryName(entry) }))
+        .filter((e): e is { entry: unknown; list: string } => typeof e.list === 'string' && e.list !== '');
+      for (const { list } of arrangement) {
         facts.relatedListNames.add(list);
         for (const labelled of [...facts.relatedListLabels]) {
-          if (relatedListNameCovers(list, labelled)) facts.relatedListLabels.delete(labelled);
-        }
-        if (relatedListEntryHidden(entry)) {
-          facts.relatedListHidden.add(list);
-          continue;
+          if (!relatedListNameCovers(list, labelled)) continue;
+          facts.relatedListLabels.delete(labelled);
+          facts.relatedListStripped.add(labelled);
         }
         for (const hidden of [...facts.relatedListHidden]) {
           if (relatedListNameCovers(list, hidden)) facts.relatedListHidden.delete(hidden);
         }
-        if (isRec(entry) && typeof entry.label === 'string' && entry.label.length > 0) facts.relatedListLabels.add(list);
+      }
+      for (const { entry, list } of arrangement) {
+        if (relatedListEntryHidden(entry)) facts.relatedListHidden.add(list);
+        else if (isRec(entry) && typeof entry.label === 'string' && entry.label.length > 0) {
+          facts.relatedListLabels.add(list);
+          facts.relatedListStripped.delete(list);
+        }
       }
     }
   }
@@ -2184,7 +2201,14 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             orphan(listWhere, listPath,
               `Related list "${listName}" of object "${objectName}" is hidden by the \`.custom\` ` +
               `arrangement (\`hidden: true\`), so no tab shows a title from this key.`,
-              `Drop this key, or show the tab (drop \`hidden\`) and give the entry a \`label\`.`);
+              `Drop this key, or show the tab (drop \`hidden\`) with the owner's \`label\` on the entry.`);
+            continue;
+          }
+          if (facts.relatedListStripped.has(listName)) {
+            orphan(listWhere, listPath,
+              `Related list "${listName}" of object "${objectName}" carries no \`label\` in the \`.custom\` ` +
+              `arrangement, which replaces the owner's entry, so no title reads this key.`,
+              `Drop this key, or re-state the arrangement's entry with the owner's \`label\` ({ list, label }).`);
             continue;
           }
           const named = facts.relatedListNames.has(listName);

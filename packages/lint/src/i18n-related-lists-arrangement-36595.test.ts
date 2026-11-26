@@ -49,7 +49,10 @@ describe('validateTranslationReferences — _relatedLists under a `.custom` arra
     for (const restated of ['contact', { list: 'contact' }, { list: 'contact', hidden: false }]) {
       const findings = judge([{ extend: 'account', relatedLists: [restated] }], { contact: { label: '联系人' } });
       expect(findings.map((f) => f.path), JSON.stringify(restated)).toEqual([KEY('contact')]);
-      expect(findings[0].message, JSON.stringify(restated)).toContain('carries no `label`');
+      expect(findings[0].message, JSON.stringify(restated)).toContain('carries no `label` in the `.custom` arrangement');
+      expect(findings[0].hint, JSON.stringify(restated)).toContain("owner's `label`");
+      expect(findings[0].message.length).toBeLessThanOrEqual(200);
+      expect(findings[0].hint.length).toBeLessThanOrEqual(200);
     }
   });
 
@@ -62,6 +65,19 @@ describe('validateTranslationReferences — _relatedLists under a `.custom` arra
     expect(hidden[0].message).toContain('hidden');
     const bare = judge([{ extend: 'account', relatedLists: ['event'] }], { 'event.related_to': { label: '会议' } });
     expect(bare.map((f) => f.path)).toEqual([KEY('event.related_to')]);
+  });
+
+  it('one arrangement entry never strips what a sibling entry of the same arrangement wrote, in either order', () => {
+    // The registry collects the arrangement's entries first, then drops what
+    // they cover from the owner's list: a bare child beside its labelled
+    // dotted list leaves that label served.
+    for (const arrangement of [[{ list: 'event.related_to', label: 'Meetings' }, 'event'], ['event', { list: 'event.related_to', label: 'Meetings' }]]) {
+      expect(judge([{ extend: 'account', relatedLists: arrangement }], { 'event.related_to': { label: '会议' } }), JSON.stringify(arrangement))
+        .toEqual([]);
+    }
+    // A sibling that would cancel a `hidden` entry is a list both shown and
+    // hidden in one arrangement, which the object schema refuses at save
+    // (`refuseContradictoryRelatedListEntries`), so it has no pin here.
   });
 
   it('applies the arrangement after every placement, whatever the extensions\' order', () => {

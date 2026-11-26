@@ -14,11 +14,13 @@ export const entry: SemanticMigration = {
     'translation.objects.<object>._relatedLists.<list> — a translated record-page tab title, in a stack\'s '
     + 'translations, over a list the object\'s owner labels but the paired .custom package\'s relatedLists '
     + 're-states as { list, hidden: true }, as a bare name, or as an entry with no label (a bare child name '
-    + 'such as event covers every list of that child, event.related_to included)',
+    + 'such as event covers every list of that child, event.related_to included, so a labelled { list: event, '
+    + 'label } also leaves the owner\'s event.related_to with no label)',
   replacement:
     'nothing, where the tab should stay hidden or keep the child lookup field\'s relatedListTitle: drop the key. '
-    + 'Where the tab should keep a title of its own, give the .custom arrangement\'s entry a label '
-    + '({ list, label }) and keep the key, which then translates that label.',
+    + 'Where the tab should keep the owner\'s translated title, re-state the .custom arrangement\'s entry with the '
+    + 'owner\'s own label ({ list, label }) and keep the key: an object read translates a label only while it still '
+    + 'equals the packaged one.',
   reason:
     'The registry applies the .custom arrangement (ADR-0146 D10) after the owner\'s tab list and every place '
     + 'entry, and each of its entries replaces every entry it covers. A hidden entry leaves no tab, and a bare or '
@@ -30,5 +32,5 @@ export const entry: SemanticMigration = {
   acceptanceCriteria:
     'Run objectstack validate: no translation-target-unknown finding names an objects._relatedLists key. For '
     + 'each key the finding named, either the key is gone, or the .custom arrangement\'s entry for that list '
-    + 'carries a label and the record page shows the translated title in that locale.',
+    + 'carries the owner\'s label and the record page shows the translated title in that locale.',
 };
