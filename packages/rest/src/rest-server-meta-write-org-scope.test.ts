@@ -27,6 +27,9 @@ import * as metadataCore from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { RestServer } from './rest-server.js';
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/objectql';
+
 const META = '/api/v1/meta';
 const ORG = 'org_alpha';
 

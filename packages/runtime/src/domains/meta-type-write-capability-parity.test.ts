@@ -17,6 +17,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from '@objectstack/rest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
+
 const WAREHOUSE = { name: 'warehouse', label: 'Warehouse', driver: 'postgres', config: { host: 'warehouse-db.fixture.internal', port: 5432 } };
 const WAREHOUSE_EDIT = { ...WAREHOUSE, label: 'Warehouse (edited)' };
 const LEADS_VIEW = { name: 'all_leads', label: 'All leads', object: 'lead', columns: ['name'] };

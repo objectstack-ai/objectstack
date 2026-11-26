@@ -51,6 +51,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { META_URL_TO_SINGULAR } from '@objectstack/spec/meta-spelling';
 import { RestServer } from './rest-server.js';
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/objectql';
+
 const META = '/api/v1/meta';
 const ORG = 'org_alpha';
 

@@ -42,6 +42,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
+
 /** An object schema carrying a field a restricted caller would never be served. */
 const STORED_SCHEMA = {
     name: 'account',
