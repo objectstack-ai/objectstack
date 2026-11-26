@@ -761,6 +761,9 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
       return Array.isArray(value) ? value.map(one).join(', ') : one(value);
     };
     const exclude = Object.keys(ask.draft);
+    // The record the draft would leave: the merge the collector judges its
+    // rows on. A row a refusal names carries it too (objectstack#37270).
+    const drafted = { ...data, ...ask.draft };
     return (
       <RequiredFieldsDialog
         open
@@ -777,7 +780,7 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
           const def = objectFields?.[name] as Record<string, unknown> | undefined;
           if (!def || typeof def !== 'object' || exclude.includes(name)) return null;
           if (!hasFieldEditWidget(def.type as string | undefined) || !fillable(name, def)) return null;
-          return label({ name, def: { name, ...def } });
+          return label({ name, def: { name, ...def }, record: drafted });
         }}
         labelOf={(name) => (objectFields?.[name] ? labelForField(name) : undefined)}
         // Cancel writes nothing and leaves the edit session as it was: the
