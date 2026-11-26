@@ -405,6 +405,49 @@ describe('KnowledgeTursoPlugin — the store URL from settings (urlFromSettings)
     expect(createClient).not.toHaveBeenCalled();
   });
 
+  it('an auth token with a control character never reaches the libSQL client, saved or given; the reason never quotes it', async () => {
+    const createClient = vi.fn((): never => {
+      throw new Error('refused by the double');
+    });
+    vi.doMock('@libsql/client', () => ({ createClient }));
+    vi.resetModules();
+    const { KnowledgeTursoPlugin: Fresh, acceptsAuthToken } = await import('../plugin.js');
+    const root = tempDir();
+    const inside = `file:${join(dataDirectoryOf(root), 'k.db')}`;
+    const refused = [`secret${String.fromCharCode(0)}tail`, 'secret-tail\n', 'secret\r\ntail', `secret${String.fromCharCode(0x7f)}tail`];
+    for (const token of refused) {
+      expect(acceptsAuthToken(token)).toBe(false);
+      // The settings door, on a remote URL and on a file; then the plugin option.
+      for (const url of ['libsql://tenant.example.turso.io', inside]) {
+        const settings = settingsOf({ turso_url: url, turso_auth_token: token });
+        const host = contextOf({ settings });
+        await boot(new Fresh({ projectRoot: root, env: {}, urlFromSettings: true }), host, settings);
+        expect(await host.adapters.get('turso')!.healthCheck!()).toMatchObject({ ok: false });
+        expect(host.logs.some(([level, m]) => level === 'warn' && m.includes('auth token') && m.includes('control character'))).toBe(true);
+        expect(host.logs.some(([, m]) => m.includes('secret'))).toBe(false);
+      }
+      const host = contextOf();
+      await boot(new Fresh({ url: 'libsql://tenant.example.turso.io', authToken: token, env: {} }), host);
+      expect(await host.adapters.get('turso')!.healthCheck!()).toMatchObject({ ok: false });
+      expect(host.logs.some(([level, m]) => level === 'warn' && m.includes('auth token'))).toBe(true);
+    }
+    expect(createClient).not.toHaveBeenCalled();
+    expect(existsSync(dataDirectoryOf(root))).toBe(false);
+
+    // Controls: a token as tokens are, and one with a percent escape (the
+    // client never decodes this option, so `%00` is three characters), reach
+    // the client as written.
+    for (const token of ['eyJhbGciOiJFZERTQSJ9.e30.c2ln', 'a%00b']) {
+      expect(acceptsAuthToken(token)).toBe(true);
+      const settings = settingsOf({ turso_url: 'libsql://tenant.example.turso.io', turso_auth_token: token });
+      const host = contextOf({ settings });
+      await boot(new Fresh({ projectRoot: root, env: {}, urlFromSettings: true }), host, settings);
+      expect(createClient).toHaveBeenLastCalledWith(expect.objectContaining({ authToken: token }));
+    }
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(acceptsAuthToken(undefined)).toBe(true);
+  });
+
   it('a settings read that fails opens nothing: the store says why', async () => {
     const root = tempDir();
     const settings = settingsOf({}, new Error('database is locked'));

@@ -31,7 +31,10 @@ export interface KnowledgeTursoPluginOptions {
    * project's `.objectstack/data/`. Never the platform's own database file.
    */
   url?: string;
-  /** The auth token of a `libsql://` URL. */
+  /**
+   * The auth token of a `libsql://` URL. One with a control character in it
+   * (a pasted line break, a NUL byte) is refused before it reaches the client.
+   */
   authToken?: string;
   /**
    * A libSQL client the store uses as it is (the plugin neither configures nor
@@ -119,6 +122,23 @@ function carriesControlCharacter(url: string): boolean {
     CONTROL_CHARACTER.test(url) ||
     CONTROL_CHARACTER.test(url.replace(PERCENT_ESCAPE, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16))))
   );
+}
+
+/**
+ * Why a store whose auth token carries a control character has no database.
+ * The token is the second value an operator's settings hand the libSQL client
+ * (a `file:` URL passes it into the native open, a remote one into a request
+ * header), and no token has a control character in it: a pasted line break is
+ * the usual one. It is read as written: the client percent-decodes a URL,
+ * never this option. The token is a secret, so the reason never quotes it.
+ */
+const AUTH_TOKEN_CONTROL_CHARACTER =
+  'its auth token (the knowledge setting `turso_auth_token`, or the plugin option `authToken`) carries a NUL ' +
+  'byte, a line break or another control character, which no token has. Save the token again without it.';
+
+/** Whether `authToken` is one the libSQL client may be handed: absent, or free of control characters. */
+export function acceptsAuthToken(authToken: string | undefined): boolean {
+  return authToken === undefined || !CONTROL_CHARACTER.test(authToken);
 }
 
 /** The bound on one request to a remote database (`requestTimeoutMs`). */
@@ -467,6 +487,10 @@ export class KnowledgeTursoPlugin implements Plugin {
   ): Promise<void> {
     if (target.url === undefined) {
       await this.register(ctx, svc, { unavailable: target.reason });
+      return;
+    }
+    if (!acceptsAuthToken(authToken)) {
+      await this.register(ctx, svc, { unavailable: AUTH_TOKEN_CONTROL_CHARACTER });
       return;
     }
     const opened = await openClient(target.url, { ...this.opts, authToken });

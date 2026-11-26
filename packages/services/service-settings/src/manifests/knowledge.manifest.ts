@@ -20,9 +20,11 @@ import type { SettingsActionHandler } from '../settings-service.types.js';
  *
  * Only `turso` reads this namespace, and only `turso_url` and
  * `turso_auth_token`, when the runtime mounts it for `requires:
- * ['knowledge']` (#37102): a `file:` URL saved there is held to the project's
- * `.objectstack/data/` directory and a URL with a NUL byte is refused, before
- * it reaches the libSQL client. Every other adapter is registered by the
+ * ['knowledge']` (#37102): a `file:` URL saved there is held to the data
+ * directory of the platform's state directory (`<OS_HOME>/data/`, else the
+ * project's `.objectstack/data/`), and a URL with a control character in it,
+ * written out or percent-encoded, or a token with one, is refused before it
+ * reaches the libSQL client. Every other adapter is registered by the
  * deployment beside the knowledge service itself.
  *
  * As with the AI manifest, the real adapter wiring happens in the
