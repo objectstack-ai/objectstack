@@ -411,7 +411,8 @@ export interface LifecycleFloorViolation {
 export interface LifecycleSweepEntry {
   object: string;
   class: string;
-  policy: 'ttl' | 'retention' | 'rotation' | 'rotation-fallback' | 'archive';
+  /** `expiry`: [ADR-0154 D8] a sealed object's whole checkpoints, through {@link LifecycleSealedExpiry}. */
+  policy: 'ttl' | 'retention' | 'rotation' | 'rotation-fallback' | 'archive' | 'expiry';
   cutoff: string;
   /** `undefined` when the driver doesn't report a count. */
   deleted?: number;
@@ -522,6 +523,45 @@ export type LifecycleReapGuard = (
   rows: Array<Record<string, unknown>>,
 ) => Promise<Array<string | number>>;
 
+/**
+ * [ADR-0154 D8] What the sweep asks the sealed-object expiry for, once per
+ * sweep and policy of an object that declares `lifecycle.seal`.
+ */
+export interface LifecycleSealedExpiryRequest {
+  readonly object: string;
+  /** The policy whose window expires the rows. */
+  readonly policy: 'archive.keep' | 'retention.maxAge' | 'ttl.expireAfter';
+  /** Its duration literal as this sweep applies it (`'7y'`): what the expiry amendment signs. */
+  readonly policyValue: string;
+  /** Rows of windows that ended at or before this instant may expire (ISO-8601, UTC). */
+  readonly cutoff: string;
+}
+
+/** One chain's expiry, planned and signed: the rows the sweep deletes, then {@link complete}. */
+export interface LifecycleSealedExpiryRun {
+  /** The chain, for the report. */
+  readonly chain: string;
+  /** Exactly the rows the removed checkpoints list. The sweep deletes these and no other. */
+  readonly rowIds: readonly string[];
+  /** Called once every listed row is gone from every store: removes the checkpoints and their seeds. */
+  complete(): Promise<void>;
+}
+
+/**
+ * [ADR-0154 D8] The expiry of a sealed object, the seam beside
+ * {@link LifecycleReapGuard}. A sealed object's rows never go by a row-granular
+ * cutoff, which would cut a sealed window in half and make an honest expiry
+ * read as `missing`. The sealer's owner (`@objectstack/plugin-audit`) answers
+ * which whole checkpoints of each chain have expired and writes the signed
+ * `expiry` amendment for them before it answers; the sweep then deletes
+ * exactly the rows they list and only then calls {@link LifecycleSealedExpiryRun.complete}.
+ * A plan that throws keeps every row for the next sweep, as a vetoing reap
+ * guard does.
+ */
+export interface LifecycleSealedExpiry {
+  plan(request: LifecycleSealedExpiryRequest): Promise<readonly LifecycleSealedExpiryRun[]>;
+}
+
 export class LifecycleService {
   private readonly now: () => number;
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -544,6 +584,10 @@ export class LifecycleService {
    * {@link registerRetentionFloor} keys by registrar rather than overwriting.
    */
   private readonly reapGuards = new Map<string, LifecycleReapGuard[]>();
+  /** [ADR-0154 D8] The one sealed-object expiry, when the sealer's owner registered it. */
+  private sealedExpiry: LifecycleSealedExpiry | undefined;
+  /** [ADR-0154 D8] Sealed objects already said about, by cause, so a standing state is said once. */
+  private readonly sealedSaid = new Set<string>();
   /**
    * [#5195] Registered retention floors, keyed `object::policy::declaredBy` so
    * a re-registration replaces rather than accumulates, while two independent
@@ -855,6 +899,33 @@ export class LifecycleService {
       return;
     }
     if (!guards.includes(guard)) guards.push(guard);
+  }
+
+  /**
+   * [ADR-0154 D8] Register the expiry every object declaring `lifecycle.seal`
+   * expires through. One slot: the sealer's owner registers it, and a later
+   * registration replaces it (a re-initialised plugin). Answers the
+   * unregistration, which clears the slot only while it still holds this one.
+   *
+   * Until one is registered, a sealed object's expiring rows are KEPT: the
+   * sweep never deletes a sealed row by its own cutoff (see {@link sweepSealed}).
+   */
+  registerSealedExpiry(expiry: LifecycleSealedExpiry): () => void {
+    if (!expiry || typeof expiry.plan !== 'function') {
+      throw new Error('[lifecycle] registerSealedExpiry requires an object with a plan(request) method');
+    }
+    this.sealedExpiry = expiry;
+    this.sealedSaid.clear();
+    return () => {
+      if (this.sealedExpiry === expiry) this.sealedExpiry = undefined;
+    };
+  }
+
+  /** Say a standing sealed-object state once, at `warn`; a changed one speaks again. */
+  private saySealedOnce(cause: string, message: string): void {
+    if (this.sealedSaid.has(cause)) return;
+    this.sealedSaid.add(cause);
+    this.opts.logger.warn(message);
   }
 
   /** Snapshot of the guards governing `object`, in registration order — a copy,
@@ -1482,6 +1553,8 @@ export class LifecycleService {
     if (lc.archive) {
       return this.archiveObject(engine, obj, lc, report);
     }
+    // [ADR-0154 D8] A sealed object expires by whole checkpoints, never by a row cutoff.
+    if (lc.seal) return this.reapSealed(engine, obj, lc, report);
 
     const outcomes: Array<number | undefined> = [];
     // Governance overrides (P4): a configured window beats the declared one.
@@ -1580,6 +1653,149 @@ export class LifecycleService {
     }
 
     return outcomes;
+  }
+
+  /**
+   * [ADR-0154 D8] The reap of a sealed object that declares no archive: each
+   * declared window (`ttl` on `created_at`, `retention`) expires whole
+   * checkpoints through {@link sweepSealed}. The spec refuses every other
+   * policy beside `seal` (`onlyWhen`, a `ttl` on another field, rotation).
+   *
+   * A settings override of the window applies as on any object, through the
+   * same floors, and the value applied is the one the amendment signs. A
+   * tenant-scoped override does not: a sealed chain's expiry is signed with one
+   * policy value per sweep, so it is said once and the global window stands.
+   */
+  private async reapSealed(
+    engine: LifecycleEngineLike,
+    obj: LifecycleObjectLike,
+    lc: Lifecycle,
+    report: LifecycleSweepReport,
+  ): Promise<Array<number | undefined>> {
+    const object = obj.name;
+    const ov = this.governance.overrides[object] ?? {};
+    const legs: Array<{
+      policy: LifecycleSealedExpiryRequest['policy'];
+      kind: 'ttl' | 'retention';
+      key: 'expireAfter' | 'maxAge';
+      declared: string;
+    }> = [];
+    if (lc.ttl) legs.push({ policy: 'ttl.expireAfter', kind: 'ttl', key: 'expireAfter', declared: lc.ttl.expireAfter });
+    if (lc.retention) legs.push({ policy: 'retention.maxAge', kind: 'retention', key: 'maxAge', declared: lc.retention.maxAge });
+    const outcomes: Array<number | undefined> = [];
+    for (const leg of legs) {
+      const tenants = (this.governance.tenantOverrides.get(object) ?? []).filter((t) => typeof t[leg.key] === 'string');
+      if (tenants.length > 0) {
+        this.saySealedOnce(
+          `tenant-override:${object}:${leg.key}`,
+          `[lifecycle] ${object} declares lifecycle.seal, so its tenant-scoped ${leg.key} override(s) ` +
+            `(${tenants.map((t) => t.tenantId).join(', ')}) do not apply: a sealed chain expires by whole checkpoints ` +
+            `under one signed policy value, and the global ${leg.policy} window stands for every organization.`,
+        );
+      }
+      const override = ov[leg.key];
+      const windowMs = this.effectiveWindowMs(override, parseLifecycleDuration(leg.declared), object, leg.kind, 'global', report);
+      outcomes.push(
+        await this.sweepSealed(
+          engine,
+          obj,
+          lc,
+          { policy: leg.policy, policyValue: appliedLiteral(override, leg.declared, windowMs), cutoffMs: this.now() - windowMs },
+          report,
+          null,
+        ),
+      );
+    }
+    return outcomes;
+  }
+
+  /**
+   * [ADR-0154 D8] One policy's expiry of a sealed object. The registered
+   * {@link LifecycleSealedExpiry} plans it and signs each chain's `expiry`
+   * amendment first; then exactly the rows each run lists are deleted — from
+   * `stores` (the hot store and the archive, by id) when the object archives,
+   * else through the engine like any reap, its guards asked — and only then
+   * is the run completed, which removes its checkpoints and seeds. A run whose
+   * rows are not all gone (a guard kept one) is not completed: the next sweep
+   * resumes it.
+   *
+   * No expiry registered ⇒ nothing is deleted, and that is said once.
+   */
+  private async sweepSealed(
+    engine: LifecycleEngineLike,
+    obj: LifecycleObjectLike,
+    lc: Lifecycle,
+    leg: { policy: LifecycleSealedExpiryRequest['policy']; policyValue: string; cutoffMs: number },
+    report: LifecycleSweepReport,
+    stores: readonly ArchiveCapableDriver[] | null,
+  ): Promise<number> {
+    const object = obj.name;
+    const cutoff = new Date(leg.cutoffMs).toISOString();
+    const expiry = this.sealedExpiry;
+    if (!expiry) {
+      if (!report.skipped.some((s) => s.object === object && s.reason === 'seal-expiry-pending')) {
+        report.skipped.push({ object, reason: 'seal-expiry-pending' });
+      }
+      this.saySealedOnce(
+        `pending:${object}`,
+        `[lifecycle] ${object} declares lifecycle.seal, but no sealed-object expiry is registered — the audit ` +
+          `sealer does not run in this process — so its rows past ${leg.policy} ${leg.policyValue} are KEPT: a ` +
+          'sealed row is never deleted by a row cutoff, which would read as missing in os audit verify. Fix: ' +
+          'compose AuditPlugin with a crypto provider so its sealer runs, or remove lifecycle.seal.',
+      );
+      return 0;
+    }
+    const runs = await expiry.plan({ object, policy: leg.policy, policyValue: leg.policyValue, cutoff });
+    let deleted = 0;
+    for (const run of runs) {
+      // [#4747] Leg boundary: a run not yet begun is the next sweep's; its amendment is already signed and it resumes.
+      if (this.abort.aborted) break;
+      if (!(await this.deleteSealedRows(engine, object, run.rowIds, stores))) continue;
+      await run.complete();
+      deleted += run.rowIds.length;
+    }
+    report.swept.push({ object, class: lc.class, policy: 'expiry', cutoff, deleted });
+    return deleted;
+  }
+
+  /**
+   * [ADR-0154 D8] Delete exactly `ids` of a sealed object, in batches of
+   * {@link REAP_BATCH_SIZE}. Answers whether every one is gone. With `stores`
+   * (an archiving object) each batch is deleted by id on the hot store and on
+   * the archive. Without, through the engine one row at a time, as
+   * {@link batchedReap} deletes, each registered guard asked first; a batch a
+   * guard does not confirm whole answers `false`.
+   */
+  private async deleteSealedRows(
+    engine: LifecycleEngineLike,
+    object: string,
+    ids: readonly string[],
+    stores: readonly ArchiveCapableDriver[] | null,
+  ): Promise<boolean> {
+    const guards = this.reapGuardsFor(object);
+    for (let at = 0; at < ids.length; at += REAP_BATCH_SIZE) {
+      const batch = ids.slice(at, at + REAP_BATCH_SIZE);
+      if (stores) {
+        for (const store of stores) await store.bulkDelete(object, batch);
+        continue;
+      }
+      if (typeof engine.find !== 'function') {
+        if (guards.length > 0) return false; // a guarded object is never blind-deleted
+        await engine.delete(object, { where: { id: { $in: batch } }, multi: true, context: { ...SYSTEM_CTX } });
+        continue;
+      }
+      const rows = await engine.find(object, { where: { id: { $in: batch } }, limit: batch.length, context: { ...SYSTEM_CTX } });
+      let confirmed = (rows ?? []).filter((row) => idKey(row?.id) !== undefined);
+      for (const guard of guards) {
+        const kept = new Set((await guard(object, confirmed)).map(idKey).filter((k): k is string => k !== undefined));
+        confirmed = confirmed.filter((row) => kept.has(idKey(row.id)!));
+      }
+      for (const row of confirmed) {
+        await engine.delete(object, { where: { id: row.id }, multi: true, context: { ...SYSTEM_CTX } });
+      }
+      if (confirmed.length < (rows ?? []).length) return false;
+    }
+    return true;
   }
 
   /**
@@ -1942,9 +2158,25 @@ export class LifecycleService {
     // finish so the Archiver never hot-deletes a row the cold store has not
     // taken, nothing is left inconsistent by skipping it. The next sweep
     // re-derives the same cutoff from the same `keep` and prunes the same rows.
-    if (!this.abort.aborted && archive.keep && typeof cold.deleteMany === 'function') {
-      const keepCutoff = new Date(this.now() - parseLifecycleDuration(archive.keep)).toISOString();
-      await cold.deleteMany(object, { where: { created_at: { $lt: keepCutoff } } });
+    //
+    // [ADR-0154 D8] On a sealed object `keep` expires whole checkpoints instead,
+    // through the sealed-object expiry, on both stores: a row the Archiver has
+    // not moved yet is listed by the same checkpoint as its archived siblings.
+    if (!this.abort.aborted && archive.keep) {
+      const keepCutoffMs = this.now() - parseLifecycleDuration(archive.keep);
+      if (lc.seal) {
+        await this.sweepSealed(
+          engine,
+          obj,
+          lc,
+          { policy: 'archive.keep', policyValue: archive.keep, cutoffMs: keepCutoffMs },
+          report,
+          [hot, cold],
+        );
+      } else if (typeof cold.deleteMany === 'function') {
+        const keepCutoff = new Date(keepCutoffMs).toISOString();
+        await cold.deleteMany(object, { where: { created_at: { $lt: keepCutoff } } });
+      }
     }
 
     report.swept.push({ object, class: lc.class, policy: 'archive', cutoff, archived });
@@ -2191,6 +2423,20 @@ export class LifecycleService {
  */
 function idKey(id: unknown): string | undefined {
   return id === null || id === undefined ? undefined : String(id);
+}
+
+/**
+ * [ADR-0154 D8] The duration literal behind the window a sweep applied: the
+ * override when it is the one that stood, else the declaration. A sealed
+ * object's expiry amendment signs it, and the verifier judges the expiry by it.
+ */
+function appliedLiteral(override: string | undefined, declared: string, appliedMs: number): string {
+  if (typeof override !== 'string') return declared;
+  try {
+    return parseLifecycleDuration(override) === appliedMs ? override : declared;
+  } catch {
+    return declared;
+  }
 }
 
 /** Best-effort row-count extraction from a driver's delete result. */

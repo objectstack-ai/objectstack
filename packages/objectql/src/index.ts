@@ -801,6 +801,10 @@ export type {
   LifecycleSettingsLike,
   LifecycleGovernanceAlert,
   LifecycleReapGuard,
+  // [ADR-0154 D8] The sealed-object expiry seam beside the reap guard.
+  LifecycleSealedExpiry,
+  LifecycleSealedExpiryRequest,
+  LifecycleSealedExpiryRun,
   // [#5195] Consumer-declared floors on settings-driven window overrides.
   LifecycleRetentionFloor,
   LifecycleFloorViolation,
