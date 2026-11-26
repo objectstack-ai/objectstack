@@ -2476,10 +2476,20 @@ function makeVerdictEngine(schemas: Record<string, any>, inert: ReadonlySet<stri
     const members = wanted != null && typeof wanted === 'object' ? (wanted as { $in?: unknown }).$in : [wanted];
     return Array.isArray(members) ? members.map(keyOf).filter((k): k is string => k !== null) : [];
   };
+  /**
+   * Each `$in` list as a Set, built once per list rather than once per row it is tested
+   * against: a read costs the rows it scans plus the ids it names, never rows x ids.
+   */
+  const inSets = new WeakMap<object, ReadonlySet<string>>();
   const valueMatches = (actual: unknown, wanted: unknown): boolean => {
     if (wanted != null && typeof wanted === 'object') {
+      let members = inSets.get(wanted);
+      if (members === undefined) {
+        members = new Set(listOf(wanted));
+        inSets.set(wanted, members);
+      }
       const key = keyOf(actual);
-      return key !== null && listOf(wanted).includes(key);
+      return key !== null && members.has(key);
     }
     return actual === wanted;
   };
