@@ -2723,6 +2723,7 @@ function walkHookTexts(config: any, out: ExpectedEntry[]): void {
  *   metadataForms.<type>.fields.<dotPath>.label
  *   metadataForms.<type>.fields.<dotPath>.helpText
  *   metadataForms.<type>.fields.<dotPath>.placeholder
+ *   metadataForms.<type>.fields.<dotPath>.options.<value>
  *
  * Section names follow the same normalization rule the resolver uses when
  * `section.name` is absent: `label.toLowerCase().replace(/&/g,'and').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')`.
@@ -2789,6 +2790,14 @@ function walkFormField(field: any, type: string, parentPath: string, out: Expect
     pushEntry(out, ['metadataForms', type, 'fields', path, 'label'], inlineText(field.label) ?? humanizeFieldPath(path), 'metadataFormField', { metadataType: type });
     pushOptional(out, ['metadataForms', type, 'fields', path, 'helpText'], field.helpText, 'metadataFormField', { metadataType: type });
     pushOptional(out, ['metadataForms', type, 'fields', path, 'placeholder'], field.placeholder, 'metadataFormField', { metadataType: type });
+    // A select's choices, keyed by value — the key `translateFormField`
+    // overlays onto `options[].label`.
+    if (Array.isArray(field.options)) {
+      for (const option of field.options) {
+        if (!option || typeof option !== 'object' || typeof option.value !== 'string') continue;
+        pushEntry(out, ['metadataForms', type, 'fields', path, 'options', option.value], option.label, 'metadataFormField', { metadataType: type });
+      }
+    }
   }
   if (Array.isArray(field.fields)) {
     for (const child of field.fields) walkFormField(child, type, path, out);
