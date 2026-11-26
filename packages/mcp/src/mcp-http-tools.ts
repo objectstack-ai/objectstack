@@ -98,6 +98,7 @@ import {
   type AIToolDefinition,
   type ActionConfirmationRequiredDetails,
   type ImportObjectResult,
+  type Logger,
   type RemoteTable,
 } from '@objectstack/spec/contracts';
 import {
@@ -566,6 +567,15 @@ export interface RegisterObjectToolsOptions {
    * still runs under the principal's permissions and RLS.
    */
   grantedScopes?: readonly string[];
+  /**
+   * [#37666] Where a tool's 5xx fault line goes (`logServerFault`,
+   * `@objectstack/types`): the host's logger, so its sink and its configured
+   * redact words apply to the line and its cause chain. `MCPServerRuntime`
+   * hands its own (the kernel's `ObjectLogger`, through the plugin context).
+   * Omitted, the line falls back to the console with the default redact words.
+   * It changes where the line is written, never what the tool answers.
+   */
+  logger?: Logger;
 }
 
 /** One declared input parameter of a business action, LLM-facing. */
@@ -788,6 +798,8 @@ export interface RegisterActionToolsOptions {
    * tools require `actions:execute`; undefined = not scope-limited.
    */
   grantedScopes?: readonly string[];
+  /** [#37666] `list_actions`' fault line, as {@link RegisterObjectToolsOptions.logger}. */
+  logger?: Logger;
 }
 
 const DEFAULT_MAX_LIMIT = 50;
@@ -1766,6 +1778,7 @@ function dataDoorErrorResult(
   err: unknown,
   tool: DataDoorTool | typeof DELETE_RECORDS_TOOL,
   objectName: string,
+  logger: Logger | undefined,
   beside?: NotRecordedMembers,
 ) {
   const envelope = dataDoorRefusalEnvelope(err, objectName);
@@ -1778,7 +1791,7 @@ function dataDoorErrorResult(
       error: err,
       ...(door.code !== undefined ? { code: door.code } : {}),
       request: { method: 'tools/call', path: `${tool} ${objectName}` },
-    });
+    }, logger);
   }
   return codedErrorResult(door, isServerFault(door.status) ? undefined : beside);
 }
@@ -1949,11 +1962,12 @@ async function recordReadErrorResult(
   tool: 'query_records' | 'aggregate_records' | 'get_record' | 'get_record_context',
   objectName: string,
   sentFields: readonly string[],
+  logger: Logger | undefined,
 ) {
   const refusal = dataDoorRefusalEnvelope(err, objectName) !== undefined
     || !isServerFault(dataDoorAnswerOf(err, objectName).status);
   const beside = refusal ? await notRecordedMembersOf(bridge, objectName, sentFields) : undefined;
-  return dataDoorErrorResult(err, tool, objectName, beside);
+  return dataDoorErrorResult(err, tool, objectName, logger, beside);
 }
 
 /**
@@ -1990,7 +2004,7 @@ type MetaDoorTool = 'list_objects' | 'describe_object' | 'validate_expression' |
  * code-less 4xx keeps its bare message. This is {@link rowRefusalOf}'s line,
  * drawn with the same reader.
  */
-function metaDoorErrorResult(err: unknown, tool: MetaDoorTool, objectName?: string) {
+function metaDoorErrorResult(err: unknown, tool: MetaDoorTool, objectName: string | undefined, logger: Logger | undefined) {
   const door = dataDoorAnswerOf(err);
   if (!isServerFault(door.status)) return errorResultWithCode(err);
   logServerFault({
@@ -1998,7 +2012,7 @@ function metaDoorErrorResult(err: unknown, tool: MetaDoorTool, objectName?: stri
     error: err,
     ...(door.code !== undefined ? { code: door.code } : {}),
     request: { method: 'tools/call', path: objectName !== undefined ? `${tool} ${objectName}` : tool },
-  });
+  }, logger);
   // [#31373] The `/data` door's `declaredCode` / `userMessage` are the record
   // data faces' members; this answer is unchanged by them.
   return codedErrorResult({ ...(door.code !== undefined ? { code: door.code } : {}), message: door.message, status: door.status });
@@ -3866,6 +3880,8 @@ export function registerObjectTools(
   };
   const allowSystem = options.allowSystemObjects === true;
   const maxLimit = options.maxQueryLimit ?? DEFAULT_MAX_LIMIT;
+  // [#37666] The host's logger for the tools' 5xx fault lines; undefined = the console fallback.
+  const faultLogger = options.logger;
   // OAuth tool-family gating (#2698). undefined = not scope-limited.
   // A tool outside the grant is NOT registered at all — the SDK then
   // rejects it as unknown, which doubles as dispatch-time enforcement.
@@ -3961,7 +3977,7 @@ export function registerObjectTools(
             status: 503,
           });
         } catch (err) {
-          return metaDoorErrorResult(err, 'list_objects');
+          return metaDoorErrorResult(err, 'list_objects', undefined, faultLogger);
         }
       },
     );
@@ -3994,7 +4010,7 @@ export function registerObjectTools(
           if (!def) return errorResult(`Object "${objectName}" not found`);
           return textResult(def);
         } catch (err) {
-          return metaDoorErrorResult(err, 'describe_object', objectName);
+          return metaDoorErrorResult(err, 'describe_object', objectName, faultLogger);
         }
       },
     );
@@ -4222,7 +4238,7 @@ export function registerObjectTools(
             },
           });
         } catch (err) {
-          return metaDoorErrorResult(err, 'validate_expression', objectName);
+          return metaDoorErrorResult(err, 'validate_expression', objectName, faultLogger);
         }
       },
     );
@@ -4377,7 +4393,7 @@ export function registerObjectTools(
           return textResult(withDelegationNotice(answer, diagnosed.statement));
         } catch (err) {
           // [#35138] …with what the call named that the caller's schema does not show.
-          return recordReadErrorResult(bridge, err, 'query_records', objectName, queryRecordsSentFields({ where, fields, orderBy }));
+          return recordReadErrorResult(bridge, err, 'query_records', objectName, queryRecordsSentFields({ where, fields, orderBy }), faultLogger);
         }
       },
     );
@@ -4590,7 +4606,7 @@ export function registerObjectTools(
           } catch (err) {
             // [#35138] …with what the call named that the caller's schema does not show.
             return recordReadErrorResult(
-              bridge, err, 'aggregate_records', objectName, aggregateRecordsSentFields({ where, groupBy, aggregations }),
+              bridge, err, 'aggregate_records', objectName, aggregateRecordsSentFields({ where, groupBy, aggregations }), faultLogger,
             );
           }
         },
@@ -4714,7 +4730,7 @@ export function registerObjectTools(
           return textResult({ record: served, related: lists });
         } catch (err) {
           // [#35138] …and an object the caller's schema does not show is said to be not recorded.
-          return recordReadErrorResult(bridge, err, 'get_record', refusedOn ?? objectName, []);
+          return recordReadErrorResult(bridge, err, 'get_record', refusedOn ?? objectName, [], faultLogger);
         }
       },
     );
@@ -4741,7 +4757,7 @@ export function registerObjectTools(
             // The record tools' renderer: a root the caller is not served is
             // answered as `get_record` answers it, and every coded refusal of
             // the executor keeps its code, sentence and status.
-            return recordReadErrorResult(bridge, err, GET_RECORD_CONTEXT_TOOL_NAME, args.objectName, []);
+            return recordReadErrorResult(bridge, err, GET_RECORD_CONTEXT_TOOL_NAME, args.objectName, [], faultLogger);
           }
         },
       );
@@ -4771,7 +4787,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.create(objectName, data));
         } catch (err) {
-          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'create_record', objectName));
+          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'create_record', objectName, faultLogger));
         }
       },
     );
@@ -4805,7 +4821,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.update(objectName, recordId, data));
         } catch (err) {
-          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'update_record', objectName));
+          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'update_record', objectName, faultLogger));
         }
       },
     );
@@ -4855,7 +4871,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.remove(objectName, recordId));
         } catch (err) {
-          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'delete_record', objectName));
+          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'delete_record', objectName, faultLogger));
         }
       },
     );
@@ -5009,7 +5025,7 @@ export function registerObjectTools(
             // (`declaredCode`, `userMessage`). A code-less throw keeps this
             // catch's rendering (#31218 says why).
             if (thrownRefusalEnvelope(err) !== undefined) {
-              return dataDoorErrorResult(err, DELETE_RECORDS_TOOL, objectName);
+              return dataDoorErrorResult(err, DELETE_RECORDS_TOOL, objectName, faultLogger);
             }
             return errorResultWithCode(err);
           }
@@ -5051,6 +5067,8 @@ export function registerActionTools(
     return name;
   };
   const allowSystem = options.allowSystemObjects === true;
+  // [#37666] `list_actions`' fault line goes to the host's logger when one is handed.
+  const faultLogger = options.logger;
   // OAuth tool-family gating (#2698): the whole action surface requires
   // `actions:execute`. Not registered = unknown tool = fail-closed.
   if (options.grantedScopes && !options.grantedScopes.includes(MCP_OAUTH_SCOPE_ACTIONS)) {
@@ -5084,7 +5102,7 @@ export function registerActionTools(
           ...(faced.refusedFaces.length > 0 ? { refusedFaces: faced.refusedFaces } : {}),
         });
       } catch (err) {
-        return metaDoorErrorResult(err, 'list_actions');
+        return metaDoorErrorResult(err, 'list_actions', undefined, faultLogger);
       }
     },
   );
