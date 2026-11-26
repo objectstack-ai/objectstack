@@ -17,7 +17,7 @@ export const AccountBrief: AiContext = {
   name: 'account_brief',
   label: 'Account brief for sales',
   object: 'account',
-  fields: ['name', 'industry', 'owner', 'annual_revenue'],
+  fields: ['name', 'industry', 'tier', 'annual_revenue'],
   related: [{
     object: 'opportunity',
     field: 'account',

@@ -2005,7 +2005,7 @@ export const CEILINGS = new Map([
   // and `os validate` rules live here and each SKILL.md carries a pointer paid by
   // deleting restatement in the same file (neither SKILL.md row moves). The row is
   // the seat's claim amendment 7179788843 on that card: one new row for this file.
-  // 5814 bytes -> ceil(5814 / 4) = 1454; zero headroom.
+  // 5813 bytes -> ceil(5813 / 4) = 1454; zero headroom.
   ['skills/objectstack-ai/references/context-packs.md', 1454],
 
   // ── 2026-10-26 the objectui bundle joins the catalog — decision C, #25832 ──
