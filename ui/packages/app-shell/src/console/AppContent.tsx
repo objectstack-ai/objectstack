@@ -13,7 +13,7 @@ import { useState, useEffect, useLayoutEffect, useCallback, useRef, lazy, Suspen
 import { useAssistant } from '../assistant/assistantBus.js';
 import { LazyModalForm } from '../views/lazyFormSurfaces.js';
 import { ConsoleFormOwnerLine } from '../views/consoleFormOwnerLine.js';
-import { Empty, EmptyTitle, EmptyDescription, Button, DataErrorState } from '@object-ui/components';
+import { Empty, EmptyTitle, EmptyDescription, Button, DataErrorState, cn } from '@object-ui/components';
 import { toast } from 'sonner';
 import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type AnsweredLoadFailure, type RecordSaveFeedback } from '@object-ui/react';
 import { useRecordApprovals, openApprovalOf } from '../hooks/useRecordApprovals.js';
@@ -45,6 +45,7 @@ import type { NavigationItem } from '@object-ui/types';
 
 // Components (eagerly loaded — always needed)
 import { ConsoleLayout } from '../layout/ConsoleLayout.js';
+import { CONSOLE_FULL_HEIGHT } from '../layout/chromeBannerHost.js';
 import { CommandPalette } from '../chrome/CommandPalette.js';
 import { ErrorBoundary } from '../chrome/ErrorBoundary.js';
 import { LoadingScreen } from '../chrome/LoadingScreen.js';
@@ -1318,7 +1319,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
 
   // One screen for both branches that draw a `denied` verdict below.
   const renderAppAccessDenied = () => (
-    <div className="h-screen flex items-center justify-center">
+    <div className={cn(CONSOLE_FULL_HEIGHT.screen, 'flex items-center justify-center')}>
       <Empty data-testid="app-access-denied">
         <EmptyTitle>
           {t('empty.appAccessDenied', { defaultValue: "You don't have access to this app" })}
@@ -1398,7 +1399,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     return (
       <NotFoundState
         testId={verdictScreen.testId}
-        className="h-screen p-0"
+        className={cn(CONSOLE_FULL_HEIGHT.screen, 'p-0')}
         title={verdictScreen.title}
         description={verdictScreen.description}
         actions={
@@ -1474,7 +1475,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   }
 
   if (!activeApp && !isCreateAppRoute && !isSystemRoute && !isMetadataRoute) return (
-    <div className="h-screen flex items-center justify-center">
+    <div className={cn(CONSOLE_FULL_HEIGHT.screen, 'flex items-center justify-center')}>
       <Empty>
         <EmptyTitle>{t('empty.noAppsConfigured')}</EmptyTitle>
         <EmptyDescription>
