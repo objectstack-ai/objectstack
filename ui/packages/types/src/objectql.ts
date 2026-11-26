@@ -2945,11 +2945,13 @@ export interface NamedListView {
   showDensity?: never;
 
   /**
-   * Collapse the toolbar's settings into the single "Display" popover: the
-   * bar keeps Filter, Sort, Display and Search, and Display carries the
-   * layout switcher, Group, Color, Hide fields, Density, Row numbers, Edit
-   * inline, Refresh and Export. On unless a view writes `false`, which keeps
-   * one toolbar button per control (objectui#12423).
+   * Collapse the toolbar's settings into the single "View settings" popover
+   * (objectstack#35878): the view's name, its columns (reorder, hide, add)
+   * and, where the host offers them, Layout, Group, Row height and Row color,
+   * with Save, Restore defaults and Export in its footer. The compact
+   * toolbar draws no Refresh button: Refresh is a wide-toolbar button only, so
+   * `userActions.refresh` changes nothing here. On unless a view writes
+   * `false`, which keeps one toolbar button per control (objectui#12423).
    * @default true
    */
   compactToolbar?: boolean;

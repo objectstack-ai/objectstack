@@ -297,11 +297,11 @@ export function AppSwitcher({
                 <span className="flex-1 truncate">
                   {studioPosture === 'view'
                     ? t('layout.appSwitcher.openAppInStudio', {
-                        defaultValue: 'Open {{app}} in Studio',
+                        defaultValue: 'Open {{app}} in App Studio',
                         app: appLabelText,
                       })
                     : t('layout.appSwitcher.editAppInStudio', {
-                        defaultValue: 'Edit {{app}} in Studio',
+                        defaultValue: 'Edit {{app}} in App Studio',
                         app: appLabelText,
                       })}
                 </span>

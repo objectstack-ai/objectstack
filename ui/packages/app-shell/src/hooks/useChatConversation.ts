@@ -22,7 +22,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 // `@object-ui/plugin-chatbot` is already a static member of this package's
 // barrel closure (`index.ts` re-exports `AiChatPage`, which imports it), so
 // this adds no package edge and no eager bundle weight.
-import { chartAnswerParts, detectPendingApproval } from '@object-ui/plugin-chatbot/core';
+import { detectPendingApproval, storedAnswerParts } from '@object-ui/plugin-chatbot/core';
+import type { StoredAnswerData } from '@object-ui/plugin-chatbot/core';
 // Type-only, so it is erased and pulls no barrel closure into the hook.
 import type { AnswerSource } from '@object-ui/plugin-chatbot';
 import { createAuthenticatedFetch } from '@object-ui/auth';
@@ -272,7 +273,9 @@ interface CacheableChatMessage {
   content?: string;
   toolInvocations?: CacheableChatToolInvocation[];
   /** The answer's charts, each at its `textOffset` into `content`. */
-  charts?: Parameters<typeof chartAnswerParts>[1];
+  charts?: StoredAnswerData['charts'];
+  /** objectstack#37487 — the answer's verified record citations, cached as persisted. */
+  recordCitations?: StoredAnswerData['recordCitations'];
 }
 
 /**
@@ -515,9 +518,14 @@ export function sanitizeChatMessagesForCache(
       // the stream's own chart part is never stored, and a tool part carries
       // no position, so this is the one record that keeps both the chart and
       // its place. `hydratedMessagesToChatMessages` reads them back.
-      const parts: HydratedUIMessagePart[] = chartAnswerParts(
+      // objectstack#37487 — with every other kept data part
+      // (`STORED_ANSWER_DATA_PARTS`): the verified citations list is cached as
+      // the `data-record-citations` part, so its chips survive a cache reload.
+      const parts: HydratedUIMessagePart[] = storedAnswerParts(
         message.content ?? '',
-        message.role === 'assistant' ? message.charts : undefined,
+        message.role === 'assistant'
+          ? { charts: message.charts, recordCitations: message.recordCitations }
+          : {},
       );
       if (message.role === 'assistant') {
         for (const tool of message.toolInvocations ?? []) {

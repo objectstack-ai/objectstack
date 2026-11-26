@@ -119,6 +119,7 @@ import { ObjectPicker, useObjectCatalog } from './ObjectPicker.js';
 import { useObjectFields } from '../previews/useObjectFields.js';
 import {
   readFields,
+  readsReference,
   writeFields,
   toFieldNameLoose,
   toFieldNameOrEmpty,
@@ -1283,7 +1284,12 @@ export function ObjectFieldInspector({
       'deleteBehavior' in def
       && (nextDeleteBehaviors.length === 0
         || (def.deleteBehavior === 'set_null' && !nextDeleteBehaviors.includes('set_null')));
-    if (keepsPicklist && !dropsKinds && !dropsNameVisible && !dropsDeleteBehavior) {
+    // The publish gate refuses a `reference` on a type that reads none
+    // (`field/reference-on-non-reference-type`), and the Related Object picker
+    // is drawn only on `lookup` / `master_detail` / `tree`, so a retype to such
+    // a type removes the target: the author could not see or clear it there.
+    const dropsReference = 'reference' in def && !readsReference(nextType);
+    if (keepsPicklist && !dropsKinds && !dropsNameVisible && !dropsDeleteBehavior && !dropsReference) {
       patchDef(requireMaster ? { type: nextType, required: true } : { type: nextType });
       return;
     }
@@ -1293,6 +1299,7 @@ export function ObjectFieldInspector({
     if (dropsKinds) nextDef.options = withoutOptionKinds(def.options as unknown[]);
     if (dropsNameVisible) delete nextDef.referenceNameVisible;
     if (dropsDeleteBehavior) delete nextDef.deleteBehavior;
+    if (dropsReference) delete nextDef.reference;
     const nextEntries = [...view.entries];
     nextEntries[idx] = { ...entry, def: nextDef };
     writeView({ shape: view.shape, entries: nextEntries });

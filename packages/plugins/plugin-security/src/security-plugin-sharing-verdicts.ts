@@ -306,34 +306,99 @@ export async function resolvePreImageFloorDrop(
 
 /**
  * How many rows' floor decisions {@link predicateWriteFloorDropIds} asks at
- * once. Each decision is one `ISharingService.checkEdit` / `checkDelete` call,
- * which reads the store (the row's owner, its shares, the bypass), so the
- * batch bounds how many of those reads one write keeps in flight.
+ * once ON THE PER-ROW PATH, the one it keeps for a sharing service that
+ * serves no set form. Each decision is one `ISharingService.checkEdit` /
+ * `checkDelete` call, which reads the store (the row's owner, its shares, the
+ * bypass), so the batch bounds how many of those reads one write keeps in
+ * flight. The set form chunks for itself.
  */
 const PREDICATE_WRITE_FLOOR_DECISION_BATCH = 25;
 
 /**
- * [#35802] The PREDICATE write's floor decision, made per row: the ids among
+ * [#35934] The SET form of {@link resolveSharingWriteVerdict}: the tri-state
+ * write verdict for each of `recordIds`, asked of the sharing service's
+ * `checkEditMany` / `checkDeleteMany` in ONE call, under the context the
+ * per-row resolution hands `checkEdit` / `checkDelete` (the write depth stash
+ * and the external OWD grant patch, resolved once for the object). Answers
+ * `null` when the service serves no set form for this verb, and the caller
+ * asks per row instead, with the same answers.
+ *
+ * Normalised as the per-row form is: any answer that is neither `allow` nor
+ * `deny` is `abstain`. Fail-closed as the per-row form is: a probe that throws,
+ * or answers anything but one verdict per record, is a `deny` for every
+ * record, logged once.
+ */
+export async function resolveSharingWriteVerdicts(
+  this: Pick<SharingVerdictsHost, 'collectRLSPolicies' | 'logger' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolveWriteScopeForSharing'>,
+  rlsOperation: string,
+  object: string,
+  recordIds: readonly string[],
+  context: any,
+  resolvedSets?: PermissionSet[],
+): Promise<SharingWriteVerdict[] | null> {
+  const method = rlsOperation === 'delete' ? 'checkDeleteMany' : 'checkEditMany';
+  const sharing = this.resolveKernelService?.('sharing') as
+    | Record<string, ((o: string, ids: readonly string[], c: any) => Promise<unknown>) | undefined>
+    | undefined;
+  const probe = sharing?.[method];
+  if (typeof probe !== 'function') return null;
+  if (recordIds.length === 0) return [];
+  const writeScope = await this.resolveWriteScopeForSharing(object, context, resolvedSets);
+  const grantPatch = await externalWriteGrantPatch.call(this, rlsOperation, object, context, resolvedSets);
+  try {
+    const verdicts = await probe.call(sharing, object, recordIds, {
+      ...context,
+      __writeScope: writeScope,
+      ...grantPatch,
+    });
+    if (!Array.isArray(verdicts) || verdicts.length !== recordIds.length) {
+      throw new Error(
+        `${method} answered ${Array.isArray(verdicts) ? `${verdicts.length} verdicts` : 'no list'} for ${recordIds.length} records`,
+      );
+    }
+    return verdicts.map((verdict): SharingWriteVerdict => (verdict === 'allow' || verdict === 'deny' ? verdict : 'abstain'));
+  } catch (e) {
+    this.logger.error?.(
+      `[security] the row-level write gate could not resolve the sharing (${method}) verdicts ` +
+        `for ${recordIds.length} '${object}' records (user ${context?.userId ?? 'unknown'}) — keeping ` +
+        `the platform ownership floor on each (fail-closed: only a resolved sharing allow, from Modify All Data ` +
+        `or an edit-level share, may replace that floor)`,
+      e instanceof Error ? e : new Error(String(e)),
+    );
+    return recordIds.map(() => 'deny');
+  }
+}
+
+/**
+ * [#35802] The PREDICATE write's per-row floor decision: the ids among
  * `candidateIds` whose by-id write would have its platform ownership floor
  * replaced.
  *
- * The decision for each row is {@link resolvePreImageFloorDrop} itself, asked
- * exactly as the by-id write pre-image gate (step 2.7) asks it for that row:
- * the same write class, the same sets, the same `delegated` exclusion. So a row
- * is in the answer if and only if a by-id write of it would drop the floor —
- * the floor in play and an `allow` from the declared write authority — and
- * the verb boundary (ADR-0111 D3) comes with it: `delete` asks `checkDelete`,
- * which an `edit` share never answers `allow`.
+ * The decision for each row is {@link resolvePreImageFloorDrop}'s, as the
+ * by-id write pre-image gate (step 2.7) asks it for that row: the same write
+ * class, the same sets, the same `delegated` exclusion. So a row is in the
+ * answer if and only if a by-id write of it would drop the floor — the floor
+ * in play and an `allow` from the declared write authority — and the verb
+ * boundary (ADR-0111 D3) comes with it: `delete` asks `checkDelete`, which an
+ * `edit` share never answers `allow`.
+ *
+ * [#35934] Asked as a SET where the sharing service serves one
+ * ({@link resolveSharingWriteVerdicts}): nothing in the floor test depends on
+ * the row, so it is made once, and the verdicts for every candidate come from
+ * one `checkEditMany` / `checkDeleteMany` call, whose reads grow per chunk
+ * rather than per row. Where the service serves none, each row is asked
+ * {@link resolvePreImageFloorDrop} itself, in batches of
+ * {@link PREDICATE_WRITE_FLOOR_DECISION_BATCH}. The answers are the same
+ * either way; the set form is the per-row verdict for each id.
  *
  * `candidateIds` is the caller's to bound. The middleware hands over only the
  * rows its predicate matches that the caller can read and the floor does not
  * already admit, so the list is at most `PREDICATE_WRITE_READABLE_ID_CAP` long
- * and the write was refused before this ran when the read was longer. Asked in
- * batches of {@link PREDICATE_WRITE_FLOOR_DECISION_BATCH}; a row whose verdict
- * cannot be resolved is a `deny` there, so it keeps its floor.
+ * and the write was refused before this ran when the read was longer. A row
+ * whose verdict cannot be resolved is a `deny`, so it keeps its floor.
  */
 export async function predicateWriteFloorDropIds(
-  this: Pick<SharingVerdictsHost, 'resolvePreImageFloorDrop'>,
+  this: Pick<SharingVerdictsHost, 'collectRLSPolicies' | 'logger' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveWriteScopeForSharing'>,
   rlsOperation: string,
   object: string,
   candidateIds: readonly (string | number | bigint)[],
@@ -342,6 +407,8 @@ export async function predicateWriteFloorDropIds(
   delegated: boolean,
 ): Promise<(string | number | bigint)[]> {
   if (delegated) return [];
+  const setForm = await predicateWriteFloorDropIdsAsSet.call(this, rlsOperation, object, candidateIds, context, permissionSets);
+  if (setForm) return setForm;
   const dropped: (string | number | bigint)[] = [];
   for (let start = 0; start < candidateIds.length; start += PREDICATE_WRITE_FLOOR_DECISION_BATCH) {
     const batch = candidateIds.slice(start, start + PREDICATE_WRITE_FLOOR_DECISION_BATCH);
@@ -355,6 +422,45 @@ export async function predicateWriteFloorDropIds(
     });
   }
   return dropped;
+}
+
+/**
+ * [#35934] {@link predicateWriteFloorDropIds} through the set form, or `null`
+ * when the host cannot ask one (a host without the members, or a sharing
+ * service without `checkEditMany` / `checkDeleteMany`). The floor test is
+ * {@link resolvePreImageFloorDrop}'s, made once; a row is dropped exactly when
+ * its verdict is `allow`, as there.
+ */
+async function predicateWriteFloorDropIdsAsSet(
+  this: Pick<SharingVerdictsHost, 'collectRLSPolicies' | 'logger' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolveWriteScopeForSharing'>,
+  rlsOperation: string,
+  object: string,
+  candidateIds: readonly (string | number | bigint)[],
+  context: any,
+  permissionSets: PermissionSet[],
+): Promise<(string | number | bigint)[] | null> {
+  const method = rlsOperation === 'delete' ? 'checkDeleteMany' : 'checkEditMany';
+  const sharing = this.resolveKernelService?.('sharing') as Record<string, unknown> | undefined;
+  if (typeof sharing?.[method] !== 'function') return null;
+  const host = this;
+  const floorApplies = host.collectRLSPolicies(
+    permissionSets,
+    object,
+    rlsOperation,
+    (context?.positions ?? []) as string[],
+    context,
+  ).some(isPlatformOwnershipFloorPolicy);
+  if (!floorApplies) return [];
+  const verdicts = await resolveSharingWriteVerdicts.call(
+    host,
+    rlsOperation,
+    object,
+    candidateIds.map(String),
+    context,
+    permissionSets,
+  );
+  if (!verdicts) return null;
+  return candidateIds.filter((_, i) => verdicts[i] === 'allow');
 }
 
 /** The body of `SecurityPlugin#delegatorOwnWriteFloorOptions`; the method's docblock there is its contract. */

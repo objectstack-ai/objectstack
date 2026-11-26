@@ -51,6 +51,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@object-ui/components';
 import { useNavigationContext } from '../../context/NavigationContext.js';
+import { CONSOLE_FULL_HEIGHT } from '../../layout/chromeBannerHost.js';
 import { CommandPaletteProvider, useCommandPalette } from '../../context/CommandPaletteProvider.js';
 import { CommandPalette } from '../../chrome/CommandPalette.js';
 import { AppHeader } from '../../layout/AppHeader.js';
@@ -182,7 +183,7 @@ export function HomeLayout({ children, variant = 'home' }: HomeLayoutProps) {
     {/* With the drawer's rail open the page is bounded to the window, so the
         rail spans it and the page scrolls in its own box beside it. */}
     <div
-      className={cn('flex w-full flex-col bg-background', chatDock.rail ? 'h-svh' : 'min-h-svh')}
+      className={cn('flex w-full flex-col bg-background', chatDock.rail ? CONSOLE_FULL_HEIGHT.svh : CONSOLE_FULL_HEIGHT.minSvh)}
       data-testid="home-layout"
     >
       {/* The provider wraps the bar and the palette only: the page below

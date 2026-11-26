@@ -8,10 +8,10 @@ description: >
   writing an `F`, `P` or `cel` literal. Not for ObjectQL query filters
   (objectstack-query), SQL fragments, or hook bodies (objectstack-data).
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 18.x and @objectstack/formula 18.x (CEL)
+compatibility: Requires @objectstack/spec 19.x and @objectstack/formula 19.x (CEL)
 metadata:
   author: objectstack-ai
-  version: "18.6.0"
+  version: "19.0.0-next.0"
   domain: expression
   tags: cel, formula, predicate, condition, validation, visibility, seed-dynamic
 ---

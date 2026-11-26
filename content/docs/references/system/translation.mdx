@@ -100,6 +100,7 @@ Translation data for a single object
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
 | **_relatedLists** | `Record<string, { label?: string }>` | optional | Record-page related list titles keyed by the relatedLists entry list name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
+| **_milestones** | `Record<string, Record<string, { summary?: string }>>` | optional | Activity-milestone summary translations keyed by the watched field, then by the value the milestone fires on |
 
 ### Nested Shape: `ObjectTranslationData.fields[string]`
 
@@ -169,6 +170,12 @@ Translation data for a single field
 | :--- | :--- | :--- | :--- |
 | **message** | `string` | optional | Translated rejection message — overlays the rule's authored `message` on every rejected write |
 
+### Nested Shape: `ObjectTranslationData._milestones[string][string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **summary** | `string` | optional | Translated milestone summary template — the same `{field}` tokens as the milestone's authored `summary` |
+
 
 ---
 
@@ -224,6 +231,7 @@ Translation data for a single object
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
 | **_relatedLists** | `Record<string, { label?: string }>` | optional | Record-page related list titles keyed by the relatedLists entry list name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
+| **_milestones** | `Record<string, Record<string, { summary?: string }>>` | optional | Activity-milestone summary translations keyed by the watched field, then by the value the milestone fires on |
 
 ### Nested Shape: `PlatformTranslationData.picklists[string]`
 
@@ -415,6 +423,7 @@ Translation data for a single object
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
 | **_relatedLists** | `Record<string, { label?: string }>` | optional | Record-page related list titles keyed by the relatedLists entry list name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
+| **_milestones** | `Record<string, Record<string, { summary?: string }>>` | optional | Activity-milestone summary translations keyed by the watched field, then by the value the milestone fires on |
 
 ### Nested Shape: `ServedTranslationData.picklists[string]`
 
@@ -669,6 +678,7 @@ Translation data for a single object
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
 | **_relatedLists** | `Record<string, { label?: string }>` | optional | Record-page related list titles keyed by the relatedLists entry list name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
+| **_milestones** | `Record<string, Record<string, { summary?: string }>>` | optional | Activity-milestone summary translations keyed by the watched field, then by the value the milestone fires on |
 
 ### Nested Shape: `TranslationData.picklists[string]`
 
@@ -892,6 +902,7 @@ Translation data for a single object
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
 | **_relatedLists** | `Record<string, { label?: string }>` | optional | Record-page related list titles keyed by the relatedLists entry list name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
+| **_milestones** | `Record<string, Record<string, { summary?: string }>>` | optional | Activity-milestone summary translations keyed by the watched field, then by the value the milestone fires on |
 
 ### Nested Shape: `TranslationItem.picklists[string]`
 

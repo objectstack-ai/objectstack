@@ -1290,7 +1290,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       compactToolbar: {
         label: "紧凑工具栏",
-        helpText: "将分组 / 颜色 / 密度 / 隐藏字段收进同一个“视图设置”弹出框"
+        helpText: "将分组 / 颜色 / 密度 / 隐藏字段收进同一个“视图设置”弹出框。默认开启：省略或为 `true` 时，渲染器绘制这个紧凑工具栏；为 `false` 时绘制宽工具栏，每个控件一个按钮。紧凑工具栏不绘制刷新按钮，因此 `userActions.refresh` 只作用于宽工具栏；下拉刷新不受这两个键影响。"
       },
       rowHeight: {
         label: "行高",

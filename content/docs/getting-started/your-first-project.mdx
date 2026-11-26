@@ -50,6 +50,12 @@ npm create objectstack@latest my-app
 cd my-app
 ```
 
+<Callout type="info">
+`npm create objectstack@latest` installs `create-objectstack` 18.6.0 today, which
+still scaffolds the earlier `blank` template with its single `note` object; the
+companies-and-contacts template this page describes ships with 19.0.
+</Callout>
+
 The scaffolder (`create-objectstack`) does four things:
 
 1. **Copies a template** into `my-app/` and rewrites its identity — the npm
@@ -77,7 +83,7 @@ bundle) with `--skip-skills` if you prefer — `AGENTS.md` is always written.
 
 | Template | Source | Description |
 |:---|:---|:---|
-| `blank` *(default)* | bundled, works offline | One object, REST API — a clean slate |
+| `blank` *(default)* | bundled, works offline | Companies and contacts, with platform tasks and notes in the menu — ready to extend |
 
 ```bash
 npm create objectstack@latest my-app -- --template blank

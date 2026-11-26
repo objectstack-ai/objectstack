@@ -24,7 +24,7 @@ import type { RichMetadataTypeEntry } from './useMetadata.js';
 import { useMetadataLocale, t, translateMetadataType, translateMetadataDomain } from './i18n.js';
 import { environmentScopeSuffix } from './catalog-scope.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
-import { isStudioCustomizeType } from '../studio-design/StudioCustomizeControls.js';
+import { isStudioCustomizeType } from '../studio-design/customizeOverride.js';
 import { AREA_CUSTOMIZE_EDITOR_TYPES, AREA_FORM_EDITOR_TYPES } from '../studio-design/metadataArea.js';
 import { StudioTitleRowEnd } from '../studio-design/studioTitleRow.js';
 

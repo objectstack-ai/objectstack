@@ -1,19 +1,24 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#37139 — the 「⋯」 package menu beside the app or package name
- * at the Studio top bar's left end: the door to the Packages page's
+ * objectstack#37139 — the 「⋯」 package menu: the door to the Packages page's
  * development-face actions now that the Studio home is gone.
  *
- *  1. A `manage_metadata` holder on a package's Studio page sees it, right of
- *     the name, with the maintainer's six items in the table's order, in en
+ * objectstack#37454 — re-pointed: the menu moved from the top bar's left end
+ * to 概览 Overview's header (ADR-0084, amended 2026-11-26), its six rows as
+ * they were. Every case below reads it there; case 1 also pins that the top
+ * bar no longer draws it.
+ *
+ *  1. A `manage_metadata` holder on a package's overview sees it, at the end
+ *     of the header, with the maintainer's six items in the table's order, in en
  *     and zh-CN.
  *  2. Each item's greyed state: on a read-only package Edit package info,
  *     Duplicate, Revert and Adopt are greyed (the server refuses each there);
  *     Revert is greyed too while nothing has changed since the last publish.
  *     Export and Manage in Setup… are never greyed.
- *  3. No 「⋯」 on `~org` or `~all` (no current package), and none for a user
- *     without `manage_metadata`.
+ *  3. No 「⋯」 on `~org` or `~all` (no current package): its one home, a
+ *     package's overview, is not drawn there at its own address. None for a
+ *     user without `manage_metadata`.
  *  4. Each item does what the development face's action does: the same door,
  *     the same confirmation, the same answer; Manage in Setup… opens Setup →
  *     Packages on this package's row.
@@ -210,6 +215,8 @@ function renderAt(entry: string, perms = AUTHOR) {
 }
 
 const header = () => screen.getByTestId('studio-shell-header');
+/** objectstack#37454 — 概览 Overview's header, where the menu lives now. */
+const overviewHeader = () => screen.getByTestId('studio-package-overview-header');
 
 /** The package name settles in the bar (the list read answered). */
 async function settledOn(name: string) {
@@ -219,7 +226,8 @@ async function settledOn(name: string) {
 }
 
 async function openMenu(): Promise<HTMLElement> {
-  const trigger = await within(header()).findByTestId('studio-package-menu', undefined, { timeout: 8000 });
+  const trigger = await screen.findByTestId('studio-package-menu', undefined, { timeout: 8000 });
+  expect(overviewHeader()).toContainElement(trigger);
   fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
   return screen.findByTestId('studio-package-menu-content');
 }
@@ -245,18 +253,19 @@ const LABELS: Record<'en-US' | 'zh-CN', string[]> = {
   'zh-CN': ['编辑软件包信息', '导出', '复制为新软件包', '还原到上次发布', '收编散落项', '在设置中管理…'],
 };
 
-describe('the 「⋯」 package menu: right of the name, six items in the table’s order (objectstack#37139)', () => {
-  it.each(['en-US', 'zh-CN'] as const)('%s: a manage_metadata holder sees it beside the package name', async (locale) => {
+describe('the 「⋯」 package menu: in the overview header, six items in the table’s order (objectstack#37139, objectstack#37454)', () => {
+  it.each(['en-US', 'zh-CN'] as const)('%s: a manage_metadata holder sees it in the overview header, and not in the top bar', async (locale) => {
     localeFixture = locale;
-    renderAt(`/studio/${OWN}/data`);
+    renderAt(`/studio/${OWN}/overview`);
     await settledOn('Sales');
-    const back = within(header()).getByTestId('studio-back');
-    const trigger = within(back).getByTestId('studio-package-menu');
+    const trigger = await within(overviewHeader()).findByTestId('studio-package-menu', undefined, { timeout: 8000 });
     expect(trigger).toHaveAccessibleName(locale === 'zh-CN' ? '软件包操作' : 'Package actions');
-    // Right of the name, left of the Studio mark.
-    const order = [...back.querySelectorAll('[data-testid]')].map((n) => n.getAttribute('data-testid'));
-    expect(order.indexOf('studio-package-menu')).toBe(order.indexOf('studio-back-app-name') + 1);
-    expect(order.indexOf('studio-mark')).toBeGreaterThan(order.indexOf('studio-package-menu'));
+    // objectstack#37454 — moved: the top bar's left end no longer draws it.
+    expect(within(header()).queryByTestId('studio-package-menu')).toBeNull();
+    // The last control of the header's title row.
+    const titleRow = within(overviewHeader()).getByTestId('studio-overview-title').parentElement!;
+    const order = [...titleRow.querySelectorAll('[data-testid]')].map((n) => n.getAttribute('data-testid'));
+    expect(order.indexOf('studio-package-menu')).toBeGreaterThan(order.indexOf('studio-overview-title'));
 
     const content = await openMenu();
     const items = within(content).getAllByRole('menuitem');
@@ -276,7 +285,7 @@ describe('the 「⋯」 package menu: right of the name, six items in the table�
 describe('which items are greyed (objectstack#37139)', () => {
   it.each(['en-US', 'zh-CN'] as const)('%s: a writable package with changes greys nothing', async (locale) => {
     localeFixture = locale;
-    renderAt(`/studio/${OWN}/data`);
+    renderAt(`/studio/${OWN}/overview`);
     await settledOn('Sales');
     await pendingRead(1);
     await openMenu();
@@ -285,10 +294,10 @@ describe('which items are greyed (objectstack#37139)', () => {
 
   it.each(['en-US', 'zh-CN'] as const)('%s: a read-only installed package greys Edit, Duplicate, Revert and Adopt, and says why', async (locale) => {
     localeFixture = locale;
-    renderAt(`/studio/${INSTALLED}/data`);
+    renderAt(`/studio/${INSTALLED}/overview`);
     await settledOn('Vendor CRM');
     // The writability verdict has landed when the surface reads read-only.
-    await waitFor(() => expect(within(header()).getByTestId('studio-package-menu')).toBeInTheDocument(), { timeout: 8000 });
+    await waitFor(() => expect(within(overviewHeader()).getByTestId('studio-package-menu')).toBeInTheDocument(), { timeout: 8000 });
     await openMenu();
     await waitFor(() => expect(isGreyed('edit')).toBe(true), { timeout: 8000 });
     expect({
@@ -308,7 +317,7 @@ describe('which items are greyed (objectstack#37139)', () => {
   it.each(['en-US', 'zh-CN'] as const)('%s: with nothing changed since the last publish, only Revert is greyed', async (locale) => {
     localeFixture = locale;
     srv.drafts = [];
-    renderAt(`/studio/${OWN}/data`);
+    renderAt(`/studio/${OWN}/overview`);
     await settledOn('Sales');
     await openMenu();
     await waitFor(() => expect(isGreyed('revert')).toBe(true), { timeout: 8000 });
@@ -322,33 +331,40 @@ describe('which items are greyed (objectstack#37139)', () => {
 // ---------------------------------------------------------------------------
 
 describe('no 「⋯」 without a current package or without manage_metadata (objectstack#37139)', () => {
-  it.each(['en-US', 'zh-CN'] as const)('%s: none on ~org and none on ~all', async (locale) => {
+  // objectstack#37454 — the menu's one home is a package's overview, so the
+  // check asks for the overview's own address on the two scopes: neither draws
+  // it, so neither draws the menu. (Asked on their other pages it would pass
+  // whatever the scopes did, the overview being absent there anyway.)
+  it.each(['en-US', 'zh-CN'] as const)('%s: none on ~org/overview and none on ~all/overview', async (locale) => {
     localeFixture = locale;
-    renderAt('/studio/~org/metadata/flow');
+    renderAt('/studio/~org/overview');
     await waitFor(() => expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent(t('engine.studio.menu.orgFlows', locale)), {
       timeout: 8000,
     });
-    expect(within(header()).queryByTestId('studio-package-menu')).toBeNull();
+    expect(screen.queryByTestId('studio-package-overview')).toBeNull();
+    expect(screen.queryByTestId('studio-package-menu')).toBeNull();
     cleanup();
 
-    renderAt('/studio/~all/metadata');
+    renderAt('/studio/~all/overview');
     await waitFor(() => expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent(t('engine.studio.menu.environment', locale)), {
       timeout: 8000,
     });
-    expect(within(header()).queryByTestId('studio-package-menu')).toBeNull();
+    expect(screen.queryByTestId('studio-package-overview')).toBeNull();
+    expect(screen.queryByTestId('studio-package-menu')).toBeNull();
   });
 
   it.each(['en-US', 'zh-CN'] as const)('%s: none for a user without manage_metadata', async (locale) => {
     localeFixture = locale;
-    renderAt(`/studio/${OWN}/data`, STUDIO_ONLY);
+    renderAt(`/studio/${OWN}/overview`, STUDIO_ONLY);
     await settledOn('Sales');
-    expect(within(header()).queryByTestId('studio-package-menu')).toBeNull();
+    expect(within(overviewHeader()).getByTestId('studio-overview-title')).toBeInTheDocument();
+    expect(screen.queryByTestId('studio-package-menu')).toBeNull();
   });
 
   it('CONTROL: the same page with manage_metadata draws it', async () => {
-    renderAt(`/studio/${OWN}/data`, AUTHOR);
+    renderAt(`/studio/${OWN}/overview`, AUTHOR);
     await settledOn('Sales');
-    expect(within(header()).getByTestId('studio-package-menu')).toBeInTheDocument();
+    expect(await within(overviewHeader()).findByTestId('studio-package-menu', undefined, { timeout: 8000 })).toBeInTheDocument();
   });
 });
 
@@ -358,7 +374,7 @@ describe('no 「⋯」 without a current package or without manage_metadata (obj
 
 describe('each item runs the development face’s action (objectstack#37139)', () => {
   it('Export reads the export door and downloads the file', async () => {
-    renderAt(`/studio/${OWN}/data`);
+    renderAt(`/studio/${OWN}/overview`);
     await settledOn('Sales');
     await openMenu();
     fireEvent.click(menuItem('export'));
@@ -369,7 +385,7 @@ describe('each item runs the development face’s action (objectstack#37139)', (
   });
 
   it('Revert asks first: Cancel sends nothing; confirm sends the revert', async () => {
-    renderAt(`/studio/${OWN}/data`);
+    renderAt(`/studio/${OWN}/overview`);
     await settledOn('Sales');
     await pendingRead(1);
     await openMenu();
@@ -393,7 +409,7 @@ describe('each item runs the development face’s action (objectstack#37139)', (
   });
 
   it('Adopt loose items asks first, then adopts and says how many moved', async () => {
-    renderAt(`/studio/${OWN}/data`);
+    renderAt(`/studio/${OWN}/overview`);
     await settledOn('Sales');
     await openMenu();
     fireEvent.click(menuItem('adopt'));
@@ -407,7 +423,7 @@ describe('each item runs the development face’s action (objectstack#37139)', (
   });
 
   it('Duplicate opens the development face’s form on 「Copy of NAME」 and `<id>-copy`, and sends the duplicate', async () => {
-    renderAt(`/studio/${OWN}/data`);
+    renderAt(`/studio/${OWN}/overview`);
     await settledOn('Sales');
     await openMenu();
     fireEvent.click(menuItem('duplicate'));
@@ -430,7 +446,7 @@ describe('each item runs the development face’s action (objectstack#37139)', (
   });
 
   it('Edit package info opens the development face’s Edit dialog on the listed manifest', async () => {
-    renderAt(`/studio/${OWN}/data`);
+    renderAt(`/studio/${OWN}/overview`);
     await settledOn('Sales');
     await openMenu();
     fireEvent.click(menuItem('edit'));
@@ -441,7 +457,7 @@ describe('each item runs the development face’s action (objectstack#37139)', (
   });
 
   it('Manage in Setup… opens Setup → Packages on this package’s row', async () => {
-    renderAt(`/studio/${OWN}/data`);
+    renderAt(`/studio/${OWN}/overview`);
     await settledOn('Sales');
     await openMenu();
     fireEvent.click(menuItem('manage'));
