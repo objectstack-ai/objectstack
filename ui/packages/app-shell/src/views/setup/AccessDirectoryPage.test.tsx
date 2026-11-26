@@ -84,14 +84,23 @@ describe('the gate: Studio\'s entry capability (objectstack#37565)', () => {
     expect(screen.queryByTestId('area-page')).toBeNull();
   });
 
-  it('parity with the Studio gate: an answer that reports no capability set is refused too', () => {
-    held.capabilities = undefined;
+  // Parity with the Studio gate: every answer its own policy cases name, with the same verdict.
+  it.each([
+    ['a tenant owner', ['manage_org_users', 'setup.access', 'setup.write']],
+    ['a reported empty set', []],
+    ['an answer that reports no capability set', undefined],
+  ] as const)('parity with the Studio gate: %s is refused', (_label, capabilities) => {
+    held.capabilities = capabilities === undefined ? undefined : [...capabilities];
     mount(SETUP);
     expect(screen.getByTestId('access-directory-not-allowed')).toHaveTextContent('studio.access');
     expect(screen.queryByTestId('area-page')).toBeNull();
   });
 
-  it('CONTROL — with it, the directory', async () => {
+  it.each([
+    ['studio.access alone', ['studio.access']],
+    ['a platform operator', ['manage_org_users', 'setup.access', 'setup.write', 'studio.access']],
+  ] as const)('CONTROL — parity with the Studio gate: %s gets the directory', async (_label, capabilities) => {
+    held.capabilities = [...capabilities];
     mount(SETUP);
     expect((await page()).page).toBe('directory');
     expect(screen.queryByTestId('access-directory-not-allowed')).toBeNull();

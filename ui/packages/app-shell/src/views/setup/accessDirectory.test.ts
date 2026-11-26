@@ -16,6 +16,7 @@ import {
   accessDirectoryLocation,
   accessDirectoryPath,
   holdsAccessDirectoryCapability,
+  holdsSetupAccess,
   studioAddressAfterSetupMove,
   studioAllLegSetupRedirect,
 } from './accessDirectory.js';
@@ -35,6 +36,14 @@ describe('the Setup page (objectstack#37565)', () => {
     expect(holdsAccessDirectoryCapability([])).toBe(false);
     expect(holdsAccessDirectoryCapability(['setup.access'])).toBe(false);
     expect(holdsAccessDirectoryCapability(undefined)).toBe(false);
+  });
+
+  it('whoever may open Setup: setup.access, in a reported set', () => {
+    expect(holdsSetupAccess(['setup.access'])).toBe(true);
+    expect(holdsSetupAccess(['studio.access', 'setup.access'])).toBe(true);
+    expect(holdsSetupAccess(['studio.access'])).toBe(false);
+    expect(holdsSetupAccess([])).toBe(false);
+    expect(holdsSetupAccess(undefined)).toBe(false);
   });
 
   it('addresses the directory, and a type\'s list in the environment scope', () => {
