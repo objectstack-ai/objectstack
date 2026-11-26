@@ -59,25 +59,30 @@ export interface ConsoleChatDock {
 /**
  * objectstack#37556 — the history entry (`location.key`) the phone sheet was
  * last shown open on, per tab (sessionStorage, like the drawer's own state).
- * Absent while the sheet is closed. A private-mode storage failure just means
- * a navigation that remounts the layout does not close the sheet.
+ * Absent while the sheet is closed. Where sessionStorage throws (private
+ * mode), the entry is kept in this module instead: it then lasts as long as
+ * the page, which covers every in-app navigation, layout swaps included.
  */
 const DOCK_SHEET_SHOWN_AT_STORAGE_KEY = 'ai-chat-dock-sheet-shown-at';
+/** The width the drawer is a sheet below: `useIsMobile`'s breakpoint (`@object-ui/components`). */
+const SHEET_WIDTH_BELOW = 768;
+let sheetShownAtInMemory: string | null = null;
 
 function readSheetShownAt(): string | null {
   try {
     return window.sessionStorage.getItem(DOCK_SHEET_SHOWN_AT_STORAGE_KEY);
   } catch {
-    return null;
+    return sheetShownAtInMemory;
   }
 }
 
 function writeSheetShownAt(key: string | null): void {
+  sheetShownAtInMemory = key;
   try {
     if (key === null) window.sessionStorage.removeItem(DOCK_SHEET_SHOWN_AT_STORAGE_KEY);
     else window.sessionStorage.setItem(DOCK_SHEET_SHOWN_AT_STORAGE_KEY, key);
   } catch {
-    /* private mode */
+    /* private mode: the module copy above stands in */
   }
 }
 
@@ -190,15 +195,39 @@ export function useConsoleChatDock({
   // opens another app's record, or leaves Home for an app, mounts another
   // layout, and this host with it. The desktop rail sits beside the page and
   // stays as it is.
+  //
+  // The move away is noted on the navigation itself, before the phone check:
+  // `useIsMobile` answers `false` on a host's first render, and a page that
+  // REPLACEs its address on mount (an app named by an alias moving to its
+  // package address) lands in that same first commit, so by the time the host
+  // knows it is on a phone the navigation type it sees is that REPLACE.
+  //
+  // At a desktop width there is no sheet, so the entry is dropped: a tablet
+  // turned from portrait (sheet) to landscape (rail) and back does not close
+  // the drawer on the turn. Desktop is read off the window, not `isMobile`,
+  // whose first-render `false` would drop a phone's entry on every remount.
   const navigationType = useNavigationType();
+  const movedAwayRef = React.useRef(false);
   React.useEffect(() => {
-    if (!enabled || !isMobile) return;
-    if (!expanded) {
+    if (!enabled) return;
+    if (!isMobile && window.innerWidth >= SHEET_WIDTH_BELOW) {
+      movedAwayRef.current = false;
       writeSheetShownAt(null);
       return;
     }
     const shownAt = readSheetShownAt();
     if (shownAt !== null && shownAt !== location.key && navigationType !== NavigationType.Replace) {
+      movedAwayRef.current = true;
+    }
+    // A phone host's first render: `isMobile` is not measured yet.
+    if (!isMobile) return;
+    if (!expanded) {
+      movedAwayRef.current = false;
+      writeSheetShownAt(null);
+      return;
+    }
+    if (movedAwayRef.current) {
+      movedAwayRef.current = false;
       writeSheetShownAt(null);
       collapse();
       return;
