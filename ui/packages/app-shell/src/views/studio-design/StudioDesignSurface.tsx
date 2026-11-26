@@ -32,6 +32,7 @@ import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
 import { StudioChatDock, type StudioCopilotStatus, type StudioSurfaceLabel } from './StudioAiCopilot.js';
 import { StudioRightSlot } from './StudioRightSlot.js';
 import { StudioTitleRowProvider } from './studioTitleRow.js';
+import { useStudioAccentOnBody } from './studioAccent.js';
 import { AssistantTopBarButton } from '../../layout/AssistantTopBarButton.js';
 import { ChatDockControlProvider, type ChatDockControl } from '../../layout/chatDockControl.js';
 import {
@@ -48,6 +49,7 @@ import {
 } from '../../layout/chatDockState.js';
 import type { AppMarkApp } from '../../layout/AppMark.js';
 import {
+  STUDIO_ACCENT,
   STUDIO_HEADER,
   STUDIO_HEADER_ICON_BUTTON,
   STUDIO_HEADER_PACKAGE_COLUMN,
@@ -1335,6 +1337,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       </button>
     );
 
+  // objectstack#37455 — and on what Studio draws in a portal on `body`
+  // (dialogs, menus, sheets, tooltips, toasts, the palette), while mounted.
+  useStudioAccentOnBody();
+
   const page = (
     <StudioMenuDataProvider segment={scopeSegment}>
     <SurfaceDeepLinkProvider onRequest={requestSurface}>
@@ -1343,7 +1349,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       <StudioRightSlotContext.Provider value={slotHandle}>
       {/* objectstack#36899 — the left menu's provider is the frame: the app
           sidebar's, under Studio's own collapse cookie (`StudioMenu.tsx`). */}
-      <StudioMenuProvider className="h-screen min-h-0 overflow-hidden bg-background text-foreground">
+      {/* objectstack#37455 — Studio's graphite on its root: nothing Studio
+          draws takes the app's theme colour (decision 4 of #37424). */}
+      <StudioMenuProvider className={cn('h-screen min-h-0 overflow-hidden bg-background text-foreground', STUDIO_ACCENT)}>
         {/* The ADR-0080 `aiSlot` seam — a cloud edition may still inject its own
           * left copilot panel; the built-in copilot is the RIGHT dock below. */}
         {/* objectstack#32615 — not beside a package that is not there. */}
