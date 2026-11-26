@@ -406,7 +406,7 @@ type DeclaredAnswer =
  * What a declared code answers with — the picked sentence and the status — or
  * the loud fault for a reason the code does not declare. Shared by the body
  * path and the in-process path so the two cannot answer differently; each
- * builds its `SandboxError` from it with the code it read ({@link refusalError}).
+ * builds its `SandboxError` from it with the code it read, in one shape.
  *
  * [#36877, ruling 7178348458 terms 1–3] A throw that names an ordered
  * `reasons` list instead of one `reason` is answered line by line:
@@ -467,20 +467,6 @@ function declaredAnswer(
   }
   const message = ownerRefusalMessage(owner, thrownCode, entry, pickedLocale, opts.i18n, opts.logger, address);
   return { message, status };
-}
-
-/** The refusal error both run paths throw for a declared answer: one shape, so every door builds one envelope. */
-function refusalError(
-  logMessage: string,
-  code: string,
-  answer: { message: string; status: number; refusals?: DeclaredRefusalLine[] },
-): SandboxError {
-  return new SandboxError(logMessage, answer.message, {
-    code,
-    status: answer.status,
-    userMessage: answer.message,
-    ...(answer.refusals !== undefined ? { refusals: answer.refusals } : {}),
-  });
 }
 
 /**
@@ -551,7 +537,12 @@ function resolveSandboxedRefusal(
   }
   const answer = declaredAnswer(owner, code, entry, sandboxRefusalAddressOf(err), locale, opts);
   if ('fault' in answer) return answer.fault;
-  return refusalError(err.message, code, answer);
+  return new SandboxError(err.message, answer.message, {
+    code,
+    status: answer.status,
+    userMessage: answer.message,
+    ...(answer.refusals !== undefined ? { refusals: answer.refusals } : {}),
+  });
 }
 
 // ── The in-process half (#33214, ruling 6879477573 letter A) ─────────────────
@@ -743,5 +734,10 @@ export function resolveInProcessHookRefusal(
   });
   const answer = declaredAnswer(owner, code, entry, address, engineCtx?.session?.locale, opts);
   if ('fault' in answer) return answer.fault;
-  return refusalError(`hook '${String(hook.name)}' threw: ${flattenThrown(err)}`, code, answer);
+  return new SandboxError(`hook '${String(hook.name)}' threw: ${flattenThrown(err)}`, answer.message, {
+    code,
+    status: answer.status,
+    userMessage: answer.message,
+    ...(answer.refusals !== undefined ? { refusals: answer.refusals } : {}),
+  });
 }
