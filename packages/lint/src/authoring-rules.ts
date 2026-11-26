@@ -2598,9 +2598,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['object'],
     // [#35143] The relation arm (`rollup/child-without-parent-reference`)
     // asks whether the child has a foreign key back to the parent, and an
-    // object extension may add it, so it reads the child's fields as served
-    // (the stack's extensions and, at the door, the host's stored ones folded
-    // in). The aggregand arms keep reading the declared child field.
+    // object extension may add it, so it reads the child's fields as served:
+    // on the CLI the stack's own extensions folded in; at the `object` door
+    // the registry's served objects arriving as `context.objects`, pending
+    // `object_extension` drafts included (`storedObjectExtensions` is stated
+    // on `object_extension` writes only, so it is empty here). The aggregand
+    // arms keep reading the declared child field.
     run: (stack, ctx) => {
       const served = new Map<string, { name: string; def: unknown }[]>();
       for (const obj of objectsAsServed(stack, ctx.storedObjectExtensions ?? []).objects) {

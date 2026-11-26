@@ -7,7 +7,7 @@ fix(lint)!: four publish-time checks for data-model metadata that saves and does
 
 Clause-②: no (narrowing)
 Metadata-protocol: narrowed
-Skills-docs: follow-up owed — skills/objectstack-data/rules/relationships.md (a roll-up's child must point back to the parent), skills/objectstack-data/rules/field-types.md (`reference` only on lookup, master_detail, user, tree and summary), skills/objectstack-automation/references/state-machines-and-approvals.md (`lockRecord` locks `master_detail` children only)
+Skills-docs: follow-up #37529
 
 <!-- adr-0087: registered publish-refuses-data-model-fields-that-save-and-do-not-work -->
 
@@ -15,8 +15,8 @@ Skills-docs: follow-up owed — skills/objectstack-data/rules/relationships.md (
 
 Two errors, run by the runtime publish gate and the CLI:
 
-- `rollup/child-without-parent-reference`: a `summary` field whose child object has no `lookup` / `master_detail` field referencing the parent, or whose `summaryOperations.relationshipField` names no field of the child. The engine's summary index finds no foreign key, skips the summary with nothing logged, and the field reads 0 or empty on every parent while every child write reports success. Judged once the child resolves (a child the stack does not hold is still not judged), against the child's fields as served (an object extension may add the foreign key) and its injected columns (`owner_id`, `created_by` back to `sys_user`). Reported by `lintSummaryRollups`, beside its aggregand checks.
-- `field/reference-on-non-reference-type`: `reference` on a field type that reads none — anything but `lookup`, `master_detail`, `user`, `tree` and `summary`. It links no record, and the record page edits a text, number or select field carrying it with a record picker that writes a record id into it. Judged on objects and on object extensions.
+- `rollup/child-without-parent-reference`: a `summary` field whose child object has no `lookup` / `master_detail` field referencing the parent, or whose `summaryOperations.relationshipField` names no field of the child. With no foreign key the engine's summary index skips the summary with nothing logged; with a `relationshipField` that names no child field the summary is indexed and never recomputed. Either way the field reads 0 or empty on every parent while every child write reports success. Judged once the child resolves (a child the stack does not hold is still not judged), against the child's fields as served (an object extension may add the foreign key) and its injected columns (`owner_id`, `created_by` back to `sys_user`). Reported by `lintSummaryRollups`, beside its aggregand checks.
+- `field/reference-on-non-reference-type`: `reference` on a field type that reads none — anything but `lookup`, `master_detail`, `user`, `tree` and `summary`. It links no record, and the record page edits a text, number or date field carrying it with a record picker that writes a record id into it. Judged on objects and on object extensions.
 
 Two warnings, which refuse nothing and make `os validate --strict` exit 1 as any warning does:
 

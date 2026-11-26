@@ -22,9 +22,10 @@ export const entry: SemanticMigration = {
     + 'a `lookup` (`{ type: \'lookup\', reference: \'<object>\' }`), or remove `reference` from it',
   reason:
     'Each object parses and publishes, then does not work: the engine finds no child rows of a parent for a roll-up with no '
-    + 'foreign key, so the summary is never indexed, never computed and reads 0 or empty while every child write reports '
-    + 'success; a `reference` on a text, number or select field links nothing, and the record page edits such a field '
-    + 'with a record picker that writes a record id into it. Stored objects are not rewritten or refused at boot. The next '
+    + 'foreign key, so the summary is never indexed, and one whose `relationshipField` names no child field is indexed and '
+    + 'never recomputed; either reads 0 or empty while every child write reports success. A `reference` on a type that '
+    + 'reads none links nothing, and on a text, number or date field the record page edits it with a record picker that '
+    + 'writes a record id into it. Stored objects are not rewritten or refused at boot. The next '
     + 'publish of an object that carries one of the two errors is refused with the fix named. Two warnings join them '
     + '(`field/count-named-lookup`, a relationship field named like a count or a total; '
     + '`approval-detail-editable-while-pending`, a lookup child drawn as a table in the record body of a record under a '

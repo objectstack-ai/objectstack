@@ -409,6 +409,29 @@ describe('rollup/child-without-parent-reference', () => {
     );
   });
 
+  it('a served child field whose reference is not a string does not point back, and throws nothing (as the engine\'s scan)', () => {
+    // At the door the child is the registry's served object, which can hold a
+    // carrier the parse would refuse. The engine's scan catches it and reads
+    // on; so does the relation arm, and the aggregand refusal of the same
+    // write still holds.
+    const unreadable = { type: 'lookup', label: 'Legacy', reference: { name: 'order' } };
+    const order = ORDER({
+      latest_line: { type: 'summary', label: 'Latest', summaryOperations: { object: 'order_line', function: 'max', field: 'shipped_at' } },
+    });
+    const servedChild = ORDER_LINE({ legacy: unreadable, ...ORDER_FK, shipped_at: { type: 'datetime', label: 'Shipped' } });
+    const verdict = runRuntimeAuthoringRules({ type: 'object', item: order, context: { objects: [servedChild] } });
+    expect(rulesOf(verdict.advisories)).not.toContain('authoring-rule-threw');
+    expect(rulesOf(verdict.errors)).not.toContain(CHILD_WITHOUT_PARENT_REFERENCE);
+    expect(rulesOf(verdict.errors)).toContain(RULE);
+    const onlyUnreadable = runRuntimeAuthoringRules({
+      type: 'object',
+      item: ORDER(),
+      context: { objects: [ORDER_LINE({ legacy: unreadable })] },
+    });
+    expect(rulesOf(onlyUnreadable.advisories)).not.toContain('authoring-rule-threw');
+    expect(rulesOf(onlyUnreadable.errors)).toContain(CHILD_WITHOUT_PARENT_REFERENCE);
+  });
+
   it('the runtime publish gate refuses the object write, and passes it once the child points back', () => {
     const refused = runRuntimeAuthoringRules({ type: 'object', item: ORDER(), context: { objects: [ORDER_LINE()] } });
     expect(rulesOf(refused.errors)).toContain(CHILD_WITHOUT_PARENT_REFERENCE);

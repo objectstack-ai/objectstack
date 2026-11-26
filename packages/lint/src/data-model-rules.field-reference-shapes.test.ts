@@ -27,11 +27,11 @@ const rulesOf = (findings: readonly { rule: string }[]) => findings.map((f) => f
 describe('field/reference-on-non-reference-type', () => {
   const object = (fields: AnyRec): AnyRec => ({ name: 'deal', label: 'Deal', fields: { name: { type: 'text', label: 'Name' }, ...fields } });
 
-  it('refuses reference on a text, number or select field', () => {
+  it('refuses reference on a text, number or date field, whose inline editor becomes the record picker', () => {
     for (const def of [
       { type: 'text', label: 'Account', reference: 'account' },
       { type: 'number', label: 'Account', reference: 'account' },
-      { type: 'select', label: 'Account', reference: 'account', options: [{ value: 'a', label: 'A' }] },
+      { type: 'date', label: 'Account', reference: 'account' },
     ]) {
       const hit = lintFieldReferenceShapes([object({ account: def })]).filter((f) => f.rule === REFERENCE_ON_NON_REFERENCE_TYPE);
       expect(hit, def.type).toHaveLength(1);
@@ -39,6 +39,15 @@ describe('field/reference-on-non-reference-type', () => {
       expect(hit[0].message).toContain('record picker');
       expect(hit[0].fix).toContain("{ type: 'lookup', reference: 'account' }");
     }
+  });
+
+  it('refuses it on a select too, saying only that it links nothing: the inline editor draws the select first', () => {
+    const hit = lintFieldReferenceShapes([
+      object({ account: { type: 'select', label: 'Account', reference: 'account', options: [{ value: 'a', label: 'A' }] } }),
+    ]).filter((f) => f.rule === REFERENCE_ON_NON_REFERENCE_TYPE);
+    expect(hit).toHaveLength(1);
+    expect(hit[0]).toMatchObject({ severity: 'error', path: 'objects[0].fields.account.reference' });
+    expect(hit[0].message).not.toContain('record picker');
   });
 
   it('on a formula it says only that the key links nothing: the record page gives a formula no editor', () => {

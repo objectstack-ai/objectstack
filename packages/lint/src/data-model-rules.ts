@@ -916,8 +916,10 @@ function acceptedChildTypesOf(fn: AggregationFunction): string {
  * (an `owner_id` / `created_by` back to `sys_user` is a real foreign key there)
  * and its fields as served (an object extension may add the foreign key). A
  * written `relationshipField` naming no field the child has is the same
- * defect; one naming a field that exists is not second-guessed (a text column
- * holding the parent id matches by equality all the same).
+ * defect by another road: the summary is indexed, but no child row yields a
+ * parent id, so it is never recomputed and reads the same. One naming a field
+ * that exists is not second-guessed (a text column holding the parent id
+ * matches by equality all the same).
  *
  * ## Silence, never a guess
  *
@@ -942,9 +944,21 @@ export function lintSummaryRollups(objects: any[]): LocatedLintIssue[] {
  */
 const ROLLUP_CHILD_WITHOUT_PARENT_REFERENCE = 'rollup/child-without-parent-reference';
 
-/** Does the engine's foreign-key scan take this child field as the parent's foreign key? */
+/**
+ * Does the engine's foreign-key scan take this child field as the parent's
+ * foreign key? A `reference` that is not a string makes `refOf` throw; the
+ * engine's scan catches exactly that and moves on to the next field, so one
+ * unreadable sibling hides no readable foreign key, and so does this: such a
+ * field does not point back. (A served child can carry one — a raw
+ * registration, or a row stored before the parse tightened.)
+ */
 function pointsBackTo(def: any, parent: string): boolean {
-  return (def?.type === 'master_detail' || def?.type === 'lookup') && refOf(def) === parent;
+  if (def?.type !== 'master_detail' && def?.type !== 'lookup') return false;
+  try {
+    return refOf(def) === parent;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -1080,12 +1094,31 @@ const FIELD_REFERENCE_ON_NON_REFERENCE_TYPE = 'field/reference-on-non-reference-
 const FIELD_COUNT_NAMED_LOOKUP = 'field/count-named-lookup';
 
 /**
- * Computed types the record page never hands to an editor, so a stray
- * `reference` on one is merely inert. Every other non-reference type is hijacked
- * by the inline editor (`InlineFieldInput`: `!!field.reference` routes the
- * field to the record picker unless its type is one of these).
+ * Types whose stray `reference` the record page's inline editor never reads:
+ * the computed types it hands no editor (`formula`, `autonumber`), and the
+ * types it routes to their own widget before it looks at `reference`
+ * (`InlineFieldInput`: a `select` / `multiselect` with options — a `select`
+ * parses only with options or a picklist, whose options are served onto the
+ * field — `boolean`, the file-backed types, `markdown` and `textarea`). On
+ * these the key is merely inert. Every other non-reference type (`text`,
+ * `number`, `currency`, `percent`, the date types, …) falls through to the
+ * reference branch (`!!field.reference` routes the field to the record picker).
  */
-const COMPUTED_TYPES_WITHOUT_EDITOR: ReadonlySet<string> = new Set(['formula', 'autonumber']);
+const TYPES_EDITED_WITHOUT_REFERENCE: ReadonlySet<string> = new Set([
+  'formula',
+  'autonumber',
+  'select',
+  'multiselect',
+  'boolean',
+  'image',
+  'avatar',
+  'signature',
+  'file',
+  'video',
+  'audio',
+  'markdown',
+  'textarea',
+]);
 
 /**
  * Non-reference types on which `reference` is still read, so it is not judged
@@ -1125,10 +1158,11 @@ export interface FieldShapeExtension {
  *   judges those four (a missing target, a foreign `user` target, a foreign
  *   `tree` target) and lets the key ride on every other type (`summary` aside,
  *   see {@link REFERENCE_READ_OFF_TYPE}). There the engine
- *   links nothing, and the record page's inline editor still reads it: any
- *   field carrying a `reference`, outside the computed types, is edited with
- *   the record picker, which writes a record id into a text, number or select
- *   column. One parse-free rule, so the CLI and the save door refuse it alike.
+ *   links nothing, and on a text, number or date field the record page's
+ *   inline editor still reads it: such a field is edited with the record
+ *   picker, which writes a record id into the column (the types the editor
+ *   routes elsewhere first, see {@link TYPES_EDITED_WITHOUT_REFERENCE}, are
+ *   told only that the key links nothing). One parse-free rule, so the CLI and the save door refuse it alike.
  * - {@link FIELD_COUNT_NAMED_LOOKUP} (`warning`): a `lookup` / `master_detail`
  *   whose name says it holds a count or a total (`contact_count`,
  *   `total_amount`). A relationship stores the id of ONE record; the author
@@ -1150,7 +1184,7 @@ export function lintFieldReferenceShapes(
     if (typeof type !== 'string') return;
     const reference = typeof def.reference === 'string' ? def.reference.trim() : '';
     if (reference !== '' && !REFERENCE_VALUE_TYPES.has(type) && !REFERENCE_READ_OFF_TYPE.has(type)) {
-      const editor = COMPUTED_TYPES_WITHOUT_EDITOR.has(type)
+      const editor = TYPES_EDITED_WITHOUT_REFERENCE.has(type)
         ? ''
         : ', and the record page edits it with a record picker that writes a record id into it';
       issues.push({
