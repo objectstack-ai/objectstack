@@ -151,15 +151,18 @@ describe('the shard door: a rotation-declared object gains a NOW() field (#37413
 });
 
 describe('the backfill fills only NULLs (#37413)', () => {
-  it('keeps a value a writer already stored in the column', async () => {
+  it('keeps a value a writer already stored, in a row the statement still visits for another column', async () => {
     const d = await open();
     const k = d.getKnex();
-    await k.raw(`CREATE TABLE "${T}" (id text primary key, added datetime)`);
-    await k(T).insert([{ id: 'a', added: null }, { id: 'b', added: 'kept' }]);
-    await k.raw(sqliteNowBackfillSql(T, [['added', { type: 'datetime', defaultValue: 'NOW()' }]])!);
-    const rows = await k(T).select('id', 'added').orderBy('id');
-    expect(String(rows[0].added)).toMatch(SHAPE.datetime);
-    expect(rows[1].added).toBe('kept');
+    await k.raw(`CREATE TABLE "${T}" (id text primary key, added datetime, on_day date)`);
+    await k(T).insert([{ id: 'a', added: null, on_day: 'kept' }, { id: 'b', added: 'kept', on_day: null }]);
+    const now = { defaultValue: 'NOW()' };
+    await k.raw(sqliteNowBackfillSql(T, [['added', { type: 'datetime', ...now }], ['on_day', { type: 'date', ...now }]])!);
+    const [a, b] = await k(T).select('id', 'added', 'on_day').orderBy('id');
+    expect(String(a.added)).toMatch(SHAPE.datetime);
+    expect(a.on_day).toBe('kept');
+    expect(b.added).toBe('kept');
+    expect(String(b.on_day)).toMatch(SHAPE.date);
   });
 });
 
