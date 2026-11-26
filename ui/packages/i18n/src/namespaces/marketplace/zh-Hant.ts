@@ -48,6 +48,8 @@ const zhHant = {
         versions: '版本',
         noApprovedVersions: '暫無已稽核版本。',
         prerelease: '預釋出',
+        notInstallableHosted: '託管環境無法安裝',
+        notInstallableHostedReason: '這是程式碼外掛：託管環境不執行程式碼外掛。請在自託管或企業版執行環境中安裝。',
         moreOptions: '更多安裝選項',
         uninstallFromRuntime: '從本執行環境解除安裝',
         addSampleData: '新增示例資料',
