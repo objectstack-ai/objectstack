@@ -21,7 +21,7 @@ feat(spec)!: a knowledge source is a governed metadata type, `knowledge_source`,
 
 Clause-②: yes (narrowing)
 Metadata-protocol: narrowed
-Skills-docs: `skills/objectstack-platform/SKILL.md` lists the new top-level key `knowledgeSources`; `skills/objectstack-ai/SKILL.md`'s compiled `supportKb` example writes `name` and `content`. Teaching the type in `skills/objectstack-ai` is a later change.
+Skills-docs: follow-up #37310. Here only the enumeration row: `skills/objectstack-platform/SKILL.md` lists the new top-level key `knowledgeSources`, and `skills/objectstack-ai/SKILL.md`'s compiled `supportKb` example writes `name` and `content`, because the 18 spelling no longer parses.
 
 <!-- adr-0087: registered knowledge-source-id-to-name, knowledge-source-content-fields-to-content, knowledge-source-inert-keys-removed, knowledge-source-content-lists-fields, knowledge-source-file-http-kinds-retired, knowledge-source-inert-keys-retired, knowledge-source-registration-governed -->
 
