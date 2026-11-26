@@ -826,6 +826,17 @@ export class KnowledgeService implements IKnowledgeService {
         if (held.fingerprint === undefined && held.recipeHash === undefined && held.building !== true) {
           return reading('nothing', true, 'the adapter holds nothing for the source: it has never been built.', held);
         }
+        // A first build opened a generation and has not completed it (it is
+        // still running on some node, or it stopped part-way): there is no
+        // active generation yet, so no other fingerprint to speak of.
+        if (held.fingerprint === undefined) {
+          return reading(
+            'nothing',
+            true,
+            'a first build was started and has not completed (it is still running, or it stopped part-way): the adapter holds no complete index for the source.',
+            held,
+          );
+        }
         if (held.fingerprint !== expected.fingerprint) {
           return reading(
             'new-fingerprint',
@@ -1036,7 +1047,14 @@ export class KnowledgeService implements IKnowledgeService {
    */
   async buildSourcesAtBoot(): Promise<void> {
     const logger = this.options.logger;
-    for (const source of this.listSources()) {
+    let sources: KnowledgeSource[];
+    try {
+      sources = this.listSources();
+    } catch (err) {
+      logger?.warn(`[knowledge] the boot build pass could not list the sources (${operatorText(err)}); none is built at boot.`);
+      return;
+    }
+    for (const source of sources) {
       if (this.buildsStopped) return;
       try {
         if (source.source.kind === 'object' && (source.refresh?.onRecordChange ?? true) === false) {

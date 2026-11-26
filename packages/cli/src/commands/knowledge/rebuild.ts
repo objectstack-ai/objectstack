@@ -18,7 +18,10 @@ import {
  * administrator only and starts the build in the background on the node that
  * answers; then, unless `--no-wait`, reads `index_status` every `--interval`
  * seconds and prints the build's progress until it ends. Exits 0 when the
- * build finished, 1 when it did not run or did not finish.
+ * build finished, 1 when it did not run or did not finish. With `--no-wait`
+ * it exits 0 once the build has started and reports no outcome: the build
+ * may still end `not-run` (another node holds the source's lock) or
+ * `failed`, which only `os knowledge status` then shows.
  *
  * A build sends the content fields of every row the source's `where` matches,
  * except those the index already holds unchanged, to the embedding provider,
@@ -41,7 +44,8 @@ export default class KnowledgeRebuild extends Command {
     url: Flags.string({ char: 'u', description: 'Server URL', env: 'OS_CLOUD_URL' }),
     token: Flags.string({ char: 't', description: 'Authentication token (an administrator\'s)', env: 'OS_TOKEN' }),
     wait: Flags.boolean({
-      description: 'Follow the build until it ends (--no-wait returns once it has started)',
+      description:
+        'Follow the build until it ends (--no-wait exits 0 once it has started and does not report its outcome: read it with os knowledge status)',
       default: true,
       allowNo: true,
     }),
@@ -58,7 +62,12 @@ export default class KnowledgeRebuild extends Command {
     }
     if (started.message) this.log(started.message);
     const startedBuild = started.details.build as KnowledgeBuildView | null | undefined;
-    if (!flags.wait) return;
+    if (!flags.wait) {
+      // Exit 0 here says "started", never "built": the build can still end
+      // not-run (another node holds the lock) or failed.
+      this.log('Not followed (--no-wait): the build may still not run or fail. Read its outcome with os knowledge status.');
+      return;
+    }
     const startedAt = startedBuild?.startedAt;
 
     let lastLine = '';

@@ -24,6 +24,7 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SETUP_APP, SETUP_NAV_CONTRIBUTIONS } from '@objectstack/platform-objects';
 import { EMBEDDER_SERVICE, KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
+import type { KnowledgeSource } from '@objectstack/spec/ai';
 import type {
   IEmbedder,
   IHttpRequest,
@@ -202,6 +203,92 @@ describe('[#24769] the two buttons the knowledge service contributes, at the HTT
     expect(answer.status).toBe(200);
     expect(answer.body?.data?.ok).toBe(true);
     expect(answer.body?.data?.message).toContain('localhost:9380');
+  });
+});
+
+/**
+ * The rebuild entry is an administrator's (ADR-0161 K7, the operator's
+ * rebuild). `rebuild` spends money (it sends a source's content to the
+ * embedding provider) and `index_status` names every source, so both are
+ * refused at the settings action door to any caller without
+ * `manage_platform_settings`, before either handler runs. The gate is not in
+ * this package: it is the `knowledge` manifest's `writePermission`
+ * (`@objectstack/service-settings`), which `SettingsService.runAction` checks
+ * before the handler lookup. These pins drive that real path, so relaxing the
+ * manifest's permission turns them red.
+ */
+describe('the rebuild and index_status actions are administrator-only, at the HTTP door', async () => {
+  // A distinctive source: its id and label must appear in no refusal.
+  const SECRET_SOURCE: KnowledgeSource = {
+    id: 'board_minutes_private',
+    label: 'Board minutes (private)',
+    adapter: 'memory',
+    source: { kind: 'object', object: 'board_minute', contentFields: ['body'] },
+  } as KnowledgeSource;
+  const kernel = new LiteKernel();
+  kernel.use(new FakeManifestPlugin([]));
+  kernel.use(new KnowledgeServicePlugin({ enableEventSync: false, buildAtBoot: false, sources: [SECRET_SOURCE] }));
+  kernel.use(new SettingsServicePlugin({ env: {}, registerRoutes: false }));
+  await kernel.bootstrap();
+  const settings = kernel.getService<SettingsService>('settings');
+  const knowledge = kernel.getService<KnowledgeService>('knowledge');
+
+  const callers = {
+    admin: () => ({ enforced: true, permissions: ['manage_platform_settings'], userId: 'usr_admin' }),
+    // An organization member who may read Setup but holds no platform capability.
+    member: () => ({ enforced: true, permissions: ['setup.read', 'setup.write'], userId: 'usr_member' }),
+    anonymous: () => ({ enforced: true, permissions: [] as string[] }),
+  };
+  const door = (who: keyof typeof callers) => {
+    const http = new MockHttp();
+    registerSettingsRoutes(http, settings, { contextFromRequest: callers[who] });
+    return http;
+  };
+  /** Every method the two handlers can call on the service, watched. */
+  const watchService = () =>
+    (['listSources', 'getSource', 'readIndexState', 'rebuildSource', 'buildRecord'] as const).map((m) => vi.spyOn(knowledge, m));
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it.each([
+    ['member', 'rebuild', { source: SECRET_SOURCE.id }],
+    ['member', 'rebuild', {}],
+    ['member', 'index_status', {}],
+    ['member', 'index_status', { source: SECRET_SOURCE.id }],
+    ['anonymous', 'rebuild', { source: SECRET_SOURCE.id }],
+    ['anonymous', 'index_status', {}],
+  ] as const)('a %s calling %s %j is refused 403 SETTINGS_FORBIDDEN, names no source, and reaches no handler', async (who, action, body) => {
+    const watched = watchService();
+    const answer = await post(door(who), 'knowledge', action, body);
+
+    expect(answer.status).toBe(403);
+    expect(answer.body?.error?.code).toBe('SETTINGS_FORBIDDEN');
+    // The refusal names the namespace, never a source the caller may not see.
+    const text = JSON.stringify(answer.body);
+    expect(text).not.toContain(SECRET_SOURCE.id);
+    expect(text).not.toContain(SECRET_SOURCE.label);
+    for (const spy of watched) expect(spy, spy.getMockName()).not.toHaveBeenCalled();
+  });
+
+  it('control: the same door lets an administrator through, and then the source is named', async () => {
+    // Without this, "names no source" above could hold because no answer ever names one.
+    const watched = watchService();
+    const status = await post(door('admin'), 'knowledge', 'index_status', {});
+    expect(status.status).toBe(200);
+    expect(JSON.stringify(status.body)).toContain(SECRET_SOURCE.id);
+
+    // `rebuild` without a source is answered by the handler itself, which lists the ids.
+    const unnamed = await post(door('admin'), 'knowledge', 'rebuild', {});
+    expect(unnamed.status).toBe(400);
+    expect(unnamed.body?.error?.code).toBe('SETTINGS_ACTION_FAILED');
+    expect(JSON.stringify(unnamed.body)).toContain(SECRET_SOURCE.id);
+    expect(watched.some((spy) => spy.mock.calls.length > 0)).toBe(true);
+  });
+
+  it('in process, an enforced caller without the capability is refused by runAction itself', async () => {
+    for (const action of ['rebuild', 'index_status']) {
+      await expect(settings.runAction('knowledge', action, { source: SECRET_SOURCE.id }, callers.member()))
+        .rejects.toMatchObject({ code: 'SETTINGS_FORBIDDEN', namespace: 'knowledge', required: 'manage_platform_settings' });
+    }
   });
 });
 

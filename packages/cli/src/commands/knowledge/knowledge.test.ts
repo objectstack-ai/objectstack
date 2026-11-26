@@ -151,12 +151,15 @@ describe('os knowledge rebuild', () => {
     expect(run.failure?.message).toContain('not running this build');
   });
 
-  it('--no-wait returns once the build has started', async () => {
+  it('--no-wait returns once the build has started, and says its outcome is not reported', async () => {
     const run = await drive(KnowledgeRebuild, ['kb', '--no-wait', ...target], [
       ok({ ok: true, message: 'started', details: { source: 'kb', build: running(0) } }),
     ]);
     expect(run.failure).toBeUndefined();
     expect(run.requests).toHaveLength(1);
+    // Exit 0 means "started", not "built": the line pointing at the outcome is
+    // the only thing that tells a script so.
+    expect(run.logs.some((line) => line.includes('os knowledge status'))).toBe(true);
   });
 });
 

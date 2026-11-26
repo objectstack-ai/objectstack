@@ -37,7 +37,9 @@ import type { AdapterIndexStatus, KnowledgeReindexResult } from '@objectstack/sp
  * What a source's adapter holds, against what the service expects of it
  * (ADR-0161 K7, "What starts a rebuild"):
  *
- * - `nothing` — the adapter holds nothing for the source. Built.
+ * - `nothing` — the adapter holds nothing for the source, or only a first
+ *   generation `beginBuild` opened and no build completed (no fingerprint is
+ *   active yet). Built.
  * - `new-fingerprint` — the active generation's fingerprint is not the one
  *   the service computes now (another model, dimensions or split). Built as a
  *   new generation.

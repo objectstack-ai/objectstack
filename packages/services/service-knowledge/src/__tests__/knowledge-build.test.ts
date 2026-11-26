@@ -264,9 +264,33 @@ describe('readIndexState — the states of ADR-0161 K7 "What starts a rebuild"',
     expect(reading.detail).toContain('store offline');
     expect(await service.readIndexState('files')).toMatchObject({ state: 'not-built-here', due: false });
   });
+
+  it('a first build that opened a generation and never completed it reads as nothing built, not another fingerprint', async () => {
+    const db = makeEngine(ROWS);
+    const { adapter } = makeAdapter();
+    // What a store answers after a builder crashed inside its first build:
+    // a generation under construction, and no active one.
+    adapter.indexStatus = async () => ({ building: true });
+    const { service } = makeService(db.engine, adapter);
+    service.registerSource(source());
+
+    expect(await service.readIndexState('kb')).toMatchObject({ state: 'nothing', due: true, held: { building: true } });
+  });
 });
 
 describe('buildSourcesAtBoot — the first build', () => {
+  it('resolves, and says so at warn, when the sources cannot even be listed', async () => {
+    const db = makeEngine(ROWS);
+    const { adapter, calls } = makeAdapter();
+    const { service, logger } = makeService(db.engine, adapter);
+    service.registerSource(source());
+    vi.spyOn(service, 'listSources').mockImplementation(() => { throw new Error('registry torn down'); });
+
+    await expect(service.buildSourcesAtBoot()).resolves.toBeUndefined();
+    expect(calls.upserted).toBe(0);
+    expect(logger.warn.mock.calls.map((c) => String(c[0])).some((l) => l.includes('registry torn down'))).toBe(true);
+  });
+
   it('a fresh deployment with one source and existing rows: after the boot pass, search finds them', async () => {
     const db = makeEngine(ROWS);
     const { adapter, calls } = makeAdapter();

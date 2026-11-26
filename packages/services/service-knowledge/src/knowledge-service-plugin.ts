@@ -547,7 +547,14 @@ export class KnowledgeServicePlugin implements Plugin {
       // since a build embeds, and never awaited, so the boot does not wait
       // for it. `buildAtBoot: false` turns it off.
       if (this.options.buildAtBoot !== false && this.service) {
-        void this.service.buildSourcesAtBoot();
+        // `buildSourcesAtBoot` resolves on every failure it can name; the
+        // catch is for one it cannot, so no rejection goes unhandled.
+        void this.service.buildSourcesAtBoot().catch((err: unknown) => {
+          ctx.logger.warn?.(
+            `KnowledgeServicePlugin: the boot build pass stopped (${err instanceof Error ? err.message : String(err)}); ` +
+              'no further source is built at this boot. Rebuild one with os knowledge rebuild.',
+          );
+        });
       }
     });
 
