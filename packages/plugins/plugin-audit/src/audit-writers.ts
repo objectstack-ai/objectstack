@@ -1283,7 +1283,7 @@ function matchMilestone(
   objectDef: any,
   before: Record<string, any> | null,
   after: Record<string, any> | null,
-): { template: string; type?: string; watched: string[] } | null {
+): { template: string; field: string; value: string; type?: string; watched: string[] } | null {
   const milestones =
     objectDef && Array.isArray(objectDef.activityMilestones) ? objectDef.activityMilestones : null;
   if (!milestones || !after || !before) return null;
@@ -1293,6 +1293,10 @@ function matchMilestone(
     if (after[m.field] === m.value && before[m.field] !== m.value) {
       return {
         template: m.summary,
+        // [#37524] The pair the milestone is addressed by in the translation
+        // bundle (`objects.<o>._milestones.<field>.<value>.summary`).
+        field: m.field,
+        value: String(m.value),
         type: typeof m.type === 'string' ? m.type : undefined,
         // [ADR-0139 E6] The same list the read rule keys the CURRENT
         // declaration by, from the same function.
@@ -1398,19 +1402,29 @@ function renderMilestoneSummary(
   fields: Record<string, any> | undefined | null,
   after: Record<string, any> | null,
   lookupTitles?: Map<string, Map<string, string>>,
-): { text: string; fields: string[] } {
+): { text: string; fields: string[]; tokens: Record<string, ActivitySummaryValue> } {
   const interpolated = new Set<string>();
+  // [#37524] Each interpolated token's value, as a field change stores one:
+  // the text rendered here and the option it matched, so a reader's
+  // composition names the option in the reader's language.
+  const tokens: Record<string, ActivitySummaryValue> = {};
   const text = template.replace(milestoneTokenRe(), (_match: string, key: string) => {
     const v = after ? after[key] : undefined;
     if (v === null || v === undefined || v === '') return '';
     interpolated.add(key);
     const field = fields ? fields[key] : undefined;
-    if (!field) return String(v);
+    if (!field) {
+      tokens[key] = { text: String(v) };
+      return String(v);
+    }
     const reference = referenceTargetForSummary(field);
     const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
-    return displayFieldValue(field, v, titlesFor);
+    const shown = displayFieldValue(field, v, titlesFor);
+    const value = summaryValueOf(field, v, titlesFor);
+    tokens[key] = value.option !== undefined ? { text: shown, option: value.option } : { text: shown };
+    return shown;
   });
-  return { text, fields: [...interpolated] };
+  return { text, fields: [...interpolated], tokens };
 }
 
 /**
@@ -2632,8 +2646,9 @@ export function installAuditWriters(
     // and the read side composes it in the READER's language
     // (`activity-summary-message.ts`). The stored `summary` is the English
     // sentence, the fallback text for every reader that composition does not
-    // reach, so no write asks for a locale. A fired milestone's author-written
-    // template has no code and stays as written.
+    // reach, so no write asks for a locale. A fired milestone's stored text is
+    // its author-written template rendered as written; [#37524] its code names
+    // the milestone, so a reader's language may translate the template.
     const writeLocale = storedSummaryLocale;
     let summary: string;
     let summaryMessage: ActivitySummaryMessage | undefined;
@@ -2680,6 +2695,16 @@ export function installAuditWriters(
         const rendered = renderMilestoneSummary(milestone.template, summaryFields, afterView, lookupTitles);
         summary = rendered.text;
         summarySources = rendered.fields;
+        // [#37524] The row's code: which milestone fired and its token values.
+        // The stored `summary` stays the authored sentence; a reader whose
+        // language translates this milestone reads it composed in that language.
+        summaryMessage = {
+          key: 'activityMilestone',
+          object: ctx.object,
+          field: milestone.field,
+          value: milestone.value,
+          tokens: rendered.tokens,
+        };
         if (milestone.type) activityType = milestone.type;
         // [#22771] `type` stays what the declaration names; the row says it is
         // a milestone in `metadata.kind`, so a "Case resolved" milestone of
