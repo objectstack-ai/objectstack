@@ -149,7 +149,7 @@ describe('i18n walker — a `form` item\'s sections, `forms.<name>.sections.<sec
     .map((e) => e.path.join('.'))
     .filter((p) => p.startsWith(`forms.${FORM}.sections.`) || p.includes('._sections.'));
   const zhMissing = (translations: unknown[]) => computeI18nCoverage(formConfig(translations)).issues
-    .filter((i) => i.locale === 'zh-CN' && (i.key.includes('.sections.') || i.key.includes('._sections.')))
+    .filter((i) => i.locale === 'zh-CN' && (i.key.startsWith(`forms.${FORM}.`) || i.key.includes('._sections.')))
     .map((i) => i.key)
     .sort();
 
