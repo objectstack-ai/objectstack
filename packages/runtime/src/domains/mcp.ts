@@ -36,7 +36,7 @@ import {
 } from '@objectstack/rest';
 // [ADR-0131 D3 · D12 items 7–8 · D11] The walled refusal every door that writes
 // the environment's metadata asks, read through this transport's one posture read.
-import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
+import { packageResolutionClosure, walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 import { shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, userTextLocalesOf } from '@objectstack/core';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
 import { buildApiError } from '../error-envelope.js';
@@ -1443,6 +1443,12 @@ export function buildMcpBridge(
         },
         // [ADR-0150 D6] A package-held skill's prompt name is `NS-NAME`.
         packageNamespace: (packageId: string) => packageNamespaceOf(skillEngine, packageId),
+        // [ADR-0150 D3 step 2, ADR-0160 D8] A package-held skill's `context`
+        // resolves through its package's closure, walked by the one walk over
+        // the same engine's registry. No engine: the empty closure, and the
+        // skill resolves only its own package's pack.
+        packageResolutionClosure: (packageId: string): ReadonlySet<string> =>
+            skillEngine?.registry ? packageResolutionClosure(skillEngine.registry, packageId) : new Set<string>(),
 
         create: async (object: string, data: any) =>
             await callData('create', { object, data }, driver, envId, ec),
@@ -1730,6 +1736,28 @@ export function buildMcpBridge(
     // caller: nothing it reads is read any other way.
     if (seams.recordContextTools) {
         let contextPackEngine: any;
+        // The authored packs, not the serving envelope: the merged listing
+        // is the one `/meta/ai_context` serves, so every item carries the
+        // read path's `_diagnostics`, which the executor's closed
+        // `AiContextSchema` refuses as an unrecognized key — every pack
+        // would be dropped. `stripReadDecorations` removes exactly the
+        // read decorations (`METADATA_READ_DECORATIONS`) and keeps the
+        // ADR-0010 protection envelope the schema declares.
+        const listContextPacks = async () => {
+            // [ADR-0150 addendum 2026-11-25] The engine whose registry
+            // places each pack's package ({@link packageNamespaceOf}),
+            // resolved beside the read it serves, as `listSkills` does.
+            contextPackEngine = await deps.getObjectQL(context, envId).catch(() => undefined);
+            const merged = await actionExec.readMergedItems(await getProtocol(), 'ai_context');
+            if (merged !== undefined) return merged.map(stripReadDecorations);
+            const meta: any = await getMeta();
+            const listed = typeof meta?.list === 'function' ? await meta.list('ai_context') : [];
+            return Array.isArray(listed) ? listed.map(stripReadDecorations) : [];
+        };
+        // [ADR-0160 D8] The skill prompt surface resolves a skill's `context`
+        // against the same listing the tool selects from, so the pack face a
+        // prompt hands on is one `get_record_context` reads back.
+        Object.assign(bridge, { listContextPacks });
         Object.assign(bridge, recordContextMembers(seams.recordContextTools, bridge, {
             assertApiExposed: (object, action) =>
                 actionExec.refuseUnexposedDataAction(deps, context, action, object, envId, ec, 'refuse'),
@@ -1740,24 +1768,7 @@ export function buildMcpBridge(
                 return (localized ?? def) as Record<string, unknown>;
             },
             publishedObjectDefinitionOf: async (name) => ((await readServedObject(name)) ?? null) as Record<string, unknown> | null,
-            // The authored packs, not the serving envelope: the merged listing
-            // is the one `/meta/ai_context` serves, so every item carries the
-            // read path's `_diagnostics`, which the executor's closed
-            // `AiContextSchema` refuses as an unrecognized key — every pack
-            // would be dropped. `stripReadDecorations` removes exactly the
-            // read decorations (`METADATA_READ_DECORATIONS`) and keeps the
-            // ADR-0010 protection envelope the schema declares.
-            listContextPacks: async () => {
-                // [ADR-0150 addendum 2026-11-25] The engine whose registry
-                // places each pack's package ({@link packageNamespaceOf}),
-                // resolved beside the read it serves, as `listSkills` does.
-                contextPackEngine = await deps.getObjectQL(context, envId).catch(() => undefined);
-                const merged = await actionExec.readMergedItems(await getProtocol(), 'ai_context');
-                if (merged !== undefined) return merged.map(stripReadDecorations);
-                const meta: any = await getMeta();
-                const listed = typeof meta?.list === 'function' ? await meta.list('ai_context') : [];
-                return Array.isArray(listed) ? listed.map(stripReadDecorations) : [];
-            },
+            listContextPacks,
             // [ADR-0150 D6, addendum 2026-11-25] A package's pack is spelt by
             // its face `NS-NAME`, as a package-held skill's prompt name is.
             packageNamespace: (packageId: string) => packageNamespaceOf(contextPackEngine, packageId),
