@@ -470,6 +470,14 @@ the grouping, the aggregations, how many records the figures cover, and whether
 only the reader's visible records were read. It draws that block alone, never
 the rest of the tool payload.
 
+An answer that rests on records draws its verified citations (the
+`data-record-citations` part, `RecordCitationsSchema` in `@objectstack/spec/ai`)
+beside that block, one chip per citation showing the quoted passage. The list is
+drawn as the platform verified it when the answer was produced, never verified
+again; a part that does not parse draws nothing. A chip calls
+`onOpenRecord({ objectName, recordId, anchor })`, and the console opens the
+record at the cited body section (`?section=ANCHOR`).
+
 Console hosts also keep a sanitized browser-side display cache for the active
 conversation. If the backend conversation record is available but returns no
 message rows on refresh, the UI can restore user/assistant text plus grouped
