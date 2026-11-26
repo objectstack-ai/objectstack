@@ -202,6 +202,36 @@ describe('sys_standard_unit_setting on a real stack: administrator sets and clea
     });
   }
 
+  // The `organization_admin` line's claim: an administrator edits and clears
+  // EVERY setting of the organization, not only the ones they created, with
+  // no superuser bit (settings carry no owner scope for an administrator).
+  describe('an administrator edits and clears every setting of the organization, not only their own', () => {
+    for (const [creator, editor] of [['owen', 'carol'], ['carol', 'owen']] as const) {
+      it(`the ${editor === 'carol' ? 'administrator' : 'owner'} changes and then deletes a setting the ${creator === 'owen' ? 'owner' : 'administrator'} created`, async () => {
+        const code = creator === 'owen' ? 'MTR' : 'CMT';
+        const id = String((await insert(as[creator], { code, decimal_places: 2 })).id);
+        expect(await storedById(id)).toMatchObject({ code, decimal_places: 2, organization_id: ORG });
+
+        await update(as[editor], id, { decimal_places: 1 });
+        expect(await storedById(id)).toMatchObject({ code, decimal_places: 1 });
+
+        await remove(as[editor], id);
+        expect(await stored({ code })).toEqual([]);
+      });
+    }
+
+    it("the effective permissions of both keep read, create, edit and delete, without the superuser bits", async () => {
+      const security = kernel.getService<{
+        getEffectiveObjectPermissions(ctx: Ctx): Promise<Record<string, Record<string, unknown>>>;
+      }>('security');
+      for (const key of ['carol', 'owen'] as const) {
+        const map = await security.getEffectiveObjectPermissions(as[key]);
+        expect(map[OBJ], key).toMatchObject({ allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true });
+        expect(map[OBJ]?.modifyAllRecords, key).not.toBe(true);
+      }
+    });
+  });
+
   describe('a member', () => {
     it("reads the organization's settings, so a quantity displays with the same default for them", async () => {
       expect((await list(as.alice)).map((r) => [r.code, r.decimal_places])).toEqual([['GRM', 3]]);

@@ -46,9 +46,12 @@ export const STANDARD_UNIT_SETTING_CODE_PATTERN = `^(?:${STANDARD_UNIT_SETTING_C
  *   unlike `sys_unit` the delete is served; it is also what lets an
  *   organization delete itself, which refuses while any of its records
  *   remain, as an exchange rate does.
- * - **Tenancy** — no tenancy opt-out, so `organization_id` is injected and the
- *   Layer 0 tenant wall (ADR-0095 D1) scopes every read and write: another
- *   organization's value is never read.
+ * - **Tenancy** — no tenancy opt-out, so `organization_id` is injected and
+ *   stamped on every row. Under the `isolated` posture the Layer 0 tenant
+ *   wall (ADR-0095 D1) confines every read and write to the caller's
+ *   organization, so another organization's value is never read; as for
+ *   every organization-owned object (ADR-0105 D1), `single` raises no wall
+ *   and `group` walls by membership.
  * - **Who reads, who writes** — every member READS it (`member_default` names
  *   this object, read only), as `sys_unit` is read, so a quantity displays
  *   with the same default for everyone who reads it. Organization
