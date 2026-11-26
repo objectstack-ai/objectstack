@@ -28,7 +28,11 @@
  *    or, spelled `{ key, fallback }`, is itself the recipient-language text of
  *    the catalog entry `key`, else `fallback`; or, spelled
  *    `{ object, fallback }`, is the label of the object whose API name is
- *    `object`, in the recipient's language, else `fallback`.
+ *    `object`, in the recipient's language, else `fallback`; or [#36853],
+ *    spelled `{ list, separator }`, is a list of catalog sentences, each with
+ *    its own params, every item rendered in the recipient's language (else
+ *    its `fallback`) and the items joined by the separator entry, so a list
+ *    of any length reads in one language ({@link NotificationListParam}).
  *  - [#35384] An object's label is METADATA, not a catalog sentence, so the
  *    `{ object }` param is resolved as `GET /meta/object/:name` serves it:
  *    by `translateObject` (`@objectstack/spec/system`) over the object's
@@ -92,10 +96,43 @@ import { DEFAULT_LOCALE } from './template-renderer.js';
  * object's name, resolved as the metadata route serves it with `fallback` as
  * the text when nothing resolves ({@link NotificationObjectLabelParam}).
  */
-export type NotificationTextParam =
+export type NotificationTextParam = NotificationScalarParam | NotificationListParam;
+
+/**
+ * [#36853] A value that fills one hole by itself: the text, a catalog key with
+ * its `fallback`, or an object's label ({@link NotificationObjectLabelParam}).
+ * A {@link NotificationListItem}'s own params take these, never a list.
+ */
+export type NotificationScalarParam =
     | string
     | { readonly key: string; readonly fallback: string }
     | NotificationObjectLabelParam;
+
+/**
+ * [#36853] A `{{name}}` value that is a list read in the recipient's language:
+ * each item its catalog sentence rendered with its own params (else the
+ * item's `fallback`), joined by the `separator` entry (else its `fallback`).
+ *
+ * A `{ key }` param renders a hole-free entry, so a list whose items are
+ * sentences with holes of their own (an approval slate's `{{type}} '{{value}}'`)
+ * could ride only as literal text, in the producer's language, or as one
+ * catalog sentence per list length. This renders a list of any length.
+ */
+export interface NotificationListParam {
+    readonly list: readonly NotificationListItem[];
+    /** The joining text as a catalog entry (`messages.mySeparator`), with the text it falls back to. */
+    readonly separator: { readonly key: string; readonly fallback: string };
+}
+
+/** [#36853] One item of a {@link NotificationListParam}. */
+export interface NotificationListItem {
+    /** The item's catalog sentence, e.g. `messages.approvalNoApproverSlot`. */
+    readonly key: string;
+    /** Values for the item sentence's own `{{name}}` holes. */
+    readonly params?: Readonly<Record<string, NotificationScalarParam>>;
+    /** The item's text when its sentence has no entry. */
+    readonly fallback: string;
+}
 
 /**
  * [#35384] A `{{name}}` value that is the label of the object whose API name
@@ -160,6 +197,15 @@ const PARAM_NAME_SHAPE = /^\w+$/;
 const TEXT_MEMBERS: ReadonlySet<string> = new Set(['titleKey', 'bodyKey', 'params']);
 const KEYED_PARAM_MEMBERS: ReadonlySet<string> = new Set(['key', 'fallback']);
 const OBJECT_LABEL_PARAM_MEMBERS: ReadonlySet<string> = new Set(['object', 'fallback']);
+const LIST_PARAM_MEMBERS: ReadonlySet<string> = new Set(['list', 'separator']);
+const LIST_ITEM_MEMBERS: ReadonlySet<string> = new Set(['key', 'params', 'fallback']);
+
+/**
+ * [#36853] The most items one list param holds. A list is rendered item by
+ * item at every delivery and every inbox read, so it is bounded; an approval
+ * slate is a handful of slots.
+ */
+export const NOTIFICATION_LIST_PARAM_MAX_ITEMS = 100;
 
 /**
  * An object's API name: one segment of {@link CATALOG_KEY_SHAPE}, so every
@@ -194,27 +240,76 @@ function problemOf(value: unknown): string | undefined {
     if (!isPlainObject(params)) return '.params must be an object';
     for (const [name, param] of Object.entries(params)) {
         if (!PARAM_NAME_SHAPE.test(name)) return `.params has a name '${name}' no {{hole}} can spell`;
-        if (typeof param === 'string') continue;
-        if (!isPlainObject(param)) return `.params.${name} must be a string, { key, fallback } or { object, fallback }`;
-        if ('object' in param) {
-            for (const member of Object.keys(param)) {
-                if (!OBJECT_LABEL_PARAM_MEMBERS.has(member)) {
-                    return `.params.${name} has an undeclared member '${member}' (declared: object, fallback)`;
-                }
-            }
-            if (typeof param.object !== 'string' || !OBJECT_NAME_SHAPE.test(param.object)) {
-                return `.params.${name}.object must be an object's API name such as 'crm_deal' (got ${JSON.stringify(param.object)})`;
-            }
-            if (typeof param.fallback !== 'string') return `.params.${name}.fallback must be a string`;
-            continue;
-        }
+        const problem = isPlainObject(param) && 'list' in param
+            ? listParamProblem(`.params.${name}`, param)
+            : scalarParamProblem(`.params.${name}`, param);
+        if (problem !== undefined) return problem;
+    }
+    return undefined;
+}
+
+/** The first thing wrong with `param` as a {@link NotificationScalarParam} at `at`, or `undefined`. */
+function scalarParamProblem(at: string, param: unknown): string | undefined {
+    if (typeof param === 'string') return undefined;
+    if (!isPlainObject(param)) return `${at} must be a string, { key, fallback }, { object, fallback } or { list, separator }`;
+    if ('object' in param) {
         for (const member of Object.keys(param)) {
-            if (!KEYED_PARAM_MEMBERS.has(member)) return `.params.${name} has an undeclared member '${member}' (declared: key, fallback)`;
+            if (!OBJECT_LABEL_PARAM_MEMBERS.has(member)) {
+                return `${at} has an undeclared member '${member}' (declared: object, fallback)`;
+            }
         }
-        if (typeof param.key !== 'string' || !CATALOG_KEY_SHAPE.test(param.key)) {
-            return `.params.${name}.key must be a catalog key such as 'objects.my_object.label' (got ${JSON.stringify(param.key)})`;
+        if (typeof param.object !== 'string' || !OBJECT_NAME_SHAPE.test(param.object)) {
+            return `${at}.object must be an object's API name such as 'crm_deal' (got ${JSON.stringify(param.object)})`;
         }
-        if (typeof param.fallback !== 'string') return `.params.${name}.fallback must be a string`;
+        if (typeof param.fallback !== 'string') return `${at}.fallback must be a string`;
+        return undefined;
+    }
+    return keyedParamProblem(at, param);
+}
+
+/** The first thing wrong with `param` as `{ key, fallback }` at `at`, or `undefined`. */
+function keyedParamProblem(at: string, param: Record<string, unknown>): string | undefined {
+    for (const member of Object.keys(param)) {
+        if (!KEYED_PARAM_MEMBERS.has(member)) return `${at} has an undeclared member '${member}' (declared: key, fallback)`;
+    }
+    if (typeof param.key !== 'string' || !CATALOG_KEY_SHAPE.test(param.key)) {
+        return `${at}.key must be a catalog key such as 'objects.my_object.label' (got ${JSON.stringify(param.key)})`;
+    }
+    if (typeof param.fallback !== 'string') return `${at}.fallback must be a string`;
+    return undefined;
+}
+
+/** [#36853] The first thing wrong with `param` as a {@link NotificationListParam} at `at`, or `undefined`. */
+function listParamProblem(at: string, param: Record<string, unknown>): string | undefined {
+    for (const member of Object.keys(param)) {
+        if (!LIST_PARAM_MEMBERS.has(member)) return `${at} has an undeclared member '${member}' (declared: list, separator)`;
+    }
+    const list = param.list;
+    if (!Array.isArray(list) || list.length === 0) return `${at}.list must be a non-empty array`;
+    if (list.length > NOTIFICATION_LIST_PARAM_MAX_ITEMS) {
+        return `${at}.list holds ${list.length} items (at most ${NOTIFICATION_LIST_PARAM_MAX_ITEMS})`;
+    }
+    if (!isPlainObject(param.separator)) return `${at}.separator must be { key, fallback }`;
+    const separator = keyedParamProblem(`${at}.separator`, param.separator);
+    if (separator !== undefined) return separator;
+    for (const [i, item] of list.entries()) {
+        const itemAt = `${at}.list[${i}]`;
+        if (!isPlainObject(item)) return `${itemAt} must be { key, params?, fallback }`;
+        for (const member of Object.keys(item)) {
+            if (!LIST_ITEM_MEMBERS.has(member)) return `${itemAt} has an undeclared member '${member}' (declared: key, params, fallback)`;
+        }
+        if (typeof item.key !== 'string' || !CATALOG_KEY_SHAPE.test(item.key)) {
+            return `${itemAt}.key must be a catalog key such as 'messages.mySentence' (got ${JSON.stringify(item.key)})`;
+        }
+        if (typeof item.fallback !== 'string') return `${itemAt}.fallback must be a string`;
+        if (item.params === undefined) continue;
+        if (!isPlainObject(item.params)) return `${itemAt}.params must be an object`;
+        for (const [name, value] of Object.entries(item.params)) {
+            if (!PARAM_NAME_SHAPE.test(name)) return `${itemAt}.params has a name '${name}' no {{hole}} can spell`;
+            if (isPlainObject(value) && 'list' in value) return `${itemAt}.params.${name}: a list item's param cannot be a list`;
+            const problem = scalarParamProblem(`${itemAt}.params.${name}`, value);
+            if (problem !== undefined) return problem;
+        }
     }
     return undefined;
 }
@@ -373,14 +468,26 @@ export class NotificationTextRenderer {
         const params: Record<string, string> = {};
         // [#35384] Built on the first object label this render asks, once.
         let translation: { value: MetaLabelTranslation | undefined } | undefined;
-        for (const [name, param] of Object.entries(keys.params ?? {})) {
-            if (typeof param === 'string') {
-                params[name] = param;
-            } else if ('object' in param) {
+        const scalar = (param: NotificationScalarParam): string => {
+            if (typeof param === 'string') return param;
+            if ('object' in param) {
                 translation ??= { value: metaLabelTranslation(i18n, locale) };
-                params[name] = this.objectLabel(translation.value, param.object) ?? param.fallback;
+                return this.objectLabel(translation.value, param.object) ?? param.fallback;
+            }
+            return lookup(i18n, param.key, locale) ?? param.fallback;
+        };
+        for (const [name, param] of Object.entries(keys.params ?? {})) {
+            if (typeof param === 'object' && 'list' in param) {
+                // [#36853] Each item its own sentence in the recipient's
+                // language, with its own params, joined by the separator entry.
+                const items = param.list.map((item) => {
+                    const itemParams: Record<string, string> = {};
+                    for (const [hole, value] of Object.entries(item.params ?? {})) itemParams[hole] = scalar(value);
+                    return lookup(i18n, item.key, locale, itemParams) ?? item.fallback;
+                });
+                params[name] = items.join(lookupSeparator(i18n, param.separator.key, locale) ?? param.separator.fallback);
             } else {
-                params[name] = lookup(i18n, param.key, locale) ?? param.fallback;
+                params[name] = scalar(param);
             }
         }
         const entry = (key: string): string | undefined => announceMisses
@@ -536,6 +643,21 @@ function lookup(
         return typeof text === 'string' && text.trim().length > 0 && text !== key ? text : undefined;
     } catch {
         // A misbehaving i18n service costs the language, never the delivery.
+        return undefined;
+    }
+}
+
+/**
+ * [#36853] A list param's joining text, or `undefined` for a miss. Unlike
+ * {@link lookup} it keeps an answer that is only whitespace or punctuation
+ * (`', '`, `'、'`): a separator is not a sentence. An empty answer and the
+ * echoed key are still misses.
+ */
+function lookupSeparator(i18n: NotificationTextI18n, key: string, locale: string): string | undefined {
+    try {
+        const text = i18n.t(key, locale);
+        return typeof text === 'string' && text.length > 0 && text !== key ? text : undefined;
+    } catch {
         return undefined;
     }
 }

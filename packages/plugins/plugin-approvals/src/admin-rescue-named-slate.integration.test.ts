@@ -657,7 +657,8 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
         { type: 'position', value: 'sales_manager' }, { type: 'position', value: 'treasury' },
       ]);
       const [notice] = told.filter((e) => e.source?.id === row.id);
-      expect(notice.keyedText.bodyKey).toBe('messages.approvalNoApproverHoldingSlots2');
+      // [#36853] The slate rides `{{who}}` as a list param, one keyed clause per slot.
+      expect(notice.keyedText.bodyKey).toBe('messages.approvalNoApproverHolding');
       expect(notice.payload.body).toBe(holding("position 'Sales Manager', position 'treasury'"));
       const renderer = new NotificationTextRenderer({ getData: () => undefined, getI18n: () => i18n as any });
       const zh = renderer.render(notice.keyedText, notice.payload, 'zh-CN').body;
@@ -667,6 +668,34 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
         .toContain('役職「Sales Manager」、役職「treasury」を担うメンバー');
       expect(renderer.render(notice.keyedText, notice.payload, 'en').body)
         .toBe(holding("position 'Sales Manager', position 'treasury'"));
+    });
+
+    // [#36853] A slate larger than the 2–8 slot sentences #36463 spelled: the
+    // real renderer reads every slot in zh-CN, no English approver type and no
+    // English separator, and the literal body is the English the row stores.
+    it('the submitter\'s notice: a slate of nine slots reads entirely in zh-CN through the real renderer', async () => {
+      const slate = [
+        { type: 'position', value: 'sales_manager' },
+        ...Array.from({ length: 4 }, (_, i) => ({ type: 'team', value: `团队${i + 1}` })),
+        ...Array.from({ length: 4 }, (_, i) => ({ type: 'department', value: `部门${i + 1}` })),
+      ];
+      const row = await openLabelled('none_notice_nine', slate);
+      const [notice] = told.filter((e) => e.source?.id === row.id);
+      expect(notice.keyedText.bodyKey).toBe('messages.approvalNoApproverHolding');
+      expect(notice.payload.body).toBe(holding([
+        "position 'Sales Manager'",
+        ...Array.from({ length: 4 }, (_, i) => `team '团队${i + 1}'`),
+        ...Array.from({ length: 4 }, (_, i) => `department '部门${i + 1}'`),
+      ].join(', ')));
+      const renderer = new NotificationTextRenderer({ getData: () => undefined, getI18n: () => i18n as any });
+      const zh = renderer.render(notice.keyedText, notice.payload, 'zh-CN').body;
+      expect(zh).toBe(holdingZh([
+        '岗位「销售经理」',
+        ...Array.from({ length: 4 }, (_, i) => `团队「团队${i + 1}」`),
+        ...Array.from({ length: 4 }, (_, i) => `部门「部门${i + 1}」`),
+      ].join('、')));
+      expect(zh).not.toMatch(/[A-Za-z]/);
+      expect(renderer.render(notice.keyedText, notice.payload, 'en').body).toBe(notice.payload.body);
     });
 
     it('CONTROL: a note written before the slot was stored renders exactly as before', async () => {
