@@ -21,6 +21,10 @@
  *     per-object Settings tab writes — then that object's own publish, so the
  *     change is live at once. Cancel puts every dial back. A refused object
  *     keeps its edit on the page, and the reason is shown.
+ *   • Each row's publish is pinned to the published row the load read
+ *     (objectstack#36962, as objectstack#36726 pins the Studio editors): a
+ *     publish over a row another writer published since is refused and the
+ *     author is asked (reload, overwrite, keep editing), never replaced.
  *   • `controlled_by_parent` rows show the master link (read-only) under the
  *     row's dial.
  *   • There is no external column: `externalSharingModel` is retired by
@@ -63,7 +67,14 @@ import { readFields } from '../metadata-admin/previews/object-fields-io.js';
 import { t, tFormat, type SupportedLocale } from '../metadata-admin/i18n.js';
 import { cbpMasterDetailDefaultsRequired, deriveMasterObject, requireCbpMasterDetails } from './owd-sharing.js';
 import { toast } from 'sonner';
-import { STUDIO_SAVE_TOAST_ID, publishSavedItem, useStudioSaveEntry, type StudioSaveResult } from './studioSaveBar.js';
+import { type DraftPin, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
+import {
+  STUDIO_SAVE_TOAST_ID,
+  publishSavedItem,
+  publishedPinOfLayers,
+  useStudioSaveEntry,
+  type StudioSaveResult,
+} from './studioSaveBar.js';
 
 
 /**
@@ -91,6 +102,14 @@ interface OwdRow {
   hasDraft: boolean;
   /** True when the package's published list held this object at load (objectui#11799). */
   saved: boolean;
+  /**
+   * objectstack#36962 — the published row this row was loaded at, the pin its
+   * Save's publish sends (`publishedPinOfLayers` of the row's layers read). A
+   * row the published list does not hold has no published row: `If-None-Match:
+   * *`, unless its layers were read and say otherwise. A layers read that
+   * failed pins nothing.
+   */
+  published: DraftPin | null;
 }
 
 /**
@@ -119,6 +138,17 @@ async function readObjectBodies(
   const draftResp = await readDraft();
   if (extractDraftBody(draftResp)) return [null, draftResp];
   return [await readLayered(), draftResp];
+}
+
+/**
+ * objectstack#36962 — the pin a row's Save publishes with, from the load's
+ * reads ({@link OwdRow.published}): the layers it read, else, for a row the
+ * published list does not hold (its layers not asked while its draft is in
+ * hand), no published row. A saved row whose layers read failed pins nothing.
+ */
+function publishedPinOfRow(layered: unknown, saved: boolean): DraftPin | null {
+  if (layered) return publishedPinOfLayers(layered);
+  return saved ? null : { ifNoneMatch: '*' };
 }
 
 /** The user's working value for one row ('' = unset). */
@@ -216,6 +246,9 @@ function OwdPicker({
   );
 }
 
+/** The conflict guard's reload, left to the Save that met the conflict (see the guard's use below). */
+function keepPageOnReload(): void {}
+
 /** The classes a dial takes, at the size the native control had. */
 const DIAL = 'h-7 min-w-[13rem] px-2 py-1 text-[12px]';
 
@@ -255,6 +288,16 @@ export function PackageOwdOverviewPanel({
   const [saving, setSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [prereq, setPrereq] = React.useState<CbpPrereq | null>(null);
+  // objectstack#36962 — each row's publish is pinned to the published row its
+  // load read (`recordPublished`), so a Save over a row another writer
+  // published since opens the conflict dialog instead of replacing it. The
+  // guard's own reload is not used: the Save that met the conflict re-reads
+  // the table itself once its pass ends (`reloadKeeping`), keeping the edits
+  // of the rows it did not save, which a reload of the whole table would drop.
+  const { recordPublished, publish: publishPinned, dialog: conflictDialog } = useDraftSaveGuard(client, keepPageOnReload);
+  // The pin each row's edit was made against: a load that keeps a row's edit
+  // keeps that row pinned to the read the edit was made on, never the fresh one.
+  const editPinsRef = React.useRef(new Map<string, DraftPin | null>());
   // The master a `controlled_by_parent` row derives under is named by its
   // label (`ux-conventions.labels-over-machine-names`): this package's own
   // object as this table reads it (its pending draft included), else the
@@ -271,7 +314,8 @@ export function PackageOwdOverviewPanel({
     navItemLabelText(findByName(servedMasters, master)?.label as I18nLabel | undefined, locale).trim() ||
     master;
 
-  const load = React.useCallback(async () => {
+  // `keep` names the rows whose edits the caller puts back over this load.
+  const load = React.useCallback(async (keep?: ReadonlySet<string>) => {
     setLoaded(false);
     setLoadError(null);
     try {
@@ -328,10 +372,20 @@ export function PackageOwdOverviewPanel({
             ),
             hasDraft: !!draftBody,
             saved,
+            published: publishedPinOfRow(layRaw, saved),
           };
         }),
       );
       built.sort((a, b) => a.label.localeCompare(b.label) || a.name.localeCompare(b.name));
+      // objectstack#36962 — each row's publish is pinned to what this load read;
+      // a kept edit stays pinned to the read it was made on (re-sent here, as a
+      // conflict's reload clears every pin the guard holds).
+      for (const r of built) {
+        const kept = keep?.has(r.name) && editPinsRef.current.has(r.name);
+        const pin = kept ? (editPinsRef.current.get(r.name) ?? null) : r.published;
+        editPinsRef.current.set(r.name, pin);
+        recordPublished('object', r.name, packageId, pin);
+      }
       setRows(built);
       // Reset working edits to the freshly loaded baseline.
       setEdits(Object.fromEntries(built.map((r) => [r.name, { internal: r.internal }])));
@@ -340,7 +394,7 @@ export function PackageOwdOverviewPanel({
     } finally {
       setLoaded(true);
     }
-  }, [client, packageId]);
+  }, [client, packageId, recordPublished]);
 
   React.useEffect(() => {
     void load();
@@ -406,10 +460,15 @@ export function PackageOwdOverviewPanel({
     const refused: Array<{ name: string; label: string; reason: string; edit: OwdEdit }> = [];
     let saved = 0;
     const savedNames = new Set<string>();
+    // objectstack#36962 — rows whose publish met a newer published row and
+    // whose author chose to reload it: their edit goes, the row is read back.
+    const reloadedNames = new Set<string>();
+    const unsavedOf = (rowsChanged: typeof changed) =>
+      rowsChanged.filter((c) => !savedNames.has(c.row.name) && !reloadedNames.has(c.row.name));
     // Read the rows back from the server, then put back the edits of the rows
     // this pass did not save.
     const reloadKeeping = async (unsaved: ReadonlyArray<{ row: { name: string }; edit: OwdEdit }>) => {
-      await load();
+      await load(new Set(unsaved.map((u) => u.row.name)));
       if (unsaved.length > 0) {
         setEdits((prev) => ({ ...prev, ...Object.fromEntries(unsaved.map((u) => [u.row.name, u.edit])) }));
       }
@@ -469,7 +528,7 @@ export function PackageOwdOverviewPanel({
             // back before it asks, so it never shows a live row as unsaved, and
             // Cancel never puts back a value the server no longer holds. Every
             // row not yet saved keeps its edit for the confirm's second pass.
-            if (saved > 0) await reloadKeeping(changed.filter((c) => !savedNames.has(c.row.name)));
+            if (saved > 0 || reloadedNames.size > 0) await reloadKeeping(unsavedOf(changed));
             setPrereq({
               object: s.row.label,
               relations,
@@ -484,7 +543,19 @@ export function PackageOwdOverviewPanel({
         }
         // A draft that was pending before this save (a copilot's) is published
         // with it; a refused publish takes back only the draft this save wrote.
-        const live = await publishSavedItem(client, { type: 'object', name: s.row.name, packageId }, s.row.hasDraft);
+        // objectstack#36962 — pinned to the published row this row was loaded at.
+        const live = await publishSavedItem(
+          client,
+          { type: 'object', name: s.row.name, packageId },
+          s.row.hasDraft,
+          publishPinned,
+        );
+        // The published row moved and the author chose to reload it: this
+        // row's edit goes, and the pass goes on with the other rows.
+        if (!live.ok && 'reloaded' in live) {
+          reloadedNames.add(s.row.name);
+          continue;
+        }
         if (!live.ok) {
           refused.push({ name: s.row.name, label: s.row.label, reason: formatMetadataError(live.error), edit: s.edit });
           continue;
@@ -495,8 +566,9 @@ export function PackageOwdOverviewPanel({
       // A Save leaves no draft: the publish told the ledger behind Changes.
       // The reload puts every dial back at what the server holds: a refused
       // row's edit stays on the page, unsaved.
-      if (saved > 0) await reloadKeeping(changed.filter((c) => !savedNames.has(c.row.name)));
-      if (refused.length === 0) return { kind: 'saved' };
+      if (saved > 0 || reloadedNames.size > 0) await reloadKeeping(unsavedOf(changed));
+      // A row the author reloaded was not saved: the Save did not go through as asked.
+      if (refused.length === 0) return { kind: reloadedNames.size > 0 ? 'declined' : 'saved' };
       const reason = refused
         .map((r) => tFormat('engine.studio.save.refusedLine', locale, { item: r.label, reason: r.reason }))
         .join('\n');
@@ -505,7 +577,7 @@ export function PackageOwdOverviewPanel({
     } finally {
       setSaving(false);
     }
-  }, [rowState, client, packageId, load, locale]);
+  }, [rowState, client, packageId, load, locale, publishPinned]);
 
   // Cancel: every dial back at what the server holds, nothing sent.
   const doCancel = React.useCallback(() => {
@@ -553,6 +625,8 @@ export function PackageOwdOverviewPanel({
       <div className="flex items-center gap-3 border-b px-6 py-3">
         <p className="min-w-0 flex-1 text-xs text-muted-foreground">{t('engine.studio.owd.description', locale)}</p>
       </div>
+
+      {conflictDialog}
 
       <Dialog open={!!prereq} onOpenChange={(open) => !open && setPrereq(null)}>
         <DialogContent data-testid="owd-cbp-prereq">
