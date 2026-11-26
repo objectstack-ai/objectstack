@@ -923,7 +923,9 @@ export class AuditPlugin implements Plugin {
       logger: ctx.logger,
     });
     this.sealer.start();
-    this.registerSealedExpiry(this.sealer, ctx);
+    // With no crypto provider nothing is sealed and no expiry can be signed: the
+    // lifecycle service then keeps the sealed rows and says so (ADR-0154 D8).
+    if (crypto) this.registerSealedExpiry(this.sealer, ctx);
   }
 
   /**

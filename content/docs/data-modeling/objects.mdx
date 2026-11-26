@@ -223,6 +223,9 @@ lifecycle: {
 }
 ```
 
+The platform's own audit log, `sys_audit_log`, declares exactly this block, so
+it is sealed on every deployment whose `AuditPlugin` has a crypto provider.
+
 - Each hour of `created_at` is sealed ten minutes after it ends, per
   organization (and once for rows about no organization): into one
   checkpoint, or, when the hour holds more than 10,000 such rows, into
@@ -277,7 +280,9 @@ lifecycle: {
   Sealed rows past their `retention`, `ttl` or `archive.keep` window leave
   only by whole checkpoints: the sealer first writes a signed expiry
   amendment naming them, so the verifier reads them as `expired` rather than
-  missing. While no sealer is running, the sweeper keeps them.
+  missing. At most 10,000 such rows leave per object per sweep, and once the
+  backlog is drained a chain gains at most one expiry amendment a day. While no sealer is running (no
+  crypto provider), the sweeper keeps them and says so once.
 - Sealing needs a crypto provider, which the host passes to `AuditPlugin` as
   `cryptoProvider`. `os serve` passes the one it seals every secret with; an
   app that puts its own `AuditPlugin` in `plugins` passes one itself. Without
