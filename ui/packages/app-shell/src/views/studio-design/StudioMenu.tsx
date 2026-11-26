@@ -75,12 +75,12 @@ import {
   Inbox,
   KeyRound,
   Languages,
-  LayoutDashboard,
   LayoutGrid,
   ListChecks,
   ListTree,
   Mail,
   MousePointerClick,
+  Package,
   PanelLeft,
   Puzzle,
   Rows3,
@@ -456,7 +456,7 @@ function StudioMenuBody({
                   if (!e.defaultPrevented) closeDrawer();
                 }}
               >
-                <LayoutDashboard aria-hidden="true" data-testid="studio-menu-icon-overview" />
+                <Package aria-hidden="true" data-testid="studio-menu-icon-overview" />
                 <span className={cn('min-w-0 flex-1 truncate', overview.pending !== undefined && 'pr-7')}>{overviewLabel}</span>
               </Link>
             </SidebarMenuButton>
