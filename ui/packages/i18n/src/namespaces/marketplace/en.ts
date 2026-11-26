@@ -51,6 +51,8 @@ const en = {
         versions: 'Versions',
         noApprovedVersions: 'No approved versions.',
         prerelease: 'pre',
+        notInstallableHosted: 'Not installable on hosted',
+        notInstallableHostedReason: 'A code plugin: hosted environments do not run code plugins. Install it on a self-hosted or Enterprise runtime.',
         moreOptions: 'More install options',
         uninstallFromRuntime: 'Uninstall from this runtime',
         addSampleData: 'Add sample data',
