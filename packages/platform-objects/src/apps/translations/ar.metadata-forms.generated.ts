@@ -1780,6 +1780,18 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "النطاق الزمني",
         helpText: "الفترة التي تُفتح بها اللوحة، وما إذا كان بإمكان المشاهدين اختيار تواريخهم الخاصة."
       },
+      "dateRange.field": {
+        label: "Date Field",
+        helpText: "The date field the period filters on. Leave it empty to use the creation date."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the dashboard opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let viewers pick their own start and end dates."
+      },
       globalFilters: {
         label: "عوامل التصفية العامة",
         helpText: "عوامل تصفية يستخدمها المشاهدون لتضييق جميع عناصر الواجهة دفعة واحدة، أو العناصر التي تختارها فقط."
@@ -3149,6 +3161,46 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     }
   },
   ai_context: {
-    label: "حزمة سياق الذكاء الاصطناعي"
+    label: "حزمة سياق الذكاء الاصطناعي",
+    sections: {
+      basics: {
+        label: "Basics",
+        description: "The pack's identity and the object whose records it reads."
+      },
+      material: {
+        label: "Material",
+        description: "What of the record is handed to the model. Each picker offers the fields of the root object, or of the related list's own object."
+      }
+    },
+    fields: {
+      name: {
+        label: "Name",
+        helpText: "Unique identifier (snake_case). A skill's context key and the get_record_context tool name the pack by it."
+      },
+      label: {
+        label: "Label",
+        helpText: "Display name, the header of the tool answer. A pack has no description: write its purpose here."
+      },
+      object: {
+        label: "Root object",
+        helpText: "The root object: the pack reads one record of it."
+      },
+      fields: {
+        label: "Fields",
+        helpText: "The root object's fields handed to the model, in order (at most 30). A lookup among them is answered with the name of the record it points at."
+      },
+      related: {
+        label: "Related lists",
+        helpText: "Child lists that point at the record, one level deep (at most 3). Each list names its child object, the reference field that points at the root, and the columns read for each row (at most 10); with no columns a row is read by its name."
+      },
+      body: {
+        label: "Body",
+        helpText: "The one long-text field read as the record's body."
+      },
+      "body.field": {
+        label: "Body field",
+        helpText: "A long-text field of the root object (textarea, markdown, html, richtext). Any other field is reported when the pack is saved, and the pack then carries no body."
+      }
+    }
   }
 };

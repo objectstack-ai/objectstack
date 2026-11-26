@@ -186,7 +186,12 @@ describe('pricing — the hand-written text is ratcheted, shrink-only', () => {
   //   at the `sys_mailbox` row for where rows come from, `sys_work_calendar_exception` leaves
   //   "kept in Setup" to its calendar's row — then 602 added; raised by the measured
   //   remainder under the ratchet header's standing ruling, 「A:先削重复,余额按实测提高」)
-  const HAND_WRITTEN_CEILING_TOKENS = 1719;
+  //   6902 bytes -> ceil(6902 / 4) = 1726 (the PR that adds the `record-context` token: its
+  //   one CAPABILITY_ROWS line, 27 bytes, at zero headroom; raised by that row's measured delta
+  //   and by no more, nothing else cut, under the standing enumeration-row case of the skills
+  //   ratchet — ruling A on #32584, record 6819475461, made standing by #32673 letter A,
+  //   record 6840575378)
+  const HAND_WRITTEN_CEILING_TOKENS = 1726;
 
   it('measures every hand-written string the page carries and nothing derived', () => {
     const page = renderPlatformCatalog();

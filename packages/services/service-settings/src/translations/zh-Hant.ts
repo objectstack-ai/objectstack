@@ -430,6 +430,7 @@ export const zhHant: PlatformTranslationData = {
         log_prompts: { label: '記錄完整提示詞', help: '在追蹤記錄中包含完整的提示詞（不只是中繼資料）。' },
         embedder_provider: {
           label: '提供者',
+          help: '伺服器啟動時讀取：任何 Embedder 設定儲存後，需重新啟動伺服器才會生效。',
           options: {
             none: '停用（不產生向量）',
             openai: 'OpenAI',
@@ -484,8 +485,7 @@ export const zhHant: PlatformTranslationData = {
         ragflow_base_url: { label: 'Base URL', help: '範例：http://localhost:9380' },
         ragflow_api_key: { label: 'API 金鑰' },
         ragflow_default_dataset: { label: '預設資料集 ID', help: '知識來源未指定自己的 RAGFlow 資料集時使用。' },
-        chunk_target: { label: '目標區塊大小（字元）', help: '在依 token 切分啟動前，區塊大小的軟性上限。' },
-        chunk_overlap: { label: '區塊重疊（字元）', help: '從前一個區塊保留的字元數，讓上下文能跨越邊界。' },
+        chunk_target: { label: '目標區塊大小（字元）', help: '知識服務切分文件時每個片段的最大字元數。知識來源自身設定的大小優先；嵌入模型的輸入上限可能將其調低。' },
         over_fetch: { label: '超量擷取倍數', help: '搜尋時取回所要求結果數的這個倍數，以便依文件資訊篩選後仍有足夠結果可傳回。' },
         enforce_rls: { label: '搜尋時強制套用 RLS', help: '依呼叫者的記錄層級權限重新檢查每一筆命中結果。' },
       },

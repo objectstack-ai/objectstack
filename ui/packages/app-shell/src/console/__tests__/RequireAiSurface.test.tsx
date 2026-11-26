@@ -5,12 +5,13 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { MetadataCtx, type MetadataContextValue } from '@object-ui/react';
 import { RequireAiSurface } from '../ConsoleShell';
+import { AiUnavailable } from '../ai/AiUnavailable';
 import { useAiSurfaceEnabled } from '../../hooks/useAiSurface';
 
 // The guard gates purely on the AI-surface signal (the agent catalog); that
 // hook's own plumbing is covered by useAiSurface.test.ts.
 vi.mock('../../hooks/useAiSurface', () => ({
-  useAiSurfaceEnabled: vi.fn(() => ({ enabled: true, isLoading: false, buildServed: true })),
+  useAiSurfaceEnabled: vi.fn(() => ({ enabled: true, isLoading: false, buildServed: true, focusServed: false })),
 }));
 const mockSurface = vi.mocked(useAiSurfaceEnabled);
 
@@ -89,7 +90,7 @@ function renderGuardedAi(apps?: MetadataContextValue['apps']) {
 
 describe('RequireAiSurface', () => {
   beforeEach(() => {
-    mockSurface.mockReturnValue({ enabled: true, isLoading: false, buildServed: true });
+    mockSurface.mockReturnValue({ enabled: true, isLoading: false, buildServed: true, focusServed: false });
     viewer.isAdmin = true;
     viewer.canAuthorMetadata = true;
     viewer.aiStudio = true;
@@ -105,7 +106,7 @@ describe('RequireAiSurface', () => {
   it('says in place that no assistant is enabled when no agents are served (objectstack#26614)', () => {
     // Community Edition. It used to redirect home, which read like a broken
     // link; now the URL stays and the screen says why, with the way home.
-    mockSurface.mockReturnValue({ enabled: false, isLoading: false, buildServed: false });
+    mockSurface.mockReturnValue({ enabled: false, isLoading: false, buildServed: false, focusServed: false });
     renderGuardedAi();
     expect(screen.queryByText('AI CHAT')).not.toBeInTheDocument();
     expect(screen.queryByText('HOME')).not.toBeInTheDocument();
@@ -119,11 +120,11 @@ describe('RequireAiSurface', () => {
   });
 
   it('offers Studio\'s new-package flow to a session that may author (objectstack#26614)', () => {
-    mockSurface.mockReturnValue({ enabled: false, isLoading: false, buildServed: false });
+    mockSurface.mockReturnValue({ enabled: false, isLoading: false, buildServed: false, focusServed: false });
     renderGuardedAi();
     const studio = screen.getByTestId('ai-unavailable-studio');
     expect(studio).toHaveTextContent('«home.build.inStudio»');
-    expect(studio).toHaveAttribute('href', '/studio?new=package');
+    expect(studio).toHaveAttribute('href', '/apps/setup/component/developer/packages?face=admin&new=package');
   });
 
   it.each([
@@ -132,14 +133,14 @@ describe('RequireAiSurface', () => {
     ['a runtime that offers no authoring', () => { viewer.aiStudio = false; }],
   ])('offers no Studio link to %s (objectstack#26614)', (_who, arrange) => {
     arrange();
-    mockSurface.mockReturnValue({ enabled: false, isLoading: false, buildServed: false });
+    mockSurface.mockReturnValue({ enabled: false, isLoading: false, buildServed: false, focusServed: false });
     renderGuardedAi();
     expect(screen.getByTestId('ai-unavailable')).toBeInTheDocument();
     expect(screen.queryByTestId('ai-unavailable-studio')).toBeNull();
   });
 
   it('waits (neither chat nor the no-assistant screen) while the agent catalog is still resolving', () => {
-    mockSurface.mockReturnValue({ enabled: false, isLoading: true, buildServed: false });
+    mockSurface.mockReturnValue({ enabled: false, isLoading: true, buildServed: false, focusServed: false });
     renderGuardedAi();
     expect(screen.queryByText('AI CHAT')).not.toBeInTheDocument();
     expect(screen.queryByTestId('ai-unavailable')).not.toBeInTheDocument();
@@ -154,7 +155,7 @@ describe('RequireAiSurface', () => {
     // On a phone, which still has its own Home page (#36732).
     viewer.phone = true;
     const user = userEvent.setup();
-    mockSurface.mockReturnValue({ enabled: false, isLoading: false, buildServed: false });
+    mockSurface.mockReturnValue({ enabled: false, isLoading: false, buildServed: false, focusServed: false });
     renderGuardedAi([
       { name: 'cloud_control', label: 'Cloud', isDefault: true },
       { name: 'account', label: 'Account' },
@@ -170,7 +171,7 @@ describe('RequireAiSurface', () => {
     // on a desktop is no longer the launcher page but the resolver that lands
     // in the declared app once it knows.
     const user = userEvent.setup();
-    mockSurface.mockReturnValue({ enabled: false, isLoading: false, buildServed: false });
+    mockSurface.mockReturnValue({ enabled: false, isLoading: false, buildServed: false, focusServed: false });
     renderGuardedAi([
       { name: 'cloud_control', label: 'Cloud', isDefault: true },
       { name: 'account', label: 'Account' },
@@ -187,7 +188,7 @@ describe('RequireAiSurface', () => {
     // once it knows which apps a permission set hides (#36732); a guard mounted
     // outside a metadata provider resolves there too (every other case here).
     const user = userEvent.setup();
-    mockSurface.mockReturnValue({ enabled: false, isLoading: false, buildServed: false });
+    mockSurface.mockReturnValue({ enabled: false, isLoading: false, buildServed: false, focusServed: false });
     renderGuardedAi([{ name: 'crm', label: 'CRM' }, { name: 'setup', label: 'Setup' }]);
     await user.click(screen.getByTestId('ai-unavailable-home'));
     expect(screen.getByText('HOME')).toBeInTheDocument();
@@ -197,7 +198,7 @@ describe('RequireAiSurface', () => {
 
 describe('the no-assistant screen\'s way home names where it goes, by viewport (objectstack#37163)', () => {
   beforeEach(() => {
-    mockSurface.mockReturnValue({ enabled: false, isLoading: false, buildServed: false });
+    mockSurface.mockReturnValue({ enabled: false, isLoading: false, buildServed: false, focusServed: false });
     viewer.phone = false;
   });
 
@@ -214,5 +215,39 @@ describe('the no-assistant screen\'s way home names where it goes, by viewport (
     const home = screen.getByTestId('ai-unavailable-home');
     expect(home).toHaveTextContent('«console.ai.unavailableHome»');
     expect(home).not.toHaveTextContent('«layout.appSwitcher.backToHome»');
+  });
+});
+
+describe('the unreachable-service sentence names where its way home goes, by viewport', () => {
+  // `AiChatPage` draws this shape when the agent catalog fails to load: the
+  // sentence points at the button below it, so it names the same place.
+  const echo = (key: string) => `«${key}»`;
+  function renderUnreachable() {
+    return render(
+      <MemoryRouter>
+        <AiUnavailable hasError onRetry={() => {}} onHome={() => {}} t={echo} />
+      </MemoryRouter>,
+    );
+  }
+
+  beforeEach(() => {
+    viewer.phone = false;
+  });
+
+  it('on a desktop, where the button opens an app\'s start page, the sentence says so', () => {
+    renderUnreachable();
+    const screenEl = screen.getByTestId('ai-unavailable');
+    expect(screenEl).toHaveTextContent('«console.ai.unavailableErrorDesktop»');
+    expect(screenEl).not.toHaveTextContent('«console.ai.unavailableError»');
+    expect(screen.getByTestId('ai-unavailable-home')).toHaveTextContent('«layout.appSwitcher.backToHome»');
+  });
+
+  it('CONTROL — on a phone, whose Home is still its app list, it keeps 「head back home」', () => {
+    viewer.phone = true;
+    renderUnreachable();
+    const screenEl = screen.getByTestId('ai-unavailable');
+    expect(screenEl).toHaveTextContent('«console.ai.unavailableError»');
+    expect(screenEl).not.toHaveTextContent('«console.ai.unavailableErrorDesktop»');
+    expect(screen.getByTestId('ai-unavailable-home')).toHaveTextContent('«console.ai.unavailableHome»');
   });
 });

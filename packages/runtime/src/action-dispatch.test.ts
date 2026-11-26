@@ -632,6 +632,35 @@ describe('a same-origin api action on a hosted environment kernel forwards as th
         expect(h.forwards).toEqual([]);
     });
 
+    // [#37273] The host door's sentence is the catalog's `_host` form, in the
+    // language of the execution context the host hands in (its `locale`, then
+    // `workspaceLocale`, then `en`); code and status are unchanged.
+    it('[#37273] the host door\'s forward-unavailable 503 is in the caller\'s language; without a locale it keeps today\'s English', async () => {
+        const h = hostedEnvironment();
+
+        const zh = await h.viaHost(h.env.kernel, { environmentId: ENV_T, executionContext: { ...MEMBER_EC, locale: 'zh-CN' } as any });
+        expect({ status: zh.status, code: zh.body.error?.code }).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+        expect(zh.body.error?.message).toBe(
+            `动作 '${probe.name}' 是同源的 \`type: 'api'\` 动作，本接口会在进程内将其转发到它的 \`target\`（'${probe.target}'），`
+            + '但传给 dispatchAction 的内核未提供进程内请求通道（IHttpServer.getRawApp）。请把提供 HTTP 接口的内核传给 dispatchAction：'
+            + '在多内核主机上，传入注册了 `kernel-resolver` 的内核，并带上本次调用的 `environmentId`（环境自身的内核不持有套接字）。'
+            + '在单内核上，请运行实现了 getRawApp 的 HTTP 服务器插件。该动作不会绕过本接口执行。',
+        );
+        expect(zh.body.error?.userMessage).toBeUndefined();
+
+        const en = await h.viaHost(h.env.kernel, { environmentId: ENV_T });
+        expect({ status: en.status, code: en.body.error?.code }).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+        expect(en.body.error?.message).toBe(
+            `Action '${probe.name}' is a same-origin \`type: 'api'\` action whose \`target\` ('${probe.target}') this door forwards to in-process, `
+            + 'but the kernel dispatchAction was handed exposes no in-process request path (IHttpServer.getRawApp). '
+            + 'Pass dispatchAction the kernel your HTTP door is served from: on a multi-kernel host, the kernel that '
+            + 'registers `kernel-resolver`, with the call\'s `environmentId` (an environment\'s own kernel owns no '
+            + 'socket). On a single kernel, run an HTTP server plugin that implements getRawApp. The action is not '
+            + 'dispatched around the door.',
+        );
+        expect(h.forwards).toEqual([]);
+    });
+
     // Nothing placed the call in an environment, so there is nothing to route:
     // a single kernel (the named environment is the scope of the call's
     // lookups, not a placement), and a resolver that answers the control plane.

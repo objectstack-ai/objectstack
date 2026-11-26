@@ -2256,6 +2256,17 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'def\'s source and its RETIRED_KEYS_BY_MAJOR[18] entry stays as history.',
   },
   {
+    id: 'knowledge-chunk-metadata-retired',
+    order: 125,
+    text:
+      'It removes `metadata` from the knowledge chunk (ADR-0049 enforce-or-remove), as ADR-0161 '
+      + 'K8 item 5 asks of the splitter that gives the chunk its first producer: the service cuts '
+      + 'every passage and sets no per-passage metadata, no adapter read one, and a passage takes its '
+      + 'document\'s `metadata`. A chunk is a runtime contract shape, never stored in stack metadata, '
+      + 'so there is no D2 conversion; the schema tombstones the key, and its D3 record is the '
+      + 'semantic entry `knowledge-chunk-metadata-retired`.',
+  },
+  {
     id: 'list-view-filterable-fields-retired',
     order: 105,
     text:

@@ -218,7 +218,14 @@ adapter):
 - `onMutation?(listener)` - Subscribe to create/update/delete events
 - `queryGroupHeaders?(resource, query)` - Answer a grouped list view's group
   header query (`compileListViewGroupQuery`), one row per group with its true
-  `count` — what a grouped grid groups by on the server (objectui#7189)
+  `count` — what a grouped grid groups by on the server (objectui#7189). The
+  answer can be PARTIAL: on a deployment with a default page size
+  (`OS_DATA_DEFAULT_PAGE_SIZE`, or `OS_DATA_MAX_PAGE_SIZE` alone) the server
+  cuts the groups to that page, and the answer then carries `hasMore: true`
+  (`ListViewGroupHeaderAnswer`). A caller that reads the groups as the whole
+  set — a total folded over them, an absent group read as empty — checks it
+  first, and reads it off the answer itself: a copy (`[...rows]`, `.slice()`)
+  drops the flag
 
 `bulk`, `batchTransaction`, `onMutation` and `queryGroupHeaders` are
 **optional** members of `DataSource`: not every adapter implements them, so

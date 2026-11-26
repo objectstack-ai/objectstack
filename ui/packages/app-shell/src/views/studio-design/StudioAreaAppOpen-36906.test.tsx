@@ -211,6 +211,8 @@ describe('a Studio dashboard or report opens in its app (objectstack#36906)', ()
     mount(`/studio/${PKG}/metadata/dashboard/ops_board?package=${PKG}`);
     expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('item');
     expect(screen.queryByTestId('app-page')).toBeNull();
+    // A plain package is no pair: its apps are the only ones read.
+    expect(apps.listCalls).toEqual([['app', { packageId: PKG }]]);
   });
 
   it('the History tab and the draft review keep the generic item page', async () => {
@@ -326,13 +328,6 @@ describe('a read-only base (objectstack#36906)', () => {
     expect(studioOf(opened.at)).toBe(`/studio/${BASE}/metadata/dashboard?package=${BASE}`);
   });
 
-  it('a pair row keeps the generic item page: the pair has no published app of its own', async () => {
-    mountBase(`/studio/${PAIR}/metadata/dashboard/headcount?package=${PAIR}`, null);
-    expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('item');
-    expect(screen.queryByTestId('app-page')).toBeNull();
-    expect(apps.listCalls).toEqual([['app', { packageId: PAIR }]]);
-  });
-
   it("report New opens the base app's new-report page (it saves in the pair), returning to the list", async () => {
     mountBase(`/studio/${BASE}/metadata/report/new?package=${BASE}`, customizationOf(false));
     const opened = await appPage();
@@ -348,5 +343,76 @@ describe('a read-only base (objectstack#36906)', () => {
     mountBase(`/studio/${BASE}/metadata/report/new?package=${BASE}`, null);
     expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('list');
     expect(apps.listCalls).toEqual([]);
+  });
+});
+
+describe("a customization pair's dashboard or report opens in its base's app (objectstack#37237)", () => {
+  const BASE = 'com.example.hr';
+  const PAIR = `${BASE}.custom`;
+  const pairList = (type: string) => `/studio/${PAIR}/metadata/${type}?package=${PAIR}`;
+
+  beforeEach(() => {
+    listed.value.set(BASE, { id: BASE, name: 'HR', writable: false, manifest: {} });
+    listed.value.set(PAIR, { id: PAIR, name: 'HR (customizations)', writable: true, manifest: {} });
+    apps.byPackage.set(BASE, [{ name: 'hr_app', label: 'HR' }]);
+    for (const item of ['dashboard/headcount', 'report/attrition']) published.add(item);
+  });
+
+  it("a pair dashboard opens in the base app's edit state, and × returns to the pair's list", async () => {
+    mount(`/studio/${PAIR}/metadata/dashboard/headcount?package=${PAIR}`);
+    const opened = await appPage();
+    // The base ships one app: its address is the base's id, never the pair's.
+    expect(opened.at.split('?')[0]).toBe(`/apps/${BASE}/dashboard/headcount`);
+    expect(opened.state).toEqual({ designModeNewDashboard: 'headcount' });
+    expect(studioOf(opened.at)).toBe(pairList('dashboard'));
+    expect(opened.how).toBe('REPLACE');
+    // One read more, and only of the base: the item itself is asked of the pair.
+    expect(apps.listCalls).toEqual([
+      ['app', { packageId: PAIR }],
+      ['app', { packageId: BASE }],
+    ]);
+    expect(itemReads.calls).toEqual([['dashboard', 'headcount', { packageId: PAIR }]]);
+  });
+
+  it("reached from the base's list: a row of the pair links `?package=PAIR`, which re-roots the area onto the pair", async () => {
+    mount(`/studio/${BASE}/metadata/dashboard/headcount?package=${PAIR}`);
+    const opened = await appPage();
+    expect(opened.at.split('?')[0]).toBe(`/apps/${BASE}/dashboard/headcount`);
+    expect(studioOf(opened.at)).toBe(pairList('dashboard'));
+    expect(itemReads.calls).toEqual([['dashboard', 'headcount', { packageId: PAIR }]]);
+  });
+
+  it("a pair report opens the base app's builder, picked by decision 6 among the base's apps", async () => {
+    apps.byPackage.set(BASE, [{ name: 'hr_people' }, { name: 'hr_reports' }]);
+    rememberAppReturnPage({ path: '/apps/hr_reports/home', app: 'hr_reports', label: 'HR Reports' });
+    mount(`/studio/${PAIR}/metadata/report/attrition?package=${PAIR}`);
+    const opened = await appPage();
+    expect(opened.at.split('?')[0]).toBe('/apps/hr_reports/report/attrition');
+    expect(opened.state).toEqual({ openReportBuilder: 'attrition' });
+    expect(studioOf(opened.at)).toBe(pairList('report'));
+    cleanup();
+
+    // No remembered app: the base's first app (rule 2).
+    resetAppReturnPageForTests();
+    mount(`/studio/${PAIR}/metadata/report/attrition?package=${PAIR}`);
+    expect((await appPage()).at.split('?')[0]).toBe('/apps/hr_people/report/attrition');
+  });
+
+  it('a pair whose base has no published app keeps the generic item page', async () => {
+    apps.byPackage.set(BASE, []);
+    mount(`/studio/${PAIR}/metadata/dashboard/headcount?package=${PAIR}`);
+    expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('item');
+    expect(screen.queryByTestId('app-page')).toBeNull();
+    expect(apps.listCalls).toEqual([
+      ['app', { packageId: PAIR }],
+      ['app', { packageId: BASE }],
+    ]);
+  });
+
+  it("a pair with a published app of its own opens there; the base's apps are not read", async () => {
+    apps.byPackage.set(PAIR, [{ name: 'hr_custom_app' }]);
+    mount(`/studio/${PAIR}/metadata/dashboard/headcount?package=${PAIR}`);
+    expect((await appPage()).at.split('?')[0]).toBe(`/apps/${PAIR}/dashboard/headcount`);
+    expect(apps.listCalls).toEqual([['app', { packageId: PAIR }]]);
   });
 });

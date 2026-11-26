@@ -93,6 +93,8 @@ import { HistoryPanel } from '../item-tools/ResourceHistoryPage.js';
 import { useMetadataClient, useMetadataTypes, type RichMetadataTypeEntry } from './useMetadata.js';
 // objectui#11773 — the package door's draft save sends the version it was built on.
 import { readDraftForSave, useDraftSaveGuard } from './DraftConflictDialog.js';
+import { DraftReviewSheet } from './DraftReviewSheet.js';
+import { useDraftReviewArrival } from './useDraftReviewArrival.js';
 // objectstack#26858 — the served verdict the RLS clause editors read at their paths.
 import {
   DraftVerdictBodyContext,
@@ -921,6 +923,55 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the residency flag is the dependency: the columns read the catalogue through `translate`
     [locale, catalogueResident],
   );
+
+  // objectstack#37269 — a review link (`?review=1`: the Packages page's
+  // per-draft link, the chat's 「Review N change(s)」) opens the draft review
+  // here, the generic item page's (`useDraftReviewArrival`, `DraftReviewSheet`):
+  // a set's item page is this editor, on Studio's page and the routed one alike.
+  // Read on its own at the arrival, the pending draft and the published set, at
+  // the address the load reads (the page's package, else the route's, else the
+  // name alone, as the generic page reads it). The matrix's load is not asked
+  // again, so an unsaved edit it holds stays, and editing stays open under the
+  // sheet.
+  const [reviewRead, setReviewRead] = React.useState<{ published: unknown; draft: PermissionSetDraft } | null>(null);
+  const [reviewReading, setReviewReading] = React.useState(false);
+  const [reviewReadNonce, setReviewReadNonce] = React.useState(0);
+  const [reviewOpen, setReviewOpen] = React.useState(false);
+  React.useEffect(() => {
+    if (reviewReadNonce === 0) return undefined;
+    let cancelled = false;
+    Promise.all([
+      readDraftForSave<{ item?: PermissionSetDraft } | PermissionSetDraft>(client, type, name, layeredPackageId),
+      client.layered<PermissionSetDraft>(type, name, layeredPackageId ? { packageId: layeredPackageId } : {}),
+    ]).then(
+      ([pending, lay]) => {
+        if (cancelled) return;
+        const body = pendingDraftBody(pending.answer ?? null);
+        setReviewRead(body ? { published: lay?.effective ?? null, draft: body } : null);
+        setReviewReading(false);
+      },
+      // An unread published set is no baseline: nothing to compare, no review.
+      () => {
+        if (cancelled) return;
+        setReviewRead(null);
+        setReviewReading(false);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- read once per arrival; the item is the nonce's
+  }, [reviewReadNonce]);
+  useDraftReviewArrival({
+    enabled: true,
+    loading: reviewReading,
+    hasDraft: reviewRead !== null,
+    reload: () => {
+      setReviewReading(true);
+      setReviewReadNonce((n) => n + 1);
+    },
+    open: () => setReviewOpen(true),
+  });
 
   const [draft, setDraft] = React.useState<PermissionSetDraft>({
     name,
@@ -2441,6 +2492,18 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             </div>
           </SheetContent>
         </Sheet>
+      )}
+      {/* objectstack#37269 — the draft review a `?review=1` link opens. */}
+      {reviewRead && (
+        <DraftReviewSheet
+          open={reviewOpen}
+          onOpenChange={setReviewOpen}
+          type={type}
+          name={name}
+          published={reviewRead.published}
+          draft={reviewRead.draft}
+          locale={locale}
+        />
       )}
       {draftConflictDialog}
     </>

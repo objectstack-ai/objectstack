@@ -8,8 +8,8 @@
  * ## Why the knowledge service owes them
  *
  * A knowledge passage is built at index time, under a system context, from
- * every `contentFields` member of its source (plus the record `title` and the
- * source's `metadataFields`). The row re-check in `applyPermissionFilter` asks
+ * every `contentFields` member of its source (plus the object's display field
+ * as the title, and the source's `metadataFields`). The row re-check in `applyPermissionFilter` asks
  * only "may this caller read the row?". Every other door that serves object
  * rows outside the data routes also asks the spec's one exposure decision
  * (`canServeApiOperation`, ADR-0049) and the caller's field-level read rules —
@@ -35,8 +35,10 @@
  *
  * Then, per source, the **field gate**: every field the source serves (each
  * `contentFields` member — `'*'` meaning every field the object declares — each
- * `metadataFields` member, and `title`), less the credential-class and
- * `internal` fields the index never carries, must be QUERYABLE by the caller.
+ * `metadataFields` member, the title field — `documentTitleField` — and,
+ * while the index may hold documents assembled under the earlier title rule, a
+ * declared `title`), less the credential-class and `internal` fields the index
+ * never carries, must be QUERYABLE by the caller.
  * Queryable, not merely readable: a passage carries the value the index read
  * under a system context, unmasked, and the search matches on it — a field the
  * caller is served masked is readable and not queryable, exactly the fields
@@ -66,7 +68,13 @@
  * one), as it bypasses the row re-check.
  */
 
-import { canServeApiOperation, isAiReadExposed, type EnableLike } from '@objectstack/spec/data';
+import {
+  canServeApiOperation,
+  isAiReadExposed,
+  resolveDisplayField,
+  type EnableLike,
+  type TitleEligibleFieldDef,
+} from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { ObjectKnowledgeSource } from '@objectstack/spec/ai';
 import {
@@ -137,6 +145,40 @@ export function declaredFields(schema: unknown): Array<[string, unknown]> | unde
   }
   if (fields && typeof fields === 'object') return Object.entries(fields as Record<string, unknown>);
   return undefined;
+}
+
+/**
+ * The field a knowledge document's `title` is read from (ADR-0161 K5: the
+ * title is the object's display field) — one answer for assembly
+ * (`recordToDocument`) and for the field gate ({@link servedFieldsOf}), so a
+ * caller is never served a title from a field the gate did not ask about.
+ *
+ * - **An object definition**: its display field, `resolveDisplayField`
+ *   (ADR-0079: `nameField`, its deprecated alias `displayNameField`, else the
+ *   derivation). A resolved field the definition does not declare, when it
+ *   declares its fields, gives no title; so does a definition that resolves
+ *   none.
+ * - **No object definition**: a field named `title`, as assembly read it
+ *   before it asked the definition.
+ */
+export function documentTitleField(schema: unknown): string | undefined {
+  if (schema === undefined || schema === null || typeof schema !== 'object') return 'title';
+  const meta = schema as { nameField?: unknown; displayNameField?: unknown };
+  const declared = declaredFields(schema);
+  const field = resolveDisplayField({
+    nameField: typeof meta.nameField === 'string' && meta.nameField.length > 0 ? meta.nameField : undefined,
+    displayNameField:
+      typeof meta.displayNameField === 'string' && meta.displayNameField.length > 0 ? meta.displayNameField : undefined,
+    fields: declared
+      ? (Object.fromEntries(declared.map(([name, def]) => [name, (def ?? {}) as TitleEligibleFieldDef])) as Record<
+          string,
+          TitleEligibleFieldDef
+        >)
+      : undefined,
+  });
+  if (field === undefined) return undefined;
+  if (declared && !declared.some(([name]) => name === field)) return undefined;
+  return field;
 }
 
 /** Every field the object declares with a `maskingRule`. */
@@ -217,8 +259,16 @@ export function servedFieldsOf(objSource: ObjectKnowledgeSource, schema: unknown
     }
   }
   for (const field of objSource.metadataFields ?? []) served.add(field);
-  // `recordToDocument` serves the record's `title` whatever the source names.
-  // Required unless the object is known not to declare one.
+  // `recordToDocument` serves the title field's value whatever the source names.
+  const titleField = documentTitleField(schema);
+  if (titleField !== undefined) served.add(titleField);
+  // A document indexed before the title became the display field carries the
+  // value of a field named `title`, and stays in the index until a complete
+  // reindex writes it again. So `title` stays a served field whenever the
+  // object declares one (or its fields cannot be enumerated), as it was.
+  // Retire this arm once the index is proven rebuilt under the display-field
+  // rule: the recipe hash that names the title rule (ADR-0161 K7) and the
+  // rebuild of a stale source.
   if (!declared || declared.some(([name]) => name === 'title')) served.add('title');
   for (const field of withheld) served.delete(field);
   return served;

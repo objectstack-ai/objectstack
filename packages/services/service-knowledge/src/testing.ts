@@ -10,7 +10,15 @@
  * runKnowledgeAdapterContract({
  *   name: 'knowledge-memory',
  *   makeAdapter: () => new KnowledgeMemoryAdapter(),
- *   implements: { listDocuments: true, organizationIds: true },
+ *   implements: {
+ *     listDocuments: true,
+ *     chunks: true,
+ *     organizationIds: true,
+ *     indexStatus: true,
+ *     builds: true,
+ *     refusesOtherFingerprint: true,
+ *     generations: true,
+ *   },
  * });
  * ```
  *
@@ -21,24 +29,56 @@
  * optional `listDocuments` (page boundaries at 0, one page and one page + 1;
  * `docHash` returned as stored); and, through a real `KnowledgeService` over a
  * small data-engine double, the skip of unchanged documents and the purge of
- * documents the source no longer has; and the organization filter
+ * documents the source no longer has; the chunk channel (ADR-0161 K8,
+ * item 5) — an adapter that declares `capabilities.chunks` receives the
+ * service's passages and indexes them as given, one that does not keeps
+ * receiving whole documents, and a `whole` document over the embedder's
+ * budget is removed and reported, never truncated; and the organization filter
  * (ADR-0161 K8, item 9) — on the adapter alone, and through a real
- * `KnowledgeService` under the `isolated`, `group` and `single` postures.
+ * `KnowledgeService` under the `isolated`, `group` and `single` postures; and
+ * the index fingerprint (ADR-0161 K7; K8, item 8) — every call through the
+ * service carries it, a complete reindex is one `beginBuild` /
+ * `completeBuild` pair and a partial one is neither, `indexStatus` answers
+ * what the last complete build recorded, a write or a search under another
+ * fingerprint is refused `KNOWLEDGE_REBUILD_REQUIRED` and never served from the
+ * other generation, and — for an adapter that builds generations — a build
+ * under a new fingerprint switches to it at its end; and
+ * what a hit carries back (ADR-0161 K8, items 3 and 14) — an adapter that
+ * stores `docHash` returns it on each hit as stored, which the service's
+ * record-level freshness check compares (pinned through a real
+ * `KnowledgeService`), and an adapter that takes chunks returns each
+ * passage's `headingPath`.
  *
  * Every optional member is DECLARED by the caller in `implements`, and the
  * suite asserts the declaration against the adapter: a member an adapter lacks
  * runs the case that pins the service's behaviour without it, never nothing.
- * `organizationIds` is a search option, not a method, so its declaration is
- * asserted by behaviour: the cases it turns on fail for an adapter that
- * ignores the option.
+ * `organizationIds` and `scope` are search options, not methods, so their
+ * declarations are asserted by behaviour: the cases they turn on fail for an
+ * adapter that ignores the option.
+ *
+ * The record scope (ADR-0161 K8, item 17) is covered on the adapter alone,
+ * for each term kind — filtered before ranking, so `topK` is filled from
+ * in-scope documents; an empty list ranks nothing; without the member every
+ * document is ranked — and through a real `KnowledgeService`, by the record a
+ * source indexes and by a parent object reached through a listed lookup, and
+ * over the adapter with the member stripped from its search: no out-of-scope
+ * hit is answered, and the service logs once.
  */
 
-import { describe, expect, it } from 'vitest';
-import type { IDataEngine, IKnowledgeAdapter, AdapterContext, AdapterSearchOptions } from '@objectstack/spec/contracts';
+import { describe, expect, it, vi } from 'vitest';
+import type {
+  IDataEngine,
+  IKnowledgeAdapter,
+  AdapterContext,
+  AdapterIndexExpectation,
+  AdapterScopeTerm,
+  AdapterSearchOptions,
+} from '@objectstack/spec/contracts';
 import type { KnowledgeDocument, KnowledgeSource, ObjectKnowledgeSource } from '@objectstack/spec/ai';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { TenancyPosture } from '@objectstack/spec/security';
-import { KnowledgeService } from './knowledge-service.js';
+import { KnowledgeService, type KnowledgeLogger } from './knowledge-service.js';
+import { resolveSplit, splitDocument } from './split/index.js';
 
 /** Input of {@link runKnowledgeAdapterContract}. */
 export interface KnowledgeAdapterContractOptions {
@@ -53,14 +93,45 @@ export interface KnowledgeAdapterContractOptions {
   /** The optional members this adapter implements; checked against the adapter. */
   implements: {
     listDocuments: boolean;
+    /** `capabilities.chunks === true`: the adapter takes the service's passages. */
+    chunks: boolean;
     /**
      * The adapter's search honours `AdapterSearchOptions.organizationIds`
      * (ADR-0161 K8, item 9): it ranks only the documents of the organizations
      * it is handed, filtering before it ranks.
      */
     organizationIds: boolean;
+    /** `indexStatus` (ADR-0161 K8, item 8 b). */
+    indexStatus: boolean;
+    /** `beginBuild` and `completeBuild`, which come as a pair (ADR-0161 K8, item 8 c). */
+    builds: boolean;
+    /**
+     * A write or a search carrying an `index` fingerprint other than the active
+     * generation's is refused with the ADR-0112 code `KNOWLEDGE_REBUILD_REQUIRED`
+     * (ADR-0161 K7, rules 4 and 5). Asserted by behaviour.
+     */
+    refusesOtherFingerprint: boolean;
+    /**
+     * `beginBuild` under a new fingerprint opens a generation beside the active
+     * one, and `completeBuild` switches to it (ADR-0161 K7, rules 1 to 3).
+     * Asserted by behaviour; needs `builds` and `refusesOtherFingerprint`.
+     */
+    generations: boolean;
+    /**
+     * The adapter's search honours `AdapterSearchOptions.scope` (ADR-0161 K8,
+     * item 17): it ranks only the documents some term holds for, filtering
+     * before it ranks, and returns each document's `metadata` on its hits.
+     */
+    scope: boolean;
   };
 }
+
+/** The ADR-0112 code of a write or a search refused under another fingerprint (ADR-0161 K7, rules 4 and 5). */
+const REBUILD_REQUIRED = 'KNOWLEDGE_REBUILD_REQUIRED';
+
+/** Two fixed fingerprints for the adapter-alone cases; opaque to the adapter. */
+const FP_OLD = { fingerprint: 'fp-contract:old', recipeHash: 'rh-contract:1' };
+const FP_NEW = { fingerprint: 'fp-contract:new', recipeHash: 'rh-contract:1' };
 
 /** Every case's source id starts with this, so a shared store can be told apart. */
 const SOURCE_PREFIX = 'contract_';
@@ -74,26 +145,43 @@ function objectSource(id: string, extra: Partial<ObjectKnowledgeSource> = {}): K
   } as KnowledgeSource;
 }
 
-function ctxOf(source: KnowledgeSource): AdapterContext {
-  return { source, reason: 'manual' };
+function ctxOf(source: KnowledgeSource, index?: AdapterIndexExpectation): AdapterContext {
+  return index === undefined ? { source, reason: 'manual' } : { source, reason: 'manual', index };
 }
 
-function doc(
-  source: KnowledgeSource,
-  n: string,
-  content: string,
-  docHash?: string,
-  organizationId?: string,
-): KnowledgeDocument {
-  return {
-    id: `${source.id}:${n}`,
-    sourceId: source.id,
-    sourceRecordId: n,
-    content,
-    title: `Title ${n}`,
-    metadata: { status: 'published' },
-    ...(docHash === undefined ? {} : { docHash }),
-    ...(organizationId === undefined ? {} : { organizationId }),
+/** Asserts `promise` rejects with an ADR-0112 coded refusal: `code` and `status`, never a bare throw. */
+async function expectRebuildRefusal(promise: Promise<unknown>): Promise<void> {
+  const err = await promise.then(
+    () => { throw new Error('expected a KNOWLEDGE_REBUILD_REQUIRED refusal, got an answer'); },
+    (e: unknown) => e,
+  );
+  expect(err).toMatchObject({ code: REBUILD_REQUIRED, status: 409 });
+}
+
+/**
+ * A document as the service hands it to this adapter: with one passage (the
+ * whole text, as split `whole` gives it) when the adapter takes chunks.
+ */
+function docFor(withChunks: boolean) {
+  return (
+    source: KnowledgeSource,
+    n: string,
+    content: string,
+    docHash?: string,
+    organizationId?: string,
+  ): KnowledgeDocument => {
+    const id = `${source.id}:${n}`;
+    return {
+      id,
+      sourceId: source.id,
+      sourceRecordId: n,
+      content,
+      title: `Title ${n}`,
+      metadata: { status: 'published' },
+      ...(docHash === undefined ? {} : { docHash }),
+      ...(organizationId === undefined ? {} : { organizationId }),
+      ...(withChunks ? { chunks: [{ id: `${id}#0`, documentId: id, index: 0, content }] } : {}),
+    };
   };
 }
 
@@ -128,7 +216,10 @@ type Row = Record<string, unknown>;
  *
  * The permission re-read (`where: { id: { $in } }`, the caller's context in
  * the query) answers the rows `wall` admits for that context; without a
- * `wall`, every row.
+ * `wall`, every row. The record-level search's freshness check passes its
+ * system context in the trailing options, never in the query, so it is
+ * answered as any other read: the rows its `where` (`id: { $in }`, alone or
+ * under `$and`) matches, whole.
  */
 function rowsEngine(rows: Row[], wall?: (row: Row, context: ExecutionContext) => boolean): IDataEngine {
   const matches = (row: Row, where: Record<string, unknown> | undefined): boolean => {
@@ -142,6 +233,10 @@ function rowsEngine(rows: Row[], wall?: (row: Row, context: ExecutionContext) =>
       if (key.startsWith('$')) throw new Error(`engine double: operator ${key} is not implemented`);
       if (value !== null && typeof value === 'object') {
         const ops = Object.keys(value);
+        if (key === 'id' && ops.length === 1 && ops[0] === '$in' && Array.isArray((value as { $in: unknown }).$in)) {
+          if (!(value as { $in: unknown[] }).$in.map(String).includes(String(row.id))) return false;
+          continue;
+        }
         if (key !== 'id' || ops.length !== 1 || ops[0] !== '$gt') {
           throw new Error(`engine double: condition ${JSON.stringify(value)} on '${key}' is not implemented`);
         }
@@ -164,11 +259,14 @@ function rowsEngine(rows: Row[], wall?: (row: Row, context: ExecutionContext) =>
           .filter((r) => inIds.includes(r.id) && (wall === undefined || wall(r, ctx)))
           .map((r) => ({ id: r.id }));
       }
-      if (typeof query?.limit !== 'number' || !(query.limit > 0)) throw new Error('engine double: an unbounded find');
+      const pinsIds = JSON.stringify(query?.where ?? {}).includes('"$in"');
+      if (!pinsIds && (typeof query?.limit !== 'number' || !(query.limit > 0))) {
+        throw new Error('engine double: an unbounded find');
+      }
       return rows
         .filter((r) => matches(r, query.where))
         .sort((a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0))
-        .slice(0, query.limit)
+        .slice(0, typeof query.limit === 'number' ? query.limit : undefined)
         .map((r) => ({ ...r }));
     },
     count: async (_object: string, query: { where?: Record<string, unknown> }) =>
@@ -182,11 +280,23 @@ interface ServiceSetup {
   posture?: () => TenancyPosture | undefined;
   /** The permission re-read's wall ({@link rowsEngine}). */
   wall?: (row: Row, context: ExecutionContext) => boolean;
+  /**
+   * Stands in for the limit the adapter's embedder would report
+   * (`embedding.maxInputTokens`); omitted, the adapter's own report is used.
+   */
+  maxInputTokens?: number;
+  /** Registered object definitions the engine double answers from `getSchema`, by object name; absent → none. */
+  schemas?: Record<string, unknown>;
+  /** Strips `scope` from every search the service hands the adapter: an adapter that ignores the member. */
+  stripScope?: boolean;
+  /** The service's logger; absent → none. */
+  logger?: KnowledgeLogger;
 }
 
 /**
  * A `KnowledgeService` over `adapter` and `rows`, with the adapter's `upsert`
- * counted and the options of every `search` it is handed recorded.
+ * counted and its documents kept, and the options of every `search` it is
+ * handed recorded.
  */
 async function serviceOver(
   make: () => IKnowledgeAdapter | Promise<IKnowledgeAdapter>,
@@ -196,32 +306,82 @@ async function serviceOver(
 ) {
   const adapter: IKnowledgeAdapter = await make();
   const upserted: string[][] = [];
+  const received: KnowledgeDocument[] = [];
   const searched: AdapterSearchOptions[] = [];
+  /** Every context a write, delete or listing was handed, in order. */
+  const contexts: AdapterContext[] = [];
+  /** `begin` / `complete`, in the order the service called them. */
+  const builds: Array<'begin' | 'complete'> = [];
   // Delegation, not a prototype proxy: an adapter with `#private` fields only
-  // answers when its methods are called on the adapter itself.
+  // answers when its methods are called on the adapter itself. The
+  // descriptors are read through on every access, as the service reads them.
   const counting: IKnowledgeAdapter = {
     id: adapter.id,
+    get capabilities() {
+      return adapter.capabilities;
+    },
+    get embedding() {
+      return setup.maxInputTokens === undefined ? adapter.embedding : { maxInputTokens: setup.maxInputTokens };
+    },
     upsert: async (docs, ctx) => {
       upserted.push(docs.map((d) => d.id));
+      received.push(...docs);
+      contexts.push(ctx);
       return adapter.upsert(docs, ctx);
     },
     search: (query, searchOpts) => {
       searched.push(searchOpts);
+      if (setup.stripScope === true) {
+        const { scope: _ignored, ...rest } = searchOpts;
+        return adapter.search(query, rest);
+      }
       return adapter.search(query, searchOpts);
     },
-    delete: (ids, ctx) => adapter.delete(ids, ctx),
+    delete: (ids, ctx) => {
+      contexts.push(ctx);
+      return adapter.delete(ids, ctx);
+    },
     ...(typeof adapter.listDocuments === 'function'
-      ? { listDocuments: (ctx: AdapterContext, listOpts: { cursor?: string; limit: number }) => adapter.listDocuments!(ctx, listOpts) }
+      ? {
+        listDocuments: (ctx: AdapterContext, listOpts: { cursor?: string; limit: number }) => {
+          contexts.push(ctx);
+          return adapter.listDocuments!(ctx, listOpts);
+        },
+      }
+      : {}),
+    ...(typeof adapter.indexStatus === 'function'
+      ? { indexStatus: (ctx: AdapterContext) => adapter.indexStatus!(ctx) }
+      : {}),
+    ...(typeof adapter.beginBuild === 'function'
+      ? {
+        beginBuild: (ctx: AdapterContext) => {
+          builds.push('begin');
+          contexts.push(ctx);
+          return adapter.beginBuild!(ctx);
+        },
+      }
+      : {}),
+    ...(typeof adapter.completeBuild === 'function'
+      ? {
+        completeBuild: (ctx: AdapterContext) => {
+          builds.push('complete');
+          contexts.push(ctx);
+          return adapter.completeBuild!(ctx);
+        },
+      }
       : {}),
   };
   const posture = setup.posture;
+  const engine = rowsEngine(rows, setup.wall);
+  const schemas = setup.schemas;
   const svc = new KnowledgeService({
-    dataEngine: rowsEngine(rows, setup.wall),
+    dataEngine: schemas === undefined ? engine : Object.assign(engine, { getSchema: (name: string) => schemas[name] }),
     ...(posture === undefined ? {} : { resolveTenancyPosture: async () => posture() }),
+    ...(setup.logger === undefined ? {} : { logger: setup.logger }),
   });
   svc.registerAdapter('under_test', counting);
   svc.registerSource(source);
-  return { adapter, svc, upserted, searched };
+  return { adapter, svc, upserted, received, searched, contexts, builds };
 }
 
 /** The last element of `list`, or `undefined` when it is empty. */
@@ -257,6 +417,39 @@ function wallOf(posture: TenancyPosture): (row: Row, context: ExecutionContext) 
   return () => true;
 }
 
+/**
+ * Twenty clauses of four policies (ADR-0161 K8, item 17): clause `cNN` belongs
+ * to policy `p${NN % 4}` through the lookup `policy`. The clauses `c03` and
+ * `c07` hold the query once in each of three paragraphs among other words;
+ * every other clause is the query alone, so each of those outranks them.
+ */
+const clauseRows = (): Row[] =>
+  Array.from({ length: 20 }, (_, i) => ({
+    id: `c${String(i).padStart(2, '0')}`,
+    body:
+      i === 3 || i === 7
+        ? 'Harbour crane north quay shift.\n\nHarbour crane south berth shift.\n\nHarbour crane night watch shift.'
+        : 'Harbour crane.\n\nHarbour crane.\n\nHarbour crane.',
+    status: 'published',
+    policy: `p${i % 4}`,
+  }));
+const SCOPE_QUERY = 'harbour crane';
+/** The clauses' registered definition: `policy` is a lookup to `policy`, the parent a scope may name. */
+const CLAUSE_SCHEMA = {
+  name: 'article',
+  fields: {
+    body: { type: 'textarea' },
+    status: { type: 'text' },
+    policy: { type: 'lookup', reference: 'policy' },
+  },
+};
+/** An `article` source that lists the `policy` lookup and cuts each paragraph into its own passage. */
+const clauseSource = (id: string): KnowledgeSource =>
+  objectSource(id, {
+    metadataFields: ['status', 'policy'],
+    split: { strategy: 'recursive', maxChars: 40, minChars: 0 },
+  } as Partial<ObjectKnowledgeSource>);
+
 const rowsOf = (n: number): Row[] =>
   Array.from({ length: n }, (_, i) => ({ id: `r${i}`, body: `body number ${i} zebra${i}`, status: 'published' }));
 
@@ -266,12 +459,21 @@ const rowsOf = (n: number): Row[] =>
  */
 export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOptions): void {
   const make = opts.makeAdapter;
+  const doc = docFor(opts.implements.chunks);
 
   describe(`IKnowledgeAdapter contract — ${opts.name}`, () => {
     it('declares exactly the optional members it implements', async () => {
       const adapter: IKnowledgeAdapter = await make();
       expect(typeof adapter.id).toBe('string');
       expect(typeof adapter.listDocuments === 'function').toBe(opts.implements.listDocuments);
+      expect(adapter.capabilities?.chunks === true).toBe(opts.implements.chunks);
+      expect(typeof adapter.indexStatus === 'function').toBe(opts.implements.indexStatus);
+      // The two ends of a build come together or not at all.
+      expect(typeof adapter.beginBuild === 'function').toBe(opts.implements.builds);
+      expect(typeof adapter.completeBuild === 'function').toBe(opts.implements.builds);
+      if (opts.implements.generations) {
+        expect(opts.implements.builds && opts.implements.refusesOtherFingerprint).toBe(true);
+      }
     });
 
     describe('upsert / search / delete', () => {
@@ -414,6 +616,169 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
       }
     });
 
+    if (opts.implements.scope) {
+      describe('scope (ADR-0161 K8, item 17)', () => {
+        /**
+         * `c1` outranks every other document. `c2` belongs to policy `p1`, `c3`
+         * to `p1` through a list, `c4` to the policy stored as the number 7,
+         * and `c5` to none.
+         */
+        async function seeded(): Promise<{ adapter: IKnowledgeAdapter; a: KnowledgeSource }> {
+          const adapter: IKnowledgeAdapter = await make();
+          const a = objectSource('scope', { metadataFields: ['status', 'policy'] });
+          const withPolicy = (n: string, content: string, policy?: unknown, organizationId?: string): KnowledgeDocument => ({
+            ...doc(a, n, content, undefined, organizationId),
+            metadata: policy === undefined ? { status: 'published' } : { status: 'published', policy },
+          });
+          await adapter.upsert(
+            [
+              withPolicy('c1', 'harbour crane harbour crane', 'p2'),
+              withPolicy('c2', 'harbour crane north quay', 'p1'),
+              withPolicy('c3', 'harbour crane south berth', ['p3', 'p1']),
+              withPolicy('c4', 'harbour crane night watch', 7),
+              withPolicy('c5', 'harbour crane east dock'),
+            ],
+            ctxOf(a),
+          );
+          return { adapter, a };
+        }
+        const search = (adapter: IKnowledgeAdapter, a: KnowledgeSource, topK: number, scope?: AdapterScopeTerm[]) =>
+          adapter.search(SCOPE_QUERY, { source: a, topK, ...(scope === undefined ? {} : { scope }) });
+        const records = (hits: Array<{ sourceRecordId?: string }>): string[] =>
+          hits.map((h) => String(h.sourceRecordId)).sort();
+
+        it('a record term: ranks only those records, filtering before it ranks', async () => {
+          const { adapter, a } = await seeded();
+          // topK 1: a filter applied after ranking would keep c1's better hit and drop it, answering nothing.
+          expect(records(await search(adapter, a, 1, [{ kind: 'record', ids: ['c2'] }]))).toEqual(['c2']);
+          expect(records(await search(adapter, a, 5, [{ kind: 'record', ids: ['c2', 'c4'] }]))).toEqual(['c2', 'c4']);
+        });
+
+        it("a metadata term: ranks only the documents whose field holds an id — a list when any element does — and returns each one's metadata", async () => {
+          const { adapter, a } = await seeded();
+          const term: AdapterScopeTerm = { kind: 'metadata', field: 'policy', ids: ['p1'] };
+          const hits = await search(adapter, a, 5, [term]);
+          expect(records(hits)).toEqual(['c2', 'c3']);
+          // The service checks every hit on its metadata, so the hit carries the document's.
+          for (const hit of hits) expect(hit.metadata?.policy).toEqual(hit.sourceRecordId === 'c2' ? 'p1' : ['p3', 'p1']);
+          const top = await search(adapter, a, 1, [term]);
+          expect(top).toHaveLength(1);
+          expect(['c2', 'c3']).toContain(top[0].sourceRecordId);
+          // A document that carries no value for the field is in no metadata scope.
+          const any = await search(adapter, a, 5, [{ kind: 'metadata', field: 'policy', ids: ['p1', 'p2', 'p3', '7'] }]);
+          expect(records(any)).toEqual(['c1', 'c2', 'c3', 'c4']);
+        });
+
+        it('compares as strings: a value stored as the number 7 matches the id "7"', async () => {
+          const { adapter, a } = await seeded();
+          expect(records(await search(adapter, a, 5, [{ kind: 'metadata', field: 'policy', ids: ['7'] }]))).toEqual(['c4']);
+        });
+
+        it('several terms are a union: a document is in scope when any one holds', async () => {
+          const { adapter, a } = await seeded();
+          const hits = await search(adapter, a, 5, [
+            { kind: 'record', ids: ['c1'] },
+            { kind: 'metadata', field: 'policy', ids: ['p1'] },
+          ]);
+          expect(records(hits)).toEqual(['c1', 'c2', 'c3']);
+        });
+
+        it('an empty list ranks nothing, and so does a term with no ids — never read as "no filter"', async () => {
+          const { adapter, a } = await seeded();
+          expect(await search(adapter, a, 5, [])).toEqual([]);
+          expect(await search(adapter, a, 5, [{ kind: 'record', ids: [] }])).toEqual([]);
+          expect(await search(adapter, a, 5, [{ kind: 'metadata', field: 'policy', ids: [] }])).toEqual([]);
+        });
+
+        it('without the member every document is ranked, as before', async () => {
+          const { adapter, a } = await seeded();
+          expect(records(await search(adapter, a, 5))).toEqual(['c1', 'c2', 'c3', 'c4', 'c5']);
+        });
+
+        if (opts.implements.organizationIds) {
+          it('organizationIds and scope both apply: a document is ranked only when it passes each', async () => {
+            const { adapter, a } = await seeded();
+            await adapter.upsert(
+              [{ ...doc(a, 'c6', 'harbour crane west pier', undefined, 'org_a'), metadata: { status: 'published', policy: 'p1' } }],
+              ctxOf(a),
+            );
+            const hits = await adapter.search(SCOPE_QUERY, {
+              source: a,
+              topK: 5,
+              organizationIds: ['org_a'],
+              scope: [{ kind: 'metadata', field: 'policy', ids: ['p1'] }],
+            });
+            expect(records(hits)).toEqual(['c6']);
+          });
+        }
+      });
+    }
+
+    describe('the record scope through KnowledgeService.search (ADR-0161 K8, item 17)', () => {
+      /** A person reading every row, under no tenancy posture: no organization filter. */
+      const READER = CALLER_A;
+      // The system identity gets one round of `topK` (no refill after the
+      // permission filter), so a full page there is the adapter's filter
+      // before ranking, not the refill's reach.
+
+      it('an own-object scope: every hit is one of the scoped records, and topK is filled from their passages', async () => {
+        const source = clauseSource('scope_record');
+        const h = await serviceOver(make, clauseRows(), source, { schemas: { article: CLAUSE_SCHEMA } });
+        expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 20 });
+        const scoped = new Set(['c03', 'c07']);
+        const hits = await h.svc.search(SCOPE_QUERY, {
+          topK: 5,
+          scope: [{ object: 'article', ids: ['c03', 'c07'] }],
+          executionContext: SYSTEM,
+        });
+        expect(lastOf(h.searched)?.scope).toEqual([{ kind: 'record', ids: ['c03', 'c07'] }]);
+        for (const hit of hits) expect(scoped.has(String(hit.sourceRecordId))).toBe(true);
+        if (opts.implements.scope) {
+          // Filtered before ranking: the eighteen better clauses take no place.
+          const passages = h.received
+            .filter((d) => scoped.has(String(d.sourceRecordId)))
+            .reduce((n, d) => n + (d.chunks?.length ?? 1), 0);
+          expect(hits).toHaveLength(Math.min(5, passages));
+        }
+      });
+
+      it('a parent scope: only the clauses whose listed lookup holds one of the policy ids', async () => {
+        const source = clauseSource('scope_parent');
+        const h = await serviceOver(make, clauseRows(), source, { schemas: { article: CLAUSE_SCHEMA } });
+        await h.svc.reindexSource(source.id);
+        const hits = await h.svc.search(SCOPE_QUERY, {
+          topK: 5,
+          scope: [{ object: 'policy', ids: ['p1'] }],
+          executionContext: SYSTEM,
+        });
+        expect(lastOf(h.searched)?.scope).toEqual([{ kind: 'metadata', field: 'policy', ids: ['p1'] }]);
+        const ofP1 = new Set(clauseRows().filter((r) => r.policy === 'p1').map((r) => String(r.id)));
+        for (const hit of hits) expect(ofP1.has(String(hit.sourceRecordId))).toBe(true);
+        if (opts.implements.scope) {
+          expect(hits).toHaveLength(5);
+          for (const hit of hits) expect(hit.metadata?.policy).toBe('p1');
+        }
+      });
+
+      it('over the adapter with the member stripped: no out-of-scope hit is answered, and the service logs once', async () => {
+        const warn = vi.fn();
+        const source = clauseSource('scope_ignored');
+        const h = await serviceOver(make, clauseRows(), source, {
+          schemas: { article: CLAUSE_SCHEMA },
+          stripScope: true,
+          logger: { warn, debug: () => undefined, info: () => undefined, error: () => undefined },
+        });
+        await h.svc.reindexSource(source.id);
+        for (const ids of [['c03', 'c07'], ['c07']]) {
+          const hits = await h.svc.search(SCOPE_QUERY, { topK: 5, scope: [{ object: 'article', ids }], executionContext: READER });
+          for (const hit of hits) expect(ids).toContain(hit.sourceRecordId);
+        }
+        const reports = warn.mock.calls.map(([message]) => String(message)).filter((m) => m.includes("outside the search's scope"));
+        expect(reports).toHaveLength(1);
+        expect(reports[0]).toContain("adapter 'under_test'");
+      });
+    });
+
     if (opts.implements.listDocuments) {
       describe('listDocuments', () => {
         it.each([
@@ -459,6 +824,39 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           await adapter.delete([`${a.id}:2`], ctxOf(a));
           const { entries } = await listAll(adapter, a, 10);
           expect(entries.map((e) => e.documentId)).toEqual([`${a.id}:1`]);
+        });
+      });
+
+      describe('the stored hash on hits (ADR-0161 K8, item 3)', () => {
+        it("a hit carries its document's docHash as stored, and none for a document stored without one", async () => {
+          const adapter: IKnowledgeAdapter = await make();
+          const a = objectSource('a');
+          await adapter.upsert([doc(a, '1', 'basalt quarry', 'v1:opaque-as-given'), doc(a, '2', 'basalt cliffs')], ctxOf(a));
+          const hits = await adapter.search('basalt', { source: a, topK: 5 });
+          const byDoc = new Map(hits.map((h) => [h.documentId, h]));
+          expect(byDoc.get(`${a.id}:1`)?.docHash).toBe('v1:opaque-as-given');
+          expect(byDoc.get(`${a.id}:2`)).toBeDefined();
+          expect(byDoc.get(`${a.id}:2`)?.docHash).toBeUndefined();
+        });
+
+        it('a record-level search answers one hit per record, and none for a record that changed or left since it was indexed', async () => {
+          const rows: Row[] = [
+            { id: 'r1', body: 'lagoon reef lagoon', status: 'published' },
+            { id: 'r2', body: 'lagoon reef', status: 'published' },
+            { id: 'r3', body: 'lagoon shallows', status: 'published' },
+          ];
+          const source = objectSource('fresh', { where: { status: 'published' } });
+          const h = await serviceOver(make, rows, source);
+          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 3 });
+          const ask = () => h.svc.search('lagoon reef', { granularity: 'record', topK: 5, executionContext: SYSTEM });
+          expect((await ask()).map((x) => x.sourceRecordId).sort()).toEqual(['r1', 'r2', 'r3']);
+          rows[0].body = 'lagoon reef, rewritten after indexing';
+          rows[1].status = 'draft';
+          const out = await ask();
+          expect(out.map((x) => x.sourceRecordId)).toEqual(['r3']);
+          // The stale documents are repaired in the background: r1 rewritten, r2 removed.
+          await expect.poll(async () => (await ask()).map((x) => x.sourceRecordId).sort()).toEqual(['r1', 'r3']);
+          expect(h.upserted.flat().filter((id) => id === `${source.id}:r1`)).toHaveLength(2);
         });
       });
 
@@ -514,5 +912,250 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
         });
       });
     }
+
+    describe('the index fingerprint (ADR-0161 K7; K8, item 8)', () => {
+      it('every write, delete, listing and search through the service carries one fingerprint and recipe hash', async () => {
+        const rows = rowsOf(2);
+        const source = objectSource('fp_carry');
+        const h = await serviceOver(make, rows, source);
+        expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 2 });
+        await h.svc.handleRecordDelete('article', 'r0');
+        await h.svc.search('zebra1', { topK: 3, executionContext: SYSTEM });
+        expect(h.contexts.length).toBeGreaterThan(0);
+        const [first] = h.contexts;
+        expect(first.index?.fingerprint).toMatch(/^fp1:[0-9a-f]{64}$/);
+        expect(first.index?.recipeHash).toMatch(/^rh1:[0-9a-f]{64}$/);
+        for (const ctx of h.contexts) expect(ctx.index).toEqual(first.index);
+        expect(lastOf(h.searched)?.index).toEqual({ fingerprint: first.index!.fingerprint });
+      });
+
+      it('changes the fingerprint when the content recipe changes, and only the recipe hash when where or metadataFields do', async () => {
+        const rows = rowsOf(1);
+        const seen = async (extra: Partial<ObjectKnowledgeSource>) => {
+          const h = await serviceOver(make, rows, objectSource('fp_vary', extra));
+          await h.svc.reindexSource(`${SOURCE_PREFIX}fp_vary`, { limit: 10 });
+          return h.contexts[0].index!;
+        };
+        const base = await seen({});
+        expect(await seen({})).toEqual(base); // the same source, the same adapter: the same hashes
+        const content = await seen({ contentFields: ['body', 'status'] });
+        expect(content.fingerprint).not.toBe(base.fingerprint);
+        const where = await seen({ where: { status: 'published' } });
+        expect(where.fingerprint).toBe(base.fingerprint);
+        expect(where.recipeHash).not.toBe(base.recipeHash);
+        const metadata = await seen({ metadataFields: [] });
+        expect(metadata.fingerprint).toBe(base.fingerprint);
+        expect(metadata.recipeHash).not.toBe(base.recipeHash);
+      });
+
+      if (opts.implements.builds) {
+        it('a complete reindex is one beginBuild / completeBuild pair; a limit or a dryRun calls neither', async () => {
+          const rows = rowsOf(3);
+          const source = objectSource('fp_pair');
+          const h = await serviceOver(make, rows, source);
+          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true });
+          expect(h.builds).toEqual(['begin', 'complete']);
+          await h.svc.reindexSource(source.id, { limit: 10 });
+          await h.svc.reindexSource(source.id, { dryRun: true });
+          expect(h.builds).toEqual(['begin', 'complete']);
+          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true });
+          expect(h.builds).toEqual(['begin', 'complete', 'begin', 'complete']);
+        });
+      } else {
+        it('without beginBuild / completeBuild a complete reindex walks as before', async () => {
+          const source = objectSource('fp_nobuild');
+          const h = await serviceOver(make, rowsOf(2), source);
+          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 2 });
+          expect(h.builds).toEqual([]);
+        });
+      }
+
+      if (opts.implements.indexStatus) {
+        it('indexStatus answers nothing before a build, and what the last complete build recorded after it', async () => {
+          const source = objectSource('fp_status');
+          const h = await serviceOver(make, rowsOf(2), source);
+          const before = await h.adapter.indexStatus!(ctxOf(source));
+          expect(before.recipeHash).toBeUndefined();
+          expect(before.building ?? false).toBe(false);
+          await h.svc.reindexSource(source.id);
+          const carried = h.contexts[0].index!;
+          const after = await h.adapter.indexStatus!(ctxOf(source));
+          expect(after.fingerprint).toBe(carried.fingerprint);
+          if (opts.implements.builds) expect(after.recipeHash).toBe(carried.recipeHash);
+          expect(after.building ?? false).toBe(false);
+        });
+      }
+
+      if (opts.implements.refusesOtherFingerprint) {
+        it('a search under another fingerprint is refused, coded, and never answered from the stored generation', async () => {
+          const adapter: IKnowledgeAdapter = await make();
+          const a = objectSource('fp_search');
+          await adapter.upsert([doc(a, '1', 'basalt columns')], ctxOf(a, FP_OLD));
+          expect((await adapter.search('basalt', { source: a, topK: 5, index: { fingerprint: FP_OLD.fingerprint } })).length).toBe(1);
+          await expectRebuildRefusal(adapter.search('basalt', { source: a, topK: 5, index: { fingerprint: FP_NEW.fingerprint } }));
+        });
+
+        it('a write under another fingerprint, with no build open for it, is refused and writes nothing', async () => {
+          const adapter: IKnowledgeAdapter = await make();
+          const a = objectSource('fp_write');
+          await adapter.upsert([doc(a, '1', 'basalt columns')], ctxOf(a, FP_OLD));
+          await expectRebuildRefusal(adapter.upsert([doc(a, '2', 'basalt quarry')], ctxOf(a, FP_NEW)));
+          const hits = await adapter.search('basalt', { source: a, topK: 5, index: { fingerprint: FP_OLD.fingerprint } });
+          expect(hits.map((x) => x.documentId)).toEqual([`${a.id}:1`]);
+        });
+
+        it('through KnowledgeService: a changed recipe refuses the source by name, and the call whole only when none answers', async () => {
+          const rows = rowsOf(2);
+          const stale = objectSource('fp_stale');
+          const h = await serviceOver(make, rows, stale);
+          await h.svc.reindexSource(stale.id);
+          // The content list changes: a new fingerprint the stored index was not built under.
+          h.svc.registerSource(objectSource('fp_stale', { contentFields: ['body', 'status'] }));
+          const whole = await h.svc.search('zebra1', { topK: 5, executionContext: SYSTEM }).then(
+            () => undefined,
+            (e: unknown) => e,
+          );
+          expect(whole).toMatchObject({ code: REBUILD_REQUIRED, status: 409, refused: [{ sourceId: stale.id, code: REBUILD_REQUIRED }] });
+          // A second source that can be searched answers; the stale one is named, never read as empty.
+          const fresh = objectSource('fp_fresh');
+          h.svc.registerSource(fresh);
+          await h.svc.reindexSource(fresh.id);
+          const report = await h.svc.searchWithRefusals('zebra1', { topK: 5, executionContext: SYSTEM });
+          expect(report.hits.map((x) => x.sourceId)).toEqual([fresh.id]);
+          expect(report.refused).toEqual([expect.objectContaining({ sourceId: stale.id, code: REBUILD_REQUIRED, status: 409 })]);
+          expect((await h.svc.search('zebra1', { topK: 5, executionContext: SYSTEM })).map((x) => x.sourceId)).toEqual([fresh.id]);
+        });
+      }
+
+      if (opts.implements.generations) {
+        it('a build under a new fingerprint fills a new generation and switches to it at completeBuild; the old one answers its own fingerprint until then', async () => {
+          const adapter: IKnowledgeAdapter = await make();
+          const a = objectSource('fp_gen');
+          await adapter.upsert([doc(a, '1', 'granite quarry')], ctxOf(a, FP_OLD));
+          await adapter.beginBuild!(ctxOf(a, FP_NEW));
+          expect((await adapter.indexStatus?.(ctxOf(a)))?.building ?? true).toBe(true);
+          await adapter.upsert([doc(a, '1', 'marble quarry')], ctxOf(a, FP_NEW));
+          // Resumed, not restarted: a second beginBuild for the same fingerprint keeps what was written.
+          await adapter.beginBuild!(ctxOf(a, FP_NEW));
+          await expectRebuildRefusal(adapter.search('quarry', { source: a, topK: 5, index: { fingerprint: FP_NEW.fingerprint } }));
+          const old = await adapter.search('quarry', { source: a, topK: 5, index: { fingerprint: FP_OLD.fingerprint } });
+          expect(old.map((x) => x.snippet)).toEqual(['granite quarry']);
+          await adapter.completeBuild!(ctxOf(a, FP_NEW));
+          const now = await adapter.search('quarry', { source: a, topK: 5, index: { fingerprint: FP_NEW.fingerprint } });
+          expect(now.map((x) => x.snippet)).toEqual(['marble quarry']);
+          await expectRebuildRefusal(adapter.search('quarry', { source: a, topK: 5, index: { fingerprint: FP_OLD.fingerprint } }));
+          expect(await adapter.indexStatus?.(ctxOf(a))).toEqual({ fingerprint: FP_NEW.fingerprint, recipeHash: FP_NEW.recipeHash });
+        });
+
+        it('through KnowledgeService: a complete reindex after a recipe change builds the new generation and search answers again', async () => {
+          const rows = rowsOf(2);
+          const source = objectSource('fp_rebuild');
+          const h = await serviceOver(make, rows, source);
+          await h.svc.reindexSource(source.id);
+          h.svc.registerSource(objectSource('fp_rebuild', { contentFields: ['body', 'status'] }));
+          await expectRebuildRefusal(h.svc.search('zebra1', { topK: 5, executionContext: SYSTEM }));
+          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 2, skipped: 0 });
+          const hits = await h.svc.search('zebra1', { topK: 5, executionContext: SYSTEM });
+          expect(hits.map((x) => x.documentId)).toEqual([`${source.id}:r1`]);
+        });
+      }
+    });
+
+    describe('the chunk channel (ADR-0161 K8, item 5)', () => {
+      const longBody =
+        'Glaciers carve valleys over centuries. Their ice holds ancient air bubbles. ' +
+        'Harbour cranes unload containers at night. The night shift starts at ten. ' +
+        'Copper wire conducts heat and electricity well. It is drawn through dies.';
+      const splitSource = (id: string) =>
+        objectSource(id, { split: { strategy: 'recursive', maxChars: 80, minChars: 0 } } as Partial<ObjectKnowledgeSource>);
+
+      if (opts.implements.chunks) {
+        it("receives the service's passages, cut once, and indexes them as given", async () => {
+          const source = splitSource('chunks');
+          const rows: Row[] = [{ id: 'r1', body: longBody, status: 'published' }];
+          const h = await serviceOver(make, rows, source);
+          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 1, failed: 0, failures: [] });
+          const [sent] = h.received;
+          const expected = splitDocument(
+            sent,
+            resolveSplit({
+              split: (source.source as ObjectKnowledgeSource).split,
+              maxInputTokens: h.adapter.embedding?.maxInputTokens,
+            }),
+          );
+          if (!expected.ok) throw new Error(expected.reason);
+          expect(expected.chunks.length).toBeGreaterThan(1);
+          expect(sent.chunks).toEqual(expected.chunks);
+          // Indexed as given: a hit is one of those passages, by id and text.
+          const third = expected.chunks.find((c) => c.content.includes('Copper'))!;
+          const hits = await h.adapter.search('copper wire electricity', { source, topK: 3 });
+          expect(hits[0]).toMatchObject({ chunkId: third.id, documentId: sent.id, snippet: third.content });
+        });
+
+        it('a hit carries the heading path of its passage, and none for a passage without one', async () => {
+          const adapter: IKnowledgeAdapter = await make();
+          const a = objectSource('headings');
+          const id = `${a.id}:1`;
+          await adapter.upsert(
+            [{
+              id, sourceId: a.id, sourceRecordId: '1', content: 'fjord ferry timetable. fjord glacier', metadata: {},
+              chunks: [
+                { id: `${id}#0`, documentId: id, index: 0, content: 'fjord ferry timetable', headingPath: ['Travel', 'Ferries'] },
+                { id: `${id}#1`, documentId: id, index: 1, content: 'fjord glacier' },
+              ],
+            }],
+            ctxOf(a),
+          );
+          const hits = await adapter.search('fjord ferry glacier', { source: a, topK: 5 });
+          const byChunk = new Map(hits.map((x) => [x.chunkId, x]));
+          expect(byChunk.get(`${id}#0`)?.headingPath).toEqual(['Travel', 'Ferries']);
+          expect(byChunk.get(`${id}#1`)).toBeDefined();
+          expect(byChunk.get(`${id}#1`)?.headingPath).toBeUndefined();
+        });
+
+        it("a whole document over the embedder's budget is removed and reported, never truncated", async () => {
+          const source = objectSource('whole', { split: { strategy: 'whole' } } as Partial<ObjectKnowledgeSource>);
+          const rows: Row[] = [
+            { id: 'r1', body: 'short tundra note', status: 'published' },
+            { id: 'r2', body: longBody, status: 'published' },
+          ];
+          // 60 tokens: a 48-token budget, which the short row fits and the long one does not.
+          const h = await serviceOver(make, rows, source, { maxInputTokens: 60 });
+          const first = await h.svc.reindexSource(source.id);
+          expect(first).toMatchObject({ ok: true, discovered: 2, indexed: 1, failed: 1 });
+          expect(first.failures).toEqual([{ documentId: `${source.id}:r2`, reason: expect.stringContaining("split 'whole'") }]);
+          expect(await h.adapter.search('glaciers copper', { source, topK: 5 })).toEqual([]);
+          // A document that fit and then grew past the budget leaves the index too.
+          rows[0].body = `tundra ${longBody}`;
+          const second = await h.svc.reindexSource(source.id);
+          expect(second).toMatchObject({ ok: true, failed: 2 });
+          expect((await h.adapter.search('tundra', { source, topK: 5 })).map((x) => x.documentId)).toEqual([]);
+        });
+
+        it('indexDocument refuses caller-supplied chunks', async () => {
+          const source = splitSource('push');
+          const h = await serviceOver(make, [], source);
+          await expect(
+            h.svc.indexDocument(source.id, {
+              id: `${source.id}:x`,
+              sourceId: source.id,
+              content: 'pushed',
+              chunks: [{ id: `${source.id}:x#0`, documentId: `${source.id}:x`, index: 0, content: 'pushed' }],
+            }),
+          ).rejects.toThrow(/chunks are cut by the knowledge service/);
+          expect(h.upserted).toEqual([]);
+        });
+      } else {
+        it('receives whole documents, never chunks, whatever the source splits by or the budget', async () => {
+          const source = splitSource('nochunks');
+          const rows: Row[] = [{ id: 'r1', body: longBody, status: 'published' }];
+          const h = await serviceOver(make, rows, source, { maxInputTokens: 20 });
+          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 1, failed: 0 });
+          expect(h.received).toHaveLength(1);
+          expect(h.received[0].content).toBe(longBody);
+          expect('chunks' in h.received[0]).toBe(false);
+        });
+      }
+    });
   });
 }

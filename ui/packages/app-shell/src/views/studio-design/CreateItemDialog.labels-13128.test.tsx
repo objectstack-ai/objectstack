@@ -115,8 +115,9 @@ describe('Studio create dialogs bind each label to its input (objectui#13128)', 
   });
 
   it('Create app (a sibling dialog on the same component): "App name" and "Identifier" each find their input', async () => {
+    // objectstack#36903 — the Automations pillar is retired; the sharing overview's page hosts the toolbar.
     render(
-      <MemoryRouter initialEntries={['/studio/app.a/automations']}>
+      <MemoryRouter initialEntries={['/studio/app.a/owd']}>
         <Routes>
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         </Routes>

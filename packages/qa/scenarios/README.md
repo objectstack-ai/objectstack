@@ -163,13 +163,13 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   names: `metric-selected` (a `query_dataset` answer whose `provenance` names the expected dataset and measure; the
   arguments the model sent decide nothing), `asked-back` (the reply asks — a question mark, or a request phrase such as `please confirm` or
   请确认 opening a sentence or a clause, after `，` `,` `；` `:` and the like — names every candidate by a word other than
-  the asked one, and states no figure; an option list's numbering, an option named by its place — `option 2`, `the
+  the asked one, and states no figure; an option list's numbering at a line's start, bare or markdown-wrapped (`**1.**`), an option named by its place — `option 2`, `the
   3rd one`, 「第 1 个」 — a count of the options it offers — `2 metrics`, 「2 个指标」 — a date, and a year a time word
   or 年 marks are no figure, unless a counted noun follows it: `for 2031 orders`) and `fallback-labelled` (an object query on the expected object answered, no dataset did, and the reply
   says the figure is not a governed metric: a closed word list, English and Chinese, in `labelsFallback`). Its notes
   say what the turn did on the way, ungraded: a loaded skill, no `list_datasets` call, the `candidates` a
   `list_datasets` answer offered. A grader whose rule has changed stamps its grade with `revision`
-  (`DATASET_GRADER_REVISIONS`, which says what each revision changed; absent ⇒ revision 1): `asked-back` is at 3.
+  (`DATASET_GRADER_REVISIONS`, which says what each revision changed; absent ⇒ revision 1): `asked-back` is at 4.
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
   that persona's truth; a `withheld` truth is must-not-reveal. A figure computed over rows
   outside the persona's scope is flagged only when no figure of the persona's own rows
@@ -288,7 +288,9 @@ files only: no model, no network, and no score of its own — every figure is th
 - **Template and ask modes** author no first build: the row is the build they were supplied. `run --template F`
   writes the file's name and sha256 at the record's top level (`template`), so runs on one template share a row; a
   record that names no file (written before the key) is a row of its own, never summed with another; an ask mode on
-  `this run’s from-scratch build` takes that run's scratch author.
+  `this run’s from-scratch build` takes that run's scratch author. When `F.provenance.json` sits beside the
+  template and names the same card with another `cardSha256` than the sha256 of the card file the run grades, `run`
+  prints a `warning: template provenance:` line before the card runs, and grades the card anyway.
 - **Never summed silently**: a table's runs must share the prompt choice, the package source, the ask repeats and the
   driver (a replay is its own driver), the ask skills (`--ask-skills`: names and sha256; a record without them
   reads `none`), the door arm (`--modes door`, below; a record without one reads `skills: none · rules: none`), the card file they graded (`card`, below; a record without it reads `card: not recorded`), and the schema masking of the apps they booted (`--schema-masking off`, below; a record without it reads `schema masking: on`).

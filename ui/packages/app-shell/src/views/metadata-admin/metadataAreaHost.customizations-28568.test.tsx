@@ -19,7 +19,10 @@
  *  - a failed read draws no mark, no filter and no number, with the server's sentence;
  *  - a base without a pair is unchanged, and Setup (no area) never reads;
  *  - in the cross-package leg an item of a pair is labelled with its base;
- *  - objectstack#30063 — the page tile counts a page's override.
+ *  - objectstack#30063 — the page tile counts a page's override;
+ *  - objectstack#37236 — "customized" is overrides + extensions alone
+ *    (`customizationTotal`): a base whose only change is an arrangement draws
+ *    no header total, and neither list offers it the "customized" filter.
  */
 
 // Paid at collection, not inside a case's clock (check:test-source-alias).
@@ -37,6 +40,8 @@ import { MetadataAreaHostContext, type MetadataAreaHost } from './metadataAreaHo
 const BASE = 'hotcrm';
 const PAIR = 'hotcrm.custom';
 const PLAIN = 'com.example.crm';
+/** objectstack#37236 — a base whose pair's only change is an arrangement. */
+const ARRANGED = 'com.example.arranged';
 
 const LISTS: Record<string, Record<string, unknown>[]> = {
   // A served override is served as the base's item, under the base's id.
@@ -44,6 +49,7 @@ const LISTS: Record<string, Record<string, unknown>[]> = {
     { name: 'crm_en', label: 'CRM English', _packageId: BASE },
     { name: 'crm_de', label: 'CRM German', _packageId: BASE },
     { name: 'plain_en', label: 'Plain English', _packageId: PLAIN },
+    { name: 'arranged_en', label: 'Arranged English', _packageId: ARRANGED },
   ],
   email_template: [
     { name: 'welcome', label: 'Welcome', locale: 'en', _packageId: BASE },
@@ -103,6 +109,7 @@ vi.mock('../../hooks/useCanAuthorMetadata', async (importOriginal) => ({
 
 import { MetadataDirectoryPage } from './DirectoryPage';
 import { MetadataResourceListPage } from './ResourceListPage';
+import { useListOrderedNames } from './useListOrderedNames';
 import { registerDefaultMetadataSchemas } from './default-schemas';
 import { t, tFormat } from './i18n';
 
@@ -120,6 +127,19 @@ const HOTCRM_READ = {
   arrangements: [],
   contributions: [],
   counts: { overrides: 2, extensions: 1, switchedOff: 0, arrangements: 0, contributions: 0 },
+};
+/** objectstack#37236 — two arrangements, no override, no extension. */
+const ARRANGED_READ = {
+  packageId: ARRANGED,
+  overrides: [],
+  extensions: [],
+  switchedOff: [],
+  arrangements: [
+    { object: 'crm_account', key: 'relatedLists' },
+    { object: 'crm_account', key: 'fieldGroups' },
+  ],
+  contributions: [],
+  counts: { overrides: 0, extensions: 0, switchedOff: 0, arrangements: 2, contributions: 0 },
 };
 const EMPTY_READ = { packageId: PLAIN, overrides: [], extensions: [], switchedOff: [], arrangements: [], contributions: [], counts: { overrides: 0, extensions: 0, switchedOff: 0, arrangements: 0, contributions: 0 } };
 
@@ -144,7 +164,8 @@ const fetchMock = vi.fn(async (url: string) => {
       return json(503, { success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'The customization ledger is unavailable.' } });
     }
     const hotcrm = readListsPage ? withPage(HOTCRM_READ) : HOTCRM_READ;
-    return json(200, { success: true, data: decodeURIComponent(m[1]) === BASE ? hotcrm : EMPTY_READ });
+    const id = decodeURIComponent(m[1]);
+    return json(200, { success: true, data: id === BASE ? hotcrm : id === ARRANGED ? ARRANGED_READ : EMPTY_READ });
   }
   if (u.startsWith('/api/v1/data/sys_metadata_activation')) {
     return json(200, { object: 'sys_metadata_activation', records: [], hasMore: false });
@@ -303,5 +324,59 @@ describe('the All metadata directory counts a base\'s customizations (objectstac
     );
     expect(screen.queryByTestId('directory-customizations-total')).toBeNull();
     expect(screen.queryAllByTestId(/^directory-tile-customized-/)).toEqual([]);
+  });
+});
+
+/** The detail's ‹ › names (`useListOrderedNames`), drawn for a pin to read. */
+function OrderedProbe({ type }: { type: string }) {
+  const ordered = useListOrderedNames(type);
+  return (
+    <output data-testid="ordered" data-status={ordered.status}>
+      {ordered.names.join(',')}
+    </output>
+  );
+}
+
+function mountOrdered(host: MetadataAreaHost, type: string, search: string) {
+  return render(
+    <MetadataAreaHostContext.Provider value={host}>
+      <MemoryRouter initialEntries={[`${host.basePath}/${type}/x${search}`]}>
+        <OrderedProbe type={type} />
+      </MemoryRouter>
+    </MetadataAreaHostContext.Provider>,
+  );
+}
+
+describe('objectstack#37236 — "customized" is overrides + extensions, never an arrangement', () => {
+  it('the directory header draws no total for a base whose only change is an arrangement', async () => {
+    mountDirectory(area(ARRANGED));
+    await vi.waitFor(() => expect(customizationReads()).toEqual([`/api/v1/packages/${ARRANGED}/customizations`]));
+    // Let the read's answer render, then look.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByTestId('directory-customizations-failed')).toBeNull();
+    expect(screen.queryByTestId('directory-customizations-total')).toBeNull();
+    expect(screen.queryAllByTestId(/^directory-tile-customized-/)).toEqual([]);
+  });
+
+  it('the list offers no "customized" filter to a base whose only change is an arrangement', async () => {
+    mountList(area(ARRANGED), 'translation', `?package=${ARRANGED}`);
+    await screen.findByTestId('metadata-row-arranged_en');
+    await vi.waitFor(() => expect(customizationReads()).toEqual([`/api/v1/packages/${ARRANGED}/customizations`]));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByTestId('metadata-customizations-failed')).toBeNull();
+    expect(screen.queryByTestId('metadata-only-customizations')).toBeNull();
+    expect(marksOf('arranged_en')).toEqual([]);
+  });
+
+  it('the detail ‹ › names: "only customizations" is not offered to it, so it filters nothing out', async () => {
+    mountOrdered(area(ARRANGED), 'translation', '?customized=1');
+    await vi.waitFor(() => expect(screen.getByTestId('ordered')).toHaveAttribute('data-status', 'ready'));
+    expect(screen.getByTestId('ordered')).toHaveTextContent(/^arranged_en$/);
+  });
+
+  it('CONTROL: for HotCRM, whose pair overrides, the same ‹ › names keep only the customized row', async () => {
+    mountOrdered(area(BASE), 'translation', '?customized=1');
+    await vi.waitFor(() => expect(screen.getByTestId('ordered')).toHaveAttribute('data-status', 'ready'));
+    expect(screen.getByTestId('ordered')).toHaveTextContent(/^crm_en$/);
   });
 });

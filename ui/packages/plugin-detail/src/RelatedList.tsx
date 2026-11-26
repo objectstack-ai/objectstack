@@ -34,7 +34,7 @@ import {
   RecordHeaderBarContext,
   toast,
 } from '@object-ui/components';
-import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, extractWriteErrorMessage, isExternalWriteRefusal, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
+import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useDrawsAction, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, extractWriteErrorMessage, isExternalWriteRefusal, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
   Plus,
   ExternalLink,
@@ -83,6 +83,7 @@ import {
   resolveAffordance,
   isDeadlineSettled,
   isActionSwitchedOff,
+  isAskAiAction,
   ActionRunner,
   type ActionDef,
   type ActionResult,
@@ -111,6 +112,7 @@ import { relatedCardId } from './synth/relatedArrangement';
 import { relatedTabConditionsChanged, useRelatedTabConditions } from './relatedTabConditions';
 import { RelatedCardMenu, RelatedPanelHandle } from './RelatedCardMenu';
 import { normalizeSortSpec } from './relatedListSort';
+import { dependsOnFromParent } from './relatedParentScope';
 import { detectStatusField } from '@object-ui/types';
 
 export interface RelatedListProps {
@@ -1168,38 +1170,19 @@ export function derivedAddOf(
  * picker of children (`derivedAddOf`), seen from the parent: `[]` when the
  * lookup is unscoped, `undefined` when the scope cannot be resolved here.
  *
- * `dependsOn` scopes the lookup's candidates by equality — a `{ field, param }`
- * entry (a bare string names both) sends the child's `field` value as the
- * parent object's `param` (`LookupField`'s `dependentFilter`). Reversed, a
- * child can name this parent only when its `field` equals the parent's
- * `param`, so each entry becomes `field equals <parent's param>`. With the
- * parent's value empty or not read yet no child could name it: no picker,
- * never an unscoped one. A `lookupFilters` comparand reading `$record` relates
- * the parent's columns to the child's by any operator, and this side does not
- * invert it: no picker either.
+ * Each `dependsOn` entry, read from the parent (`dependsOnFromParent`, the
+ * pairs a New on this tab also opens with, objectstack#37246), becomes
+ * `field equals <parent's param>`. With the parent's value empty or not read
+ * yet no child could name it: no picker, never an unscoped one. A
+ * `lookupFilters` comparand reading `$record` relates the parent's columns to
+ * the child's by any operator, and this side does not invert it: no picker
+ * either.
  */
 function parentScopeOf(rel: RelationFieldDef, parentRecord: Record<string, unknown> | undefined): ViewFilterElement[] | undefined {
   if (Array.isArray(rel.lookupFilters) && rel.lookupFilters.some(readsRecord)) return undefined;
-  if (!Array.isArray(rel.dependsOn) || rel.dependsOn.length === 0) return [];
-  const rules: ViewFilterElement[] = [];
-  for (const entry of rel.dependsOn) {
-    const field = typeof entry === 'string' ? entry : (entry as { field?: unknown } | null)?.field;
-    const param = typeof entry === 'string' ? entry : ((entry as { param?: unknown }).param ?? field);
-    if (typeof field !== 'string' || field === '' || typeof param !== 'string' || param === '') return undefined;
-    const value = referenceValueOf(parentRecord?.[param]);
-    if (value === undefined) return undefined;
-    rules.push({ field, operator: 'equals', value });
-  }
-  return rules;
-}
-
-/** A record field's value as a filter comparand: an expanded reference reads as its id. */
-function referenceValueOf(raw: unknown): string | number | boolean | undefined {
-  const value = raw && typeof raw === 'object' && !Array.isArray(raw)
-    ? ((raw as { id?: unknown; _id?: unknown }).id ?? (raw as { _id?: unknown })._id)
-    : raw;
-  if (typeof value === 'number' || typeof value === 'boolean') return value;
-  return typeof value === 'string' && value !== '' ? value : undefined;
+  return dependsOnFromParent(rel.dependsOn, parentRecord)?.map(
+    ([field, value]): ViewFilterElement => ({ field, operator: 'equals', value }),
+  );
 }
 
 /** Does this `lookupFilters` entry compare with a `{ $record }` value? */
@@ -1586,9 +1569,14 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    * and can only ever hide more than before.
    */
   const mayInvoke = useCapabilityGate();
+  // [ADR-0160 D7] An `ask_ai` action is absent where the provider has no
+  // in-app assistant.
+  const drawsAction = useDrawsAction();
   const permittedToolbarActions = React.useMemo(
-    () => (toolbarActions ?? []).filter((a) => mayInvoke(a?.requiredPermissions) && !isActionSwitchedOff(a)),
-    [toolbarActions, mayInvoke],
+    // [ADR-0160 D7] The toolbar holds no single record (a launch from it runs
+    // on the parent), so an `ask_ai` action is absent here; its rows draw it.
+    () => (toolbarActions ?? []).filter((a) => mayInvoke(a?.requiredPermissions) && !isActionSwitchedOff(a) && drawsAction(a) && !isAskAiAction(a)),
+    [toolbarActions, mayInvoke, drawsAction],
   );
 
   // In the record page's related column (objectstack#26678) the list is a
@@ -2821,18 +2809,22 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    * opens it — the picker's first row is 「新建」 when New is offered too —
    * and with none it creates a new row directly (New). `null` when neither is
    * offered.
+   *
+   * objectstack#37251 — the entry is named for what it does: 「添加」 / Add
+   * (or the authored `add.label`) only where it opens a picker; where it can
+   * only create (a `master_detail` child with no catalog, since
+   * objectstack#36704) it reads 「新建」 / New, the create form's own name.
    */
   const pickerOffered = !!add && !!add.picker?.object && !!dataSource && addGranted && addBatchable;
-  const addFallbackLabel = t('detail.add', { defaultValue: 'Add' });
   const addEntry: { label: string; disabled: boolean; onClick: () => void } | null = pickerOffered
     ? {
-        label: add!.label || addFallbackLabel,
+        label: add!.label || t('detail.add', { defaultValue: 'Add' }),
         disabled: addBusy,
         onClick: () => { setAddError(null); setPickerOpen(true); },
       }
     : onNew
       ? {
-          label: addFallbackLabel,
+          label: t('detail.new', { defaultValue: 'New' }),
           disabled: !!newDisabled,
           onClick: () => onNew(),
         }

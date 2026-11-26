@@ -421,7 +421,7 @@ export const SkillSchema = lazySchema(() => strictObject({
    * MCP has no server-side activation step: a client lists every projected
    * prompt and decides for itself which to fetch.
    */
-  triggerConditions: z.array(SkillTriggerConditionSchema).optional().describe('Programmatic activation conditions — evaluated by the cloud agent runtime only'),
+  triggerConditions: z.array(SkillTriggerConditionSchema).optional().describe('Programmatic activation conditions — evaluated by the cloud agent runtime only. The context fields a condition reads are reported by the client: a condition is routing, never access control'),
 
   /**
    * Whether the skill is enabled. Honoured in both distributions: an inactive

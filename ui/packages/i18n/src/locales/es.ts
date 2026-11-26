@@ -70,6 +70,9 @@ const es = {
     autofillNoCurrency: 'No se rellenó {{field}}: el importe elegido es {{amount}}, pero aquí aún no se ha elegido moneda. Elija la moneda y luego introduzca {{field}}.',
     autofillCurrencyUnread: 'No se rellenó {{field}}: el importe elegido es {{amount}}, pero no se pudo leer la moneda de aquí. Compruebe la moneda y luego introduzca {{field}}.',
     autofillKept: '{{field}} conserva su valor anterior.',
+    autofillNowSameCurrency: 'No se rellenó {{field}} al elegirlo. El registro ahora está en {{to}}: vuelva a elegirlo para rellenar {{amount}}.',
+    autofillNowSameCurrencyHeld: 'No se rellenó {{field}} al elegirlo y conserva su valor anterior. El registro ahora está en {{to}}: vacíe {{field}} y vuelva a elegirlo para rellenar {{amount}}.',
+    autofillCopiedUnder: '{{field}} se copió como {{amount}}, pero el registro ahora está en {{to}}. Introduzca {{field}} en {{to}} si debe cambiar.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -696,6 +699,7 @@ const es = {
       needsWholeRows:
         "La agrupación necesita todos los registros, pero esta cuadrícula recibió solo una página de ellos, por lo que no se pueden contar los grupos. Entregue todos los registros o deje que la cuadrícula los obtenga de un origen de datos que implemente queryGroupHeaders.",
       draftOnly: "No agrupado por {{fields}}: solo existe en el borrador hasta que publique.",
+      moreGroupsNotLoaded: "No se cargaron más grupos: esta vista tiene más grupos de los que el servidor devuelve en una lectura, así que solo se muestran algunos.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -2573,6 +2577,7 @@ const es = {
       unavailableTitle: "Asistente de IA no disponible",
       unavailableDescription: "Esta implementación no tiene habilitado un asistente de IA. Todo lo demás funciona con normalidad.",
       unavailableError: "No se pudo contactar con el servicio de IA. Puede estar temporalmente sin conexión — reinténtelo o vuelva al inicio.",
+      unavailableErrorDesktop: "No se pudo contactar con el servicio de IA. Puede estar temporalmente sin conexión — reinténtelo o vuelva a la página inicial de la app.",
       unavailableRetry: "Reintentar",
       unavailableHome: "Volver al inicio",
       dock: {
@@ -3812,21 +3817,18 @@ const es = {
   },
   home: {
     build: {
-      title: "Crear una aplicación",
       noCapability: "La creación de aplicaciones no está disponible en este sistema: requiere el permiso «Gestionar metadatos», que su cuenta no tiene.",
-      inStudio: "Nuevo en Studio",
+      inStudio: "Nueva aplicación en blanco",
     },
     template: {
       title: "Empezar con una plantilla",
       marketplaceDisabled: "Este runtime no tiene un marketplace de aplicaciones configurado, por lo que no hay plantillas que instalar aquí.",
     },
-    welcomeAdminDescription: "Describa su negocio en una frase — la IA genera los objetos, las pantallas, las API y las herramientas del agente. O configúrelo usted mismo desde el menú de la izquierda.",
     welcomeAdminDescriptionNoBuild: "Configure su primera aplicación desde el menú de Administración de la izquierda. Cuando tenga datos, el asistente de IA podrá ayudarle a explorarlos.",
     welcomeAdminDescriptionNoAi: "Configure su primera aplicación desde el menú de Administración de la izquierda.",
     noAppsTitle: "Todavía no hay aplicaciones",
     noAppsDescription: "El sistema se está preparando — las aplicaciones que su administrador comparta aparecerán aquí.",
     noAppsAddDescription: "Cree su primera aplicación, o empiece con una plantilla o el mercado de aplicaciones.",
-    buildWithAI: "Crear con IA",
     askAI: "Preguntar a la IA",
     recoveryReminder: {
       message: "Establezca una contraseña de recuperación para poder iniciar sesión aunque el inicio de sesión único no esté disponible.",
@@ -4780,6 +4782,7 @@ const es = {
     tool: {
       aggregate_data: "Resumir los datos",
       get_record: "Leer el registro",
+      get_record_context: "Leer el contexto del registro",
       list_datasets: "Ver las métricas disponibles",
       query_data: "Consultar los datos necesarios",
       query_dataset: "Consultar por métrica",
@@ -5269,7 +5272,12 @@ const es = {
     bulkRejected_one: '{{count}} solicitud rechazada',
     bulkRejected_many: '{{count}} de solicitudes rechazadas',
     bulkRejected_other: '{{count}} solicitudes rechazadas',
-    bulkPartial: '{{ok}} con éxito, {{fail}} fallidas: {{which}}',
+    bulkPartialSummary: '{{ok}} con éxito, {{fail}} fallidas',
+    bulkFailureLine: '{{title}}: {{reason}}',
+    bulkFailuresShowAll: 'Ver todas ({{n}})',
+    bulkFailuresTitle: 'Sin decidir: {{n}}',
+    bulkFailuresBody: 'Estas solicitudes quedaron sin cambios. Cada una indica el motivo.',
+    close: 'Cerrar',
     rejectOneTitle: '¿Rechazar "{{title}}"?',
     rejectOneBody: 'Se rechaza la solicitud y se notifica al solicitante.',
     rejectTitle: '¿Rechazar esta solicitud?',

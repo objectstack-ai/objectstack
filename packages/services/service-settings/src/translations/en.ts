@@ -345,6 +345,7 @@ export const en: PlatformTranslationData = {
           help: 'Include rendered prompts (not just metadata) in trace rows.' },
         embedder_provider: {
           label: 'Provider',
+          help: 'Read when the server starts: a saved change to any embedder setting takes effect after the next restart.',
           options: {
             none: 'Disabled (no embeddings)',
             openai: 'OpenAI',
@@ -412,9 +413,7 @@ export const en: PlatformTranslationData = {
         ragflow_default_dataset: { label: 'Default dataset id',
           help: 'Used when a knowledge source does not name its own RAGFlow dataset.' },
         chunk_target: { label: 'Target chunk size (chars)',
-          help: 'Soft cap on chunk size before token-aware splitting kicks in.' },
-        chunk_overlap: { label: 'Chunk overlap (chars)',
-          help: 'Characters retained from the previous chunk so context survives the boundary.' },
+          help: 'Longest passage, in characters, when the knowledge service splits a document. A size set on a knowledge source itself wins; the embedding model\'s input limit can lower it.' },
         over_fetch: { label: 'Over-fetch multiplier',
           help: 'Search fetches this many times the requested number of results, so enough are left to return after they are filtered by document details.' },
         enforce_rls: { label: 'Enforce RLS on search',

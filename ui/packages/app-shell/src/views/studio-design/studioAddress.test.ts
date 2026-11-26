@@ -46,7 +46,7 @@ import {
   DESIGNER_SURFACE_VIEW_PARAM,
 } from './useSurfaceDeepLink.js';
 import { STUDIO_CHANGES_PARAM, STUDIO_CHANGES_REVIEW } from './studioChangesLink.js';
-import { STUDIO_NEW_PACKAGE_PATH } from './studioNewPackage.js';
+import { STUDIO_NEW_PACKAGE_VALUE, STUDIO_NEW_PARAM } from './studioNewPackage.js';
 import { retiredInterfacesTarget } from './studioInterfacesRetired.js';
 import { studioOrgScopePath } from './studioScope.js';
 import { AREA_PILLAR_FOR_TYPE, areaItemPillarPath, studioMetadataItemPath, studioPillarItemPath } from './metadataArea.js';
@@ -82,7 +82,8 @@ describe('studioPath — the one path builder (objectstack#36895)', () => {
 describe("today's addresses, byte for byte", () => {
   it('landing, package, pillar, home', () => {
     expect(studioLandingPath()).toBe('/studio');
-    expect(STUDIO_NEW_PACKAGE_PATH).toBe('/studio?new=package');
+    // objectstack#36908 — the retired new-package bookmark Studio's entry forwards.
+    expect(studioLandingPath({ query: `${STUDIO_NEW_PARAM}=${STUDIO_NEW_PACKAGE_VALUE}` })).toBe('/studio?new=package');
     expect(studioPackagePath('com.acme.crm')).toBe('/studio/com.acme.crm');
     expect(studioPillarPath('com.acme.crm', 'automations')).toBe('/studio/com.acme.crm/automations');
     expect(studioHomePath('com.acme.crm')).toBe('/studio/com.acme.crm/data');
@@ -102,9 +103,9 @@ describe("today's addresses, byte for byte", () => {
   });
 
   it('an item opens its pillar today when the table names one, else its "All metadata" page', () => {
-    // objectstack#36904 — an object opens its designer on its metadata address.
+    // objectstack#36904, objectstack#36903 — an object and a flow open their designer on their metadata address.
     expect(studioItemPath('crm', 'object', 'account')).toBe('/studio/crm/metadata/object/account');
-    expect(studioItemPath('crm', 'flow', 'notify')).toBe('/studio/crm/automations?surface=flow%3Anotify');
+    expect(studioItemPath('crm', 'flow', 'notify')).toBe('/studio/crm/metadata/flow/notify');
     // objectstack#36905 — a permission set opens its metadata address.
     expect(studioItemPath('crm', 'permission', 'admin')).toBe('/studio/crm/metadata/permission/admin');
     expect(studioItemPath('crm', 'dashboard', 'sales')).toBe('/studio/crm/metadata/dashboard/sales');
@@ -144,13 +145,15 @@ describe("today's addresses, byte for byte", () => {
   });
 
   it('the repointed module builders keep their addresses', () => {
-    expect(studioOrgScopePath()).toBe('/studio/~org/automations');
-    expect(studioOrgScopePath({ type: 'flow', name: 'a:b' })).toBe('/studio/~org/automations?surface=flow%3Aa%3Ab');
+    // objectstack#36903 — the package-less scope's flows, on its leg of the area.
+    expect(studioOrgScopePath()).toBe('/studio/~org/metadata/flow?source=runtime');
+    expect(studioOrgScopePath({ type: 'flow', name: 'a:b' })).toBe('/studio/~org/metadata/flow/a%3Ab?source=runtime');
     expect(studioPillarItemPath('crm', 'access', { type: 'permission', name: 'p' })).toBe('/studio/crm/access?surface=permission%3Ap');
     expect(studioMetadataItemPath('crm', { type: 'object', name: 'account' })).toBe('/studio/crm/metadata/object/account');
+    // objectstack#36903 — the flow was the last pillar type: no item opens a pillar.
     expect(
       areaItemPillarPath({ packageId: 'crm', type: 'flow', name: 'notify', search: new URLSearchParams() }),
-    ).toBe('/studio/crm/automations?surface=flow%3Anotify');
+    ).toBeNull();
     expect(
       areaItemPillarPath({ packageId: 'crm', type: 'flow', name: 'notify', search: new URLSearchParams('review=1') }),
     ).toBeNull();

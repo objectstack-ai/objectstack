@@ -65,12 +65,17 @@ export interface StudioAddressFamily {
 }
 
 export const STUDIO_ADDRESS_FAMILIES: readonly StudioAddressFamily[] = Object.freeze([
-  { id: 'landing', today: '/studio', builder: 'studioLandingPath', meaning: 'The front door: pick or create a writable package.' },
+  {
+    id: 'landing',
+    today: '/studio',
+    builder: 'studioLandingPath',
+    meaning: "Studio's entry, no page of its own: the package last opened, else the package list (StudioEntryRedirect).",
+  },
   {
     id: 'landing-new-package',
     today: `/studio?${STUDIO_NEW_PARAM}=${STUDIO_NEW_PACKAGE_VALUE}`,
     builder: 'studioLandingPath',
-    meaning: 'The front door with its create-package dialog open.',
+    meaning: "A retired bookmark: Studio's entry forwards it to Setup → Packages with New Package open.",
   },
   { id: 'package', today: '/studio/<package>', builder: 'studioPackagePath', meaning: `A package's Studio; the route lands it on its home, \`${STUDIO_HOME_PILLAR}\`, which redirects to the package's object list (objectstack#36904).` },
   { id: 'pillar', today: '/studio/<package>/<pillar>', builder: 'studioPillarPath', meaning: 'One pillar of a package: data, automations or access.' },
@@ -86,12 +91,19 @@ export const STUDIO_ADDRESS_FAMILIES: readonly StudioAddressFamily[] = Object.fr
     builder: 'studioOwdOverviewPath',
     meaning: "A package's organization-wide default sharing overview (objectstack#36905), optionally on one object. Not a metadata item and not a pillar.",
   },
-  { id: 'org-scope', today: '/studio/~org/automations', builder: 'studioOrgScopePath', meaning: 'The package-less scope: the organization\'s own flows.' },
+  {
+    id: 'org-scope',
+    today: '/studio/~org/metadata/flow?source=runtime',
+    builder: 'studioOrgScopePath',
+    meaning:
+      "The package-less scope: the organization's own flows, listed in its own leg of the area (objectstack#36903). The old /studio/~org/automations redirects here.",
+  },
   {
     id: 'org-scope-item',
-    today: `/studio/~org/automations?${DESIGNER_SURFACE_PARAM}=flow:<name>`,
+    today: '/studio/~org/metadata/flow/<name>?source=runtime',
     builder: 'studioOrgScopePath',
-    meaning: 'A package-less flow. It has no package, so no metadata address of a package; it moves with the flow designer card.',
+    meaning:
+      'A package-less flow, full-screen in the scope\'s leg of the area (objectstack#36903). The old /studio/~org/automations?surface=flow:<name> redirects here.',
   },
   { id: 'area-root', today: '/studio/<package or ~all>/metadata', builder: 'studioMetadataAreaRoot', meaning: 'The "All metadata" area of a package, or across packages.' },
   { id: 'area-type', today: '/studio/<package or ~all>/metadata/<type>', builder: 'studioMetadataTypePath', meaning: "A type's list in the area." },
@@ -159,6 +171,9 @@ export const STUDIO_ITEM_TYPES: readonly StudioItemTypeRow[] = Object.freeze([
     onMetadataAddress: '/studio/<package>/metadata/object/<name>',
   },
   {
+    // objectstack#36903 — switched: a flow opens its designer on its metadata
+    // address, and this pillar address redirects there
+    // (`automationsPillarRedirect.ts`), dropping `?view=` and `?nav=`.
     type: 'flow',
     pillar: 'automations',
     surface: 'flow:<name>',
@@ -271,7 +286,7 @@ export const STUDIO_QUERY_PARAMS: readonly StudioQueryParamRow[] = Object.freeze
   {
     key: STUDIO_NEW_PARAM,
     values: STUDIO_NEW_PACKAGE_VALUE,
-    meaning: "The landing's create dialog. Landing only.",
+    meaning: "The retired new-package bookmark; Studio's entry forwards it to Setup's New Package. Entry only.",
     onMetadataAddress: 'verbatim',
     keptOnRetiredInterfaces: false,
   },

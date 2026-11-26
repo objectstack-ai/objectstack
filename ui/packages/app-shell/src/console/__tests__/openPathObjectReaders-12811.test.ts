@@ -120,6 +120,7 @@ const OBJECTS_READERS: Record<string, { kind: Kind; why: string }> = {
   },
   'packages/app-shell/src/views/metadata-admin/PositionHoldersSection.tsx': { kind: 'off', why: 'the metadata admin' },
   'packages/app-shell/src/views/metadata-admin/AssignedUsersSection.tsx': { kind: 'off', why: 'the metadata admin' },
+  'packages/app-shell/src/views/metadata-admin/ContextPackRelatedEntries.tsx': { kind: 'off', why: "the metadata admin's context-pack related lists (objectstack#37143)" },
   'packages/app-shell/src/views/setup/RecycleBinPage.tsx': { kind: 'off', why: 'Setup → Recycle Bin, not mounted on an app object-list open' },
   'packages/app-shell/src/views/setup/PublicFormsSetupPage.tsx': { kind: 'off', why: 'Setup → Public forms, not mounted on an app object-list open (objectstack#36444)' },
   'packages/app-shell/src/views/metadata-admin/previews/ScreenPreview.tsx': { kind: 'off', why: "the metadata admin's form-screen preview" },

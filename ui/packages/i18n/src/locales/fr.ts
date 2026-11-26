@@ -70,6 +70,9 @@ const fr = {
     autofillNoCurrency: '{{field}} n’a pas été rempli : le montant choisi est de {{amount}}, mais aucune devise n’est encore choisie ici. Choisissez la devise, puis saisissez {{field}}.',
     autofillCurrencyUnread: '{{field}} n’a pas été rempli : le montant choisi est de {{amount}}, mais la devise ici n’a pas pu être lue. Vérifiez la devise, puis saisissez {{field}}.',
     autofillKept: '{{field}} garde sa valeur précédente.',
+    autofillNowSameCurrency: '{{field}} n’a pas été rempli lors du choix. L’enregistrement est maintenant en {{to}} : choisissez à nouveau pour remplir {{amount}}.',
+    autofillNowSameCurrencyHeld: '{{field}} n’a pas été rempli lors du choix et garde sa valeur précédente. L’enregistrement est maintenant en {{to}} : videz {{field}}, puis choisissez à nouveau pour remplir {{amount}}.',
+    autofillCopiedUnder: '{{field}} a été copié comme {{amount}}, mais l’enregistrement est maintenant en {{to}}. Saisissez {{field}} en {{to}} s’il doit changer.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -691,6 +694,7 @@ const fr = {
       needsWholeRows:
         "Le regroupement a besoin de tous les enregistrements, mais cette grille n'en a reçu qu'une page : les groupes ne peuvent donc pas être comptés. Fournissez tous les enregistrements, ou laissez la grille les charger depuis une source de données qui implémente queryGroupHeaders.",
       draftOnly: "Non regroupé par {{fields}} : ce champ n'existe que dans le brouillon jusqu'à la publication.",
+      moreGroupsNotLoaded: "D'autres groupes n'ont pas été chargés : cette vue compte plus de groupes que le serveur n'en renvoie en une lecture, seuls certains sont donc affichés.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -2569,6 +2573,7 @@ const fr = {
       unavailableTitle: "Assistant IA non disponible",
       unavailableDescription: "Cette instance n'a pas d'assistant IA activé. Tout le reste fonctionne normalement.",
       unavailableError: "Impossible de joindre le service IA. Il est peut-être temporairement hors ligne — réessayez, ou retournez à l'accueil.",
+      unavailableErrorDesktop: "Impossible de joindre le service IA. Il est peut-être temporairement hors ligne — réessayez, ou retournez à la page de démarrage de l'app.",
       unavailableRetry: "Réessayer",
       unavailableHome: "Retour à l'accueil",
       dock: {
@@ -3808,21 +3813,18 @@ const fr = {
   },
   home: {
     build: {
-      title: "Créer une application",
       noCapability: "La création d'applications n'est pas disponible dans ce système : elle requiert l'autorisation « Gérer les métadonnées », que votre compte ne possède pas.",
-      inStudio: "Nouveau dans Studio",
+      inStudio: "Nouvelle application vierge",
     },
     template: {
       title: "Partir d'un modèle",
       marketplaceDisabled: "Aucune place de marché d'applications n'est configurée pour ce runtime : il n'y a donc aucun modèle à installer ici.",
     },
-    welcomeAdminDescription: "Décrivez votre activité en une phrase — l'IA génère les objets, les écrans, les API et les outils d'agent. Ou configurez tout vous-même depuis le menu de gauche.",
     welcomeAdminDescriptionNoBuild: "Configurez votre première application depuis le menu Administration à gauche. Une fois les données en place, l'assistant IA pourra vous aider à les explorer.",
     welcomeAdminDescriptionNoAi: "Configurez votre première application depuis le menu Administration à gauche.",
     noAppsTitle: "Aucune application pour l'instant",
     noAppsDescription: "Le système est en cours de configuration — les applications partagées par votre administrateur apparaîtront ici.",
     noAppsAddDescription: "Créez votre première application, ou partez d'un modèle ou de la place de marché.",
-    buildWithAI: "Créer avec l'IA",
     askAI: "Demander à l'IA",
     recoveryReminder: {
       message: "Définissez un mot de passe de secours afin de pouvoir vous connecter même si l'authentification unique est indisponible.",
@@ -4776,6 +4778,7 @@ const fr = {
     tool: {
       aggregate_data: "Synthétiser les données",
       get_record: "Lire l’enregistrement",
+      get_record_context: "Lire le contexte de l’enregistrement",
       list_datasets: "Consulter les indicateurs disponibles",
       query_data: "Interroger les données nécessaires",
       query_dataset: "Interroger un indicateur",
@@ -5265,7 +5268,12 @@ const fr = {
     bulkRejected_one: '{{count}} demande rejetée',
     bulkRejected_many: '{{count}} de demandes rejetées',
     bulkRejected_other: '{{count}} demandes rejetées',
-    bulkPartial: '{{ok}} réussies, {{fail}} échouées : {{which}}',
+    bulkPartialSummary: '{{ok}} réussies, {{fail}} échouées',
+    bulkFailureLine: '{{title}} : {{reason}}',
+    bulkFailuresShowAll: 'Tout afficher ({{n}})',
+    bulkFailuresTitle: 'Non traitées : {{n}}',
+    bulkFailuresBody: 'Ces demandes sont restées inchangées. Chacune indique la raison.',
+    close: 'Fermer',
     rejectOneTitle: 'Rejeter « {{title}} » ?',
     rejectOneBody: 'La demande sera rejetée et le demandeur notifié.',
     rejectTitle: 'Rejeter cette demande ?',

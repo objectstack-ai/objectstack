@@ -58,16 +58,12 @@ import {
   type StudioPendingDrafts,
 } from './studioItemDraftStatus.js';
 import { StudioEmptyState } from './StudioEmptyState.js';
-import {
-  navigationObjectOrder,
-} from './flowGrouping.js';
 import { StudioRefusalStrip } from './StudioRefusalStrip.js';
-import { PACKAGE_LIST_TOAST_ID, STUDIO_LANDING_PATH } from './PackageSwitcher.js';
+import { PACKAGE_LIST_TOAST_ID } from './PackageSwitcher.js';
+import { studioEntryFallbackPath, useStudioEntryPermissions } from './studioEntryPermissions.js';
+import { SETUP_PACKAGES_PATH } from '../metadata-admin/packageSource.js';
 import { StudioBackToApp, type StudioAppTarget } from './StudioBackToApp.js';
-import {
-  FlowStatusDot,
-  type NewFlowTrigger,
-} from './AutomationsFlowRail.js';
+import { type NewFlowTrigger } from './AutomationsFlowRail.js';
 import {
   CreateTakenNotice,
   findTakenIdentifier,
@@ -77,6 +73,7 @@ import {
   type StudioSavedDraft,
 } from './StudioPillarKit.js';
 import { AutomationsPillar } from './AutomationsPillar.js';
+import { automationsPillarRedirect } from './automationsPillarRedirect.js';
 import { DataPillar, renderStudioGridList } from './DataPillar.js';
 import {
   cn,
@@ -210,7 +207,11 @@ function formatBackfillReceipt(receipt: PublishBackfillReceipt, locale: string):
 // (`studioInterfacesRetired.tsx`). The "All metadata" area
 // (`/studio/<package>/metadata/…`, `metadataArea.ts`) is not a pillar, so the
 // not-found check does not hold it.
-const PILLARS: readonly string[] = ['automations', 'access'];
+//
+// objectstack#36903 — the Automations pillar is retired too: a flow opens its
+// designer on its metadata address, and `/automations` redirects
+// (`automationsPillarRedirect`) before this page draws.
+const PILLARS: readonly string[] = ['access'];
 // objectstack#29988 — the pillar kit moved to its own module; re-exported for its pins.
 export { StudioHeldNotice, StudioReadOnlyLink, type StudioBaseCustomization };
 
@@ -223,7 +224,6 @@ export { StudioHeldNotice, StudioReadOnlyLink, type StudioBaseCustomization };
  * buys nothing.
  */
 const PILLAR_FOR_SURFACE_TYPE: Readonly<Record<string, string>> = {
-  flow: 'automations',
   permission: 'access',
 };
 
@@ -271,6 +271,12 @@ export function StudioDesignSurface(props: StudioDesignSurfaceProps): React.Reac
   if (!props.area && params.tab === RETIRED_INTERFACES_SEGMENT) {
     const scope = customizationPairBaseOf(params.packageId ?? null) ?? params.packageId ?? 'com.example.showcase';
     return <Navigate to={retiredInterfacesTarget(scope, location.search)} state={retiredInterfacesState()} replace />;
+  }
+  // objectstack#36903 — the retired Automations pillar (and the package-less
+  // scope's) lands on the flow list or the flow's designer, a pair's in its
+  // own area (`automationsPillarRedirect`).
+  if (!props.area && params.tab === STUDIO_ORG_SCOPE_PILLAR && params.packageId && !isStudioAllPackagesScope(params.packageId)) {
+    return <Navigate to={automationsPillarRedirect(params.packageId, location.search)} state={location.state} replace />;
   }
   // objectstack#36904 — the retired Data pillar (Studio's old home, and the
   // old object address) lands on the object list or the object's designer, a
@@ -933,6 +939,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // is 「‹ Back to app」 at the left (`StudioBackToApp`, objectstack#36501), in
   // the same tab, mirroring the app bar's Edit app.
   const shellNavigate = useNavigate();
+  // objectstack#36908 — where the package-not-found state's way out leads:
+  // Setup → Packages for a principal who may open it, the "All metadata" area
+  // for a Studio-only author (the same choice as Studio's entry).
+  const notFoundExit = studioEntryFallbackPath(useStudioEntryPermissions());
   React.useEffect(() => {
     openAccessRef.current = () => {
       if (confirmLeavePillar()) shellNavigate(studioPillarPath(scopeSegment, 'access', { segmentEncoding: 'verbatim' }));
@@ -944,10 +954,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // today; a reader of `label` resolves it in the designer locale at render,
   // through `navItemLabelText`, as the Interfaces rail heading does.
   const [packageApp, setPackageApp] = React.useState<{ name: string; label: I18nLabel; icon?: string; branding?: AppMarkApp['branding'] } | null>(null);
-  // objectui#12612 — the objects the package app's navigation lists, in its
-  // order: the Automations rail orders its groups by it. Read off the same
-  // app row as `packageApp`, so the pillar adds no read of its own.
-  const [packageAppObjectOrder, setPackageAppObjectOrder] = React.useState<readonly string[]>([]);
   // objectstack#36501 — the package's PUBLISHED apps, where the header's
   // 「‹ Back to app」 goes when the author did not come from an app: a draft
   // app has no running front-end to open. Read off the same list as
@@ -1046,13 +1052,11 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     // objectui#11553 — no package, so no package app to resolve.
     if (packageId === null) {
       setPackageApp(null);
-      setPackageAppObjectOrder([]);
       setPublishedApps([]);
       return;
     }
     try {
       const apps = (await shellClient.list('app', { packageId })) as Array<Record<string, unknown>>;
-      setPackageAppObjectOrder(navigationObjectOrder((apps || []).find((a) => a?.name)?.navigation));
       setPublishedApps(
         (apps || [])
           .filter((a) => a?.name)
@@ -1077,7 +1081,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       setPackageApp(first ?? null);
     } catch {
       setPackageApp(null);
-      setPackageAppObjectOrder([]);
       setPublishedApps([]);
     }
   }, [shellClient, packageId]);
@@ -1234,6 +1237,17 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       if (target.type === 'object' && draftScope !== null) {
         const to = studioItemPath(draftScope, 'object', target.name);
         if (to !== currentPathname) {
+          if (!confirmLeavePillar()) return false;
+          shellNavigate(to);
+        }
+        setChangesOpen(false);
+        return;
+      }
+      // objectstack#36903 — a flow is its designer's own address, in a
+      // package's area or the package-less scope's.
+      if (target.type === 'flow' && !allScope) {
+        const to = packageId === null ? studioOrgScopePath(target) : studioItemPath(packageId, 'flow', target.name);
+        if (to.split('?')[0] !== currentPathname) {
           if (!confirmLeavePillar()) return false;
           shellNavigate(to);
         }
@@ -1577,14 +1591,17 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
             {allScope ? (
               <StudioMetadataArea key={scopeSegment} packageId={null} />
             ) : packageId === null ? (
-              tab === STUDIO_ORG_SCOPE_PILLAR ? (
-                <AutomationsPillar
-                  key={`${scopeSegment}:${pillarEntry}`}
+              // objectstack#36903 — the package-less scope's area: its flows,
+              // listed and opened full-screen (`studioScope.ts`).
+              tab === STUDIO_METADATA_AREA ? (
+                <StudioMetadataArea
+                  key={scopeSegment}
                   packageId={null}
+                  orgScope
                   publishNonce={publishNonce}
                   onDraftSaved={onDraftSaved}
-                  readOnly={readOnly}
                   onHeldEditChange={setHeldEdit}
+                  onSurfaceLabelChange={setSurfaceLabel}
                 />
               ) : (
                 <Navigate to={studioOrgScopePath()} replace />
@@ -1595,8 +1612,13 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 testId="studio-package-not-found"
                 sentence={tFormat('engine.studio.notFound.package', locale, { id: packageId })}
                 action={
-                  <Button type="button" size="sm" variant="outline" onClick={() => shellNavigate(STUDIO_LANDING_PATH)}>
-                    {t('engine.studio.landingHome', locale)}
+                  // objectstack#36908 — Setup → Packages, or the "All metadata"
+                  // area for one who may not open it: Studio's home, its old
+                  // way out, was removed.
+                  <Button type="button" size="sm" variant="outline" onClick={() => shellNavigate(notFoundExit)}>
+                    {notFoundExit === SETUP_PACKAGES_PATH
+                      ? t('engine.studio.notFound.packageList', locale)
+                      : t('engine.studio.notFound.allMetadata', locale)}
                   </Button>
                 }
               />
@@ -1614,7 +1636,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 publishNonce={publishNonce}
                 onDraftSaved={onDraftSaved}
                 publishRefusalFor={publishRefusalFor}
-                // objectstack#36904 — the object designer's reports, as the pillars' are.
+                // objectstack#36904, objectstack#36903 — the object and flow designers' reports, as the pillars' are.
                 onHeldEditChange={setHeldEdit}
                 onSurfaceLabelChange={setSurfaceLabel}
                 onReviewChanges={() => {
@@ -1637,18 +1659,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 icon={FileQuestion}
                 testId="studio-pillar-not-found"
                 sentence={tFormat('engine.studio.notFound.pillar', locale, { pillar: tab })}
-              />
-            ) : tab === 'automations' ? (
-              <AutomationsPillar
-                key={`${packageId}:${pillarEntry}`}
-                packageId={packageId}
-                objectOrder={packageAppObjectOrder}
-                publishNonce={publishNonce}
-                onDraftSaved={onDraftSaved}
-                readOnly={readOnly}
-                customization={customization}
-                onHeldEditChange={setHeldEdit}
-                onSurfaceLabelChange={setSurfaceLabel}
               />
             ) : (
               // objectstack#36905 — the Access pillar draws no page: a set opens
@@ -1767,7 +1777,8 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
 }
 
 // objectstack#29988 — the Automations rail's flow helpers moved to their own module; re-exported for their pins.
-export { FlowStatusDot, type NewFlowTrigger };
+// objectstack#36903 — the rail's status dot went with the rail.
+export { type NewFlowTrigger };
 
 // objectstack#36893 — the Automations pillar moved to its own module; re-exported for its pins.
 // objectstack#36905 — the Access pillar is gone: its addresses redirect (`accessPillarRedirect.ts`).
