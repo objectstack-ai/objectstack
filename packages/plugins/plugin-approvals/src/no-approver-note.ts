@@ -22,8 +22,15 @@
  * the slate, the request is reassigned to that member.
  */
 
-import { approvalMessageKey, interpolate, type ApprovalTextParam } from './approval-notification-text.js';
-import { enMessages, noApproverHoldingSlotsId, type ApprovalMessageId } from './translations/messages.js';
+import {
+  APPROVAL_LIST_PARAM_MAX_ITEMS,
+  approvalMessageKey,
+  interpolate,
+  type ApprovalListParam,
+  type ApprovalScalarParam,
+  type ApprovalTextParam,
+} from './approval-notification-text.js';
+import { enMessages, type ApprovalMessageId } from './translations/messages.js';
 import { slatePositions, type ApprovalSentenceRender, type PositionLabelOf } from './admin-rescue-note.js';
 import { isPlatformAdminAddress, slateNamesAPerson } from './approver-address.js';
 import { positionLabelKey } from './reader-locale-labels.js';
@@ -135,13 +142,32 @@ export function namesNoOneBut(slate: readonly string[], submitter: string): bool
  * falling back to `declaredLabel`, else the name.
  */
 function slotParams(slot: Slot, declaredLabel: PositionLabelOf | undefined): {
-  type: ApprovalTextParam; value: ApprovalTextParam;
+  type: ApprovalScalarParam; value: ApprovalScalarParam;
 } {
   const word = APPROVER_TYPE_WORDS[slot.type];
   const value = slotValue(slot, declaredLabel);
   return {
     type: word ? { key: approvalMessageKey(word), fallback: enMessages[word] } : slot.type,
     value: slot.type === 'position' ? { key: positionLabelKey(slot.value), fallback: value } : value,
+  };
+}
+
+/**
+ * [#36853] The slate as the messaging service's list param: each slot its
+ * `approvalNoApproverSlot` clause with the slot's params, falling back to the
+ * English clause the row stores, joined by the separator entry.
+ */
+function slotList(slots: readonly Slot[], declaredLabel: PositionLabelOf | undefined): ApprovalListParam {
+  return {
+    list: slots.map((slot) => ({
+      key: approvalMessageKey('approvalNoApproverSlot'),
+      params: slotParams(slot, declaredLabel),
+      fallback: slotClause(slot, slotValue(slot, declaredLabel), undefined),
+    })),
+    separator: {
+      key: approvalMessageKey('approvalNoApproverSlotSeparator'),
+      fallback: enMessages.approvalNoApproverSlotSeparator,
+    },
   };
 }
 
@@ -156,11 +182,17 @@ function slotParams(slot: Slot, declaredLabel: PositionLabelOf | undefined): {
  * the approver type's word as a key, and a position's `value` is its
  * reader-language label as a key (`positions.<name>.label`, the key the
  * timeline reads) falling back to `declaredLabel`, else the name — the order
- * the timeline note names it in. [#36463] A slate of 2 to
- * `NO_APPROVER_NOTICE_MAX_SLOTS` slots is spelled inline the same way, in
- * `approvalNoApproverHoldingSlots<n>`, slot `i` under `type<i>` / `value<i>`
- * in the slate's order. A slate of more slots names them in English inside
- * the reader's sentence, each position by `declaredLabel`; a note that stored
+ * the timeline note names it in. [#36853] A slate of more slots rides
+ * `approvalNoApproverHolding` with `who` the messaging service's list param:
+ * one `approvalNoApproverSlot` per slot in the slate's order, each with the
+ * same `type` / `value` params, joined by `approvalNoApproverSlotSeparator`,
+ * so every slot reads in the recipient's language whatever the slate's size.
+ * (The `approvalNoApproverHoldingSlots<n>` sentences #36463 spelled slates of
+ * 2 to 8 slots with stay in the packs: notices already delivered carry those
+ * keys and are rendered again at every inbox read.) A slate of more slots
+ * than a list param takes (`APPROVAL_LIST_PARAM_MAX_ITEMS`) rides
+ * `approvalNoApproverHolding` with `who` the English clauses joined, so the
+ * emit is not refused and the submitter is still told. A note that stored
  * `who` keeps it as written.
  */
 export function noApproverNotice(note: Pick<NoApproverNote, 'slots' | 'who'>, declaredLabel?: PositionLabelOf): {
@@ -171,15 +203,8 @@ export function noApproverNotice(note: Pick<NoApproverNote, 'slots' | 'who'>, de
     const { type, value } = slotParams(slots[0], declaredLabel);
     return { id: 'approvalNoApproverHoldingSlot', params: { type, value } };
   }
-  const listed = noApproverHoldingSlotsId(slots.length);
-  if (listed) {
-    const params: Record<string, ApprovalTextParam> = {};
-    slots.forEach((slot, i) => {
-      const { type, value } = slotParams(slot, declaredLabel);
-      params[`type${i + 1}`] = type;
-      params[`value${i + 1}`] = value;
-    });
-    return { id: listed, params };
+  if (slots.length > 1 && slots.length <= APPROVAL_LIST_PARAM_MAX_ITEMS) {
+    return { id: 'approvalNoApproverHolding', params: { who: slotList(slots, declaredLabel) } };
   }
   const who = note.slots ? noApproverWho(note.slots, declaredLabel) : note.who;
   return who
