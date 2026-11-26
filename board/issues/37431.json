@@ -1,0 +1,32 @@
+{
+  "number": 37431,
+  "kind": "issue",
+  "title": "skills platform catalog: add sys_standard_unit_setting (an organization's display decimals per standard unit code) beside sys_unit",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:skills",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T04:22:23Z",
+  "updated_at": "2026-11-26T04:33:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37431",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbdHk3orAeensH6EzS\n\nFiling gate: ① a shipped platform object missing from the generated catalog agents read · Source: fleet (note 7180167601 item 3 on #35490; the #35490 card thread found the row regenerates `skills/objectstack-project/references/platform-catalog.md`, a governed surface its PR stays out of). Follow-up of #35498 / #35490.\n\nGrading: `area:data` · reach: read — `packages/spec/scripts/lib/platform-catalog.ts` lists `sys_unit` (line ~128) and `sys_exchange_rate` but not `sys_standard_unit_setting`, shipped by PR #37389; an agent building a metadata app reads the generated catalog and does not learn where a standard code's display decimals are set · evidence: read.\nSuggested-grade: p3 · docs reach for agents; runtime unaffected.\n\n## What\n\nAdd a `sys_standard_unit_setting` row to `platform-catalog.ts` (builds: an organization's display decimal places for a standard unit code; reach: Setup, data API, read by the quantity display from #35490; clearing = deleting the row) and regenerate `skills/objectstack-project/references/platform-catalog.md`. Tier H (`skills/**`).\n\nRelated: #35498 (PR #37389), #35490, #37245 (ADR-0158 row 7179515770).\nDedupe: searched 'platform-catalog sys_standard_unit_setting' — only #35490."
+}

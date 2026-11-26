@@ -1,0 +1,34 @@
+{
+  "number": 37416,
+  "kind": "issue",
+  "title": "MCP：一次拒绝带多条原因时，把 details.refusals 逐条转给智能体（接 #36877）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-26T02:52:57Z",
+  "updated_at": "2026-11-26T08:16:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37416",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca6EBDpTBZk8v46Jjv\n\nFiling gate: ② review finding N2 of the seat's contract-tier L2 on PR #37395 (#36877), comment 7181155005; the seat asked the owning zone to file a carrier under the parent. Source: reviewer.\nGrading: area:ai · Feature · p2 (with the parent) · reach: every action or hook refusal with several reasons reached through MCP, once #36877 ships · evidence: L2 N2; `packages/mcp/src/mcp-http-tools.ts` ~L1368–1379 relays `userMessage` and, for FLOW_FAILED only, a relay sentence built from `details`.\n\n## 维护者速读\n\n- 做什么：#36877 让服务端一次拒绝可以带多条已翻译原因，放在 `details.refusals`。MCP 现在只转 `userMessage`（/data 上会截到 500 字），多条原因可能被截掉。改成把每条原因完整转给智能体。\n- 谁受益：通过 MCP 操作的智能体和它背后的用户，能看到每一条被拒的原因。\n- 不做会怎样：原因多时，智能体只看到被截断的一段，结尾那句可能丢。\n- 需要你做的：无。\n\n## What\n\n- When a coded refusal carries `details.refusals: [{ reason, message }]` (shape defined by #36877), the MCP tool result names every refusal line whole, in order, with the entry's closing line last, instead of relying on the (possibly 500-char-cut) `userMessage`.\n- Follow the existing FLOW_FAILED pattern (`flowFailureRelaySentence`): read the details as the spec declares them, imported, never hand-spelled. Keep the #7450 withholding rule for `PermissionDeniedError` details.\n\n## Acceptance\n\n- A refusal with several reasons reaches an MCP caller with every line whole; a single-reason refusal reads as today.\n- Pins for both, plus one where `userMessage` was cut at 500.\n\n## Order\n\nAfter the #36877 server PR (#37395) merges; it defines the wire shape.\n\nBlocked-by: #36877\n\nReader: zone o5-U files it; area:ai zone picks it up.\nDedupe: open issues for \"details.refusals\" and \"MCP refusal reasons\" return none besides #36877/#37403."
+}

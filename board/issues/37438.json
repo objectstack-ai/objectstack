@@ -1,0 +1,38 @@
+{
+  "number": 37438,
+  "kind": "pull_request",
+  "title": "feat(record-context): citation verifier reports failures apart from refusals",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ai",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T05:09:16Z",
+  "updated_at": "2026-11-26T08:16:54Z",
+  "closed_at": "2026-11-26T08:16:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T08:16:51Z",
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37438",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgToQGw4qwp7m57qUh2sLcjt)_\nFixes #37418\n\nClause-②: yes (widening) — new optional third argument of the exported verifyRecordCitations and two new exported types; existing calls unchanged\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：用户无感；AI 回答里的引用核对时，数据库故障不再被当成「无权查看」悄悄丢掉，而是报给后台。\n- 为什么做：AI 回答引用专题的后续，替云端产生引用的那一步和运维排障的人解决「一次故障让引用永久消失且无人知晓」。\n- 出错会怎样：故障时引用照样不显示（宁缺勿错），只是多报一条错误；无权查看和记录不存在对后台仍是同一个结果，不泄露记录是否存在；可直接撤回本改动。\n- 要你做什么：无。\n\n## What changes\n\n`verifyRecordCitations(citations, door, options?)` in `packages/services/service-record-context/src/verify-citations.ts`:\n\n- **Refusal vs failure.** A throw carrying an ADR-0112 `code` with a declared 4xx status is a refusal. The status is read as ADR-0112's reader (`resolveThrownHttpError`'s `declaredStatus`) reads it, `.status` then `.statusCode`, mirrored locally because the package does not depend on `@objectstack/types`. A refusal is the only shape `get_record_context` refuses with: its citations are dropped and nothing is reported, as before. Any other throw (no code, a driver code with no status, a 5xx) is a failure: its citations are dropped too, so the result stays fail-closed, and the failure goes to the new optional `options.onError(error, call)`, once per verifying call. A callback that throws, or returns a promise that rejects, is ignored, so the verifier still never throws for a citation and leaves no unhandled rejection. The served-definition read behind the HTML-body check reports too; there the call answered and only the tag-removed reading is lost, which the option's JSDoc says.\n- **Why status, not the code string.** ADR-0112's 2026-08-27 amendment names the status channel as the one structural signal between a refusal and a fault: a driver errno (`ECONNRESET`, `SQLITE_ERROR`) also arrives on `.code`, so the string alone cannot tell.\n- **Design choice: a callback, not a new result shape.** It is the smaller change. The return type stays `RecordCitationParsed[]`, existing two-argument callers see nothing, and the result carries nothing that could tell a caller a hidden record from a missing one. A `{ verified, unverifiable }` result would put the failure next to data the caller may see, and would change the signature every caller reads.\n- New exported types `VerifyRecordCitationsOptions` and `VerifyingCall` (`src/index.ts`).\n- **Nits from the PR #37396 review:**\n  - The module doc says which list cap a producer gets: the verifier reads the first 20 (`RECORD_CITATIONS_MAX`) and drops the rest, where `RecordCitationsSchema` refuses a list of 21.\n  - The module doc corrects the \"tag-stripping only makes verification stricter\" note: the tag-removed reading is a second string, and removing a tag joins adjacent text (`<p>Fire</p><p>cover</p>` reads `Firecover`). A test pins it.\n  - `stripBodyTags` (`packages/spec/src/ai/record-body-anchor.ts`) says it is not a sanitizer. JSDoc only.\n\n## Tests\n\n`src/__tests__/verify-citations.test.ts`, new block \"a refusal and a failure\":\n\n- A door whose root read throws an uncoded `Error`: citations dropped, failure reported once per distinct call (two calls, three citations → two reports). Control: the same citations verify through a door that answers.\n- A driver code with no status and a coded 500: dropped and reported.\n- Control: coded 403, 404 and 400 refusals: dropped, not reported.\n- A refused read (`unreadableRows`) and a missing record (`p404`) give the host the identical `{ quotes: [], reported: [] }`, with a control leg that verifies the readable record.\n- A throwing callback is ignored; no callback still drops the failed call.\n- Rework (contract review 7184346569, seat REWORK 7184355118): a coded refusal declared with `statusCode` only is not reported (control: coded 503 `statusCode` is); a 4xx with no code, a thrown string and a thrown `undefined` are reported; a failing definition read behind an HTML body is reported once while the field quote and the as-stored quote still verify; an async callback that rejects leaves no unhandled rejection.\n- The adjacent-text join of the tag-removed reading.\n\nAblation (one, on the coded-vs-uncoded split): `isRefusal` reduced to \"has a string code\" → \"reports a driver code with no status, and a coded 5xx, as failures\" goes red (1 failed, 20 passed); restored → green. Rework ablations: dropping the `.statusCode` limb → the statusCode-only test red (1 failed | 24 passed); dropping the returned-promise handler → the async-callback test red (1 failed | 24 passed); both restored → green.\n\n## Acceptance notes\n\n- `record-context-tools.ts` (fenced, sibling #37361) turns some door failures into coded refusals before they reach the verifier: a failing related-object definition read or published-definition read becomes `PERMISSION_DENIED` 403 so the refusal names nothing. Those failures are therefore not reported, and the module doc now says so. The follow-up card is #37463.\n- The whole 4xx band is a refusal, so a door declaring a coded 408 or 429 would drop a transient condition without a report. No door on the read path declares one today; the module doc records it (review N4).\n- `Clause-②: yes (widening)` (seat ruling, same as the #37412 precedent): the new parameter is optional and the return type is unchanged, so no existing caller changes; there is no caller outside this package today. Bump stays patch.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/service-record-context exec vitest run src/__tests__/verify-citations.test.ts` — 25 tests pass.\n\nRead first: `verify-citations.ts` `isRefusal`, `declaredStatusOf` and `report` (the split and the async guard), then the `haystackOf` catch.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZnFSe9yjMwBFr33Rk)_\n\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6CZnFSe9yjMwBFr33Rk -->\n"
+}

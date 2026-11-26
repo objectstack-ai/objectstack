@@ -2,9 +2,9 @@
   "number": 37381,
   "kind": "pull_request",
   "title": "fix(app-shell): record-tabs rename gate reads the served sourceLocale",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-26T00:33:13Z",
-  "updated_at": "2026-11-26T02:18:57Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 1,
+  "updated_at": "2026-11-26T03:02:19Z",
+  "closed_at": "2026-11-26T03:02:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T03:02:16Z",
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37381",
   "body": "Fixes #36875\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n用户能看到什么变化:搭建者在设计模式里给记录页签改名时,「能不能改名」改按应用的源语言判断,不再按部署的默认语言判断;默认语言与源语言相同的部署用户无感。\n为什么做:接着菜单改名已改用源语言的那项工作,把记录页签改名补齐到同一种判断。\n出错会怎样:默认语言与源语言不同的部署上,页签名可能被当成源文字写入或该能改时改不了;本改动只换判断依据,可直接撤回。\n要你做什么:无\n\n## What changes\n\n`ui/packages/app-shell/src/views/recordTabsConfigIo.tsx` decided \"source language\" with `fetchDefaultLocale()` + `isSameLanguage(language, defaultLocale)`. It now reads the deployment's languages through the reader PR #36858 added, `fetchDeploymentLocales()`, and asks `labelLanguageOf(language, locales).source`, the exact gate the menu rename uses. That reader takes the served `sourceLocale` and falls back to the default locale when the server serves none, so the fallback is the reader's own. No second fetch: the reader is cached per page load and shared with the menu.\n\nWhat the editor does with the answer is unchanged: in the source language a rename opens and writes the stored label; in any other language the rename button is disabled with the hint \"Tab names are changed in the app's source language\".\n\n## Tests\n\nNew file `ui/packages/app-shell/src/views/__tests__/RecordTabsConfig-36875.test.tsx`, same harness as the #36499 suite, the `GET /i18n/locales` fake now serving `sourceLocale`:\n\n1. default locale zh-CN, source en, reader in zh-CN: rename disabled with the source-only hint, Save disabled, nothing written.\n2. default locale zh-CN, source en, reader in en: rename opens, Save writes `relatedLists` `[{ list: 'contact', label: 'Contacts we know' }, 'task']` through the draft save, then publish.\n3. no `sourceLocale` served: the default locale is the source, as before (zh-CN reader renames, en reader cannot).\n\nReverse check (one-off, no file kept): with the fix committed (`e2288d21`), `recordTabsConfigIo.tsx` was put back to `origin/main` and the new file run. Cases 1 and 2 turned red (`Tests 2 failed | 1 passed (3)`), case 3 stayed green as expected (fallback behaviour is unchanged). Restored with `git checkout HEAD -- PATH`; HEAD blob hash matched, `git diff HEAD` empty.\n\n## Acceptance notes\n\n- Acceptance item 2 says the test \"stores a tab rename as a translation\". The record-tabs editor has no translation write path: outside the source language its rename is closed by design (#36499, ruling (4) precedent), it never writes a translation. The test therefore proves the side the fix controls: a reader in a default locale that is not the source language cannot write the tab name as the source label, and a reader in the source language can. Adding a translation write to record tabs would be a new capability, not this card.\n- `fetchDefaultLocale` in `layout/designModeMenuSave.ts` has no caller after this change (it was the only one). Left in place: that file is the #36858 reader's and outside this card's file surface.\n- The lazy-import comment in `RecordTabsConfig.tsx` (~L95) still says \"the default language\"; comment only, outside the file surface.\n- No other design-mode rename path gates on the default locale: `git grep` for `fetchDefaultLocale` / `isSameLanguage(` under `ui/` finds only the reader itself.\n\n## Verification\n\nTwo-minute check: `cd ui && pnpm exec vitest run packages/app-shell/src/views/__tests__/RecordTabsConfig-36875.test.tsx` → 3 passed.\n\nRead first: `ui/packages/app-shell/src/views/recordTabsConfigIo.tsx` (the whole change is the gate line and the fetch it reads).\n\n<details><summary>Local readings at e2288d21</summary>\n\n- `pnpm --filter '@object-ui/app-shell^...' build` → VERDICT command-exit 0\n- `cd ui && pnpm exec vitest run --maxWorkers=2` the three RecordTabsConfig suites + `packages/app-shell/src/layout/` → Test Files 167 passed (167), Tests 1467 passed (1467)\n- `pnpm --filter @object-ui/app-shell run type-check` → exit 0\n- `node scripts/pm/dispatch-gates.mjs --commands`: 38 derived commands, all exit 0; `--ran` reconciliation: 38 derived, 38 run, 0 NOT-MEASURED, 0 UNRUN (a derived zero). `pnpm --dir ui exec vitest run scripts/` was OOM-killed on the first unlocked run on the shared box, rerun under the verify lock with `--maxWorkers=2`: 172 passed, 2 skipped files.\n- `node scripts/pm/overlap-check.mjs --branch=HEAD` → VERDICT clean exit 0\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6Ca6EBDpTBZk8v46Jjv)_\n"

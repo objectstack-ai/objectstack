@@ -1,0 +1,33 @@
+{
+  "number": 37411,
+  "kind": "issue",
+  "title": "mcp: a tool argument that fails the published JSON Schema is refused with a bare -32602 \"Input validation error\" (no code, no status) that echoes unknown keys verbatim",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T02:34:09Z",
+  "updated_at": "2026-11-26T02:42:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37411",
+  "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nTriage: lands in area:ai · domain:server · Bug · priority:p3 · `pm:queue` · size S; rationale: a refusal convention gap on the MCP doors. The caller gets a refusal it can read, and only its own input back, so it is Impeded × developers only (rare configuration), p3.\n\nFiling gate: ① · Source: fleet (found in the review of PR #37393 by the epic #37000 seat, relayed to triage) · reach: every tool on both MCP doors (HTTP and stdio), measured · evidence: measured.\n\n## 维护者速读\n\n- 问题：外接 AI 调用工具时，参数不符合工具公布的格式，返回的是 SDK 自带的「Input validation error」，没有平台约定的错误代码，还会把调用方传错的键原样回显（实测一次回显 300 字符、含换行和空字符、列出九个键）。\n- 影响：只影响调用方自己，看到的是自己的输入，不算安全问题；但平台「每个拒绝都带代码」的约定在这条路上不成立，AI 客户端没法按代码处理。\n- 要你做什么：无。低优先级，排队等有人顺手做。\n\n## What happens\n\n- Over MCP, when a `tools/call` argument fails the tool's published JSON Schema, the SDK's own schema check refuses first with `MCP error -32602: Input validation error`.\n- The refusal carries no `code` or `status` from the platform's coded-refusal convention.\n- It echoes unknown keys verbatim. Measured: 300 characters with a raw newline and NUL, nine keys listed.\n- It applies to every tool on both doors (HTTP and stdio). The top-level case predates PR #37393.\n\n## Expected\n\n- A schema refusal on either door carries the platform's coded-refusal shape (a stable `code`, and the status where the door has one), like the platform's own argument refusals.\n- Unknown keys are named in bounded, sanitised form: a capped count, with control characters stripped or escaped.\n\n## Done when\n\n- One test per door sends an argument that fails the schema (a wrong type and unknown keys) and asserts the coded refusal and the bounded key echo.\n- The behaviour is the same on HTTP and stdio.\n\n## Notes\n\n- Related, closed: #29135 (malformed params answered -32603 with a raw Zod array) and #32436 (an unknown-key refusal cited retired keys).\n- Not a security card: the caller sees only its own input.\n- Dedupe: searched `\"Input validation error\"` and `-32602` on open and closed issues. No open card covers this path."
+}

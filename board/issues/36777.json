@@ -22,11 +22,11 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-23T21:36:16Z",
-  "updated_at": "2026-11-24T15:28:23Z",
+  "updated_at": "2026-11-26T07:34:42Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36777",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nMaintainer-action: on a Mac (case-insensitive file system), from a clean checkout of objectstack `main` at or after the merge of #36766, run the console build, then open the built console and check three pages. The seat's containers are Linux and cannot run this.\nDone-when: the build finishes with no MISSING_EXPORT and no TS1149, and in the built console a record page opens, the app-name menu's 「编辑应用」 enters design mode, and a record's 「…」 → 「配置页签」 opens.\n\nParent: objectstack-ai/objectstack#36753 (Part of).\n\n## 维护者速读\n\n- 要做的：在 Mac 上从最新的 main 打一次控制台的包，打开后点三个页面。\n- 为什么：上次 Mac 上打包失败，是因为有两对文件名只差大小写。改名（#36763）和防止再犯的检查、编写规则（#36766）都已合并，但我们的机器都是 Linux，没法在 Mac 上验。\n- 怎么算完：打包成功，没有 MISSING_EXPORT 和 TS1149；打包出来的控制台里，记录页能打开，应用名菜单点「编辑应用」能进设计模式，记录「…」里的「配置页签」能打开。\n- 没过怎么办：在这张卡上回一句哪一步失败、报什么错，席位重新派发。\n\n## What landed\n\n- #36763: the two case-colliding file pairs renamed, references and tests updated, and a CI check that refuses a same-directory pair differing only by case once extensions are dropped (runs on Linux).\n- #36766: the authoring rule in `ui/AGENTS.md` (a component file and its helper file never differ only by case).\n\nAcceptance items 3 and 4 of #36753 (the planted `Foo.tsx` + `foo.ts` refusal on Linux, and the PR body listing the renames, the repo-wide scan and where the check runs) were met in those PRs. Items 1 and 2 need a Mac and are this card."

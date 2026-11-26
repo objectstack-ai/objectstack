@@ -1,0 +1,31 @@
+{
+  "number": 37467,
+  "kind": "issue",
+  "title": "service-knowledge: retire the field gate's title arm once a source's index is proven built under the current recipe",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T06:30:21Z",
+  "updated_at": "2026-11-26T07:18:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37467",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb4BAjgQ43tqy1DvVJ\n\nFiling gate: ② follow-up out of #37099 (PR #37439, contract record 7184443506 finding S5, seat L1 7184456563; carried from #37099 comment 7166026415), filed by the owning zone ai-37000 under topic #37000, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p3 (suggested; triage seat offline) · reach: knowledge search hit filtering · evidence: read, not run.\n\n## 维护者速读\n\n- 做什么：知识检索结果的字段过滤里有一段为旧索引保留的“标题”分支；等能证明每个知识源的索引都按当前方式重建过，就把它退掉。\n- 谁受益：代码更简单，检索结果的权限过滤只走一条路。\n- 不做会怎样：多留一段兼容代码，安全行为不变。\n- 需要你做的：无。\n\n## What\n\nThe knowledge field gate keeps a declared `title` arm until the index is rebuilt (noted on #37099, comment 7166026415). PR #37439 makes the first build and the rebuild happen, but does not retire the arm: retiring a security gate needs per-source proof, at search time, that the index was built under the current recipe. Its previous carrier seat has signed off, so this card carries it.\n\n## Acceptance\n\n- Search can tell, per source, that its index was built under the current recipe (for example the build fingerprint recorded by #37099's build).\n- The `title` arm is removed for sources with that proof; a source without it is rebuilt or refused, never served through the old arm. Tests cover both.\n- No weakening: the gate's other arms are unchanged, and a reverse pin shows a non-permitted field still never reaches a hit."
+}

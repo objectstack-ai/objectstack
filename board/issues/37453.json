@@ -1,0 +1,37 @@
+{
+  "number": 37453,
+  "kind": "issue",
+  "title": "App Studio 改版（摸底）：散落项实测数量、合法的无包写入清单、移入软件包对 ADR-0150 寻址的影响——为 #37424 拍板 2、3 提供读数",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:server",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T06:02:45Z",
+  "updated_at": "2026-11-26T06:33:13Z",
+  "closed_at": "2026-11-26T06:33:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37453",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbL6Nn3scsU8yvLyU4\n\nFiling gate: ③ · Source: topic #37424 — parent decision 11 says 「The ADR-0150 addressing risk of moving an item into a package is verified first」; the maintainer picked 「按推荐启动」 on the phase plan (2026-11-26 05:57Z), which starts this investigation today. Sub-issue of #37424 (phase 4, first step).\nGrade: area:ux · Task (investigation, no product change) · p2 (takes the parent's grade) · evidence: the area evaluation's reading that the kernel still accepts package-less saves.\nReader: area `ux-37424` (seat `repo:objectstack#5`), an `os-dev` subagent; its report feeds questions 2 and 3 on #37424 (a fable analysis, then the maintainer).\n\n## 维护者速读\n\n- 做什么：只读摸底，不改产品。回答三件事：① 示例应用和种子环境里有多少「散落项」（不属于任何软件包的元数据）；② 今天哪些写入合法地不带软件包（逐个点名，将来内核收口时作为例外）；③ 把一个散落项移进软件包，对 ADR-0150 的按包寻址有没有风险。\n- 为什么：你要拍板「内核是否禁止无包新建」（问题 2）和「散落项怎么清」（问题 3），这两件都要先有实测数字，不能凭感觉。\n- 需要你做的：无，结果出来我先让 fable 分析再找你。\n\n## Questions to answer, each with a reading\n\n1. Loose items: count package-less metadata rows per type in each `examples/*` app boot and in a fresh seeded environment (the `~org` entry's source), and how the existing adopt door (`packages/runtime/src/domains/packages.ts` ~3718, ⋯ menu 「收编散落项」) handles them.\n2. Package-less writers: every path that writes metadata with no package today — the protocol door (`packages/metadata-protocol/src/protocol-package-scope.ts` ~113–133 still offers \"save … without naming a package\"), the front end's silent fall-back (`ui/packages/app-shell/src/views/runtime-metadata-persistence.ts`, see #37261), AI / MCP tools, seeds, migrations, imports. Name each and say whether it is legitimate (would need a named exemption) or should be closed.\n3. ADR-0150: does moving a loose item into a package change how behavioural metadata is addressed (literal prefixes, references by name) — what breaks, with a reproduction or a code reading per case.\n\n## Acceptance\n\n- A report (`premise_still_valid`, readings with file:line, no PR, or a test-only probe PR if a measurement needs one) posted on this card. ⛔ No product code change.\n\nGoverning text: `docs/adr/0070-package-first-authoring.md` (D1, D3, D5, D6), `docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md`."
+}

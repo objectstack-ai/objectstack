@@ -1,0 +1,32 @@
+{
+  "number": 37434,
+  "kind": "issue",
+  "title": "SQLite schema drift: a boolean field declaring defaultValue 'false' (a string) is reported as set_column_default drift on every read, and re-applying it changes nothing",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:data",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T04:34:20Z",
+  "updated_at": "2026-11-26T05:39:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37434",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbdHk3orAeensH6EzS\n\nFiling gate: ① · Source: fleet (os-dev measurement on PR #37425 for #37345, report comment 7182686626) · finding class a · reach: named producer (`SqlDriver.detectManagedDrift`: the boot drift warning and `os migrate plan`, on any SQLite datasource).\n\nGrading: `area:data` · Bug · measured at PR #37425 head `f438ff8c` through both `driver-turso` faces; not introduced by that PR (the local face has written `'0'` since before it) · evidence: measured.\nSuggested-grade: p3 · a permanent false drift entry; no data is wrong, but the drift report never goes clean for such a field and a re-apply loops.\n\n## What\n\nA `boolean` field declaring `defaultValue: 'false'` (a string) gets column DEFAULT `'0'` (knex's boolean formatter on the local face; the shared renderer on the remote face after PR #37425). `packages/drivers/driver-sql/src/schema-drift.ts` `physicalLiteralMatches` compares a string declaration as text, so it reports `default_mismatch` / `set_column_default` (expected DEFAULT `'false'`, actual DEFAULT `'0'`) on every read, and applying the entry writes `'0'` again.\n\n## Acceptance (proposed, for triage)\n\n- The differ normalises a boolean declaration the way the writer renders it (`'false'` / `false` → `0`, a truthy value → `1`, for `boolean` and `toggle` columns), so a freshly synced column reads zero drift on both faces.\n- `turso-remote-default-parity.test.ts`'s separate `'false'` describe joins the per-kind zero-drift set; the docblock note pointing here goes.\n\nRelated: #37345 (PR #37425), #36245 (local DEFAULT drift).\nDedupe: searched 'physicalLiteralMatches', 'set_column_default boolean', 'default_mismatch boolean' — no open card."
+}

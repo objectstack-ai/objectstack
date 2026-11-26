@@ -1,0 +1,32 @@
+{
+  "number": 37479,
+  "kind": "issue",
+  "title": "service-knowledge: a knowledge source that names an unregistered adapter fails silently (boot clean, search answers [], index throws a bare Error)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T07:38:18Z",
+  "updated_at": "2026-11-26T08:19:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37479",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZmwqAVSYHM1nQUDTq\n\nFiling gate ① · Source: fleet · from PR #37477 (#37004) Acceptance notes, measurement (b) the card asked for (\"If (b) is silent, say so in the PR and the seat files the enforcement card\") · Area: o5-A\n\n## What happens\nMeasured on PR #37477's head `d3692d0c` (the card thread's readings): a knowledge source whose `adapter` names no registered adapter\n- boots clean (one info line only);\n- `search` answers `[]` with one warn log, and `searchWithRefusals` answers `refused: []` — the source is not listed as refused;\n- `indexDocument` / `reindexSource` throw a bare `Error` with no code or status; event sync swallows it at warn.\n\n`KnowledgeSourceSchema.adapter` is `z.string()` (`packages/spec/src/ai/knowledge-source.zod.ts`), so nothing at publish time refuses an unknown name either. After #37004 retires `ragflow`, every stored source that still says `adapter: 'ragflow'` lands in this path.\n\n## Done when\nAn unregistered adapter is refused loudly at one named point (publish/`os validate` or boot) with a coded error that names the source and the adapter, `searchWithRefusals` lists the source as refused, and the index paths throw a coded error. Which point refuses is the lane's design call; a pin test covers each.\n\nreach: an author or agent who writes `adapter: 'ragflow'` (taught by the docs until #37004) or mistypes an adapter name; read from PR #37477's measurement.\nBusiness reason: knowledge search that quietly returns nothing looks like \"no answer\" to the user; the author never learns the source is dead.\nReader: triage → `domain:server` lane (service-knowledge).\nDedupe: `unregistered adapter knowledge`, `unknown adapter knowledge` (open and closed) → #37304 (knowledge_source type and loader, zone ai-37000) is the nearest; it registers published sources but does not refuse an unregistered adapter. If its loader is the natural refusal point, ai-37000 may fold this in.\nGrading: area:ai · Bug · suggested p2 (silent wrong result, builders often after the ragflow retirement) · evidence: measured on PR head."
+}

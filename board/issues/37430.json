@@ -1,0 +1,32 @@
+{
+  "number": 37430,
+  "kind": "issue",
+  "title": "driver-turso remote: a changed or removed literal defaultValue on a column the remote face created is reported as drift it can never apply (set_column_default / drop_column_default answer needs-table-rebuild)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:data",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T04:19:11Z",
+  "updated_at": "2026-11-26T07:23:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37430",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbdHk3orAeensH6EzS\n\nFiling gate: ① · Source: fleet (L1 S1 of seat repo:objectstack#5 on PR #37425, comment 7182476239; contract record 7182460866). Follow-up of #37345.\n\nGrading: `area:data` · reach: read on PR #37425's diff and `origin/main` — once PR #37425 lands, the remote Turso/libSQL face writes declared literal column DEFAULTs on `CREATE TABLE` and `ADD COLUMN`; an author who later edits or removes that `defaultValue` gets a `set_column_default` / `drop_column_default` drift entry, which `REMOTE_DRIFT_OP_ANSWERS` (`packages/drivers/driver-turso/src/turso-driver.ts`) answers `needs-table-rebuild`, and the remote transport runs no table rebuild · evidence: read.\nSuggested-grade: p3 · the stale DEFAULT only fills rows inserted without a value; `os migrate plan` already declares the entry unapplicable (`driftApplyLimit`), so nothing is silent; the local face rebuilds.\n\n## What\n\nBefore PR #37425 the remote face wrote no declared DEFAULT, so this drift could not arise on columns it created. After it, a literal DEFAULT the remote face wrote can be changed only by the SQLite table rebuild, which only the local face performs. The remote face keeps the old DEFAULT, and every later `os migrate plan` lists the entry as needing a rebuild.\n\n## Acceptance (proposed, for triage)\n\n- Decide and implement the remote answer for `set_column_default` and `drop_column_default` on a column the remote face created: a remote table rebuild (as the local face does), or another route that leaves the column's DEFAULT equal to the declaration, with the drift read empty afterwards.\n- `REMOTE_DRIFT_OP_ANSWERS` and `driftApplyLimit` move with it; a test pins edit and removal of a literal default through the remote face.\n\nRelated: #37345 (PR #37425), #36245 (local DEFAULT drift), #37413 (`NOW()` half), #33724 (remote relax in place).\nDedupe: searched 'default_mismatch', 'needs-table-rebuild turso' — no open card."
+}

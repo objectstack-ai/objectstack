@@ -1,0 +1,36 @@
+{
+  "number": 37418,
+  "kind": "issue",
+  "title": "37364 跟进：引用核对器区分「拒绝」和「故障」，故障不再静默丢失引用",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T03:07:12Z",
+  "updated_at": "2026-11-26T08:17:47Z",
+  "closed_at": "2026-11-26T08:16:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37418",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37364. The source is seat 5's contract review on PR #37396 (record 7181386892, S1) and the seat's scope ruling 7181397348, which asked for this card under #36996. The owning area files it, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p2 · reach: every answer whose citations the host verifies (row 10c producer and the console's citation list) · evidence: read.\n\n## 维护者速读\n- 做什么：引用核对器目前把「提问人无权看 / 记录不存在」和「数据库故障 / 程序出错」一样处理，都是悄悄丢掉引用。要让调用方能分清这两种情况，故障时可以记录或重试，而不是永久丢失。\n- 谁受益：云端产生引用的那一步（第 10 行 c 部分）和运维排障的人。\n- 不做会怎样：一次数据库抖动会让这条回答的全部引用永久消失，且没人知道原因。\n- 需要你做的：无。\n\n## What\n`verifyRecordCitations(citations, door)` in `packages/services/service-record-context/src/verify-citations.ts` (PR #37396) catches every throw from `executeGetRecordContext` and drops that tuple's citations. ADR-0160 D9 verifies once, so a loss from an outage is permanent and silent.\n1. Treat only a refusal (an error carrying an ADR-0112 `code` the tool answers with: not found, permission, conflict, bad request) as \"not verified\". Report any other failure to the host, for example through an optional `onError` callback or a result shape that separates `verified` from `unverifiable`. Keep the public result fail-closed: a failed read never verifies a citation, and nothing in the result tells a caller whether a hidden record exists.\n2. Do not reveal a refused record's existence: a refusal and a missing record must still look the same to the host.\n3. While there, close the review's nits that touch the same module: say in `stripBodyTags`'s JSDoc that it is not a sanitizer; correct the PR #37396 Acceptance-note claim that tag-stripping \"only makes verification stricter\" (adjacent elements join); state which list cap 10c gets (the schema refuses 21, the reader takes the first 20).\n\n## Acceptance\n- A test with a door that throws a non-coded error shows the citation dropped and the failure reported to the host. A control with a coded refusal shows it dropped and not reported.\n- A test pins that a refused read and a missing record give the host the same answer.\n- `Clause-②: no` unless the exported signature changes in a way an existing caller sees (it has none outside this package today), `Metadata-protocol: none`.\n\nBlocked by: PR #37396 on `main`.\nParent: #36996\nSize: S\nDedupe (objectstack, is:issue): `verifyRecordCitations` 0 · `citation outage refusal` 0.\n"
+}

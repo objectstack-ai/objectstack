@@ -1,0 +1,31 @@
+{
+  "number": 37419,
+  "kind": "issue",
+  "title": "37177 跟进：objectstack-ai 技能评测第 5、6 题带技能也失败，先测通过率再修",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T03:16:19Z",
+  "updated_at": "2026-11-26T03:36:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37419",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37177. The source is the card thread's skill-eval round on PR #37409 (round records at project files `objectstack-seat5/ai-36996/card-37177/`) and seat 5's ask after its re-record 7181463291. The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p3 · reach: every assistant that learns tool exposure and MCP auth from `skills/objectstack-ai` · evidence: measured, one draw per arm.\n\n## 维护者速读\n- 做什么：技能评测里有两道题（第 5、6 题）在带技能时也没答对，改动前的版本也一样。先多跑几次看是偶发还是稳定失败，稳定失败再改技能文档里对应的句子。\n- 谁受益：靠技能文档学习的 AI 助手。\n- 不做会怎样：技能可能一直教不会「怎么把工具暴露给 AI」和「登录会话」这两点。\n- 需要你做的：如果要改技能文件，需要 os-zhuang 批准。\n\n## What\nIn one round of `pnpm --filter @objectstack/scenarios skill-evals --skills objectstack-ai` on the PR #37409 head, cases 5 and 6 of `skills/objectstack-ai/evals/skills-tools-knowledge.json` failed with the skill: case 5 missing `aiExposed`, case 6 missing `signed-in session`. The same round on the base text (`skills/objectstack-ai` at `9ffe37153`) gave 8 of 10, and the same two cases failed. So the failures predate #37409.\n1. Measure a rate first: at least 5 draws per arm for cases 5 and 6, at the tier the runner uses, and record the pass rate per arm. If the runner can't select single cases, run the bundle and read those two.\n2. If the with-skill arm fails in most draws, find the sentence the case expects. Fix the teaching, not the case, unless the case asks for wording the skill rightly does not use. If so, say why and change the case.\n\n## Acceptance\n- The rates are recorded on this card, per case and arm, with the head they ran on.\n- If the teaching changed: with-skill pass rate on both cases ≥ 4 of 5, `node scripts/check-skills-token-ratchet.mjs` exits 0 with no ceiling raised.\n- `Clause-②: no`, `Metadata-protocol: none`.\n\nModel: skills/** is MANDATORY at the contract review tier if the teaching changes.\nParent: #37177\nSize: S\nDedupe (objectstack, is:issue): `skills-tools-knowledge case 5 aiExposed` 0 · `case 6 signed-in session` 0.\n"
+}

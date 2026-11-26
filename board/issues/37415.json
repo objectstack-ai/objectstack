@@ -1,0 +1,35 @@
+{
+  "number": 37415,
+  "kind": "issue",
+  "title": "37177 跟进：资料包校验对平台注入字段（owner_id）误报 ai-context-field-unknown",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T02:52:11Z",
+  "updated_at": "2026-11-26T05:16:27Z",
+  "closed_at": "2026-11-26T05:15:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37415",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37177. The source is the os-dev report on PR #37409 (comment 7181165779), acceptance note \"Possible defect, not fixed here\". The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Bug · p3 · reach: authors whose `ai_context` pack names a platform-injected column (`owner_id` and the other injected system columns) · evidence: measured (the warning) + read (the cause).\n\n## 维护者速读\n- 做什么：资料包里写了平台自动加的字段（比如负责人 owner_id），校验却警告「字段不存在」。查清运行时是否真的带出这个字段，再让校验和运行时说同一句话。\n- 谁受益：写资料包的作者，不会被误报干扰。\n- 不做会怎样：作者看到误报，可能删掉其实有用的字段。\n- 需要你做的：无。\n\n## What\nMeasured on the #37409 scratch stack: `os validate` warns `ai-context-field-unknown` for `owner_id` in a pack's `fields` on an object that does not declare `owner_id` itself. Read: `packages/lint/src/validate-ai-context.ts` `fieldMapOf` builds the map from the object's declared `fields` only; it does not apply `applyInjectedSystemColumns` (`packages/metadata-core/src/injected-system-columns.ts`), which other lint paths use (see `authored-site-expression.test.ts`, the `applyInjectedSystemColumns(FLOW_EXT)` case).\n1. Measure first: does `get_record_context` carry an injected column named in `fields` (or a related entry's `fields` / `where` / `orderBy`) at run time?\n2. If yes, judge the pack's names against the object with injected columns applied, in every place the rule reads a field map. If no, keep the warning and say in its message that the column is not served to the pack.\n\n## Acceptance\n- A test pins the lint verdict for `owner_id` on an object that does not declare it, and that verdict matches the measured runtime answer.\n- `Clause-②: no`, `Metadata-protocol: none`.\n\nParent: #37177\nSize: S\nDedupe (objectstack, is:issue): `ai-context-field-unknown owner_id` 0 · `validate-ai-context injected` 0.\n"
+}

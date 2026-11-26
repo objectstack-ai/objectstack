@@ -2,8 +2,8 @@
   "number": 36907,
   "kind": "issue",
   "title": "Studio 重构（3-4b）：仪表盘列表的「新建」跳到应用的设计模式并直接打开「添加菜单项 → 仪表盘」（设计模式加一个到达入口）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-support-ai",
@@ -14,7 +14,6 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T08:09:05Z",
-  "updated_at": "2026-11-26T01:42:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T04:56:01Z",
+  "closed_at": "2026-11-26T04:45:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36907",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzufqmKuir7GiTdwGd3Z\n\n③ topic child · Source: topic #36890. Maintainer 06:34Z decision card 「Studio 仪表盘、报表列表的『新建』怎么做？」 → 「新建跳到设计模式加菜单」 (dashboard half; the report half follows #36692, decision 13). Part of #36890.\n\n## 为什么\n\n专题 #36359 定过「新建仪表盘在设计模式的『添加菜单项』里做」，为的是不产生不在任何菜单里的仪表盘。Studio 的仪表盘列表要有「新建」，点了就走这条现成的流程。\n\n## 今天（读代码确认，主干 0819cab1）\n\n- `AS/layout/designMode.tsx:52-53`：「The mode has no address: no URL enters it.」模式由 `ConsoleLayout` 按应用持有，手机上永远不开。\n- 全仓只有 `AS/layout/SidebarAppMenu.tsx:167, 238`（`useEnterDesignMode`）进入；`DesignModeMenu.tsx` 不读任何 `location.state` 到达指令，只往外发 `dashboardEditArrival`（`:493`）。\n- PR #36848 之后：仪表盘或报表处于编辑状态时 `enter()` 会被拒绝；「New dashboard…」保留，「New report…」删除。\n\n## 要做的\n\n1. 仿照 `designModeArrival.ts` 加一个「到达即进入设计模式并打开添加菜单项的仪表盘一栏」的导航状态，由 `ConsoleLayout` 或 `DesignModeMenu` 读取后调用 `enter()`。\n2. Studio 仪表盘列表的「新建」用它，目标应用按决定 6 的规则选；建完落在菜单里，进入编辑（沿用 #36364 的行为）。\n3. 手机宽度不提供这个「新建」；目标应用找不到时不显示「新建」并说明原因。\n4. 和设计模式的在途工作（#36504 / PR #36858、#36876、#36820）协调，避免同时改 `DesignModeMenu.tsx`。\n\n## 验收\n\n- 自建应用和 HotCRM 上，Studio 仪表盘列表点「新建」→ 应用设计模式、添加菜单项的仪表盘一栏已打开 → 建完挂在菜单上、进入编辑。\n\nBlocked-by: #36906\n\nGrading: `area:ux · Feature · design mode entry point (no address enters it) · builders creating dashboards · evidence: read from code`. Topic child ⇒ p2.\nDedupe: `design mode arrival` / `useEnterDesignMode` (no open card; #36359 children closed).\nReader: seat repo:objectstack#3, one os-dev card. Size M. `Metadata-protocol: none`. Wave 3."

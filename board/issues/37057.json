@@ -14,17 +14,17 @@
     "area:ai",
     "domain:skills",
     "pm:blocked",
-    "priority:p2"
+    "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T17:44:08Z",
-  "updated_at": "2026-11-24T21:50:02Z",
+  "updated_at": "2026-11-26T07:06:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37057",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYo86w1wqy2z2fMrryr\n\nFollow-up of #36630 (PR #37043), from its contract review 7139491356 (nit N2 and a note read outside the diff). Filing agreed by the seat session; the zone that filed it takes it.\n\n## What is wrong (readings at `b01d8f97`, plus PR #37043's head `63287424a2` for the new sentence)\n\n1. **The `os validate` sentence is unqualified.** PR #37043's section in `skills/objectstack-ui/rules/actions.md` says \"`os validate` refuses a name the arm's scope does not place\", and the next sentence teaches the paired `.custom` extension writing `actionLayout` on an installed object. `validateObjectActionLayout` (`packages/lint/src/validate-object-action-layout.ts`, docblock line 27) judges an extension only against an object the same stack defines; an extension of an object the stack does not define is skipped (pin: `validate-object-action-layout.test.ts` line 75, \"skips one whose object the stack does not define\"). So on the `.custom` path the skill describes next, a wrong name draws nothing from `os validate`, and the arm just skips it at run time. An agent reading the two sentences together expects a refusal it will not get.\n2. **objectstack-data lists two of the three pair-only keys.** `skills/objectstack-data/SKILL.md` line 385 says \"Only the pair's extension may also write `fieldGroups` and `relatedLists`\". `CUSTOM_ARRANGEMENT_KEYS` (`packages/spec/src/data/field-customization.ts`) now holds `actionLayout` as the third. PR #37043 points from objectstack-ui at that sentence (\"as `fieldGroups`, objectstack-data\"), so the target now under-states the rule it is cited for.\n\n## Done when\n\n- The objectstack-ui sentence says where `os validate` judges the names (the object's own key, and an extension of an object the same stack defines) and that an installed object's `.custom` extension is not judged there, in the fewest words.\n- The objectstack-data sentence names `actionLayout` beside `fieldGroups` and `relatedLists`.\n- Token ratchet green with no ceiling raised unless paid down first in the same file (standing ruling, record 6513306068).\n\nBlocked-by: #37043 (the objectstack-ui sentence lands there first)\n\n## Grade\n\nSuggested-grade: p3 · two teaching gaps in published skills; neither makes an author write metadata the runtime refuses (the placement rule itself is taught correctly).\nSuggested-domain: `domain:skills`"

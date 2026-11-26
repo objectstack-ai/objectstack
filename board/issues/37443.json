@@ -1,0 +1,37 @@
+{
+  "number": 37443,
+  "kind": "pull_request",
+  "title": "fix(mcp): name notRecorded in the record tools descriptions; never name __search as not recorded",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T05:31:19Z",
+  "updated_at": "2026-11-26T08:11:05Z",
+  "closed_at": "2026-11-26T08:11:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T08:11:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37443",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8YQgdqmVpPyn5tDL2dx5FM5)_\n\nPart of #35429 (items 1 and 3; item 2, the ask-card question, is split to #37473)\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- AI 助手查数据被拒时，能提前知道\"未记录\"的含义，不会把没记录的数据说成 0 或空；用户无直接界面变化。\n- 属于问数准确性的收尾工作，替所有用 AI 问数的用户解决误报空值的问题。\n- 出错只会让 AI 的说明文字不准，不影响数据，可直接撤回。\n- 要你做的：无。第二项（新增一个\"未记录\"问题）已拆到 #37473 单独处理。\n\n## What changes\n- `packages/mcp/src/mcp-http-tools.ts`: one shared `NOT_RECORDED_DESCRIPTION` sentence beside `OBJECT_QUERY_SOURCE_DESCRIPTION`, used by the `query_records`, `aggregate_records` and `get_record` descriptions (item 1). `get_record` sends no field names, so its `notRecorded` only ever names an object; the sentence says \"what it names\", true for both.\n- `whereFieldNames` skips `SEARCH_COMPANION_FIELD` (already imported from `@objectstack/spec/data`), so a where or aggregation filter refused for another reason never names `__search` (item 3).\n- One patch changeset.\n\n## Tests\nNew top-level describe in `packages/mcp/src/mcp-not-recorded.test.ts` (the shared harness, per AGENTS.md): the three registered descriptions name `notRecorded` / `ifNotRecorded`; `__search` at top level, under `$or` and in an aggregation filter is never named; a where whose only unshown key is `__search` carries no member. Ablation: with the source file restored to 5d21d431 the five new tests fail (5 failed / 22 passed); restored, 27/27.\n`pnpm --filter @objectstack/mcp test`: 85 files / 1526 tests passed; `typecheck` exit 0 (head cf2ba9b6, after merging main a46efa8c; ablation re-run there: 5 failed / 22 passed, then 27/27).\n\n## Acceptance notes\n- Item 2 (one not-recorded ask question) is split to #37473: it widens the dataset-card question band, outside this card's file surface. This PR stays Part of #35429.\n- Assumption A holds: neither `september_commission` nor `recoverable_vat` is described as the not-recorded question.\n\n## Verification\nRead first: `packages/mcp/src/mcp-http-tools.ts` (`whereFieldNames` and `NOT_RECORDED_DESCRIPTION`).\nTwo-minute check: `pnpm --filter @objectstack/mcp exec vitest run src/mcp-not-recorded.test.ts`, expect 27 passed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbZEHjgBkgmgj9G9xr4\n\n<!-- signed: repo:objectstack#6 · hotlong · session_01Q4EjjQkY5yXZrN9BEA3rEK -->\n"
+}

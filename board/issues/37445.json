@@ -1,0 +1,32 @@
+{
+  "number": 37445,
+  "kind": "issue",
+  "title": "check-adr-0087-registration：成员路径不能穿过 interface，`Interface.member` 的收窄无法登记（接 #36987）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T05:37:36Z",
+  "updated_at": "2026-11-26T06:25:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37445",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca6EBDpTBZk8v46Jjv\n\nFiling gate: ② review finding, the seat's analysis of the ADR-0087 refusal on PR #37433 (#36987); the seat asked the owning zone to file it under #36987. Source: reviewer.\nGrading: area:fleet · Bug · p2 (suggested; triage grades) · reach: any changeset that narrows a member of a published TS `interface` and must name it as `path#Interface.member` · evidence: the refusal the #36987 dev captured on head ac218b24 (os-dev report 7183552545, attempt 1).\n\n## 维护者速读\n\n- 做什么：ADR-0087 登记检查只能沿对象字面量和 class 找成员，不能沿 interface 找。接口成员改了类型，就没法按 `接口.成员` 写登记。\n- 谁受益：改公开 TS 接口的开发者和审查者。\n- 不做会怎样：接口成员的收窄只能写成文件里唯一的名字，名字不唯一时根本无法登记。\n- 需要你做的：无。\n\n## What\n\n- `scripts/check-adr-0087-registration.mjs`: `containerBodiesFor` (~:3714, reached via `resolveMemberPath` ~:3790) accepts only object literals and class bodies as containers, so `ui/packages/auth/src/types.ts#AuthClient.updateUser` fails with \"no `AuthClient` object literal or class … is declared at the top of the file\", though `AuthClient` is an exported `interface`.\n- Walk `interface` (and type-literal alias) bodies the same way, with the same zero-or-several-candidates refusal.\n\n## Acceptance\n\n- `path#Interface.member` resolves to the member signature at both revs; a pin for an interface member, and one where the name is ambiguous (still refused).\n\nBlocked-by: none. Order: independent of #36987's ruling.\n\nReader: area:fleet / domain:devx triage.\nDedupe: open issues for \"check-adr-0087-registration interface\" return none."
+}

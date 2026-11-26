@@ -1,0 +1,32 @@
+{
+  "number": 37441,
+  "kind": "issue",
+  "title": "scaffold-e2e: \"Scaffold with repo dist\" installs the generated project from this checkout's packed tarballs",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T05:30:22Z",
+  "updated_at": "2026-11-26T06:23:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37441",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CYtTDvfPQDzMbZnN5X\n\n③ maintainer-directed task · Source: maintainer — Bill (os-bill), decision card in seat 5's project thread, 2026-11-26T05:27Z, option verbatim 「先等，并立卡改检查」 (card text: 「模板保持和起步应用一致，改动停到第一个 19 预发布版发出；同时立一张受管卡，让检查改用本仓库打出的包，以后不再被旧版本卡住。」). Ruling record: https://github.com/objectstack-ai/objectstack/issues/36945#issuecomment-7183516548 · analysis: https://github.com/objectstack-ai/objectstack/issues/36945#issuecomment-7182816947\n\nParent: #36945 · Governed surface: `.github/workflows/scaffold-e2e.yml` ⇒ Tier H; contract-tier build and review. Suggested `domain:devx` (triage's to set); grade is triage's.\n\n## Why\n\nDuring changeset pre mode the repo version (18.6.0) stays the npm `latest`, so the job `Scaffold with repo dist` resolves a generated project's `@objectstack/*` deps to the published 18.6.0, which rejects shapes `main` already ships (object `color`, `fieldGroups[].fields`, object-form `relatedLists`). PR #37428 (#36945) is red for that reason alone, and every template change during a long pre mode hits the same wall. The `next` snapshot is not an answer: ADR-0125's 2026-11-05 amendment refuses snapshots in pre mode until 19 GA.\n\n## Scope\n\n1. The job `Scaffold with repo dist` installs the generated project from this checkout's packed tarballs through the project's own overrides, reusing `scripts/publish-smoke-pack.mjs` as `os-create-smoke.yml` does.\n2. The `latest` fallback and the `engines.protocol` re-stamp in the install step are removed.\n3. Unchanged: the pinned-shape step, the skills steps, and the nightly `Registry canary`.\n4. In passing: correct the two stale `note.test.ts` comments in the file.\n\n## Acceptance\n\n- PR #37428's head is green on `Scaffold with repo dist` with no template change.\n- A control (one template key the workspace spec refuses) is red on the same job.\n\n## Premise clause\n\nThe dev re-runs premises 1–9 of the analysis comment before writing. Named, falsifiable premise: a project scaffolded from PR #37428's head validates, builds, tests and boots when its `@objectstack/*` dependencies resolve to the checkout's tarballs. If that does not hold, or if the Docker leg cannot take the packed CLI without a product-visible change under `docker/**`, the dev reports a fork. ⛔ No fallback to installing a snapshot, to tolerating the red, or to changing the template.\n\n## Restart link\n\n#36945 waits as `pm:on-hold`; its `Restart-when:` names this card's merge as one of its two triggers."
+}

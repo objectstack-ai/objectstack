@@ -1,0 +1,36 @@
+{
+  "number": 37476,
+  "kind": "pull_request",
+  "title": "docs(releases): the v19 line's page — breaking changes since 18.6.0 and the path from 18.x",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T07:35:47Z",
+  "updated_at": "2026-11-26T08:18:05Z",
+  "closed_at": "2026-11-26T08:18:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T08:18:03Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37476",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgKuB9tSHfx8mc1SYKnqrY8R)_\n\nFixes #37461\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：文档站「发布说明」里新增 v19 页面，列出 18.6.0 之后的全部破坏性变更（每条附 PR）和从 18 升级到 19 的步骤；代码与运行时不变。\n- 为什么做：发布流水线定时任务因缺少 v19 发布页一直报红，第一个 19 预发布版出不去，这页补上它。\n- 出错会怎样：最坏是页面某条描述不准，读者按变更集原文核对即可；页面可直接撤回，不影响任何包。\n- 要你做什么：无。\n\n## What changes\n\n- `content/docs/releases/v19/index.mdx` (new): the v19 line's landing page, in the folder layout v17 and v18 use. It leads with the breaking changes and the path from 18.x, and marks itself as covering the `19.0.0-next.N` prerelease line, written before `19.0.0-next.0` publishes (npm `latest` = 18.6.0, no 19.x on npm, read 2026-11-26).\n- `content/docs/releases/v19/meta.json` (new): `[\"index\"]`, as v18's folder carries one.\n- `content/docs/releases/meta.json`: `\"v19\"` added first.\n- `scripts/docs-audit/handwritten-docs.json`: one line, `\"content/docs/releases/v19/index.mdx\"`, exactly what `node scripts/docs-audit/check-audit-scope.mjs --write` produces. **Fence addition**, approved by the dispatching seat (o5-P, option A) after the dispatch fenced `scripts/**`; nothing else in that file changes. The release-page precedents carry the same line (#35227, #33823).\n\n**How the breaking list was built.** The 950 changesets pending on `main` at `a46efa8c` (the input of the 19.0.0-next.0 version pass) were each classified by `classifyReleaseBullet` in `scripts/release-github-releases.mjs` (the function that groups a GitHub Release body): 102 breaking (71 manual, 31 registered ADR-0087 entries), from 101 PRs; each changeset was mapped to its PR through the commit that added it (`git log --diff-filter=A 958ee0359..origin/main`, history deepened to cover the 18.6.0 version commit `958ee0359`). Cross-check: all 87 PRs titled with `!` since 18.6.0 are in the set, and the page links exactly those 101 PRs (set-compared). Each line is the changeset's own summary, shortened; nothing is listed that has no changeset.\n\n**Migration path.** Points at what main ships: `os migrate meta --from 18 --write` for the `engines.protocol` range (the registered `protocol-18-range-refused` entry, protocol-19 step), `--from 17` for the 30 registered entries that landed after 18.6.0 on the protocol-18 step, then `os validate` / `os build` and the existing [Upgrading](https://github.com/objectstack-ai/objectstack/blob/main/content/docs/upgrading.mdx) loop; no guide duplicated.\n\n## Tests\n\n<details><summary>Post-version rehearsal: the Release workflow's content gates on a rendered 19.0.0-next.0 tree (head 8d877be5e)</summary>\n\nA throwaway worktree at `8d877be5e`, `pnpm install --frozen-lockfile`, `pnpm run version` (exit 0; `packages/spec/CHANGELOG.md` heads `## 19.0.0-next.0`), then the step's content gates:\n\n```\n0 | pnpm check:release-notes | check-release-notes: OK — every released major has a curated, navigable release page.\n0 | pnpm check:release-page-status\n0 | node scripts/check-release-section-coverage.mjs\n0 | node scripts/check-release-section-coverage.mjs --strict\n0 | pnpm check:release-index-currency-sync\n0 | pnpm check:nul-bytes\n0 | pnpm check:published-readme-links\n0 | pnpm check:docs-image-tag\n0 | pnpm check:docs-image-tag-sync\n0 | pnpm check:template-version-sync\n0 | pnpm check:skill-compatibility\n```\n\nThe worktree was removed afterwards. The step's five package gates (create-objectstack, template manifests, protocol-version test, spec-changes, upgrade-guide) read no docs and were green in run 45766367806; not re-run.\n</details>\n\n<details><summary>Derived gate families (dispatch-gates --commands, head 8d877be5e): 52 run, 51 exit 0, 1 exit 1, since fixed at d8a0cacdb</summary>\n\n`node scripts/pm/dispatch-gates.mjs --ran` with exit codes recorded: \"52 derived famil(ies) accounted for — 52 run, 0 NOT-MEASURED (a DERIVED zero)\". Prerequisite builds run under the verify lock: `@objectstack/lint...` and `@objectstack/client-react...` (both VERDICT command-exit 0).\n\nThe one red at 8d877be5e was `pnpm check:docs-audit-scope` (exit 1): `scripts/docs-audit/handwritten-docs.json` did not list `content/docs/releases/v19/index.mdx`. At head d8a0cacdb, after the fence addition, the same chain (`affected-docs.mjs --self-test`, `check-audit-scope.mjs --self-test`, `check-audit-scope.mjs`) exits 0: \"docs-accuracy-audit scope is in sync with content/docs/: 254 hand-written doc(s)\". `node scripts/check-release-notes.mjs` at d8a0cacdb: exit 0.\n</details>\n\n## Acceptance notes\n\n- **Fence addition:** `scripts/docs-audit/handwritten-docs.json` gains the one line `check:docs-audit-scope` asks for, generated by its own `--write`, approved by the dispatching seat (o5-P, option A). It was outside the dispatched file surface (`scripts/**` fenced).\n- Not in scope, per the card: per-version pages for 19.x prereleases, and the releases overview's Versions list (`content/docs/releases/index.mdx`), which names lines once they ship.\n- The steps under \"Coming from 18.x\" are compiled from the changesets and not walked; the page says so.\n\n## Verification\n\nRead first: `content/docs/releases/v19/index.mdx`, the \"Coming from 18.x\" section (the only prescriptive part), then the \"What makes it a major\" list.\n\nTwo-minute check: in a worktree at this head, `pnpm run version && pnpm check:release-notes` prints `check-release-notes: OK — every released major has a curated, navigable release page.`\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CY2uhJ1AYNPw5TUSVS)_\n\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6CY2uhJ1AYNPw5TUSVS -->\n"
+}

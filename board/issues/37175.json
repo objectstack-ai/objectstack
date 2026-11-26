@@ -2,8 +2,8 @@
   "number": 37175,
   "kind": "issue",
   "title": "37140 跟进：get_record_context 在运行时 HTTP 通道上用真执行器测一遍（含拒绝）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "area:ai",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-25T01:53:47Z",
-  "updated_at": "2026-11-25T21:21:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T05:36:11Z",
+  "closed_at": "2026-11-26T05:34:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 11,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37175",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nFiling gate: ③ maintainer-directed (topic #36996 handed to this project, 「36996 你接手整个专题的任务，现在就开专区派发」), from the #37173 contract review, R6 (comment 7149757761).\nGrading: area:ai · Task · p2 (topic child's test gap, not a known defect) · evidence: read.\n\n## 维护者速读\n- 背景：外接 AI 读记录资料的工具（#37140）在 stdio 通道上有完整测试；HTTP 通道只测了接线，执行器是假的。\n- 要做的：在 HTTP 通道上用真执行器、真内核跑同一组场景，包括各种被拒的情况，确认两个通道对同一个人给出同样的回答。\n- 要你做的：无。\n\n## What\n1. Add a real-kernel rig for `get_record_context` over the runtime HTTP data bridge (`packages/runtime/src/domains/mcp.ts`), modelled on `domains/mcp-package-object-discovery.test.ts`. Use the real `@objectstack/service-record-context` executor, not a mock.\n2. Cover on that rig the cases #37173 pins on stdio: the root refused, a refused `related` child (unnamed when hidden), a hidden field, an unopenable lookup, an unreadable related row, an unresolved anchor, and an `OBJECT_PACKAGE_DISABLED` child.\n3. Add one read over a context pack served from the metadata registry, rather than from the stack. `read-set.ts` drops a registry row that does not parse, so pin that a valid registry row is read.\n\n## Acceptance\n- For one fixture and one caller, the HTTP bridge and the stdio bridge give byte-identical answers, refusals included.\n- The registry-served pack is read.\n\nParent: #36996. Related: #37140, #37173."

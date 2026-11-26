@@ -1,0 +1,33 @@
+{
+  "number": 37483,
+  "kind": "issue",
+  "title": "Console approvals: system notes in approval history follow the browser's language, not the chosen UI language — the approvals fetch helper sends no Accept-Language",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "sunhaolin",
+    "id": 6194896,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "p1",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T07:48:48Z",
+  "updated_at": "2026-11-26T08:20:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37483",
+  "body": "## What happens\n\nA user whose Console language is **English** opens a record that went through an approval. In the approval history, the system note the server writes when `excludeSubmitter` removes the submitter appears in the **browser's** language (here zh-CN), not the chosen one:\n\n> \"本步骤设置了 excludeSubmitter，提交人已从审批人中移除；没有其他人可以处理，只有特权管理员的强制处理才能决定此请求。\"\n\nEvery other string on the page is English, including step labels and buttons.\n\n## Why\n\n`plugin-approvals` renders this note at **read** time, in the request's locale (`submitterExclusionNoteText(note, render)` → `approvalSubmitterExcluded*` keys; all locales ship). The Console's approvals fetch helper sends no language, so the server falls back to the browser's `Accept-Language`.\n\n- `record-approvals-renderer-*.js`: `K(path)` builds headers as `{\"Content-Type\", ...authHeaders()}`. `authHeaders` (`authToken-*.js`) returns only `Authorization`. That helper serves `/approvals/requests/:id`, `/approvals/requests/:id/actions` and `/remind`.\n- `approvalRequestsDataSource-*.js` follows the same pattern for the inbox list, actions, approve and reject.\n- Compare `data-adapter`, which passes `{\"Accept-Language\": client.getLocale()}` for `/meta/view` and export.\n\nThe same request answered by the server:\n\n| Request | `comment` on the `action: \"comment\"` row |\n|---|---|\n| `GET /api/v1/approvals/requests/:id/actions`, browser default (zh-CN) | 本步骤设置了 excludeSubmitter… |\n| same, with `Accept-Language: en` | The request's submitter was removed from its approvers because this step sets excludeSubmitter; no one else could take it, so only a privileged override can decide it. |\n\n`process_label` / `step_label` on `/approvals/requests/:id` follow the same pattern (`报销单审批` / `上级审核` vs `Expense Report Approval` / `Manager Review`). Any other approvals surface that shows server-rendered text is affected the same way.\n\n## Repro (18.6.0, `pnpm dev` of an app with an approval step that sets `excludeSubmitter`, e.g. HotCRM's expense report approval)\n\n1. Use a browser whose language is zh-CN. Choose **English** in avatar → Preferences → Language (`objectui-locale = en`, `<html lang=\"en\">`).\n2. As the only possible approver, submit a record so `excludeSubmitter` leaves no one (route `no_one`).\n3. Open the record and look at the approval history.\n\n**Expected:** the note is in English, the Console's language, as every other approvals string the reader sees.\n**Actual:** the note is in Chinese, the browser's language.\n\n## Suggested direction\n\nSend the Console's current locale on every approvals request: `Accept-Language: <ui locale>`, as `data-adapter` already does. Better still, make the shared auth-header helper add it, so other plugin pages' fetches don't repeat this.\n\nRelated but different: #27625 (Accept-Language outranks the UI language for date cells), #36463 (English words in approvals refusals).\n\nVersions: `@objectstack/console` 18.6.0, `@objectstack/plugin-approvals` 18.6.0.\n"
+}

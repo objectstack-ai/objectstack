@@ -1,0 +1,32 @@
+{
+  "number": 37447,
+  "kind": "issue",
+  "title": "ADR-0087: add an 8th disposition category runtime-member-retyped (a published member kept, its type changed) and teach the registration gate",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T05:38:38Z",
+  "updated_at": "2026-11-26T06:23:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37447",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CYtTDvfPQDzMbZnN5X\n\n③ maintainer-directed task · Source: maintainer — Bill (os-bill), decision card in seat 5's project thread, 2026-11-26T05:38Z, answering 「已发布 TS 类型从具体类型收窄，ADR-0087 用哪个处置类别？」 with option 「新增第八类」 (card text: 「ADR-0087 增补 runtime-member-retyped，另开受管卡教门禁；#37433 保持 draft，等门禁卡合并后带新标记落地」).\n\nParent: #36987 · Blocks: PR #37433 · Governed surfaces (ADR text, the registration gate) ⇒ Tier H, contract-tier build and review. Grade and domain are triage's.\n\n## Why\n\nA published TypeScript member whose type narrows from one concrete type to another (PR #37433: `AuthClient.updateUser` `Promise<AuthUser>` → `Promise<void>` in `@object-ui/auth`) has no ADR-0087 category today:\n- `type-surface-only` needs a base of `any` / `unknown` / no annotation, and the ADR forbids weakening predicate 4 (`docs/adr/0087-metadata-protocol-upgrade-contract.md` ~931-934, 1017-1021);\n- `runtime-export-retired` (D9) needs the member gone;\n- `no-migration-prescription` / `runtime-interface-only` are refused by a body that carries FROM → TO.\nMore such corrections are likely during the 19 pre-release line.\n\n## Scope\n\n1. ADR-0087 amendment: an 8th category, working name `runtime-member-retyped` — the member exists at both revisions and its declared type differs. Modelled as D9's sibling: the compiler reads the member at both revisions (reuse D9's machinery, `scripts/check-adr-0087-registration.mjs` ~4547-4566), keeps `no-metadata-surface` and `from-operands-named`, and swaps predicate 1 for \"present at both, type differs\". It does not go through the text walker. ⛔ Predicate 4 is not weakened.\n2. `CATEGORIES` (~:604) and the gate's self-test gain the category with accepted and refused cases (a concrete→concrete narrowing accepted; a member that vanished, or a metadata-surface hit, refused).\n3. The ADR's category table and any skill/docs text that enumerates the categories move with it.\n\n## Acceptance\n\n- PR #37433's head, carrying one `runtime-member-retyped` marker for `AuthClient.updateUser`, passes `check-adr-0087-registration`.\n- The self-test's new refused cases are red when the new predicate is ablated.\n\n## Not in scope\n\nThe two gate defects found in the same analysis (interface members unaddressable via `containerBodiesFor`; `memberDefinitionsIn` reading a function-typed property as unannotated) are filed separately by zone o5-U under #36987."
+}

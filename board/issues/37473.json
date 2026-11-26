@@ -1,0 +1,31 @@
+{
+  "number": 37473,
+  "kind": "issue",
+  "title": "qa scenarios: add one not-recorded ask question to an open dataset card (item 2 split from #35429)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T07:23:01Z",
+  "updated_at": "2026-11-26T08:19:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37473",
+  "body": "repo:objectstack#6 · hotlong · session_01Q4EjjQkY5yXZrN9BEA3rEK\n\nFiling gate: ③ follow-up of an accepted delivery. Split from #35429 (item 2) by seat repo:objectstack#6; #35429's PR #37443 lands items 1 and 3 only.\n\n## What is owed (verbatim from #35138 comment 6983113781, carried on #35429)\n\n\"One ask-card question for an object or field that is not recorded, in #35113's open ask cards.\"\n\n## Why it was split\n\nBoth open dataset ask cards already ask 10 questions. The mid-tier band in `docs/qa/scenarios/README.md` (\"8–10 questions\") and the pins `order-to-cash.test.ts:184` / `travel-expense.test.ts:159` (`toBeLessThanOrEqual(10)`) cap them, so one more question reds tests outside #35429's file surface.\n\n## Options the previous dev reported (handoff 7183583455 on #35429)\n\n- A: widen the band to 8–11 and add one `order_to_cash` question naming a field `sales_order` lacks (e.g. a discount). Recommended there.\n- B: replace an existing question.\n- C: reword `september_commission` to name a field.\n\n## Also noted (PR #35408 Acceptance notes, carried on #35429)\n\nThe open citation grader (`packages/qa/scenarios/src/score/scenario-run-grade.ts`, `SOURCE_LINE`) reads `Source:` / `来源：` but not `來源：` / `出典：`. Fold it in only if a zh-Hant or ja question is added.\n\nSuggested-grade: p3 · eval-card coverage follow-up, no user-visible defect.\nDedupe: `not-recorded ask question` found only #35429 and #35138."
+}

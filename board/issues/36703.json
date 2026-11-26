@@ -22,11 +22,11 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-23T12:46:37Z",
-  "updated_at": "2026-11-23T13:48:21Z",
+  "updated_at": "2026-11-26T07:33:51Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36703",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n\nMaintainer-action: dispatch `deploy-objectos-prod.yml` in objectstack-ai/cloud with `ref` = a cloud `main` commit whose `.objectstack-sha` contains objectstack `d463c46f64` (#36539), after that commit's staging deploy is green, e.g. cloud `777e8e22f` (pin `ed0edb1b5`, staging-deployed 2026-11-23) or a later one.\nDone-when: on hosted production, a member clicks a 👍 they added on a record comment, clicks it again, and the 👍 is gone (the `DELETE /api/v1/comments/reactions/:id` request answers 200).\n\nParent: objectstack-ai/objectstack#36469 (Part of).\n\n## 维护者速读\n\n- 要做的：把云端运行时发布到生产，版本选包含评论修复的那一版（预发环境今天已经是这一版）。\n- 为什么：取消表情回应、标记已解决、删除自己的评论这三个操作的修复已经合并，预发已带上，生产还停在修复之前的版本。\n- 不做会怎样：生产环境里这三个操作继续报「表情回应未保存」或「接口不存在」。\n- 发布后：在生产上给一条评论点 👍 再点一次，👍 消失即完成。\n\n## Readings (read only, 2026-11-23 ~12:40Z)\n\n| Environment | Last objectos deploy | cloud commit | framework pin (`.objectstack-sha`) | contains `d463c46f64`? |\n|---|---|---|---|---|\n| staging | `deploy-staging.yml` run 45114043640, 2026-11-23 04:48Z, job \"objectos / Build + deploy to staging\" success | `777e8e22f` | `ed0edb1b5075` | yes |\n| staging (in flight) | run 45175776428, started 2026-11-23 12:35Z | `2668ab654` | `3aa008d436c5` | yes |\n| production | `deploy-objectos-prod.yml` run 45043806704, 2026-11-22 16:25Z, success | `ab4358642` | `7ae5e0742d45` | **no** |\n\nBoth staging and production run `apps/objectos/server/serve-node.ts` (Dockerfile `CMD`), which mounts the `createHonoApp` catch-all, so #36539's `/comments` domain is reachable there once the pin carries it.\n\nNot verified live: the agent container's proxy blocks the hosted hosts, so no reaction was removed on staging or production from here."

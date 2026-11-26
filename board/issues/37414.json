@@ -1,0 +1,33 @@
+{
+  "number": 37414,
+  "kind": "issue",
+  "title": "37177 跟进：技能文档 context-packs.md 改写「看不到的关联对象」一句，对齐 #37361 的省略行为",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T02:52:08Z",
+  "updated_at": "2026-11-26T08:13:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37414",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37177. The source is the os-dev report on PR #37409 (comment 7181165779), acceptance note \"A related object the caller cannot read\". The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p2 · reach: every author an AI assistant teaches from `skills/objectstack-ai` · evidence: read.\n\n## 维护者速读\n- 做什么：技能文档里有一句话描述「提问人看不到某个关联对象时会怎样」。现在写的是旧行为（整次报错），#37361 上线后行为变成「这一段省略并说明」。把这一句改成新行为。\n- 谁受益：靠技能文档写资料包的 AI 助手和作者。\n- 不做会怎样：技能文档教的和产品实际行为不一致。\n- 需要你做的：改的是受管的技能文件，需要 os-zhuang 批准。\n\n## What\n`skills/objectstack-ai/references/context-packs.md` (added by PR #37409), section \"What the caller is not shown\", teaches that a related object the caller cannot read refuses the whole call with `403 PERMISSION_DENIED`. ADR-0160 D3 as amended says such a child is left out with the one `not_visible` statement, and #37361 lands that behaviour in `record-context-tools.ts` step 4a. Change that one sentence to what `main` does after #37361. Keep the file's ratchet row (1454) or pay for any growth by cutting restatement in the same file.\n\n## Acceptance\n- The sentence matches `record-context-tools.ts` step 4a on `main` after #37361, and cites no behaviour `main` lacks.\n- `node scripts/check-skills-token-ratchet.mjs` exits 0 with no ceiling raised.\n- `Clause-②: no`, `Metadata-protocol: none`.\n\nBlocked by: #37361 and PR #37409 (both must be on `main`).\nModel: skills/** is MANDATORY at the contract review tier.\nParent: #37177\nSize: XS\nDedupe (objectstack, is:issue): `context-packs.md` 0 · `not_visible skills` 0.\n"
+}

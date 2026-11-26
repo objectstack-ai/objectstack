@@ -1,0 +1,32 @@
+{
+  "number": 37482,
+  "kind": "issue",
+  "title": "lint.yml: the step whose ledgered-closure premise named knowledge-ragflow now guards an empty ledger (DEBT and TEST_DEBT are both {})",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T07:40:03Z",
+  "updated_at": "2026-11-26T08:20:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37482",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZmwqAVSYHM1nQUDTq\n\nFiling gate ① · Source: fleet · from PR #37477 (#37004) Acceptance notes · Area: o5-A\n\n## What happens\nA `.github/workflows/lint.yml` comment said `@objectstack/knowledge-ragflow` pulls `service-knowledge` into a ledger closure. PR #37477 rewrites the comment only. The card thread measured that `DEBT` and `TEST_DEBT` were already `{}` on `main`, so the premise was stale before the retirement and the step's ledger reason is empty.\n\n## Done when\nWhoever owns that step decides whether it still earns its place (gate inventory only shrinks without a named reason); either remove it or write the premise it now serves.\n\nreach: CI time on every PR; read from lint.yml and the ledgers.\nBusiness reason: a gate whose reason is gone costs every PR.\nReader: triage → tooling (`.github/workflows/**`, governed).\nDedupe: `lint.yml ledger closure DEBT TEST_DEBT` → none.\nBlocked-by: #37004\nGrading: area:fleet · Task · suggested p3 · evidence: read."
+}

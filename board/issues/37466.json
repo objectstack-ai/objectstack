@@ -1,0 +1,31 @@
+{
+  "number": 37466,
+  "kind": "issue",
+  "title": "service-knowledge: os knowledge rebuild and status give the right answer behind a load balancer",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T06:29:59Z",
+  "updated_at": "2026-11-26T07:18:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37466",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb4BAjgQ43tqy1DvVJ\n\nFiling gate: ② follow-up out of #37099 (PR #37439, contract record 7184443506 finding S2, seat L1 7184456563), filed by the owning zone ai-37000 under topic #37000, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Bug · p3 (suggested; triage seat offline) · reach: operators running `os knowledge` against a multi-node deployment · evidence: read from the PR #37439 code by the contract reviewer, not run.\n\n## 维护者速读\n\n- 做什么：多节点部署时，运维用命令行重建知识源或查看状态，要拿到正确结果，而不是看运气打到哪个节点。\n- 谁受益：多节点部署的运维和自动化脚本。\n- 不做会怎样：重建其实在跑、最后也成功了，命令行却可能报失败，脚本会当成故障处理。\n- 需要你做的：无。\n\n## What\n\nAs of PR #37439 (#37099), the build record (progress and last result, which card #37099 item 3 asks the operator entry to read) lives in memory on the node that ran the build and is gone on restart. Behind a load balancer, `os knowledge status` reaches the building node only by chance, and `os knowledge rebuild` exits 1 as soon as a poll lands on another node, although the build continues and may succeed.\n\n## Acceptance\n\nOne of, chosen in the PR with its reason:\n- the build record is shared across nodes (cluster or store backed), or\n- the CLI falls back to the index state read from the store, which is the same on every node (`due` turning `current` means done), and only reports failure on a recorded failure.\n\nA test drives a poll that lands on a node without the record and asserts the command does not exit 1 while the build is still running or after it succeeded."
+}

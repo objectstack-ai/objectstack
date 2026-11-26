@@ -1,0 +1,36 @@
+{
+  "number": 37429,
+  "kind": "issue",
+  "title": "Dogfood 回归测试 organization-ownership-boot-refusal-order 时好时坏，把无关 PR 踢出合并队列",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T04:18:54Z",
+  "updated_at": "2026-11-26T07:40:20Z",
+  "closed_at": "2026-11-26T07:39:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37429",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ① non-deterministic test that ejected a PR from the merge queue. Found by area ai-36996 while landing PR #37409. Filed with no parent: it is not this area's surface.\nGrading: area:data · Bug · p2 · reach: every PR in the merge queue that lands in Dogfood shard 2/3 (one measured ejection) · evidence: measured (CI logs).\n\n## 维护者速读\n- 做什么：合并队列里有一个回归测试时好时坏：同样的代码，有时过、有时不过，结果把一个无关的 PR 踢出了队列。查清原因并修好这个测试。\n- 谁受益：所有排队合并的 PR。\n- 不做会怎样：无关 PR 会被随机踢出队列，要人手重新排队，拖慢合并。\n- 需要你做的：无。\n\n## What\n`packages/qa/dogfood/test/organization-ownership-boot-refusal-order.dogfood.test.ts`, \"[ADR-0131 D10 item 5] a 17.x database upgrades through the boot refusal\":\n- step 1b fails at :121 with `expected [ 'id', 'user_id', …(2) ] to include 'permission_set'` (the columns of `sys_user_permission_set` after the refused boot);\n- then step 2 (the ceremony) fails at :132.\n\nMeasured, on unchanged inputs (PR #37409, head `e9b2056f`, a docs-only diff that touches no migration, driver or platform object):\n- passed the whole queue CI on base `9ac77b48` (run 45748004021) and on base `cd9d3b52` (run 45749212646);\n- failed in queue group `gh-readonly-queue/main/pr-37409-f9dd0331`, CI run 45751259665, job \"Dogfood Regression Gate (2/3)\" (job 139679521374): 1 file failed, 161 passed; 2 tests failed, 1305 passed;\n- the group's base `f9dd0331` passed its own queue CI (pr-37382, run 45751257776).\n\nFind the root cause (\"flake\" is not one: likely an ordering or timing dependency in the additive schema sync of the refused boot) and fix the test or the code it exposes. Do not skip, retry-wrap or quarantine it.\n\n## Acceptance\n- The root cause is named on this card with the evidence.\n- The test passes in 20 repeated runs of that file, and the fix carries a test that fails without it where the cause is in product code.\n\nSize: S\nDedupe (objectstack, is:issue): `\"organization-ownership-boot-refusal-order\"` 0 open · `\"boot refusal\" permission_set` 0 open.\n"
+}

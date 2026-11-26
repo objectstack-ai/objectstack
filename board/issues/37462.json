@@ -1,0 +1,32 @@
+{
+  "number": 37462,
+  "kind": "issue",
+  "title": "kernel: a failed boot's rollbackStartedPlugins() destroys only plugins whose start() succeeded, while performShutdown() destroys every plugin with a destroy — a plugin that initialised but did not start is never torn down on a refused boot",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T06:20:18Z",
+  "updated_at": "2026-11-26T07:18:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37462",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbdHk3orAeensH6EzS\n\nFiling gate: ① · Source: fleet (L1 S3 of seat repo:objectstack#5 on PR #37450, comment 7184319598; contract record 7184310941; the #37429 dev's out-of-scope note). Follow-up of #37429.\n\nGrading: `area:data` · reach: read — `packages/core/src/kernel.ts` `rollbackStartedPlugins()` (called at ~:587 and ~:671 on a failed boot) destroys only plugins whose `start()` succeeded; `performShutdown()` destroys every plugin that has a `destroy`. A plugin whose `init()` opened a resource and whose `start()` never ran (or failed) keeps it after a refused boot · evidence: read, no measured wrong answer (on #37429 the datasource-admin plugin's destroy happened to close the default datasource).\nSuggested-grade: p3 · resource left open after a refused boot in-process (tests, embedded hosts); a process exit cleans it.\n\n## What\n\nDecide one teardown rule for both paths: on a failed boot, destroy every plugin whose `init()` ran (in reverse order), as shutdown does, or record why rollback is narrower. Pin it with a plugin that opens a resource in `init()` and a boot that fails before or during its `start()`.\n\nRelated: #37429 (PR #37450).\nDedupe: searched 'rollbackStartedPlugins' — no open card."
+}

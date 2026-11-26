@@ -1,0 +1,33 @@
+{
+  "number": 37471,
+  "kind": "issue",
+  "title": "Units of measure: unit picker for a unit-code field and a quantity's unit field (ADR-0158 Open item 8)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-26T07:20:53Z",
+  "updated_at": "2026-11-26T08:19:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37471",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbdHk3orAeensH6EzS\n\nFiling gate: ① · Source: fleet (L1 S2 of seat repo:objectstack#5 on PR #37449, verdict 7185332286; contract record 7185313489). Split out of #35490 so its PR can land the label rendering while the picker stays carried.\n\nGrading: `area:data` · reach: write — ADR-0158 Open item 8 (ruled A on #35339, record 7008524997: a standalone unit field renders with its label 「有下拉」, i.e. gets a picker) names #35490 as the picker card; PR #37449 draws the unit label in cells and stops there · evidence: read — no unit dropdown exists for a `code`-mode unit field or for a quantity's `unitField`, and on the form face `TextField` does not read `unitConfig`, so a unit-code field in a form shows the bare code (even read-only).\nSuggested-grade: p2 · same grade as the parent; the ruled OI8 consequence is unbuilt.\n\n## What\n\n- A unit picker on the form face for a field declaring `unitConfig` with `unitMode: 'code'`, and for the `unitField` of a quantity: options from the standard-unit catalog plus the organization's own units, labelled by the server-translated name (`app.messages.standardUnit<CODE>`, falling back to the spec English base name), storing the code.\n- Read-only form face shows the label, not the bare code.\n- Pins: picker lists the catalog, stores the code, shows the translated label; read-only form shows the label.\n\nRelated: #35490 (PR #37449), ADR-0158 Open item 8.\nDedupe: searched open issues for 'unit picker' — none."
+}

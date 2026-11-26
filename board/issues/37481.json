@@ -1,0 +1,32 @@
+{
+  "number": 37481,
+  "kind": "issue",
+  "title": "docs(releases): implementation-status.mdx still lists @objectstack/knowledge-ragflow after its retirement",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:docs",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T07:39:16Z",
+  "updated_at": "2026-11-26T08:20:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37481",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZmwqAVSYHM1nQUDTq\n\nFiling gate ① · Source: fleet · from PR #37477 (#37004): AGENTS.md Documentation Guardrails keep `content/docs/releases/**` out of a code PR, so these hits were left for a docs-only PR · Area: o5-A\n\n## What happens\n`content/docs/releases/implementation-status.mdx` lines 311, 329, 446 (on `main` at the time PR #37477 opened) list `knowledge-ragflow` among shipped plugins. #37004 retires the package.\n\n## Done when\nA docs-only PR drops `knowledge-ragflow` from those three lists after PR #37477 merges; `git grep -i ragflow content/docs/releases/implementation-status.mdx` returns nothing.\n\nreach: readers of the implementation-status page; read from the file.\nBusiness reason: the status page tells readers a retired adapter is available.\nReader: triage → `domain:devx` (docs).\nDedupe: `implementation-status ragflow` → none.\nBlocked-by: #37004\nGrading: area:ai · Task · suggested p3 · evidence: read."
+}
