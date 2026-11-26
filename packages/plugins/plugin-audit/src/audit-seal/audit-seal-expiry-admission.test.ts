@@ -127,7 +127,7 @@ describe('a fresh expiry takes only checkpoints bound to the chain, each linked 
     s.checkpoints().push({ ...s.checkpoint('org:org_b', 0), id: 'misfiled', chain_key: 'org:aaa' });
     const runs = await s.expireNow();
     expect(chainsOf(runs)).toEqual(['org:org_a', 'org:org_b']);
-    expect(s.warned(/chain 'org:aaa' is NOT expired: the checkpoint 0 stored under it is signed for another object or organization/)).toBe(1);
+    expect(s.warned(/chain 'org:aaa' is NOT expired: the checkpoint 0 stored under it is signed for another organization/)).toBe(1);
   });
 
   it('a chain whose checkpoints do not link one to the next is not expired at all', async () => {
@@ -251,5 +251,23 @@ describe('the sealer\'s chain head follows only an admitted expiry bound to the 
       for (let i = 0; i < 50; i++) await s.amend({ first: 3, last: 10 + i, digest: 'f'.repeat(64) }, { id: `unsigned_${i}`, signature: NO_SIGNATURE });
     });
     expect(s.bodyOf('org:org_a', 3)).toMatchObject({ row_ids: ['a3'], previous_digest: last });
+  });
+});
+
+describe('an expiry removes only the seed sealed under each checkpoint\'s own coordinate (ADR-0154 D2, D8)', () => {
+  it('a checkpoint whose seed handle names another secret removes nothing but its own row', async () => {
+    const s = await sealedLedger();
+    const secrets = () => s.store.hot.table('sys_secret');
+    const keyHalf = secrets().find((r) => r.namespace === 'sys_audit_signing_key')!;
+    const ownSeed = String(s.checkpoint('org:org_a', 1).seed_handle);
+    // The chain's last checkpoint, so nothing that links to it changes.
+    s.put('org:org_a', 2, await s.resigned(s.checkpoint('org:org_a', 2), { seed_handle: String(keyHalf.id) }));
+    const runs = await s.expireNow();
+    const run = runs.find((r) => r.chain === 'org:org_a')!;
+    expect(run.rowIds).toEqual(['a0', 'a1', 'a2']);
+    await run.complete();
+    expect(secrets().some((r) => r.id === keyHalf.id)).toBe(true);
+    expect(secrets().some((r) => r.id === ownSeed)).toBe(false);
+    expect(s.checkpoints().filter((r) => r.chain_key === 'org:org_a')).toEqual([]);
   });
 });

@@ -569,17 +569,10 @@ export class AuditSealer {
       const session = await trySealPassLocks(this.options.engine, [plan.name]);
       if (session.held) return [];
       try {
-        let archive: SealStorageDriver | undefined;
-        try {
-          archive = plan.archiveTo ? this.options.engine.datasource?.(plan.archiveTo) : undefined;
-        } catch {
-          archive = undefined;
-        }
         const expiry = new ObjectExpiry({
           engine: this.options.engine,
           object: plan.name,
           chainField: plan.chainField,
-          ...(archive ? { archive } : {}),
           signer,
           ...(seams.sink ? { sink: seams.sink } : {}),
           trust: new SigningKeyTrust(anchoredPublicKeyOf(this.options.engine, crypto, signer)),
@@ -953,9 +946,8 @@ class ObjectPass {
 
   /**
    * D8: the stored `expiry` amendment of this object (narrowed by `where`) that
-   * is highest by `field` among those admitted — bound where it is stored (its
-   * signed object is this one and its signed organization is the chain it is
-   * stored under) and signed under a trusted key (D6) — or `undefined`. Every
+   * is highest by `field` among those admitted — signed for the chain it is
+   * stored under and under a trusted key (D6) — or `undefined`. Every
    * stored one is walked, page by page, so no run of rows that are not admitted
    * hides an admitted one; a row that is not admitted is passed over, so a head
    * or a floor never follows one. A malformed one is a chain-local fault of its
@@ -986,7 +978,8 @@ class ObjectPass {
           throw new ChainFault(String(row.chain_key), err);
         }
         if (body.kind !== 'expiry') continue;
-        if (body.sealed_object !== this.plan.name || chainKeyOf(body.tenant_id) !== String(row.chain_key)) continue;
+        // Signed for the chain it is stored under (its `sealed_object` is signed, and fixed by the read).
+        if (chainKeyOf(body.tenant_id) !== String(row.chain_key)) continue;
         if ((await this.trust().signature(body.signing_key_id, signedBodyBytes(body), row.signature)) === 'ok') return body;
       }
       if (rows.length < LAST_EXPIRY_PAGE) return undefined;

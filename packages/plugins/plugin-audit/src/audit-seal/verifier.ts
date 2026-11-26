@@ -88,7 +88,11 @@ export type AuditChainFaultKind =
   | 'gap'
   /** A `previous_digest` that is not the digest of what precedes it. */
   | 'link'
-  /** An expiry amendment that is not honoured (D8). */
+  /**
+   * An expiry amendment that is not honoured (D8), or a checkpoint inside an
+   * honoured range whose own window ends after the range's `covered_to`
+   * (its rows are then judged, not read `expired`).
+   */
   | 'expiry'
   /** Stored leaf hashes that do not rebuild the signed root. */
   | 'leaf_hashes'

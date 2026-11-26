@@ -1177,9 +1177,9 @@ export const LifecycleSchema = lazySchema(() => strictObject({
     "`onlyWhen`, a `ttl` on another field than `created_at`, or rotation `storage`. Sealed rows past their " +
     '`retention`, `ttl` or `archive.keep` window leave only by whole checkpoints, after a signed expiry ' +
     'amendment names them, so the verifier reads them as expired rather than missing. A tenant-scoped ' +
-    'retention window is matched to each row by the column it is set on: a chain expires under the longest ' +
-    'window among the organizations whose rows it holds, and the chain of rows about no organization under ' +
-    'the longest window set, so no row leaves before its own window. The window is counted to the start of a ' +
+    "retention window set on the chain column applies to that organization's chain; every other chain (the " +
+    'chain of rows about no organization, and every chain of an object whose windows are set on another ' +
+    'column) keeps its rows to the longest window set. The window is counted to the start of a ' +
     'UTC day and at most 10,000 rows leave per sweep, so a row can stay past it: a day, or longer while a ' +
     'backlog drains. While no sealer is running, the sweeper keeps them. A deployment with no crypto ' +
     'provider seals nothing and reports that at error.',

@@ -538,23 +538,23 @@ export interface LifecycleExpiryPrefixRequest {
   /**
    * The tenant-scoped windows of this policy (`retention_overrides` at tenant
    * scope), each through the same floors, in place of {@link policyValue}
-   * and {@link cutoff} for the rows that organization owns by
-   * {@link tenantColumn}: a chain expires under the longest window among the
-   * owners of its rows (an owner with none of its own under the global one),
-   * and a chain of no one organization (the deployment chain) under the
-   * longest of all of them and the global one, so no chain ever expires under
-   * a window shorter than one configured for a row in it. Absent when no
-   * tenant overrides the window.
+   * and {@link cutoff}. Where {@link tenantColumn} is the object's chain
+   * column, an organization's chain expires under its own organization's
+   * window (or the global one). Any other chain — the deployment chain, or
+   * every chain of an object whose windows sit on another column, which may
+   * hold rows of several organizations — expires under the longest of all of
+   * them and the global one, so no chain ever expires under a window shorter
+   * than one configured for a row in it. Absent when no tenant overrides the
+   * window.
    */
   readonly tenants?: ReadonlyArray<{ readonly tenantId: string; readonly policyValue: string; readonly cutoff: string }>;
   /**
    * The column {@link tenants} are configured on — the partition `reap()`
    * uses (`organization_id`, or an attribution column), which need not be
-   * the object's chain column. Each row is matched to a window by this
-   * column: a chain expires under the longest window among the owners of the
-   * rows it holds, the chain of rows about no organization under the longest
-   * window of all, so no chain is shorter than a window set for a row in it.
-   * Present exactly when `tenants` is.
+   * the object's chain column. Only where it is does a tenant's own window
+   * apply to a chain; elsewhere every chain takes the longest (see
+   * {@link tenants}), and a shorter tenant window has no effect on that
+   * object's sealed rows. Present exactly when `tenants` is.
    */
   readonly tenantColumn?: string;
 }
@@ -1686,10 +1686,10 @@ export class LifecycleService {
    * A settings override of the window applies as on any object, through the
    * same floors, and the value applied is the one the amendment signs. A
    * tenant-scoped override travels as {@link LifecycleExpiryPrefixRequest.tenants},
-   * with the column {@link tenantWindowsFor} partitions on: a chain expires
-   * under the longest window among the owners, by that column, of the rows it
-   * holds (the chain of rows about no organization under the longest of all),
-   * and each chain's amendment signs the window it expired under.
+   * with the column {@link tenantWindowsFor} partitions on: where that is the
+   * chain column an organization's chain expires under its own window, any
+   * other chain under the longest, and each chain's amendment signs the
+   * window it expired under.
    */
   private async reapSealed(
     engine: LifecycleEngineLike,
