@@ -1186,6 +1186,7 @@ const ru = {
     addColumn: "Добавить колонку",
     moveCard: "Переместить карточку",
     noCards: "Нет карточек",
+    notLoaded: "Не загружено карточек: {{count}}",
     columnCards: "Карточки в колонке {{column}}",
     laneCards: "Карточки: {{column}} - {{lane}}",
     dropBlocked: "Карточку из {{from}} нельзя переместить в {{to}}.",

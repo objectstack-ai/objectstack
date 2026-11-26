@@ -103,7 +103,7 @@ function StudioAccessRequired({ home }: { home: string }) {
   // page, so the button says so, as the shell's other way-home buttons do.
   const phone = usePhoneViewport();
   return (
-    <div className="flex h-screen items-center justify-center p-4">
+    <div className="flex h-[calc(100vh-var(--os-chrome-banners,0px))] items-center justify-center p-4">
       <Empty data-testid="studio-access-required">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
           <Lock className="h-6 w-6 text-muted-foreground" />

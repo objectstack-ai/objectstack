@@ -17,6 +17,10 @@
  * The CONTROL is the mount the Home page, `DraftPreviewBar` and
  * `CommitTimeline` use: no `posture` prop at all. It must read exactly as the
  * review posture does.
+ *
+ * objectstack#37454 — the same panel drawn in place (`embedded`), as Studio's
+ * package overview's Pending tab: the same list and Publish all with no sheet,
+ * no toast cleared on opening, and a fresh read whenever `reloadKey` moves.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -34,6 +38,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
   }),
 }));
 
+import { toast } from 'sonner';
 import { DraftChangesPanel, type DraftChangesPosture } from '../DraftChangesPanel';
 // The source under test reaches a dynamic `import('@objectstack/lint')`: pay its load at
 // collection, never inside a case's clocked window (`check:test-source-alias`).
@@ -154,5 +159,65 @@ describe('objectui#12517 — the pending-changes sheet opens in a posture', () =
     });
     await waitFor(() => expect(screen.getAllByText(/^(New|Update)$/)).toHaveLength(DRAFT_ROWS.length));
     expectReviewPosture();
+  });
+});
+
+describe('objectstack#37454 — drawn in place as the overview\'s Pending tab (`embedded`)', () => {
+  const draftReads = () => fetchMock.mock.calls.filter(([input]) => String(input).includes('/_drafts')).length;
+
+  function Embedded({ reloadKey, onPublish = () => {} }: { reloadKey?: unknown; onPublish?: () => void }) {
+    return (
+      <DraftChangesPanel embedded open onOpenChange={() => {}} packageId="com.x" onPublish={onPublish} reloadKey={reloadKey} />
+    );
+  }
+
+  it('lists the drafts with Publish all, in place: no sheet, no dialog; its button publishes with no options', async () => {
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const onPublish = vi.fn();
+    render(<Embedded onPublish={onPublish} />);
+    await waitFor(() => expect(screen.getAllByText(/^(New|Update)$/)).toHaveLength(DRAFT_ROWS.length));
+    expect(screen.getByTestId('draft-changes-panel')).toHaveAttribute('data-embedded');
+    expect(screen.getByTestId('draft-changes-panel').tagName).toBe('SECTION');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(screen.getByTestId('draft-changes-publish'));
+    expect(onPublish).toHaveBeenCalledTimes(1);
+    expect(onPublish).toHaveBeenCalledWith();
+  });
+
+  it('CONTROL: the sheet is a dialog, and carries no embedded mark', async () => {
+    await renderHost('review');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('draft-changes-panel')).not.toHaveAttribute('data-embedded');
+  });
+
+  it('opening clears no toast; CONTROL: opening the sheet clears them', async () => {
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const dismiss = vi.spyOn(toast, 'dismiss');
+    render(<Embedded />);
+    await waitFor(() => expect(screen.getAllByText(/^(New|Update)$/)).toHaveLength(DRAFT_ROWS.length));
+    expect(dismiss).not.toHaveBeenCalled();
+    cleanup();
+    render(<Host posture="review" />);
+    await waitFor(() => expect(dismiss).toHaveBeenCalled());
+    dismiss.mockRestore();
+  });
+
+  it('reads the drafts again when `reloadKey` moves; CONTROL: an unmoved key reads nothing more', async () => {
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { rerender } = render(<Embedded reloadKey="a" />);
+    await waitFor(() => expect(screen.getAllByText(/^(New|Update)$/)).toHaveLength(DRAFT_ROWS.length));
+    const first = draftReads();
+    expect(first).toBe(1);
+    rerender(<Embedded reloadKey="a" />);
+    await act(async () => {});
+    expect(draftReads()).toBe(first);
+    rerender(<Embedded reloadKey="b" />);
+    await waitFor(() => expect(draftReads()).toBe(first + 1));
+  });
+
+  it('closed, it draws nothing', () => {
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    render(<DraftChangesPanel embedded open={false} onOpenChange={() => {}} packageId="com.x" />);
+    expect(screen.queryByTestId('draft-changes-panel')).toBeNull();
   });
 });

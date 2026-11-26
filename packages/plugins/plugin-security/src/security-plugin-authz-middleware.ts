@@ -605,6 +605,7 @@ export interface AuthzMiddlewareHost {
   readonly logger: SecurityPlugin['logger'];
   readonly permissionEvaluator: SecurityPlugin['permissionEvaluator'];
   readonly ql: SecurityPlugin['ql'];
+  readonly resolveKernelService: SecurityPlugin['resolveKernelService'];
   addressedByIdWriteId: SecurityPlugin['addressedByIdWriteId'];
   addressedPredicateWrite: SecurityPlugin['addressedPredicateWrite'];
   assertControlledByParentWrite: SecurityPlugin['assertControlledByParentWrite'];
@@ -633,12 +634,13 @@ export interface AuthzMiddlewareHost {
   resolveHopWithheldFields: SecurityPlugin['resolveHopWithheldFields'];
   resolvePreImageFloorDrop: SecurityPlugin['resolvePreImageFloorDrop'];
   resolveSharingWriteVerdict: SecurityPlugin['resolveSharingWriteVerdict'];
+  resolveWriteScopeForSharing: SecurityPlugin['resolveWriteScopeForSharing'];
   writeCheckFieldOptions: SecurityPlugin['writeCheckFieldOptions'];
 }
 
 /** The authorization middleware registration `SecurityPlugin#start` runs; the comment above its call there is its contract. */
 export function registerAuthzMiddleware(
-  this: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeTenantLayer0Only' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveOperationPrincipals' | 'resolveHopWithheldFields' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'>,
+  this: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeTenantLayer0Only' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveOperationPrincipals' | 'resolveHopWithheldFields' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'resolveWriteScopeForSharing' | 'writeCheckFieldOptions'>,
   ctx: PluginContext,
   ql: IObjectQLEngine,
   metadata: IMetadataService,
@@ -3197,7 +3199,7 @@ export function idsOfReadableScope(scope: Record<string, unknown>): (string | nu
  * readable scope beside this one still binds.
  */
 async function predicateWriteFloorRelief(
-  this: Pick<AuthzMiddlewareHost, 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'ql' | 'resolvePreImageFloorDrop'>,
+  this: Pick<AuthzMiddlewareHost, 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'logger' | 'ql' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveWriteScopeForSharing'>,
   opCtx: any,
   permissionSets: PermissionSet[],
   floored: Record<string, unknown>,

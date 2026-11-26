@@ -474,8 +474,11 @@ When an answer carries a verified record-citations part (the
 `data-record-citations` part, `RecordCitationsSchema` in `@objectstack/spec/ai`),
 the console draws it beside that block, one chip per citation showing the quoted
 passage, and verifies nothing again; a part that does not parse draws nothing.
-The chips appear on a live answer whose stream carries the part; a conversation
-reloaded from history does not redraw them yet. A chip calls
+The chips appear on a live answer whose stream carries the part, and are drawn
+again when the conversation is reloaded or reopened: the history rebuild, the
+display cache and the `useObjectChat` store rebuild keep the data parts one
+allow-list names (`STORED_ANSWER_DATA_PARTS`: charts and record citations). A
+chip calls
 `onOpenRecord({ objectName, recordId, anchor })`, and the console opens the
 record at the cited body section (`?section=ANCHOR`).
 

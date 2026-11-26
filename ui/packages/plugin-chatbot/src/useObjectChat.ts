@@ -12,7 +12,7 @@ import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { generateUniqueId } from './utils';
 import { emitAiUsageRefresh } from './aiUsageEvents';
-import { chartAnswerParts, uiMessagesToChatMessages } from './mapMessages';
+import { storedAnswerParts, uiMessagesToChatMessages } from './mapMessages';
 import { toRuntimeRole, toRuntimeTimestamp } from './chatMessageAdapter';
 import type { SeamChatMessage, SeamToolInvocation } from './chatMessageAdapter';
 
@@ -790,7 +790,13 @@ export function useObjectChat(options: UseObjectChatOptions = {}): UseObjectChat
         // objectstack#25908 — a hydrated answer's charts go back into the store
         // as the `data-chart` parts the live stream gave, between the text runs
         // they sat between, so `mapMessages` reads them at the same offsets.
-        const parts: SdkChatMessage['parts'] = chartAnswerParts(normalized.content, msg.charts);
+        // objectstack#37487 — with every other kept data part
+        // (`STORED_ANSWER_DATA_PARTS`): the verified citations list goes back
+        // as the `data-record-citations` part, so its chips draw again.
+        const parts: SdkChatMessage['parts'] = storedAnswerParts(normalized.content, {
+          charts: msg.charts,
+          recordCitations: msg.recordCitations,
+        });
         if (msg.reasoning) {
           parts.push({ type: 'reasoning', text: msg.reasoning });
         }

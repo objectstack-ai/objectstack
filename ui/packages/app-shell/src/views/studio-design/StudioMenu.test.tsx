@@ -332,7 +332,10 @@ describe('a package that holds nothing yet (objectstack#37201)', () => {
     reads.sweep = { countsByType: {}, packagesByType: {} };
     renderAt(`/studio/${PKG}/data`);
     const links = (root: HTMLElement) => within(root).queryAllByRole('link').map((a) => a.getAttribute('data-testid')!.replace('studio-menu-entry-', ''));
-    const common = links(screen.getByTestId('studio-menu')).filter((k) => !links(foldRegion()).includes(k));
+    // objectstack#37454 — 概览 Overview leads, above the groups; the 常用 types follow it.
+    const all = links(screen.getByTestId('studio-menu'));
+    expect(all[0]).toBe('overview');
+    const common = all.slice(1).filter((k) => !links(foldRegion()).includes(k));
     expect(common).toEqual([
       'type:object',
       'type:app',

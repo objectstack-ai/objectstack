@@ -30,7 +30,7 @@ import {
   saveInPlace,
   type InPlaceEditTarget,
 } from './runtime-metadata-persistence.js';
-import { useCustomizeDoorWalled } from './studio-design/StudioCustomizeControls.js';
+import { useCustomizeDoorWalled } from './studio-design/customizeOverride.js';
 import { authoredBuffer, extractDraftBody, formatMetadataError, type AuthoredLayers } from '@object-ui/data-objectstack';
 import { t as tStudio, tFormat, useMetadataLocale } from './metadata-admin/i18n.js';
 import { servedPackageId } from '@object-ui/core';

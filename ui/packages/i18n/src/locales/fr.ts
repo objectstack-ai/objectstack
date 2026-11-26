@@ -1151,6 +1151,7 @@ const fr = {
     addColumn: "Ajouter une colonne",
     moveCard: "Déplacer la carte",
     noCards: "Aucune carte",
+    notLoaded: "Cartes non chargées : {{count}}",
     columnCards: "Cartes de la colonne {{column}}",
     laneCards: "Cartes de {{column}} - {{lane}}",
     dropBlocked: "Une carte de {{from}} ne peut pas être déplacée vers {{to}}.",

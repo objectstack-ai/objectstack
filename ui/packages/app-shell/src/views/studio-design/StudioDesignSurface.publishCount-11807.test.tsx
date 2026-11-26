@@ -26,6 +26,11 @@
  * `DraftChangesPanel`, reduced to the button that fires `onPublish` (the sheet
  * has its own tests, `../../preview/__tests__/`).
  *
+ * objectstack#37454 — the package's publish has a second door, 概览
+ * Overview's Pending tab (the panel drawn in place, `embedded`), wired to the
+ * same publish: every package-batch case below runs through both doors, the
+ * top bar's and the Pending tab's, with the same expectations.
+ *
  * The expected sentences are read from the string table through the same
  * `tFormat` the surface calls, so what is pinned is which row and which count,
  * never the prose.
@@ -70,9 +75,13 @@ vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPan
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({
-  DraftChangesPanel: ({ onPublish }: { onPublish?: () => void | Promise<void> }) =>
+  DraftChangesPanel: ({ onPublish, embedded }: { onPublish?: () => void | Promise<void>; embedded?: boolean }) =>
     onPublish ? (
-      <button type="button" data-testid="publish-all-drafts" onClick={() => void onPublish()}>
+      <button
+        type="button"
+        data-testid={embedded ? 'publish-all-drafts-pending-tab' : 'publish-all-drafts'}
+        onClick={() => void onPublish()}
+      >
         publish
       </button>
     ) : null,
@@ -159,7 +168,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function publishAt(path: string, expectPosts: number): Promise<void> {
+async function publishAt(path: string, expectPosts: number, button = 'publish-all-drafts'): Promise<void> {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
@@ -168,9 +177,18 @@ async function publishAt(path: string, expectPosts: number): Promise<void> {
       </Routes>
     </MemoryRouter>,
   );
-  fireEvent.click(await screen.findByTestId('publish-all-drafts'));
+  fireEvent.click(await screen.findByTestId(button));
   await waitFor(() => expect(posts).toHaveLength(expectPosts));
 }
+
+/**
+ * objectstack#37454 — the two doors of the package's publish: the top bar's
+ * Publish (its review sheet's button), and 概览 Overview's Pending tab.
+ */
+const PACKAGE_DOORS = [
+  { door: 'the top bar', path: `/studio/${PACKAGE_ID}/interfaces`, button: 'publish-all-drafts' },
+  { door: 'the overview\'s Pending tab', path: `/studio/${PACKAGE_ID}/overview?tab=pending`, button: 'publish-all-drafts-pending-tab' },
+] as const;
 
 /** Every toast the publish raised, by kind. */
 function toasts() {
@@ -181,7 +199,7 @@ function toasts() {
   };
 }
 
-describe('the package publish names how many items went live, and what was refused (objectui#11807)', () => {
+describe.each(PACKAGE_DOORS)('the package publish names how many items went live, and what was refused (objectui#11807) — from $door', ({ path, button }) => {
   it('two published items: the count row, with 2', async () => {
     batchBody = batch({
       outcome: 'published',
@@ -190,7 +208,7 @@ describe('the package publish names how many items went live, and what was refus
       published: published('repairs_repair_ticket', 'visit'),
       failed: [],
     });
-    await publishAt(`/studio/${PACKAGE_ID}/interfaces`, 1);
+    await publishAt(path, 1, button);
     await waitFor(() => expect(toast.success).toHaveBeenCalled());
     expect(toasts().success).toEqual([tFormat('engine.studio.publishedAllCount', 'en', { count: 2 })]);
     expect(toasts().error).toEqual([]);
@@ -204,7 +222,7 @@ describe('the package publish names how many items went live, and what was refus
       published: published('visit'),
       failed: [],
     });
-    await publishAt(`/studio/${PACKAGE_ID}/interfaces`, 1);
+    await publishAt(path, 1, button);
     await waitFor(() => expect(toast.success).toHaveBeenCalled());
     expect(toasts().success).toEqual([tFormat('engine.studio.publishedAllCountOne', 'en', { count: 1 })]);
   });
@@ -222,7 +240,7 @@ describe('the package publish names how many items went live, and what was refus
       failed: [],
       unregistered: [{ type: 'object', name: 'visit', rule: 'object-registry-refused' }],
     });
-    await publishAt(`/studio/${PACKAGE_ID}/interfaces`, 1);
+    await publishAt(path, 1, button);
     await waitFor(() => expect(toast.success).toHaveBeenCalled());
     expect(toasts().success).toEqual([tFormat('engine.studio.publishedAllCount', 'en', { count: 2 })]);
     expect(toasts().error).toEqual([]);
@@ -230,7 +248,7 @@ describe('the package publish names how many items went live, and what was refus
 
   it('nothing to publish: said as such, neither a success nor a failure', async () => {
     batchBody = batch({ outcome: 'nothing_to_publish', publishedCount: 0, failedCount: 0, published: [], failed: [] });
-    await publishAt(`/studio/${PACKAGE_ID}/interfaces`, 1);
+    await publishAt(path, 1, button);
     await waitFor(() => expect(toast.info).toHaveBeenCalled());
     expect(toasts()).toEqual({ success: [], info: [t('engine.studio.publishNoneTitle', 'en')], error: [] });
   });
@@ -247,7 +265,7 @@ describe('the package publish names how many items went live, and what was refus
       published: [],
       failed: [{ type: 'object', name: 'visit', error: reason, code: 'SECURITY_OWD_UNSET' }],
     });
-    await publishAt(`/studio/${PACKAGE_ID}/interfaces`, 1);
+    await publishAt(path, 1, button);
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(toasts().success).toEqual([]);
     expect(toasts().info).toEqual([]);
