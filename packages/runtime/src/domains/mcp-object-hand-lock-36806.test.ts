@@ -20,7 +20,6 @@ import {
     SysMetadataObject,
 } from '@objectstack/metadata-core';
 import { PermissionSetSchema } from '@objectstack/spec/security';
-import { AUDIT_FIELD_DEFS, OWNER_FIELD_DEF } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from '@objectstack/plugin-security';

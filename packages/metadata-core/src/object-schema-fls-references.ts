@@ -635,6 +635,8 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // A boolean facet: whether a create surface asks for this field (#36425);
     // it names no field.
     showOnCreate: keep,
+    // A boolean facet: the console's hand lock (#36806); it names no field.
+    uiReadonly: keep,
     requiredPermissions: keep, maskingRule: keep, ackPlaintextMasking: keep, system: keep,
     sortable: keep, inlineHelpText: keep, placeholder: keep, externalId: keep,
     // A boolean facet of this date field: it declares the field a deadline
@@ -681,6 +683,9 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     expression,
     visibleWhen: expression,
     readonlyWhen: expression,
+    // The hand lock's predicate (#36806), CEL over this object's record as
+    // `readonlyWhen` is.
+    uiReadonlyWhen: expression,
     requiredWhen: expression,
     // The deadline's settle predicate (#22227), a `visibleWhen`-family CEL over
     // this object's record. Deleted when it mentions a denied field: the caller
