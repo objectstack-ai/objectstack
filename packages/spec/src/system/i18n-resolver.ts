@@ -4401,8 +4401,9 @@ export interface LocaleDescriptor {
  * Turn `II18nService.getLocales()` — a bare `string[]` — into the descriptor
  * list `GetLocalesResponseSchema` declares for `GET /i18n/locales`.
  *
- * Shared for the same reason `resolveObjectFieldLabels` is: both the
- * dispatcher domain and service-i18n serve this route, and when each kept its
+ * Shared for the same reason `resolveObjectFieldLabels` is: the dispatcher
+ * domain and service-i18n both once served this route (service-i18n's mount
+ * was retired by #23347; the dispatcher owns it), and when each kept its
  * own copy they diverged. service-i18n mapped to descriptors; the dispatcher
  * passed the raw `string[]` straight through, so the SAME endpoint returned
  * `['en','zh-CN']` or `[{code,label,isDefault}]` depending on which provider
