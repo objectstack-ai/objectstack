@@ -8,10 +8,10 @@ description: >
   `src/data/*.ts`. Not for querying records (objectstack-query), flows or
   approvals (objectstack-automation), or plugin hooks (objectstack-platform).
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
+compatibility: Requires @objectstack/spec 19.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.6.0"
+  version: "19.0.0-next.0"
   domain: data
   tags: object, field, validation, index, relationship, hook, schema, permission, rls, security, seed, fixture
 ---

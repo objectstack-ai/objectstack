@@ -1,5 +1,389 @@
 # @objectstack/formula
 
+## 19.0.0-next.0
+
+### Minor Changes
+
+- c809deb: fix(formula)!: a flow condition that hands `timestamp()` a date field through `record.FIELD` or `previous.FIELD` is now refused, as the bare field name already was
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/objectstack-formula/SKILL.md` already states the `date-text-call` rule (a `date` / `datetime` field handed to a timestamp-only call, and `timestamp()` over a `date` field) with `record.FIELD` spellings and names no site it is limited to, so it now holds for a flow condition's root reads as written
+  
+  <!-- adr-0087: not-required (already-registered formula-timestamp-date-only-refused, formula-date-text-call-refused, formula-date-subtraction-refused) The three semantic entries already carry these verdicts, their codes and their rewrites to the upgrade guide, and each entry's surface already names flow conditions among the CEL predicates judged with the object's field types, with record.FIELD spellings as its examples. This change makes that text true for a flow condition that reads the field through record or previous, where only the bare field name was judged before; the verdicts, codes, rewrites and acceptance criteria are the entries' own. No id is added, no key is added, removed or re-shaped, and nothing an author wrote is rewritten. -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor`. In a flow condition (a start, edge or `decision` branch condition) the run binds the record's fields under their bare names and also as `record`, with the row before the write as `previous`. The date-text checks judged only the bare name. `timestamp(borrow_date) < now()` over a `date` field was refused, but `timestamp(record.borrow_date) < now()` passed `os validate` and the publish door. The flow then failed on every run, because a date field reaches the run as its `YYYY-MM-DD` text, which `timestamp()` does not parse.
+  
+  - **The verdicts.** A `record.FIELD` / `previous.FIELD` read in a flow condition now gets the date-text checks its bare name gets, with the same code and outcome arm (`date-text-call-run-fails` / `date-text-arithmetic-run-fails` on a record-triggered flow or a sweep of the typed object, `-run-may-fail` elsewhere). The message names the read as written and prescribes `date(record.FIELD)`, or `isoDate(addDays(record.FIELD, N))` to shift by whole days. This covers the calls the text cannot take (`timestamp(record.FIELD)` over a `date` field, `isoDate(record.FIELD)` over a `date` or `datetime` field) and arithmetic on the text (`record.end_date - record.start_date`).
+  - **Where.** `os validate` / `os build` (`validateStackExpressions`) report an `error`, and the flow publish door refuses the publish with `INVALID_METADATA` (422). `registerFlow` logs it as an advisory, as it does for the bare name, and still registers the flow, so a stored flow keeps running until it is next published.
+  - **Not refused.** `timestamp()` over a `datetime` field. A shape the Timestamp typing already faults on (`record.due_date + 1`), which is another verdict's. An `input.FIELD` read. The run-time evaluator is unchanged.
+  
+  ## FROM → TO
+  
+  | FROM | TO |
+  |:---|:---|
+  | `timestamp(record.borrow_date) < now()` | `date(record.borrow_date) < now()` |
+  | `timestamp(previous.borrow_date) < now()` | `date(previous.borrow_date) < now()` |
+  | `isoDate(record.picked_up_at) == '2026-11-16'` | `isoDate(date(record.picked_up_at)) == '2026-11-16'` |
+  
+  One-line fix: in a flow condition, parse a date field with `date(record.FIELD)` before comparing it with a timestamp, never `timestamp(record.FIELD)`.
+- 97b9d1e: fix(formula)!: a flow condition that does date arithmetic on `record.FIELD` or `previous.FIELD` is now refused, as the bare field name already was
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered flow-condition-record-date-arithmetic-refused -->
+  
+  **BREAKING** accept-set narrowing. In a flow condition (a start, edge or `decision` branch condition) the run binds the record's fields under their bare names and also as `record`, with the row before the write as `previous`. The date-arithmetic check judged only the bare name: `due_date + 1 > 5` over a `date` field was refused, but `record.due_date + 1 > 5` passed `os validate` and the publish door. The flow then failed on every run, because a date field reaches the run as its `YYYY-MM-DD` text and the evaluator cannot add a number to it.
+  
+  - **The verdict.** A `record.FIELD` / `previous.FIELD` read of a `date` or `datetime` field in arithmetic against a number now gets the verdict its bare name gets, with the same code and outcome arm (`date-arithmetic-run-fails` on a record-triggered flow or a sweep of the typed object, `date-arithmetic-run-may-fail` elsewhere). A root read keeps the row's arm where bare names are unproven or a flow variable shadows the bare name. The message names the read as written and prescribes `daysBetween(a, b)` or `addDays(d, n)`.
+  - **Where.** `os validate` / `os build` (`validateStackExpressions`) report an `error`, and the flow publish door refuses the publish with `INVALID_METADATA` (422). `registerFlow` logs it as an advisory, as it does for the bare name, and still registers the flow, so a stored flow keeps its run-time behaviour until it is next published.
+  - **Not refused.** An ordering of the field (`record.due_date < today()`), `daysBetween` / `addDays` over it, and the date-text shapes, which keep their own verdicts. Formula fields and validation rules read `record.FIELD` already and were refused before. The run-time evaluator is unchanged.
+  
+  ## FROM → TO
+  
+  | FROM | TO |
+  |:---|:---|
+  | `record.due_date + 1 > 5` | `daysBetween(record.due_date, today()) > 5` (days past due) or `addDays(record.due_date, 1) < today()` (a shifted date) |
+  | `previous.due_date - 7 < today()` | `addDays(previous.due_date, -7) < today()` |
+  
+  One-line fix: in a flow condition, never add or subtract a number on a date field read through `record` or `previous`; use `daysBetween(a, b)` for a span and `addDays(d, n)` to shift a date.
+- 3d6dea2: feat(formula): `addWorkingDays()`, `workingDaysBetween()` and `addWorkingHours()` count with the organization's working calendar (ADR-0157 D4)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added — a formula field's or a stored field's `expression` may now call `addWorkingDays(...)`, `workingDaysBetween(...)` and `addWorkingHours(...)`
+  Skills-docs: updated here — skills/objectstack-formula/SKILL.md teaches the three functions and eval 8 of skills/objectstack-project/evals/project-process.json exercises them (the card's order names both)
+  
+  Not released alone: it ships in the same release as the working calendar service and objects (#35355) and the approval escalation's working-time clock (#35357), ADR-0157 D4.
+  
+  - **Three formula functions** (`@objectstack/formula`). `addWorkingDays(day, n[, code])` answers the calendar day `n` working days after `day` (before it, for a negative `n`); `day` itself never counts and `0` answers `day`. `workingDaysBetween(start, end[, code])` counts the working days after `start` up to and including `end`, negative when `end` is earlier, and is the inverse of `addWorkingDays`. `addWorkingHours(start, hours[, code])` answers the instant `hours` of working time after `start`, counted as elapsed time in the calendar's time zone (D11); a start outside working time begins at the next working period. All three step over the calendar's weekends and holidays and onto its make-up working days. Without `code` a call counts with the organization's default calendar; `code` names a calendar and is written as a quoted literal. They join the advertised standard library (`CEL_STDLIB_FUNCTIONS`).
+  - **Where they count** (`@objectstack/objectql`). A `formula` field and a stored field's `expression` count with the record's own organization's calendars, which the engine loads through the calendar service before it evaluates them: only the calendars the expressions name, once per organization per read, from the service's cache. A formula field counts again on its next read after a calendar edit; a stored due time keeps the value of its last write.
+  - **When the calendar cannot answer** (D8). With no default calendar in the organization, a code the organization has no calendar for, or a count that reaches past the span the calendar is maintained for, the formula reads `null` and the server logs one line naming the object, the field and the reason. A stored field's `expression` stores blank and the write goes through; the blank stays until that record's next write, and a write made while the calendar refuses blanks a value that was valid before. Nothing counts on the weekly pattern or the wall clock instead.
+  - **No calendar arithmetic as a filter.** A query filter, a sharing rule's condition and every filter compiled from CEL refuse the three functions with a message that prescribes the stored due-time field (D6).
+  - **Build refusals** (`@objectstack/lint`). `os build` / `os validate` refuse the three functions at every expression site but a formula field's and a stored field's `expression` (validation rules, visibility, action conditions, flow conditions and values, sharing rules, a field's expression `defaultValue` and a seed value), and refuse a calendar code that is not a quoted literal, with a branch between literal calls as the way to pick a calendar per record.
+  - **Forms** (`@object-ui/core`). A form does not compute a formula that calls one of the three: its calendar is loaded for the server's read, never handed to the form, so the field is unservable there as on the server's write-path check.
+  - **Teaching** (`@objectstack/skills`). objectstack-formula documents the three functions; the platform catalog moves working-day formulas from Planned into what the platform ships; the project-process eval for business-hours SLAs now expects the functions.
+- ad65d82: fix(formula)!: `validateExpression` refuses `==` / `!=` between a list-valued field and a scalar, which answers a constant on every row
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #36217
+  
+  <!-- adr-0087: registered cel-list-equality-refused -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor`. CEL compares the whole list with the scalar, so `record.labels == 'frontend'` is `false` for `['frontend', 'qa']` and for `null` alike, and `record.labels != 'frontend'` is always `true`: a condition written that way never fires (or always does), with no fault and no log line. The shared validator accepted it.
+  
+  - **The refusal.** `validateExpression` refuses a `==` / `!=` between a read of a list-valued field on `record` / `previous` (`record.f`, `record['f']`, either operand order) — or, at a flattened (flow) condition, its bare name `f`, which the run binds to the trigger record's field, unless a flow variable holds the name or a node can bind names no reader sees — and a non-null string, number or boolean literal, as the new `list-equality` code (params `reference`, `operator`, `operand`, `answer`, `rewrite`), prescribing the null-guarded membership test.
+  - **Which fields are lists.** A `fieldTypes` entry of an inherently multi-value type (`multiselect`, `checkboxes`, `tags`), or a field named in the new optional `ExprSchemaHint.multiValueFields` — the fields a caller reads as multi-valued through `isMultiValueField` (`@objectstack/spec/data`), which is how a `select` / `radio` / `lookup` / `user` / `file` / `image` field declared `multiple: true` becomes a list here. Absent, such a field is not judged, as before.
+  - **Who fills it.** The publish lint (`os validate` / `os build`, every CEL site that types the object's fields), the MCP `validate_expression` tool (read off the served definition, `McpDataBridge.servedObjectDefinitionOf`, at the validation / formula / flow-condition sites; a bridge without it answers as before), `registerFlow`'s schema pass (`parseObjectFieldSchema` returns `multiValueFields`; logged, never thrown, like every finding of that pass), the scenario scorer, and Studio's object draft check (field rules, formulas, validation rules; `CelSchemaHint.multiValueFields`).
+  - **Still accepted.** `S == null` / `S != null` (either side), `'a' in S`, a list compared with a list literal or with another list field, and a comparison whose other operand is not a literal.
+  
+  FROM → TO:
+  
+  - `record.labels == 'frontend'` → `record.labels != null && 'frontend' in record.labels`
+  - `record.labels != 'frontend'` → `record.labels == null || !('frontend' in record.labels)`
+  - at a flow condition, `labels == 'frontend'` → `labels != null && 'frontend' in labels`
+  
+  One-line fix: test membership with `in`, null-guarded (`'a' in null` faults); compare the list with `null` to test whether it is set.
+- cb5a975: fix(formula): the `list-equality` refusal prescribes a rewrite that works where it is read, and a flow condition is judged only where the run binds a row of the typed object
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #36217
+  
+  The two widenings. A flow condition in a flow that no record write or sweep starts (an API, scheduled or trigger-less flow) is no longer refused as `list-equality`, bare or `record.`: that run holds what its entrance handed it, so `labels == 'frontend'` can be correct code there. And `ExprSchemaHint` gains the optional key `filterCompiled`, which tells the validator that the site's source compiles to a query filter.
+  
+  The rewrite the refusal prescribes now depends on the site, and is parenthesised whole so it can stand where the comparison stood (`A && (…)`):
+  
+  - **A `record.` / `previous.` read evaluated as CEL** (a validation rule, a field rule, a formula, an action's `visible` / `disabled` / `pressed`, a hook condition):
+    - FROM `record.labels != null && "frontend" in record.labels`
+    - TO `(has(record.labels) && record.labels != null && "frontend" in record.labels)`
+    - `has()` answers on a sparse row or a null `previous`, where the old form faulted.
+    - For `!=` the TO form is `(!has(record.labels) || record.labels == null || !("frontend" in record.labels))`. The old `!=` form, with no parentheses, split under a leading `&&`.
+  - **A bare name at a flow condition:**
+    - FROM `labels == null || !("frontend" in labels)`
+    - TO `(labels == null || !("frontend" in labels))`
+    - For `==` the TO form is `(labels != null && "frontend" in labels)`.
+  - **A sharing rule `condition`**, which compiles to a query filter:
+    - FROM `record.labels != null && "frontend" in record.labels`, which does not lower (`in` needs a field on its left), so the rule was dropped as `sharing-rule-unlowerable-condition`.
+    - TO `(record.labels != null && record.labels.contains("frontend"))`, which lowers to a membership filter (`$contains`).
+    - For `!=` the TO form is `(record.labels == null || !record.labels.contains("frontend"))`.
+    - A number or boolean operand is passed as its text (`contains("3")`).
+  
+  One-line fix: write the rewrite the refusal names.
+  
+  `registerFlow`'s advisory pass now hands the validator `faultOutcome: 'run-fails'` on a record-triggered flow and on a time-relative sweep of the typed object, the same flows `os validate` declares it on. On those flows its logged type-mismatch lines now use the wording `os validate` prints. It still only logs and never throws.
+- ad92dfd: fix(lint)!: `==` / `!=` between a list-valued field reached through a lookup hop and a scalar is refused, as the root-field case is
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — the `objectstack-formula` skill already teaches that a list field compared with a scalar literal is refused and the `has()`-guarded `in` rewrite; a hop read of a list field takes the same rewrite
+  
+  <!-- adr-0087: not-required (already-registered cel-list-equality-refused) the same list-equality refusal and membership rewrite, one hop away; this change extends that entry's surface to the one-hop read at a validation rule predicate and a field expression, and states its doors (os validate, os build, the object save door) -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor`; the new `@objectstack/formula` export `findHopListEquality` widens the package's public surface.
+  
+  `record.labels == 'vip'` on a list-valued field has been refused as `list-equality` since the shared validator learned it, but the same comparison one hop away, `record.account.labels == 'vip'` where `account` is a lookup and `labels` a list-valued field of its target, was refused nowhere. A validation rule's `condition` / `when` and a formula's `expression` are the two sites that serve a hop: the engine hydrates the related row, so `record.account.labels` is the stored list, and comparing it with a scalar answers `false` (for `!=`, `true`) on every row. A rule written that way never fires and saves clean.
+  
+  - **The refusal.** At those two sites, the publish lint (`os validate` / `os build`) and the object save door refuse a `==` / `!=` between a read of a hop target's list-valued field (an inherently multi-value type, or a multi-capable type declared `multiple: true`) and a non-null scalar literal, either operand order, in the root case's words, prescribing the root case's membership test on the hop read.
+  - **What carries it.** `@objectstack/formula` exports `findHopListEquality(source, listLeaves)`, which returns the `list-equality` refusals (same code and params as `validateExpression`'s) for the reference → list-valued-leaves map its caller hands in. `ExprSchemaHint` is unchanged. The ADR-0087 entry `cel-list-equality-refused` now names the one-hop read and its doors; the Studio draft check and the shared-validator half of the MCP `validate_expression` tool do not see a hop.
+  - **Still accepted.** A hop to a scalar field (`record.account.tier == 'vip'`), `record.account.labels == null`, `'vip' in record.account.labels`, a hop through a reference that is itself multi-valued, and every site that serves no hop (an action's `visible`, a flow condition), where `record.account` is the stored id.
+  
+  FROM → TO:
+  
+  - `record.account.labels == 'vip'` → `(has(record.account.labels) && record.account.labels != null && "vip" in record.account.labels)`
+  - `record.account.labels != 'vip'` → `(!has(record.account.labels) || record.account.labels == null || !("vip" in record.account.labels))`
+  
+  One-line fix: test membership with `in` on the hop read, guarded as the refusal prescribes.
+
+### Patch Changes
+
+- 8b550f8: fix(formula): a flow value envelope's date-text refusal says the run fails when the value is computed, not when a condition runs
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A flow value envelope (an `assignment` value, or a `create_record` / `update_record` `fields.*` value) that hands a `date` field's text to a call it cannot take (`timestamp(record.borrow_date)`) or does arithmetic on it (`record.due_date - record.borrow_date`) is refused by `os validate` and by `registerFlow`. The refusal reused the flow-condition sentence: "this faults wherever `record.borrow_date` holds that text when the condition runs, and a flow condition that cannot be evaluated fails the run: the flow stops at this condition …". A value slot has no condition. It now reads "… when the value is computed, and a flow value that cannot be computed fails the run: the flow stops at this step and the work the flow exists to do is not done (it does not read null)."
+  
+  - **Two codes join `ExpressionRefusalCode`** (`EXPRESSION_REFUSAL_CODES`), with the params of the code each splits from: `date-text-call-value-run-may-fail` (params of `date-text-call`) and `date-text-arithmetic-value-run-may-fail` (params of `date-text-arithmetic`). `validateExpression` serves them where `ExprSchemaHint.flowValueEnvelope` is set, in place of `date-text-call-run-may-fail` / `date-text-arithmetic-run-may-fail`. A consumer keyed to the old codes on a value envelope re-keys to the new ones.
+  - **Unchanged:** the same sources are refused, at the same grade (an error), at the same location, with the same leading value-envelope sentence and the same fix hint. A flow condition keeps `date-text-call-run-may-fail` / `date-text-arithmetic-run-may-fail` and `-run-fails`, byte for byte.
+- ed906d5: feat: the working-calendar service, its arithmetic and its refusal codes (ADR-0157, part one of two)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Not released alone; pair #35641/#35642. This ships in the same release as #35642 (the calendar objects and Setup pages, the second half of this change), the working-day formula functions (#35356) and the approval escalation's working-time clock (#35357), ADR-0157 D4.
+  
+  - **The arithmetic** (`@objectstack/formula`). `isWorkingTime`, `addWorkingDays`, `workingDaysBetween` and `addWorkingHours` compute over a resolved calendar and its dated exceptions, as pure functions a formula can call synchronously, beside `parseWorkPeriods` (`HH:mm-HH:mm` periods; a period that crosses midnight is refused, `24:00` is a legal end), `buildWorkCalendar` (a frozen calendar) and the three error classes. A computation that needs a date outside the calendar's maintained span is refused rather than read from the weekly pattern.
+  - **The types, constants and time-zone rule** (`@objectstack/spec`). `WorkCalendar` and the column and code constants are in `@objectstack/spec/data`; the service contract is `IWorkCalendarService` in `@objectstack/spec/contracts`. `zonedWallClockToUtcMs`, `wallClockToUtcMs` and `WallClockParts` move to `@objectstack/spec/data` from `@objectstack/core`, unchanged; `@objectstack/core` re-exports all three, so no import changes.
+  - **Three error codes** in the ADR-0112 ledger: `ERR_WORK_CALENDAR_UNRESOLVED` (no calendar by that code, no organization default, two defaults, or no organization named outside the `single` posture), `ERR_WORK_CALENDAR_NOT_MAINTAINED` and `ERR_WORK_CALENDAR_INVALID`, each a 400.
+  - **The calendar service** (`@objectstack/objectql`, registered as `work-calendar`). `resolve({ organizationId, calendar })` takes the named code, else the organization default, else refuses; it never falls back to wall-clock time. It reads in the organization the caller names, elevated, and caches until a calendar or exception row is written. Outside the `single` tenancy posture, a computation that names no organization is refused before any read. Until the calendar objects are registered it refuses every resolution.
+  - **The write door** (`@objectstack/objectql`). Once the calendar objects exist, a calendar or exception write is refused `400 VALIDATION_FAILED` when a period crosses midnight, is malformed or overlaps another, an `off` row carries periods or an `on` row carries none, `maintained_through` is before `maintained_from`, a second calendar is marked the default, or a calendar created in an organization other than the one being worked in is marked the default (create it there, or set the default by an update); a calendar created without `timezone` takes the organization's Localization time zone. The hooks take the organization from the session.
+- 401eb44: fix(app-shell): Studio's formula inspector asks whether the formula still computes money before it keeps a `currency` result type
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  When an author edited a formula field in Studio, the inspector re-stamped `returnType` from the expression's inferred CEL type, and kept a declared `currency` under every `number` or unproven verdict, because that type never says "money". So a formula edited from an amount (`record.amount * 0.1`) into a count (`record.est_hours * 2`) kept `returnType: 'currency'` and its `currencyConfig`, and its value was still shown as an amount.
+  
+  The stamp now also asks `@objectstack/formula`'s `inferFormulaReturn`, over the object's declared fields, whether the edited expression computes money:
+  
+  - Provably money: `returnType` is stamped `currency`, with the currency the source amounts are in as the formula's `currencyConfig` (absent for the tenant default currency). This holds for a formula that was `number` too.
+  - An edit it answers `number` for withdraws a declared `currency`: `returnType` becomes `number` and the `currencyConfig` is removed.
+  - An unproven verdict (a field-over-field quotient, two currencies meeting) keeps a declared `currency`, as before, and so does an engine that does not offer `inferFormulaReturn`.
+  - A declared `percent` is unchanged: it survives a `number`, unproven or money verdict, and is never re-stamped `currency`. A verdict that proves `text`, `boolean` or `date` still stamps, and now also removes a stale `currencyConfig`.
+  
+  `@objectstack/formula`'s `inferFormulaReturn` now answers `{}` (unproven) where it used to answer `{ returnType: 'number' }` on the numeric path, unless the unit proof succeeds or every read of the record (`record.x`, `record['x']`, `record.?x`, `record[?'x']`, or a bare `x`) is one segment naming a declared field whose unit can be read and is not money. FROM `inferFormulaReturn('record.rollup * 0.9', fields)` → `{ returnType: 'number' }` TO → `{}`. The same holds for `100 / record.amount`, `record.amount % 3`, `record.amount * 1.0 + record.fee_eur * 1.0` (two currencies), `double(record.amount) * double(record.tax)`, an amount whose `currencyConfig` does not parse, a hop through a reference (`record.account.balance * 0.9`), a formula operand that declares no `returnType` (`record.subtotal * 0.2`), the indexed and optional spellings of an amount (`record['amount'] * 0.1`), and a name the field map does not declare (`record.unknown_field * 2`). A call with no field map therefore answers `{}` for any numeric expression that reads the record (`inferFormulaReturn('record.amount * 0.1')` was `number`). So a `number` answer means "proved not money", and only that answer withdraws a declared `currency`.
+  
+  What still answers `number` is an expression over declared fields of readable non-money units: number, percent and other plain fields, a formula declaring a non-`currency` `returnType`, and a `count` roll-up whose `summaryOperations` is passed. A bare ratio of two amounts in one currency (`record.amount / record.tax`) types `dyn` and answers `{}`, as before. A caller that read the old `number` for these shapes should read the expression's CEL type (`inferExpressionType`) instead. In Studio, a new formula over such an amount is still stamped `number` from that CEL type.
+  
+  Widened: the published `FormulaSourceField` type gains one optional member, `summaryOperations` (a `summary` field's roll-up, as declared). A `count` roll-up is read as a plain number only when it is passed. A roll-up passed without `summaryOperations`, a `count` included, is read as possibly money, so an expression over it answers `{}`.
+  
+  The stamp still runs only after the author edits the expression; selecting a field writes nothing. The `returnType` description in `@objectstack/spec` now says the same: `currency` is stamped when the expression provably computes money and withdrawn for `number` when an edit leaves it a plain number, and a declared `percent` is kept under a money verdict.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [52a2398]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+
 ## 18.6.0
 
 ### Minor Changes
