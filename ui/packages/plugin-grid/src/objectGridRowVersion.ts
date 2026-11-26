@@ -1,11 +1,8 @@
 /**
  * The optimistic-concurrency helpers of `ObjectGrid` (`./ObjectGrid.tsx`): the
- * row's version token, the version a row save sends, and the conflict and
- * batch-save outcome types, moved out of that file verbatim
- * (objectstack#25994, slice 1).
+ * row's version token, the version a row save sends, and the conflict outcome
+ * type, moved out of that file verbatim (objectstack#25994, slice 1).
  */
-
-import type { DataTableSchema } from '@object-ui/types';
 
 /**
  * The row key that carries a record's optimistic-concurrency token
@@ -55,11 +52,3 @@ export function rowVersionToSend(
 /** The three ways out of `ConcurrentUpdateDialog`, by its own button names. */
 export type RowConflictChoice = 'reload' | 'overwrite' | 'cancel';
 
-/**
- * The per-row outcome the table's `onBatchSave` slot reads, derived from the
- * slot's declared return rather than restated here.
- */
-export type BatchSaveOutcome = Exclude<
-  Awaited<ReturnType<NonNullable<DataTableSchema['onBatchSave']>>>,
-  void
->;

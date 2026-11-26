@@ -304,11 +304,12 @@ const RUNTIME_SLOT: readonly Site[] = [
   //
   // Each channel measured on its own, and they do NOT all share one — which is
   // why six siblings are not evidence for the seventh:
-  //   - `onAddRecord` / `onBatchSave` / `onCellChange` / `onRowSave` are React
-  //     props on `ObjectGridComponentProps`; `ObjectGrid` puts them on the
-  //     `data-table` node it builds (`onRowSave ?? defaultRowSave` and
-  //     `onBatchSave ?? defaultBatchSave` install a dataSource-backed default
-  //     only when the host wired none);
+  //   - `onAddRecord` / `onCellChange` / `onRowSave` are React props on
+  //     `ObjectGridComponentProps`; `ObjectGrid` puts them on the `data-table`
+  //     node it builds (`onRowSave ?? defaultRowSave` installs a
+  //     dataSource-backed default only when the host wired none);
+  //   - `onBatchSave`, the seventh, LEFT this half for `RETIRED` below
+  //     (objectstack#35827 retired the staged editing model that called it);
   //   - `onRowActionDef` is `RelatedList`'s own `onRowAction` React prop,
   //     forwarded onto the node it builds;
   //   - `onRowClick` has THREE suppliers — `ObjectGrid`'s `navigation.handleClick`,
@@ -322,7 +323,6 @@ const RUNTIME_SLOT: readonly Site[] = [
   //     `'retired'` would have published "no renderer reads this key" for a read
   //     objectui#6175 wired on purpose.
   ['data-display.zod.ts', 'DataTableSchema', 'onAddRecord', DataTableZod],
-  ['data-display.zod.ts', 'DataTableSchema', 'onBatchSave', DataTableZod],
   ['data-display.zod.ts', 'DataTableSchema', 'onCellChange', DataTableZod],
   ['data-display.zod.ts', 'DataTableSchema', 'onColumnResize', DataTableZod],
   ['data-display.zod.ts', 'DataTableSchema', 'onRowActionDef', DataTableZod],
@@ -492,6 +492,11 @@ const RETIRED: readonly Site[] = [
   ['objectql.zod.ts', 'ObjectKanbanSchema', 'onQuickAdd', ObjectKanbanZod],
   ['overlay.zod.ts', 'AlertDialogSchema', 'onConfirm', AlertDialogZod],
   ['overlay.zod.ts', 'AlertDialogSchema', 'onCancel', AlertDialogZod],
+  // ⭐ objectstack#35827 — `DataTableSchema.onBatchSave`, MOVED here from
+  // `RUNTIME_SLOT` above. "Save All" of the staged editing model called it; that
+  // model is retired, so the table saves each committed cell through
+  // `onRowSave` and no renderer reads this key.
+  ['data-display.zod.ts', 'DataTableSchema', 'onBatchSave', DataTableZod],
 ];
 
 const ALL_SITES: readonly Site[] = [...RUNTIME_SLOT, ...RETIRED];
@@ -626,8 +631,12 @@ describe('census: no on* key in the eight mirrors is declared z.function() (obje
     // ⭐ 60 + 22 → 61 + 22: objectstack#35955 declared
     // `DataTableSchema.onColumnHide`, a runtime slot the `data-table` renderer
     // calls from its column menu.
-    expect(RUNTIME_SLOT).toHaveLength(61);
-    expect(RETIRED).toHaveLength(22);
+    //
+    // ⭐ 61 + 22 → 60 + 23, total unchanged: objectstack#35827 MOVED
+    // `DataTableSchema.onBatchSave` to the retired half with the staged editing
+    // model it served.
+    expect(RUNTIME_SLOT).toHaveLength(60);
+    expect(RETIRED).toHaveLength(23);
     const ids = ALL_SITES.map(([file, schema, key]) => `${file}#${schema}.${key}`);
     expect(new Set(ids).size).toBe(83);
   });
@@ -775,6 +784,8 @@ export type assertionRetiredKeysAreTombstoned = [
   Expect<RetiredIsNever<AlertDialogSchema['onCancel']>>,
   // objectui#11234 — moved here from the runtime-slot block below.
   Expect<RetiredIsNever<ObjectKanbanSchema['onQuickAdd']>>,
+  // objectstack#35827 — moved here from the runtime-slot block below.
+  Expect<RetiredIsNever<DataTableSchema['onBatchSave']>>,
 ];
 
 export type assertionRuntimeSlotsKeepTheirFunctionType = [
@@ -797,7 +808,6 @@ export type assertionRuntimeSlotsKeepTheirFunctionType = [
   // objectui#7804 — the `DataTableSchema` slice. Each TS twin stays callable
   // because the function value REACHES the renderer; the mirror refuses by name.
   Expect<KeepsFunction<DataTableSchema['onAddRecord']>>,
-  Expect<KeepsFunction<DataTableSchema['onBatchSave']>>,
   Expect<KeepsFunction<DataTableSchema['onCellChange']>>,
   Expect<KeepsFunction<DataTableSchema['onColumnResize']>>,
   Expect<KeepsFunction<DataTableSchema['onRowActionDef']>>,

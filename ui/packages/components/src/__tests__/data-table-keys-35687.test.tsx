@@ -68,6 +68,7 @@ function renderTable(extra: Record<string, unknown> = {}, selection: GridCellSel
     searchable: false,
     pagination: false,
     onCellChange,
+    onRowSave: () => Promise.resolve(),
     ...extra,
   };
   const utils = render(

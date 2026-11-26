@@ -145,7 +145,7 @@ function renderGrid(ds: any, rows: any[], columns: any[]) {
   return render(
     <ActionProvider>
       <SchemaRendererProvider dataSource={ds}>
-        <ObjectGrid cellSelection={false} schema={schema} dataSource={ds} />
+        <ObjectGrid schema={schema} dataSource={ds} />
       </SchemaRendererProvider>
     </ActionProvider>,
   );
@@ -166,6 +166,7 @@ function cellAt(container: HTMLElement, index: number): HTMLElement {
  */
 async function openEditor(cell: HTMLElement): Promise<HTMLElement> {
   fireEvent.click(cell);
+  fireEvent.doubleClick(cell); // select-first: a click selects, a double-click edits (objectstack#35827)
   return await waitFor(() => {
     const panel = cell.querySelector('[data-testid="lookup-in-cell"]');
     expect(panel).toBeTruthy();
