@@ -4,7 +4,7 @@
 
 feat(scenarios): an external driver command can build through the MCP draft door (`--modes door`) on contract `objectstack-scenario-driver/2`
 
-Clause-②: no
+Clause-②: yes
 Metadata-protocol: none
 
 `--driver external:COMMAND` now takes door mode, so any agent tool behind a wrapper is scored on the same door cards as the live `claude` driver. The driver contract gains a second version, `objectstack-scenario-driver/2`: `/1` plus an optional `door` on an `author` call, `{"mcp":{"url":…,"configFile":…},"skillsDir":…}`. The door's OAuth token (scoped `openid metadata:write`) travels as an `ask` call's persona key does: only in a 0600 MCP config file outside the call's directory, deleted when the call returns, never on argv, in the environment or on stdin, and so never in a run record, a scorecard or a gallery export. `--door-skills` and `--door-skill-omit` reach the command as `door.skillsDir`, and the record states the arm (`env.driver.door`) in the same shape as for the `claude` driver; the rules arm (`--door-rules`) is a Claude Code `CLAUDE.md` and is refused with an external command, naming why.
