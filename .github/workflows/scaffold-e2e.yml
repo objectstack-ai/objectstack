@@ -8,7 +8,8 @@
 #      breakage would only be found by a real new user.
 #
 # Job 1 (PRs touching the scaffolder / docker example) scaffolds with the
-# repo-built scaffolder and runs the generated project against the registry:
+# repo-built scaffolder and runs the generated project against this checkout's
+# packed tarballs — what the next release would publish, not what the last one did:
 # install → validate → build → test → boot → health probes → docker build/run. That
 # run scaffolds with `--skip-install` and installs the project itself, so it
 # exercises the scaffolder's `--skip-install` shape; a second, throwaway
@@ -50,13 +51,25 @@ jobs:
     name: Scaffold with repo dist
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Measured shape of a run: the framework closure build, packing every
+    # publishable package, and three image builds (the official one, the
+    # scaffolded build stage, the candidate layer) on top of the old leg.
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
+
+      - name: Setup turbo cache
+        uses: actions/cache@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-${{ github.job }}-
+            ${{ runner.os }}-turbo-
 
       - name: Build the scaffolder
         run: pnpm --filter create-objectstack build
@@ -66,69 +79,102 @@ jobs:
           cd "$RUNNER_TEMP"
           node "$GITHUB_WORKSPACE/packages/create-objectstack/bin/create-objectstack.js" e2e-app --skip-install --skip-skills
 
-      - name: Install generated project (registry deps)
+      # The project is installed from THIS checkout's packed tarballs, so every
+      # package it reaches must be built before it is packed. The build set is
+      # read off the project the scaffolder just emitted, never a hand list:
+      # each `@objectstack/*` dependency it declares, with turbo's `^build`
+      # bringing that package's own workspace dependencies along. A package
+      # outside that closure is still packed (the pin set must stay total, see
+      # scripts/publish-smoke-pack.mjs) but nothing installs it.
+      - name: Build the framework the generated project depends on
+        run: |
+          FILTERS=$(node -p '
+            const pkg = require(process.env.RUNNER_TEMP + "/e2e-app/package.json");
+            const names = [pkg.dependencies, pkg.devDependencies]
+              .flatMap((deps) => Object.keys(deps ?? {}))
+              .filter((name) => name.startsWith("@objectstack/"));
+            if (names.length === 0) throw new Error("the generated project declares no @objectstack/* dependency — nothing to build or to test");
+            names.map((name) => "--filter=" + name).join(" ");
+          ')
+          echo "turbo run build $FILTERS"
+          # shellcheck disable=SC2086 # FILTERS is a word list on purpose.
+          pnpm exec turbo run build $FILTERS
+
+      # `pnpm pack` applies the same manifest rewrites as `pnpm publish`, so a
+      # tarball is what the registry would hand a new user once this checkout
+      # is released. The packer is shared with scripts/create-scaffold-smoke.sh
+      # (`os-create-smoke.yml`) and the release smoke: it owns the publishable
+      # population and writes the name → `file:` tarball map the next step pins.
+      - name: Pack this checkout's publishable packages
+        run: node "$GITHUB_WORKSPACE/scripts/publish-smoke-pack.mjs" "$RUNNER_TEMP/tarballs"
+
+      # The generated project's dependency SPECS are left exactly as the
+      # scaffolder wrote them — they are what is on trial. Resolution is
+      # redirected through the project's OWN pnpm overrides, appended to the
+      # pnpm-workspace.yaml the template ships (its build approvals are part of
+      # what a user gets, so they stay part of what is tested). Anything not in
+      # the map — typescript, vitest, every third-party transitive — resolves
+      # from the registry, as it would for a user.
+      #
+      # There is no registry fallback and no `engines.protocol` re-stamp: the
+      # project is tested at the version this checkout would publish, against
+      # the protocol this checkout implements. A red here is a red about what
+      # the next release would ship.
+      - name: Install generated project (this checkout's packed tarballs)
         run: |
           cd "$RUNNER_TEMP/e2e-app"
-          # The scaffolder pins ^<repo version>. Right after a version bump
-          # lands but before the release publishes, that version is not on the
-          # registry yet — fall back to the latest published release so the
-          # template is still exercised against the real registry.
-          if ! npm install --no-fund --no-audit; then
-            echo "::warning::repo version not published yet — falling back to latest"
-            node -e '
-              const fs = require("fs");
-              const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-              for (const deps of [pkg.dependencies, pkg.devDependencies]) {
-                if (!deps) continue;
-                for (const d of Object.keys(deps)) {
-                  if (d.startsWith("@objectstack/")) deps[d] = "latest";
-                }
-              }
-              fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
-            '
-            npm install --no-fund --no-audit
-            # The fallback just swapped the repo's unpublished version for
-            # whatever `latest` points at — which during an RC window is the
-            # PREVIOUS major (17.0.0-rc.N unpublished → latest is 16.x). The
-            # template's manifest still stamps the repo's protocol major
-            # (`engines: { protocol: '^17' }`, written by
-            # scripts/sync-template-versions.mjs), so the ADR-0087 D1 handshake
-            # in `os start` correctly refuses to boot the artifact:
-            #   ✗ package 'e2e-app' targets protocol ^17 (engines.protocol)
-            #     but this runtime is protocol 16.0.0
-            # That is the gate working, on a skew this step introduced (#4894).
-            # Re-stamp the manifest to the protocol major actually installed so
-            # the rest of the job exercises the template against a coherent
-            # runtime. Same alignment the Docker step below already does by
-            # reading the resolved CLI version; done here BEFORE `npm run
-            # build`, so the artifact carries the corrected range too.
-            #
-            # The major is read off the installed @objectstack/spec package:
-            # PROTOCOL_VERSION is kept in lockstep with that package's own major
-            # (packages/spec/src/kernel/protocol-version.ts, asserted by
-            # protocol-version.test.ts), so the two cannot drift.
-            #
-            # Deliberately confined to the fallback branch: on the normal path
-            # the project installs the repo's own version and the majors agree
-            # by construction — a template that stamped the wrong major would
-            # still fail, which is what template-consistency.test.ts is for.
-            node -e '
-              const fs = require("fs");
-              const major = JSON.parse(
-                fs.readFileSync("node_modules/@objectstack/spec/package.json", "utf8"),
-              ).version.split(".")[0];
-              const path = "objectstack.config.ts";
-              const src = fs.readFileSync(path, "utf8");
-              const stamp = /engines:\s*\{\s*protocol:\s*[\x27"][^\x27"]*[\x27"]\s*\}/;
-              if (!stamp.test(src)) {
-                console.log("::error::fallback cannot re-stamp engines.protocol — no stamp found in " + path);
-                process.exit(1);
-              }
-              const out = src.replace(stamp, "engines: { protocol: \x27^" + major + "\x27 }");
-              fs.writeFileSync(path, out);
-              console.log("::notice::fallback re-stamped engines.protocol to ^" + major + " (installed @objectstack/spec major) — this run exercises the template against protocol " + major + ", not the repo\x27s");
-            '
-          fi
+          node - "$RUNNER_TEMP/tarballs/overrides.json" pnpm-workspace.yaml <<'EOF'
+          const { existsSync, readFileSync, writeFileSync } = require('node:fs');
+          const [overridesPath, wsPath] = process.argv.slice(2);
+          if (!existsSync(wsPath)) {
+            console.log('::error::the scaffolder wrote no pnpm-workspace.yaml, so there is nowhere to pin the packed tarballs (and a fresh pnpm install would refuse the build scripts the template relies on)');
+            process.exit(1);
+          }
+          const overrides = JSON.parse(readFileSync(overridesPath, 'utf8'));
+          const lines = [
+            readFileSync(wsPath, 'utf8').replace(/\s*$/, ''),
+            '',
+            '# appended by scaffold-e2e.yml: every publishable package of the checkout',
+            '# redirected to its packed tarball; package.json is left as scaffolded.',
+            'overrides:',
+            ...Object.entries(overrides).map(([name, spec]) => `  '${name}': '${spec}'`),
+          ];
+          writeFileSync(wsPath, lines.join('\n') + '\n');
+          console.log(`pinned ${Object.keys(overrides).length} package(s) to packed tarballs in ${wsPath}`);
+          EOF
+          pnpm install --no-frozen-lockfile
+          # Every @objectstack/* name the project declares must resolve from a
+          # tarball. A pinned name that resolved from the registry tested
+          # PUBLISHED code; a declared name that resolved from neither means the
+          # lockfile shape this reads has moved — both red, by name.
+          node - "$RUNNER_TEMP/tarballs/overrides.json" <<'EOF'
+          const { readFileSync } = require('node:fs');
+          const names = Object.keys(JSON.parse(readFileSync(process.argv[2], 'utf8')));
+          const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+          const declared = [pkg.dependencies, pkg.devDependencies]
+            .flatMap((deps) => Object.keys(deps ?? {}))
+            .filter((name) => name.startsWith('@objectstack/'));
+          const lock = readFileSync('pnpm-lock.yaml', 'utf8').split(/\r?\n/);
+          const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const pinned = new Set();
+          const leaked = new Set();
+          for (const name of names) {
+            const key = new RegExp(`^\\s*'?${esc(name)}@([^']+?)'?:\\s*$`);
+            for (const line of lock) {
+              const m = key.exec(line);
+              if (!m) continue;
+              if (m[1].startsWith('file:')) pinned.add(name);
+              else if (/^[0-9]/.test(m[1])) leaked.add(`${name}@${m[1]}`);
+            }
+          }
+          const unpinned = declared.filter((name) => !pinned.has(name));
+          if (leaked.size > 0 || unpinned.length > 0) {
+            for (const l of [...leaked].sort()) console.log(`::error::resolved from the registry, not from its tarball: ${l}`);
+            for (const n of unpinned) console.log(`::error::declared by the generated project but not resolved from a tarball: ${n}`);
+            process.exit(1);
+          }
+          console.log(`${pinned.size} package(s) resolved from packed tarballs, 0 from the registry; all ${declared.length} declared @objectstack/* dependencies among them`);
+          EOF
 
       - name: Validate and build the generated project
         run: |
@@ -136,9 +182,10 @@ jobs:
           npm run validate
           npm run build
 
-      # The starter's own test (`note.test.ts`): it boots the generated
+      # The starter's own test (`starter.test.ts`): it boots the generated
       # project's stack in-process through @objectstack/verify, as installed
-      # from the registry, and asserts one business fact on the real engine.
+      # from this checkout's packed tarballs, and asserts one business fact on
+      # the real engine.
       # A scaffold whose `test` script is red out of the box teaches its user
       # to ignore tests, so the starter ships it green or not at all.
       - name: Test the generated project
@@ -302,11 +349,11 @@ jobs:
         # step after this one asserts them.
         #
         # The unpublished-version window is the one degradation, and it is
-        # evidenced rather than blanket. The install step above carries the
-        # fallback that rewrites unresolvable `@objectstack/*` ranges to
-        # `latest`; that fallback lives in THIS WORKFLOW rather than in the
-        # shipped scaffolder, so this step — whose whole point is to run the
-        # scaffolder's OWN install — cannot borrow it.
+        # evidenced rather than blanket. The install step above never meets
+        # that window: it pins the project to this checkout's packed tarballs
+        # in THIS WORKFLOW, not in the shipped scaffolder, so this step — whose
+        # whole point is to run the scaffolder's OWN install against the
+        # registry — cannot borrow it.
         #
         # WHY IT STILL LIVES HERE, RECORDED RATHER THAN TRIBAL (#9149).
         # Relocating the fallback into the scaffolder would remove this
@@ -434,63 +481,128 @@ jobs:
           fi
           echo "skills as expected: .claude/skills == the installed @objectstack/skills catalog"
 
+      # The Docker leg runs in three steps, and each one states what it proves
+      # and what it does not. Nothing under docker/** and nothing in the
+      # template is edited for this job: both Dockerfiles are built exactly as
+      # they are in this checkout, and every CI-only piece is a layer or a
+      # local tag on this runner.
+      #
+      # Step 1 of 3: the official runtime image, as it stands.
+      #
+      # PROVES: docker/Dockerfile from this checkout builds, and the image it
+      # produces runs its own CLI (`os --version`) and reaches the SQL drivers
+      # it promises — the same smoke docker-publish.yml runs on a released image.
+      #
+      # DOES NOT PROVE: that the official image's own CLI boots this checkout's
+      # artifact. It is built with the PUBLISHED @objectstack/cli that the
+      # registry's `latest` names, never this checkout's version: on the
+      # Version Packages PR and after its merge, that version is not on the
+      # registry yet, so passing it would make the build fail for a reason
+      # unrelated to the change under review. The boot below runs the candidate
+      # CLI from the layer in step 2, which shadows this one.
       - name: Build official runtime image from this checkout
-        # The scaffolded app's Dockerfile builds FROM
-        # ghcr.io/objectstack-ai/objectstack. Build that base HERE from
-        # docker/Dockerfile instead of pulling, so
-        # (a) PRs exercise the official runtime Dockerfile itself, and
-        # (b) the e2e stays hermetic — no dependency on a prior release
-        # having published the tag (chicken-and-egg on the very first one).
-        #
-        # Pin the runtime's CLI to the SAME version the generated project
-        # actually resolved to — NOT a hardcoded `latest`. The scaffolded
-        # artifact is built by that project's `@objectstack/cli` and carries
-        # its `engines.protocol` major; `os start` in the runtime image rejects
-        # any artifact from a different protocol major. During an RC window the
-        # project pins `^<repo rc>` (e.g. 16.0.0-rc.1, protocol 16) while the
-        # `latest` dist-tag still points at the last STABLE cli (protocol 15),
-        # so a hardcoded `latest` skews the two and boot fails. Reading the
-        # resolved version keeps the image in lockstep whether the project got
-        # the repo RC, the `latest` fallback (see the install step), or a
-        # published stable.
-        #
-        # The TAG this image is built under is READ OUT OF the generated
-        # Dockerfile rather than hardcoded (#9017). The two used to be
-        # hand-matched literals — `:latest` here and `:latest` in the template —
-        # and the scaffolder now pins that tag to the CLI a project resolved, so
-        # a hardcoded tag here would stop naming the image the scaffolded
-        # `FROM` asks for. Docker would then silently pull the last PUBLISHED
-        # image instead of the one built from this checkout, and (b) above would
-        # be quietly false while the job stayed green. Deriving both from one
-        # source is what makes that skew impossible rather than merely fixed.
-        # (This job scaffolds with --skip-install, so today that tag reads
-        # `latest`; it follows the file if that ever changes.)
         run: |
-          CLI_VERSION=$(node -p "require('$RUNNER_TEMP/e2e-app/node_modules/@objectstack/cli/package.json').version")
-          RUNTIME_TAG=$(sed -n 's|^FROM ghcr\.io/objectstack-ai/objectstack:||p' \
-            "$RUNNER_TEMP/e2e-app/Dockerfile")
-          if [ -z "$RUNTIME_TAG" ]; then
-            echo "::error::no FROM ghcr.io/objectstack-ai/objectstack:<tag> line in the scaffolded Dockerfile — the base image the next step builds against cannot be named, so this job would silently test a pulled image instead of this checkout"
+          PUBLISHED=$(npm view @objectstack/cli@latest version 2>/dev/null || true)
+          if [ -z "$PUBLISHED" ]; then
+            echo "::error::cannot read @objectstack/cli's latest version from the registry, so the official image cannot be built with a published CLI"
             exit 1
           fi
-          echo "Runtime image will bundle @objectstack/cli@$CLI_VERSION (matches the scaffolded artifact's protocol)"
-          echo "Tagging it ghcr.io/objectstack-ai/objectstack:$RUNTIME_TAG (read from the scaffolded Dockerfile)"
-          docker build -t "ghcr.io/objectstack-ai/objectstack:$RUNTIME_TAG" \
-            --build-arg OS_CLI_VERSION="$CLI_VERSION" \
-            "$GITHUB_WORKSPACE/docker"
+          echo "Building docker/Dockerfile as it stands, with the published @objectstack/cli@$PUBLISHED"
+          docker build -t os-official-e2e --build-arg OS_CLI_VERSION="$PUBLISHED" "$GITHUB_WORKSPACE/docker"
+          GOT=$(docker run --rm os-official-e2e os --version)
+          echo "$GOT"
+          if ! printf '%s\n' "$GOT" | grep -qF "/$PUBLISHED "; then
+            echo "::error::the official image's os --version does not name the @objectstack/cli@$PUBLISHED it was built with"
+            exit 1
+          fi
+          docker run --rm -w /usr/local/lib/node_modules os-official-e2e \
+            node -e "require('pg'); require('mysql2')"
 
+      # Step 2 of 3: the candidate runtime layer.
+      #
+      # The scaffolded Dockerfile's build stage copies only the manifests and
+      # runs a FROZEN install from the lockfile the install step above wrote.
+      # That lockfile names each pinned package by a path relative to the
+      # project (`file:../tarballs/…`), which does not exist inside the build
+      # context. So the build stage's base image (read from the Dockerfile,
+      # `FROM … AS build`) is re-tagged on this runner as itself plus the
+      # tarballs, at the path the lockfile names from the stage's WORKDIR. The
+      # scaffolded Dockerfile is then built unedited, `--target` its build stage.
+      #
+      # The candidate layer is the official image from step 1 with that build
+      # stage's node_modules copied in at the same path and its `.bin` first on
+      # PATH, so `os` in the layer is this checkout's CLI, installed for the
+      # image's own Node and libc. It is tagged as the runtime image the
+      # scaffolded Dockerfile's final stage names, so step 3 builds FROM it.
+      #
+      # PROVES: the scaffolded Dockerfile's build stage installs and builds the
+      # project from this checkout's packages, and the candidate CLI runs inside
+      # the official image.
+      #
+      # DOES NOT PROVE: anything about the official image's global CLI (step 1
+      # covers what can be covered), or that the candidate CLI reaches the
+      # image's global `pg` / `mysql2` — the boot below uses SQLite.
+      - name: Build the candidate runtime layer (scaffolded build stage + official image)
+        run: |
+          cd "$RUNNER_TEMP/e2e-app"
+          BUILD_BASE=$(sed -n 's/^FROM \([^ ]*\) AS build$/\1/p' Dockerfile)
+          BUILD_DIR=$(sed -n '/^FROM [^ ]* AS build$/,/^FROM /s/^WORKDIR \([^ ]*\)$/\1/p' Dockerfile | head -n 1)
+          if [ -z "$BUILD_BASE" ] || [ -z "$BUILD_DIR" ]; then
+            echo "::error::the scaffolded Dockerfile has no 'FROM <image> AS build' stage with a WORKDIR (read: base '${BUILD_BASE:-<none>}', workdir '${BUILD_DIR:-<none>}'), so the tarballs cannot be placed where its frozen install looks"
+            exit 1
+          fi
+          TARBALL_DIRS=$(grep -o "file:[^'\" ]*\.tgz" pnpm-lock.yaml | sed 's|^file:||; s|/[^/]*$||' | grep -v '^/' | sort -u)
+          if [ -z "$TARBALL_DIRS" ] || [ "$(printf '%s\n' "$TARBALL_DIRS" | wc -l)" -ne 1 ]; then
+            echo "::error::expected the lockfile to name every packed tarball under one project-relative directory, read: '${TARBALL_DIRS:-<none>}'"
+            exit 1
+          fi
+          IN_IMAGE=$(realpath -m "$BUILD_DIR/$TARBALL_DIRS")
+          echo "build stage: FROM $BUILD_BASE, WORKDIR $BUILD_DIR; lockfile names $TARBALL_DIRS, so the tarballs go to $IN_IMAGE"
+
+          mkdir -p "$RUNNER_TEMP/tarball-base/tarballs"
+          cp "$RUNNER_TEMP"/tarballs/*.tgz "$RUNNER_TEMP/tarball-base/tarballs/"
+          printf 'FROM %s\nCOPY tarballs/ %s/\n' "$BUILD_BASE" "$IN_IMAGE" > "$RUNNER_TEMP/tarball-base/Dockerfile"
+          docker pull "$BUILD_BASE"
+          docker build -t "$BUILD_BASE" "$RUNNER_TEMP/tarball-base"
+          docker build --pull=false --target build -t e2e-app-build .
+
+          CANDIDATE=$(node -p "require('./node_modules/@objectstack/cli/package.json').version")
+          RUNTIME_TAG=$(sed -n 's|^FROM ghcr\.io/objectstack-ai/objectstack:||p' Dockerfile)
+          if [ -z "$RUNTIME_TAG" ]; then
+            echo "::error::no FROM ghcr.io/objectstack-ai/objectstack:<tag> line in the scaffolded Dockerfile — the runtime image the next step builds against cannot be named, so this job would silently test a pulled image instead of this checkout"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/candidate-layer"
+          printf 'FROM os-official-e2e\nCOPY --from=e2e-app-build %s/node_modules %s/node_modules\nENV PATH=%s/node_modules/.bin:$PATH\n' \
+            "$BUILD_DIR" "$BUILD_DIR" "$BUILD_DIR" > "$RUNNER_TEMP/candidate-layer/Dockerfile"
+          echo "Tagging the candidate layer ghcr.io/objectstack-ai/objectstack:$RUNTIME_TAG (read from the scaffolded Dockerfile)"
+          docker build --pull=false -t "ghcr.io/objectstack-ai/objectstack:$RUNTIME_TAG" "$RUNNER_TEMP/candidate-layer"
+          GOT=$(docker run --rm "ghcr.io/objectstack-ai/objectstack:$RUNTIME_TAG" os --version)
+          echo "$GOT"
+          if ! printf '%s\n' "$GOT" | grep -qF "/$CANDIDATE "; then
+            echo "::error::os in the candidate layer is not this checkout's @objectstack/cli@$CANDIDATE"
+            exit 1
+          fi
+
+      # Step 3 of 3: the scaffolded Dockerfile, built whole and booted.
+      #
+      # The blank template ships its own Dockerfile / docker-compose.yml /
+      # .dockerignore, so build the generated project as-is rather than a
+      # hand-kept copy (the standalone examples/docker copy was removed in
+      # 6c28bac).
+      #
+      # PROVES: the template's Dockerfile, unedited, builds this project's
+      # artifact with this checkout's CLI and boots it under `os start` inside
+      # the official image's user, entrypoint, environment and healthcheck.
+      #
+      # DOES NOT PROVE: the image a user pulls, whose CLI is the published one
+      # (step 1). Scope, precisely: this is the `--skip-install` shape of that
+      # path, so the Dockerfile built here still carries the floating tag. A
+      # real `npm create objectstack` user ships the PINNED shape, which differs
+      # by exactly one FROM tag — asserted by the pinned-shape step above rather
+      # than built a second time here, since the layers below the tag are the
+      # ones this build already proves (#9117).
       - name: Docker build and run (scaffolded Dockerfile)
-        # The blank template ships its own Dockerfile / docker-compose.yml /
-        # .dockerignore, so build the generated project as-is rather than a
-        # hand-kept copy (the standalone examples/docker copy was removed in
-        # 6c28bac).
-        #
-        # Scope, precisely: this is the `--skip-install` shape of that path, so
-        # the Dockerfile built here still carries the floating tag. A real
-        # `npm create objectstack` user ships the PINNED shape, which differs by
-        # exactly one FROM tag — asserted by the pinned-shape step above rather
-        # than built a second time here, since the layers below the tag are the
-        # ones this build already proves (#9117).
         run: |
           cd "$RUNNER_TEMP/e2e-app"
           docker build --pull=false -t e2e-app .
@@ -559,7 +671,7 @@ jobs:
       # `build` is the gate every template must pass; `validate` is run only
       # when the scaffolded project defines it (the now-retired remote
       # templates did not always ship it), and `test` likewise: a published
-      # scaffolder older than the starter's `note.test.ts` declares none.
+      # scaffolder older than the starter's test (`starter.test.ts`) declares none.
       - name: Gate the generated project
         run: |
           cd "$RUNNER_TEMP/canary-app"
