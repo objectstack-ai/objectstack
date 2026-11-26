@@ -531,17 +531,26 @@ jobs:
       #
       # The candidate layer is the official image from step 1 with that build
       # stage's node_modules copied in at the same path and its `.bin` first on
-      # PATH, so `os` in the layer is this checkout's CLI, installed for the
-      # image's own Node and libc. It is tagged as the runtime image the
-      # scaffolded Dockerfile's final stage names, so step 3 builds FROM it.
+      # PATH. It is tagged as the runtime image the scaffolded Dockerfile's
+      # final stage names, so step 3 builds FROM it.
+      #
+      # Which `os` answers is asserted by its RESOLVED PATH, not by its version:
+      # outside pre mode this checkout's CLI version equals the published one
+      # step 1 installed globally, so a version match cannot tell the shadowing
+      # CLI from the global one. The path is exported for step 3, which asks
+      # the same question of the image that actually boots.
       #
       # PROVES: the scaffolded Dockerfile's build stage installs and builds the
-      # project from this checkout's packages, and the candidate CLI runs inside
-      # the official image.
+      # project from this checkout's packages, and `os` in the layer is the
+      # build stage's CLI, which runs inside the official image.
       #
       # DOES NOT PROVE: anything about the official image's global CLI (step 1
-      # covers what can be covered), or that the candidate CLI reaches the
-      # image's global `pg` / `mysql2` — the boot below uses SQLite.
+      # covers what can be covered); that the candidate CLI reaches the image's
+      # global `pg` / `mysql2` (the boot below uses SQLite); or that the build
+      # stage's native modules built. `better-sqlite3` compiles with node-gyp
+      # at install, and the build stage's base ships no Python, so its install
+      # step fails there and the copied tree may carry no native addon (step 3
+      # prints the storage driver the container booted with).
       - name: Build the candidate runtime layer (scaffolded build stage + official image)
         run: |
           cd "$RUNNER_TEMP/e2e-app"
@@ -583,6 +592,14 @@ jobs:
             echo "::error::os in the candidate layer is not this checkout's @objectstack/cli@$CANDIDATE"
             exit 1
           fi
+          CANDIDATE_OS="$BUILD_DIR/node_modules/.bin/os"
+          RESOLVED=$(docker run --rm "ghcr.io/objectstack-ai/objectstack:$RUNTIME_TAG" sh -c 'command -v os')
+          echo "os in the candidate layer resolves to: $RESOLVED"
+          if [ "$RESOLVED" != "$CANDIDATE_OS" ]; then
+            echo "::error::os in the candidate layer resolves to '$RESOLVED', not the build stage's $CANDIDATE_OS — the image's own global CLI would answer instead of this checkout's"
+            exit 1
+          fi
+          echo "CANDIDATE_OS=$CANDIDATE_OS" >> "$GITHUB_ENV"
 
       # Step 3 of 3: the scaffolded Dockerfile, built whole and booted.
       #
@@ -595,8 +612,17 @@ jobs:
       # artifact with this checkout's CLI and boots it under `os start` inside
       # the official image's user, entrypoint, environment and healthcheck.
       #
+      # Before it boots, the built image is asked which `os` its CMD resolves:
+      # it must be the candidate CLI step 2 placed, never the global one.
+      #
       # DOES NOT PROVE: the image a user pulls, whose CLI is the published one
-      # (step 1). Scope, precisely: this is the `--skip-install` shape of that
+      # (step 1). Nor the template Dockerfile's `npm ci` branch: this job
+      # installs the project with pnpm, so the build stage takes the pnpm
+      # branch, and no job on a pull request builds the `npm ci` branch any
+      # more. Nor native SQLite: the driver line printed after the boot names
+      # the storage driver the container was configured with, and with no
+      # native addon built (step 2) the boot is not evidence that one loaded.
+      # Scope, precisely: this is the `--skip-install` shape of that
       # path, so the Dockerfile built here still carries the floating tag. A
       # real `npm create objectstack` user ships the PINNED shape, which differs
       # by exactly one FROM tag — asserted by the pinned-shape step above rather
@@ -606,6 +632,12 @@ jobs:
         run: |
           cd "$RUNNER_TEMP/e2e-app"
           docker build --pull=false -t e2e-app .
+          RESOLVED=$(docker run --rm e2e-app sh -c 'command -v os')
+          echo "os in the image that boots resolves to: $RESOLVED"
+          if [ -z "${CANDIDATE_OS:-}" ] || [ "$RESOLVED" != "$CANDIDATE_OS" ]; then
+            echo "::error::os in the e2e-app image resolves to '$RESOLVED', not the candidate CLI '${CANDIDATE_OS:-<unset>}' — the boot below would run a CLI this checkout did not build"
+            exit 1
+          fi
           # The fixed container NAME and the fixed HOST PORT below both stay,
           # and they are a different animal from the in-process port shift the
           # two `os start` blocks guard against (#9779). Docker declines both
@@ -638,6 +670,8 @@ jobs:
           if [ -z "$ok" ]; then
             echo "::error::container never became healthy"; docker logs e2e; exit 1
           fi
+          echo "storage the container booted with (from its boot banner):"
+          docker logs e2e 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -E 'Database:|Driver:' || echo "  (the boot banner names no Database:/Driver: line)"
           docker rm -f e2e
 
   registry-canary:
