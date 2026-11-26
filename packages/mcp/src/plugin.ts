@@ -36,7 +36,12 @@ import { MCPServerRuntime, setRuntimeObjectView, setRuntimeStdioPrincipal } from
 import { PACKAGE_VERSION, DEFAULT_SERVER_VERSION } from './package-version.js';
 import type { MCPServerRuntimeConfig, McpMergedMetadataRead } from './mcp-server-runtime.js';
 import type { ToolRegistry } from './types.js';
-import { objectSchemaReadDelegateSource, type ObjectSchemaMaskSecuritySurface } from '@objectstack/metadata-core';
+import {
+  objectSchemaReadDelegateSource,
+  packageResolutionClosure,
+  type ObjectSchemaMaskSecuritySurface,
+  type PackageClosureRegistry,
+} from '@objectstack/metadata-core';
 import {
   callerObjectView,
   createStdioDataBridge,
@@ -246,6 +251,26 @@ function installedPackageNamespace(ctx: PluginContext): (packageId: string) => s
     }
     const manifest = (registry?.getPackage?.(packageId) as { manifest?: { namespace?: unknown } } | undefined)?.manifest;
     return typeof manifest?.namespace === 'string' && manifest.namespace !== '' ? manifest.namespace : undefined;
+  };
+}
+
+/**
+ * [ADR-0150 D3 step 2, ADR-0160 D8] A package's resolution closure — its
+ * declared dependency closure plus every `sys` package — walked by the one
+ * walk (`packageResolutionClosure`) over the engine's registry when a
+ * package-held skill's `context` names no pack of its own package. A host with
+ * no engine answers the empty closure: the skill then resolves only its own
+ * package's pack.
+ */
+function installedPackageResolutionClosure(ctx: PluginContext): (packageId: string) => ReadonlySet<string> {
+  return (packageId) => {
+    let registry: PackageClosureRegistry | undefined;
+    try {
+      registry = ctx.getService<{ registry?: PackageClosureRegistry }>('objectql')?.registry;
+    } catch {
+      return new Set<string>();
+    }
+    return registry ? packageResolutionClosure(registry, packageId) : new Set<string>();
   };
 }
 
@@ -963,7 +988,14 @@ export class MCPServerPlugin implements Plugin {
       // so a runtime `PUT /api/v1/meta/skill/<name>` reaches this surface.
       // [ADR-0150 D6] …and each package-held skill and agent named by its face
       // (`NS-NAME`), its package's namespace read from the engine's registry.
-      await this.runtime.bridgePrompts(metadataService, mergedRead, installedPackageNamespace(ctx));
+      // [ADR-0160 D8] …and a skill's `context` resolved from its package
+      // through that package's closure, read from the same registry.
+      await this.runtime.bridgePrompts(
+        metadataService,
+        mergedRead,
+        installedPackageNamespace(ctx),
+        installedPackageResolutionClosure(ctx),
+      );
     }
 
     // [#8034] BEFORE `start()`, with the resources and prompts: registering a

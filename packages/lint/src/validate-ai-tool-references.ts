@@ -50,6 +50,7 @@
  * positives (6 references resolve via the registry).
  */
 
+import { GET_RECORD_CONTEXT_TOOL_NAME, skillBindsRecordContextTool } from '@objectstack/spec/ai';
 import {
   MCP_DOOR_TOOL_NAMES,
   PLATFORM_PROVIDED_TOOL_NAMES,
@@ -60,6 +61,10 @@ import {
 import { recordsOf, suggestName } from './object-graph.js';
 
 export const AI_SKILL_TOOL_UNRESOLVED = 'ai-skill-tool-unresolved';
+/** [ADR-0160 D8] A skill's `context` names no context pack. */
+export const AI_SKILL_CONTEXT_UNKNOWN = 'ai-skill-context-unknown';
+/** [ADR-0160 D1 advisory, point 1] A skill reads packs without naming one, on an object with several. */
+export const AI_SKILL_CONTEXT_OMITTED = 'ai-skill-context-omitted';
 
 export type AiToolRefSeverity = 'error' | 'warning';
 
@@ -242,7 +247,82 @@ function projectedOverMcp(skill: AnyRec): boolean {
 }
 
 /**
- * Validate every `skill.tools[]` reference in a stack. Returns findings
+ * [ADR-0160 D8; D1 "Advisory reports", point 1's third condition] A skill's
+ * context-pack reference, judged against the stack's own packs
+ * (`stack.aiContexts`). Two verdicts, each a `warning`:
+ *
+ * - {@link AI_SKILL_CONTEXT_UNKNOWN}: `context` names no pack the stack
+ *   defines. At run time the prompt lists no record argument and the tool call
+ *   it would lead to is refused; no other pack is substituted (D8).
+ * - {@link AI_SKILL_CONTEXT_OMITTED}: the skill binds `get_record_context`
+ *   (by name or a matching wildcard) and declares no `context`, and some object
+ *   has more than one pack. The call it makes without `context` on such an
+ *   object is refused, listing the candidates (D4); the configuration is
+ *   legal, so this is advisory.
+ *
+ * A stack is one holder here: the pack names it declares are the ones its own
+ * skills resolve to first (ADR-0150 D3 step 1). A pack only a dependency
+ * package ships is not in this stack, and is reported as unknown.
+ */
+export function validateAiSkillContext(stack: AnyRec): AiToolRefFinding[] {
+  const findings: AiToolRefFinding[] = [];
+  if (!stack || typeof stack !== 'object') return findings;
+
+  const packNames = new Set<string>();
+  const packsByObject = new Map<string, string[]>();
+  for (const pack of recordsOf(stack.aiContexts)) {
+    const name = strName(pack.name);
+    if (!name) continue;
+    packNames.add(name);
+    const object = strName(pack.object);
+    if (!object) continue;
+    const names = packsByObject.get(object) ?? [];
+    if (!names.includes(name)) names.push(name);
+    packsByObject.set(object, names);
+  }
+  const severalPacks = [...packsByObject].filter(([, names]) => names.length > 1);
+
+  const skills = recordsOf(stack.skills);
+  for (let si = 0; si < skills.length; si++) {
+    const skill = skills[si];
+    const skillName = strName(skill.name) ?? `#${si}`;
+    const context = strName(skill.context);
+    if (context !== undefined) {
+      if (packNames.has(context)) continue;
+      findings.push({
+        severity: 'warning',
+        rule: AI_SKILL_CONTEXT_UNKNOWN,
+        where: `skill "${skillName}" · context`,
+        path: `skills[${si}].context`,
+        message:
+          `\`context\` names context pack "${context}", which this stack does not define, so the skill's MCP prompt ` +
+          `takes no record and its ${GET_RECORD_CONTEXT_TOOL_NAME} call is refused.` +
+          suggestName(context, packNames),
+        hint: 'Name a pack the stack defines under `aiContexts` (check the spelling), or remove `context`',
+      });
+      continue;
+    }
+    if (!skillBindsRecordContextTool(skill.tools)) continue;
+    // One finding per such object: each names its own packs.
+    for (const [object, names] of severalPacks) {
+      findings.push({
+        severity: 'warning',
+        rule: AI_SKILL_CONTEXT_OMITTED,
+        where: `skill "${skillName}" · context`,
+        path: `skills[${si}]`,
+        message:
+          `The skill binds ${GET_RECORD_CONTEXT_TOOL_NAME} without \`context\`, and object '${object}' has ` +
+          `${names.length} packs (${names.join(', ')}), so its call there without a pack name is refused`,
+        hint: 'Set `context` to the pack this skill works from',
+      });
+    }
+  }
+  return findings;
+}
+
+/**
+ * Validate every `skill.tools[]` reference in a stack, and each skill's
+ * context-pack reference ({@link validateAiSkillContext}). Returns findings
  * (empty = clean).
  */
 export function validateAiToolReferences(stack: AnyRec): AiToolRefFinding[] {
@@ -346,5 +426,6 @@ export function validateAiToolReferences(stack: AnyRec): AiToolRefFinding[] {
     }
   }
 
+  findings.push(...validateAiSkillContext(stack));
   return findings;
 }
