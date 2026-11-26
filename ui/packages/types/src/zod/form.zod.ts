@@ -1159,6 +1159,10 @@ export const FormFieldSchema = z.looseObject({
   // below carries that one rule (`CURRENCY_FIELD_SCALE_REFUSAL`).
   scale: stripImportedDefaults(SpecFieldSchema).shape.scale,
   currencyConfig: stripImportedDefaults(SpecFieldSchema).shape.currencyConfig,
+  // objectstack#35490 — the unit a `number` quantity (or a unit-code `text`
+  // field) is drawn with: `NumberField` and the text and number cells read it
+  // (ADR-0158 R1 display).
+  unitConfig: stripImportedDefaults(SpecFieldSchema).shape.unitConfig,
   minLength: stripImportedDefaults(SpecFieldSchema).shape.minLength,
   maxLength: stripImportedDefaults(SpecFieldSchema).shape.maxLength,
   pattern: z.string().optional()

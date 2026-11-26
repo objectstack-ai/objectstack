@@ -2093,6 +2093,15 @@ export interface FormField {
    */
   currencyConfig?: SpecField['currencyConfig'];
   /**
+   * The unit a quantity is drawn with (ADR-0158, objectstack#35490). On a
+   * `number` field, `{ unitMode: 'fixed', unit: 'KGM' }` gives every value one
+   * unit and `{ unitMode: 'record', unitField: 'unit_code' }` reads it off the
+   * record's own unit field. On a `text` field, `{ unitMode: 'code' }` marks
+   * the value itself as a unit code. The `number` widget shows the unit's
+   * name beside the value, at the unit's display decimal places.
+   */
+  unitConfig?: SpecField['unitConfig'];
+  /**
    * Minimum character length. The built-in `input` and `textarea` branches
    * put it on the native control as `minlength`, which the browser enforces
    * at submit. For a react-hook-form rule with its own message, write
