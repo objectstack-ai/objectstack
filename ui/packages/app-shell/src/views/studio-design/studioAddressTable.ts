@@ -35,6 +35,8 @@ import {
   STUDIO_HOME_PILLAR,
   STUDIO_ITEM_REVIEW_PARAM,
   STUDIO_ITEM_REVIEW_VALUE,
+  STUDIO_OVERVIEW_SECTION,
+  STUDIO_OVERVIEW_TAB_PARAM,
   STUDIO_OWD_OBJECT_PARAM,
   STUDIO_OWD_SECTION,
   type StudioPillarKey,
@@ -93,6 +95,13 @@ export const STUDIO_ADDRESS_FAMILIES: readonly StudioAddressFamily[] = Object.fr
     today: `/studio/<package>/${STUDIO_OWD_SECTION}[?${STUDIO_OWD_OBJECT_PARAM}=<object>]`,
     builder: 'studioOwdOverviewPath',
     meaning: "A package's organization-wide default sharing overview (objectstack#36905), optionally on one object. Not a metadata item and not a pillar.",
+  },
+  {
+    id: 'overview',
+    today: `/studio/<package>/${STUDIO_OVERVIEW_SECTION}[?${STUDIO_OVERVIEW_TAB_PARAM}=pending]`,
+    builder: 'studioPackageOverviewPath',
+    meaning:
+      "A package's own page, 概览 Overview (objectstack#37454, ADR-0084 as amended 2026-11-26): the menu's first entry, on its Info tab or its Pending tab. Not a metadata item: there is no package type.",
   },
   {
     id: 'org-scope',
@@ -284,6 +293,13 @@ export const STUDIO_QUERY_PARAMS: readonly StudioQueryParamRow[] = Object.freeze
     key: CATALOG_SCOPE_PARAM,
     values: ENVIRONMENT_SCOPE,
     meaning: "The area's environment scope: the cross-package leg; the area does not send it to a pillar.",
+    onMetadataAddress: 'verbatim',
+    keptOnRetiredInterfaces: false,
+  },
+  {
+    key: STUDIO_OVERVIEW_TAB_PARAM,
+    values: 'pending',
+    meaning: "The overview's open tab (objectstack#37454): `pending` opens 待发布 Pending, where the menu's badge leads; absent opens 信息 Info. Read on the overview only.",
     onMetadataAddress: 'verbatim',
     keptOnRetiredInterfaces: false,
   },

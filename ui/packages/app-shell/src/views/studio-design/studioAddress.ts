@@ -88,6 +88,26 @@ export const STUDIO_OWD_SECTION = 'owd';
 export const STUDIO_OWD_OBJECT_PARAM = 'object';
 
 /**
+ * objectstack#37454 (ADR-0084, amended 2026-11-26, 概览 Overview) — the route
+ * segment of a package's own page, 概览 Overview (`/studio/<package>/overview`):
+ * the menu's first entry. Not a metadata address: a package is not an item,
+ * and there is no `package` metadata type.
+ */
+export const STUDIO_OVERVIEW_SECTION = 'overview';
+
+/** The query key that names the overview's open tab (`?tab=pending`); absent opens 信息 Info. */
+export const STUDIO_OVERVIEW_TAB_PARAM = 'tab';
+
+/** The overview's tabs, in their order: 信息 Info, then 待发布 Pending. */
+export const STUDIO_OVERVIEW_TABS = ['info', 'pending'] as const;
+export type StudioOverviewTab = (typeof STUDIO_OVERVIEW_TABS)[number];
+
+/** The overview's tab a `?tab=` value names: `pending`, else Info (the default). */
+export function studioOverviewTab(value: string | null | undefined): StudioOverviewTab {
+  return value === 'pending' ? 'pending' : 'info';
+}
+
+/**
  * The retired pillars' route segments. objectstack#36909 — no pillar draws a
  * page any more: each address only redirects (`studioPillarRedirectModel.ts`).
  */
@@ -220,6 +240,15 @@ export function studioOwdOverviewPath(
   const query = new URLSearchParams(typeof options.query === 'string' ? options.query : options.query ?? undefined);
   if (options.object) query.set(STUDIO_OWD_OBJECT_PARAM, options.object);
   return studioPath(packageId, STUDIO_OWD_SECTION, null, { query, segmentEncoding: options.segmentEncoding });
+}
+
+/**
+ * A package's 概览 Overview, `/studio/<package>/overview`, on its Info tab, or
+ * on its Pending tab (`?tab=pending`, where the menu's pending badge leads).
+ */
+export function studioPackageOverviewPath(packageId: string, options: { tab?: StudioOverviewTab } = {}): string {
+  const query = options.tab && options.tab !== 'info' ? `${STUDIO_OVERVIEW_TAB_PARAM}=${options.tab}` : null;
+  return studioPath(packageId, STUDIO_OVERVIEW_SECTION, null, { query });
 }
 
 // ---------------------------------------------------------------------------
