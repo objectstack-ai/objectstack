@@ -374,6 +374,14 @@ describe('QA scenario round 1 (2026-11-09): correct replies the scorer failed', 
     expect(numbersIn('Rows 12-15 of 120.')).toEqual([12, 15, 120]);
   });
 
+  it('an ISO date joined by a Unicode hyphen states no figure either', () => {
+    // A typeset reply writes U+2011 (non-breaking hyphen) or U+2010 between the parts.
+    expect(numbersIn('September orders, 2026\u201109\u201101 to 2026\u201109\u201130, total 28.')).toEqual([28]);
+    expect(numbersIn('Filed on 2026\u201010\u201003 for 3 days.')).toEqual([3]);
+    // Not a date: a figure range joined by the same hyphen still reads.
+    expect(numbersIn('Rows 12\u201115 of 120.')).toEqual([12, 15, 120]);
+  });
+
   it("a date in the reply is no figure outside the persona's scope", () => {
     const input: PersonaRunInput = { object: 'leave_request', truth: { kind: 'scalar', value: 7 }, personaTruth: { kind: 'scalar', value: 3 }, hidden: {} };
     const g = gradePersonaRun(input, turn('You have 3 leave requests; the latest starts on 2026-07-06.\nSource: leave_request'));

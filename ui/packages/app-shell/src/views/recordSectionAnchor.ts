@@ -164,7 +164,7 @@ export function markSection(heading: HTMLElement): () => void {
   };
 }
 
-function scrollTo(el: HTMLElement): void {
+function scrollIntoStart(el: HTMLElement): void {
   if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'start' });
 }
 
@@ -175,12 +175,19 @@ function scrollTo(el: HTMLElement): void {
  * no candidate, or no candidate field drawn by then, nothing moves. Answers
  * the cleanup, which also takes the mark off: a page opened at another
  * section, or at the same one again, marks only the section it opens.
+ * `mayScroll` is asked at the moment the page would move; when it answers
+ * false the heading is still marked and nothing moves: the page is redrawn at
+ * a section it already opened (objectstack#37487 S5).
  */
 export function focusRecordSection(
   root: HTMLElement,
   candidates: readonly SectionCandidate[],
   settleMs: number = RECORD_SECTION_SETTLE_MS,
+  mayScroll: () => boolean = () => true,
 ): () => void {
+  const scrollTo = (el: HTMLElement): void => {
+    if (mayScroll()) scrollIntoStart(el);
+  };
   if (candidates.length === 0) return () => {};
   let done = false;
   let observer: MutationObserver | undefined;

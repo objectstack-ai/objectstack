@@ -1,5 +1,2743 @@
 # @object-ui/i18n
 
+## 19.0.0-next.0
+
+### Major Changes
+
+- 5cf9941: feat(i18n)!: the 67 translation keys `@object-ui/i18n@18.6.0` shipped that no code reads any more are retired in 19.0.0
+  
+  **BREAKING**: released keys are retired in 19.0.0. `@object-ui/i18n@18.6.0` shipped every key listed below; none of them is in the package any more, in any locale. No code in the platform reads them.
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The retired operands are translation keys in the published i18n catalogues: no packages/spec schema, registered node type, stored metadata row or ADR-0087 conversion surface names them, and nothing a metadata author writes changes, so there is nothing for objectstack migrate meta to rewrite -->
+  
+  If a deployment overrides one of these keys (in its own i18next resources, or a Studio catalogue it registers), that override no longer applies: nothing in the console or Studio asks for the key, so the overriding text is never shown. Remove the override, or move the text to the key the surface reads now.
+  
+  `@object-ui/i18n` is in the changesets `fixed` group, so this `major` moves every package in that group to 19, every `@objectstack/*` package included. The line's opening marker is a second `major` (on `@objectstack/spec`) in the same group; two majors in one fixed group still give one 19.0.0. In pre mode under `next` the first version step reads `19.0.0-next.0`.
+  
+  The list is reproduced by `node ui/packages/i18n/scripts/released-keys-removed.mjs` (the tag against `origin/main`, every locale and namespace the package publishes, nested keys flattened).
+  
+  ## Removed translation keys
+  
+  ### Language packs (`@object-ui/i18n`, `@object-ui/i18n/locales`), 32 keys
+  
+  Each key below is removed from all eleven locales: ar, de, en, es, fr, ja, ko, pt-BR, ru, zh-Hans, zh-Hant.
+  
+  - `appDesigner.fieldDesigner.trackHistory`
+  - `console.firstRunChecklist.confirm`
+  - `console.firstRunChecklist.currency.saved`
+  - `console.firstRunChecklist.currency.title`
+  - `console.firstRunChecklist.currency.todo`
+  - `console.firstRunChecklist.languageCountry.saved`
+  - `console.firstRunChecklist.languageCountry.title`
+  - `console.firstRunChecklist.languageCountry.todo`
+  - `console.firstRunChecklist.organizationName.action`
+  - `console.firstRunChecklist.organizationName.title`
+  - `console.firstRunChecklist.organizationName.todo`
+  - `console.firstRunChecklist.prefilled`
+  - `console.firstRunChecklist.timezone.saved`
+  - `console.firstRunChecklist.timezone.title`
+  - `console.firstRunChecklist.timezone.todo`
+  - `console.nav.design`
+  - `console.nav.phoneBarHint`
+  - `console.nav.searchMenu`
+  - `console.objectView.openAsPage`
+  - `console.objectView.personalizedParts.rowNumbers`
+  - `dashboard.exportCsv`
+  - `detail.collapseToDrawer`
+  - `filterBuilder.where`
+  - `list.recordOpen`
+  - `list.recordOpenDeclaredPage`
+  - `list.recordOpenDrawer`
+  - `list.recordOpenNote`
+  - `list.recordOpenPage`
+  - `list.rowNumbers`
+  - `sidebar.keepOpen`
+  - `view.switcher.all`
+  - `view.switcher.saveAsMyView`
+  
+  ### Studio namespace (`@object-ui/i18n/namespaces/studio`), 35 keys
+  
+  Each key below is removed from both locales the namespace ships: en, zh.
+  
+  - `designer.field.relatedList.parentFallback`
+  - `designer.field.trackHistory`
+  - `engine.edit.autoSaveOff`
+  - `engine.edit.autoSaveOn`
+  - `engine.edit.autoSavingShortly`
+  - `engine.edit.related`
+  - `engine.packages.installedApps.description`
+  - `engine.packages.installedApps.title`
+  - `engine.studio.autoSaved`
+  - `engine.studio.data.form.flowCreate`
+  - `engine.studio.data.form.flowEdit`
+  - `engine.studio.data.form.flowLabel`
+  - `engine.studio.data.form.layoutSource.fieldGroups`
+  - `engine.studio.data.form.layoutSource.fieldGroupsTitle`
+  - `engine.studio.data.form.layoutSource.formView`
+  - `engine.studio.data.form.layoutSource.formViewTitle`
+  - `engine.studio.designer.offForm`
+  - `engine.studio.designer.sectionDeleteTitle`
+  - `engine.studio.flowSavedNamed`
+  - `engine.studio.flowSaveFailed`
+  - `engine.studio.inspector.listView.kanbanCard.mode.drawer`
+  - `engine.studio.inspector.listView.kanbanCard.mode.newWindow`
+  - `engine.studio.inspector.listView.kanbanCard.mode.page`
+  - `engine.studio.openApp`
+  - `engine.studio.openAppPick`
+  - `engine.studio.openAppTitle`
+  - `engine.studio.owd.save`
+  - `engine.studio.owd.saved`
+  - `engine.studio.owd.saveNone`
+  - `engine.studio.pillar.access`
+  - `engine.studio.pillar.automations`
+  - `engine.studio.pillar.data`
+  - `engine.studio.pillar.interfaces`
+  - `engine.studio.pillar.metadata`
+  - `engine.studio.settings.highlightPreview`
+
+### Minor Changes
+
+- 0739dee: fix(objectql)!: a field that is `required` and hidden by its own `visibleWhen` is required only when shown, so one admin setting no longer locks every record outside the condition
+  
+  Clause-②: yes (narrowing + widening of the required write contract) — widened: an insert or update whose record a `required` field's own `visibleWhen` cleanly hides no longer needs that field, and an explicit null onto a row already shown and empty is accepted. Narrowed: a write that moves a record INTO the condition while that field is empty is refused; 18.5.0 accepted it.
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what moved is when the engine enforces required on a field that also declares visibleWhen. The one-line fix for a refused write is in the body: fill the field in the same write that moves the record into the condition. -->
+  
+  **BREAKING** for flows, bulk updates, imports and API PATCHes that move existing records into a `required` field's `visibleWhen` condition without filling the field. Such a write is now refused with `required` naming the field (on a bulk update, one such row refuses the batch). Fill the field in the same write. A field with `required` and no `visibleWhen` is unchanged.
+  
+  **What changed (ADR-0113 D1 and D5, amended).** A field that declares `required: true` and its own `visibleWhen` used to be enforced on every save. In Studio an administrator can add one in a few clicks, and from then on every record that fails the condition refused every write, even an edit of an unrelated field, naming a field nobody could see. The engine now judges such a field from its visibility on the write:
+  
+  - the predicate evaluates cleanly to anything but TRUE on the record (the stored row with the write over it), so FALSE, or `null` such as an unset boolean: the field is not required for that write, so a record outside the condition can be created and edited, and the form's clear-on-hide `null` is accepted;
+  - the predicate is true: the field is required by the same non-regression rule `requiredWhen` uses, against the prior record, which the engine now reads on update for objects with such a field;
+  - the predicate cannot be evaluated: it counts as shown, the field stays required exactly as before, and the server logs a warning naming the field and the fault.
+  
+  The predicate is evaluated with the acting user bound as `current_user`, so a role-gated field is judged per writer; a system write with no user counts as shown. A `formula` field it reads is computed over the record first, as a read of that record computes it. A formula that faults for a reason a read shares (an empty operand) is judged on the `null` a read serves; a formula whose read value the write path cannot know (it reads through a reference, calls `label()`, calls `can` on a write that picks no permission-gated option and so resolves no permission map, reads `current_user` on a system write with no user, or reads such a formula at any depth) counts as shown; the system-write case is logged as `no-acting-user`, as the direct `current_user` spelling is. Only the field's own `visibleWhen` is read: a field group's `visibleWhen` and form-view predicates are not.
+  
+  The refusal for such a field now comes from the rule pass rather than the record walk. A single-fault write gets the same `required` code and sentence; a write with several faults may name fewer of them in one `400`, or answer a dangling reference first, and a `beforeUpdate` hook now runs before the refusal and may fill the field.
+  
+  **A formula-driven `visibleWhen` on the form.** The form computes the object's formula fields over the record being edited before it judges the field rules (the form-side recompute in `@object-ui/core`, `@object-ui/components` and `@object-ui/console`), so it shows such a field where the server requires it. A formula the form cannot compute (it reads through a reference, calls `label()` or `can()`, reads `os`, or reads the user when nobody is signed in) leaves the field shown and required, and the server decides on save.
+  
+  **`@objectstack/lint`.** Three new warnings at `objectstack validate` and the object save door, on a `required` field with a `visibleWhen`: the predicate reads through a reference field (the server cannot evaluate it, so the field stays required everywhere); the predicate reads a `formula` field (with the counts-as-shown consequence when a formula it reads, at any depth, reads through a reference, calls `label()`, or calls `can`, which a write computes only when it picks a permission-gated option); and `storage.notNull: true` beside the pair (the column still refuses the null on a record outside the condition).
+  
+  **`@object-ui/app-shell`.** Studio's field inspector shows the reference-read and formula-read warnings under the Visible-when editor of a required field.
+  
+  **`@objectstack/spec`.** The `required` and `visibleWhen` descriptions on `FieldSchema` say how the two combine.
+- 61722e9: feat: Change Owner cascade — a relationship declares `transferBehavior: 'cascade'`, and the Change Owner dialog offers it as a tick
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #36713
+  
+  A Change Owner can now move related records along with the record, relationship by relationship.
+  
+  - **The declaration.** A `lookup` or `master_detail` field takes `transferBehavior: 'none' | 'cascade'`, beside `deleteBehavior` (omitted means `'none'`). `'cascade'` on the child's reference field to a parent says: when the parent's owner changes, the child records that point at it and are owned by the parent's previous owner may move to the new owner too. No other child records move; there is no filter key.
+  - **Refused where it could never act.** The key is refused on any other field type, `'cascade'` is refused on a reference to a `sys_` object and on a multi-value reference (`multiple: true`), and `'cascade'` is refused on a field of an object that does not offer Change Owner itself: one that is not structurally eligible (no reassignable owner), a `controlled_by_parent` detail (its access already follows its master), or one whose `userActions.transfer` is off. Each refusal names the field and the fix.
+  - **The request.** `POST /api/v1/data/:object/:id/change-owner` and `POST /api/v1/data/:object/change-owner` take an optional `cascade: [{ object, field }]` naming the relationships to move along (`data.changeOwner` / `data.changeOwnerMany` in `@objectstack/client`). A relationship that does not declare `'cascade'`, or whose child does not offer Change Owner, is refused `400 VALIDATION_ERROR` before anything is written; so is a cascade with a queue target. Each cascaded record is updated as the caller, so it needs the caller's own transfer grant on the child object. Each relationship's outcome in the answer's `cascade[]` lists every record the caller's write refused, with its id, code and sentence: a related record whose `owner_id` is locked on it (read-only, or under a `readonlyWhen` that holds) is refused `FIELD_NOT_ACCESSIBLE` and keeps its owner, as the record itself would be, while the record's own move stands. One call moves at most 500 related records; the records past that limit are counted in `remaining`, still with the previous owner, not listed. When a relationship's records could not be read, its outcome carries `readFailure` and none of them moved.
+  - **The candidates.** `GET /api/v1/data/:object/change-owner/cascades` (`data.changeOwnerCascades`) lists the relationships declared to an object whose child offers Change Owner. A child whose declared API exposure does not serve `update` is left out, and so is a child of a disabled package.
+  - **The Studio.** The field form and the object form's field rows offer `transferBehavior` beside `deleteBehavior`, on `lookup` and `master_detail` fields; the row's label and help text ship in the metadata-forms locale packs of `@objectstack/platform-objects`.
+  - **The dialog.** For a person target, the Change Owner dialog lists those relationships on which the explain engine allows the caller the `transfer` operation, one tick each, sends the ticked ones, and draws each relationship's outcome, every record it did not move included.
+  
+  A plain `owner_id` update is unchanged: the declaration is read only by the Change Owner action.
+- e6fa510: feat(approvals): an escalation deadline can count working time on an organization's working calendar (`escalation.clock: 'working_time'`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — skills/objectstack-automation/references/state-machines-and-approvals.md
+  
+  An approval node's `escalation` gains two optional keys (ADR-0157 D5):
+  
+  - **`clock`**: `'wall_clock'` (the default) or `'working_time'`. Under `wall_clock` nothing changes: `timeoutHours` counts elapsed hours from `created_at`, nights, weekends and holidays included, and every request already open keeps its deadline (a stored snapshot carries no `clock`). Under `working_time` the hours count only the working periods of a working calendar (`sys_work_calendar`), skipping its holidays and counting its make-up workdays: a request opened at 17:00 on a Friday with `timeoutHours: 4`, on 09:00-12:00 and 13:00-18:00 periods, escalates at 12:00 on the next working day.
+  - **`calendar`**: the code of the working calendar to count on. Left out, the request organization's default calendar counts. There is never a fallback to wall-clock hours.
+  
+  The approvals sweep and the request read share one deadline function. A `working_time` deadline is counted again on every sweep and every read and is never stored, so a holiday entered after a request opened moves its deadline; an escalation that already fired stays fired (single-shot, ADR-0042). When the calendar cannot count the deadline (no calendar has the code, the organization has no default, or the calendar is not maintained as far as the deadline needs), the request does not escalate, the next sweep tries again, and the request read carries a new additive field, `sla_due_refusal` (`code`, `reason` or `date`, `message`), in place of `sla_due_at`. The approvals inbox shows "Calendar can't compute" with the reason where the SLA countdown sits, in every console language.
+  
+  `@objectstack/lint` refuses a `calendar` written beside the wall clock (`approval-escalation-calendar-without-working-time`, error): nothing would read it. Whether the named calendar exists is the organization's runtime data and is never checked at publish. The Studio approval inspector offers the clock and, under working time only, the calendar.
+  
+  Not released alone: this ships in the same release as the working-calendar objects and service and the working-day formula functions (ADR-0157 D4).
+- bfd1049: fix(core, console): a banned user's hand-over follows each object's Change Owner switch, and the ban dialog says why a record stays
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  An object's Change Owner switch (`userActions.transfer`) now also decides whether the offboarding hand-over (`POST /api/v1/security/users/USER_ID/assigned-work/transfer`) moves the object's `owner_id`, and how the count (`GET /api/v1/security/users/USER_ID/assigned-work`) reports it. The hand-over reads the same resolution the Change Owner action refuses by (`resolveUserActionTransfer`), so the two never disagree:
+  
+  - An object that turns the switch off keeps its records' owners where they are. Before, the hand-over moved them.
+  - A `controlled_by_parent` detail that leaves the switch out keeps its owner (the default is off there), as before. A detail that sets `userActions.transfer: true` now has its owner handed over like any other object. Before, every detail's owner was skipped.
+  - The object's own user fields (an approver, an assignee) are handed over whatever the switch says.
+  
+  A kept owner is still counted. Before, a detail's owner was left out of the count; now its row answers `transferable: false` with `reason: 'transfer_off'`. A multi-valued user field answers `reason: 'multi_valued'`. `reason` is a new optional member of each `objects[]` row in `security.assignedWork.count`'s answer (`UserAssignedWorkSummary` in `@objectstack/client`, `UserAssignedWorkHoldReason` in `@objectstack/core`). It is present exactly when `transferable` is false.
+  
+  The ban dialog words each kept row by its reason. A kept owner reads "Not handed over: this object keeps the owner of each record (Change Owner is off for it)." (zh: 不会交接：该对象的记录负责人保持不变（该对象已关闭“更改负责人”）。). A multi-valued row keeps its own sentence ("Lists several people, so it cannot be handed over here."), and a kept owner never shows it. The new `console.assignedWork.ownerKept` key is in all eleven UI locales.
+  
+  To keep the old hand-over of an object you switched off, set `userActions.transfer` back on for it. Before this change the switch gated only the Change Owner action; it now gates that action and the hand-over, and nothing else: a plain `owner_id` write (an import, a hook, a `PATCH`) still needs only the transfer grant.
+- 8df7bf2: feat(spec): an object's `relatedLists` is its record page's tab list — only the listed related lists show, in order, the attachments, approvals and activity-stream tabs are placed by object name, and an entry can carry its list's title and columns
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  A record page's tabs are now declared on the parent object, in one place:
+  
+  ```ts
+  relatedLists: [
+    { list: 'quote_line', label: 'Line items', columns: ['product', 'quantity', 'unit_price', 'amount'] },
+    'task',
+    'sys_attachment',
+    'sys_approval_request',
+    'sys_activity',
+  ],
+  ```
+  
+  - **No `relatedLists` (or an empty one): nothing changes.** Every related list shows, in the derived order, then attachments, approvals and the activity stream.
+  - **A declared `relatedLists` now decides which tabs show**, not only their order. A related list no entry names shows no tab; before, it still followed the listed ones. Removing an entry removes its tab. Body tables a field group places in the overview (`fieldGroups[].relatedList`) stay at their group, and the tab such a `master_detail` table also keeps on an undeclared page shows only when an entry names it, and `relatedList: false` on the child's FK still hides a list.
+  - **This narrows the #35889 note** ("Its tab stays on the tab row too, with its count"): the tab of a `master_detail` child that a field group places in the overview stays only while the parent declares no `relatedLists`; once it declares one, that tab shows only if an entry names the child.
+  - **The three built-in tabs by object name**: `'sys_attachment'` (attachments; shown only when listed, and still only when the object enables files), `'sys_approval_request'` (approvals; still only on a record with requests, and when unlisted it follows the listed tabs), `'sys_activity'` (the one activity stream; when unlisted it closes the strip). A built-in is written only as its bare name: `{ list: 'sys_attachment', … }` is refused at parse. `'sys_comment'` and `'sys_audit_log'` are parts of the stream, not tabs: `os validate` warns (`related-list-stream-part`) and prescribes `'sys_activity'`. `'sys_attachment'` on an object without files warns (`related-list-attachments-off`).
+  - **An entry's own title and columns**: `{ list, label?, columns? }` wins over the child FK's `relatedListTitle` / `relatedListColumns`, which keep working unchanged. The columns are child field names, used wherever the list is drawn (its tab, and the body table a field group places); a dotted column (`account.industry`) walks the child's relationships, as `relatedListColumns` does, and a name that resolves to no field of the child is refused (`related-list-column-unknown`) by `os validate`, `os build` and the metadata write door.
+  
+  - **The generic object form** (metadata admin) edits `relatedLists` with its own chip input: a bare name and an object entry both show and both survive add and remove (the entry's title and columns beside its name; they are edited in Studio). Its help text states the tab-list meaning in every translated locale.
+  - **Studio** (object settings, Record page tabs): the editor lists the entries in order, the built-in tabs among them, and offers the built-ins not yet listed (attachments only when the object enables files). A relationship row's edit sets its own title and columns, and clearing both writes the bare name again. The relationships not listed are shown below as having no tab. A move, a removal or an add keeps every entry's object form and every built-in name.
+  
+  What to check in an app: an object that already declares `relatedLists` and leaves some related lists out now shows only the listed ones, and shows no attachments tab unless `'sys_attachment'` is listed. List every tab the page should keep, or remove `relatedLists` to show them all. A child list another package adds is hidden too until the parent names it, which a build accepts only when that package is in the parent's stack; letting a package place its own list is a later change. ADR-0087 semantic entry `related-lists-declared-is-tab-list`.
+- d33bf5a: feat(spec): an object extension says where the fields, groups and child lists it brings go (`place`), and a child list another package brings is no longer hidden by the parent's `relatedLists`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  An `objectExtensions` entry can now place what it brings on the object it extends:
+  
+  ```ts
+  objectExtensions: [{
+    extend: 'account',
+    fields: { tax_id: { type: 'text', label: 'Tax ID' } },
+    place: [
+      { field: 'tax_id', group: 'basic', after: 'industry' },
+      { group: { key: 'tax', label: 'Tax' }, after: 'basic' },
+      { list: 'contract', after: 'opportunity', label: 'Contracts', columns: ['name', 'amount'] },
+    ],
+  }],
+  ```
+  
+  - **No `place`: nothing moves.** Fields still arrive after the object's own, and an extension that writes no `place` serves exactly what it served before.
+  - **One merge, every reader.** The registry fold applies the placements once, after every contributor's fields are merged, so the record page, the forms and Studio show one arrangement. Uninstalling or disabling the package takes its items off and leaves the object's own order as it was.
+  - **Placement arranges what the parent declares.** A list placement applies when the extended object declares `relatedLists`; a group or field placement when it declares `fieldGroups`. On a parent that declares neither, its automatic arrangement stays and nothing is dropped: the list shows in the automatic tab order, and its entry's `label` / `columns` are not applied either (write `relatedListTitle` / `relatedListColumns` on your child object's lookup field to title it on every parent); the field shows among the fields, its `after` / `before` not applied. The boot log names each placement that did not apply, with the object and the package. It is the main channel: `os validate` names it too (`extension-placement-not-applied`, warning) only when the extended object is in the same stack.
+  - **Anchors and order.** `after` or `before`, not both; neither means the end. An anchor may be an item another placement brings, whatever order the two are written or registered in. An anchor nobody has puts the item at the end of its group, of the groups, or of the tabs (before a trailing approvals / activity-stream run), and `os validate` warns (`extension-placement-anchor-missing`). A list placement's `columns` are fields of the child, checked by `os validate` as a `relatedLists` entry's are (`related-list-column-unknown`). Several packages at one anchor follow ascending `priority`, then package name, so every build gives the same order. When the object itself already names the list or lists the field, its own position wins.
+  - **An extension places only its own items.** A field outside its own `fields`, a field the extended object declares (also one the extension redeclares to relabel it), a group key the extended object already declares, or a list (placed as a tab or by a group's `relatedList`) that is not a child object of its package pointing at the extended object is refused at parse or at `defineStack`, and skipped by the merge with a warning naming whose item it is, whichever door registered the extension. The extension keys `fieldGroups` and `relatedLists` are refused with a prescription naming `place`.
+  - **Shipped behaviour change (flips #35897's hiding):** a child list another package brings is no longer hidden by the parent's declared `relatedLists`. Placed, it sits where its package puts it; unplaced, it shows at the end of the tabs. "Another package" means the child and the parent both belong to a package and the two differ; a child of the parent's own package, or one no package owns, is still hidden until an entry names it. This narrows the #35897 note "A child list another package adds is hidden too until the parent names it … letting a package place its own list is a later change": that change is this one.
+  - **Studio** (object settings, Record page tabs) shows such a list read-only among the unlisted rows with a "from <package>" badge, and the preview draws it where the record page does.
+  
+  What to check in an app: on an object that declares `relatedLists`, every installed package's child lists of it now show, at the end of the tabs unless placed; name one in the parent's `relatedLists` to put it elsewhere, or set `relatedList: false` on that package's FK to hide it. Nothing in HotCRM changes meaning today: no module writes `place`, and no object declares `relatedLists`. Most HotCRM objects already declare `fieldGroups`, so a field or group placement there applies as soon as a module writes one; a list placement waits until the parent declares its `relatedLists` (follow-up #35902). ADR-0087 semantic entry `object-extension-place-and-cross-package-lists`; ADR-0146 D10 and ADR-0085 notes.
+- f2a990b: feat(spec): every step a flow drawing shows can be translated, under `flows.<flow>.nodes.<node_id>.label`
+  
+  Clause-②: yes (widening: a new translation key `flows.<flow>.nodes.<node_id>.label`; the new exports `FLOW_TECHNICAL_NODE_TYPES` and `isFlowTechnicalNodeType` from `@objectstack/spec/automation`; and `@object-ui/i18n`'s exported `FlowLabelTranslations` type gains the member `screenTitle`, and its `stepLabel` parameter accepts a `config`)
+  Metadata-protocol: added
+  Skills-docs: follow-up #36401
+  
+  A package can now translate the label of any flow step, not only a screen's heading and an approval step's label. A manual that embeds a flow (a `type: flow` metadata embed) lists its steps by label, and until now a start, decision, notify or end step had nowhere to put a translation, so a zh-CN reader saw those steps in English beside translated approval steps.
+  
+  - **The key.** `flows.<flow>.nodes.<node_id>.label`, keyed by the node's `id`, at any depth. It overlays the node's own `label` and is plain text. A `screen` keeps its `screens.<node_id>.title` and an `approval` its `approvals.<node_id>.label`, so one string keeps one key: `objectstack validate` points a `nodes` key over either at that key, and points a `screens` or `approvals` key over any other node at `nodes.<node_id>.label`. A key over a node the flow does not declare is refused. `nodes` was an unknown-key hint that suggested `screens`; it is now its own group.
+  - **Start and end steps are translated like any other.** Their labels are the author's words and often name an outcome or a trigger ("Approved", "On Task Created"), so nothing substitutes words of its own for them.
+  - **Missing translations are reported.** `os lint` and `os i18n check` (`i18n/missing-flow`) now ask for the label of every top-level step the embed draws at its default `detail: business` altitude, except screens and approvals, which they already asked for, and of a folded technical step where a drawn decision's branch list names it as the step the branch leads to (a decision whose branch runs a `script` first). `os i18n extract` scaffolds the keys. An app that ships translated locales gets new findings for its flows until it translates them.
+  - **The drawings read it.** The docs viewer's `type: flow` embed (`element:metadata_viewer`) and the Studio flow designer's canvas, nested region nodes included, now name each step by its translation in the reader's language, through the one resolution in `@object-ui/i18n`: `stepLabel` reads `approvals.<node_id>.label` for an approval, `screens.<node_id>.title` for a screen with no `config.title`, and `nodes.<node_id>.label` for any other node. A step the package leaves untranslated keeps its authored label. A decision's branch list names the step a branch leads to the same way.
+  - **A titled screen is named by its heading in the docs embed.** A screen that authors its own `config.title` shows that heading at run time, translated under `screens.<node_id>.title`, so the embed names it by the heading (translated where the bundle carries it) instead of its canvas label, which has no key. A heading with a `{{ }}` hole cannot be filled in a drawing, so such a screen keeps its authored label. `FlowLabelTranslations` gains `screenTitle` for this read. The Studio canvas keeps a titled screen's authored label.
+  - **One table for what business altitude hides.** `FLOW_TECHNICAL_NODE_TYPES` (and `isFlowTechnicalNodeType`) in `@objectstack/spec/automation` lists the node types `detail: business` folds away (`script`, `http`, `connector_action`, `assignment`, `get_record`, `create_record`, `update_record`, `delete_record`, `boundary_event`). The docs viewer folds steps by it and the coverage check asks for translations by it, so they agree on which steps a reader sees.
+- a23164e: feat(spec, ui): an object takes a colour from a fixed palette, and its icon is drawn as a white glyph on a square of that colour
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **`ObjectSchema.color` (new, optional).** One name from a closed palette of nine: `gray`, `blue`, `teal`, `green`, `amber`, `orange`, `red`, `pink`, `purple` (exported as `OBJECT_COLORS` and the `ObjectColor` type from `@objectstack/spec/data`). No free colour values: `color: '#ff0000'` is refused, and the refusal lists the nine names. An object without a `color` is drawn in the neutral `gray`. Nothing to migrate: every existing object stays valid and simply has no colour.
+  - **The AI blueprint carries it too.** `BlueprintObjectSchema.color` is the same leaf (required-but-nullable on `SolutionBlueprintStrictSchema`, like `icon`), and its rule asks the model to colour every object and give each object of one solution a different colour while the palette lasts. A producer of the STRICT shape must now send `color` on each object, `null` when it has none; the lenient shape a stored blueprint is read with keeps it optional.
+  - **`ObjectIconTile` (new, `@object-ui/components`).** Draws an icon name as a white glyph on a rounded square of a palette colour, in four sizes. Each name has a light-theme and a dark-theme value chosen so the white glyph keeps at least 3:1 contrast. `OBJECT_COLOR_TILE_CLASS` and `objectColorOrDefault` are exported with it.
+  - **Navigation draws objects as tiles.** In the sidebar, the app-home menu and the phone menu, every entry that opens an object is drawn as that object's tile: the entry's own `icon` when it names one, else the object's, on the object's colour. Dashboards, pages and links keep their line icons. `NavigationRenderer` takes a new `resolveTargetColor` resolver (`NavTargetColorResolver`) beside `resolveTargetIcon`; the console answers it from the object metadata it already holds (`useNavTargetColor`). A host that passes no `resolveTargetColor` gets its object entries as gray tiles where it had line icons.
+  - **The designer picks icon and colour together.** In the object's settings, the icon picker shows the nine colour swatches, and the trigger and every icon in the grid are previewed as the tile they become. The picker elsewhere (pages, apps, navigation entries) is unchanged: only objects carry a colour.
+  - The other places that draw an object's icon (list and record headers, search, related-record chips, the designer's object lists) switch to the tile in a follow-up release.
+  
+  `@objectstack/metadata-core`: the field-level-security reference table classifies the new `color` key as `keep` (a palette name names no field).
+  
+  `@objectstack/platform-objects`: the generic object form's metadata-form packs ship the new `color` row's label and help text in all 10 locales.
+- 8da2b7e: fix(fields): a lookup pick no longer copies an amount into a field in another currency; the field stays empty and the form says why
+  
+  Clause-②: yes (narrowing) — a cross-currency price copy that happens today stops and the line is left empty with a stated reason (ruled B); widened: three new `@object-ui/i18n` `lookup.autofill*` keys in every locale pack, new `@object-ui/fields` exports from `lookupAutofill.ts` (`planDeclaredLookupAutofill`, `crossCurrencyRefusal`, `amountCurrencyOf`, `pickedAmountCurrencyOf`, `withheldAutofillMessage`, `withLookupAutofillTargets`, `readLookupAutofillTargets`, `LOOKUP_AUTOFILL_TARGETS_KEY` and their types), an optional second argument on `onSelectRecord`, an optional trailing `currency` parameter on `declaredLookupAutofillPatch` and `lookupAutofillPatch`, and the optional `columnFields` prop on `GridField`
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what moved is what a pick copies in the browser. The fix for an author is in the body: the price on a line in another currency is entered by hand. -->
+  
+  **BREAKING** for forms and line-item grids that relied on a pick copying an amount across currencies. On a EUR invoice, picking a product whose price is in the home currency used to copy the number as euros (a $100 product became a €100 line). Nothing converted it. Now the price is not copied: the cell or field stays empty, and a note under the line (in a grid) or under the lookup (in a form) names the picked amount with its currency and the currency of the field, so the price can be entered by hand. The other fields of the same pick (a description) still fill.
+  
+  **The rule.** It applies to the grid's same-named copy (the column key `autofill`), to the grid's declared `lookupAutofill` pairs, and to the record form's declared pairs, on a pick and on a create form's opening fill:
+  
+  - an amount is a `currency` field or a `formula` returning `currency`; a `number` carries no currency and copies as before;
+  - both sides in the home currency (neither declares one) copy as before, also when no home currency is configured;
+  - otherwise the value copies only when both sides name the same known code: a `fixed` code, the code the record holds, or the code its `master_detail` parent holds (ADR-0144 D2 as amended), with the home currency counting as its configured code;
+  - a field that follows a record's currency while that record holds none yet is not filled, and the note says no currency is chosen yet.
+  
+  Nothing is converted at any rate, and no build-time check is added: the line's currency is known only while the form is open.
+  
+  **`@objectstack/spec`.** The describes of `FieldSchema.lookupAutofill` and of the inline grid column key `autofill` state the rule.
+  
+  **`@object-ui/fields`.** `planDeclaredLookupAutofill` returns the writes and the withheld values of a pick; `declaredLookupAutofillPatch` and `lookupAutofillPatch` keep returning the writes alone. `LookupField` hands a host that owns the pick (`onSelectRecord`) the referenced object's field map as a second argument. `GridField` takes `columnFields`, the child field behind each currency column, so a `fixed` code or a code on the line decides that column's currency as on the record form.
+  
+  **`@object-ui/plugin-form`.** The record form stamps the definitions of a lookup's `lookupAutofill` targets on the lookup's field metadata, each with the name the form shows for it, so the lookup can read each target's currency and names it as the form does. The line-item hosts hand their grid each currency column's child field.
+  
+  **`@object-ui/i18n`.** Three new `lookup.autofill*` sentences, in every locale pack.
+- 73f2cf4: feat(kanban): the board's own 视图设置, a lane header 「+」 and 「⋯」, and a lane statistic and card toggles on `KanbanConfig`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `KanbanConfigSchema` gains three optional keys, none with a default; a view that declares none of them renders as before:
+  
+  - `summary` — a lane statistic drawn at the foot of each lane (`KanbanLaneSummary`): `{ type: 'count' }`, or `{ type: 'sum', field }` of a number field over the cards the lane has loaded, not every record of the lane; `{ type: 'none' }` shows nothing. It takes precedence over `summarizeField`. A sum over a lane holding more cards than were loaded says so (「仅已加载的卡片」). The whole-lane sum, and average, minimum and maximum, wait for a server lane read (#36520).
+  - `showFieldLabels` — absent means `true`: a card names each field beside its value; `false` draws the values alone.
+  - `hideEmptyFields` — absent means `true`: a card leaves out an empty field; `false` keeps its line.
+  
+  On a board, the view settings show the lane field, which lanes show and in what order, the card fields (order, hide, add), the two card toggles and the lane-foot statistic, in place of the table's columns, group, row height and row colour. Each change applies at once and is held as the list's draft until Save. Each lane header gets 「+」 (a new record with the lane prefilled; an empty lane also gets a 「+ New」 row) and 「⋯」 (collapse, kept in this browser; hide). Hiding a lane moves its cards into 「未分类」, as `kanban.lanes` (#28211) always has, and the menu and the lanes list say so. The lane field picker offers select and radio fields; collapse is kept per reader, object and view. The Console now relays the view's `kanban.lanes`, which it used to drop, and both producers of the board node (`ListView` and `ObjectView#generateViewSchema`) relay the three new keys. `ObjectKanban` takes the host's `laneMenu` request (`KanbanLaneMenuRequest`). `@objectstack/lint` walks `kanban.summary.field` and refuses a `sum` over a field that is no number, a yes / no field included (`list-view-summary-field-type-refused`). Saving a board whose view declares no `kanban` block stores the lane field the board draws with the changed keys.
+- 8f141a2: feat(kanban): a lane's sum, average, minimum and maximum cover every record of the lane, computed in the query
+  
+  Clause-②: yes
+  Metadata-protocol: semantic
+  Skills-docs: follow-up #36422 (skills/objectstack-ui/rules/list-views.md teaches the board lane summary, now including avg / min / max)
+  
+  A stored `kanban.summary` of type `sum` now totals every record in the lane (computed in the query) instead of the loaded cards; where the board cannot ask the server, no figure is drawn.
+  
+  A board's lane foot statistic, `kanban.summary`, now takes `{ type: 'avg' | 'min' | 'max', field }` beside `none`, `count` and `sum`, and every one of `sum`, `avg`, `min` and `max` covers all of the lane's records:
+  
+  - **One grouped aggregate, no fetch-then-add.** The board asks ONE aggregate over its own query — its filter and its host's search, grouped by the lane field — through the data door a grouped list view's headers already ride (`DataSource.queryGroupHeaders`, `POST /data/:object/query`). A lane longer than its page (50 records) shows the whole lane's figure; the "loaded cards" label is gone. Records with no lane value, and records in a value that is no lane, are folded into the trailing "Uncategorized" lane. A lane with no record shows `0` for a sum and no figure for the other three; a lane that holds records but that the answer has no group for (the door can cut the group rows under a deployment's default page size) shows no figure rather than `0`. A whole answer needs the door to hand back that the rows were cut: follow-up #36870.
+  - **Under the reader's permissions.** The platform runs the aggregate with the reader's row filter, and refuses an aggregate over a field the reader may not read; the board asks nothing for such a field, and a refused read draws no figure.
+  - **No figure rather than a partial one.** A data source without `queryGroupHeaders`, or a filter the read cannot repeat, draws no `sum` / `avg` / `min` / `max` figure. Over cards a host hands to the board, a `sum` is still added up on the board and the other three draw nothing. Known gap, follow-up #36871: the list view hands a board whose lanes it cannot know before the query (lanes over a lookup field, a view with grouping) its fetched page, so there `sum` totals that page, unmarked.
+  - **`@objectstack/lint`** judges `avg`, `min` and `max` the way it judges `sum` (`list-view-summary-field-type-refused`): the aggregate × field-type table's row for that function over the field's declaration, less the boolean class, which it now reads from the spec (`BOOLEAN_VALUE_TYPES`) instead of listing `boolean` and `toggle` itself. The list view's lane-statistic picker reads the same class, and now offers and names `avg` (Average), `min` (Minimum) and `max` (Maximum) over the number fields it offers for `sum`; the locale packs carry the three names and drop the retired loaded-cards label.
+  
+  A stored `sum` keeps its key and its field; what it draws is now the whole lane's total where it drew a total over the loaded cards before, and no figure over a data source that cannot answer the lane read.
+- fed637c: feat(i18n): a flow screen with its own heading gets a translatable step name, `flows.FLOW.nodes.NODE_ID.label`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A screen node that sets its own `config.title` has a heading and a separate canvas label. Until now only the heading could be translated (`flows.FLOW.screens.NODE_ID.title`), so the label stayed in the authoring language. The docs flow embed and the Studio flow designer both draw that label.
+  
+  - **New key accepted.** `objectstack validate` now accepts `flows.FLOW.nodes.NODE_ID.label` over a screen whose `config.title` is a non-empty string. A screen with no `config.title` is still refused there and pointed at `screens.NODE_ID.title`, because its heading is its label and one string keeps one key. An `approval` node is still pointed at `approvals.NODE_ID.label`.
+  - **Docs embed.** The `type: flow` embed (`element:metadata_viewer`) names a titled screen by its heading, translated where the bundle has the heading. When the heading holds a `{{ }}` hole, which a drawing cannot fill, the embed now names the screen by the new key, and falls back to the authored label only if the key is missing.
+  - **Studio designer.** The canvas draws a titled screen's label from the new key.
+  - **Untitled screen with a hole.** If a translated `screens.NODE_ID.title` contains a `{{ }}` hole, the embed and the canvas now draw the authored label rather than the raw template.
+  - **Coverage.** `os lint`'s i18n coverage and `os i18n extract` ask for the new key on a top-level screen whose authored heading holds a `{{ }}` hole. These are the screens the embed draws by their label.
+  - **One branch rule.** `@objectstack/spec/automation` exports `flowDecisionEdgeBranch`, `FlowDecisionEdgeBranch` and `FLOW_DECISION_DEFAULT_BRANCH_LABEL`. They decide which out-edges of a decision a drawing lists as branches. The docs embed's branch list and the i18n walk's folded branch targets both read them, so the two can no longer disagree.
+  
+  Nothing to migrate. A bundle that does not use the new key keeps working.
+- 129e637: feat(i18n): console flow labels follow the server's declared fallback chain
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: none — the new member is a response field the console reads, not something a metadata author writes; no skills/ page teaches `GET /i18n/locales` or how the console resolves flow labels
+  
+  - **`GET /api/v1/i18n/locales` names the declared fallback chain.** `GetLocalesResponseSchema` (`@objectstack/spec/api`) gains an optional `fallbackChain: string[]`, and the runtime's `/i18n` domain fills it from the i18n service's `getFallbackLocale()` (the stack's `i18n.fallbackLocale`, else its `defaultLocale`), the same accessor the server's metadata translations hand the spec resolvers as `ResolveOptions.fallbackChain`. A service that declares no fallback (no accessor, or an empty answer, such as the core in-memory provider) serves no member. Nothing existing changes meaning.
+  - **The console loads the fallback locale's flow translations.** The console's language loader reads the chain and `sourceLocale` beside the active language's bundle and, unless the language is the authored one, fetches each fallback locale's bundle and keeps its `flows` group (`withDeclaredFlowsFallback`, `@object-ui/i18n`).
+  - **Flow labels walk the same locales as the server.** `activeFlowsBundle` returns the fallback locales' rows too, and the new `flowsResolveOptions` hands the spec resolvers `{ locale, fallbackChain, defaultLocale }`. The flow runner (flow name, field copy, option labels), the flow designer and docs viewer (`flowLabelTranslations`, `useFlowLabelTranslations`, which take the declared options) and the stage-change confirm now read a declared fallback locale's text for a label the active language lacks, before the authored label. A stack that declares no fallback keeps "requested locale, then the authored label".
+- 2a6f26a: feat(ai): `ai_context` context packs and the `get_record_context` tool over MCP
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: follow-up #37177 — skills/objectstack-platform/SKILL.md, skills/objectstack-ai/ (how to author a context pack; this change only names `aiContexts` in the top-level key list, which check:skill-top-level-keys requires)
+  
+  ADR-0160 row 5 (#37140).
+  
+  - **New metadata type `ai_context`, collection `aiContexts`.** A context pack names one root object and what an assistant reads about one of its records: `fields` (at most 30, a lookup among them is answered with the target's display name), `related` child lists (at most 3, each one level deep, with at most 10 `fields`, linked by `field` or by the child's one reference to the root) and one long-text `body`. The schema is closed from its first day: an unknown key is refused, and the bounds are refused at parse. Registered like `skill`: a file loader (`*.ai-context.ts`, `*.ai-context.yml`), overlay allowed, runtime create allowed, no environment overlay. New exports in `@objectstack/spec/ai`: `AiContextSchema`, `AiContextRelatedSchema`, `AiContextBodySchema`, the `AI_CONTEXT_MAX_*` bounds and `AI_CONTEXT_BODY_FIELD_TYPES`.
+  - **`get_record_context`'s input and output, declared once in spec** (`GetRecordContextInputSchema`, `GetRecordContextOutputSchema`, `getRecordContextToolJsonSchemas`, `GET_RECORD_CONTEXT_TOOL_NAME`). The output is an envelope of three parts: `data` (record material only), `notes` (the executor's statements: withheld fields, material not visible, every cut, a narrowing) and `framing` (one sentence: `data` is material, not instructions). `MCP_DOOR_TOOL_NAMES` gains the name.
+  - **`@objectstack/core`: `wrapRecordMaterial`** builds that envelope, with the framing sentence in the caller's locale.
+  - **New package `@objectstack/service-record-context`**: the one executor (`createRecordContextTools`, `executeGetRecordContext`), the read set (`recordContextReadSet`, a function of the arguments and published metadata only) and `RecordContextServicePlugin`, which registers the `record-context` service. Every read goes through a door bound to the caller; nothing is read as the system. Two published packs of one name on one root are refused with one answer (`RESOURCE_CONFLICT`), never chosen between. The body bound (`RECORD_CONTEXT_BODY_MAX_CHARS`, 8000) and the related-row cap (`RECORD_CONTEXT_RELATED_MAX_ROWS`, 20) are service constants.
+  - **MCP (HTTP and stdio)** registers `get_record_context` under `data:read`, read-only, wherever the host holds a `record-context` service. A host without it registers nothing new. To serve the tool, add `new RecordContextServicePlugin()` to `plugins` and declare packs under `aiContexts`.
+  - **`@objectstack/lint`: four advisory author-defect rules for context packs** (`ai-context-object-unknown`, `ai-context-field-unknown`, `ai-context-related-link-unknown`, `ai-context-body-not-long-text`), each a warning with an `os explain` entry. `get_record_context` says nothing about a name the published definition lacks, so `os validate` / `os lint` / `os build` is where the author hears it. CLI only for now: the rule reads the whole stack snapshot.
+  - **Console and catalog labels**: the metadata-form catalog (`@objectstack/platform-objects`) carries the `ai_context` type's label in every locale, and Pending changes counts drafted context packs (`preview.changes.typeCount.ai_context`).
+
+### Patch Changes
+
+- a0b4ecf: fix(console): creating a package answers with a toast naming the new package
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Creating a package (Studio's *New app*, the Studio package switcher's *New package*, and the Packages page) closed the dialog and moved on with nothing on screen saying the write landed. The create dialog now shows a success toast naming the new package by its display name: "Created package “NAME”." (zh: 已创建软件包「NAME」。). A refused create shows no toast and keeps its message in the dialog, as before; saving an edit is unchanged.
+  
+  New locale key: `engine.packages.create.created` in the studio catalogue (en, zh). No props or exports change.
+  
+  Revoke on a granted suggested binding in Studio Access already answers with its toast ("“SET” is no longer granted by default."); a new pin on the Studio mount holds it.
+- 1c05546: feat(plugin-grid): an aggregate bulk action that resolves with a `BulkActionResult` is reported per row: the rows it moved, the rows it refused with its own reasons, and the rows it did not confirm
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The grid's bulk executor now reads the resolve value of an `execution: 'aggregate'` bulk handler. When it is a `BulkActionResult` (`{ succeeded: string[], failed: { id, message }[] }`, `BulkActionResultSchema` in `@objectstack/spec/ui`), the result panel shows how many selected rows were moved, lists each refused row under its record with the handler's `message` (and in the error CSV), and lists every selected row the result names in neither list as "not confirmed", never as succeeded. Ids are read against the dispatched `params._selectedIds`: an id outside the selection is dropped, a duplicate counts once, an id in both lists counts as failed, and when one id is in `failed` twice the first entry's message wins. A rejection is unchanged: it stays one outcome for the whole selection.
+  
+  A handler that partly succeeds no longer has to reject to avoid being reported as full success: resolve with the per-row answer instead. The `[PLANNED — not enforced]` marker is removed from `BulkActionResultSchema`'s description and its reference page, and the "all-or-nothing" wording is removed from the `bulkActionDefs` description (`@objectstack/spec`) and the `BulkActionDef.execution` TSDoc (`@object-ui/types`).
+  
+  **Declared behaviour change.** An existing aggregate handler whose own return value carries a top-level `succeeded` or `failed` member in another form (for example counts, `{ succeeded: 2, failed: 1 }`, or only one of the two lists) was reported as full success and is now reported as "unreadable": the panel says the action finished but its result could not be read, prints no per-row count, and the grid re-reads its rows when the dialog closes. To keep the success report, return a value with neither member (a summary under another name), or return both lists in the `BulkActionResult` shape. A handler that returns nothing, or a value with neither member, keeps today's report.
+  
+  The widening is additive: three new keys in every locale pack `@object-ui/i18n` publishes (`grid.bulk.resultNotConfirmed`, `grid.bulk.notConfirmedRecords`, `grid.bulk.aggregateUnreadable`). No metadata key, value or default changes.
+- c3fb37a: fix(plugin-chatbot): a file over the chat composer's size limit is named to the user with the limit, instead of only reaching `console.warn`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The two widenings are additive: the new key `chatbot.composer.fileTooLarge` in every locale pack `@object-ui/i18n` publishes through `./locales`, and the optional `files` field on the `onError` argument of `PromptInputProps`, exported as `AIElements` from `@object-ui/plugin-chatbot`.
+  
+  A file picked, pasted or dropped into the chat composer that is larger than `maxFileSize` (10 MB by default) used to vanish: it did not attach and nothing told the user why. `ChatbotEnhanced` now shows a notice above the composer naming every refused file and the limit, in the user's language (new pack key `chatbot.composer.fileTooLarge`, in all eleven locales). The notice closes with its close button or on the next send, and a later refusal replaces it.
+  
+  The vendored `PromptInput` now reports every over-size file of a pick through `onError` with `code: 'max_file_size'` and the refused files in the new optional `files` field. Before, it reported only a pick where every file was over the limit; a pick that mixed sizes attached the small files and dropped the large ones with no report. An `onError` handler that ignores `files` sees one more call, for a mixed pick, with the same `code`.
+- c9b3f7a: feat(account): a Notification Settings page where each person chooses their own notification topics, channels, digest and quiet hours
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The Account app has a new **Notification Settings** page, under Inbox and only when the messaging service runs. It shows one row per notification topic and one column per channel. Each cell shows whether that notification reaches you on that channel, and where the answer comes from: your own setting, your organization's default, the built-in default, or a mandatory topic. Mandatory topics are always delivered and cannot be switched off. A channel the deployment cannot send on yet says so in its column header. Above the matrix you can set your digest and your quiet hours.
+  
+  - **The read: `GET /api/v1/messaging/me/preferences`.** This new door answers the signed-in person's *effective* preferences. The server computes them with the same resolver `emit` uses to filter (`PreferenceResolver.effectiveFor`), so the page shows what is actually sent and computes nothing itself. The door takes no parameters and answers only about the caller: there is no `user` parameter, and any parameter is refused `VALIDATION_ERROR` / `400`. It keeps the posture of `GET /api/v1/messaging/preference-options`:
+    - an anonymous caller gets `401`;
+    - a held sign-in gets `403`;
+    - a source it cannot read is `500` / `INTERNAL_ERROR`, never a partial or "everything on" answer.
+  
+    The door reads only what the answer needs: the caller's own rows and the organization's default rows, each by equality on `user_id` within the caller's organization. A read that comes back with more rows than its cap is a fault (`500`), never a page.
+  
+    The organization's defaults appear only as `source: 'default'` on the caller's own cells. No other person's row, and no row id except the caller's own, is ever answered.
+  - **The writes: your own `sys_notification_preference` rows, through the data door, as you.** `member_default`, the baseline set every signed-in person resolves (external members excepted), now carries a grant of read, create and edit on the object, with no delete. Two row policies come with it:
+    - `sys_notification_preference_self` binds every principal that holds the grant. Its row scope is `user_id == current_user.id`, and its write check is the same expression, so the row as written must still be your own.
+    - `sys_notification_preference_org_admin` widens organization owners and administrators back to every row of their organization. Its write check is `topic != null`, which holds on every row being created because `topic` is required with a default. If `topic` ever becomes optional, an administrator's create is refused, never widened.
+  
+    An ordinary member or a delegated administrator lists only their own rows. Their create with `user_id` omitted, empty or naming another person is refused `403` / `PERMISSION_DENIED`, as is moving their own row to another person or to the organization default.
+  - **Owners and administrators are unchanged.** They still list every row, create and edit the organization default, create and edit another person's row, and delete in the Setup grid.
+  - **App-authored grants are narrowed too.** `sys_notification_preference_self` carries no `positions` domain, so it binds every principal that holds a grant on this object, including through an app's own permission set. A role other than organization owner or administrator that an app grants this object reads and writes only its own rows, unless the app declares its own widening policy for that role.
+  
+  There is no "reset to the organization's default" button, because that needs a delete, which members are not granted. Changing your digest or quiet hours saves your own general setting, and the page says so beside the control. From then on, that setting applies in place of the organization's defaults to every topic and channel you have not set yourself.
+- 8896822: Clause-②: no
+  Metadata-protocol: none
+  
+  feat(app-shell): connect your Slack account on the notification settings page, and an admin Slack page in Setup
+  
+  The console side of Slack direct-message delivery (step 3 of the Slack DM work; the server doors shipped with `@objectstack/service-messaging`'s Slack link routes).
+  
+  - **Notification Settings: your Slack link.** Where the preference door lists the `slack` channel (only on a deployment that composes connector-slack), the page shows a Slack section. Without an install, or with an install whose token Slack refused, it says so and offers nothing. Otherwise **Connect Slack** asks `POST /api/v1/messaging/me/slack-link/proposal`; the page shows what the door answers: that a Slack user with your verified email was found (never whom), with **Confirm** (`…/confirm`) and **Cancel** (`DELETE /api/v1/messaging/me/slack-link`); or, when nothing was proposed, a sentence naming every reason the door does not tell apart (no verified email, no Slack user with it, or that Slack user linked to someone else). A confirmed link shows the Slack user and **Disconnect**. A refusal is shown in the server's own words (its `userMessage` when it carries one), and the section then reads the door again.
+  - **Setup's Slack page** (component `messaging:slack`, `/apps/setup/component/messaging/slack`): for an organization administrator holding `setup.write`, the capability the doors ask; anyone else sees what is needed and no door is read. It installs or sets again the organization's bot token (`PUT /api/v1/messaging/slack/account`) through a password input that always starts empty, removes the install after a confirm that says every linked person is told, and lists every link as served (person, Slack user once confirmed, when) with a confirmed **Remove** per link. When the list reaches the 10,000 links the server answers, the page says it may be incomplete.
+  - Every new sentence is in all eleven built-in locales (`slackLink`, `slackSetup`).
+- dc53d4a: fix(app-shell): Studio's "Explain access" says why Explain and Pick are disabled, on hover, on keyboard focus and to assistive technology
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  With no object chosen, the Explain button and the record Pick button were bare disabled buttons: no tooltip on hover, skipped by Tab, and nothing in the accessibility tree (Pick's only title was its own label, "Pick"). Both now sit in the shared `DisabledControlReason` wrapper the Studio form designer, create dialog and metadata Save already use: a focusable wrapper that opens a tooltip with the reason "Choose an object first", and both the wrapper and the button point `aria-describedby` at it. Each button keeps its own name; once an object is chosen both are plain enabled buttons, and a running Explain gives no reason because its label already says "Explaining…". The new string is in the Studio namespace catalogues (`en`, `zh`) of `@object-ui/i18n`.
+- ad15579: fix(plugin-dashboard): the dashboard table widget no longer offers an "Export CSV" download
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The dataset table and cross-tab widgets drew a download button that built a CSV in the browser. That file skipped the export grant and the export audit entry that list export enforces. The button, its CSV helpers and the `dashboard.exportCsv` label in every locale pack are removed. To take rows out, use list export, which checks the export grant and writes the audit entry. Report exports are unchanged.
+- bfd6b6b: fix(i18n): an approval rejection reads 驳回 in Chinese, on the runtime surfaces and in the designer's approval panel
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In Chinese, the approval runtime now names the reject decision 驳回 (zh-Hant 駁回), the word the flow designer gives the approval branch and the server notifications already use. Before, the designer's branch said 驳回 while its approval-node help and the approver's buttons said 拒绝 for the same decision.
+  
+  - `@object-ui/i18n`: the `approvalsInbox` strings in zh-Hans and zh-Hant: the inbox and record-bar buttons, the bulk and single confirm dialogs, the toasts, the status chip (已拒绝 → 已驳回), the history row, the keyboard hint and the send-back limit notice.
+  - `@objectstack/plugin-approvals`: the zh-CN labels of `sys_approval_request` (the `approval_reject` lever, its confirm question and success toast, the `rejected` status) and of the `reject` row of `sys_approval_action`; the zh-Hant bundle already said 駁回. The email action-link confirm and result pages read 驳回.
+  - `@object-ui/app-shell`: the approval node's zh panel in the flow designer: the multi-approver help, the status-mirror help, the escalation help and its `auto_reject` option label (自动拒绝 → 自动驳回; the stored `auto_reject` value is unchanged), and the revision-limit help. Its branch label and Problems hint already said 驳回; a zh-Hant session draws the same Simplified table.
+  
+  拒绝 stays where it means access denial or declining an invitation, in the AI tool approvals, and in the designer's end-node refused outcome and its API-key, bulk-update and audit-outcome refusals. Display text only: the stored `rejected` status and the `reject` action key are unchanged, and English and the other languages are untouched.
+- 9f352e8: feat(studio): the main area adapts when the Studio right slot opens: narrow left rails, a four-column permission matrix, a Records grid that shows its scrollbar, and a resizable right slot
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Left rails narrow.** While the right slot shows beside the Studio pillars and the middle region they leave, list and content together, is under 900 px, the Data, Automations, Interfaces and Access lists draw 52 px wide: each row shows the first character of its name, with the full name on hover. The 「»」 button at the top shows the whole list over the content until a row is picked, Escape or a click outside. Closing the slot or a wider window brings the full list back. Phones are unchanged.
+  - **Permission matrix (Access pillar, Objects tab).** When the matrix's pane is narrower than 1000 px, each object row keeps Create / Read / Edit / Delete as flat checkboxes. Export, Transfer, View all, Modify all and the read and write scopes move behind the row's "More permissions" button, which shows how many of those six are on ("2 on" / 「已开 2 项」) and opens them in a row beneath. The "All · Read only · None · Read & write" strip folds into one "Bulk" menu with the same four actions. At 1000 px and wider the matrix is the full flat grid it was. The folded controls are the same checkboxes and pickers as the flat columns, so a read-only set locks them the same way. The width rule is a CSS container query on the matrix pane, so it follows the right slot opening, closing or being dragged wider. Setup's permission set page draws a different table and does not fold.
+  - **Records tab (Data pillar).** The grid's horizontal scrollbar is drawn at rest instead of only under the pointer, so a pane the right slot narrows still shows there are more columns. Selecting a field by its column header, or from the field list, scrolls that column into view, clear of the frozen name column. Column widths, the frozen name column and the 400 px ceiling of a long text column are the runtime grid's, unchanged.
+  - **Right slot width.** The slot is resized from its left edge within 320–560 px, and the properties pane and the AI copilot each remember their own width in the browser (360 px and 420 px by default). A width both panes shared before this release is not carried over: each pane starts from its default once. The in-place widen of the copilot and the phone overlay keep their own widths.
+  - New `studio` namespace strings, in en and zh: `engine.studio.rail.expand`, `engine.studio.rail.collapse`, `perm.more.col` and `perm.more.count`.
+- fd471d3: fix(messaging): a member's own "no digest" or "no quiet hours" now beats the organization's default
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A member who chooses no digest, or clears their quiet hours, now keeps that choice even when the organization's default sets a digest or quiet hours. The organization's default is a default, not a floor. Before this release the member still got the organization's digest and quiet hours.
+  
+  - **Three states per field.** A notification preference's `digest` and `quiet_hours` are each one of: not set (empty), explicitly off, or a value. The most specific preference that sets the field decides it. A preference that leaves a field empty decides nothing for that field, so it keeps following the next preference: the default for all users, then none. Explicit off is `none` for the digest and `{ "off": true }` for quiet hours. An organization default that is explicitly off is the same as no default. After an explicit "no quiet hours", the member's digest still lands at midnight in the time zone of the organization's quiet-hours window (the next preference that holds one), or UTC when none does.
+  - **`digest` has no default value any more.** A preference created without a digest stores it empty, so it follows the organization's default. On a database created by an earlier release, the `digest` column still carries the old database default `none`. The messaging service writes an explicit empty digest on every insert that leaves it out, so the database default never applies. A write that skips the platform's engine (raw SQL, a bulk load straight into the table) still stores `none` on such a database. That stored `none` now means "no digest".
+  - **Stored rows keep their meaning.** On the first start of this release, every stored `digest = 'none'` is rewritten to empty, in every organization, once. The pass is recorded in `sys_migration` (`messaging-preference-digest-none-unset`) and never runs again, so a `none` chosen after the upgrade is kept. A stored `none` never took effect before, so no one's digest changes at upgrade. If you picked "none" by hand in Setup > Notification Preferences to opt out, pick it again after upgrading.
+  - **The Notification Settings page offers the opt-out.** "No digest" is always offered and saves `none`. Clearing the quiet-hours window and saving stores `{ "off": true }`. The two notes saying these choices were not offered are gone, in all 11 languages.
+- 6ffa816: feat(i18n): a count family for capability drafts in the pending-changes summary
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Every locale pack adds `preview.changes.typeCount.capability` (and its plural forms), so the console's pending-changes summary reads "2 capabilities" (`能力 2` in Chinese) instead of the raw type name when a publish carries capability drafts.
+- 7702f09: fix(lint, studio): warn about a required field's `visibleWhen` formula read only when the form cannot compute the formula
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `required` field whose `visibleWhen` reads a `formula` field used to draw a warning from `os validate` (and the object save door) and an advisory in Studio's field inspector for every formula it read. The form now computes the object's formulas over the record being edited, so for a formula it can compute the form and the server judge the same value, and that warning named no real problem. Both now fire only for a formula the form cannot compute:
+  
+  - **The server cannot compute it either.** The formula reads through a reference, calls `label()` or `current_user.can()`, or reads such a formula. The server counts the field as shown, so it stays required on every record. Same verdict as before, now stated on its own.
+  - **Only the form cannot compute it.** The formula reads `os`, or reads such a formula. The server computes it and can waive the field where the form still shows it and keeps it required. Before this change such a formula drew only the generic warning, which said the form computes it.
+  
+  Either message now says that the form's half holds for a form that computes the object's formulas. A form check that computes none judges the value it last read, and can hide the field or not ask for it.
+  
+  A formula that reads the acting user draws nothing, as before. Both sides compute it for a signed-in writer.
+  
+  Studio catalogue (en, zh): `designer.field.requiredVisibleWhenFormula` is removed. `designer.field.requiredVisibleWhenFormulaUnservable` is now a full sentence on its own. `designer.field.requiredVisibleWhenFormulaFormOnly` is new. The lint rule's location and severity (warning) are unchanged. No props or exports change.
+- 05e0eb8: fix(console): Notification Settings is read-only, with its reason, for a caller who cannot change their notification preferences
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An external member (the `org_external` identity, `external_default` permission set) could open the Account app's Notification Settings page and was shown every switch, the digest choice and the quiet hours as editable, yet each change answered `403`: that set grants no create or edit on `sys_notification_preference`. The page now reads the caller's own grant on that object from the console's permission answer (`/me/permissions`, through `usePermissions()`), and when the caller holds neither a create nor an edit grant it draws the same settings read-only: every control disabled, one visible line saying why (`notificationSettings.readOnly`, in every built-in locale), named by each disabled control as its accessible description, and no write sent.
+  
+  What does not change: a member and an organization administrator see and use the page as before. With no permission answer mounted, the page stays writable and the server's refusal decides, as every other console grant read does. No metadata key, value, default or permission changes; the server's refusal is unchanged.
+- c890070: feat(console): the Studio landing opens package management in one click
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Studio's landing (the App Builder home at `/_console/studio`) is now the visible door to package management. Every package card carries **Manage**, which opens the same detail sheet as the top-bar package switcher's "Package info & settings": Disable where the server says the package can be switched off (a module of an installed app, or your own app), Enable on a disabled package, and export. The title row gains an **All packages** link to the unfiltered Packages page. Before, the only way in from a menu was to open a package, open the package switcher and pick its last entry, so admins of code-loaded modules looked for Disable and did not find it.
+- 58d00db: fix(console): the About dialog names the ObjectStack version first, then the console build
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Help → About showed one row, the console build (a git short sha), and nowhere the ObjectStack version. The dialog now opens on an **ObjectStack version** row filled with exactly the `version` the server's discovery document answers (an operator's `OS_RUNTIME_VERSION` stamp where one is set), read through the shell's adapter from the discovery document the console already holds, so opening it sends no new request. **Console build** stays as the second row, so a deployment can still be traced to a commit. While the read is in flight the version row says it is loading; when discovery cannot be read or names no version, it says so in words ("Unknown version (the server did not report one)"), never an empty field.
+  
+  New locale keys `help.aboutVersion` and `help.aboutVersionUnknown` in all eleven packs, and `help.aboutDescription` now names both rows. No props or exports change.
+- 6a35635: feat(console): Change Owner on the record page, in a list's selection bar, and beside the read-only owner of the edit form
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A record whose object offers Change Owner now shows a **Change Owner** action in its page header. The action appears only where three things hold: the object can have its owner changed (it has a per-person owner that is not pinned read-only), the object's `userActions.transfer` switch is on, and the server's explain engine allows this user to transfer this record. A `controlled_by_parent` detail offers the action only once its author turns the switch on. Objects with `ownership: 'none'`, `managedBy` objects and `sys_*` objects never offer it, even to a platform admin.
+  
+  The action opens one dialog. You pick the new owner under the object's own label for its owner field. Where the object has an ownership queue, you can pick a queue instead. You can also ask that the new owner be notified. The dialog sends the change through `data.changeOwner` for one record and `data.changeOwnerMany` for several. Picking the record's current owner is refused in the dialog with the reason shown. A bulk change ends with a report: how many records moved, how many already had that owner, how many did not move, and each row that did not move with the server's own reason.
+  
+  A list's selection bar offers **Change Owner** for the selected rows, where the object's switch is on and the explain engine allows this user to transfer the object's records (one question per object, not per row, asked once a selection is open rather than when the list opens). The rows of such an object take a selection even when the user has no bulk Delete and the view authors no bulk actions, so the entry can be reached at all; where the verdict refuses, the bar draws no Change Owner. The server judges every row again. Rows that the switch's `visibleWhen` excludes are left out of the request, and the dialog says how many were left out.
+  
+  The Console's edit form now shows the owner, read-only, above the form's fields, with Change Owner beside it when it is offered. The owner field is still not part of what the form saves. Forms embedded outside the Console are unchanged: the owner line appears only where a host mounts `FormOwnerLineContext` (exported from `@object-ui/plugin-form` and `@object-ui/plugin-form/core`).
+  
+  New public surface, all additive:
+  
+  - `@object-ui/plugin-grid`: `ObjectGrid` takes two new optional props, `onBulkChangeOwner` (wiring it makes the rows selectable and adds the entry) and `bulkChangeOwnerOffered` (`false` holds the entry back while the rows stay selectable); the package exports the action name `CHANGE_OWNER_BULK_ACTION`.
+  - `@object-ui/plugin-list`: `ListView` takes and forwards both props.
+  - `@object-ui/plugin-form`: new exports `FormOwnerLine`, `FormOwnerLineProps`, `FormOwnerLineContext`, `FormOwnerActionTarget` and `FormOwnerLineHost`; `@object-ui/plugin-form/core` exports `FormOwnerLineContext`, `FormOwnerActionTarget` and `FormOwnerLineHost`.
+  - `@object-ui/plugin-detail`: `RecordOperation` gains `'transfer'`, so `useRecordVerdict` and `seedRecordVerdict` accept it.
+  - `@object-ui/i18n`: every console locale gains `grid.changeOwner` and the `console.changeOwner.*` block.
+- 9b3227f: fix(console): the first-run checklist on Home counts its done rows the way its progress line does, names the Setup app in the reader's language, and folds to one line when two rows or fewer are left
+  
+  Clause-②: yes (widening) — @object-ui/i18n adds console.firstRunChecklist.showDoneSplit; nothing removed
+  Metadata-protocol: none
+  
+  The progress line counts the required rows alone, while the control that unfolds the done rows counted every done row, optional ones included, so a managed environment could read "6 of 7 done" above "Show completed (8)". Once an optional row is done the control now names the two counts apart ("Show completed (6 required · 2 optional)"); with no optional row done it reads as before.
+  
+  The checklist's description, the built-in AI row's done line and the Connect an AI assistant row's line named "Setup" in English in every language; they now use the Setup app's own label in each pack (for example 系统设置, 系統設定, セットアップ, Configuración). English and German keep "Setup", which is their label.
+  
+  Above the page, once two rows or fewer are left to do, the card folds to one line: its title, its progress, each row left by its title and a Set button, and the close button. A language, timezone or currency row's Set opens the full card with that row's editor, and the card folds back once the editor closes; every other row's Set opens the page its row links to. The phone placement after the apps keeps its own fold. No row, completion rule or setting write changes.
+  
+  New locale key: `console.firstRunChecklist.showDoneSplit`, in all eleven packs.
+- fe75349: fix(approvals): the approval timeline names an unstaffed position by its label, and the platform's own rows read as the system's
+  
+  Clause-②: yes (widening) — @objectstack/plugin-approvals adds the optional `ApprovalServiceOptions.positionLabelSource`; @object-ui/i18n adds approvalsInbox.systemActor and approvalsInbox.actSystemNote; nothing removed
+  Metadata-protocol: none
+  
+  When a request goes to the organization's administrators because a position on its approver list has no holder, its timeline note named the position by its machine name ("岗位「crm_sales_manager」无人任职"). The note a reader is served now names it by its label: the reader's language pack (`positions.<name>.label`) first, else the position's declared `label`, else the name as before ("岗位「销售经理」无人任职"). The English the row stores for audit keeps the name.
+  
+  On the timeline, a row no person took read its actor as "—", and the routing, submitter-exclusion and no-approver notes read as "Commented". A row with no actor now reads its actor as "System", and a `comment` row with no actor reads as "System note". A person's comment keeps "Commented" and its author.
+  
+  New locale keys: `approvalsInbox.systemActor` and `approvalsInbox.actSystemNote`, in all eleven packs.
+- dab4712: feat(console): the 「All documentation」 page has the console's top bar, groups its books by app, and searches every article
+  
+  Clause-②: yes (widening) — @objectstack/client `meta.getItems` takes an optional `include` (`'content' | 'grants'`, sent as `?include=`) and exports its options type `MetaItemsListOptions`; @object-ui/i18n adds nine help.* keys (two of them plural, with their per-locale forms); nothing removed
+  Metadata-protocol: none
+  
+  - **The console's top bar on every portal page.** `/docs`, a book (`/docs/<book>`) and an article (`/docs/<book>/<article>`) are drawn in Home's frame, whose bar reads 「<product> / Documentation」 (the crumb links to the portal's index) and carries the search, the inbox, the assistant and the avatar menu, so the reader can go back to any app. The portal's own 「Documentation / <title>」 strip is gone.
+  - **Books grouped by app.** The page lists each app's books under the app's name, as the launcher names it: a book goes under the first app whose navigation links to it (a module's navigation contributions included), else under its package's app; books no app carries are listed last under 「Other documentation」. No card shows a package id; a package's docs with no authored book are named by their app. A platform package's books (`com.objectstack.*`, such as Setup's) are listed only under an app in the member's list that carries them, never under 「Other documentation」, so they are not listed for a member whose app list has no such app. This is what the page lists, not who may read a doc: the server's audience gate decides that, as before.
+  - **The subtitle and the counts read the session language** (「9 篇」, not 「9 articles」).
+  - **「Search all documentation」.** A search field on the page searches every listed article's title, summary and body, and lists the matches with the words marked in context; each opens the article in its own book. The bodies are asked once, the first time the reader searches (`GET /meta/doc?include=content`, through the same audience gate as the list). The query stays in the URL (`?q=`).
+  - **A hand-typed article URL whose book does not hold the article** (`/docs/<book A>/<article of book B>`) now opens the article in its own book; with no book that holds it, the article draws no previous/next pager instead of showing both ends at once. Inside an app, an article whose book is in no package now keeps its 「← Back to <app>」 link.
+  
+  `@objectstack/client`: `client.meta.getItems(type, { include })` and the environment-scoped `meta.getItems` send `?include=`; leaving it out sends nothing, as before. `@object-ui/app-shell`: `AppHeader` takes a `docs` variant and `DefaultHomeLayout` a `variant` prop for it.
+- 141a826: feat(console): an app's docs page has one navigation — the docs column — with the path to its book and the previous and next article
+  
+  Clause-②: yes (widening) — @object-ui/plugin-markdown exports MermaidEnlargeContext and MermaidEnlargeText; @object-ui/i18n adds 12 help.* keys; nothing removed
+  Metadata-protocol: none
+  
+  Inside an app, the documentation pages (`/apps/<app>/docs/…`) no longer draw the app menu beside the docs: the left column is the docs' own, with 「← Back to <app>」 at its top, a title filter, every book of the app's package (the current book open, the others folded, each with its article count; long titles wrap instead of truncating) and 「All documentation →」 at its foot. Every other docs page inside an app (the app's docs index, a book with no articles, a book or doc not found) carries the same 「← Back to <app>」 at its top. The app bar stays, and reads 「<app> / Documentation」; the separate 「Documentation / <title>」 bar under it is gone, and the path above the article names the book (Documentation › <book>). 「On this page」 marks the section being read as the page scrolls, and the article ends with its book's previous and next article. The article column is 720 px wide at 15 px, and a diagram carries an 「Enlarge」 control that opens it full size.
+  
+  `@object-ui/plugin-markdown` adds `MermaidEnlargeContext`: a host that provides its words gets the enlarge control on every rendered diagram; with no provider a diagram renders exactly as before. `@object-ui/app-shell` exports `matchAppBySegment` and `useServedAppLabel`, and `isAppDocsPath` beside `isRecordPagePath` from its `ConsoleLayout` module. New `help.*` keys in every shipped locale. No doc content, doc metadata, route or API changes.
+- 8145424: feat(i18n): the sign-in page and the in-app language menu offer one list, every interface language
+  
+  Clause-②: yes (widening) — @object-ui/i18n adds `appContentLanguages` to the i18n context and the locale key `console.localeSwitcher.appContentDefault` in all eleven packs; `offerableLanguages` is never `null` any more; nothing removed
+  Metadata-protocol: none
+  
+  The in-app language menu used to list only the languages the app declares (four on HotCRM), while the sign-in page, which has no session to ask the app with, listed all eleven interface languages. A language picked on the sign-in page (German, Korean) was then missing from the menu after sign-in.
+  
+  Both now list all eleven, as does the profile page's language card. A language the app's own content is not translated into stays selectable: the interface shows in it, and object, field and view names show in the deployment's default language. The menu row of such a language carries one muted line, "App content shows in the default language", and the profile card shows the same line under the picker when one is chosen. The sign-in page marks nothing, because nothing has been read about the app there.
+  
+  `offerableLanguages` on `useObjectTranslation()` is now every platform locale table language whatever the app ships. The app's list (`loadLocales`) feeds the new `appContentLanguages`: the table languages it covers, or `null` when not known (in flight, signed out, failed, or naming no table language). `GET /api/v1/i18n/locales` is unchanged and no language pack is added. The organization's default-language setting keeps the app's declared list.
+- 83a79e6: fix(app-shell, plugin-chatbot): the AI panel in an app has one title row, and its composer reads cleanly
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console's AI drawer title bar is one row: History, a 「···」 menu and a 「×」 Close. The menu holds the AI usage reading (with its upgrade or top-up entry when the pool runs low), Share, Expand / Restore side panel, and the Build Doctor. The Build Doctor is listed only for a user who may build (`manage_metadata`, the reading that already decides who gets the build composer). While the usage pool is running low or full, the 「···」 trigger carries a marker. The close button is the drawer 「×」, named Close, in both the side panel and the full window; closing still keeps the conversation for the next open. The phone sheet gets the same menu, without Expand.
+  
+  The pane row under the title keeps the agent label and the app chip, but no longer draws Share or the Build Doctor in the drawer. `ChatPane` gains `actionsInHost` for a host that offers them itself. The full-page chat and the Studio copilot are unchanged.
+  
+  In the composer:
+  
+  - the 「正在看」 chip sits on the input's top edge, inside its frame;
+  - the closed model picker shows the model's label alone, truncated, with the full label on its title (no provider, no `×N`). The list rows keep both;
+  - the 「↵ 发送 · Shift+↵ 换行」 hint stays on one line;
+  - the 「+」 attachment button and its menu item are named "Add attachment" (「添加附件」).
+  
+  An answer table's copy and download tools are named in the reader's language (「复制表格」, 「下载表格」 and their format variants) instead of streamdown's English defaults.
+  
+  New locale keys, in every pack: `console.ai.dock.close`, `console.ai.dock.more`, `chatbot.composer.addAttachment`, `chatbot.answer.copyTable`, `copyTableAsMarkdown`, `copyTableAsCsv`, `copyTableAsTsv`, `downloadTable`, `downloadTableAsCsv`, `downloadTableAsMarkdown`. The drawer no longer reads `console.ai.dock.collapse`.
+- e01b8be: feat(console): the list page's frame — a 44px page bar, a 40px view bar, a denser grid and per-column totals in the grid's own last row
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The object list page is redrawn around two bars and a denser grid (objectstack#35548, the first card of the list-page epic):
+  
+  - **Page bar, 44px.** The object's icon in one colour and its name on the left; ⋮ and 「+ 新建」 on the right. The object's description, Import and Favorite moved into ⋮.
+  - **View bar, 40px.** The view switcher is one trigger on the left, reading the view type's icon, the view name, the record count and a caret (the count beside the name returns, after objectstack#34603 removed it). 「筛选」「排序」「选项」 are text buttons on the right beside the search icon, and open the same panels as before; below `sm` they stay icons. The kanban and every other view type draw the same two bars. An empty condition row under the bar takes no height.
+  - **Grid.** A 32px header and 33px default rows, 13px on the header, the cells and the bar buttons, faint row lines, no rule after the first column, and the frozen-column shadow only once the grid scrolls sideways. The row ⋮ trigger is 24px so it fits the row. Lookup values read as small chips, money and number columns (a money formula with `returnType: 'currency'` among them) align right with tabular digits, and select labels keep their colour at lower saturation.
+  - **Totals.** Column summaries are drawn as the table's own last row, each figure under its column (so they line up at any width and are never covered by pinned columns), led by 「计数 N」; the separate footer line and its doubled colon are gone.
+  
+  `DataTableSchema` gains one host-only runtime slot, `summaryRow` (`{ lead?, cells }`), which `ObjectGrid` fills; like `rowGroups`, the zod face refuses it by name, so it is not authorable. New locale keys: `list.options`, `grid.summary.countLead`.
+- 238661f: feat(list): the list's options panel is a menu of second levels, and the view dropdown creates a view in place
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **The options panel (选项) is a menu.** Each row names a setting on the left and shows its current value on the right, and opens a second level: the view name, Layout, Fields (「已显示 N 个」), Grouping, Row color, Row height (紧凑 / 标准 / 宽松), and More (how records open, row numbers, inline edit). On a phone a Sort row is added, as before. The Layout level lists every layout the view offers as one choice each, at any count. The Fields level is the list's shared field list (the one 筛选 and 排序 open), as the view's field manager: a search box on top; the shown fields are listed in their order, can be dragged (or moved with the arrow keys) and hidden by their eye, and the hidden fields sit below, where one click shows a field again or adds a readable field the view does not list. Only fields the reader may read are offered. The footer reads 「恢复默认」 and 「刷新」, and — on one of the reader's own views that differs from what it stores — 「保存」 beside 「恢复默认」, which writes the list on screen into that view (as the 「已个性化」 marker's 保存 does); in the console 「恢复默认」 is the marker's reset, dimmed while there is nothing to restore. The view name at the top is renamed in place by the view's owner, or by an admin on a saved shared view; opening the menu does not put the cursor in it. Fields reorders the grid's columns through the same state a header drag writes, and Row height on a gallery picks its card size by name; every icon button has a name; the developer note under Open records is gone. These settings stay the reader's own preference, stored as before.
+  
+  **The view dropdown** keeps its search and lists one row per view, led by its type's icon, with the reader's own views (我的视图) and the shared views in groups of their own; a long name wraps instead of being cut. 「添加视图」 at the bottom turns the dropdown into a create card (the separate 「另存为我的视图」 entry and its name dialog are folded into it; the full Create View dialog stays reachable from 「管理视图」): a name, the view type (with icons), the one field the type needs (kanban: the group field; calendar: the date field), 「包含当前的筛选和排序」 while the list holds unsaved conditions (on by default), and — for a reader who may create shared views — a personal / shared switch. The one field a type needs defaults to one the list shows (a kanban groups by 阶段 on a list that shows it, not by a hidden status-like field). 「创建」 creates one of the reader's own views by default and opens it; a shared view goes through the existing draft-and-publish door unchanged. No machine name is asked for: a unique one is generated from the name. A kanban or gallery created this way lists the view's columns as its card fields, as the add-view door does.
+  
+  The fields count label (`list.optionsMenu.fieldsShown`) is a count family in every pack. Keys no surface reads any more are dropped from every pack: `list.recordOpenNote`, `list.recordOpenDeclaredPage`, `view.switcher.all` and `view.switcher.saveAsMyView`.
+- d96c878: feat(list): the object list page has no Actions column; a selection swaps the page bar, and a list with no declared pagination loads as it scrolls
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **No Actions column on the list page.** The list's rows carry no control: no Actions column and no "⋮" at the row end, on hover or at rest. A row's actions are reached by selecting it or by right-clicking it. Grids outside a list page (related lists, page blocks, the record drawer) keep their Actions column and their bottom bulk bar.
+  - **Selection in the page bar.** Ticking rows swaps the page bar to 「对象名 / 已选 N 条」, Cancel, and the actions for what is selected: one record shows its own row actions, two or more show the bulk actions. The first two are buttons (in the order the actions are declared, by their `order`), the rest are behind "⋮", and Delete is never a button. Cancel, or clearing the selection, brings the page bar back. The bottom bulk bar no longer floats over the list on the list page.
+  - **Context menu.** In a row's menu (its context menu, and the "⋮" where one is still drawn) Delete is the last item, after a separator, in the danger colour; a selection's menu closes with its destructive actions the same way.
+  - **Checkboxes.** The whole leading cell toggles a row, and Shift extends the selection over the rows between the last toggled row and this one.
+  - **Scroll loading.** A grid list view that declares no `pagination` draws no pager: it loads 50 rows and the next 50 as the list nears its end, and shows the match total beside the view name. With every loaded row ticked, the page bar offers 「选择全部 M 条」 (capped at 5000 as before). Opening a record on its own page and coming back returns to the same place in the list. A view that declares `pagination` keeps its pager. Footer totals are still computed by the server over every matching record.
+- b0c624a: feat(record-page): one tab per related list, and an Overview rail that sums up the other tabs
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The record page's tab row and its right column are redrawn (supersedes objectstack#28469):
+  
+  - **Tabs.** Overview, then one tab per related list in its order, then Attachments, Approvals and Activity last. Every tab is there at first paint and none moves when the counts land. A list with no records keeps its place, greyed, with no number. The width is the row's only fold: the tabs that do not fit go into 「更多 N ▾」, whose items keep their counts. Approvals carries a dot while a request waits, not a count. A tab that merges several tables (only an explicit page can write one) carries no count.
+  - **Overview.** The stage path and the key fields sit across the whole width on Overview only; every other tab draws its block in full in their place.
+  - **Right rail.** On Overview, the right column sums up the other tabs, in this order: Approvals, Attachments, Recent activity, then 「其他相关」 with a card for each related list that has records. Each card has a title (which opens its tab), a grey count and at most three rows. A card with nothing to show is not drawn, and there is no 「还有 N 个空关联」 line. Nothing in the rail is editable. A rail with no cards folds away. A drawer draws no rail and no right-column switch. The rail's rows come from the page's one read: it reads nothing more.
+  - **No band at the foot.** A page drawn as written that places no approvals or attachments panel gets them as tabs of its first tab strip, not as bands under the page. The header's approval tag opens the Approvals tab.
+  - **One approval band.** A page drawn as written whose details are split into several `record:details` nodes draws the record's approval band once, on the first body that reaches it, recall included.
+  
+  - **Reader arrangement leaves with the cards.** The related cards' ⠿ handle, ⌥↑ / ⌥↓ and 「隐藏」 are gone with the cards, so a reader can no longer reorder or hide a related list on the page. An order or hides already stored still apply, and 「恢复默认顺序」 / 「显示」 still undo them.
+  - **`?tab=related` is retired.** The single 「Related」 tab is gone, so a saved link carrying `?tab=related` opens Overview.
+  
+  `@object-ui/plugin-detail` adds `ApprovalBandOnceScope`. `@object-ui/i18n` adds the 「更多 N」 trigger and the rail's labels in every pack. Nothing an app authors changes.
+- 1e018d6: feat: edit a record and its line tables together, and lock a record's lines while an approval locks the record
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **A locked record's lines are locked too.** While a record is held by an approval that locks it, writes to its master-detail child rows are refused with `RECORD_LOCKED` (409), the same answer a write to the record itself gets: inserting a row under it, updating or deleting one of its rows, and moving a row into it or out of it (both ends of a reparent are checked). A multi-row write that touches any such row is refused as a whole, and a row whose parent cannot be read is refused when the parent object has a locking approval the writer's run does not own. The approval's own exemptions carry over: system writes and the flow run that opened the approval still write. The refusal names the record by its object's label ("This Opportunity is locked while an approval is in progress, …"). Lookup children are not affected. `@objectstack/plugin-approvals` binds the new `bindDetailRowLockHook` beside the record lock it already binds.
+  
+  **`@object-ui/plugin-form` exports the record-page body-table editor.** `RecordBodyTableEditor` draws a master-detail body table as editable lines (the `LineItemsField` grid, with the child columns, field permissions and add / remove rules the master-detail form uses) for a host's edit session (`RecordEditSessionContext`). `buildRecordEditBatch` folds a record's field changes and every table's lines into one batch (the `buildMasterDetailEditBatch` diff, table by table), and `attributeRecordEditRefusal` places a refused batch's reasons on the record's field or on the line whose write carried the refused field.
+  
+  **`@object-ui/i18n`** adds `detail.bodyTableRow`, `detail.bodyTablesReadOnlyBulk` and `detail.discardInlineEditsMessage` to every built-in pack.
+  
+  **`@object-ui/plugin-detail`** exports `RecordBodyTableEditorSlotContext`: while a host provides it, a `record:related_list` whose relationship id (`CHILD_OBJECT.FK_FIELD`) is in the slot's set draws the host's element in its place instead of the read-only list. The record page's edit state draws its body-table editors through it; no new node type is registered.
+  
+  In the console, Edit on a record page that draws master-detail body tables now opens the page's edit state: the fields become inputs, the body tables editable lines, and one Save writes all of it in one batch. Per-field inline edit stays on every record page, those included, and saves the record alone through its save bar. One mode runs at a time: the edit state offers no per-field inline edit, and pressing Edit while inline changes are unsaved first asks whether to discard them.
+- 6d86b43: fix(studio): Customize is offered only on a list view the read-only base ships
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  On a read-only base, an object's page in Studio lists every list view of the object, including views created in the app (the console's New view) and views the customization package adds. Customize declares an override of the base's view, and the server refuses that declaration for a view the base does not ship, so the first saved edit of such a view answered 403 ("declares an override of …, which ships no view named …"). Studio now reads whether the base ships the view from the layered read at the base (its code layer) and offers Customize only then. A view created in the app is read-only in Studio, and its panel says it is edited in the app, from Manage views › Edit view config; a view the base serves nothing of says the base does not ship it. Two new Studio strings carry those sentences, in English and Chinese.
+- a3a74f2: feat(record-page): dense field rows, one-line activity entries grouped by day, and one row per attachment
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The record page now fits more on one screen: fields read as one row each with the label on the left, the activity feed shows one line per entry under a day heading with a one-line comment box, and each attachment is one file row with its actions in a ⋮ menu.
+  
+  New locale keys in every pack: `detail.streamToday`, `detail.streamYesterday`, `detail.viewApproval`, `detail.replyToComment`, `detail.attachmentsDropHint`, `detail.attachmentsChooseFile`, `detail.attachmentActions`. `RecordActivityTimeline` takes an optional `onViewApprovals`; `RichTextCommentInput` takes an optional `compact`; `CommentBody` takes an optional `controlsClassName`. No metadata key, value or default changes.
+- 74d3d83: fix(console): a view added in an app is saved into that app, so its draft preview bar counts and publishes it
+  
+  Clause-②: yes (widening) — one new published language-pack key, view.savedOutsideApp, in all eleven packs (the fallback notice the maintainer's ruling 7024102451 names)
+  Metadata-protocol: none
+  
+  Add new view and Save as view used to save the new view's draft naming no package. The app's draft preview bar counts only the app's package and its customization package, so right after the create it said "no unpublished changes" while the draft was pending, and its Publish left the new view unpublished. A view created inside an app is now saved into the app: into the app's own package when that package is writable, else into its customization package (`BASE.custom`), which is created on first use. The bar counts the view at once, its Publish publishes it, and the view travels with the app's customization. Editing, discarding and publishing the view afterwards reach that same draft. Views saved without a package before this change keep their address. When the customization package cannot be used (an isolated multi-tenant deployment refuses a tenant administrator), the view is saved without a package as before, and a notice says that this app's draft bar does not count it and that it is published from Home. Reports, dashboards and pages are created as before.
+- 598a34d: Clause-②: no
+  Metadata-protocol: none
+  
+  fix(list): the list page lines up on one 16px left edge; the checkbox column is 40px at any width; no row numbers
+  
+  The list page drew five different left edges, and on a list with more columns than fit, the selection column was squeezed to the checkbox's own 16px, flush against the left of the page. Now the page bar's object icon, the view bar's view icon, the header's select-all box, every row's checkbox and the footer's record count all start 16px in, and the selection column is 40px (16px in, the 16px box, 8px before the first column) on a list that scrolls sideways, on one that fits, and after scrolling sideways and back. The view bar's last text trigger ends 16px in, where the page bar's button ends.
+  
+  The grid no longer draws row numbers unless a host asks for them (`showRowNumbers`): each row's leading cell is its checkbox, shown at rest rather than on hover. This applies to every grid, the list page, related lists and the designers' grids among them. The list page's Options menu no longer offers a 行号 (Row numbers) switch, the 「已个性化」 (Personalized) marker no longer names row numbers, and `ListView` drops its `defaultRowNumbers` host prop; the `list.rowNumbers` and `console.objectView.personalizedParts.rowNumbers` keys leave every language pack.
+  
+  A non-selectable grid with a row click drew a hover 「打开 ›」 (Open) button in its row-number cell; with row numbers off by default that button now appears only where a host opts into row numbers. Clicking the row, and Cmd/Ctrl-clicking it, still open the record.
+  
+  Removed from `@object-ui/plugin-list`'s exports:
+  - `ListViewProps.defaultRowNumbers`: `<ListView defaultRowNumbers={…}>` → delete the prop. Row numbers are off by default; a grid host that wants them passes `showRowNumbers` to `ObjectGrid`.
+  - `'rowNumbers'` in `ListPersonalizationPart`: an `onPersonalizationChange` handler or a label map keyed on it → drop that entry; the list no longer reports it. A grid whose authored columns all fail to resolve now says it renders "NO data columns" in its console diagnostic, since it no longer draws a row-number column.
+- 811858c: feat(list): a list's cells are selected by a click and edited by a double-click, Enter or typing, with no inline-edit toggle
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  Skills-docs: none — `skills/objectstack-ui/rules/list-views.md` already teaches that inline editing is on by default for a user who may update the object, with `userActions: { editInline: false }` as the opt-out, which the list page now does with no toggle; no skill teaches the toggle or a single-click edit.
+  
+  **The list page (`ListView`) has no inline-edit mode and no toggle.** Its grid is editable in place wherever the reader may update the object and the view does not declare `userActions.editInline: false`; a view's boolean `inlineEdit` still folds into that switch, so `inlineEdit: false` reads off and `inlineEdit: true` reads on. Before, a view that declared neither opened read-only with an "Edit inline" toggle in the toolbar and in the Display menu, the mode lasted for the session, and a click on a cell edited it. Both toggles are gone, and `ListViewProps.onInlineEditChange` is deprecated and never called; the console stops passing it.
+  
+  **The select-first cell model** (`data-table`, behind the new `GridCellSelectionProvider` in `@object-ui/components`; `ObjectGrid` mounts it when its host passes the new `cellSelection` prop, and `ListView` passes it for every `object-grid` view it draws, on the hosts listed below):
+  
+  - A click selects a cell (a ring around it) and neither edits it nor opens the record. A link the cell draws (the name, a lookup, a phone or an email) keeps its own click. A touch tap opens the record and never edits in place.
+  - Double-click, Enter or F2 edits, keeping the value with the caret at its end; typing a character replaces the value with it (a picker or a date opens instead); Backspace or Delete clears the cell and saves at once, and a required field keeps its value and says it is required (objectstack#36023).
+  - While editing, Enter commits and stays on the cell (objectstack#36023), Tab and Shift+Tab commit and move right and left, Escape cancels and keeps the cell selected; in a multi-line editor Enter is a new line and Ctrl/Cmd+Enter commits. Commits are the grid's staged edits, saved by the row's Save and Save All as before.
+  - On the selected cell the arrows and Tab move the selection, Space opens the record (a checkbox cell flips and commits instead, as a second click on it does), Ctrl/Cmd+C copies, Ctrl/Cmd+V converts the text to the field's type and commits it, and Escape clears the selection.
+  - An input method's composition is kept whole: keys pressed while composing, and the 229 Enter Safari raises after it, never commit, cancel or move, and a composition started on a selected cell opens the editor with the composed text. This guard applies to every `data-table` editor.
+  - A cell that opens no editor says why on the cell: the field is read-only, calculated or not editable in a list, the reader may not edit the field, these records or this record, the view turned editing off, or the record is locked by an approval. The approval lock is read from the approvals service's per-record lock when a cell of the row is selected, through the record page's rule (`resolveApprovalLock`); until it answers, the row's `approval_status` stands in only where the view fetches that column, which a view that authors its columns does only when a column, a row predicate or a grouping names it.
+  
+  Every grid a `ListView` draws has this model, because `ListView` passes `cellSelection` to each `object-grid` view: the console's object list pages, interface list pages, the object data page (`/apps/:app/:object/data`), the Studio Data pillar's records artboard, and every `list-view` block, whether an SDUI page node or a `ListView` on a `kind: 'react'` page; a grid no `ListView` draws mounts no provider and keeps its click-to-edit (`singleClickEdit`) and click-to-open behaviour unchanged: an authored `object-grid` node, `ObjectView`'s own grid (the `object-view` block, or a host that passes no `renderListView`), a related list, a dashboard table, the record picker and the designer's grids.
+  
+  On every `ListView` grid (the select-first model) the table's trailing edit column, which holds a changed row's Cancel and Save, is drawn only while a row has changes, so the list at rest ends on its last data column. `@object-ui/core` exports `resolveAffordanceGrant`, the grant half of `resolveAffordance`, which the list cell's read-only reason reads.
+  
+  New locale keys, in every pack: `table.cellReadOnly` and `grid.readOnlyReason.*` (nine reasons). No key is removed: `list.inlineEditShort` and `list.inlineEditLabel`, the toggle's words, stay in every pack, though the list no longer draws the toggle.
+- fac1e7d: feat(list): a list cell saves the moment it is committed, and Space types into the selected cell
+  
+  Clause-②: yes (widening) — new members on the `@object-ui/react` package entry: `createOwnWrites`, `OwnWritesContext`, `useOwnWrites` and the `OwnWrites` type, and an optional third parameter on `useDataInvalidation`; three new `table.*` keys in every `@object-ui/i18n` locale (`cellSaving`, `cellSaved`, `openRecordToFinish`); nothing removed or renamed
+  Metadata-protocol: none
+  
+  In a grid that mounts `GridCellSelection` (the select-first grid every `ListView` draws), a committed cell edit is now saved at once, as one update for that record:
+  
+  - **No save bar, no row Save/Cancel column, no amber row.** The cell shows a small spinner while the save runs and a check mark once it landed.
+  - **Only that row is redrawn**, from the record the write answered with, so a value a server hook rewrote shows as stored. The list is not read again, though the write is still announced to every other reader (the record's detail pane, related lists, counts): the grid holds the record in the list's `OwnWritesContext` registry for the length of its write, and `ListView` lets that one write go by. So a row whose new value would sort it elsewhere stays where it is until the next load (refresh, sort, filter or page change). The counts on group headers, read with the rows, follow on the next load too; the footer's whole-set summary is its own reader and still refreshes on the write.
+  - **A refused save keeps the typed value** and shows the server's reason on the cell. Esc puts the stored value back. Later edits on the same row are sent together with the refused one as one update. When the reason names a field the list does not show (a rule that needs another field), the notice offers to open the record.
+  - **The 409 conflict dialog is unchanged.** The next save on a row sends the version the previous save answered.
+  - **Space** on a selected cell now types a space and opens its editor, as any other key does. A two-state (boolean) cell still flips. The record opens from the title link or a touch tap; the "Space opens the record" key added in #35747 is gone, so a master-detail page opens its pane only that way too.
+  
+  `@object-ui/react` adds that registry: `createOwnWrites()`, `OwnWritesContext` / `useOwnWrites()`, and `useDataInvalidation(objectName, recordId, ownWrites)`, which skips a change naming a held record.
+  
+  Grids without `GridCellSelection` keep the staged save bar and its batch save unchanged.
+  
+  New `table.*` strings in every locale: `cellSaving`, `cellSaved`, `openRecordToFinish`.
+- 8500ee7: feat(list): confirm a state-machine move before a list cell saves it; the drawer's save bar says when the record changed elsewhere
+  
+  Clause-②: yes (widening) — `GridCellSelection` in `@object-ui/components` takes an optional `confirmCommit(row, columnKey, value)` member; nothing removed or renamed
+  Metadata-protocol: none
+  
+  In a grid that mounts `GridCellSelection` (the select-first grid every `ListView` draws):
+  
+  - **A move of a state-machine field asks first.** When an active `state_machine` validation rule of the object governs the field on update, a new value committed into its cell (picked in the editor, or pasted) opens a confirm naming the field and both values and saying saving may trigger related automation. Cancel writes nothing and the cell keeps what it showed; Change saves the value as any commit is saved. Focus goes back to the cell either way.
+  - **The generic seam:** `GridCellSelection.confirmCommit` is asked before a value that changes what a cell shows is staged or saved. A promise holds the write until it settles (`true` writes, `false` or a rejection writes nothing); `null` or `undefined` means no question, as before.
+  
+  On a record page or in a record drawer, `InlineEditSaveBar` now says so when the record is read again at another version while an inline edit session is open (a list cell beside the drawer saved it, say). The draft stays as typed, and Save writes it over the version now read, as it did before; only the note is new.
+- c00be39: feat(fields): in a list grid's cell editor, select, multi-select, tags, date, time and colour open ready to pick
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The widget contract `FieldWidgetComponentProps` gains two optional host keys, `inCell` (draw the face for a grid cell's editor) and `onCommit` (the user has finished: write the last `onChange` value and close). `FieldEditWidget` forwards both, and `ObjectGrid`'s cell editor passes them. A host that passes neither renders every widget exactly as before.
+  
+  In the cell editor of every grid `ObjectGrid` draws:
+  
+  - **Single select and status** show their option list at once, with a search box that filters as you type. The arrow keys move through the list, Enter or a click picks, and the pick is saved; the selection stays on the cell. With nothing picked, Enter commits as before and Escape cancels.
+  - **Multi-select** (and a select declared `multiple`) is the same list with check marks: each pick toggles, and the edit is saved when you move on.
+  - **Tags** list this record's tags with check marks; unchecking removes one, and text that matches no tag is added from the list's leading "Add" row (Enter).
+  - **Date and date-time** open their calendar at once while the typed value stays visible and editable in the text box. The calendar offers Today, Tomorrow, Next week (seven days from today) and Clear. On a date, picking a day or a quick pick saves and closes; on a date-time, a day keeps the calendar open for the time, as in forms.
+  - **Time** opens the browser's time picker when the editor opens.
+  - **Colour** shows the hex box first (Enter saves, Escape leaves) and a row of swatches plus the browser's colour picker; a swatch saves and closes.
+  - A value picked this way hands the keyboard focus back to the selected cell, and in a grid that edits on a single click, the click that picked it no longer opens the editor again.
+  
+  `@object-ui/i18n` adds the strings these faces show in every locale: `fields.datePicker.nextWeek`, `fields.datePicker.clearPick`, `fields.options.search`, `fields.options.noMatches`, `fields.tags.add`, `fields.color.swatches`, `fields.color.custom`.
+  
+  Forms, dialogs and the record page keep their current controls.
+- 5345905: feat(components): in a list's grid a read-only cell says it is read-only, a cell save is said in one live region, and a touch never edits a cell in place
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The widening is additive: the new key `table.cellSavedAnnouncement` in every locale pack `@object-ui/i18n` publishes through `./locales`.
+  
+  - **Read-only cells.** When the data table is a grid (`role="grid"`: a list page with the select-first cell model, or `keyboardNavigation`), a cell that opens no editor carries `aria-readonly="true"`, and so does the focus inside the selected cell, so a screen reader says "read only" on the cell it moves to. The selected cell adds the host's own facts (`GridCellSelection.describeCell`), asked as it becomes selected and again only when the row is re-read or the host hands a new value, never on each render; the rest read the table's own (`editable`, the column, the row). A plain table carries no `aria-readonly`. In a list, an approval lock or an update verdict that answers after the cell was selected is said on that cell at once, without the reader moving: the lock read re-renders the grid when it answers, and the grid hands the table a new value only when what its cell facts read changed.
+  - **Save results.** A table that saves each cell (`GridCellSelection` with `onRowSave`) draws one visually hidden polite live region for its whole life and says each saved cell there, by column name ("Saved: Amount"; new pack key `table.cellSavedAnnouncement`, in all eleven locales). Cells saved together are joined in the locale's list punctuation (`validation.formInvalidJoiner`: `、` in ja and zh); a column with no header is never named by its key (the region says "Saved"). A refused save is said once, by the cell's existing alert. The cell's saving/saved mark is no longer a live region of its own (it was mounted with its words and announced unreliably); it stays a named image.
+  - **Touch.** A tap on a cell that is not selected never edits in place: a lookup cell's edit button is not drawn for a finger, and a tap that lands on one drawn earlier for a mouse does nothing (the row ignores a click on a button). A tap elsewhere on the cell still opens the record, which is where a touch edits. A later click on the button with no pointer of its own (assistive tech) edits as before.
+- af566c2: feat(spec): `count_true` / `count_false` column summaries — a boolean column's Yes and No counts in the list footer and group headers
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `ListColumn.summary` accepts two more members, `count_true` and `count_false`: the number of rows whose boolean (or toggle) cell is true, and the number whose cell is false. A cell with no value is neither; it stays `count_empty`'s, so `count_true + count_false = count_filled`.
+  
+  Both are answered on the server with no new aggregation function: booleans aggregate as numbers on every backend, so `count_true` is `SUM(field)` and `count_false` is `COUNT(field) − SUM(field)`, read off the group header row (or the footer's whole-set row) by `deriveColumnSummary`. `COLUMN_SUMMARY_AGGREGATION`'s derived rows now carry `reads`, every node the member reads (`from` is its first); `columnSummaryNodeFunctions(mapping)` is the one reading of a row's nodes, which the group header compiler, the footer's whole-set query and the lint now share. `COLUMN_SUMMARY_FIELD_TYPES` / `isColumnSummaryCompatibleWithFieldType` say the two members apply to `boolean` and `toggle` only.
+  
+  `@objectstack/lint` refuses `count_true` / `count_false` over any other field type under `list-view-summary-field-type-refused` (an error, so `os validate` and the save door fail): over a number the same `SUM(field)` is a total, and the footer would print it as a count.
+  
+  `@object-ui/plugin-grid`'s footer menu offers Count of Yes and Count of No first on a boolean or toggle column, and only there; the footer draws them as `Yes 12` / `No 3`, from the whole matched set when the server answers it and from the page, labelled as the page's, when it does not. `@object-ui/i18n` adds the `grid.summary` keys `countTrue`, `countFalse`, `menuCountTrue` and `menuCountFalse` in every pack.
+- f909734: feat(ui): a resident footer row on list tables, where a reader who may change the view picks each column's calculation
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A list's table view now always ends in one footer row, aligned with the columns and held at the bottom of the table: the record count in its first cell, and under each column its calculation, if any, written as the calculation's name in the secondary text colour and the figure in the normal one, with a space and no colon (`Sum ¥1,234,500`). A `min` / `max` over a date reads Earliest / Latest. The list's own "N records" line at the foot of the page is gone from a table that draws this row; the data-cap notice stays there. A grouped table, the phone's card list and every other view type are unchanged.
+  
+  A reader who may change the open view clicks a cell to pick the column's calculation from one menu that lists what the field type allows (sum and average on numbers and amounts, earliest and latest on dates, the counts on any field), the current one ticked and None last. The console saves it as the column's `summary` on the view, and nothing else of the reader's layout. On a personal view it is saved at once and stays drawn. On a shared view the console saved, a reader who may edit it saves it as a draft through the view settings' own save: the draft save reloads the list, which then draws the published view again, so the pick shows for a moment and is drawn again, for every reader, once the draft is published. Until #35932, each pick's draft is built on the published view, so a second pick before Publish replaces the first in the draft: only the latest pick is published. The menu is offered on the columns the view itself declares; a column the reader added for themselves and a view that declares no columns draw the figures with no menu. A pick that is not saved is taken back, with the refusal said (a view a read-only package ships is refused this way: its changes go to the package's customization). A reader who may not change the view sees the figures and no menu.
+  
+  New host props, all optional and never authored metadata: `ObjectGrid` takes `residentSummaryRow`, `onColumnSummaryPick(field, summary)` (answer `false` to have the pick taken back), `summaryPickFields` and `onResidentSummaryRowChange(drawn)`; `ListView` takes `onColumnSummaryPick` and `columnSummaryPickFields`. `ColumnSummaryResult` gains `name` and `text`, the two halves of its `label`. `@object-ui/i18n` adds the `grid.summary` keys `earliest`, `latest`, `pageName`, `calculate`, `none`, `menuPercentEmpty` and `menuPercentFilled` in every pack.
+- c9b0a23: feat(service-storage): rename an attachment through a door by the attachment delete rule, and the Attachments tab names the uploader of other people's files
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Two additions, no answer narrowed:
+  
+  - **The rename door.** `PATCH /api/v1/attachments/:id` with `{ "file_name": "..." }` sets the name one `sys_attachment` row is listed under, by the attachment delete rule: the caller who uploaded it, or a caller the attachment update gate admits as an editor of the record it is attached to. The door reads the row as the caller first, so every attachment read rule applies; the uploader's rename is written on the caller's behalf with no edit grant, as the uploader's removal door does; anyone else's goes through the data engine as the caller, so the object's edit grant and the update gate judge it. It answers `{ id, file_name }` (200), and refuses `UNAUTHENTICATED` (401), `VALIDATION_ERROR` (400: a query parameter, a blank name, or any body key besides `file_name`), `RECORD_NOT_FOUND` (404: an attachment the caller cannot read answers as one that does not exist) and the update gate's `RECORD_NOT_ACCESSIBLE` (403) for a caller who can read the record but not edit it. Only the attachment row's name changes: the stored file, its bytes and the name a download carries are untouched. The package's exports are unchanged; `StorageServicePlugin` mounts the door beside the removal door.
+  - **The uploader, expanded.** The record page payload's `attachments` part (`POST /api/v1/data/:object/:id/page`) now asks its `sys_attachment` read with `uploaded_by` expanded, as the `activity` part expands its actor, and the Attachments panel's own list read does the same. The expansion is a read of `sys_user` as the caller: a reader who may read the uploader gets that user's row (its name), and a reader who may not keeps the stored id. A consumer of that part that compared `uploaded_by` with a user id now reads `uploaded_by.id` where the reader may read the user.
+  
+  The record Attachments tab shows the uploader's name on every row whose uploader the reader may read, and never shows a bare id. Its row menu offers Rename beside Delete, on the reader's own uploads and, to a reader who also holds the edit grant on `sys_attachment`, on every row, opening a name prompt; the new name is the one the list shows after a reload.
+  
+  `@object-ui/core`: the affordance-to-grant map gains the `attachmentRename` row (the edit grant on `sys_attachment`), which the panel asks for a row the caller did not upload.
+- f51578e: fix(app-shell): a decided approval step shows its step and decision in "Approval progress" instead of an empty card
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On an approval request's page, a request decided at the first step of its flow, or decided in a one-step flow, showed an "Approval progress" card with nothing in it: the step line drew only from two steps up, a single-approver step has no tally, and nobody is pending any more. The step line now draws a decided request's route even when it is a single step, and marks the request's own step with its decision (Approved, Rejected, Returned for revision, Recalled or Cancelled) instead of drawing a rejected, returned, recalled or cancelled step as the step in progress. A pending request still needs two steps for a line, as before. A progress card with nothing to draw (no line, no tally, nobody pending) is no longer drawn at all.
+  
+  New locale key: `approvalsInbox.statusCancelled` in every ui language pack. Inside `@object-ui/app-shell`, `ApprovalStepLine` gains an optional `decided` prop and its module exports a new `stepLineDraws` helper; neither is exported from the package entry, so the package's public exports are unchanged. No metadata changes.
+- 1d7015a: feat(record-page): a related list's tab moves left or right and hides, and 「更多」 restores the default order
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Reader arrangement is back.** The related cards' ⠿ handle, ⌥↑ / ⌥↓ and 「隐藏」 left the page with objectstack#35595, and with them the reader's way to reorder or hide a related list. This note supersedes the "Reader arrangement leaves with the cards" bullet of that release's note: 「左移」, 「右移」 and 「隐藏」 now sit on each related tab's own menu, 「恢复默认顺序」 sits in 「更多」 (in a drawer and an embedded pane too), and an arrangement already stored keeps applying.
+  
+  - **A related list's tab is its menu.** Open a list's tab and click it again (or press Enter, Space or ↓ on it): 「左移」 and 「右移」 move it one place among the related lists, and 「隐藏」 takes it off the row into 「更多」's hidden lists and returns to Overview. The open tab draws a ▾ to say so.
+  - **「更多」 restores the default.** While the order or the hidden set is not the default, 「更多」 ends with 「恢复默认顺序」: the default order with every list shown. It is in a drawer and an embedded pane too, which have no rail.
+  - **Fixed tabs.** Overview, Attachments, Approvals and Activity have no menu and never move.
+  - **One stored arrangement.** The tabs write the same per-reader, per-object arrangement the related cards wrote, so an order or hides already stored keep working, and the rail's 「已隐藏 N · 显示」 and 「恢复默认顺序」 still undo them.
+  
+  `@object-ui/i18n` adds `detail.recordTabMoveBefore` / `detail.recordTabMoveAfter` (左移 / 右移) in every pack. `@object-ui/plugin-detail` removes the unused `RelatedCardStack` and `useRelatedArrangement` modules (not exported from the package). Nothing an app authors changes.
+- 40e22f1: fix(approvals, list): a list cell no longer opens an editor before it knows the record's approval lock, and the list reads the locks of a page in one request
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **What a list user sees.** On a list that edits in place, a double-click, Enter, F2 or a typed key on a cell whose record's approval lock or edit permission is still being read no longer opens an editor that the server would then refuse on save. The cell says "Checking whether this record can be edited…", and when the answer arrives the same edit goes ahead by itself (with the typed key), or the cell says why it does not: the record is locked while it is in approval, or the reader has no permission to edit it. Selecting another cell in the meantime drops the wait. Moving the selection with the arrow keys no longer sends a lock request per row: the first cell selected on a page asks the locks of every row on it at once.
+  
+  **New route.** `POST /api/v1/approvals/records/:object/locks` with the body `{ "recordIds": ["<id>", ...] }` (at least one id, at most `APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS`, 200) answers `{ success: true, data: { records: [{ recordId, locked }] } }`, one entry per id in order. `locked` is what `GET /api/v1/approvals/records/:object/:recordId/lock` answers for that id, and `null` where that route answers 404: a record the caller cannot read and one that does not exist answer alike. Any other body (a key other than `recordIds`, an empty list, a non-string or blank id, more ids than the cap) and any query parameter are refused whole with `400 VALIDATION_ERROR`, never trimmed. A deployment whose approvals service does not implement the read answers `501`.
+  
+  **Contract and SDK.** `IApprovalService` gains the optional member `getRecordLocks(object, recordIds, context)`, entry `i` answering `recordIds[i]` exactly as `getRecordLock` does; the approvals plugin implements it in two reads whatever the page size (the caller's read of the ids, then one pending-request lookup judged by the record-lock hook's own judgement). `@objectstack/spec/contracts` exports `APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS`. `@objectstack/client` gains `client.approvals.getRecordLocks(object, recordIds)`.
+  
+  **Components.** `GridCellFacts` (the select-first table's per-cell facts) gains the optional `checking: { text, settled }`: while present, an edit asked on the cell shows `text` and is asked again when `settled` settles; a toggle, paste or clear shows `text` and writes nothing. A host that sets no `checking` sees no change.
+- d6be99d: feat(console)!: an object's list opens a record one way — the name opens the page, the hover icon opens the side panel; `navigation.mode` is deprecated
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/components#NavigationOverlayProps.maximizable, @object-ui/plugin-list#ListViewProps.recordOpen) the retired operands are a prop of the drawer component and a host prop of the list, in published ui package entries; no packages/spec schema, no registered node type, no ADR-0087 conversion surface and no stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that passed `NavigationOverlay` its `maximizable` prop or passed `ListView` a `recordOpen` choice. The maintainer ruled one way to open a record from an object's list, with no setting (「这样就不需要任何设置」), and deprecated `navigation.mode` (「废弃」).
+  
+  On a Console object list the record's name now opens the full record page, and the icon shown beside the name while the row is hovered (「在侧边打开」 / "Open in side panel") opens the record in the drawer over the list. There is no setting to choose between them: the Display menu's 「打开记录：抽屉 / 整页」 section and the browser-kept preference behind it are gone. A touch screen has no hover, so there the name opens the page. A ⌘/Ctrl or middle click on the name still opens the page in a new tab.
+  
+  The drawer is a card floating 8 px clear of the window's top, right and bottom edges, rounded and shadowed. Its full-width "maximize in place" state is gone (a reload lost it, and the full page is the wide face): the bar's one ⤢ opens the full page. The page's 「收为抽屉」 / "Collapse to drawer" hop is gone with it.
+  
+  A page the list opens remembers the list in its history entry (`location.state.from`): the list's URL (view, filters, sort, search, grouping, page), its view's name, the rows it showed and, new here, the count its query matched (`total`). A reload of the tab keeps it, and going back to that URL restores the list's scroll position. A page opened any other way carries none.
+  
+  `navigation.mode` (`NavigationConfigSchema.mode`) is deprecated on an object's list (`@deprecated`, `[DEPRECATED]` describe; ADR-0087 D3 semantic entry `navigation-mode-record-open-deprecated`). The key stays in the shape and every value still parses, so existing metadata loads. On an object's list (a list view, an object's `listViews`) `drawer`, `page` and `new_window` change nothing: a view that declares one behaves as a view that declares nothing. `none` keeps "rows open nothing", because a read-only list that started opening records would be a regression nobody chose; prefer `navigation: { preventNavigation: true }`. `navigation.openNewTab: true` stays live: on an object's list the record's name then opens the full page in a new tab, and the list stays. A page's blocks that carry `navigation` (a list block, the timeline, an embedded view) still honour `drawer`, `page` and `new_window` as before: keep the key there.
+  
+  The i18n keys `list.recordOpen`, `list.recordOpenDrawer`, `list.recordOpenPage`, `list.optionsMenu.recordOpenAlwaysPage`, `detail.collapseToDrawer` and `console.objectView.openAsPage` are removed from every pack, and `console.objectView.openInSidePanel` is added.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `NavigationOverlayProps.maximizable` TO nothing, in the components package: the drawer has no full-width state. Fix: delete `maximizable`; the drawer's ⤢ opens the full page.
+  - FROM `ListViewProps.recordOpen` TO nothing, in the list plugin: the Display menu has no Open records section. Fix: delete `recordOpen`; the list opens a record one way.
+- 0a1b69c: feat(approvals): a decided request's step line says where the record's approval went next: on to a later step, or ended
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The single approval request read (`GET /api/v1/approvals/requests/ID`) serves one more fact on a decided request's own route: `flow_route.outcome`, beside `ahead: 'decided'`. Before, a decided route stopped at the request's own step, so an approver reopening a request they had decided could not tell whether the record's approval went on to a later step or ended.
+  
+  - `outcome.step` is the run's latest request when it is a later one than this request (a request of the same flow run opened after it, on any node, a later round of the same node included; a pending one wins over a decided one). It is absent when no later request was opened in that run; a request a child run opened is not among them.
+  - `outcome.status` is that latest request's status, or this request's own when `step` is absent. `pending` with a `step` means the approval went on to that step and waits on its decision.
+  - `outcome.ended` is `true` only when the record's approval is known to have stopped: the request's run is a root run (not a `subflow` body or a `map` item, whose end is not the approval's), the flow body the run ran holds no `subflow` or `map` node anywhere, regions included (a child run files its requests under its own run, so this run's requests cannot show what it decided, before or after this request), and the run reports it stopped for good, with the same terminal set the dead-run sweep uses. The body the run ran is known only when the body armed now is the flow's newest registration and was registered before the run started, so a flow edited, rolled back or re-registered after a run started is never judged by its current body for that run. `false` means not known to have stopped: the run goes on, is a child run, ran a body that can start a child run, ran a body that is not known, cannot be read, or was opened before this release (the approval node now records on each new request whether its run is a root run).
+  
+  `outcome` is absent when nothing past the request is known: no later request was opened and the approval is not known to have ended, or several later requests are pending at once (parallel steps). A pending request's route never carries it. It is served to every reader of the request and says only where the same approval went: the later step's node id and label and that request's status, never the later request's id, approvers, comments or field values. The `ApprovalRequestRow.flow_route` contract type in `@objectstack/spec/contracts` gains the optional member, and `routeOutcome` in `@objectstack/plugin-approvals` is the rule.
+  
+  The approval request page (`@object-ui/app-shell`) draws one line under the decided step: "Went on to STEP, waiting for a decision", "Went on to STEP: DECISION", "Went on to STEP, then ended: DECISION", or "The approval ended here". No line is drawn when no outcome is served. `@object-ui/i18n` carries the four new `approvalsInbox` rows in every built-in locale, and the console's request type (`@object-ui/console`) mirrors the new member.
+  
+  Nothing to migrate: a caller that does not read `outcome` is unaffected.
+- dea68e9: fix(plugin-list): a list's column header opens a menu and keeps a multi-level sort; a sort chip opens the sort panel
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  On a list page (the grid `ListView` draws), a click on a column header no longer sorts at once. It opens the column menu: sort ascending, sort descending, hide the column (a column that does not sort offers hide alone). Enter, Space or ArrowDown on the focused header opens the same menu, the arrows move through it, Enter chooses, and Esc shuts it without touching the sort. With no sort or a single level, the column picked in the menu replaces the sort; with two levels or more it becomes the first level, the other levels keep their order after it, and a column already in the sort moves up with the picked direction. No level is dropped. The ↑1 / ↓2 marks on the headers are unchanged.
+  
+  A sort chip under the view bar no longer reverses its direction on a click: it opens every sort level in one panel. Each level row in the sort builder now has a handle; dragging it, or ArrowUp / ArrowDown on the focused handle, reorders the levels.
+  
+  New public surface, all additive: `GridHeaderMenuProvider` and `useGridHeaderMenu` from `@object-ui/components` (a host opts a data-table into the header menu; without it a header click sorts as before, so related lists, dashboard tables and every other host keep click-to-sort); the `headerMenu` runtime prop on `ObjectGrid`; and the `sortBuilder.reorder` key in every `@object-ui/i18n` locale. The column menu itself is now a menu (`role="menu"` entries, keyboard reachable) wherever it opens, including a right-click on a header and the design host's caret.
+- b113178: feat(list): the list page's toolbar is two rows: 「Object / View ▾ · View settings … Search · New · ⋮」 and a resident condition row
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The console's object list drew three rows above the table: the object's name with ⋮ More and New, the view bar with Filter N, Sort N, Options and search, and a condition row that appeared only once a sort or filter was set. It now draws two:
+  
+  - The view bar starts with the object's icon and name, 「/」 and the view switcher, then 「View settings」. Its right end is the search, the page's toolbar actions, New, and ⋮ More last at the right edge. While rows are selected the right end shows what the selection offers, and ⋮ More keeps its place and its icon (⋮, also in the selection face).
+  - The Filter N and Sort N buttons are gone from the bar. The condition row is always there: with nothing set it shows dashed 「Sort」 and 「Filter」 buttons; a sort of any number of levels is one chip, 「Sorted by X」 with 「+N」 for the further levels, which opens the sort panel; each filter is its own chip with ×, followed by 「+」. The row's right end is 「Personalized」 and 「Reset」 while the list differs from its view. The table no longer moves down when the first condition is set.
+  - 「Options」 is renamed 「View settings」 and sits beside the view name. Its first level shows the content itself: the view's name, the shown columns (drag to reorder, the eye to hide) and 「+ Add column」, then Layout, Group, Row height and Row color where offered, and Save, Restore defaults and export in its footer. The More level and its inline edit switch, and Refresh, are gone.
+  - As the list narrows, 「View settings」 folds to its icon first, then the word 「Personalized」 goes, then 「Reset」 folds to its icon. The condition row stays one line and scrolls sideways.
+  
+  For hosts of `ListView`: two optional host props, `toolbarTrailing(tools)` (the bar's right end, given the list's search) and `conditionRowEnd` (the condition row's right end, drawn in place of the row's own Reset). A host that passes neither gets the search alone at the bar's end and the row's own Reset.
+- 138faaa: feat(app-shell): on a phone, sign-in lands in an app whose home is its whole menu, and the bottom bar is fixed to Home, Notifications, Approvals and search
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Phone width only (below 768 px). Desktop and tablet widths do not change.
+  
+  - **Where sign-in lands.** A phone opens the app the person used last. The app the product marks as default is used only when there is no record yet, for example on a first sign-in. With one app it opens that app; with several and neither, it opens the app list. The last app is kept per person with their other console preferences (the `ui.app.last` key), so it follows them across devices. It is read in the same request as those preferences, not in a new one. A desktop still lands on the declared default first, as before.
+  - **The app's home is its whole menu.** On a phone, `/apps/SEGMENT` shows the app's menu with its groups, order and icons, one row per entry. It no longer redirects to the first entry. This is the sidebar's own menu drawn in a second place, so it cannot list an entry the sidebar hides. 「‹」 on a page one level down goes back to it, and the page comes back scrolled as it was left. An app that shows the member no entry still says so.
+  - **App switcher.** The app pill at the top left opens a bottom sheet: 「Current app」 with a check, then 「Other apps」 with Setup last, and a search box at the bottom. On a phone, `/home` is that same list as a page.
+  - **Bottom bar.** The bar has three fixed cells, Home, Notifications and Approvals, and a round search button. They do not change with the app and cannot be configured. Home opens the app's home. Notifications and Approvals open the pages the bell opens, with the bell's two counts as badges. Search opens the command palette. The bar shows only on those three pages; a list, a record, a form or any deeper page has the screen to itself. The bar no longer holds menu entries, a 「More」 cell or pinned entries (objectstack#34594). Pins already stored are ignored, and the drawer's menu search and pin hint are gone. The drawer still opens with a swipe in from the left edge.
+- 411fe24: feat(list): a phone's object list gets its own top row, one row of pills, and bottom-sheet sort, filter and view panels that apply on 「✓」
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  At phone width (below `sm`) the console's object list changes its containers, not its content:
+  
+  - The app bar's row becomes the page's own: 「‹」, the object's icon and name, and 「⋮ More」 at the right. The app pill, the page title, the search, the bell and the avatar are not drawn while the list is on screen (the phone has them in the bottom bar and on the app's home). 「⋮ More」 offers 「Select」 (only on a card list whose rows take more than one tick), the object's description, Import and the favorite.
+  - Below it, one row of pills: the view switcher, Sort and Filter with a count of what is in force, and Search, which expands into a field in place. There is no condition row on a phone.
+  - Sort, Filter, the view switcher and View settings open as bottom sheets. The sort and filter sheets edit a copy: 「✓」 applies it through the same write the desktop chips use, 「×」 drops it. The sort sheet lists each level on two lines (field over direction) with a handle a finger can drag (or ArrowUp / ArrowDown moves), a ⋯ menu per level (change field, direction, remove) and 「Add sort」. The filter sheet lists the conditions, each with a ⋯ menu (edit, remove), and shows a sentence and 「Add filter」 when there are none. A view whose filter is an 「or」 group says it uses an advanced filter and is changed on a computer. View settings keeps its desktop content and applies as before. 「✓」 on an untouched copy writes nothing. While the on-screen keyboard is up, a sheet stands on it (it reads `visualViewport`), so its 「✓」 and the focused field stay in view.
+  - A long press on a card starts selecting with that card ticked, as 「Select」 in 「⋮ More」 does with none; a tap then ticks or unticks a card, and unticking the last ends it. The selection shows in the list's floating selection bar, which after 「Select」 reads 「0 selected ×」 until a card is ticked. The 「+」 create button is not drawn while selecting. A card is also a keyboard control: Enter opens it, and while selecting Enter or Space toggles it.
+  
+  New exports and props:
+  
+  - `@object-ui/plugin-list`: `PhonePanelSheet`, `useListPhonePanels`, `PHONE_CHIP`, `PHONE_CHIP_ACTIVE` and the types `PhonePanelSheetProps`, `ListPhonePanels`.
+  - `@object-ui/plugin-grid`: `requestListSelection`, `useListPageSelecting` and `useListPageSelectable` (would 「Select」 open a selection in this page's list); `BulkActionBar` takes `open` (show 「0 selected ×」 with no actions while a host's selection is open and empty).
+  
+  `@object-ui/app-shell` changes no public export: the page's top row is an internal store (`PhonePageBarProvider`, mounted by `ConsoleLayout`).
+- 48c732c: feat(console): on a wide full record page the details are pinned in a left column and the other tabs sit beside them; the right summary rail is retired
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The synthesized record page (objectstack#35890, ruling on the card 7064066204):
+  
+  - **Pinned details.** A full page whose content fits a 320 px details column, a 24 px gap and 400 px of tabs pins the record's details in a left column and draws the other tabs (related lists, Attachments, Approvals, 动态) beside them, opening on the first. The column is 400 px wide and narrows toward 320 px on a tight page; its edge is a separator the reader drags, or moves with ←/→ (Home/End for the ends). The dragged width is kept per object in the console's workspace preference store (`record.columns.details-width`, this browser). Each column scrolls on its own. A page with no other tab draws the details across the page with no tab row; a page whose details hold a related table among the fields (objectstack#35889) is not pinned and keeps its one-column tab row. Narrowing out of the pinned layout keeps the tab that was shown, writing it to the address with `replace`.
+  - **The right rail is retired** at every width, with its ⊟ switch and `⌘⇧,` shortcut and the `record.columns.related` preference (an old stored choice is no longer read). Its cards (approval, attachments, recent activity, other related) are the tabs they summarised. A list the reader hid still opens, from its item in 「更多」 or from an address that names it (`?related=`).
+  - **「详情」.** The first tab is named Details (详情) in every locale.
+  - **「审批中 · 当前步骤」.** For everyone but the approver, the header's in-approval tag names the step the request waits at, when it has one.
+  - **Drawer, split pane and phone** keep their one-column tab row and never pin. What reaches them: the rail is gone there too, and the first tab reads 「详情」 / Details. Authored pages are untouched.
+  
+  `RecordPageColumns` gains the optional `fullPage`, `detailsWidth`, `onDetailsWidthChange` and `onShownTabChange` props, and `onEnlargeRelated` an optional `{ replace }`; `rightColumn` and `rail` are kept as deprecated props that do nothing. `@object-ui/plugin-detail` exports `RECORD_PAGE_DETAILS_WIDTH`, `RECORD_PAGE_PIN_MIN_WIDTH` and `recordPagePinsDetails`; `recordPageTierHasRightColumn` stays exported, answering as before, and is now `@deprecated` (no tier draws a right rail).
+  
+  `@object-ui/i18n` widens: two new keys in every pack, `detail.approvalPendingStep` (`In approval · {{step}}`) and `detail.detailsColumnResize` (the separator's name), and `detail.recordTabOverview` changes its text from 概览 / Overview to 详情 / Details. Every key the rail read (`detail.relatedColumn`, `detail.relatedHiddenCount` and its plural forms, `detail.relatedShowHidden`, the six `detail.summary*` keys and `shortcuts.toggleRelated`) stay in every pack, unread, so a host that reads them keeps its text; retiring them is a separate change.
+- 52fb30c: feat(plugin-detail): the default record page draws no stage bar and no key-field strip; the stage moves from the header's status tag
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  The default record page (`buildDefaultPageSchema`) no longer emits `record:highlights` or `record:path`. The stage is the status tag beside the record's name: a reader who may edit the stage field sees it with an arrow and opens a menu listing every stage in order, the current one checked; a stage the field's blocking `state_machine` cannot reach is disabled with its reason under the name. Picking a stage confirms, and a stage that makes other fields required (their `requiredWhen` holds once the record stands on it, such as a loss reason on a lost stage) asks for exactly those fields in the same dialog and writes them with the move. A refusal stays in the dialog, beside the field it names, and the stage does not move. A reader who may not edit the field, an approval lock or an open draft leaves the plain tag. A plain status field (no stage role) is read and moved the same way.
+  
+  The details body now draws every field its groups hold: the highlight fields and the stage field are no longer taken out of their groups, so a record reads in the same groups and order in view and in edit (objectstack#35849). `highlightFields` itself is unchanged and still drives the hover card, a related list's default columns and the record picker; nothing is picked when an object declares none.
+  
+  `buildDefaultHighlights` and both blocks are kept: an authored page, or a slotted page's `highlights` slot, still places a strip and a path where it wants them.
+  
+  - `@object-ui/components`: `RecordHeaderState` gains an optional `stage` renderer (with the exported `RecordHeaderStageParts`), which the header calls with the stage tag it would draw. Without a host bar (a phone) the header now draws the stage tag in the row under the record's name, beside the state's tags; before, a phone showed no stage at all.
+  - `@object-ui/plugin-detail`: exports `RecordStageMenu`, the menu a host hands the header as `RecordHeaderState.stage`. Its fields-a-stage-needs dialog comes from the package-internal `useStageChange` (`record:path` keeps its plain confirmation).
+  - `@object-ui/plugin-detail`: `BuildPageOptions.highlightFields`, `.statusField` and `.stages` are still accepted by `buildDefaultPageSchema` and `buildDefaultTabs` but no longer do anything there, since the default page draws no strip and no stage bar; `buildDefaultHighlights` still reads them. Retiring them is objectstack#35943.
+  - `@object-ui/i18n`: four `detail.stageMenu*` strings in every locale.
+  - `@objectstack/lint`: `field-group-shadowed` no longer counts the highlight strip as hiding fields from the detail body, since the default record page leaves them in their groups; a group whose only visible member is the record title still warns.
+- 8807dcb: feat(ui): a record page's related tab is the child object's full list
+  
+  Clause-②: yes (widening) — a new export `ListConditionsBlock` (`@object-ui/plugin-list`, the condition row as a host element, not a registered node type) and its `ListConditionsHostProps`; a new slot `RelatedListConditionsSlotContext` and its `RelatedListConditionsProps` (`@object-ui/plugin-detail`), which the record page fills (`@object-ui/app-shell`); new exports `ConditionDiscardButton` and its type `ConditionDiscardButtonProps` (`@object-ui/plugin-list`) and `withHeaderSortPick` (`@object-ui/core`); new i18n keys in every `@object-ui/i18n` locale pack (`listConditions.chips.discard`, `listConditions.chips.discardHint`, `detail.relatedNoMatches`, `detail.deleteRowsTitle`, and the count family `detail.deleteRowsConfirmation` with its plural slots `_zero`, `_one`, `_two`, `_few`, `_many`, `_other` as each pack needs them); nothing removed or renamed
+  Metadata-protocol: none
+  
+  On a record page, a related list opened as its own tab now works like the object's list page:
+  
+  - The first row names the child list (its tile and title) on the left and keeps **+ Add** on the right. The **Open in list** button is gone.
+  - The second row is the list page's own condition row: **Sort** (several levels) and **Filter**, with no view switch, view settings or search. On a narrow tab or in the drawer their labels fold to icons.
+  - The table is the list page's grid: the column menu, cell editing as on the list page wherever the reader may edit the child object, row selection with the floating bulk bar (bulk delete asks once, deletes the selection in one batch call where the data source has one, and says how many rows went and how many did not), and the footer row, whose calculations cover every matching row, not just the loaded ones. A tab grouped by status draws no footer row.
+  - Rows load as the page scrolls instead of in pages.
+  - The tab title still counts every child; the footer counts the rows the filter keeps.
+  - What the reader changes (sort, filter, footer calculations) lasts while they stay on the record, for that reader only, across its tabs and between its page and its drawer, and is gone after a reload or on another record. **Discard** appears once something changed and puts the tab back; there is no Save. The list page's Discard and this one are one button.
+  
+  Upgrade note: the header sort and the column widths and order that an earlier version remembered for a related tab in a reader's record-page preference (`sys_user_preference`) no longer apply: the tab opens in its declared order, and its column widths and order are now kept in the reader's browser, as the list page's are, so they start from the default once. Nothing stored is deleted. The default sort and columns of every related list are unchanged.
+  
+  `@object-ui/core` adds `withHeaderSortPick`, the list page's rule for how a header sort joins an existing multi-level sort, now shared with the related tab. `@object-ui/app-shell`'s list Discard is drawn by `ConditionDiscardButton`; it looks and behaves as before.
+- c261a7c: feat(console): a stage confirm names the flows the move would start, in the list cell and on the record page
+  
+  Clause-②: yes (widening) — `@object-ui/plugin-detail` adds the exports `useRecordUpdateStarts`, `StageChangeStarts`, `RECORD_UPDATE_STARTS_PATH` and the type `RecordUpdateStartsAsk`; `@object-ui/fields`' `RequiredFieldsDialog` takes an optional `notice`; `@object-ui/i18n` adds the export `activeFlowsBundle` (with the types `FlowsTranslation` and `TranslationResourceReader`, moved from `@object-ui/app-shell`'s internal `utils/flowsBundle`) and two keys to every pack: `detail.stageChangeStartsHeading`, `detail.stageChangeStartsApproval`. `@object-ui/plugin-grid`'s `StateChangeConfirm` gains an optional `ask`. Nothing existing is removed or re-typed.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the console's stage confirms; `content/docs/frontend/plugins/plugin-grid.mdx` names the list in this change.
+  
+  When a stage move would start a flow, its confirm now says so (objectstack#35928, ruling record 7073655354):
+  
+  - The list cell's state-machine confirm and the record page's stage confirm (the path's press and the header's stage menu) keep their sentence and add, under it, 「保存后将启动以下流程：」 ("Saving this change starts these flows:") and each flow by its label in the reader's language. A flow that starts an approval is marked 「发起审批」 ("starts an approval").
+  - Both confirms ask one read, `POST /api/v1/automation/_record-starts`, through one shared hook, so the two surfaces cannot disagree. The server decides which flows start; nothing is judged in the browser.
+  - A move that starts nothing shows no list, and a read that fails or is refused leaves the confirm exactly as it was.
+  - A flow label is translated as the flow runner translates it: the app's `flows` translations, read through `activeFlowsBundle`, which now lives in `@object-ui/i18n` so the confirms' packages can read it; the console's flow runner and designer import it from there.
+- 76cb366: fix(console): Studio's kanban card "Click to open" offers only Default and "Don't open"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On an object's list the record name opens the full page and the hover icon opens the side panel, so `navigation.mode` `drawer`, `page` and `new_window` parse there and change nothing; only `none` still counts. The kanban card section of Studio's list-view inspector offered all four. It now offers Default (no key) and "Don't open" (`none`). A view that already stores `drawer`, `page` or `new_window` shows that value flagged "(deprecated)" in the select, and picking Default removes the key. Opening such a view writes nothing. The spec is unchanged, and page blocks that carry `navigation` keep every mode.
+  
+  The studio catalogue drops the three labels nothing reads any more: `engine.studio.inspector.listView.kanbanCard.mode.drawer`, `.mode.page` and `.mode.newWindow`.
+- 32409a9: fix(form): a new detail line on a master-detail create / edit form starts on the child's defaults, does not read red before a save is tried, and a line added and left untouched is skipped with a notice on the form and the record page
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a parent object's create or edit form, a line added to a detail table started blank, so a required column with a default (a status that defaults to "Pending") read red at once although saving would store the default. The record page's edit state already started its new lines on their defaults; the form now does the same.
+  
+  **New lines on the form.** A new line starts on the child object's static defaults, the values a create form of the child seeds, whether it is added with Add or with Enter on the last line. A default the server resolves at insert (`NOW()`, a CEL expression) is left to the server. A new line's empty required cell reads red once a save of the form was tried, not the moment the line appears; a stored line is flagged as before. A line added with Add and then applied from the row editor is the user's input and is saved.
+  
+  **A line added and left untouched** (maintainer ruling, card comment 7056413638: 「跳过并提示未保存」). A line Add started on its defaults that nobody edited holds only those defaults. It is still not written, and the save now says so: once the save lands, the form and the record page's edit state show "1 blank line was not saved" (or "N blank lines were not saved"), also when the host supplies its own save confirmation. Such a line never reads red, before or after a refused save, since there is nothing in it to fix; once the user edits any of its cells it is input, saved and flagged like any other new line. On an edit form that stays open after saving, the skipped line leaves with the save, as it does on the record page. A line the user typed into and then cleared is blank and is skipped as before, without the notice. The pack key is `form.lineItems.untouchedNotSaved`, in every built-in locale.
+  
+  **Seeding context.** The defaults on both the form and the record page's edit state are now read with the session facts a create form uses: a child field defaulted to the acting user starts on that user, and the organization's currency and time zone seed the fields they seed on a create form. With no known user that field starts empty and the server fills it, as before.
+- f548bdc: fix: descriptions and help text no longer say the default record page draws a key-field strip or a stage path
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The default record page draws no key-field strip and no stage path: the stage is the status tag beside the record name. These texts said otherwise and now say what each key drives:
+  
+  - `@objectstack/spec`: the `highlightFields` describe ("Drives default list and related-list columns, cards, hover cards, previews and the record picker; the default record page draws no strip from it") and its Studio help text. The `stageField` and `RECORD_HIGHLIGHTS_MAX` doc comments say the header's status tag reads the stage and the count cuts only a strip a page places in its `highlights` slot. The upgrade-guide entry `field-group-shadowed-six-highlights` no longer tells authors to move highlights: the warning now judges the record title alone, and no action is owed.
+  - `@objectstack/platform-objects`: the `highlightFields` help text in every metadata-form locale.
+  - `@objectstack/lint`: the `os explain` text of `object-field-ref-unknown` and `semantic-role-field-unprovisioned` names the hover card and the record picker in place of the strip.
+  - `@object-ui/plugin-detail`: the `record:details` `hideFields` description no longer says the default page fills it. The key is still accepted.
+  - `@object-ui/i18n`: Studio's lifecycle-field help (`stageField`, and its "None" choice) talks about the status tag, not a progress bar.
+  - `@object-ui/types`: the page `highlights` slot doc says it places a strip the synthesized default does not draw.
+  - `@object-ui/app-shell`: on a phone the default record page no longer hands the synthesizer a highlight list it never read. The page looks the same, and the subtitle under the record name is unchanged.
+- c757e07: feat(console): a change on a list is a draft, with Discard and Save
+  
+  Clause-②: yes (widening) — new `console.objectView.draft.*` keys in every `@object-ui/i18n` locale pack (`discard`, `discardTitle`, `save`, `heading`, `partSeparator`, `saveToView`, `saveAsMyView`, `copyName`, `saved`); nothing removed or renamed
+  Metadata-protocol: none
+  
+  On a Console object list, a header sort, a filter change, grouping, the search, Hide Fields, an added field and a column drag apply at once and are now a draft: they are kept nowhere. They used to be saved at once into the reader's own list preference (`sys_user_preference`, key `ui.list.<object>`) and followed them to every device.
+  
+  - While the list holds a draft, **Discard** and **Save** sit at the end of the condition row, where the 「Personalized · Reset to view」 marker was. On a narrow list or a phone they fold into one **Save** whose menu also holds Discard.
+  - **Save** names what is unsaved and offers **Save to this view** (on a view of the reader's own) and **Save as my view**, which asks a name first (the view's name with "copy"), saves the draft as a new view of the reader's own and opens it. Either says "Saved", and the buttons go while the conditions stay.
+  - **Discard** puts the list back as its view declares it and removes the list's `uf_*` parameters from the address bar.
+  - Where the reader may not save (no personal view can be created or updated), both faces are Discard alone.
+  - The draft survives opening a record (as a page or in the side panel) and coming back. Opening another view or object, or reloading the list's page, drops it. A reload of another page does not drop the state an in-app link to a list carries.
+  - Column widths, the row height and the views' order are not a draft. They are still remembered for the reader in the same `ui.list.<object>` row.
+  
+  Upgrade note: a sort, filter, search, column order, hidden column or added column that an earlier Console stored in a reader's `ui.list.<object>` row no longer applies; the list opens as its view declares it. Nothing stored is deleted by this change; a later column-width change rewrites that row's column state with the widths alone. A reader who wants such a list kept saves it as a view of their own.
+  
+  Saving into a shared view, and saving the Display panel's layout and row colour, are not offered yet. `@object-ui/plugin-list` changes only its README, which now describes added fields as part of the draft. No metadata key, value or default changes.
+- c1b35c3: feat(console): Save to this view on a shared view asks once, then saves and publishes it; the layout and row colour are part of a list's draft
+  
+  Clause-②: yes (widening) — new `console.objectView.draft.*` keys in every `@object-ui/i18n` locale pack (`saveToViewConfirmTitle`, `saveToViewConfirm`, `saveToViewConfirmButton`, `savedForEveryone`, `pendingDraft`); `@object-ui/plugin-list` `ListView` gains the optional host prop `onRowColorChange` and two optional `viewDefaults` members, `viewType` and `rowColor`; nothing removed or renamed
+  Metadata-protocol: none
+  
+  On a Console object list, **Save to this view** is now offered on a shared view to a reader who may edit it (an administrator, on a stored view whose package takes saves). It asks once ("everyone who uses this view will see these changes"), then saves the view and publishes it in the same step, so other readers see it on their next read, and says "Saved, visible to everyone". The options menu's Save does the same.
+  
+  - When the view already has unpublished changes (a draft saved from the view settings, by anyone), nothing is written: the Console says so and points to the view settings to publish or discard that draft first. The draft write is sent with the first-write pin (`If-None-Match: *`), so the server refuses it when a draft is pending; that draft is never published on someone else's behalf. A publish the server refuses discards the draft the save wrote.
+  - The reader's row height and column widths are never written into a shared view: it keeps its own.
+  - The Display panel's layout and row colour are part of the list's draft: they survive opening a record and coming back, and both Save to this view and Save as my view keep them (a layout switch retypes the saved view). Discard puts back the view's own.
+  
+  `@object-ui/plugin-list`: `ListView` reports a pick in its row colour panel through the new optional host prop `onRowColorChange` (the rule in force, or `null` for none), never at mount or for a reset. A host that lays the reader's layout or row colour into `schema` passes the view's own in `viewDefaults.viewType` / `viewDefaults.rowColor`, and the `layout` / `rowColor` parts and the Display count are judged against them; each is read only when its key is present. Without them nothing changes.
+  
+  No metadata key, value or default changes. The view settings panel and the footer calculation still save a shared view as a draft that the view settings publish.
+- 9a98a46: feat(list,detail): a change that makes other fields required asks for them in place — the kanban drop's fill-in, now shared by the list cell and the record page
+  
+  Clause-②: yes (widening) — `@object-ui/fields` exports `collectRequiredWhenPromptFields`, `RequiredFieldsDialog` and their types (moved from `@object-ui/plugin-kanban`, which never exported them) and the new `requiredWhenPromptReads`; nothing removed or renamed
+  Metadata-protocol: none
+  
+  When a value about to be written makes another field's `requiredWhen` true while that field is still empty, the write is held and one dialog asks for the missing values:
+  
+  - **Where:** a list cell in the select-first grid every `ListView` draws, the record page's inline Save, and the kanban drop (as before).
+  - **What it shows:** the record's name, the change that set it off (read-only), and one row per field to fill, with the editors the record form uses. A value typed there that makes one more field required adds that field; Save waits for it.
+  - **Save** writes the change and the typed values as ONE update. **Cancel** writes nothing: the list cell keeps its value; on the record page the edit session and its draft stay.
+  - **A refusal of that update stays in the dialog:** under the field it names, as a new row for another field the reader can fill, or at the dialog's foot.
+  - **Not asked for**, and written and refused as before: a field that already has a value, is hidden or read-only, that the reader may not write, or that has no in-place editor (a file, rich text, a formula). The record drawer's per-field save does not ask either.
+  
+  The pre-evaluation is the one the kanban drop already used (`resolveFieldRuleState`, the evaluator the form and the server share, judged as the engine's transition gate), generalised from one key to any set of changed keys.
+- 27e414b: fix(ui): a view a read-only package ships hides only Delete in Manage views and opens its view panel read-only
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  This applies to a list view that ships inside a read-only package (a code or installed package). The console no longer offers that view the two writes the server refuses:
+  
+  - Manage views hides Delete on its row.
+  - The row's configuration entry reads "View config". It opens the admin's view panel read-only: the configuration is shown read-only, no edit reaches the list, and there is nothing to save. The panel has no Save, no draft bar to publish or discard, and only Close.
+  
+  Rename, pin and set as default stay offered. They land in that package's customization (the console creates it on first use), so no lock icon is drawn on the row. The list's options menu offers Rename on such a view again. A shared view the console saved into the customization package, and the reader's own view, are unchanged. The toolbar's personal list changes keep saving to the reader's preferences.
+  
+  `@object-ui/plugin-view`: `ViewTabItem` gains an optional `definitionReadonly` field. When it is `true`, `ManageViewsDialog` hides Delete and labels the configuration entry "View config" (`view.showViewConfig`, a new key in every locale of `@object-ui/i18n`). Rename, pin, set as default and the configuration entry stay. `readonly` still wins when both are set. Without the field a row behaves as before. `ViewTabBar` does not read it.
+  
+  The read-only verdict is the one the footer calculation menu already uses. The console takes the package the view row was served under and reads the server's `writable` verdict for it from the package list it holds for the session. While that list is unread, or when the read fails or does not name the package, everything stays offered as before and the server's refusal still applies. The view panel reads the same answer that drew the Manage views row, so a row's "View config" never opens an editable panel. If the answer arrives after the admin has started editing, the panel turns read-only and discards the edit: the list's preview goes back to the stored view.
+- eb53d63: fix(studio): the key-fields editor no longer previews a record-page strip
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The default record page draws no key-field strip, so Studio's object settings
+  stop drawing a "Highlight strip preview" under the `highlightFields` list. The
+  ordered rows stay: order still decides which fields each surface takes. The
+  `engine.studio.settings.highlightPreview` catalogue key leaves the studio
+  namespace (English and Chinese).
+- dda5e74: fix(components): a docs `type: flow` metadata embed names the flow and its approval steps in the reader's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A package can translate a flow's label (`flows.<flow>.label`) and an approval step's label (`flows.<flow>.approvals.<node_id>.label`). The flow runner and the Studio flow designer already showed both, but the docs viewer's `type: flow` embed (`element:metadata_viewer`) drew the authored text, so a zh-CN reader of a manual saw the English flow name and step names. The embed now reads the same bundle, through the same resolution, in the reader's language, and falls back to the authored text where the bundle carries no key. A decision's branch list names the approval step a branch leads to by the same translated label.
+  
+  The spec has no key yet for a start, decision, notify or end node's label, so those steps still show the authored text.
+  
+  `@object-ui/i18n` has new public exports for the flow-label resolution (`flowLabelTranslations`, `useFlowLabelTranslations` and the `FlowLabelTranslations` type), moved out of the Studio flow designer and built on the `activeFlowsBundle` reader that package already exports, so the runner, the designer and the docs viewer share one reader of the `flows` group.
+- 035a12c: feat(ui): every modal dialog draws one lighter surface, short create and edit dialogs are one narrow column, and a create dialog can stay open for the next record
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  What a user sees:
+  
+  - Behind a dialog the page is only slightly dimmed (10% in light mode) and no longer blurred, so it stays readable. The dialog is a white card (the raised grey in dark mode) with a hairline edge and a translucent outer ring, a 12px corner, and anything inside it drawn at the shared 40px control height (`h-10`: inputs, select triggers, default and icon buttons, and any other `h-10` element such as a 40px avatar) one step smaller, 32px from the `sm` breakpoint up; the phone sheet keeps its 44px touch targets. Confirmation dialogs, the required-fields prompt and the record create and edit dialog all share it.
+  - The create and edit dialog's title is 16px and follows the object's icon, and its padding is 20px.
+  - A dialog that lays out at most six fields and declares no `columns` (not on the form, not on any section) draws one field per row in the narrow `lg` size (672px); six is the maintainer's choice (ruling of record 7061696632 on objectstack-ai/objectstack#35980). This reverses the at-least-two-columns default such a dialog drew before. Seven fields or more, any declared `columns`, an authored `modalSize` or a maximized dialog lay out as before.
+  - The console's list 「New」 dialog (and a related list's child create) has a 「Create more」 switch. With it on, a save keeps the dialog open on an empty form with focus on the first field, and the list behind refreshes; with it off, a save closes the dialog and opens the new record as before. The switch is remembered per object in this browser.
+  - ⌘↵ (Ctrl+Enter on other platforms) saves the create and edit dialog, and the Save button shows the keycaps. A master-detail dialog (a record with line items) takes neither the shortcut nor 「Create more」.
+  
+  What a developer sees (`Clause-②: yes (widening)`, additions only):
+  
+  - `ModalFormSchema.createMore?: boolean` offers the switch on a `create` dialog that a host mounts itself (the `object-form` renderer's `formType: 'modal'` keeps it off), and `ModalFormSchema.onSuccess` receives a second argument, `{ createMore: true }`, when the dialog stays open. A host that passes neither sees no change.
+  - New i18n key `form.createMore` in every locale.
+  - The console's global `[role="dialog"]` corner rule and the blurred overlay on dialogs are gone; the look lives in `@object-ui/components` (`src/lib/dialog-surface.ts`), reached from the `dialog` and `alert-dialog` primitives through declared Shadcn patches. The card carries the `dialog-surface` class, which the console's shared floating-surface shadow skips; a host stylesheet that adds its own shadow to `[role="dialog"]` should skip it too. Popovers and the bottom drawer keep their rounded corners by their own containers; side drawers are unchanged.
+  
+  Nothing to migrate.
+- 43580a3: fix(fields): the line grid's column-header help no longer becomes part of every cell's announced column name
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The widening is additive: the new key `fields.grid.columnHelp` in every locale pack `@object-ui/i18n` publishes through `./locales`, in all eleven locales.
+  
+  The info button beside a line grid's column header used the column's help text as its accessible name. The button sits inside the header cell, so the help joined the column header's name, and a screen reader that announces a cell's column read the whole help sentence with every cell of that column. The button is now named by a short "Help" word in the reader's language (`fields.grid.columnHelp`), and the help is its description (`aria-describedby`), read when the button is reached. The column header is named by the field label and that one word. The tooltip on hover and keyboard focus is unchanged, on the editable grid and on the read-only table.
+  
+  No metadata key is added or changed.
+- cc05e60: feat(console): Manage views restores the factory version of a customized package view
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A pin, a rename or a set-default on a view a read-only package ships writes the whole view into the package's customization (`<package>.custom`), and every user of the view then sees that copy. Manage views now marks such a view "customized" and offers "Restore factory version" in its `…` menu. After one confirm, which says every user of the view sees the factory version again, the override is removed from the customization and the list shows the package's own view. A view without a customization has no mark and offers no restore; a refused restore is said with the server's own message.
+  
+  - `@object-ui/data-objectstack`: `ObjectStackAdapter.restoreFactoryView(objectName, viewName)` deletes the view's draft, then its row, at the customization the ensure door names for the shipping package (`DELETE /meta/view/NAME?package=PAIR`, the door Studio's "Restore package original" uses). It refuses, sending nothing, a view that is no override of the package it is served under, and throws when the customization held no row of the view. The customization package itself stays. `listViews()` now carries a record's `overrides` declaration onto the flattened row.
+  - `@object-ui/plugin-view`: `ViewTabItem.customized` and `ManageViewsDialogProps.onRestoreFactory`.
+  - `@object-ui/i18n`: the mark, the menu entry, the confirm, its result and the failure title, in every locale pack.
+- 13d1e95: feat(ui): in a list cell, a picker opens under the cell, Backspace clears, a refused value stays, and Enter stays on the cell
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `GridCellFacts` (the select-first grid's per-cell host facts, `@object-ui/components`) gains three optional keys: `editor` (`'below'` draws the cell's editor as a panel under the cell, which keeps showing its value; absent or `'cover'`, the editor stays a layer over the cell), `clearRefusal` (why Backspace or Delete leave the cell as it is) and `validate` (why a committed value is refused). A host that sets none of them gets the editor placement and commits it had, with Backspace now clearing (below).
+  
+  In every grid `ObjectGrid` draws with the select-first model (the list page):
+  
+  - **Pickers open under the cell.** Single and multi select, status, tags, date, date-time, time, colour, lookup and user cells open their list, calendar or palette as a panel under the cell; the cell keeps its value as drawn (a coloured badge stays coloured) and the row height does not change. On a date the typeable box is the top of the panel and the calendar shows beneath it. Typed input, long text and an address still edit in place.
+  - **Backspace or Delete clears the selected cell and saves at once.** A required field keeps its value and says it is required (a required rating too, for Backspace, Delete and the 0 key); a read-only cell says why, as before; a checkbox cell is left alone.
+  - **A value that fails the field's rules is not saved.** The rules are the record form's (required, length, range, email and URL shape), and text a number box cannot read is refused too. The editor stays open with what was typed and says why under it (a number box that already says it cannot read its text is not told twice); correct it and commit again, or press Escape to discard. A click elsewhere does nothing while a refused value is open; a refused value whose cell scrolls out of sight is discarded.
+  - **A person's face no longer makes its row taller.** A user cell drew a 32 px face, which made its list row 41 px tall against 33 px for a row of text; the face is now 24 px and the row stays 33 px, at rest and while the cell is edited.
+  - **The selected cell's frame stays under the frozen columns** when the cell scrolls beneath them, and a cell deselected with Escape is left with no focus ring.
+  - **Enter saves and keeps the same cell selected**, with the focus back on it. It used to save and move the selection one row down. Tab and Shift+Tab still save and move right and left.
+  
+  `@object-ui/i18n` adds `table.cellNotNumber` and `table.cellInvalid` in every locale.
+  
+  Forms, dialogs and the record page keep their current controls.
+- eebb893: feat(plugin-grid): a list draws a line between columns, its default rows and header are 36px tall, and the footer shows 「+ Add calculation」 at rest
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - A line of the same colour and weight as the row lines now runs between columns in the header, the rows and the footer row, with none after the last cell. The last frozen column keeps its scroll shadow on top of its line.
+  - The default row height (`compact`, the density a view without `rowHeight` gets, shown as Compact in the row-height menu) is 36px instead of 32px, and the header is 36px too. The Standard and Spacious densities are unchanged.
+  - In a list whose reader may change the view, every footer cell without a calculation shows a faint 「+ Add calculation」 at all times instead of only on hover. A reader who may not change the view still sees only the calculations already set. The `grid.summary.calculate` text changes in every language pack to match.
+- 3543b51: fix(comments): Reply puts the caret in the reply box, comments show the author's avatar or initials, the mention menu opens at the caret, and a delete says it went through
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Four small fixes to comments on the record page:
+  
+  - **Reply.** Pressing Reply on a comment opened the reply box but left focus on the button, so typing went nowhere (or into the main comment box). The caret now goes into the reply box. On a comment whose replies were collapsed, Reply also expands them first.
+  - **Author avatar.** A comment by someone without an avatar showed a generic comment icon. Every comment and reply now leads with a 20 px avatar: the author's image, or their initials on the same round disc the people chips draw.
+  - **Mention menu.** Typing `@` opened the people menu at the top left of the comment box. It now opens under the caret, or above it when the window has no room below.
+  - **Delete.** Deleting a comment now shows a "Comment deleted" toast (zh: 评论已删除). A refused delete still shows its error, as before.
+  
+  Additions, nothing removed or changed in meaning: `@object-ui/plugin-detail` exports `CommentAuthorAvatar` (and its props type), and `ThreadedReplies` takes a new optional `focusReplyOnOpen` prop (default `false`, so a host that always shows the reply box keeps today's focus behaviour). `@object-ui/fields` exports `getPersonInitials`. New locale key `detail.commentDeleted` in all eleven locale packs.
+- 4ab2c82: feat(record-page): the desktop comment panel resolves and reopens threads, filters them, counts the unresolved ones, and offers Edit and Delete on other people's comments only where the server admits them
+  
+  Clause-②: yes (widening) — `@object-ui/react`'s `DiscussionContextValue` adds three optional members: `onResolveComment(itemId, resolved)`, `moderatesComments` and `updatesOthersComments`. `@object-ui/types`' `FeedItem` adds five optional members: `resolved`, `resolvedById`, `resolvedByName`, `resolvedAt`, `mentionsViewer`. `@object-ui/plugin-detail` adds exports `useRecordVerdict` (the three-state verdict `useRecordEditable` fails open on; a definite allow is the explain answer's `allowed` together with its `record.visible`, as the server admits a by-id write, so `useRecordEditable` reads as before except that an answer whose `allowed` is false beside a visible record, such as an on-behalf-of session whose delegator is gone, now reads not editable), `threadResolvable`, `threadResolved`, `threadInvolvesViewer`, `filterCommentThreads`, `unresolvedThreadCount`, `DEFAULT_COMMENT_THREAD_FILTER` and the type `CommentThreadFilter`; `RecordCommentsData` adds `resolvable`, `onResolveComment`, `moderates` and `updatesOthers`, and its `count` is now the unresolved threads; `CommentItemActions` adds `onResolve` and `resolved`; `CommentHoverActionsProps` adds `resolved`; `RecordCommentThreadProps['comments']` may carry `onResolveComment`, `moderates` and `updatesOthers`. `@object-ui/i18n` adds ten keys to every pack: `detail.reopenThread`, `detail.threadResolved`, `detail.threadResolvedBy`, `detail.filterComments`, `detail.showResolvedComments`, `detail.commentsInvolvingMe`, `detail.noUnresolvedComments`, `detail.noCommentsInvolvingMe`, `detail.showAllComments`, `detail.commentResolveFailed`. Nothing existing is removed or re-typed.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the console's comment panel; `content/docs/frontend/plugins/plugin-detail.mdx` and the plugin-detail README gain resolved threads, the filter and the moderator's Edit and Delete in this change.
+  
+  The desktop record page's comment panel (objectstack#36075) gains the resolved threads #36071 stores:
+  
+  - ✓ in a thread's first comment's action row marks the thread resolved: it leaves the list and the comments icon's number, now the unresolved threads, drops by one. ✓ is offered under the `sys_comment` update grant: on a thread the viewer started, and on anyone's only where the explain engine admits the viewer's update of a comment they did not write. Today the platform's row floor admits that for administrators, not for rank-and-file members, so a member resolves only the threads they started until the server carries ruling 7063285032 (any reader of the record may resolve) past that floor.
+  - The filter menu at the panel's top right holds 「显示已解决」, which shows resolved threads marked 「已由 X 解决」 (their ✓ reopens them), and 「只看我参与的」, the threads the viewer started, replied in or is mentioned in. The filter is not stored. With every thread resolved, the panel says so and offers to show them all.
+  - A reply into a resolved thread shows the thread reopened, as the platform stores it.
+  - The resolver is named from the people the page already knows (the viewer and the discussion's authors); any other resolver is named by one `sys_user` read of exactly those ids, after the discussion is drawn. Where that read is refused, the mark reads 「已解决」.
+  - Edit and Delete under More are offered on other members' comments to a viewer the explain engine admits to update the record by id, the server's rule for moderating someone else's comment; Edit also needs the explain engine to admit their update of a comment they did not write (the row floor above). Both are asked only on a definite allow: pending, a refusal, an error or a deployment without the explain service offers them on the viewer's own comments alone. Their own comments keep them as before.
+  
+  Unchanged: no server permission changes (a deployment without the explain service shows ✓ and Edit on the viewer's own rows only, administrators included); a deployment whose comment rows carry no `is_resolved` shows no ✓ and no filter, and the icon counts every thread; hand-written record pages and the phone keep their feed as before.
+- 04f9861: feat(record-page): a record's comments move out of the 动态 tab into a comment panel of their own on the desktop
+  
+  Clause-②: yes (widening) — `@object-ui/plugin-detail` adds exports (`CommentsPanel`, `CommentsButton`, `CommentThread`, `CommentItem`, `CommentComposer`, `CommentHoverActions`, `useRecordComments`, `buildCommentThreads`, `latestRepliers`, `RecordCommentsInPanelContext`) and their types (`CommentsPanelProps`, `CommentsButtonProps`, `RecordCommentThreadProps`, `CommentItemProps`, `CommentItemActions`, `CommentComposerProps`, `CommentHoverActionsProps`, `CommentThreadData`, `RecordCommentsData`), and an optional `reservedWidth` on `useRecordPageTier`. `RichTextCommentInput` (exported) now takes the `Esc` that closes its @ list (`preventDefault` and `stopPropagation`), so nothing round it acts on that key. `RecordActivityTimeline` draws no chip group when it is handed no chips. `@object-ui/components` adds an optional `comments` slot to `RecordTopBar` and `NavigationOverlay`, and the drawer leaves an `Esc` pressed inside a `[data-owns-escape]` region to that region. `@object-ui/i18n` adds five keys to every pack: `detail.closeComments`, `detail.collapseReplies`, `detail.commentActions`, `detail.commentsEmptyHint`, `detail.resolveThread`. Nothing existing is removed or re-typed.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches where the console draws a record's comments; `content/docs/frontend/plugins/plugin-detail.mdx` and the plugin-detail README gain the panel in this change.
+  
+  On the desktop record page and in the record drawer, the record header gains a comments icon with the number of top-level comments. A press opens the record's comment panel, the next one closes it, and the browser remembers whether it was left open (once for the page, once for the drawer).
+  
+  - The panel is 380 px wide: 「评论」 and ✕ at the top, the threads oldest first, the comment box docked at the foot. A thread's replies fold to 「N 条回复」 with the latest repliers' faces and open in place, with a reply box under them; Reply on any comment of a thread opens it with the caret in that box.
+  - A comment's actions sit in one row at its top right while the pointer is over it, or focus is in it: Reply, an emoji, and More with Edit and Delete on the viewer's own comments. Every write is offered under the same grants as before.
+  - From a 1280 px window the panel sits beside the record and the record gives way; in a narrower window it is drawn over the record's right edge. In a drawer narrower than 760 px (the default 720 px drawer) it covers the drawer's body; a wider drawer splits.
+  - Esc in the panel closes it and returns the focus to the comments icon, in a drawer too: the drawer neither closes nor steps back on it. Esc in the panel's @ list closes the list only and keeps the draft.
+  - While the panel holds the comments, the 动态 tab and panel hold the system entries only: activity and field changes, with no comment box and no All / Activity / Discussion chips; the Changes chip stays where the record shows its field history, and pressed again it goes back to every entry. Their count leaves the comments out.
+  
+  Unchanged: a record page authored in full keeps the feed blocks it places (`record:discussion`, `record:activity`) as they were and shows no icon; an object with `enable.feeds: false` shows no icon; the phone keeps the comments in its 动态 tab.
+- c30ce97: feat(record-page): on a phone, the record's comments open as a page of their own: the threads first, a thread's replies inside it, the comment box docked at the foot, and a long press for a comment's actions
+  
+  Clause-②: yes (widening) — `@object-ui/plugin-detail` adds the export `CommentsPage` and its type `CommentsPageProps`; `CommentThread` takes a third `mode`, `'page'`, and optional `itemInteraction`, `heldId` and `onHeldActions`; `CommentItem` an optional `interactionProps`; `CommentComposer` and `RichTextCommentInput` (exported) an optional `layout` (`'default' | 'phone'`). `@object-ui/app-shell` reserves the console URL parameter `comments` (`RECORD_COMMENTS_PARAM`, in `RESERVED_URL_PARAMS`). `@object-ui/i18n` adds four keys to every pack: `detail.addReactionEmoji`, `detail.commentThread`, `detail.formatBold`, `detail.formatItalic` (the toolbar's names without their shortcut). Nothing existing is removed or re-typed; the desktop's panel, toolbar and labels are unchanged.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches where the console draws a record's comments; `content/docs/frontend/plugins/plugin-detail.mdx` and the plugin-detail README gain the phone's page in this change.
+  
+  On a phone the record page's top bar gains the comments icon, with the number of unresolved threads. A press opens the record's comments as a page over the record, which stays where it was under it; 「‹」 and the browser's Back return to it.
+  
+  - The page lists each thread's first comment with 「N 条回复」 under it; a tap opens the thread, the comment first and its replies after it. 「‹ 评论」 returns to the list.
+  - The comment box is docked at the foot of the screen and stands on the keyboard while it is up. One line until tapped; then a row under the text holds mention, bold, italic, list and code, and send at the right end. In the list it writes a comment, in a thread a reply. No 「Ctrl+Enter」 hint.
+  - A long press on a comment (or its context menu) raises a sheet from the bottom: six reactions, 「标记已解决」 on a thread's first comment, 「编辑」 and 「删除」 (red, confirmed first), each offered exactly where the desktop's hover row offers it.
+  - The filter at the top right is the desktop's: 「显示已解决」 and 「只看我参与的」.
+  - The 动态 tab holds the system entries alone, as on the desktop. On a phone the comments live on this page: this replaces the lines of the two objectstack#36075 entries (the record comment panel, and resolved threads) that said the phone keeps the comments in its 动态 tab, or keeps its feed as before.
+  - The page is in the URL (`?comments=` for the list, `?comments=<id>` for a thread), so a link or a reload opens it where it was.
+  
+  Unchanged: the desktop; who may write, resolve, edit or delete a comment (the phone offers each exactly where the desktop does); a record page authored in full and an object with `enable.feeds: false` show no icon.
+- e605773: feat(components): a `type: flow` metadata embed shows each decision's branches and their conditions
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The business view of a `type: flow` metadata embed (ADR-0051) listed the flow's steps and nothing else, so a manual could not point its readers at the diagram for an approval threshold. Under each decision step it now lists the decision's branches: the condition in readable form, such as `Amount > 500,000`, an arrow, and the step the branch leads to. A branch that is taken when no other matches reads `otherwise`. When the flow's start node has a condition, it is shown once above the steps (`Runs when Amount ≥ 100,000 and other conditions`).
+  
+  The text comes from the live definition on every render: the edges' `condition` (or a decision's `config.conditions` matched by edge label), the field label from the flow's object, and the amount formatted in the reader's locale, in the field's or the tenant's currency when one is known. A changed threshold shows on the next page load with no manual edit. The embed now makes one more metadata request, for the object the flow runs on.
+  
+  The reader understands comparisons of one field of that object with one literal, joined by `&&` and `||`. Presence guards on the compared field (`has(x)`, `x != null`) are left out. Anything else, such as a field compared with another field, `previous.*` or a function call, shows a neutral `condition` marker, never the raw expression. The technical view (`detail: technical`) is unchanged. The six new viewer strings ship in every locale pack.
+- cbd582f: feat(app-shell): from 768 px up an app draws no top bar; what it carried moves to the sidebar and the content area
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Part of objectstack#36112 (epic #36107). An app page from 768 px up now starts at the window's top:
+  
+  - **Sidebar head.** The first row is the app's glyph and name, which open a menu that only switches apps (the viewer's apps with the current one checked, Setup among them for the viewers the server serves it to, a search field past eight apps, and 「Add app」 for a workspace admin who may author: build with AI or in Studio, start from a template, the marketplace), with the collapse button beside it. The second row is search (`⌘K`) and the notification bell.
+  - **Sidebar foot.** The account menu: avatar, name and, in a walled organization, the organization's name; the same entries the avatar menu had (profile, connect an AI assistant, organizations, hidden apps, theme, language, notifications, log out), plus the stage chip on a preview or beta deployment.
+  - **Content area.** The impersonation, read-rate and storage banners and a lost-connection notice sit at the top of the content, its width.
+  - **Page header.** While the sidebar is collapsed the page header draws the expand button first; a route with no shell header gets it at the content's top-left corner. The page's button group (#36111) is always on; the `os:shell:page-actions` storage switch is gone.
+  - `⌘⇧H` goes home from any app page at every width (the app layout installs it, not the bar).
+  
+  Unchanged: a phone keeps its top bar and bottom bar; an app's docs pages, which mount no sidebar, keep the bar at every width; `/home`, the organization pages and Studio keep their bar; the sidebar's fold below 1416 px and its keep-open choice are as before.
+  
+  New strings in all 11 locales: `sidebar.collapse`, `sidebar.expand`, `layout.appSwitcher.addApp`.
+- 031325d: feat(console): the sidebar's docking model — 1280 px starts expanded, the expand/collapse button is the one control, and Recent lists this app's items
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Which state a window starts in.** From 768 px up, a browser with no choice kept starts with the sidebar expanded on a window 1280 px wide and up, and collapsed from 768 to 1279 px. The threshold was 1416 px, and below it the sidebar folded on its own. `CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH` is now 1280 (one constant).
+  - **The reader's choice wins, on each side.** The sidebar's collapse button and, while it is collapsed, the page header's expand button are the one control, and this browser keeps each press: a wide-window choice and a narrow-window choice, kept apart as before. The expand button now docks the sidebar beside the page; before, it floated the menu over the page. Resting the pointer on the window's left edge and ⌘B still float the menu over a collapsed sidebar without changing the choice. Phone widths are unchanged, and the sidebar stays 256 px wide.
+  - **"Keep sidebar open" is gone.** Its stored choice (the workspace preference `console.sidebar.keepOpen`) is now the narrow-window choice, so a reader who kept the sidebar open starts expanded on a narrow window. Nothing to migrate.
+  - **Upgrade change.** On a 1280 to 1415 px window, a reader who never kept the sidebar open now starts with it expanded (it folded before), unless they collapsed it on a wide window. The accepted cost: on a 1280 px window with the sidebar expanded, the list beside an open record drawer is 304 px wide (560 before), and on 1280 to 1415 px, opening the record page's comment panel moves its fields back to the tab row; collapsing the sidebar gives the width back.
+  - **Recent is this app's.** From 768 px up, the sidebar's Recent group lists only the items opened in the current app. Home's "Recently accessed" and the phone drawer still list every app's.
+  
+  `@object-ui/i18n`: the `sidebar.keepOpen` key, which no surface reads any more, is dropped from all eleven packs (zh-Hant regenerated).
+- 1705ec9: feat(console): the list page's top reads the object's row, the view bar, then the condition row; 「Import / Export」 and 「New Account」 end the view bar
+  
+  Clause-②: yes (widening): `@object-ui/plugin-list` exports `ListExportDoor` and `ListToolbarTrailingState` and calls `toolbarTrailing` with a second argument; `@object-ui/i18n` adds `console.objectView.newObject` and `console.objectView.importExport`
+  Metadata-protocol: none
+  
+  An object's list page draws three rows above its table again:
+  
+  - **The object's row** — the console `PageHeader` in its list posture: the object's icon and plural name, ended by the shell's top-right button group where the shell turns it on. It carries none of the page's acts.
+  - **The view bar** — the view switcher and 视图设置 on the left; the search, 「Import / Export」, the authored list toolbar actions, 「New Account」 and ⋮ More on the right. The view bar no longer leads with the object's name.
+  - **The condition row** — the sort and filter chips, and Discard / Save while the list holds a draft, as before.
+  
+  「Import / Export」 holds Import and one entry per export format the reader may use. ⋮ More keeps the object's description and the favorites entry; Import is no longer in it. While the list is narrower than 896px, 「Import / Export」 folds into ⋮ More; below 768px the search keeps its icon alone, without the active keyword. The 视图设置 panel keeps its export entries. The create button names what it creates (`console.objectView.newObject`, 「New {{object}}」, in every locale). A phone's list header is unchanged.
+  
+  `@object-ui/plugin-list`: `ListView`'s `toolbarTrailing` host prop is now called with a second argument, `ListToolbarTrailingState`, whose `export` is the list's export door (`ListExportDoor`: the formats, `run`, `busy`, `error`), absent where the list offers no export. Both types are exported. A host that reads only the first argument is unchanged.
+- a6756a2: feat(console): the record page's field area is one list — one field a row in the side preview, on a phone and in the wide page's pinned left column
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The synthesized record page's field area (objectstack#36147, ruling on the card 7066516044):
+  
+  - **One column at any width.** The drawer (at any width), the split pane, the phone's 「详情」 tab, the wide page's pinned left column and a desktop full page that has other tabs but is not pinned (an opportunity's 详情 tab goes from three columns to one) draw the fields one a row: label left, value right, a hairline between rows. The phone's own grouped-inset face is gone there; it is the same list. A full page whose details are its only face (no other tab, none hidden) keeps laying a group out by width.
+  - **Group title row.** The title sits left and its chevron at the row's right end, pointing down while the group is folded and up while it is open; the whole row toggles.
+  - **Referenced records are chips.** A lookup value is drawn as a pill with the referenced object's colour tile (`ObjectSchema.color` / `icon`, objectstack#35985) and the record's whole name, wrapping rather than cut. A click on the chip opens the record; the rest of an editable lookup's row edits it. Everywhere else a reference keeps its link face.
+  - **Empty fields fold into one row.** Every empty field of every group is folded into the list's one last row (「显示 N 个空字段」), replacing the per-group toggle and the 「N 个空分组」 line on this page. The reader's choice is the per-object record-page preference `showEmptyFields` (objectstack#25883), so it holds for the next record of the object. An authored `hideEmpty` group stays hidden and is not counted.
+  - **「系统信息」 is the last group,** folded until opened: created by, created on, updated by, updated on (when the record was updated), the owner (when the body does not draw it) and the record ID, one fact a row. On this page it **replaces the one-line meta footer that objectui#12307 introduced**; outside the laid-out record page that line is unchanged.
+  - **A click edits; no pencil.** A single click on an editable value enters edit (a click on a link, a button or a text selection inside it is not taken); the hover pencil is no longer drawn, and stays in the DOM only as the keyboard's way in (visible on focus). A double click is no longer needed. **A read-only value takes no click any more**: the click-to-copy on read-only rows is removed on this page. For a mouse or a keyboard its copy icon, shown on hover or keyboard focus, stays; a touch screen shows none, and the value is selected by a long press.
+  - Authored record pages and every other DetailView keep their faces.
+  
+  `@object-ui/fields` widens: it exports `ReferenceChipContext` (a boolean React context, default `false`) that switches `LookupCellRenderer`'s reference link to the chip face.
+  
+  `@object-ui/i18n` widens: five new keys in every pack, `detail.systemInfo` (系统信息 / System information), `detail.createdTime`, `detail.updatedTime`, `detail.recordNumber` and `detail.clickToEdit`.
+- b3bcfef: fix(i18n): the record timeline's events chip reads 事件 / Events, and the Chinese stream says 动态, never 活动
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The record page's 动态 tab drew its chips as 「全部 · 活动 · 讨论 · 变更」, so an app with an object named 活动 (a CRM's meetings and calls) showed 活动 twice on one screen with two meanings, and the English tab Activity held a chip also named Activity. The chips now read 「全部 · 事件 · 讨论 · 变更」 (zh-Hant the same), Events in English, and each other pack's own word for events (Ereignisse, Eventos, Événements, イベント, 이벤트, Eventos, События, الأحداث). What each chip holds is unchanged: 变更 / Changes keeps the audit-sourced field changes, and created, updated, assigned and shared rows stay under the events chip.
+  
+  In zh-Hans and zh-Hant the rest of the stream takes the tab's word: the empty state reads 「暂无动态」 (「暫無動態」), the stream title `detail.activity` reads 「动态」 like `detail.timeline`, and the access-denied, load-failed and filter labels say 动态. The English chip's in-code fallback follows the pack, and the tab strip's Chinese token map reads an `Activity` tab as 动态 / 動態, matching `detail.activity`. Values only: no key is added, renamed or removed.
+- 71e02ff: fix(studio): the CEL condition builder offers membership, not equals, on a list field
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a field that holds a list (a `multiselect`, `checkboxes` or `tags` field, or a `select` / `lookup` / `user` field declared `multiple: true`), Studio's condition builder (hook, validation-rule, action-visibility, page-block and flow entry conditions) offered equals / not equals and the ordering operators. CEL compares the whole list with one value there, so `record.labels == 'frontend'` was false for every record (and `!=` true for every record), and the author got no signal.
+  
+  Such a field is now offered what the list toolbar's filter builder offers it: contains, does not contain, is empty and is not empty. Contains writes `S != null && V in S` and does not contain writes `S == null || !(V in S)`, the same spelling a flow edge's condition rows write; both are null-safe. A row moved onto a list field leaves equals for contains, and a row moved off one leaves membership for equals. A stored condition that compares a list field with `==` / `!=` now opens in the expression editor exactly as stored, never rewritten. A single-value field is offered what it was before.
+  
+  New locale key: `engine.inspector.condition.op.notContains` in the studio catalogue (en, zh). No props or exports change.
+- 5e8e243: feat(console): a footer calculation is a part of the list's draft; a refused save of a package's view says why in the reader's words
+  
+  Clause-②: yes (widening) — new keys in every `@object-ui/i18n` locale pack: `console.objectView.personalizedParts.summaries` and `console.objectView.saveRefused.packaged`; nothing removed or renamed
+  Metadata-protocol: none
+  
+  On a Console object list, picking, changing or removing a column's footer calculation (「+ 添加统计」) applies at once and writes nothing. It used to be saved at once: on the reader's own view straight into it, on a shared view as a draft of the view (`PUT /api/v1/meta/view/<name>?mode=draft`), which the server refuses on a view an app package ships.
+  
+  - The calculation is a part of the list's draft, like the sort and the filter: **Discard** and **Save** appear, Save's menu names it (「统计」), and Discard takes it off. The draft lives as long as the others: kept on opening a record and coming back, dropped on another view, object or a reload.
+  - **Save to this view** (on the reader's own view, or on a shared view an admin may edit) and **Save as my view** store it on the columns the saved view keeps.
+  - **Save to this view** on a shared view is offered only once the Console has read that the view's package takes saves: not while that read is in flight (on a slow start the list draws seconds before it lands) nor for a package it lists read-only. A failed read, or a package the list leaves out, still offers it as before.
+  - On a view the reader cannot change in place (one an app package ships, or a shared view of a reader who is no admin), the pick goes into the draft too and Save offers **Save as my view** alone.
+  - The menu is offered on every column the saved view would carry: the columns the list draws and the fields the reader added.
+  - When the server refuses to save a view an app package ships (`NOT_OVERRIDABLE`), the toast says in the reader's language that the view comes with an app package, cannot be changed directly and can be saved as the reader's own view. The server's text goes to the console only. Every other refusal is said as before.
+- 4099ef2: fix(list): "Add group field" asks which field, and offers only fields that can group
+  
+  Clause-②: yes (widening) — `@object-ui/components`'s `GroupingEditor` gains the optional props `askFieldOnAdd`, `fieldOptionsLoading` and `fieldLabel`, and its `labels` the optional `noFields`; `@object-ui/i18n` gains the key `list.noGroupableFields` in every locale; nothing removed or renamed
+  Metadata-protocol: none
+  
+  On a list, 「添加分组字段」 / "Add group field" used to group at once by the list's first column, usually the record's name, so every record became a group of its own. Now, in the toolbar's Group panel and in the view settings menu's Group level alike:
+  
+  - It adds no field by itself and does not group. The field dropdown opens, and the list is grouped once a field is picked there. Closing the dropdown without a pick leaves the list as it was.
+  - The dropdown lists only the fields that can group: single select or radio (a status is one), tick (boolean or toggle), person, and linked record (lookup, master-detail, tree), each single-valued. Text, number, date and multi-select fields are not offered. The list's columns come first in the reader's column order, then the object's other groupable fields the reader may read, business fields before system ones such as the record owner. Created by and updated by are offered only when the view shows them as a column.
+  - With no field that can group, the button is drawn disabled and says why: 「没有可以用来分组的字段」 / "No field here can group the list".
+  - Until the object's field types are read, the button is disabled without a reason. When no definition can be read at all, every column is offered, as before.
+  - A view already grouped by another kind of field keeps showing that grouping, and its level can still be changed or removed.
+  - A second level follows the same rule among the fields no level uses yet.
+  - The grouping is still a part of the list's draft: **Discard** and **Save** appear, and nothing is written.
+  
+  `@object-ui/components`: with `askFieldOnAdd`, `GroupingEditor`'s "Add group field" opens a row whose field dropdown is already open and writes the level only on a pick. With no `fieldOptions` it draws the button disabled, explained by `labels.noFields`, or without a reason while `fieldOptionsLoading`. `fieldLabel(field)` labels a level whose field `fieldOptions` does not carry. Without these props the editor behaves as before.
+- 6a73185: feat(console): the left sidebar resizes by its right edge, the collapsed sidebar floats as a card, and a menu opened from the float no longer leaves it folded with the menu cut off
+  
+  Clause-②: yes (widening) — one new `@object-ui/i18n` key (`sidebar.resize`) in all 11 locales; no spec, schema, server or published export change
+  Metadata-protocol: none
+  
+  - **Resize** (`@object-ui/app-shell`): from 768 px up, the docked sidebar's right edge drags it between 200 and 350 px; a double-click comes back to 256; ← → move it 16 px, Home and End to either end. The width is kept in this browser (`console.sidebar.width`) and the menu floating over a collapsed sidebar takes it too. A phone's drawer keeps its own width.
+  - **The float is a card:** 8 px off the window's left, top and bottom edges, with rounded corners, a border and a shadow; the page under it is not dimmed or moved. Resting the pointer at the window's left edge still floats it and moving away still folds it.
+  - **A menu opened from the float keeps it out:** pressing the app name (or the account, or an entry's `…`) while the float was still sliding in under the pointer opened the menu and folded the float a moment later, leaving the menu cut off at the window's left edge. A press in the float now stops the fold's clock, and the fold does not happen while a menu or dialog is open, or while the pointer is on the float.
+- 96b7975: feat(console): the empty ⌘K palette leads with a "Current page" group: the page's favorites entry
+  
+  Clause-②: yes (widening) — one new published language-pack key, in all eleven packs: console.commandPalette.currentPage
+  Metadata-protocol: none
+  
+  Opened with nothing typed, the command palette inside an app now starts with a "Current page" group, above the recently viewed records, when the page behind it is an object's list or a record page:
+  
+  - **On an object's list** (`/apps/APP/OBJECT`, or one of its views): "Add to favorites" (or "Remove from favorites"), the list's own favorites entry from its ⋮ More menu. It pins the app's navigation entry for the list where the app has one, and keeps an object favorite otherwise, exactly as that menu does.
+  - **On a record page**: the record's star — the same `record` favorite the star beside the record's name toggles, named by the title the record was last visited under.
+  
+  The row is first, so Enter on the empty palette now runs it; the footer says so ("Add to favorites ↵" / "Remove from favorites ↵", the menu's own words). Typing takes the group away. On every other page (an app's landing, a dashboard, the search page, a create form) the palette is unchanged. Which records the palette searches and how it ranks them, the full search page, and the phone's search are unchanged.
+  
+  New locale key, in every pack: `console.commandPalette.currentPage`. No props or package exports change.
+- e8b494a: feat(console): the ⌘K palette previews the record it is on, creates a record from what you typed, finds "New OBJECT", and says what Enter does
+  
+  Clause-②: yes (widening) — eight new published language-pack keys, in all eleven packs: console.commandPalette.create, createAs, previewEmpty, enterOpenRecord, enterCreate, enterSwitchApp, enterApplyTheme, enterOpen
+  Metadata-protocol: none
+  
+  The command palette inside an app gains four things; which records it searches, and how it ranks them, are unchanged.
+  
+  - **Record preview.** While the query finds records, the palette widens and shows the selected hit on the right, read-only: the object's label, the record's title and the object's declared key fields (`highlightFields`), drawn the way the record pointer card draws a record (field-level security applied; an object that declares no key fields shows its title alone). Arrow keys move the preview with the selection; the record is read once the selection rests for 150 ms. A palette narrower than 45rem (720px) shows the results alone.
+  - **Create "words" as OBJECT.** Once something is typed, the end of the list offers to create a record of up to three of the app's objects, the object of the page the palette was opened on first, with the typed words in the object's title field: Enter opens that object's create page (`/apps/APP/OBJECT/new`) with the field filled. An object is offered only where its list offers New (the same verdict: CRUD bucket, `userActions.create`, effective API operations, the create grant, and the create action's `visibleWhen` / `disabledWhen`), and only when its title field is a text field the member may write on create.
+  - **New OBJECT.** Typing "new", "create" or an object's name finds a "New OBJECT" entry for each such object, which opens its empty create page.
+  - **Enter hint.** A footer names what Enter does to the selected entry: Open record, Create, Switch app, Apply theme or Open.
+  
+  New locale keys, in every pack: `console.commandPalette.create`, `createAs`, `previewEmpty`, `enterOpenRecord`, `enterCreate`, `enterSwitchApp`, `enterApplyTheme`, `enterOpen`. No props or package exports change.
+- bbc7e03: feat(grid): a list cell's right-click menu copies, pastes and clears that cell
+  
+  Clause-②: yes (widening) — an optional `cell` member (`copy`, `paste`, `clear`) on the context `data-table` hands a host's `renderRowContextMenu`; five new `table.*` language-pack keys in every locale `@object-ui/i18n` ships (`copyCell`, `pasteCell`, `clearCell`, `pasteNotValue`, `pasteUnavailable`); nothing is removed or renamed
+  Metadata-protocol: none
+  
+  Right-clicking a cell in a list now offers what can be done to that cell, above the row's own items.
+  
+  - The menu has two sections. Above a line: **Copy**, **Paste**, **Clear** and, where it was already offered, **Change history**. Below it: the row's items as before (Open, Open in new tab, the row's actions). A right-click off a data cell opens the row's section only.
+  - **Copy** copies the cell's value, as Ctrl/Cmd+C does.
+  - **Paste** writes the clipboard's text into the cell and saves it, through the same checks as typing into the cell: text that is not an email address in an email cell, a value over a field's length, an empty required field are refused and the cell says why. If the browser will not let the list read the clipboard, the cell says so and names Ctrl/Cmd+V. Paste is offered on text, numbers, dates and single-choice fields (an option by its value or label); on a record reference, a person, a multi-choice and other types it is unavailable.
+  - **Clear** empties the cell and saves it, as Backspace does; it is unavailable on a required field.
+  - On a read-only field, a calculated field, a grid that is not editable or a record the reader may not change, Paste and Clear are unavailable and Copy still works.
+  - A paste into the selected cell with Ctrl/Cmd+V now goes through the same checks: text the cell's editor would refuse is no longer sent to be saved, and text the column cannot read (letters in a number cell, a name in a lookup cell) says why instead of doing nothing.
+- 27895d7: feat(record-page): each changed field is its own line under an activity entry, `Label: old → new`
+  
+  Clause-②: yes (widening) — four new `detail.*` language-pack keys in every locale `@object-ui/i18n` ships (`fieldChangeLabel`, `fieldChangeEmpty`, `fieldChangeExpand`, `fieldChangeCollapse`), and six new optional props on the exported `FieldChangeItem` (`label`, `oldText` / `newText`, `emptyLabel`, `expandLabel` / `collapseLabel`); nothing is removed or renamed
+  Metadata-protocol: none
+  
+  The record page's activity named a saved change by its fields only (「更新了 客户备注」), or carried every value on one cut line. An activity entry now reads as the fields it changed, with one line per changed field under it: `Customer notes: Old words → New words`. A save that changed the phone and the email is one entry with two lines.
+  
+  - The values come from the field-change code the server already serves on each `sys_activity` row (`metadata.summary_message`), narrowed per reader by plugin-audit: a field the reader may not read has no change in it, so it draws no line. Nothing new is read, and nothing is filtered in the browser.
+  - An empty side reads as the language pack's word for empty (`Empty`, `空`), never the stored `∅`.
+  - A select side reads as the field's option label in the reader's language; a lookup or user side reads as the record's name the server served; a yes/no reads as the pack's Yes / No.
+  - Each side is cut to its line. A side that does not fit, or holds more than one line, offers a control that shows both sides in full and one that cuts them again.
+  - An audit-log entry (objects with `enable.trackHistory`) draws its changes the same way, and an activity row paired with its audit entry keeps its own summary with the audit's lines under it. The record's creation is unchanged: one row with its values beside the summary.
+  - The compact one-line text of a change (the activity panel's peek rows) now reads `Label: old → new` with the same words, where it read `Label old → new` with `—` for empty.
+  
+  What does not change: which entries the activity shows, how consecutive edits by one person on one day fold into one row, the activity filters, and no metadata key, value or default.
+- 543585d: feat(record-page): one field's change history, opened in place from the field or from a list cell's context menu
+  
+  Clause-②: yes (widening) — three new `detail.*` language-pack keys in every locale `@object-ui/i18n` ships (`fieldHistory`, `fieldHistoryNone`, `fieldHistoryNoneRecent`); new exports from `@object-ui/plugin-detail` (`FieldHistoryButton`, `FieldHistoryCard`, `FieldHistoryPopover`, `useFieldHistory`, `useFieldHistoryOffered`, `fieldHistoryOffered`, the constants `FIELD_HISTORY_PAGE_SIZE`, `FIELD_HISTORY_SCAN_BATCH` and `FIELD_HISTORY_SCAN_BATCHES_PER_LOAD`, and their types); an optional `column` member on the context `data-table` hands a host's `renderRowContextMenu`; `FieldChangeItem` draws no label for `label: ''`; nothing is removed or renamed
+  Metadata-protocol: none
+  
+  A reader can now see one field's past changes on one record without reading the whole activity stream.
+  
+  - On the record page, each field of the object has a history button beside its value, shown on hover and focus like the copy button. In a list, right-clicking a cell of a field the object declares adds 「Change history」 to the row's menu. Both open the same small card in place. Neither is offered on a field whose old → new values are not recorded (`fieldHistory: false` on the field, `enable.fieldHistory: false` on the object, a credential field, or a media or JSON-like type that does not opt in), judged by the same `resolveFieldHistory` the audit writer keeps values by.
+  - The card lists only that field's changes: who, when, and old → new in the reader's words (an option by its label, an empty side as the pack's word for empty), newest first, ten at a time with 「Load more」.
+  - A field never changed reads 「No changes recorded」 with who created the record and when.
+  - The changes are the record's activity rows the server already serves, narrowed to the reader: a change of a field the reader may not read is never sent. A field the reader may not read offers no entry point at all. The full audit log is not read.
+  - The rows are read by record, newest first, fifty at a time, keeping those that changed the field; a query naming the change columns is refused for a reader withheld any field of the object, so the field is never part of the query. Opening the card reads at most four batches, and each 「Load more」 at most four more; when they hold no change of the field and older rows remain, the card reads 「No changes in the recent activity」 and offers 「Load more」 to read on.
+  
+  `@objectstack/spec`: the authoring hint for the mistyped field key `tracked` now names what turns one field's change history on or off today (`fieldHistory: false`, `true` for a media or JSON field, `enable.fieldHistory: false` on the object), where it named `trackHistory: true`, which changes nothing for most field types. Wording only; `tracked` stays rejected.
+- 7e89bc6: feat(studio): the field inspector, the field designer and the object's settings write Field change values instead of Track history
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Old → new values show on the record activity by default, and an object or a single field can turn them off. The Studio now writes that setting where an author looks for it:
+  
+  - **Field inspector.** The "Track history" box is gone. In its place, "Field change values" offers Default, On and Off. Default leaves the field's `fieldHistory` unset and names what it means for this field on this object: "Default (On)" for most types, "Default (Off)" for a media, JSON or credential field, and "Default (Off)" for every field when the object turns values off, with a note saying so. On and Off write `fieldHistory: true` and `false`; choosing Default after Off removes the key. A stored `trackHistory` is kept as it is and never written.
+  - **Field designer** (`@object-ui/plugin-designer`). The drawer's "Track History" switch, which wrote `trackHistory: false` on every save, is replaced by "Field Change Values" with the same three choices: Default (named "Default (On)" or "Default (Off)" for the type in the drawer, and it follows a type change), On, Off. A stored `trackHistory` is carried through an edit and never written. `DesignerFieldDefinition` (`@object-ui/types`, with its zod mirror) gains an optional `fieldHistory`, and both designer save paths (`MetadataFieldsPage`, `MetadataService.saveFields`) carry it; Default sends no key, which removes a stored one.
+  - **Object settings.** The Features card gains "Field change values" (`enable.fieldHistory`). Unticking it writes `false`; ticking it again removes the key rather than writing `true`, since unset already means on. Sibling `enable` keys are kept.
+  
+  The inspector and the metadata form's Field History control share one module for the three choices, what each writes and their wording; the field designer cannot import it (the app shell depends on the designer) and shares the rule itself, `resolveFieldHistory` from `@objectstack/spec/data`. New Studio strings `designer.field.fieldHistory`, `designer.field.fieldHistoryObjectOff`, `engine.studio.settings.capFieldHistory` and `engine.studio.settings.capFieldHistoryDesc` (en, zh); `designer.field.trackHistory` is removed with the box it labelled. In the language packs, `appDesigner.fieldDesigner.trackHistory` is replaced by `appDesigner.fieldDesigner.fieldHistory`, `fieldHistoryDefault`, `fieldHistoryOn` and `fieldHistoryOff`, in all eleven locales.
+- 42e4096: feat(console): on the record page's field list an empty field you can edit reads 「设置{字段名}」 and one click fills it in; an editable value offers the copy icon too
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The synthesized record page's field area (the side preview, the phone's 「详情」 tab, the wide page's pinned left column and a full page alone):
+  
+  - **Empty editable fields read 「设置」 plus their label.** An empty value the reader can edit is drawn as light text, 「设置」 plus the field's label (`Set Phone` in English), and a single click on it opens the field's editor, as a click on any editable value already does. A read-only field, a field the caller may not write and a record that is not inline-editable keep the shared 「—」 placeholder. Empty fields still fold into the list's one 「显示 N 个空字段」 row; shown, they read 「设置…」 instead of 「—」.
+  - **An editable value can be copied without editing.** Its copy icon is drawn on hover or keyboard focus at the value's right, as a read-only value's is; it copies the value and does not enter edit. A touch screen draws none, as before for read-only values. The keyboard's way into edit (the pencil, drawn on focus only) is unchanged.
+  - Authored record pages and every other DetailView keep their faces: an empty field there reads 「—」 and an editable row keeps its double-click and pencil.
+  
+  `@object-ui/i18n` widens: one new key in every pack, `detail.setField` (`Set {{field}}` / `设置{{field}}`).
+- ff60149: feat(console): 「Edit app」 turns on a design mode in the running app instead of opening Studio
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An administrator who may design the app (a workspace admin holding `manage_metadata`, on a writable package: the gate 「Edit app」 always had) now presses 「Edit app」 in the page header to turn on the app's design mode, in place. A bar across the top of the window says 「Design mode」 and offers 「Cancel」 and 「Save」, and nothing else. The mode stays on from page to page of the app and goes off when the app changes; it is never on a phone. While it is on, the sidebar shows the app's own menu without the person's Favorites.
+  
+  The mode is the extension point the next design-mode surfaces (menu editing, the page header's pinned actions) stage their changes through: 「Save」 writes every staged change and leaves the mode, 「Cancel」 drops them all. 「Save」 is off while nothing is staged. While a change is staged, closing or reloading the tab, a link out of the app and the app switcher ask first; a link to another page of the app does not. This release stages nothing yet.
+  
+  A read-only package's app keeps its 「Open APP in Studio」 entry unchanged. New `@object-ui/i18n` keys: `designMode.title`, `designMode.leaveUnsaved`, `designMode.saveFailed`.
+- ee651ce: feat(console): the app's menu is edited in the design mode, and an installed app enters it too
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  While the design mode is on, the sidebar draws the app's menu with its editor. Each group, and the menu's top level, ends with 「Add menu item」: it holds a dashed row 「Choose a menu item…」 where the entry will go and opens a picker that searches the app's existing objects, views, dashboards, reports and pages (and takes a link), offering only what is not in the menu yet. Each entry has a 「⋮」 menu (move up, move down, move to a group, add an item before or after it, rename and icon, remove from the menu) and can be dragged to another place or group. Removing takes the entry off the menu only; the picker offers it again.
+  
+  The edits are staged with the mode: 「Save」 writes the app with its new menu where Studio's menu editing writes it (the app's package when it is writable, else its customization package, declaring the override at the package's version) and publishes it, so every member sees it; 「Cancel」 drops them. A draft of the app already pending (in Studio) is not overwritten: the save says so and keeps the mode on. The save is composed from the app as stored, never as served: the menu a member is shown is translated into their language and pruned of what they may not open, so the edits are replayed by entry id on the stored menu, and every entry they did not touch is written back as it was. Renaming an entry is offered in the deployment's default language only, and only while the entry shows its stored name; in any other language the name field is closed and says that menu names are changed in the app's source language. Adding, moving and the icon stay open in every language. An entry another package puts into the menu (its `navigationContributions`) is not in the app's stored menu, so its 「⋮」 says it is changed in that package, and it is not moved, renamed or removed here. Such entries are added after the app's own entries when the app is served, so, once the editor has read the app's stored menu, an entry added or moved to the end of a group the app itself holds is drawn before them, where everyone will see it. A group another package adds, and the moment before that read lands, are not handled this way yet.
+  
+  「Edit app」 now enters the mode on an installed (read-only) app as well, where the customization door takes the caller; where it is walled off (a walled deployment, not the platform operator) the eye into Studio stays. An app whose menu is split in areas keeps its menu unedited in the mode. New `@object-ui/i18n` keys under `designMode.menu`.
+- dad9b55: feat(console): a new dashboard is created from the design mode's 「Add menu item」 and opens for editing
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  In the design mode's 「Add menu item」 picker, the 「Dashboards」 list now starts with 「New dashboard…」, above the existing dashboards that are not in the menu yet. It asks for a name only. 「Create」 creates the dashboard, empty, in the package the menu is saved to (the app's package when it is writable, else its customization package), publishes it, puts its entry in the place the editor held for it, and saves the menu with every other change staged in the mode; the mode is then left and the new dashboard opens in its page's edit state. A dashboard with no cards yet now says so on its page (「No cards yet」) instead of drawing a blank canvas, so members see an empty dashboard, not an error. 「Cancel」 writes nothing and leaves nothing in the menu. Where the menu cannot be saved (the app's package is not listed, an installed app states no version, or its customization package cannot be had or written) nothing is created. When the menu save is refused after the dashboard was created, the dashboard is removed again, the mode stays on and the reason is said. The machine name is generated from the name (a Chinese name through its pinyin), unused by any dashboard. A report cannot be created this way yet: a report needs a dataset and measures before it can be published. New `@object-ui/i18n` keys under `designMode.menu` and `dashboard.noCards`.
+- d076975: feat(console): a new report is built from the design mode's 「Add menu item」 and lands in the place held for it
+  
+  Clause-②: yes (widening) — new `@object-ui/i18n` keys (`designMode.menu.newReport`, `designMode.menu.newReportLeft`, `report.builder.addsToMenu`) in all 11 locales; no package export, spec or schema change
+  Metadata-protocol: none
+  
+  In the design mode's 「Add menu item」 picker, the 「Reports」 list now starts with 「New report…」. A report needs a data source and a measure before it can be published, so it is not created from a name: the place stays held in the menu (「New report…」) and the report builder opens at the app's `reports/new`, saying that saving adds the report to the menu. The builder's Save creates and publishes the report in the package the menu is saved to (the app's package when it is writable, else its customization package), puts its entry in the held place, and saves the menu with every other change staged in the mode; the mode is then left and the report's page opens. When the menu save is refused the report is removed again, the mode and the held place stay, and the builder stays open with the reason. The builder's Close, or leaving the builder any other way, drops the held place and writes nothing. Opened outside the design mode, `reports/new` saves on its own as before.
+- 70d07fd: feat: an object arranges its actions per scope (`actionLayout`: pinned buttons and the 「More」 order), and the design mode sets it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #36630
+  
+  A page header draws at most three of its actions as buttons and puts the rest in its 「More」 menu. An object now arranges them itself with the new optional key `actionLayout` on `ObjectSchema` and `ObjectExtensionSchema`: `{ list?: Arm, record?: Arm }`, where `Arm = { pinned: string[], more?: string[] }`. `pinned` names the buttons in the order drawn, at most three (`[]` pins none); `more` orders the 「More」 menu; an action the scope places that neither part names goes to the end of 「More」 in its default order. A pinned action that is hidden leaves its button out, and no other action takes its place.
+  
+  - `list` arranges the actions placed at `list_toolbar` and the list page's built-ins `$import` and `$export`. A built-in is only ever pinned: one named in `more` is refused with its reason, since not pinned the list page draws it in its own Import / Export menu.
+  - `record` arranges the actions placed at `record_header` or `record_more`. It is a scope, not a page: the record page header, the side preview and a phone's bottom action bar all read it. A `page:header` that authors its own `actions` list keeps that list.
+  - An arm left out (or the key left out) draws that scope exactly as before.
+  
+  What each package gains:
+  
+  - `@objectstack/spec`: the key and its shape refusals at every door (more than three pinned, a name given twice in one part or in both, a malformed name, a built-in the scope does not have, a built-in in `more`, since a built-in is only ever pinned), each with its reason. New exports `OBJECT_ACTION_LAYOUT_PINNED_LIMIT`, `OBJECT_ACTION_LAYOUT_SCOPES`, `OBJECT_ACTION_LAYOUT_BUILTINS` and the types `ObjectActionLayoutScope`, `ObjectActionLayout`, `ObjectActionLayoutArm`. The object form offers it under Advanced, one JSON row per arm.
+  - `@objectstack/objectql`: `actionLayout` joins `fieldGroups` and `relatedLists` as a key only the base's paired `.custom` package writes on an `object_extension` (ADR-0146 D10). It is applied last, after every other layer, arm by arm: each arm it writes replaces the served arm for that scope whole, and an arm it leaves out stays. A manifest's `objectExtensions` entry now carries the key to the fold.
+  - `@objectstack/metadata-protocol`: the one judge refuses `actionLayout` from any other package, naming the action's own `locations` and `order` as the way to place an action the package brings. Each door says it its own way: publish, restore and draft promotion of an `object_extension` answer `VALIDATION_ERROR` / 400; marketplace install refuses the package body with `VALIDATION_ERROR` / 422; `os validate` and `os build` exit non-zero and print the row; the registry fold skips the key and leaves a note.
+  - `@objectstack/lint`: `validateObjectActionLayout` (`object-action-layout-unknown`, `object-action-layout-not-placed`, at `error`) refuses in `os validate`, `os build` and `os lint` a name, in either part, that is no action of the object or is not placed in the scope its arm arranges.
+  - `@object-ui/types`: `arrangedHeaderActions(actions, arm, scope)`, the one reader both record headers and the list header apply, and `readActionLayoutArm`.
+  - The console: both record headers (the default page's and an authored `page:header` with `placedActions: true`) and the list header draw the arrangement. In the design mode, 「Header buttons」 at the end of the page header lists the scope's actions under 「Pinned to header」 and 「Other」 (the 「More」 menu), each dragged into order; a dot moves an action between them, a fourth pin is refused with a toast, the header shows the change at once, and 「Save」 writes only the arms that changed: into the object's own package when it is writable, else into the installed object's customization package as an `object_extension`, through the one writer of an installed object's arrangement (`saveObjectExtensionArrangement`, whose patch type now takes the object-shaped `actionLayout`), which refuses a customization package the server does not list writable. A name the scope no longer offers is listed in the panel as left out. A name the header cannot draw is refused at save with its reason. New `@object-ui/i18n` keys under `designMode.pins`.
+- 8a741ab: feat(console): a dashboard is edited on its own page by the people who may design its package, and every card marks the page filters it does not follow
+  
+  Clause-②: yes (widening) — one new exported function (`dashboardFiltersNotApplied` in `@object-ui/core`), two new optional `DashboardRenderer` props (`onWidgetResize`, `onAddFilter`), and new `@object-ui/i18n` keys (`dashboard.inPageEdit.*`, `dashboard.filters.notApplied`, `dashboard.filters.addFilter`); nothing is removed or renamed
+  Metadata-protocol: none
+  
+  A dashboard page draws an **Edit** button for a workspace admin who may author metadata, on a package Studio lists (the gate of the app's Studio entries). Edit opens the dashboard as stored (never the translated copy the page shows) in an edit state: the header says **Editing**, with **Add card**, **Discard** and **Save**; every card draws a dashed outline and can be dragged to move it, resized from its corner by whole grid tracks (or with the arrow keys on the corner handle) and clicked to select it. The panel at the right is Studio's own dashboard panels, as they stand: a selected card's (its data, its "follow page filters" switches, Remove) and otherwise the dashboard's (label, cards, filters, layout). The filter bar's **Add filter** opens the panel's Filters section. Add card appends a card at the end and selects it.
+  
+  Save writes where Studio's Customize would and publishes that one item in the same act, so everyone sees the change at once without the app's package being published: into the owning package when it is writable, else into the app's customization package (`<base>.custom`, declaring `overrides: { package, basedOn }`), so an installed app's dashboard is edited too. Opening the edit state writes nothing: the pair is asked of the ensure door, which creates it on first use, at Save only. As with Studio's Customize, an installed app's dashboard is not opened where that door is walled for the caller or the package list gives no installed version to declare the override at. A dashboard with a draft already pending there (a Studio edit not yet published) is not opened for editing, and a save over one writes nothing: that draft is never published on its saver's behalf. Discard drops every change and writes nothing.
+  
+  Every card, in every mode, carries a small mark naming the page filters that do not reach it ("Not filtered by Region"), asked of the same binding its query is built from (`dashboardFiltersNotApplied` over `resolveBoundField`): a filter the card opts out of, or one whose `targetWidgets` leaves it out (an explicit string binding wins over `targetWidgets`). A card every filter reaches carries none.
+- 60e79ed: feat(app-shell): the report and dashboard-widget panels speak business wording, and opening the report editor keeps the page in the session's language
+  
+  Clause-②: yes (widening) — the report and widget panels accept an edit of a translated name or title in the session's language, stored as the inline locale map `{ default: SOURCE, LANG: EDIT }` the spec's `I18nLabel` already allows; nothing is removed or renamed
+  Metadata-protocol: semantic — `translateReport` and `translateDashboard` now treat a report `label`/`description` or a widget `title` as changed when its inline locale-map entry for the requested locale (the entry the panel writes: exact tag, then the locale's own script, else base tag or a sibling region; never `default`) differs from the packaged base's own, so the base's translation no longer replaces it; a translation the paired `.custom` package ships still answers first (ruling record 6631250894), and with none the entry is served; dataset members (`translateDataset`, ADR-0149) are unchanged
+  
+  The report editor beside a report (runtime 「编辑」 and Studio) and the dashboard widget property bar (Studio, and the dashboard page's edit state) now name things the way a business reader does:
+  
+  - Fields, measures and data sources show their labels in the current language; the machine name is on hover only (`title`), never printed. A measure reads `LABEL · AGGREGATE` with the aggregate in words (「金额 · 合计」, "Amount · Sum").
+  - 「行（维度）」「维度」 read 「分组」, 「值（度量）」 reads 「指标」, 「数据集」 reads 「数据来源」 (its label alone, no `(name)` and no description), and the filter-binding section reads 「跟着页面顶部的筛选变」 with each filter by its name (「时间」 for the date range, the dimension's label for a filter with none).
+  - The chart-type list is Chinese names with their icons (柱状图, 折线图, …), not `bar`.
+  - The line under the data source is plain words: 「报表从这里取数；每个人只能看到自己有权限的记录。」 — no 「受治理」 or 「RLS」.
+  - The report form rows below the curated fields (section headings and hints in zh-CN) use the same wording.
+  
+  The report's name box and a widget's title box show the served (current-language) text while it is untouched, and an edit lands in the session language only: a plain-string source shown translated becomes `{ default: SOURCE, LANG: EDIT }`, so every other language reads exactly what it read before. For a report or dashboard installed from a package (one with a packaged base), the server serves that entry ahead of the package's translation (a translation the paired customization package ships still comes first), so the edit is what the page shows after save. A report with no packaged base keeps the bundle first: where the bundle has an entry for that language, the stored edit does not show.
+  
+  Fixed: opening the report editor no longer turns the page heading and subtitle from the served 「各阶段商机」 to the English source. The page draws the served text for every translated key the edit has not touched.
+  
+  This supersedes objectui#11161's `LABEL (name)` and objectui#12303's trailing machine name on these two panels only; other dataset pickers are unchanged.
+- 3cf6a44: feat(console): the report builder — one page to build a new report or edit an existing one, with the report drawn live on the left and five settings on the right
+  
+  Clause-②: yes (widening) — new public exports from `@object-ui/plugin-report` (`ReportBuilder` and its model types), a new optional `foldTableUnderChart` prop on `DatasetReportRenderer`, and new `@object-ui/i18n` keys (`report.builder.*`, `report.computedValues`) in all 11 locales; no spec or schema change
+  Metadata-protocol: none
+  
+  - **The builder** (`ReportBuilder`, `@object-ui/plugin-report`): the report previewed on the left; report type, data source, measure, grouping and chart on the right. Every pick rewrites the report and the preview draws it again; there is no Generate button. Picking a data source draws a single number at once (the dataset's count measure, no grouping). While a required piece is missing, the preview says what it is where the chart would be (「Choose a data source」, 「Choose a field to group by」) and that setting's picker opens by itself. A second grouping layer splits a bar or line chart; the chart's own switches are Show values and a target line. Grouping by a date adds the report's period chip. The report's table folds under the chart as 「Computed values」.
+  - **The doors** (`@object-ui/app-shell`): the report page's 「Edit」 opens the builder for a dataset-bound report (a joined report, a pre-dataset report, and a dataset report with a cross-tab, a saved filter or several values keep the inspector panel), and the app's `reports/new` address opens it on a new report, created under a name no served report holds. Admin only.
+  - **Save is seen by everyone at once:** the report is written and published in the same press, for the builder and the inspector panel alike. Over any pending draft nothing is written and the builder says so; the draft bar above the preview publishes or discards it.
+- 5fecc22: feat(console): Change Owner's queue picker searches the server, so a queue past the first 200 can be found and picked; a non-grid list says bulk Change Owner is in the grid
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Change Owner dialog's queue target used to read `sys_queue` once, capped at 200 rows, into a plain dropdown with no search, so an organization with more queues could not pick the rest. It now picks the queue the way the person tab picks a person: with the shared lookup picker over `sys_queue`, which reads one page at a time when it is opened and sends the typed term to the server as its search. The picker shows the queue's label and sends its `name`, which is what the Change Owner endpoint's `queue` takes. Nothing the endpoint accepts changes.
+  
+  Bulk Change Owner lives in the grid's selection bar, and kanban, calendar, gallery, timeline, gantt, map and tree layouts select no rows. On those layouts, a reader the grid would offer bulk Change Owner to (the object offers the action and the object-level transfer verdict allows it) now sees one muted line above the list: "To change the owner of several records at once, switch to a grid view." The list view's `onBulkChangeOwner` documentation says the same.
+  
+  `@object-ui/i18n`: adds `console.changeOwner.gridOnly` to every locale pack and removes the four keys the old queue dropdown read and nothing reads any more: `console.changeOwner.noClient`, `console.changeOwner.queuesLoading`, `console.changeOwner.queuesFailed` and `console.changeOwner.noQueues`.
+- 4f19091: fix(fields): a lookup pick that keeps an amount says so over a filled field too, a create form's opening fill no longer waits for ever on a parent it cannot read, and a pick that fills a currency code and an amount in it copies both
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Three follow-ups to the cross-currency pick rule (a pick copies an amount only into a field in the same currency). Nothing is converted, and no metadata changes.
+  
+  - **A pick over a filled amount says why it kept it.** When a pick would replace an amount that already holds a value (a re-pick in a line-item grid, or a declared pair with `overwrite: true`) and the picked amount is in another currency, the earlier value stays and the note now shows there too, ending "Unit Price still holds its earlier value." Before, the note showed only over an empty field, so the earlier product's price sat under the new product with nothing said. The note goes away once somebody edits the field.
+  - **The opening fill of a create form no longer waits for ever.** A form opened with a lookup already holding a record (a related list's New, a URL prefill) fills its declared targets from it. When an amount there follows the currency of a parent the record names, the fill waited for that parent's read and never ran if the read failed, the data source cannot read single records (`findOne`), or the form names no parent object. Now the wait ends when the read answers, fails or cannot run: the other targets (a description) fill, and the amount is left empty with the note "the currency here could not be read".
+  - **A pick that fills a code field and its amount together copies both.** An amount that follows the record's own code field (`currencyMode: 'record'`) is now judged against the line or record with the same pick's write to that code field applied, in the line-item grid and in the record form. Picking a product that carries `currency_code: EUR` and a price in it onto a fresh line now fills the code and the price, where the price was withheld with a "no currency is chosen" note beside the code the same pick had just written.
+  
+  Also in `@object-ui/fields`: new exports `declaredPickWrites`, `judgePickWrites`, `withheldStillStands` and the type `PickWrite`; `AmountCurrency` gains the kind `unread`, `WithheldAutofill` the reason `targetCurrencyUnread` and the optional `held` (the value a target kept); `amountCurrencyOf` takes an optional third argument, the pick's own writes; `AutofillCurrencyContext.targetCurrency` is handed them as an optional second argument. In `@object-ui/i18n`: two new `lookup.*` sentences, `autofillCurrencyUnread` and `autofillKept`, in every locale pack. In `@object-ui/plugin-form`: the record-form stamp's documentation lists the hosts the rule reaches; no behaviour changes there.
+- e377918: fix(fields): after a currency change in the same edit, a lookup pick's amounts stay as they are and the notes beside them follow the new currency
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Follows the cross-currency pick rule (a pick copies an amount only into a field in the same currency). Changing the record's currency in the same edit (a new record, one with no saved lines, lines staged in this edit) still changes and clears no amount. Now the notes say what that means, in the line-item grid and in the record form. Nothing is converted, and no metadata changes.
+  
+  - **An amount a pick copied gets a note once the currency changes.** If a pick copied a price while the record was in one currency and the record is now in another, a note under the field says so: "Unit Price was copied as $100.00, but the record is now in EUR. Enter Unit Price in EUR if it should change." The note goes away when the currency changes back or someone edits the amount. An amount typed by hand gets no note.
+  - **A note about a price that was not copied follows the new currency.** The "was not filled" note is judged again against the record's currency as it is now, so it names the new currency, not the one at the pick.
+  - **When the record changes to the picked price's own currency, the note stays and the field stays empty.** It now says "Unit Price was not filled when it was picked. The record is now in USD: pick again to fill $100.00." A currency change never fills a field by itself. If the field still holds an earlier value (a pick over a filled field), the note says to clear it first, because picking the same record again does not replace a value that record did not fill: "Unit Price was not filled when it was picked and still holds its earlier value. The record is now in USD: clear Unit Price, then pick again to fill $100.00."
+  
+  Also in `@object-ui/fields`, a widening of its published surface, with nothing removed or made required: new exports `withheldAutofillNow`, `copiedAutofillNow`, `copiedAutofillMessage` and the type `CopiedAutofill`. `LookupAutofillPlan` gains the optional `copied`, the amounts a pick wrote and the currency each was written in; it is absent when there are none, so a plan built without it is still a valid plan. The `WithheldAutofill.reason` union widens with `nowSameCurrency`: code that switches over every reason gains one case to say. In `@object-ui/i18n`: three new `lookup.*` sentences, `autofillNowSameCurrency`, `autofillNowSameCurrencyHeld` and `autofillCopiedUnder`, in every locale pack.
+- 3b58921: feat(console): record create and edit stop loading internal forms; a field's Show on create switch
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: registered internal-record-forms-not-loaded -->
+  
+  The Console's record create and edit surfaces no longer load an object's internal form view. The create dialog, the edit dialog, the full-page create and edit (`/new`, `/record/:id/edit`) and a create or edit an action opens now lay the record out by the object's field groups (`fieldGroups`) and follow the rules on its fields (`visibleWhen`, `readonlyWhen`, `requiredWhen`, `required`). What used to steer those surfaces and now steers nothing: the default form view (`form`, `formViews.default`), the `create` form view, and on them `sections`, the `tabbed` and `wizard` layouts, `defaultTab`, `tabPosition`, `subforms`, `modalSize`, `buttons`, `layout` and `defaults`. A master-detail sub-table still comes from `fieldGroups[].relatedList`, and a flow screen reads its sub-table settings from there too.
+  
+  An app that still declares an internal form installs and runs as before; the definition is inert. A public form (`sharing.enabled: true`) keeps loading at its own link by its own definition, and a named form an action of type `form` opens is unchanged.
+  
+  `showOnCreate` is now live: a field with `showOnCreate: false` is left out of every create surface and stays on edit, the record page and lists. The field form (`field.form.ts`) and the Studio field inspector offer it as "Show on create", on by default; a required field keeps it on.
+  
+  `@objectstack/lint` adds the advisory rule `form-view-internal-not-loaded`: a warning, never an error, on each internal create or edit form an app declares (a container's `form`, `formViews.create`, `formViews.default`, and a stored form view that is the default or named `OBJECT.create`), and on no public or named form.
+  
+  Studio: the Data pillar's Form tab always lays out the object's field groups, and the Interfaces rail no longer lists internal forms; public forms and named forms stay listed.
+  
+  An app that relied on its internal form for create defaults should move them to each field's `defaultValue`; sections move to `fieldGroups`, and required or conditional rules move onto the fields.
+  
+  The upgrade guide carries this as the protocol-18 semantic entry `internal-record-forms-not-loaded`.
+- 9c283a1: feat(console): preview images, PDF, text and CSV in the page from a record's attachments and from a file field
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A file opens in a dialog in the page instead of leaving it. In a record's attachments, the file's name opens the preview; the download stays in the row's menu. On a file field, a click on the file's link opens the preview; a modified click (new tab, new window) still opens the link as before.
+  
+  - **Four views, no new dependency.** Images (PNG, JPEG, GIF, WebP) draw in an image element, and an SVG only ever through an image element, never inlined. A PDF draws in the browser's own viewer in a frame; on a phone it opens in a new tab, which hands it to the system viewer. Plain text draws as text. A CSV draws as a table, read with the same GBK-aware decoder the grid's import wizard uses.
+  - **Download only.** Word, Excel, PowerPoint, HTML and every other type show "This file type cannot be previewed. Please download it." with a download button. An HTML file is never framed and never drawn as markup.
+  - **Limits.** Images and PDF up to 20 MB; text and CSV up to 2 MB, showing their first 1000 rows or lines. Past a limit the dialog shows "This file is too large to preview. Please download it." with a download button.
+  - **Controls.** Previous and next (and the arrow keys) walk a record's attachments; download; open in a new tab.
+  - **Same door as the download.** The preview reads the same signed link through the same permission check as the download, so a reader the download refuses sees the same refusal in the preview. When the browser cannot read a text or CSV file from the page (a bucket on another origin without the CORS rule the preview needs), the dialog offers the new tab instead.
+  
+  New exports from `@object-ui/fields`: `FilePreviewDialog` and its types `FilePreviewDialogProps` and `FilePreviewItem`; `decodeSpreadsheetText` and `parseDelimited`, the delimited-text reader that moved down from `@object-ui/plugin-grid` (which now imports them from `@object-ui/fields`; its own behaviour is unchanged).
+  
+  New `@object-ui/i18n` keys in every pack, under `fields.filePreview`: `title`, `previous`, `next`, `download`, `openInNewTab`, `loading`, `tooLarge`, `unsupported`, `denied`, `loadFailed`, `blocked`, `pdfOutside`, `truncatedRows`, `truncatedLines`, `empty`.
+  
+  No metadata key, value or default changes.
+- c45dd80: feat(setup): Setup → Configuration → Public forms lists every public form of the environment and switches it on or off
+  
+  Clause-②: yes (widening) — a new Setup navigation id `nav_public_forms`, a new component id `forms:public-forms`, new language-pack keys (the `publicFormsSetup` block and the nav label) in every shipped locale, and `anonymousFormIntakeWithdrawnIn` newly exported from `@objectstack/spec/ui` (moved from `@objectstack/metadata-core`, which re-exports the same binding)
+  Metadata-protocol: none
+  
+  A system administrator (`manage_platform_settings`, the capability the Setup entry asks) now has one page for the operations side of public forms. It lists every public form of the environment: its name, the object a submission creates a record of, its address, and whether it is on. Per row: switch it on or off, copy its address, or open it in a new tab. A form is designed (created, deleted, its fields and title changed) in Studio, not here.
+  
+  - **Which forms are listed.** A form view whose `sharing` opens it to anonymous intake once switched on (`allowAnonymous: true` and a `publicLink`), read by the same rule the anonymous form routes use (`anonymousFormIntakeCandidates`). A switched-off form stays listed and can be switched back on. A form with no public address or no anonymous access is an internal form and is not listed. The list is the effective one (`GET /meta/view`), so an installed app's form switched off in this environment lists as off.
+  - **Where a switch is saved.** The switch is the form's `sharing.enabled`, saved and published at once. A form of a writable package is saved in that package. A form of an installed (read-only) app is saved as this environment's customization, an override in the app's `.custom` package (ADR-0146), never an edit of the app's own package, so the app upgrades as before. Switching such a form back on removes the override when it held nothing but the switch, so the app's own form is served again; an override that also carries design changes keeps them, with the switch on.
+  - **A form its installed app ships switched off** (its address kept, `enabled` or `allowAnonymous` set to `false`, or `enabled` omitted, which the stack schema reads as `false`) stays closed whatever the environment saves: the anonymous routes treat the app's own document as a withdrawal that no override re-opens. The page judges this with the routes' own function, `anonymousFormIntakeWithdrawnIn`, now declared in `@objectstack/spec/ui` beside the rest of the intake rule; `@objectstack/metadata-core` re-exports the same binding, so the server's import is unchanged. The page lists such a form as "Off (switched off by its app)" with its switch disabled, also when an override already switches it on, and a switch-on writes nothing and says the app ships it switched off. A form whose app's document cannot be read is shown as status unknown, never as on.
+  - **After an app upgrade**, switching back on an override taken from an earlier version restores the app's own form when the form is otherwise unchanged. When it is not, the override is kept with the switch on and the page says the form stays on the app's earlier version, which Studio's "Restore package original" undoes.
+  - A switch over a draft already pending where it would save writes nothing and says so: that draft is its saver's and is never published on their behalf.
+  - A switch writes the form's metadata, which the server lets only a `manage_metadata` holder do. Without it the page still lists the forms but disables the switches and says why. A refused switch, and a list read that fails, are told in business words, never the server's raw message.
+  - A switched-off form keeps answering as it does today: `404 FORM_NOT_FOUND` at its address. No route, error code or stored key is added.
+  
+  New Setup navigation entry `nav_public_forms` in `group_configuration` (label "Public Forms", in every shipped locale) opening the component `forms:public-forms`; the Setup navigation now carries 35 entries. New locale block `publicFormsSetup` in every console locale. Not shown: when a form last took a submission, since a submission is an ordinary record of the form's object and records no form.
+- f26469a: fix(app-shell): the report name box and the dashboard card title box say when readers are served a translation instead of the saved text
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The report panel (the report page's Edit panel and Studio) and the dashboard card panel (the dashboard page's edit panel and Studio) write a name or title typed in the session language as that language's entry, `{ default: SOURCE, LANG: EDIT }`. The server does not always serve that entry: with no packaged base (an item built in the environment) a translation the environment keeps for that language answers first, and on an installed item a translation the paired `.custom` package ships answers first (ruling record 6631250894's order, unchanged). The box then showed the translation again after Save, with nothing saying why.
+  
+  A note under the box now says so before Save, from the served text paired with the published one:
+  
+  - the published name already has its own entry for this language and readers are served another text: the note names that text and says a translation comes ahead of the text saved here, shown before any edit;
+  - the published name has no entry for this language, readers are served a translation of it, and the box holds an edit: the note names the translation and says readers keep seeing it after Save if it is kept in the environment's own translations or in the customization package.
+  
+  Both name where to change it: Studio › All metadata › Translation. Save writes no translation row: the console cannot read which translation row answers.
+  
+  New locale keys: `engine.inspector.servedLabel.kept` and `engine.inspector.servedLabel.ifKept` in the studio catalogue (en, zh). No props or exports change.
+- 7501d0c: feat(studio): the Field History setting offers Default, On and Off, and Default says what it resolves to
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The Field History setting on the field form, on each row of the object form's field list, and in the object's capabilities is now a three-way choice instead of a switch. Default leaves the setting unset, so the field (or object) follows the platform, and it names what that means for the row: "Default (On)" for most field types, "Default (Off)" for a media or JSON field unless the field opts in with Track History, and for a credential field always. On and Off write `true` and `false` as before. A setting turned off can now be returned to Default, which removes the key.
+  
+  `@objectstack/spec/data` exports `resolveFieldHistory(field, object)` and `FIELD_HISTORY_DEFAULT_OFF_TYPES`: whether a changed field's old → new values show on the activity timeline, and the types that are off by default. The activity writer in `@objectstack/plugin-audit` now asks this predicate instead of its own copy of the type list, so the default the form shows and what the writer keeps cannot disagree. Behaviour of the writer is unchanged.
+- 4ef1ea9: feat(console): the sidebar's object entry offers Object settings in place of Design, and dashboard and page entries no longer offer Design
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A sidebar entry's ⋯ menu used to offer Design for an object, a dashboard or a page entry, and only on an app whose package Studio lists as writable. An object entry, and an object favorite, now offer Object settings instead, which opens the object in Studio's Data surface, where its fields are. It is offered to a workspace admin who may author metadata on an app built here and on an installed app alike; an installed app's package opens in Studio's browse-only posture. A dashboard, page or report entry offers no Studio entry any more: each is edited on its own page. Object settings asks first when the page on screen holds unsaved edits, as Design did.
+  
+  The list header's folded ⋯ menu, drawn when the header is too narrow for its actions, leads with the same Object settings entry under the same rule.
+  
+  The `console.nav.design` translation key is replaced by `console.nav.objectSettings` in every locale pack.
+- d7411fa: feat(console): 「Configure tabs」 on an installed object writes its paired `.custom` package, marks where each tab comes from, and opens the record's 「…」
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  On the record page of an object of an installed (read-only) package, a workspace administrator who may author metadata now finds 「Configure tabs」 too, where the customization door does not wall them off (the walled `group` / `isolated` postures leave it to the platform operator). Its 「Save」 writes the `relatedLists` of the object extension of the base's paired `.custom` package in the spec's shape (ADR-0146 D10): every shown tab in order, a built-in tab by its bare name, and every hidden related tab written `{ list, hidden: true }`; the pair is created on the first save by the ensure door, as Studio creates it. The extension is written over what the pair stores, with only its `relatedLists` replaced (`fields`, `fieldPatches`, `place` and `fieldGroups` kept), as a draft with the first-write pin, then published; a refused publish discards that draft. The original package is not written.
+  
+  On an installed object every tab can be moved: the object's own lists, a list another package brings, and the built-in 附件 / 审批 / 动态. A related tab can be hidden and shown again; a built-in tab cannot be hidden there (the `.custom` list cannot hide it), and an attachments tab the base hides waits in 「Hidden」, from which it can be shown. Each related tab is marked 「Original package」, 「From <package>」 or 「This environment」, read from the child object's package and the relationship field.
+  
+  A tab's stored title is kept when the administrator did not rename it, on self-built and installed objects alike: the name the editor shows is the served one, which the read translates for the reader's language.
+  
+  The write is one shared helper, `saveObjectExtensionArrangement`, which replaces only the arrangement keys a caller returns (`relatedLists` here; `fieldGroups` for a field-layout editor).
+  
+  `page:header`: a host `⋯` entry declaring `leadsMenu: true` is drawn first, ahead of Refresh; an authored action cannot claim the place. The record page's 「Configure tabs」 declares it, so it is the first item of the record's 「…」.
+  
+  New language-pack keys under `designMode.recordTabs` (`pairNotWritable`, `builtinMoves`, `sourceBase`, `sourcePackage`, `sourceEnvironment`) in all eleven console locales.
+- c6075a7: feat(console): an administrator configures the record page's tabs in place, from the record's 「…」
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  On the record page of an object whose package is writable (an object of a self-built app), a workspace administrator who may author metadata finds 「Configure tabs」 among the record's own entries in its 「…」 (desktop full page only; never on a phone, in a drawer or a pane, or on a page its author composed). Chosen, the page enters an edit state in place: a bar across the top with 「Configure tabs」, 「Cancel」 and 「Save」, in the design mode's bar's look, and the tab row turns into an editor. The record stays on screen as the preview, in the administrator's default order.
+  
+  In the edit state the related tabs are dragged to a new order, hidden into a 「Hidden」 area and shown again from it, and renamed; the attachments tab can be hidden; 审批 and 动态, which the page always draws last, are shown fixed, and so is a list another package brings. 「Adjust field groups」 opens the object in Studio. 「Cancel」 drops the changes and writes nothing; leaving the page with a change held asks first.
+  
+  「Save」 writes the object's `relatedLists` over the object as stored (never as served), as a draft with the first-write pin, and publishes it, so everyone sees the new default order, names and hidden tabs. An object's own `relatedLists` hides a tab by leaving it out; an entry the editor does not arrange (a 审批 / 动态 name, a list it does not offer) is kept. A reader's own dragged order still lays over the new default, and 「Restore default order」 returns them to it. A tab is renamed only in the app's source language, where its shown name is its stored one, the design-mode menu's rule.
+  
+  New language-pack keys under `designMode.recordTabs` in all eleven console locales. `RecordPageColumns` takes an optional `tabRowEditor`, drawn in the tab row's place. Objects of installed (read-only) packages are not offered the entry yet.
+  
+  `page:header`: a `⋯` entry that finished on the click (it returned no pending promise) now closes the menu, as Refresh does; an entry still running keeps the menu open with its row busy until it settles, as before.
+- cd51dbb: feat(studio): the top bar's left end reads 「‹ Back to app」, the app's name and "Studio"; the Studio-home button, the package switcher and Open app are gone
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Studio's top bar now starts with one way out: 「‹ Back to app · APP · Studio」. Entered from an app, the link names that app and returns to the page the author came from, its query included. Opened directly (a Studio address in a new tab, a reload), it names the package's published app and lands on its first screen; with several apps, the first. A package with no published app (none yet, or only a draft) and the organization flows scope read 「‹ Back to app」 with no name and go to the console's landing. Leaving with unsaved work in a pillar asks first, as every other header departure does.
+  
+  The home icon, the package switcher and the top-right Open app button are removed. Another package is opened from the app, or from the Studio landing, whose cards also carry package management and New package.
+  
+  New studio catalogue keys (en, zh): `engine.studio.backToApp`, `engine.studio.backToAppTitle`, `engine.studio.backToAppTitleNoApp`, `engine.studio.mark`. Removed with the Open app button: `engine.studio.openApp`, `engine.studio.openAppTitle`, `engine.studio.openAppPick`. `engine.studio.app.willOpenAfterPublish` now names 「Back to app」. No props or exports of the published packages change.
+- 3f568c1: fix(studio): Studio's Interfaces column is retired; its old links land on the Studio home and its Changes links open from the Data pillar
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack#36502. Menus, header actions, list views, dashboards, reports and record pages are designed in the running app. Studio keeps Data, Automations, Access and All metadata, and every view, dashboard, report and page stays readable and editable as metadata on its All-metadata item page. No metadata type, key or stored shape changes.
+  
+  - **Old links still open.** `/studio/<package>/interfaces`, with or without a `?surface=` deep link, lands on the package's Data pillar and says once, there, "Interface edits have moved into the app" (「界面的修改已经搬到应用里」) with a link back to the app. A `?changes=review` request travels with it.
+  - **`@objectstack/runtime`, `@objectstack/cli`.** The review link the MCP authoring tools and `os meta register --draft` print is `/studio/<package>/data?changes=review` (it was `/studio/<package>/interfaces?changes=review`, which still works through the redirect).
+  - **`@object-ui/i18n`.** Adds `engine.studio.interfacesRetired.sentence`, `.backToApp` and `.dismiss` (en, zh).
+  - **`@object-ui/plugin-chatbot`.** The `onDesignBuiltApp` doc example names the Data route.
+  - The console's "Edit in Studio" links for a dashboard, page, report or view open its All-metadata item page.
+  - **Customize moves with them.** On a read-only base, a view, dashboard, report or page is customized on its All-metadata item page, in the type's designer, into the base's pair (`<base>.custom`), with the override mark and "Restore package original" as before. It was the Interfaces column's header.
+- 573a376: feat(i18n): `GET /i18n/locales` names the source locale, and a design-mode menu rename outside it is stored as that language's translation
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — skills/objectstack-i18n/SKILL.md
+  
+  - **`GET /api/v1/i18n/locales` names the source locale.** The body gains an optional `sourceLocale` (`GetLocalesResponseSchema.sourceLocale`): the language the app's own text, a plain-string `label`, is written in. It is the declared `i18n.sourceLocale`, else the default locale, the same rule the metadata translators use. It differs from the `isDefault` locale on an app written in one language that defaults its users to another. It is absent only when the server knows neither. Nothing that parsed before stops parsing.
+  - **A menu rename in design mode is stored where the reader's language reads it.** The name field of 「Rename and icon」 is now open in every language. A name typed in the source language, over an entry shown by its stored label, is still written to the stored label. Any other name is written as that language's translation of the entry: a name typed in another language, or one typed in the source language over a translation the reader was shown. The stored label stays unchanged, so every other language keeps its name. The rename says so when the new name will be a translation ("The new name is shown in LANGUAGE. The app's other languages keep their names.").
+  - **Where the translation goes.** It is written to the `translation` item `APP_menu_LOCALE` (for example `crm_menu_zh_cn`), at `apps.APP.navigation.ID.label`, the key app navigation is translated by. It goes into the package the menu is written to: the app's own package when that is writable, else its customization package, whose own translations are read first (ADR-0146 D2). Like the menu, it is saved as a draft with the first-write pin and published at once. A pending draft of it is refused and the reason is shown. A translation-only rename writes the translation and leaves the app alone.
+  - **A link added in another language** is stored without a name, and the name typed for it becomes that language's translation. The source language names it when someone sets a name there. Until then, a reader in the source language sees the link's URL, as for any link with no label.
+  - Before this change, the console allowed a rename only when the reader was in the deployment's default language. The default language could differ from the source language, and a rename there was written to the stored label for every language.
+- 5c2d5cf: feat(studio): the object page's 「表单」 tab is now 「字段布局」 (Field layout), edits the object's field groups only, and arranges an installed object into its paired `.custom` package
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Studio object page's Form tab is renamed 「字段布局」 / Field layout, and says in one sentence where its groups and order are used: the record page, the right-side preview, and the create and edit dialogs. It reads and writes the object's field groups and nothing else; no form view is read or written there.
+  
+  Group membership and order are saved in each group's own `fields` list. An object still written with a `group` on each field shows its groups as before, and its first save from the tab converts it to the lists, with nothing on the canvas moving.
+  
+  On an object of an installed (read-only) package the tab is no longer read-only where the customization door is open: adding, renaming, deleting and reordering groups, dragging fields (a field another package brings included) and the group settings all edit the object extension of the base's paired `.custom` package, as the whole `fieldGroups` arrangement (every group listing its members), saved and published by the top bar's Save with the rest of that extension. The original package is not written. A field or group `place` entry of that extension, which a written arrangement replaces, is taken off on save; a tab placement stays. Each field card of an installed object is marked 「原始包」 / Original package, 「本环境」 / This environment, or with the package that contributes it. Where the door is walled the tab stays read-only, as before.
+  
+  New Studio strings: `engine.studio.data.form.usedOn` and `engine.studio.designer.source.{base,baseTitle,environment,environmentTitle}` (en, zh); `engine.studio.data.form.layoutSource.*` is removed with the chip it labelled.
+- 43916f3: fix(plugin-list): a list's locked chip for a condition on a related record's field names the field and the value, instead of reading `[object Object]`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A view filter that compares one field of a related record, the nested-relation form `{ crm_account: { industry: 'technology' } }`, now reads as one locked chip on the path `crm_account.industry`: 「Account › Industry: Technology」. The form is read as written and as lowered to `['crm_account', '=', { industry: 'technology' }]`, the shape a dashboard or report drill on a relationship-path dimension hands its list. Before, that chip read the lookup's label and `[object Object]`.
+  
+  - The lookup's name is its label in the list's own field list. The related field's name and its option labels come from the related object's definition, translated as the list translates its own fields (`fields.<object>.<field>`, `fieldOptions.<object>.<field>.<value>`). Where a label is missing, the raw name shows.
+  - The row reads the related object's definition once per related object, only while such a chip is shown, through the host's data source.
+  - A nested condition the chip cannot say as one equality (several fields, an operator, a deeper relation) reads as the view's own condition (「View filter」), never as `[object Object]`.
+  - Every console locale gains `listConditions.chips.relationPath`.
+  
+  The chip stays locked: the list cannot edit a related-record condition.
+- f590f3e: feat(studio): hooks, an installed app's added actions and flows save with the top bar, and a Save is live at once
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Studio's hooks, the actions an installed app's object gains in its `.custom` package and flows no longer autosave a draft 1.5 s after each edit. Edits stay on the page until the author presses Save in the top bar; Cancel puts them back as the server holds them. Save writes each edited item's draft and then publishes that one item at the package it was written to, so the change is live at once. A new hook or an added action is written only by Save, and a removed added action is deleted by Save.
+  
+  A flow's on/off switch needs no Save: a flip writes the stored flow with the new status and publishes it at once, leaving any unsaved canvas edit on the page for Save. A new flow is published as it is created, switched off, so switching it on makes it live straight away. The inspector footers and the Studio landing say that Save makes a change live; permission sets follow in a separate change.
+- 9fa05c6: feat(studio): every human editor in Studio saves live; an item's unpublished AI changes can be dropped on its page
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Every editor a person uses in Studio's object, automation and access pages now saves with the top bar's Save and Cancel, and a Save is live at once: an object's fields, field layout, validation rules, actions, settings and hooks, flows, and now permission sets and the Access pillar's record-sharing overview, which no longer has a Save of its own. A permission set no longer autosaves a draft 1.5 s after each edit, and the access banners say that Save makes a change live. Creating an object, a flow or a permission set makes it live at once too, so those create dialogs say Create instead of Save as draft; apps, pages, dashboards, reports and datasets are still created as drafts.
+  
+  Changes and Publish are left for the AI assistant's drafts. When an object or a flow holds an unpublished draft the assistant wrote, its page says that saving makes those changes live too and offers to discard them: that one item's draft is dropped, the page goes back to the live version, and Changes counts one item fewer. Unsaved edits on the page go with the discard, after a confirm.
+- ed0edb1: feat(studio): the object page saves with Cancel and Save in the top bar, and a Save is live at once
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Studio's object page (fields, validation rules, actions, settings and field groups) no longer autosaves a draft 1.5 s after each edit. Edits stay on the page until the author presses Save, which sits at the right of the Studio top bar where Publish was; Cancel beside it puts the page back as the server holds it. Save writes the object's draft and then publishes that one object at the package it was written to, so the change is live at once. An installed app's object takes its edits into the paired `.custom` package and publishes them there.
+  
+  Changes and Publish are drawn only while drafts are pending (a copilot's, or another editor's), and a publish waits while the page holds edits Save has not sent. A Save refused by the server keeps the edits on the page with the reason, and its toast names each refused item with its reason and lists the items that were saved. Removing or retyping a published field asks first. Save waits out the expression checks of the last keystroke, so a formula or rule guard that does not parse is never sent. Leaving the page, or opening another object, with unsaved edits asks, as every departure does.
+  
+  Hooks, flows and permission sets moved to the same Save in later changes; list views and navigation keep their draft autosave for now.
+- a10987a: feat(studio): the object Settings tab speaks business language, shows each setting's key as small print, and puts the developer options last
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Studio's object Settings tab is now in two parts. The business settings come first: label, plural label, icon and colour, description, who can see which records, the record name field, the stage field, the highlight fields, the record page tabs and the features. A "Developer options" section comes last, expanded and with no switch. It holds the internal name (read-only once the object exists), who can open the object by default, and the extra permissions it requires.
+  
+  Titles and descriptions no longer show ADR numbers, internal rule codes or key names in parentheses. The metadata key each setting writes (`nameField`, `sharingModel`, `enable.clone`, `access.default`, `requiredPermissions`, …) is shown as small monospace text beside the setting's title. One click selects the whole key for copying. The key sits outside the control's label, so selecting it neither opens a picker nor flips a switch.
+  
+  Three descriptions are rewritten so that someone who does not know the platform's internals can follow them: the internal name, the default access ("Standard — anyone with access to all objects" / "Restricted — only people granted this object by name") and the extra required permissions. The English and Chinese texts are both updated; every other language falls back to English for these strings, as before.
+  
+  What each setting means and what it saves are unchanged.
+  
+  For hosts of the object default inspector: `MetadataDefaultInspectorProps` gains an optional `split` (`{ part: 'business' | 'developer'; renderKey? }`). Only the object inspector reads it. Without it the inspector draws its whole panel, as before. The reworded object-inspector strings also show wherever that inspector is mounted.
+- d24e4ab: feat: the controlled-by-parent master refusal carries a machine-readable code, and the Studio settings tab words it for the author in en and zh
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `@objectstack/spec` — the refusal of a `sharingModel: 'controlled_by_parent'` object that does not derive exactly one writable master now stamps its parse issue with `params: { code: 'CONTROLLED_BY_PARENT_MASTER_INVALID', shape }`, at both raise sites: `ObjectSchema`'s refinement and `defineStack`'s extension-merge gate. `shape` is the refusal's existing `ControlledByParentMasterShape` (`several-required-masters`, `several-masters`, `master-not-required`, `required-lookup-only`, `no-master`, `master-not-writable`). The code is exported as `CONTROLLED_BY_PARENT_MASTER_INVALID` from `@objectstack/spec/data`, with the `ControlledByParentMasterIssueParams` type, and is registered in `ERROR_CODE_LEDGER` under `@objectstack/spec`. Which objects are refused, and where, is unchanged.
+  
+  The refusal's English message no longer cites an ADR section: each of its three arms read `ADR-0055 §1: since @objectstack/spec 18, …` and now reads `Since @objectstack/spec 18, …`. The rest of each message, including the fix it prescribes, is unchanged. A script that matched `ADR-0055 §1:` in this message should match `params.code` on the zod issue instead, where it can see the issue: an `ObjectSchema` / `ObjectStackDefinitionSchema` `safeParse`, or the `issues` of `defineStack`'s `STACK_SCHEMA_INVALID` refusal. The metadata save door's `422 INVALID_METADATA` does not carry the code: its `issues[]` entries keep `path`, `message` and zod's issue code (`custom`) only, so a reader there still has only the message.
+  
+  `@object-ui/app-shell` / `@object-ui/i18n` — the Studio object settings tab no longer shows the spec's English message verbatim when "Follows its parent record" cannot be saved. It reads the code and shape off the save door's own parse and shows one sentence per shape from the `studio` namespace (`engine.studio.settings.cbpRefusal*`, en and zh), naming the fields to change by their labels. A refusal without the code, or with a shape that has no sentence, still shows the spec's message.
+- f77d078: fix(console): the design mode's menu save refuses an unreadable stored app, pins its publish, and keeps own entries out of another package's group
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The menu editor of the console's design mode, and its 「Save」, are hardened in eight places:
+  
+  - Two id-less menu entries of one group with the same type and target (two separators, say) are matched to their own served copies: an entry the reader was not shown (other `requiredPermissions`) no longer takes the key of the one shown, so removing the shown entry removes it, not the hidden twin. Twins equal in every key are matched by their place.
+  - A stored read that holds no app (the layered read answers a 404 as an empty view) refuses the save, and the bar says why, instead of writing an app of the menu additions alone. On entry such a read no longer marks every entry as another package's.
+  - The publish is pinned to the published row the save was composed over (the `/layers` read's `overlayVersion`, sent as `If-Match`, or `If-None-Match: *` where no row is stored), read at the address the publish writes. A publish somebody lands in between is refused, the draft is discarded and the bar says so; saving again applies the edits over it. A server that serves no `overlayVersion` is published unpinned, as before.
+  - A group another package contributes is not offered by 「Move to group」, has no 「Add menu item」, takes no drop, and offers no 「Add an item before / after」 on its entries.
+  - An entry added at a group's end while the stored read is still pending is drawn before another package's entries once the read lands, where the save puts it.
+  - Space starts a keyboard move and Enter opens the entry's page; the editor's help line and its screen-reader instructions say so.
+  - A drop outside the menu moves nothing.
+  - The click that ends a pointer drag opens nothing however long the button was held after an Escape, and no click opens a link while a keyboard move is held.
+  
+  `AppMenuSaveTexts` gains two optional sentences, `storedUnread` and `publishedMoved`; a caller that states neither is told the package sentence for the first and the server's refusal for the second. Nothing to migrate.
+- 0e83fe0: fix(studio): a state-machine row in the validations panel can say its state may be cleared, and editing the row keeps that
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `state_machine` rule judges a clear of its field (`null` or `''`) as a transition to `''`, allowed only from a state that lists `''` among its targets. The Studio validations panel parsed a row's next states with the empty entries dropped, so an admin could not make a state clearable from Studio, and editing a row that already listed `''` silently removed it, after which users who cleared the field were refused again.
+  
+  Each transition row now has a "May be cleared" checkbox that adds or removes the `''` target. The "Next states" box shows and edits the named targets only, and an edit to it keeps an existing `''` (written as the row's last target), so a rule with `paused: ['open', '']` is written back unchanged. Nothing changes in what the server accepts or how it judges a transition.
+- 70f454a: fix(metadata): two Studio Saves over one published item are no longer last-writer-wins
+  
+  Clause-②: yes (widening) — two new optional members join what the API accepts and answers: `PublishMetaItemRequestSchema.parentVersion` (the `If-Match` / `If-None-Match: *` pin on `POST /meta/:type/:name/publish`) and `GetMetaItemLayeredResponseSchema.overlayVersion` (served on `GET /meta/:type/:name/layers`); nothing is removed or narrowed, and a publish that names no version behaves as before
+  Metadata-protocol: added
+  
+  A Studio Save writes the item's draft and then publishes that one item, so it leaves no draft behind. Two admins who opened the same object with no pending draft both asserted "no draft" on their draft save, and the later Save published over the earlier one without a word: the published layer served no version a Save could pin.
+  
+  - `GET /meta/:type/:name/layers` now answers `overlayVersion`: the version token of the stored active row at the read's address (`?package=`), the same keyed token the plain uncached read serves as `version` and a publish receipt serves as `version`; `null` when no active row is stored there.
+  - `POST /meta/:type/:name/publish` takes that token as `If-Match` (or `If-None-Match: *`, "no active row here"). A token that is not the current active row's is refused `409 METADATA_CONFLICT` with the current token as `currentVersion`, and nothing is promoted: the draft stays pending. The headers are read as the save door reads them, so `If-Match` beside `If-None-Match`, or an `If-None-Match` other than `*`, is refused `400 VALIDATION_ERROR`. A publish with neither header is unpinned, as before. The pin is checked by the store's own lock on the promoting write, not by a separate earlier read.
+  - `MetadataClient.publish` (`@object-ui/data-objectstack`) takes `ifMatch` / `ifNoneMatch`, sent as those headers.
+  - Studio's object page pins its Save's publish to the published row it was loaded at. When another editor published since, the Save shows the reload-or-overwrite dialog the draft conflict shows, worded for a live change: reload takes back the draft the Save wrote and re-reads the live object, overwrite (after a confirmation) publishes over the version the refusal names, and keep editing leaves the edits on the page, unsaved. New locale keys in the studio catalogue (en, zh): `engine.draftConflict.publishedTitle`, `engine.draftConflict.publishedDescription`, `engine.draftConflict.publishedOverwriteTitle`, `engine.draftConflict.publishedOverwriteDescription`.
+  
+  The two members enter the authorable-surface ratchet (`api/GetMetaItemLayeredResponse:overlayVersion`, `api/PublishMetaItemRequest:parentVersion`), so `@objectstack/spec` takes `minor`; the other packages stay `patch`.
+  
+  Nothing to migrate: a client that sends no version is unaffected.
+- 0d6589d: Clause-②: no
+  Metadata-protocol: none
+  
+  The console now reads a drawn flow's approval step label (`flows.FLOW.approvals.NODE_ID.label`) through the spec's `resolveFlowApprovalStepLabel`, the resolver the server's approval reader uses, with the same resolve options it hands `translateFlow` for the flow's own label. A locale tag spelled in another case (`zh-cn` against a `zh-CN` bundle) now finds the approval label as it already found the flow label, and a locale missing the entry still answers nothing, so the drawing keeps the authored label.
+- c54aa57: feat(console): the report builder adds 「+ Filter」 under the data source — a report filter on the bound dataset, drawn into the preview at once and kept on Save
+  
+  Clause-②: yes (widening) — a new optional `filter` slot on `ReportBuilder` (`@object-ui/plugin-report`), two exports from `@object-ui/plugin-list` (`conditionCandidatesOf`, `conditionOptionsOf`, and the `ConditionCandidateField` type), and four new `@object-ui/i18n` keys (`report.builder.source.addFilter`, `filterAdvanced`, `filterLoading`, `filterNoFields`) in all 11 locales; no spec, schema or server change
+  Metadata-protocol: none
+  
+  - **The filter** (`@object-ui/app-shell`): under the data source, 「+ Filter」 opens the same condition editor the dataset designer uses, over the fields of the dataset's object (their translated labels, a select's options, a lookup's record picker; hidden fields are not offered). Each condition is written into the report's `runtimeFilter`, the preview redraws with it at once, and Save keeps it; removing the last condition removes the key. Switching the data source clears the filter.
+  - **The fields offered** leave out virtual (formula) fields: the dataset door refuses a filter on one, so a report filtered on it could be saved and then fail for every viewer.
+  - **A filter with `$and` beside other conditions** (`{ $and: [...], amount: {...} }`, or with `$not`) is no longer read as editable rows by the shared filter bridge, so neither the report builder nor the dataset designer opens it where the next edit would drop the conditions beside the `$and`; it keeps the panel / source editor, unchanged.
+  - **Which reports open in the builder:** a dataset report with a saved filter now opens in the builder when its filter is one the builder can edit (field conditions joined by AND); a filter it cannot edit (an OR, a nested group, two operators on one field) keeps the report inspector panel, as before. A filter that turns out not to be editable once the fields are read is shown as kept and saved unchanged.
+- 53257a5: feat(report): 「Compare with previous period」 beside a report's period chip — the chart draws the earlier window beside the current one
+  
+  Clause-②: yes (widening) — one new `@object-ui/i18n` key, `report.dateRange.comparePrevious`, in all 11 locales; no export, spec key, schema or server change
+  Metadata-protocol: none
+  
+  - **The switch**: a report that declares `dateRange` now shows 「Compare with previous period」 next to its period chip when its chart can draw a comparison: bar, column, horizontal bar, line or area over a category axis, or a single number. It is not offered on a `seriesBy` split, nor on a chart whose x axis is the window's own date dimension, where the earlier window's date buckets would not line up with the current ones. Like the period pick it is the viewer's and is not saved into the report. It is off, and cannot be turned on, while the period is All time or a custom range missing an end.
+  - **What it asks for**: the chart's dataset query carries the contract's `compareTo: { kind: 'previousPeriod', dimension }`, on the same dimension and window the period chip already sends. The chart is compared with the same-length window just before the current one (the contract's `previousPeriod`). The table beside the chart is not asked for a comparison.
+  - **What it draws**: a bar or line chart gets one more series, the measure's earlier window, labelled 「<measure> · vs previous period」 and drawn muted by the chart's existing `comparison` styling; a single number shows the previous period's value and the change in percent under it. A click on an earlier-window mark opens no record list, the dashboard's rule for the same series. A comparison the server refuses is shown where the chart was, instead of the chart disappearing.
+- e0050ba: fix(console): report editing is its own entry, and report and dashboard editing exclude the design mode both ways
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console's design mode no longer hosts the report builder, so the screen shows one Save/Cancel set at a time:
+  
+  - The design mode's 「Add menu item → Reports」 lists only reports that exist; its 「New report…」 row is gone, with the hand-off that let the builder save into the menu. A new report is made from the reports index, then linked from the design mode.
+  - The reports index offers 「New report」 in its header, opening the report builder. It is offered to workspace admins, as the builder is, and not while the design mode is on.
+  - While the design mode is on, a dashboard's and a report's own 「Edit」 are not offered.
+  - While a dashboard or report editor is open, 「Design layout」 refuses with a prompt to save or cancel those changes first, so the design mode's 「Cancel」 can no longer end the mode under an editor left open.
+  - The report builder's own address reached with the design mode already on (the browser's Back) shows a prompt to finish designing the layout instead of the builder; the builder opens there once the mode is saved or cancelled.
+  
+  The design mode's 「New dashboard…」 is unchanged. In `@object-ui/i18n`, `designMode.menu.newReport`, `designMode.menu.newReportLeft` and `report.builder.addsToMenu` are removed from every pack, and `designMode.editorOpen`, `console.reportIndex.newReport`, `report.builder.designModeOnTitle` and `report.builder.designModeOn` are added. Nothing to migrate.
+- 14f4d8f: feat(app-shell): Notification Settings offers "Follow organization setting" for digest and quiet hours
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Once a member has saved a digest or quiet hours of their own, the Notification Settings page now offers a "Follow organization setting" action beside each one. It empties that field on the member's own general preference (the same empty the Setup grid writes), so the organization's default decides again, including any later change to it. The page then shows the value in force as the organization default. The action appears only where the field is the member's own choice; where there is nothing to clear, it is not drawn.
+  
+  The member's own general preference itself stays, and so does its on/off; per-topic and per-channel choices are not reset by this action.
+  
+  New strings `notificationSettings.followOrganization` and `notificationSettings.followOrganizationFor` in all eleven built-in locales.
+- 183ed23: fix(console): saving a report an installed app ships, from the report builder, writes the app's `.custom` customization package instead of failing with 403
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The report builder (and the report inspector panel beside a joined or pre-dataset report) wrote every save naming no package, so an edit to a report a read-only package ships addressed that package and the metadata write door refused it: the admin's change was lost at Save. The save now lands where the in-page dashboard editor's does (ADR-0146 D2, D3, D11): in the package the report is served from when that package is writable, else in the app's customization package `<base>.custom`, which the ensure door creates on the first save, with the report declaring the override of its base (`overrides: { package, basedOn }`), as Studio's Customize writes it. The editor's buffer is still the layered authored read at the package the report is served from, and Save still writes and publishes in one press.
+  
+  Where such a save could not land, the editor is not opened and says why, in Studio's own sentences: the ensure door is walled for this caller, the package list names no installed version to declare the override at, or a draft of the report is already pending in the customization package (the in-page dashboard editor refuses that at open too). A report whose package is not listed, or whose package list cannot be read, is refused in its own sentence with the reason under it; a report of a writable package opened in the builder before this change even when the list could not be read. A report that names no package is saved as before. Two new Studio sentences carry those refusals in English and Chinese.
+- 4d4ec16: feat(console): from 768 px up a sign-in lands in the last-used app, and the platform home page retires
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  From 768 px up there is no platform home page any more. A sign-in, the SSO round trip and the old `/home` address all land the person in an app their permission sets show, in this order: the app they last had open, while it is still there for them; else the app the product declares `isDefault`; else the first app somebody put into the environment (never Setup or Studio).
+  
+  - A person with no such app at all stays on `/home`, which now draws only the no-apps empty state: 「No applications yet」, and for a viewer who may add an app the same doors the sidebar's 「Add app」 offers (build with AI, start from a template, the app marketplace). An administrator's first-run checklist stays above it.
+  - An administrator's first-run checklist, while it has open items, moves to the top of the Setup app's first page (the page Setup opens on). It is drawn from 768 px up only, and a phone is unchanged.
+  - `@object-ui/app-shell` exports `SetupFirstPageSlotProvider`, through which a host puts its element above the Setup app's first page.
+  - The console's Home affordances (⌘⇧H, the way back from a missing app, Studio's way out) go where the landing goes. Where the chrome cannot yet tell which apps a permission set hides (Studio, the AI pages, or before that answer arrives) they point at `/home`, which resolves the landing itself.
+  - The SSO sign-in's callback is the console root instead of `/home`, so it lands the same way.
+  - A phone is unchanged: it still lands in the last app first, and `/home` is still its app list.
+  - `@object-ui/app-shell` exports `resolveDesktopHomePath(apps, lastApp)`, the desktop's Home.
+  - `RedirectWithSplash` takes an optional `state`, so the hops from `/` and `/home` into the landing app keep what the visit carried (an old `/ai` address's Builder handoff).
+  - Every console locale gains `home.noAppsAddDescription`.
+- d763ee7: fix(console): a record page's tabs are arranged in the design mode, under its one bar; a list's draft actions read Reset / Update view
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The design mode and the record page's 「Configure tabs」 each drew a purple bar with its own Cancel and Save, and the two stacked when both were open. A list's draft actions (Discard / Save) showed under the design mode's bar as a second page save. Following Twenty's grouping (the maintainer's ruling 「照 Twenty 归类」):
+  
+  - The record page's tabs are part of the design mode. While the mode is on, the tab row of a record's desktop full page is the tabs editor in place, for an administrator who may arrange that object's tabs (the same gates as before: a workspace administrator who may author metadata, the desktop full page, not a drawer or pane, not an authored page, and the customization-door wall on an installed object). The draft is staged with the mode's other changes (the app menu, the header buttons): the mode's Save writes it with them, to the object's own package (`relatedLists`, published) or, on an installed object, to the base's paired `.custom` object extension, as before; the mode's Cancel drops it. The draft stays staged while the administrator moves to another page of the app. The record's ⋯ no longer offers 「Configure tabs」, and the separate 「Configure tabs」 bar is gone. A failed save says so through the mode's own message and keeps the draft staged.
+  - A list's draft actions are the view's own, as Twenty's 「Reset / Update view」: they now read 「重置 / 更新视图」 (en: Reset / Update view; every bundled language pack is updated), and they stay drawn and live while the design mode is on. The Update view menu keeps 「Save to this view」 and 「Save as my view」. Where the open view cannot take the change (a view a read-only package ships, or a reader who may not write it), the button reads 「另存为我的视图」 (Save as my view), the one save its menu holds; on the phone's chip row it reads 「保存」 (Save) there, so the view switcher beside it keeps its name.
+  
+  Locale values changed in `@object-ui/i18n` (no key added or removed): `console.objectView.draft.discard` and `console.objectView.draft.save`, in all eleven bundled packs. No props or package exports change. While a record's own edit state is open, its tab row is not the tabs editor.
+- 8018e00: feat(console): the first-run checklist asks for the organization's basics in one form, leaves the rest optional, and follows the administrator as a 「Get started n/m」 pill in the sidebar
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The administrator's first-run checklist had five setup rows that each saved on their own (the organization's name, language and country, timezone, currency) and counted every row, so it only went away once mail, invitations and AI were set up too. Following the maintainer's ruling on objectstack#36739:
+  
+  - **One form, one save.** A single 「Organization basics」 row opens one form with the organization's name, default language, country, timezone and currency. Values the server does not hold yet are suggested from the browser, and a setting with neither a value nor a suggestion must be filled in like the name; nothing is written until Save, which renames the organization (when the name changed) and writes the four settings in one call. A refused rename or a refused setting shows on its field, as before. The row is done once the organization has a real name and all four settings are set.
+  - **Only the basics are required.** Mail, invitations, the built-in AI provider and connecting an outside assistant become optional rows (marked 「Optional」); they still tick themselves when the server says they are done. On the hosted profile, 「Put in your first app」 stays required. The checklist is complete, and stands aside on Home, once the required rows are done; its progress (n/m) still counts every row.
+  - **A pill in every app.** For the administrator only, a 「Get started n/m」 pill sits at the bottom of every app's sidebar (on the folded icon rail it keeps its icon, with the count in its accessible name and tooltip). A press opens the checklist in place in a popover; the popover's X only closes it, and 「Hide on this device」 under the list hides the pill and Home's card. On a phone, which has no resident sidebar, the pill sits after the app's menu on the app's home page. It disappears once the required rows are done, or once the administrator hides it on this device.
+  - **Setup's first page keeps the full list**, done rows included, even after the checklist is complete or hidden; a completed list folds to one line with 「Show list」.
+  
+  `@object-ui/app-shell` exports a product-neutral `SidebarFooterSlotProvider` (with its `SidebarFooterSlot` and `SidebarFooterSlotPlace` types; places `'sidebar' | 'phoneAppHome'`) that the console fills; the shell names no checklist. `@object-ui/i18n` replaces the per-setting checklist strings in all eleven packs. Added under `console.firstRunChecklist`: `showList`, `hideHere`, `organizationBasics.{title,todo,name,nameRequired,prefilled,save,saved}`, `pill.{label,count,aria}`. Removed from `console.firstRunChecklist` (no reader is left in the console; a consumer that indexed them reads the new keys instead): `showDoneSplit`, `confirm`, `prefilled`, `organizationName.{title,todo,action}`, `languageCountry.{title,todo,saved}`, `timezone.{title,todo,saved}`, `currency.{title,todo,saved}`.
+- 844218f: feat(console): the bell opens a full-page inbox from 768 px up
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  From 768 px up, the sidebar's bell no longer opens the right-hand panel: it opens the inbox page at `/apps/APP/inbox` (`/inbox/approvals`, `/inbox/activity`, with `?item=ID` for the selected row), inside the current app's shell, so it can be bookmarked and the browser's Back leaves it. A list on the left, the selected item on the right:
+  
+  - **Approvals** — the request's own page, embedded: its fields, approval progress, the applicant's note and the request's declared decision actions, with the same visibility rules and parameter dialogs. A decision moves the selection to the next request and the badge drops with it.
+  - **Notifications** — the record the notification is about, embedded (its comments stay on the record's full page, one «Open full record» away); opening a notification marks it read, while the row the page shows on arrival stays unread until it is opened. Repeats stay coalesced into one row by topic and title, with every occurrence listed on the right. «Unread only», «Mark all read», and «Load earlier notifications» page beyond the 20 rows the bell badges from.
+  - **Activity** — the record each activity row happened on.
+  
+  J / K move through the list. The inbox links a linkless arrival toast and Home's notifications column used (`sys_inbox_message?view=mine`) now open this page. The zh-Hans name of the surface is 收件箱. The phone keeps its panel, and the `global:notifications` page block keeps the panel at every width. The data, the coalescing rule, the badge count and the decision actions are unchanged.
+- 8cce05b: fix(studio): a flow just created in Studio reads 「已停用」 in its header, and the create toast says it is switched off
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Creating a flow in Studio publishes it at once, born switched off. The header's Status pill then read 「未发布草稿」 (Unpublished draft): it reads the engine's `/automation/_status` rows, and the create never asked for them again, so the snapshot taken before the flow existed had no row for it, which reads as never published. The create now re-reads the engine status after its publish, as Save and the on/off switch already do, so the header says 「已停用」 (Switched off) right after creation.
+  
+  The create toast had reused the Save toast, 「已保存并生效：{items}」, which promises a run the new flow will not do. It now has its own key, `engine.studio.auto.createdOff`: 「已创建：{name}（已停用，启用后才会运行）」 / "Created: {name} (switched off; it runs once you switch it on)".
+  
+  The Data pillar's first-object hint no longer ends 「…最后一次发布。」 ("publish once at the end"): objects are live on Save, and it now says each Save takes effect at once.
+- 0d727b7: fix(studio): 「新建自己的应用」 on the Studio landing ends with an app, a new object joins that app's menu, and an empty menu is not blamed on access
+  
+  Clause-②: yes (widening) — new keys in the published `@object-ui/i18n` packs: the studio namespace (`engine.studio.newApp.*`, `engine.studio.data.appMenu.*`) and all 11 app-shell locale packs (`empty.appMenuEmpty`, `empty.appMenuEmptyDescription`, `empty.openInStudio`). Additive only; nothing is removed or renamed.
+  Metadata-protocol: none
+  
+  The landing's "New app of your own" card opened the create-package dialog unchanged: it created a package and no app, and the author then had to find "Create app" in the top bar, which saved a draft that opened only after a package publish. The card now opens one "New app" dialog, worded for an app throughout (in Chinese it says 「应用」, never 「软件包」), and one confirm creates the package and its app. The app is written and published at once, like every other item a person creates in Studio, so it opens as soon as the dialog closes. A free app name (the package's namespace, else `NAMESPACE_app`) is checked before anything is written, so a taken name refuses the confirm and writes nothing.
+  
+  The Studio top bar's left end named an app only when there was one to go back to. A package with no app read "Back to app · Studio" and did not say which package was open; it now shows the package's name in that place.
+  
+  The top bar's own "Create app" button and the package dialog on the Packages page are unchanged.
+  
+  A new app's menu started empty, and nothing ever filled it: an object created later in Studio did not appear in the app, which opened on an empty screen. Studio's "New object" now adds the new object to the menu of its package's app once the object is live, when the package has exactly one app and no menu entry already opens the object. The entry is written through the design mode's menu save (a draft, then the app's publish), so a draft somebody left pending on the app is refused rather than overwritten. A refused menu save, or a failed read of the package's apps, keeps the object and says so in a warning; the menu can be edited in design mode. With several apps, which menu gets the object stays the author's choice in design mode.
+  
+  An app whose menu is empty, as stored, told an administrator to grant access in Setup. For a person who can grant access and author the app (`manage_metadata`), the screen now reads the app's stored menu: when it is empty there too, it says the app has nothing in its menu yet and opens the app's package in Studio. A stored menu with entries this person is not shown, an administrator who cannot author (the stored menu is served to them pruned, and Studio would refuse them), or a failed read keeps the access answer.
+- ff0d1f1: fix(console): the app-name menu offers 「Design layout」 for the design mode and 「Edit app」 for Studio
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The app-name menu's 「Edit app」 entered the design mode, which edits only the app's layout (its menu, header pins and page arrangement), and no desktop surface opened the app itself in Studio. The menu now has two entries under the list of apps, in one group with 「Add app」:
+  
+  - 「Design layout」 (zh 「设计布局」) turns the design mode on, on the same condition as before. The mode's bar now reads 「Design layout」 too, and so do the strings that name the mode (the leave prompt, the menu editor's notes).
+  - 「Edit app」 (zh 「编辑应用」) opens this app's package in Studio, on the app switcher's Studio target: an object page opens that object in the Data pillar, a dashboard, page or report its design surface. An installed (read-only) package's app reads 「View in Studio」 (zh 「在 Studio 中查看」) behind an eye instead, and opens Studio's browse-only posture. It is offered on the Studio entry's own condition: a workspace admin holding `manage_metadata`, on an app whose package Studio lists (the console's own Setup, Studio and Account apps get none).
+  
+  Two locale keys are added in every built-in pack, `topbar.designLayout` and `topbar.viewInStudio`; `topbar.editApp` keeps its words and now names the Studio entry wherever it is drawn.
+- 021524c: feat(spec,ui): a field can be read-only by hand at the console while actions, imports, the API and flows keep writing it (`uiReadonly` / `uiReadonlyWhen`)
+  
+  Clause-②: yes (widening: two new optional authorable keys `Field.uiReadonly` and `Field.uiReadonlyWhen`)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37405
+  
+  A status column that only moves through actions, or a field an integration fills, used to have no honest declaration: `readonly: true` also strips every client write, so the action, the import and the API lost the field too. Fields now carry two lock tiers:
+  
+  | | server lock: no client writes | hand lock: no person edits at the console |
+  |:--|:--|:--|
+  | always | `readonly` | `uiReadonly` |
+  | conditional | `readonlyWhen` | `uiReadonlyWhen` (CEL, the same scope as `readonlyWhen`) |
+  
+  - **`uiReadonly: true` / `uiReadonlyWhen`.** These console surfaces lock the field: the create and edit dialogs (the field is left off them and out of the payload they submit, so a create from the console lands on the field's `defaultValue`, and a `required` field therefore needs one), the record page's inline edit and stage path, the highlight-strip chip, grid inline edit and its multi-row save, kanban drag between columns grouped by the field, calendar drag, and the line-item grid (a `uiReadonly` child field is not a derived column, and an authored column over it is locked; a `uiReadonlyWhen` one locks its cell per row). The Gantt, the timesheet cell, the kanban swimlane drag and the in-app assistant do not read the keys yet. The engine never reads either key, so REST, import, declarative and script actions, and flows write the field, and the object's validations (a `state_machine`, for one) judge each write.
+  - **`uiReadonlyWhen` is judged on an existing record only** (the create dialog does not read it, nor does a new line-item row), over the host's predicate scope on every surface. Grids and list views fetch the operands of a shown or dragged field's lock predicates. A predicate that cannot be evaluated LOCKS the field (no server judges the hand lock), the edit dialog refuses to submit until it is fixed, and `os validate` checks it as it checks `readonlyWhen`.
+  - **Refused: `uiReadonly: true` beside `readonly: true`** (at `['uiReadonly']`, at every door that parses a field: `defineStack`, `os validate`, metadata save). Keep one: `readonly` when no client may write the field, `uiReadonly` when people at the console may not. `uiReadonlyWhen` beside `readonlyWhen` is accepted.
+  - **Kanban: a `readonly` lane field no longer drags.** The board read no field lock before, so a card grouped by a `readonly` field could be dragged and its PATCH was silently stripped. The board now reads both locks.
+  - **`@object-ui/core` exports the one verdict:** `fieldReadOnlyByHand(def, record?, context?)`, `fieldStaticallyReadOnlyByHand(def)`, `fieldHasConditionalHandLock(def)`. `resolveFieldRuleState` takes `uiReadonlyWhen` in its rules and `uiReadonly` in its statics. The import wizard's target mapping and the Studio/designer reads stay on the raw `readonly`.
+  - **MCP `describe_object`** reports `uiReadonly` and `uiReadonlyWhen` as their own keys where set (never folded into `readonly`, which tells an agent to leave the field out of a write), on the HTTP and the stdio transport, and the tool description names them.
+  - **Censuses and Studio.** The FLS reference scrub classifies both keys (`@objectstack/metadata-core`: `uiReadonly` kept, `uiReadonlyWhen` an expression position). A caller denied a field the `uiReadonlyWhen` reads is served the field with `uiReadonly: true` in place of the predicate, so the lock never opens for them. The Studio field form offers both rows beside Read-only and Read-only when, with their labels and help translated in every metadata-forms locale pack (`@objectstack/platform-objects`).
+- 4f7d6f7: fix(console): the Change Owner dialog's queue target offers the queues an installed app declares, not only the organization's `sys_queue` rows
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A queue can live in two places (ADR-0142 D1): a `sys_queue` row the organization authored, or a `queue` item an installed package declares. The Change Owner dialog's queue target searched `sys_queue` alone, so a declared queue could be named everywhere else (sharing-rule recipients, flow approvers) but never picked as a record's new owner. The queue target now lists the declared queues as their own choices under the `sys_queue` lookup, built by `mergeQueueCandidates`, the merge the other queue pickers use. The server resolves a queue name registry-first, so when a `sys_queue` row shares a declared queue's name, the declared queue is the one offered and the lookup leaves that row out. Either choice sends the queue's name, as before. The `sys_queue` lookup keeps its server search and paging; a declared read that fails offers no declared queue and leaves the lookup working.
+  
+  `@object-ui/i18n` adds one key, `console.changeOwner.declaredQueues`, in every locale pack.
+- b848b47: fix(i18n): a flow's node and screen step labels match the session's locale tag the way the flow label does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The flow designer and the docs viewer's flow drawing read a node's translated label (`flows.FLOW.nodes.NODE_ID.label`) and an untitled screen's translated title (`flows.FLOW.screens.NODE_ID.title`) by the exact language key, so a `zh-cn` session missed a bundle keyed `zh-CN` and showed the authored text. They now pick the bundle row with the spec's `resolveBundleLocale`, the locale matching `translateFlow` and `resolveFlowApprovalStepLabel` already use for the flow label and an approval step's label. One locale, no fallback chain.
+- 0819cab: fix(console): a screen-flow step the run already left is never submitted again
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console's screen-flow dialog no longer resends a step after the run has moved on. Before, a resume could finish on the server while its answer was lost on the way back: a gateway timed out, or the connection dropped. The dialog then kept the step with Next still active. The next press sent that step's values to the screen the run was now on, and the user saw the engine's English refusal, which names the fields. A two-step quote wizard showed this failure after the quote had already been created.
+  
+  Before it offers a retry, the dialog now reads the run's paused screen again (`GET /api/v1/automation/FLOW/runs/RUN/screen`). This happens when no answer arrives, and on every failure the dialog would treat as retryable:
+  
+  - If the run waits on another screen, the dialog shows that screen with a plain notice: "Your previous submission went through. The flow has moved on to this step."
+  - If the run waits on no screen (`404`), Next is withdrawn and a plain notice asks the user to check the record before trying again.
+  - If the run still waits on the same screen, or the read gives no usable answer, the retry and the refusal's sentence stay as before.
+  
+  Both notices come from the console catalog (`flowRunner.alreadySubmitted` and `flowRunner.noLongerWaiting`) in every shipped locale. The engine's refusal is unchanged. Nothing to migrate.
+- c8d4b90: feat(console): Setup gets one Packages entry, the package list's administration face; the Installed Apps entry retires
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The maintainer's ruling on objectstack#36834 amends ruling 甲 of #25098: Setup lists what is installed, with the administration actions only, and the marketplace-only "Installed Apps" entry merges into it.
+  
+  - **Setup → Apps → Packages (`nav_packages`).** `@objectstack/platform-objects` contributes one entry to Setup's `group_apps`, gated on `manage_platform_settings` like Setup's other administration entries. It opens the console's `developer:packages` page with `params: { face: 'admin' }`, so the URL carries `?face=admin`. Its label is translated in every locale the Setup bundle carries.
+  - **The page's administration face.** With `?face=admin`, the Packages page lists every package of every source, with modules folded under their app. It shows the Name, Version, Status, Source and Update columns, plus a Source filter (All, Code, Marketplace, Authored) that writes `?source=`. Its only header action is New Package, and a package created there opens in Studio, on the address the Studio landing's package card opens. The detail sheet offers View info, Disable / Enable and Delete (keeping the choice to keep the data), plus "Open in Studio" on an authored package. Import, Edit, Publish, Revert, Export, Duplicate, Adopt loose items and the pending changes' Publish and Discard are not offered there. An unknown or repeated `face` value is refused by name. With no `face`, the page is unchanged: Studio's "All packages" link and each package card's Manage keep every action.
+  - **Installed Apps retires.** `MARKETPLACE_INSTALLED_UI_BUNDLE` (`@objectstack/cloud-connection`) no longer carries `nav_marketplace_installed`. The bundle stays exported under its id, with an empty `navigationContributions`, so a host that imports and registers it keeps working. The entry's labels are removed from the Setup translation bundle, and its id joins the dead-key tombstone. A bookmarked `/apps/setup/component/developer/packages?source=marketplace`, which the marketplace page's "Installed" button also opens, still shows the list filtered to marketplace installs, on the administration face.
+- 76eea0f: fix(hosted): printing a record works on a kernel with no `http.server` (a hosted tenant kernel), and an api action whose service is absent shows a readable, localized line instead of the route text
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `POST /api/v1/print/records` (service-print) was mounted only on the kernel's `http.server`. A hosted tenant kernel owns no socket and registers no `http.server`, so the host's `createHonoApp` catch-all, and the `/actions` door's in-process forward of a `type: 'api'` action, handed the request to the runtime dispatcher, which had no domain for it and answered `404 ROUTE_NOT_FOUND`. A hosted HotCRM's Print Quote showed its user `Route Not Found: /print/records`.
+  
+  - `@objectstack/spec/contracts` declares `IPrintDoorService` (one optional, transport-neutral member, `handlePrintDoor(request: Request): Promise<Response>`). A service without the member still satisfies it.
+  - `PrintServicePlugin`'s `print` service gains `handlePrintDoor`, which runs the same registration the `http.server` mount runs, on a private route table that never listens (`createDoorTableMember`), so every answer is the mount's own. The `http.server` mount is unchanged, and no path is mounted twice. `@objectstack/service-print` now depends on `@objectstack/plugin-hono-server` at runtime.
+  - The runtime dispatcher gains a `/print` domain that claims exactly `POST /print/records` and forwards the request, body unread, to the REQUEST kernel's member (never the host kernel's scoped fallback). Every other shape under `/print` keeps the dispatcher's `404 ROUTE_NOT_FOUND`. With no `print` slot, or one without the member, the door answers `501 NOT_IMPLEMENTED` naming `@objectstack/service-print`. The door stays behind the dispatcher's authentication and project-membership gates.
+  - The console shows a `type: 'api'` action's `501 NOT_IMPLEMENTED` refusal (the service behind its target is not composed in this environment) as the new `actions.serviceUnavailable` line in the user's language (zh-CN: 「此操作所需的服务在当前环境未启用，请联系管理员。」) instead of the server's operator text. A producer-marked `userMessage` still wins. A `503 SERVICE_UNAVAILABLE` (a transient outage) and a route miss (`ROUTE_NOT_FOUND`, `ENDPOINT_NOT_FOUND`, for example a misspelled `target`) keep the server's own sentence.
+- 8695703: fix(console): a partly failed bulk approve or reject in the Approval Center says why each row failed
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no page under `skills/` or `content/docs/` names the Approval Center's bulk-failure string or teaches overriding it
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is one console string retired from the approvalsInbox locale namespace of @object-ui/i18n; no packages/spec schema, registered node type, stored row or metadata key names it, nothing a metadata author writes changes, and a host that overrode it has nothing to rewrite: its override is simply no longer shown -->
+  
+  **BREAKING** for a host that overrides `approvalsInbox.bulkPartial`, listed under "Removed translation keys" below: it is retired in 19.0.0, and an override of it no longer applies.
+  
+  A bulk approve or reject that partly fails used to show "3 succeeded, 2 failed: Quote A, Quote B": at most three record titles, and no reason. Each failed row now keeps its refusal's text, read the way the single-row Approve reads it: the server's `userMessage` (already in the decider's language) when the refusal carries one, else the page's line for the refusal (not allowed, already decided, no longer exists), else the error's own text as the console's approvals client reports it (`CODE: message`; a server failure, for example, reads `APPROVAL_APPROVE_FAILED: ` followed by the server's text). The generic "Action failed" shows only for an error that carries no text at all.
+  
+  The error toast reads "N succeeded, M failed" and lists the first three failed rows, one per line, each as "title: reason". It stays until dismissed. When more rows fail, it carries a "Show all (M)" action, which opens a dialog listing every failed row of that run with its reason, even after a later bulk run. The toasts are dismissed when the Approval Center is left.
+  
+  `@object-ui/i18n`: the `approvalsInbox` namespace gains `bulkPartialSummary`, `bulkFailureLine`, `bulkFailuresShowAll`, `bulkFailuresTitle`, `bulkFailuresBody` and `close`, in every locale pack.
+  
+  Removed translation keys (approvalsInbox namespace of `@object-ui/i18n`, released in 18.6.0; no code reads it since the partial-failure toast became a summary plus per-row lines). It is removed from all eleven packs it shipped in, `ar`, `de`, `en`, `es`, `fr`, `ja`, `ko`, `pt-BR`, `ru`, `zh-Hans` and `zh-Hant`:
+  
+  - `approvalsInbox.bulkPartial` (ar, de, en, es, fr, ja, ko, pt-BR, ru, zh-Hans, zh-Hant)
+  
+  An override of this key no longer applies; delete it, or move its wording to `approvalsInbox.bulkPartialSummary` (no `{{which}}` hole: the failed rows are listed below the summary).
+- 49c6bf3: fix(fields): an action's lookup param honours the borrowed field's `allowCreate: false`, and a record created in a filtered picker that fails the filters is not selected
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **A field-backed lookup param reads the field's `allowCreate`.** A param written `{ field, objectOverride }` already took the field's `lookupFilters`, `lookupColumns`, `lookupPageSize` and `descriptionField`, but not `allowCreate`. As a result, a field declaring `allowCreate: false` still showed "+ New" in an action's picker. `resolveActionParams` now copies it, app-shell's `paramToField` forwards it to the record-header dialog's picker, and the selection toolbar's dialog carries it through `resolvePromotedBulkParams`. Both the desktop popover and the phone drawer honour it. `@object-ui/core`'s `ActionParamDef` gains the optional `allowCreate` member it travels on. An author who writes `allowCreate` on a raw param is warned by name in development, like the other inherited picker keys: the spec's `ActionParamSchema` does not declare it.
+  - **A quick-created record is selected only if the picker could have offered it.** The create form accepts whatever the user enters, so the new record can fail the field's `lookupFilters`, for example a `draft` where the field asks for `approved`. The picker used to select it anyway, and the save or action that read the field then refused it. The picker now re-reads the new id through its own filter, the field's `lookupFilters` and `dependsOn` scope combined with the id. If the server does not return the record, it is not selected, and the picker reopens with the line `lookup.createdOutsideFilters` ("The record was created, but it does not match this field's filters, so it cannot be chosen here."), in every shipped locale. If the check itself fails, the record is not selected either, and the line `lookup.createdUnchecked` says the record was created but could not be checked, so the user searches for it instead of creating a duplicate. A picker with no filter selects the new record as before, without the extra read.
+  - **A create notice no longer hides the candidate list.** A create notice (the two lines above, or a failed inline create) now sits above the list instead of replacing it, so the user can pick an existing record straight away. Closing the picker clears it. Before, a failed inline create hid the list and its create entry until the widget was remounted.
+- 00dd362: feat(console): the strings of the one Studio detail header (close, previous, next, position, package, more)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `studio` namespace gains the `engine.studio.detailHeader.*` keys in English and Chinese, for the header every full-screen Studio detail will share: × back to the list, ‹ › with the item's position in the list, the source package chip and the ⋯ menu. The header itself lives in the private console shell and no page shows it yet.
+- bac4864: feat(console): the metadata list keeps its search, filters, sort and scroll position across a trip to an item and back
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The generic metadata list (Setup's catalog lists and Studio's "All metadata" area) held its search text, its source filter, "only customizations" and the activation status filter in component state, so opening an item and coming back, or refreshing the page, reset all of them. They now live in the list's address as page-scoped params: `q` (search), `source` (`artifact` / `runtime`), `customized=1`, `status` (`active` / `inactive`) and the new `sort`. A value at its default is left out, so an untouched list keeps its clean address, and every change replaces the history entry instead of adding one, so Back leaves the list rather than paging through keystrokes. The `package` and `scope` params keep their meaning.
+  
+  The list gains a sort control: by API name or by label, each way. The default is by API name, A to Z; before this change the list kept the server's order.
+  
+  Each row link now carries the list's non-default params to the item page, and the scroll position of the list is restored when the same list address is shown again in the same tab (Back, or a link to the list with the same params).
+  
+  New module `metadataListState.ts` beside the page holds the codec, the list's filter and sort (`applyListState`) and `orderedListNames`; the new `useListOrderedNames(type)` hook gives an item page the names of its list in that order, read from its own address — every item of the scope by API name when the address carries no list context. Neither is exported from the package root.
+  
+  New locale keys in the studio catalogue (en, zh): `engine.list.sort`, `engine.list.sort.name.asc`, `engine.list.sort.name.desc`, `engine.list.sort.label.asc`, `engine.list.sort.label.desc`.
+- 8c29b81: feat(console): the metadata list shows when each item last changed and marks items with unpublished changes
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The generic metadata list (Setup's catalog lists and Studio's "All metadata" area) gains a 「修改时间」 / "Modified" column, read off the list answer's `changedAt` sibling. Only an item served from a stored row has a time; a code-shipped item shows an empty cell. The sort control gains "Modified (newest first)" and "Modified (oldest first)", which ride the address as `sort=-changed` / `sort=changed`; items without a time sort last either way, and the item page's ‹ › follow the same order.
+  
+  Beneath the time, an item with a pending draft on the existing `GET /api/v1/meta/_drafts` ledger is marked 「有未发布的改动」 / "Unpublished changes", including drafts that existed before this change. A draft the AI assistant wrote (any of its recorded changes made by the AI copilot or through the MCP build door, the rule the item page's AI line uses) is marked 「AI 的改动未发布」 / "Unpublished AI changes" instead. A publish removes the mark.
+  
+  `MetadataClient.listResponse` now returns the list's `changedAt` beside the items (each entry read with the spec's own rule; an entry that does not parse is dropped, and absence stays absence). `list` is unchanged.
+  
+  New locale keys in the studio catalogue (en, zh): `engine.list.sort.changed.asc`, `engine.list.sort.changed.desc`, `engine.list.col.changedAt`, `engine.list.draftMark.human`, `engine.list.draftMark.humanTitle`, `engine.list.draftMark.ai`, `engine.list.draftMark.aiTitle`.
+- a68b475: feat(studio): a collapsible left menu of six groups replaces the top pillar nav
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  ADR-0084 (amended) · #36899, part of #36890.
+  
+  - **Studio's one navigation is a left menu.** The top bar's Data / Automations / Access / All metadata switcher is gone. Every Studio page (a package's pillars and area, the package-less flows `~org`, and the cross-package leg `~all`) draws the same menu of six groups: Data, UI, Automation, Platform, Access, AI (数据、界面、自动化、平台、访问、AI). Each group lists the metadata types the package holds (the directory's own rule, `scopeDirectoryEntries`), with a type count per group and an item count per type, and a search box that narrows the entries. A type entry opens that type's list in the area; an item of an object, flow or permission set still opens its designer. Four entries are not a type: Organization flows (`~org`, under Automation), Default sharing (the Access pillar's OWD overview, under Access), Diagnostics (under Platform) and Positions and permissions (the environment catalog on `~all`, under Access).
+  - **It collapses like the app sidebar, under its own cookie.** It is the app sidebar's primitive: the header's toggle hides and shows it, the state survives a reload under `studio_menu_state` (never the app sidebar's `sidebar_state`), and below 768 px it is a drawer. `SidebarProvider` (`@object-ui/components`) takes a new optional `cookieName` prop for that; the default is unchanged.
+  - **The menu names the `system` group Platform / 平台 and the `security` group Access / 访问**, the amended ADR-0084's group names, through its own `studioMenuGroupLabel`. The shared domain dictionary (`translateMetadataDomain`) is unchanged: Setup's datasource pages and the rest of Studio still say System / 系统 and Security / 安全.
+  - **`~all` is drawn in the builder's shell.** `/studio/~all/metadata/*` is served by the same route as a package's area, so it has the left menu too; the landing's frame no longer draws it. A `~org` area URL (or `?package=~org`) now lands on the package-less flows instead of being read as a package.
+  - **「‹ Back to app」 names the current package's app** (decision 5), never a remembered app of another package; a package with no app names the package and goes to the apps home.
+  - Changes and Publish stay at the right end of the top bar, beside Cancel and Save.
+- c75453e: feat(studio): a metadata item fills the content pane under one detail header, and its tools are tabs instead of side sheets
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Studio's generic item page and the form editor of an email template or a translation now draw the shared Studio detail header: × back to the type's list (its search, filters, sort and package scope kept), ‹ › to the previous and next item in the list's order with "index / total", the type and source package as chips, and the page's actions at the right. Both × and ‹ › ask first when the page holds unsaved edits; the browser's Back is not intercepted.
+  
+  The six side sheets of the generic item page are tabs of the page: Details, Preview (a type with an editing canvas), Related (a type with anchors), Referenced by, History (the versions with rollback, and the audit log read inside it; shown to a caller who may read the authoring trail) and Source (the JSON source, and the layered comparison read inside it, for read-only callers too). The open tab is in the address as `?tab=`; the values the sheets wrote still open the same place (`?tab=layers` opens Source on the layers, `?tab=audit` opens History on the audit log). The draft review is a status chip in the header while a draft is pending, and `?review=1` still opens it.
+  
+  On a type with a canvas the page opens on Preview; Details shows the whole item's form. Both edit one draft, and one Save (the header's button, ⌘S or autosave) saves it whichever tab is open, so a tab switch keeps every unsaved edit.
+  
+  The address `/studio/PACKAGE/metadata/TYPE/NAME/history` opens the item on its History tab; the permission set, whose item page is its own matrix editor, and an item a pillar's designer opens (a flow, an object) keep the standalone history page there.
+  
+  New in `@object-ui/app-shell`: `item-tools/ItemToolTabs.tsx` (the tab strip, the address helpers and the References, History and Source panels, for the designers to mount) and `metadata-admin/ResourceDetailHeader.tsx`. New locale keys `engine.studio.itemTabs.*` in the studio catalogue (en, zh). No metadata changes; nothing to migrate.
+- 1e96009: feat(studio): the generic item page's Save takes effect at once; an AI draft gets the designers' notice and discard
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Studio's generic item page saves the way the designers do. Save writes the item's draft and then publishes that one item (`POST /meta/:type/:name/publish`, at the same package and bundle member), so the change is live at once and there is no second Publish step. The draft save keeps its version pin and conflict dialog, and the publish is now pinned to the published version the page loaded: when another editor published the item in between, the same dialog asks to reload, overwrite or keep editing. A create publishes right after its first save. The auto-save switch is gone, and edits wait for Save, ⌘S or the destructive-change confirmation.
+  
+  A refused publish shows its reason above the editor in the designers' words, with the server's text under Details. Nothing goes live, the draft the Save wrote is taken back, and the edits stay on the page, unsaved.
+  
+  A pending draft written by the AI assistant (the copilot or an MCP client) is the version on screen, under the designers' line: saving makes it live too, and "Discard AI changes" drops that one item's draft, asking first when the page holds unsaved edits. A pending draft a person wrote before this change is marked "This item has unpublished changes", with its own Publish and Discard for that item. The header's Publish and discard buttons are gone.
+  
+  Leaving the page with unsaved edits still asks first through ×, ‹ ›, the side menu, in-app links, reload and close. The browser's Back is not intercepted.
+  
+  `@object-ui/data-objectstack`: the exported `MetadataLayered` type gains an optional `overlayVersion` member (`string | null`), and `MetadataClient.layered()` now forwards the served `overlayVersion` into it. The client used to rebuild its answer field by field and drop it, so a Studio Save's publish was never pinned on a server that serves it.
+  
+  Locale keys `engine.edit.unpublishedChanges` and `engine.edit.unpublishedPublishDirty` are new, and `engine.edit.autoSaveOn`, `engine.edit.autoSaveOff` and `engine.edit.autoSavingShortly` are removed (en, zh). The per-browser `metadata-admin:autosave` setting is no longer read. No metadata changes; nothing to migrate.
+- 4fb03eb: feat(studio): a flow opens full-screen in its own page; the Automations pillar's flow list is gone
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no page under `skills/` or `content/docs/` names the Automations rail's strings or teaches overriding a Studio console string
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is nine console strings retired from the studio locale namespace of @object-ui/i18n; no packages/spec schema, registered node type, stored row or metadata key names them, nothing a metadata author writes changes, and a host that overrode one has nothing to rewrite: its override is simply no longer shown -->
+  
+  **BREAKING** for a host that overrides one of the nine studio console strings listed under "Removed translation keys" below: they are retired with the Automations pillar's flow list in 19.0.0, and an override of one of them no longer applies.
+  
+  In Studio, a flow now opens on its own page, full-screen beside the left menu, from the flow list in "All metadata", instead of in the Automations pillar's flow list and canvas. Its header is the one every full-screen item page has: × goes back to the flow list with its filters and sort kept, ‹ › step through the list in its order, and the flow's label, type and package are shown, with its machine name in a chip beside the label. A ⋯ menu holds New similar and Delete flow. The header still shows the flow's Trigger, Status (the engine's run status), Run as and version, and the Enabled switch (or, on a read-only package, the activation switch). The tab row holds the designer's Canvas, Variables, Runs, Problems and Debug, then References, History and Source, which replace the item-tools menu and its side sheets; a refreshed or shared link reopens the same tab. Save stays in the Studio top bar and still publishes that one flow, pinned to the version it was loaded at. Leaving with unsaved edits (×, ‹ ›, the menu, the Changes sheet, a reload, closing the tab) asks first.
+  
+  A flow is created from the flow list's 「新建」, with the same starting points, and that create refuses to overwrite a flow published under the same name, as the pillar's did. When the name is taken by a flow in this package, the dialog says so and offers to open it. New similar opens the copy on its own page, with a strip saying where it landed. Deleting a flow returns to the flow list. The copilot still knows which flow is open, and still refreshes it after its edits.
+  
+  The organization's own flows, which belong to no package, have their own flow list and open on their own pages; that list offers no 「新建」, as before, and when it is empty it says how a packaged flow is changed instead (open its package and use New similar).
+  
+  Old bookmarks keep working. A link to a flow in the Automations pillar opens that flow's page, and a link to the pillar itself opens the flow list, for a package, a read-only package's customizations and the organization's own flows alike. A flow's History link opens its History tab. A link naming a flow the package does not hold says so and opens no other flow; one naming a flow that belongs to no package opens it among the organization's flows. A flow's draft-review link (and the environment view) opens the general item page with its review, as it did when flows had a pillar. A permission set's review link keeps opening its matrix page, as before.
+  
+  The flow list has no column yet for a flow's trigger object or its run status; until it has one, both are shown in the flow's header.
+  
+  Removed translation keys (studio namespace of `@object-ui/i18n`, released in 18.6.0; no code reads them since the flow list left the designer). Each is removed from both packs it shipped in, `en` and `zh`:
+  
+  - `engine.studio.auto.heading` (en, zh)
+  - `engine.studio.auto.none` (en, zh)
+  - `engine.studio.auto.emptyMain` (en, zh)
+  - `engine.studio.auto.group.noObject` (en, zh)
+  - `engine.studio.auto.kind.record` (en, zh)
+  - `engine.studio.auto.kind.scheduled` (en, zh)
+  - `engine.studio.auto.kind.screen` (en, zh)
+  - `engine.studio.auto.kind.autolaunched` (en, zh)
+  - `engine.studio.auto.legend` (en, zh)
+  
+  An override of one of these keys no longer applies; delete it. `engine.studio.org.none` is kept: the organization's empty flow list shows it.
+- ff04943: feat(app-shell): a dashboard or a report opened from a Studio list opens in its app's edit state, and × goes back to the list
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Studio redesign (epic #36890), decisions 3, 6, 13 and 15.
+  
+  - **Opening a dashboard or a report from a Studio list** opens its page in an app, with the dashboard's edit state or the report's builder already open, as the page's own Edit opens them. The app is the one the author came from, when that app is one of the package's published apps or its menu opens the item; otherwise it is the package's first published app. The item keeps opening Studio's own item page when the package has no published app, on the list of every package, when the item has no published version yet (a draft only), or when the link asks for one of the item page's tabs or its draft review.
+  - **× back to Studio.** The page's address remembers the Studio list it was opened from, so the dashboard page and the report page draw a × that goes back to that list with its filters and sort, after a reload too. The report builder's own × does the same. Leaving unsaved edits asks first.
+  - **New report from Studio's report list** opens the app's New report page. The report is saved in the package the list shows, or, for an installed app, in its customization package, so it appears in the list × goes back to. Where the installed app's customization package cannot be used, New goes back to the list, as before. If that package becomes unusable between opening the page and saving, the report is saved outside any package, and a notice says the Studio list does not show it. Closing the page goes back to the Studio list, and the saved report's page keeps the way back. With no app to open, the list creates as before.
+  - **A dashboard made in Studio** opens in its app once saved, and the browser's Back from there goes to the list, not to an empty New page.
+  - **The report builder's ×, and the New report page's ×,** now ask before dropping unsaved edits everywhere, not only when Studio opened them.
+  - **No dashboard edit on a phone.** The dashboard edit state is no longer offered in a phone-width window (narrower than 640 px). A link that asks for it, from Studio or the design mode, is ignored there and the page stays a viewer. The Edit button was already hidden at that width.
+  - New console strings under `studioReturn`, and `report.builder.savedOutsideApp`, in every bundled locale.
+- ab91323: feat(studio): New on a Studio dashboard list opens the app's design mode, ready to add a dashboard to its menu
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Studio redesign (epic #36890): a new dashboard is made where it hangs in an app's menu, never outside every menu.
+  
+  - **New on a Studio dashboard list** opens the package's app with Design layout already on and the 「Add menu item」 picker open on its Dashboards, 「New dashboard…」 first. The app is picked the same way as for opening a dashboard: the app you came from when it is one of the package's, otherwise the package's first app. For an installed app, what you save there goes to its customization package, as before. For a customization package (`<base>.custom`) that has no app of its own, the base package's app opens.
+  - **After Create** the dashboard is in the menu where the picker put it, at the end of the menu's top level, and opens for editing, as a dashboard made in Design layout always has. Its × goes back to the Studio list you left. Closing the picker instead leaves you in Design layout, with nothing added.
+  - **When there is no New.** On a phone-width window the dashboard list offers no New: Design layout is never on there. An empty list there says a dashboard is made in an app's design mode on a wider screen. A package with no app to open offers no New either, and the list says why. While the package's apps are still being read, an empty list shows no hint yet. It never says a writable package is read-only.
+  - **Nothing enters Design layout by itself.** The way in is a one-time instruction carried by the click, never the address: a reload, a shared link or Back does not turn it on. If a dashboard's or a report's own editor is open at that moment, Design layout refuses with the usual message and nothing else happens.
+  - **The report list is unchanged:** its New still opens the app's New report page.
+  - **A note on an earlier entry,** customization packages' dashboards and reports opening in their base package's app: the app you came from also counts when it is not one of the base's apps, as long as its menu opens that dashboard or report. That is the same rule as for every package.
+  - New Studio strings `engine.list.dashboardNewNoApp` and `engine.list.dashboardNewWiderScreen`, in English and Chinese.
+- fbb62e1: feat(i18n): strings for the customizations section in Setup → Packages and for Studio's way out of a missing package
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Adds the strings for the customizations section of an app's detail in Setup → Packages, and for the way out of Studio's "package not found" state. The strings of Studio's removed home page that shipped in 18.6.0 stay in the studio namespace, no longer read, so no released string is removed. Four of that page's strings that were added after 18.6.0 and never released are removed. The "New in Studio" label now reads "New blank app" in English and 「新建空白应用」 in Chinese, and is translated anew in every other language pack.
+- 57445a6: fix(console): a per-record bulk flow action counts a refused record as refused, with its own message, and stacks no refusal notice
+  
+  Clause-②: yes (seat ruling: the published `@object-ui/types` `ActionResult` gains a member; L1-a owes a lane-keep L2 review)
+  Metadata-protocol: none
+  
+  The published `@object-ui/types` adds two optional members, `ActionResult.refusal` and `ActionContext.reportsRefusal`. Nothing existing is narrowed.
+  
+  A list view's selection bar can run a `type: 'flow'` action once per selected record. A run that ended on an `end` node with `outcome: 'refused'` answers `200` with `status: "refused"` and a `refusalMessage`. Before this change the bulk result counted such a record as succeeded ("Succeeded 3 / 3"), and one refusal dialog opened on top of the result showing a single record's message, so the other refused records' reasons were lost.
+  
+  - The result now counts refused records apart: "Succeeded 1 / 3 · Refused 2". Each refused record is listed with the sentence the flow wrote for it. A refused record has no Retry and is not written to the error CSV: re-running it would get the same answer. When a failed record is retried and the action refuses it, it moves to the refused list.
+  - No refusal dialog opens during a bulk run. The same action launched from a row menu still opens its Close-only refusal notice, unchanged.
+  - `ActionResult.refusal` (`{ message }`) is set by the console's flow launch on a run that ended `refused`, beside `success: true` and `handedOff: true`. A caller that counts outcomes reads it as refused, never as done.
+  - `ActionContext.reportsRefusal` is passed for one dispatch through `ActionRunner.execute`'s `callContext`. A caller that lists refusals itself sets it, and the console's flow handler then opens no notice of its own.
+- 1f3e9f6: fix(console): a per-record bulk flow action counts a record whose run paused at a screen as waiting for input, and every paused record's screen opens in turn
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The published `@object-ui/types` adds one optional member, `ActionResult.paused`. Nothing existing is narrowed.
+  
+  A list view's selection bar can run a `type: 'flow'` action once per selected record. A run that reaches a `screen` node pauses and waits for input. Before this change the bulk result counted such a record as succeeded ("Succeeded 3 / 3"), and the console held one paused run at a time: each paused record replaced the previous one, so only the last record's screen opened and the other records' runs waited at screens nobody could reach.
+  
+  - The result now counts paused records apart: "Succeeded 1 / 3 · Waiting for input 2". Each waiting record is listed by name, under a line saying its screen opens next. A waiting record has no Retry and is not written to the error CSV: a re-run would start a second run. When a failed record is retried and its run pauses, it moves to the waiting list.
+  - The console now queues paused runs. Its flow runner shows the first paused record's screen, and closing or completing it shows the next one, until none is left. This holds for the console's list runtime and for a list on a record page.
+  - `ActionResult.paused` (`{ runId }`) is set by the console's flow launch on a run that paused at a screen, beside `success: true` and `handedOff: true`. A caller that counts outcomes reads it as waiting, never as done.
+- 305fe60: fix(i18n): the full search page names component, doc and link results in every language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console's full search page (opened from the command palette's "Open Full Search Page") titles each result group and badges each result by the navigation item's type. Component items, doc items and link items printed raw keys (`search.typeComponents`, `search.badgeDoc`, `search.typeUrls`, …) because no locale pack defined them, English included. Every shipped console locale pack now carries a heading and a badge for the three types, and the search placeholder and its accessible label also name components and docs. A new test in `@object-ui/app-shell` renders the page with one navigation item of every spec type and fails when any heading or badge key the page asks for is missing from a pack.
+- e91149e: fix(console): the profile Language card says it is the same setting as the globe menu
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Language card on the profile page described itself as the language for notifications and messages only, and said the interface language was chosen separately from the globe menu. Both controls write the same `sys_user.locale` column and the console applies it as the interface language, so saving the card switched the whole console. The card's description (`profile.language.description`, in all ten built-in packs and in the console's own fallback text) now says it is one setting for the interface and for what is sent to the user, the same one as the globe menu. The zh-Hans text uses full-width punctuation. Nothing to migrate.
+- 06c1f54: feat(console): a chat conversation can be pinned to one record — sent as `context.focus` on every turn, shown as a chip in the composer, kept across navigation — where the agent declares `capabilities.focus`
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  **Contract (`@objectstack/spec`).** `ToolExecutionContext` gains `focus?: { object: string; id: string }[]`, beside `surfaceContext`: the record(s) the conversation is pinned to, as the client reports them on every turn. Client-reported and advisory, never an access decision; a consumer re-reads the record as the caller. At most one entry in phase 1. The agent catalog row (`AiAgentCapabilitiesSchema`, `GET /api/v1/ai/agents`) gains an optional `capabilities.focus: boolean`: an agent that honours the focus says so, and an absent flag reads as false. Both are additions; nothing is removed or renamed, and every catalog row served before the flag still parses.
+  
+  **Console (`@object-ui/app-shell`, `@object-ui/plugin-chatbot`, `@object-ui/i18n`).** Where the agent the chat runs declares `capabilities.focus: true`:
+  
+  - The composer's page chip is drawn in the row above the input (where the drafts line sits) instead of on the input's top edge, and carries a pin when the page shows one record (a record page, or a record open in a list's drawer). Pinning makes every later turn send `context.focus: [{ object, id }]`, the first turn of a new conversation included, until the user removes it with the chip's remove control.
+  - The pinned record's chip replaces the page chip and names the record by its display name, read in the browser as the user; a record the user cannot read keeps its `object · id` pair.
+  - Opening another record while one is pinned asks once whether to ask about that one instead; a decline is remembered for the conversation.
+  - The focus belongs to the conversation: it never changes which conversation the drawer shows, and it is restored when that conversation is shown again in the same tab.
+  - `setChatFocus({ object, id })` (exported from `@object-ui/app-shell`) is the setter every entry point pins through.
+  
+  Where the agent does not declare the flag — every server today — nothing changes: no pin, no chip, no `focus` key in the request, and the page chip stays where it was. `AgentCapabilities` in `@object-ui/plugin-chatbot` gains `focus`, read from the catalog; unlike the build-era capabilities it has no name-based fallback for older servers. New locale keys `console.ai.focus.pin`, `.pinned`, `.remove`, `.switchPrompt`, `.switchAccept` and `.switchDecline`, in every pack.
+- 2af9729: fix(studio): one name per group: the directory and a type page's badge say Platform / Access, like the menu
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  ADR-0084 (amended) · part of the Studio redesign follow-ups.
+  
+  - **The shared domain dictionary (`translateMetadataDomain`) names the `system` group Platform / 平台 and the `security` group Access / 访问**, the amended ADR-0084's group names. It used to say System / 系统 and Security / 安全 while the Studio left menu said Platform / Access.
+  - **Every place a group is named now reads that one dictionary:** the Studio left menu (`studioMenuGroupLabel` reads it instead of its own two keys), the All metadata directory's group headings and domain chips, and the domain badge on a type or item page (`PageShell`). Setup's datasource pages draw the same badge, so a datasource reads Platform / 平台 there too, the group ADR-0084 puts it in.
+  - The menu-only keys `engine.studio.menu.groupSystem` and `engine.studio.menu.groupSecurity` are removed from the `studio` namespace (en and zh); nothing reads them any more.
+- f339060: feat(console): New Package offers "Also create an app", ticked by default
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The New Package dialog (Setup → Packages, the console's "New blank app" entries that open it, and the resource list's create-a-package-first prompt) now has a checkbox, "Also create an app" (zh: 同时创建应用), ticked each time the dialog opens.
+  
+  - Ticked: one confirm creates the package and an app with the same name, live at once. The success toast reads "Created package “NAME” and its app." (zh: 已创建软件包「NAME」及其应用。), and Studio's header names the app when you land there. If the app's identifier is already taken, nothing is written and the dialog says which app holds it; change the namespace under Advanced, or untick the box. If the package is created but its app cannot go live, a toast says so and Studio's Create app is the way to try again.
+  - Unticked: only the package is created, exactly as before, for a package that only holds objects or flows for other packages.
+  
+  Where the dialog takes you afterwards is unchanged. Packages created before this change, installed packages and other app-less packages still show the package name in Studio's header.
+  
+  New locale keys in the studio catalogue (en, zh): `engine.packages.create.alsoApp`, `engine.packages.create.alsoAppHint`, `engine.packages.create.createdWithApp`. No key is removed. `PackageFormDialog`'s `newApp` prop now adds the checkbox to the create-package dialog instead of rewording the dialog for an app; no other props or exports change.
+- 40914bd: feat(console): a 「⋯」 package menu in Studio's top bar, and Import on Setup → Packages
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  With the Studio home gone, the whole-package actions of the Packages page's development view had no button anywhere. They are back, in two places:
+  
+  - **Studio's top bar.** Beside the app or package name at the left end there is now a 「⋯」 menu (zh: 软件包操作) with six items: Edit package info (编辑软件包信息), Export (导出), Duplicate as a new package (复制为新软件包), Revert to last publish (还原到上次发布), Adopt loose items (收编散落项) and Manage in Setup… (在设置中管理…). Each opens the same dialog and sends the same request as the development view's button; the answer appears as a toast. Revert now asks for confirmation first. On a read-only installed package, Edit, Duplicate, Revert and Adopt are greyed with the reason on hover; Revert is also greyed while nothing has changed since the last publish. Manage in Setup… opens Setup → Packages with that package's detail open, where it is enabled, disabled or deleted. The menu is shown only to people who can author metadata (`manage_metadata`), and not in the organization-flows scope or the all-packages view, where no package is open. Publishing every draft is not in the menu: Studio's Changes / Publish already do that.
+  - **Setup → Packages.** Import now sits in the header beside New Package and works exactly as on the development view. A Setup → Packages address can open one package's detail directly by adding `&package=ID`.
+  
+  The development view itself is unchanged.
+  
+  New locale keys in the studio catalogue (en, zh): `engine.studio.packageMenu.trigger`, `.editInfo`, `.duplicate`, `.revert`, `.manageInSetup`, `.noChanges`, `.duplicateTitle`, `.duplicateDescription`, `.revertTitle`, `.revertDescription`.
+  
+  Seventeen studio-catalogue rows that no screen read any more are removed: `engine.studio.menu.typeCount` and the app-worded `engine.studio.newApp.*` rows (`title`, `description`, `advancedHint`, `id`, `help.*`, `nsDerived`, `created`, `exists`, `failed`). None of them was in a published `@object-ui/i18n` release; `engine.studio.newApp.nameTaken` and `engine.studio.newApp.appFailed` are still used and stay.
+- 68250f6: feat(studio): author context packs (`ai_context`) in Studio — a form for the type, and a related-lists block that picks each list's columns from its own child object
+  
+  Clause-②: yes (widening) — one new public export, `aiContextForm` from `@objectstack/spec/ai`, and `/meta/types` now serves a form for `ai_context`; no key is added to what a pack may hold
+  Metadata-protocol: none
+  
+  ADR-0160 D1, clause 2 (runtime authoring). A context pack can now be created and edited in Studio like a skill: Studio's metadata editor lays it out with the new `aiContextForm` (`@objectstack/spec/ai`, registered in `METADATA_FORM_REGISTRY` as `ai_context`), and saving goes through the metadata API, where the pack's author defects are reported at save as before.
+  
+  - **Root object and its fields.** The root is picked from the object catalog; `fields` is the generic field picker scoped to that root (`field-multi`, `dependsOn: 'object'`); `body.field` is a single field picker over the root's fields.
+  - **Related lists.** `related` uses the `related-list-entries` block. Under a pack, whose entries are `{ object, field?, fields? }`, the block offers every reference field of a served object that points at the root (a self-reference and each of a child's several links included) and writes the pick as `{ object, field }`; each entry's columns are picked from that child object's fields. It stops adding at the schema's bounds (3 lists, 10 columns), and an emptied list or column set removes its key. A stored entry the catalog shows no link for is kept and marked; the save-time report judges it. The object form's `relatedLists` keeps its chip face unchanged: the block tells the two apart by the entry schema it is handed.
+  - **An emptied picker removes its key.** In Studio's metadata editor, removing the last chip of a field list whose schema has `minItems: 1` (a pack's `fields`) now removes the key instead of writing `[]`, and a composite left with no value while its schema requires a key that has no default (a pack's `body` after choosing "None") is removed instead of written as `{ field: '' }`; a composite whose required keys all carry a default (a view's `pagination`, `selection`) keeps `{}`; both were drafts the save refused with no way back in the form. A cleared sub-field of any composite drops its key, as a cleared top-level field already did.
+  - **The related-lists block waits for the object list.** While the object list loads, or after it failed, no stored entry is marked as unlinked and the add picker says it is loading or could not load.
+  - No key is added to `AiContextSchema`, and nothing a pack may hold changes.
+- 6161010: fix(console): on a desktop the ⌘⇧H row names the app start page it opens, not the retired home page
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  From 768 px up the platform home page is retired: `⌘⇧H` / `Ctrl+Shift+H` (unchanged) opens where `/` lands, the last-used app's start page. The keyboard-shortcuts dialog and the app pill's menu still called that 「Back to home」. On a desktop both now read 「Back to app start page」 (zh: 返回应用起始页), one wording for the one destination; the pill's row keeps its `⌘⇧H` keycaps. A phone, whose Home is still its app list, keeps 「Back to home」 in the dialog.
+  
+  Locale value change, no new key: `layout.appSwitcher.backToHome` in every built-in locale. No props or exports change.
+- 875ae40: feat(ai): `get_record_context` joins the cloud `service-ai` group of `PLATFORM_TOOLS_BY_PACKAGE`, with its chat step label
+  
+  Clause-②: yes (widening) — `PLATFORM_TOOLS_BY_PACKAGE` and `PLATFORM_PROVIDED_TOOL_NAMES` gain `get_record_context`, so `ai-skill-tool-unresolved` stops reporting it on a `mcpPrompt: false` skill; nothing that resolved before is reported
+  Metadata-protocol: none
+  Skills-docs: none — `skills/objectstack-ai/SKILL.md` points at the registry file and names no tool
+  
+  The in-app assistant (cloud `@objectstack/service-ai`) registers `get_record_context` from the same definition the MCP door serves and delegates to the same `record-context` executor (ADR-0160 D4). Its name now sits in that group of the platform tool registry, so `PLATFORM_PROVIDED_TOOL_NAMES` resolves it. The `skill.tools[]` lint rule therefore stops reporting it for a skill kept out of MCP (`mcpPrompt: false`); before, it reported the name as served over MCP only. Nothing an author writes changes.
+  
+  New locale key: `chatbot.tool.get_record_context` in all eleven packs (en "Read the record context", zh-Hans 读取记录资料), the step name the chat shows while the assistant reads a record's context pack.
+- 8316d3d: feat(studio): the left menu shows the 常用 Common types first and folds everything else under one 「高级」 Advanced section
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Studio's left menu on a package now lists the ten Common types first, in building order: Objects · Apps, Pages, Dashboards, Reports · Flows · Permission sets · Agents, Tools, Skills. Every other type, and the four entries that are not a type (Organization flows, Diagnostics, Default sharing, Positions and permissions), sit under one **Advanced** (高级) button below a divider, still under their group names.
+  
+  - The Advanced section is closed by default. Opening or closing it is remembered per browser in the `studio_menu_advanced` cookie, apart from the menu's own collapse cookie.
+  - Opening a page that is one of its entries (a bookmark to the hooks list, the default sharing overview) shows the section open, with that entry marked current; this does not change the remembered state.
+  - The menu search lists matches from both tiers, whether the section is open or not.
+  - Group names are small muted headings with no number. The muted number beside an entry is its item count.
+  - A Common type the package holds nothing of is listed anyway, dimmed and with no number, and still opens its list, so a new package shows where to make its first app, page, dashboard or report. Before the item counts have loaded, no type is dimmed.
+  - The organization's flows (`~org`) and the cross-package catalog (`~all`) have no Advanced section: their entries are listed flat, in the same order.
+  
+  No address changes: every entry opens the same page as before, bookmarks keep working, and the ⌘K palette lists the same entries in the new order. Two new strings: "Advanced" (高级) and the dimmed entry's tooltip.
+- 6cc6177: fix(console): on a desktop the Studio refusal's way home and the AI-unreachable sentence name the app start page
+  
+  Clause-②: yes (widening) — one new published language-pack key, console.ai.unavailableErrorDesktop, in all eleven packs
+  Metadata-protocol: none
+  
+  From 768 px up the platform home page is retired, and the way home opens an app's start page. Two desktop texts still named a home page:
+  
+  - A caller without Studio access who opens `/studio` sees a refusal with a 「Back to home」 button. On a desktop it now reads 「Back to app start page」 (zh: 返回应用起始页), the app pill's row label, as the console's other way-home buttons do.
+  - When the AI service cannot be reached, the `/ai` screen's sentence ended 「…try again, or head back home.」 while its button already read 「Back to app start page」. On a desktop the sentence now ends 「…try again, or go back to the app start page.」, in every language.
+  
+  A phone, whose Home is still its app list, keeps 「Back to home」 and 「…or head back home.」. No targets change. The new sentence is the language-pack key `console.ai.unavailableErrorDesktop`, added in all eleven packs; no key is removed or renamed, and no props or exports change.
+- 8fe4eaf: fix(app-shell)!: Home no longer offers 「Build with AI」 or 「Build an app」
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the removed operands are two Home entry points, one welcome sentence and three translation keys of the console's own language packs; no packages/spec schema, registered node type, stored row or ADR-0087 conversion surface names them, and no key, value or default a metadata author can write changes, so there is nothing for objectstack migrate meta to rewrite -->
+  
+  **BREAKING** for a deployment that overrides one of the removed translation keys below: the override no longer applies, because nothing reads the key any more.
+  
+  The home page shows on a phone, and on a desktop as the 「No applications yet」 screen when you have no app. On it:
+  
+  - **「Build with AI」** is gone: the button shown beside the greeting, and in the phone's 「No applications yet」 welcome, when the build agent is deployed.
+  - **「Build an app」** is gone: the chip beside the greeting that opened Studio when the build agent is deployed.
+  - **The phone welcome makes no AI-building promise any more.** On a phone with no app yet, an administrator on a deployment with the build agent was welcomed with 「Build your business system with AI」 and "Describe your business in one sentence — AI generates …". That welcome now reads 「No applications yet」 with the description other deployments show: set up your first application from the Administration menu, plus the AI-assistant sentence where an ask agent is deployed. Deployments without the build agent keep their welcome unchanged.
+  
+  Everything else stays. 「Start with a template」 is still there, and so is 「New blank app」 where it showed before. 「Ask AI」 shows exactly where it did before.
+  
+  Nothing to do on upgrade, unless your deployment overrides one of the keys below.
+  
+  ## Removed translation keys
+  
+  Removed from every language pack of `@object-ui/i18n` (ar, de, en, es, fr, ja, ko, pt-BR, ru, zh-Hans, zh-Hant). Each shipped in 18.6.0.
+  
+  - `home.build.title` (en: "Build an app")
+  - `home.buildWithAI` (en: "Build with AI")
+  - `home.welcomeAdminDescription` (en: "Describe your business in one sentence — AI generates the objects, screens, APIs and agent tools. Or set things up yourself from the menu on the left.")
+- 84a27e7: fix(console): "customized" means one thing everywhere; Setup → Packages names an app's arrangements apart
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In Setup → Packages, an installed app's "Customizations in this environment" line now counts as customized only the items this environment changed or added on the app (overrides and extensions), the same number the All metadata header shows and the same rule its lists' 「customized」 filter uses. Tab, field-group and action-layout arrangements are not counted as customizations any more: they are named on their own in the same line, and only when there are any — for example "3 customized, 2 rearranged, 1 switched off" (「已定制 3 项，调整排列 2 处，已停用 1 项」).
+  
+  An app whose only change is an arrangement now reads "0 customized, 2 rearranged, 0 switched off" instead of "2 customized", and still lists both arrangements under the section's 「布局」 tab. The All metadata header and the 「customized」 filter are unchanged.
+- 2d18ba8: fix(ui): the grouped grid and the used-currency read treat a cut grouped answer as partial
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a deployment that sets a default page size (`OS_DATA_DEFAULT_PAGE_SIZE`, or `OS_DATA_MAX_PAGE_SIZE` alone), `POST /data/:object/query` cuts a grouped read that names no `limit` to that page size and answers `hasMore: true`; `queryGroupHeaders` hands it on as the answer's `hasMore`. Two readers read such an answer as every group:
+  
+  - A grid grouped on the server listed only the groups the answer carried, with nothing saying more exist, and told the bulk bar a record total summed over those groups. It now draws one line above the rows, "More groups were not loaded: this view has more groups than the server returns in one read, so only some are listed." (translated in every locale pack, key `grid.grouping.moreGroupsNotLoaded`; not the `grid.grouping.partial*` page-slice marker retired by objectui#10881 ruling F: those counts were slices of a fetched page, these are the server's exact counts over a cut group list), and tells no total. The groups it lists keep their exact counts. A whole answer draws as before.
+  - The form's used-currency read (the "available" group of a record-currency code field) took the codes of a cut answer as every code in use, so a code in use could sit under "all". A cut answer now hands down no used codes, as a failed read does: the field offers home + rated + the record's own code under "available", and every code under "all". A whole answer hands every used code down as before.
+  
+  Neither reader can ask for the rest: the header query carries no `limit`, and the grouped read takes no `offset`.
+  
+  `ListViewGroupHeaderAnswer`'s doc now warns that `hasMore` lives on the array, so a copy of the answer drops it.
+- 68b2430: fix(kanban): a list view board whose lanes come from the data counts and totals each whole lane, and a board laned by a lookup draws a lane whose records all sit past the first page
+  
+  Clause-②: yes (widening) — @object-ui/i18n kanban.notLoaded
+  Metadata-protocol: none
+  
+  A list view hands its board one page of records when it cannot know the lanes before the query: the lane field has no options (a lookup, or a text, number, boolean or date field). That board's lane header count and a foot `count` counted the page with no `+`, its `summarizeField` header total summed the page, and a lane whose records all sat past the first page was not drawn.
+  
+  - The board's one grouped lane read (`DataSource.queryGroupHeaders`, the read that already answers its `sum`, `avg`, `min` and `max`) now also asks each lane's record count and the `SUM` of the view's `summarizeField`, and is asked whether or not the view draws a lane statistic. It is still one read per board, never one per lane.
+  - Each lane header and a foot `count` read the whole lane's count, and the header total reads the whole lane's sum, printed without binary residue (`0.3`, never `0.30000000000000004`), as the page's total is. The foot `sum` gets the same rounding. The trailing "Uncategorized" lane, when it is drawn, reads its whole count and total too.
+  - On a board laned by a lookup (a field that names the object it references), the read's groups name every lane, so a lane whose records all sit past the page is drawn after the page's lanes, titled by its referenced record, and says how many cards it did not load (new string `kanban.notLoaded`, in every locale). A board laned by any other field draws the page's lanes only.
+  - Over a source without that door, a refused read or a cut answer, the counts and the header total are the page's, marked `+`, and no lane past the page is drawn.
+  - Unchanged: the swimlane layout, and an "Uncategorized" lane whose records all sit past the page, which is still not drawn.
+- bbb4ad3: feat(studio): 「全部类型」 All types ends the 高级 fold, and the type directory lists every type a package could hold
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Studio's 高级 Advanced fold lists a type only when the package holds one, so a new app showed no way to make its first email template, document, book, field mapping, seed data or AI context pack. The fold now ends with one row under no group, 全部类型 All types, which opens the type directory. On a package that page lists the types the package holds, as before, and after them in each group every other type of the menu's six groups, marked None yet (zh: 还没有) with the word that says what can be done there; a tile opens the type's list, whose New makes the first item. Types that cannot be made in Studio are listed as read-only, and Hide read-only drops them. The fold's own rule is unchanged: a 高级 type appears in it once the package holds one. The directory is the row's current page.
+  
+  New locale keys in the studio catalogue (en, zh): `engine.studio.menu.allTypes`, `engine.directory.notHeld`, `engine.directory.notHeldTitle`, `engine.directory.notHeldReadOnlyTitle`. No props or entry exports change.
+- 276174a: feat(chatbot): when an answer carries a verified record-citations part, the console draws it as chips, and a chip opens the record at the cited section
+  
+  Clause-②: yes (a new reserved URL parameter `section`)
+  Metadata-protocol: none
+  
+  When an assistant answer carries a `data-record-citations` part (ADR-0160 D9), the console draws it: the part, read through `@objectstack/spec/ai`'s `RecordCitationsSchema`, becomes one chip per citation beside the "How this was computed" block, each showing the quoted passage (`extractRecordCitations` in `@object-ui/plugin-chatbot`, `RecordCitations`). The chips draw the part as it arrives and verify nothing again on display. A part the schema refuses draws nothing. Nothing in this release emits the part yet, and a conversation reloaded from history does not redraw it yet: the chips appear on a live answer whose stream carries the part.
+  
+  A chip calls the chat's `onOpenRecord` with the citation's `object` and `id` (the context pack's root record, also when the passage came from a related-list row) and its `anchor`; `onOpenRecord`'s argument gains an optional `anchor`. The console's assistant (the `/ai` page and the dock) opens `/apps/APP/OBJECT/record/ID?section=ANCHOR`.
+  
+  `section` is a new reserved console URL parameter (`RECORD_SECTION_PARAM`, listed in `RESERVED_URL_PARAMS`). The record page reads it: the spec's `headingsOf` runs on each long-text field of the record (`markdown`, `html`, `richtext`, `textarea`), the first field whose outline issues the anchor is the body, and its heading is scrolled to and marked; opening another section moves the mark, and the same chip clicked again opens the section again. A `textarea` body, a heading the field does not draw, or a body that draws a different number of headings of that title than its outline lists, opens at the field; an anchor no heading issues any more opens the record at its top. A record detail row now carries `data-detail-field` with the field's name, which is how the page finds the field.
+  
+  The record-link grammar in answers is unchanged: a fragment or a query string is still refused.
+- 061e342: fix(console): a stored settings select, radio or multiselect value the setting no longer offers reads as "no longer available" instead of nothing chosen
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When a settings select's stored value is not among the options the setting declares today (an option removed in a later release, such as the knowledge adapter `ragflow`), the Setup select showed an empty box: no label and no placeholder. It now shows the stored code with a mark, for example "ragflow (no longer available)", as one disabled entry in the list. A radio group shows the same text as one checked, disabled item. A multiselect shows each stored member outside the options as a checked checkbox with the same text: ticking a current option keeps the member in the saved list, as before (and the server still refuses a save of that list while it holds one); unticking it removes it, and it cannot be ticked back. The admin can still pick a current option, which saves as before; the retired entry cannot be picked back. Values among the options, and an unset value, render as before.
+  
+  New locale key: `console.settingsView.selectValueRetired` (`{{value}}` is the stored code), in all eleven Console language packs. No props or exports change.
+- da7c559: fix(console): the marketplace Versions panel marks a code-plugin version where the install would be refused
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The widening is additive: two new keys, `marketplace.detail.notInstallableHosted` and `marketplace.detail.notInstallableHostedReason`, in every locale of the `marketplace` namespace pack that `@object-ui/i18n` publishes through `./namespaces/marketplace`. No props or other exports change.
+  
+  A package's detail page listed every approved version the same way, so a code-plugin version (served with `contains_code: true`) gave no sign that installing it from a hosted environment is refused with 422 `CODE_PLUGIN_UNSUPPORTED`. On a runtime with no install-local surface, where the page installs through the control plane's door (a hosted environment's console, and the control plane's own console), each code-plugin version now carries a muted "Not installable on hosted" badge (zh: 托管环境无法安装) and one line naming the way out: hosted environments do not run code plugins, so install it on a self-hosted or Enterprise runtime. A self-hosted runtime that installs through its own install-local door marks nothing, and a metadata version is never marked.
+- e8740c5: fix(plugin-chatbot): the AI quota notice offers an upgrade only when the refusal names one
+  
+  Clause-②: yes (widening) — one new published language-pack key, `chatbotQuota.limitTitle`, in every locale
+  Metadata-protocol: none
+  
+  - The composer's AI quota notice and the confirm card's blocked state now read the 429's `upgrade` / `topUp` flags. `upgrade: true` keeps the "Upgrade needed" title and the "Upgrade plan" action; `topUp: true` shows a neutral "AI limit reached" title and the "Buy a credit pack" action; a refusal with neither (a paid plan's five-hour limit, a developer organization) shows "AI limit reached", the server's sentence about when it frees up, and no action. Before, every refusal was titled "Upgrade needed" and offered "Upgrade plan" unless `topUp` was set, so a paying team at its five-hour limit was told to upgrade.
+  - New locale key `chatbotQuota.limitTitle` in every `@object-ui/i18n` locale.
+- 7d3b8d6: feat(i18n): the `listConditions` namespace carries the words of the field manager
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Every pack gains six `listConditions.fieldList.*` keys for managing a view's fields in the shared field list: the fields not in the view yet, add, show, hide and move a field, and the reorder hint. Nothing reads them yet; the list's Options → Fields panel starts using them in a later release. No existing key changes.
+- 15f8357: feat(i18n): the locale packs carry the `listConditions` namespace for the list's coming filter and sort controls
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Every pack gains `listConditions.*`: the words of the shared field list (search, the fields the view shows and the hidden ones), the quick filter's values and operators, the sort directions worded by field type (time, size, the alphabet) and the condition row under the view bar (add filter, reset, a locked chip's note). Nothing reads them yet; the list's filter and sort panels start using them in a later release. No existing key changes.
+- 378c955: feat(plugin-list): the list's Filter and Sort open the shared field list, and the conditions show as chips under the view bar
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The toolbar's Filter opens a searchable field list (the fields the view shows first, a type icon on each), then the values by field type; every pick applies at once. Sort opens the same list with the direction on top. Under the view bar, the condition row shows the sort chips first (click to reverse, drag or Alt+Arrow to reorder, × to remove), then the view's own conditions as locked chips, then the reader's filter chips, 「Add filter」 and 「Reset」, which puts the filter and sort back to the view as saved. A column header click shows up there as a sort chip. The full FilterBuilder and SortBuilder stay one click away, behind 「Advanced filter」 and 「All sort levels」. The FilterBuilder no longer draws its 「Where」 label: `filterBuilder.where` is retired from the locale packs, and `listConditions.sort.advanced` is added. No filter storage format, `uf_*` parameter or server sort changes.
+- 39e9a82: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A shared list view is offered only to an administrator who may write one, and it is shared at once. Add view offers Shared only to an administrator whose session holds `manage_metadata`, the capability the shared view's write door asks; an organization administrator without it is no longer offered a Shared choice the server answers `403`. A view created Shared is saved and published in one act, so everyone sees it on their next read instead of waiting behind a draft; a refused save publishes nothing. A reader who opens a view the server says no longer exists is told so once, and the list shows its default view. Two new `@object-ui/i18n` keys under `view.switcher` carry the notices in every locale.
+- 9c5fb3e: fix(components, plugin-list): the sort builder and the phone sort sheet word a number, percent, progress or currency direction as size
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A sort level on a numeric field read "A → Z" / "Z → A" in the sort builder (the list's "All sort levels" panel) and in the phone sort sheet's levels, while a date read "Oldest → Newest". Numeric, percent, progress, currency, rating and boolean levels now read "Low → High" / "High → Low" (zh: 「小 → 大」 / 「大 → 小」), date, datetime and time levels read as time, and text keeps the alphabet, on both surfaces. The words come from the `listConditions.sort.*` rows every locale already carries.
+  
+  What else a reader sees change:
+  
+  - The four `sortBuilder.ascending`, `sortBuilder.descending`, `sortBuilder.oldestFirst` and `sortBuilder.newestFirst` rows are no longer read by either surface; the rows stay in the packs. A host that overrode them to reword a sort direction now overrides `listConditions.sort.alphabet_asc` / `alphabet_desc` / `time_asc` / `time_desc` (and `size_asc` / `size_desc` for numbers) instead.
+  - Because the words now come from `listConditions.sort.*`, the date and text wording changes in some locales: Japanese and Korean dates read 「古い → 新しい」 / 「오래된 순 → 최신 순」 instead of 「古い順」 / 「오래된 순」, Russian dates read "Старые → Новые" instead of "Сначала старые", and Russian text reads "А → Я" instead of "A → Z".
+  - Arabic: the `listConditions.sort.alphabet_asc` / `alphabet_desc` pair now reads "A → Z" / "Z → A". A run of two Latin letters stays left to right on a right-to-left page, so the old "A ← Z" showed ascending as Z to A.
+- abb5449: fix(studio): the author panels speak the author's words, and the zh pack names `label` 显示名
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - A Lookup's related-object picker shows the placeholder 「选择对象…」 / "Select object…" (not `object_name`), in prose type, with a chevron; the roll-up child-object picker takes the same placeholder. The "every record is selectable" hint and the related-list help name the target by its label, and neither is drawn before a target is set.
+  - The post-save advisory toast shows the producer's sentence alone when the finding carries one; the rule id and locator stay on the developer face (a finding with no sentence).
+  - The Notify node's rows are rewritten in the author's words in en and zh: no key aliases, no literal defaults, no `info | warning | critical`; the topic row reads "Category" (zh 「通知类别」) and the severity options read 一般 / 警告 / 紧急 in zh.
+  - The object Settings tab keeps each metadata key off the panel at rest: the key is the setting title's hover text. The object inspector's `split.renderKey` is replaced by `split.keysOnHover`.
+  - The Studio zh pack names an item's `label` 显示名 throughout, where it said 标签 or 显示名称 (the add-field hints included).
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [52a2398]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [eed422e]
+- Updated dependencies [2df9691]
+- Updated dependencies [55020c3]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [99a0e4f]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [3d6dea2]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [285ad8d]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [ccded86]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [811858c]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [c9b0a23]
+- Updated dependencies [6b360ab]
+- Updated dependencies [78f7160]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8807dcb]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [9ed18a5]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [f3d0a9f]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [8a741ab]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [49c6bf3]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [6ddb97b]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [c385d3b]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [3aa008d]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @object-ui/core@19.0.0-next.0
+
 ## 18.6.0
 
 ### Minor Changes

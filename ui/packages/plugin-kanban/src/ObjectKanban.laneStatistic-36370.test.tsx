@@ -34,7 +34,7 @@ import { ValueDataSource, extractRecords } from '@object-ui/core';
 import { SchemaRendererProvider } from '@object-ui/react';
 import { ObjectKanban } from './ObjectKanban';
 import { KANBAN_LANE_PAGE_SIZE } from './KanbanLanePaging';
-import { readLaneFigures } from './KanbanLaneStatistic';
+import { readLaneCounts, readLaneFigures, readLaneKeys, withoutBinaryResidue } from './KanbanLaneStatistic';
 // The board renders inside a `React.lazy` boundary; importing the chunk at
 // module scope bills the cold transform to the import phase (objectui#3010).
 import './KanbanImpl';
@@ -463,6 +463,24 @@ describe('a lane statistic covers every record of the lane (objectstack#36520)',
     rerenderWith({ search: 'open', searchFields: ['name'], reloadKey: '1' });
     await waitFor(() => expect(source.queryGroupHeaders).toHaveBeenCalledTimes(2));
   });
+
+  it('asks each lane\'s count under the node\'s filter and the host\'s search, with no statistic drawn (objectstack#37327)', async () => {
+    const source = adapter(ROWS_70);
+    mountHanded(
+      source,
+      undefined,
+      deals('open', 3),
+      { search: 'open', searchFields: ['name'], reloadKey: '0' },
+      { filter: [['region', '=', 'north']] },
+    );
+    await waitFor(() => expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1));
+    const query = source.queryGroupHeaders.mock.calls[0][1];
+    expect(query.groupBy).toEqual(['stage']);
+    expect(query.aggregations).toEqual([{ function: 'count', alias: 'count' }]);
+    expect(query.where).toEqual({ region: 'north' });
+    expect(query.search).toBe('open');
+    expect(query.searchFields).toEqual(['name']);
+  });
 });
 
 /**
@@ -592,6 +610,32 @@ describe('readLaneFigures (objectstack#36520)', () => {
   });
   it('answers no figure for a value that is not a number', () => {
     expect(readLaneFigures([{ stage: 'a', sum_amount: 'x' }], { ...base, type: 'sum', laneIds: ['a'], foldCase: false }).a).toBeNull();
+  });
+});
+
+describe('readLaneCounts, readLaneKeys and the sum fold (objectstack#37327)', () => {
+  const reading = { laneField: 'account', laneIds: null, foldCase: false, uncolumnedId: '__uncolumned__' };
+  const partial = <T,>(rows: T[]): T[] => Object.assign(rows, { hasMore: true });
+
+  it('reads each lane\'s count, folding the empty group into the trailing lane', () => {
+    expect({ ...readLaneCounts([{ account: 'a', count: 30 }, { account: { id: 'b', name: 'B' }, count: 4 }, { account: null, count: 2 }, { account: '', count: 1 }], reading) })
+      .toEqual({ a: 30, b: 4, __uncolumned__: 3 });
+  });
+  it('answers no counts for a cut answer or a count that is not a number', () => {
+    expect(readLaneCounts(partial([{ account: 'a', count: 30 }]), reading)).toBeNull();
+    expect(readLaneCounts([{ account: 'a', count: 'x' }], reading)).toBeNull();
+  });
+  it('names the lanes in the answer\'s order, once each, by foreign key, never the empty group', () => {
+    expect(readLaneKeys([{ account: 'c' }, { account: { id: 'a' } }, { account: null }, { account: 'c' }, { account: '' }], 'account')).toEqual(['c', 'a']);
+  });
+  it('names no lanes for a cut answer', () => {
+    expect(readLaneKeys(partial([{ account: 'c' }]), 'account')).toBeNull();
+  });
+  it('folds a sum without binary residue', () => {
+    expect(withoutBinaryResidue(0.1 + 0.2)).toBe(0.3);
+    expect(withoutBinaryResidue(870)).toBe(870);
+    expect(readLaneFigures([{ account: 'a', sum_amount: 0.1 }, { account: '', sum_amount: 0.2 }, { account: null, sum_amount: 0.1 }], { ...reading, type: 'sum', field: 'amount' }).__uncolumned__)
+      .toBe(0.3);
   });
 });
 

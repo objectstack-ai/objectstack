@@ -33,8 +33,9 @@
  * it was, is one CLI teaching two spellings for one metadata type: `os init`
  * wrote `<ns>_item.ts`, `os g object customer` (after commit 50fb191dc) writes
  * `customer.object.ts`, `create-objectstack`'s own blank starter already
- * shipped `note.object.ts`, and the examples (`app-crm/src/objects/
- * account.object.ts`) plus the registry's own glob keys speak the same shape.
+ * shipped `<name>.object.ts` files (`company.object.ts` today), and the
+ * examples (`app-crm/src/objects/account.object.ts`) plus the registry's own
+ * glob keys speak the same shape.
  * The scaffold is the first thing a new author reads as the house convention.
  *
  * That is why the assertion below is `matchesGlob` against the REGISTRY and

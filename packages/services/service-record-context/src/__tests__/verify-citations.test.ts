@@ -217,6 +217,33 @@ describe('[ADR-0160 D9] a refusal and a failure', () => {
     expect((await run(throwingDoor(fault), [cite('Fire cover')])).reported.map((r) => r.error)).toEqual([fault]);
   });
 
+  it('a related child\'s read that throws an uncoded error drops the citation and is reported; a coded refusal there is dropped and not reported', async () => {
+    /** A door whose served-definition read of the related child throws `err`. */
+    const childThrows = (err: unknown): FakeDoor => {
+      const door = fakeDoor(policyApp());
+      const servedOf = door.servedObjectDefinitionOf.bind(door);
+      door.servedObjectDefinitionOf = async (object) => {
+        if (object === 'policy_revision') throw err;
+        return servedOf(object);
+      };
+      return door;
+    };
+    // Control: the same citation verifies through a door whose child read answers.
+    expect((await run(fakeDoor(policyApp()), [cite('Fire cover')])).quotes).toEqual(['Fire cover']);
+
+    const outage = new Error('metadata store down: policy_revision');
+    const failed = await run(childThrows(outage), [cite('Fire cover')]);
+    expect(failed.quotes).toEqual([]);
+    expect(failed.reported).toHaveLength(1);
+    expect(failed.reported[0].call).toEqual({ object: 'policy', id: 'p1' });
+    // The executor's failure, naming nothing, with the outage on its cause.
+    expect(failed.reported[0].error).toMatchObject({ code: 'INTERNAL_ERROR', status: 500, cause: outage });
+    expect((failed.reported[0].error as Error).message).not.toContain('policy_revision');
+
+    const refusal = Object.assign(new Error("Object 'policy_revision' not found"), { code: 'OBJECT_NOT_FOUND', status: 404 });
+    expect(await run(childThrows(refusal), [cite('Fire cover')])).toEqual({ quotes: [], reported: [] });
+  });
+
   it('reports a 4xx with no code, and a thrown value that is not an Error, as failures', async () => {
     for (const err of [Object.assign(new Error('gone'), { status: 404 }), 'socket hang up', undefined]) {
       const { quotes, reported } = await run(throwingDoor(err), [cite('Fire cover')]);

@@ -923,6 +923,7 @@
     "resolveMetadataTypeDescription (function)",
     "resolveMetadataTypeLabel (function)",
     "resolveObjectFieldLabels (function)",
+    "resolveObjectMilestoneSummary (function)",
     "resolveSettingsActionConfirm (function)",
     "resolveSettingsActionLabel (function)",
     "resolveSettingsActionSuccess (function)",

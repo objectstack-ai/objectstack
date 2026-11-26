@@ -136,7 +136,7 @@ export const ar: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'منضدة عمل البيانات الوصفية للمطوّرين والمحللين والمنفّذين',
       navigation: {
         group_overview: { label: 'نظرة عامة' },

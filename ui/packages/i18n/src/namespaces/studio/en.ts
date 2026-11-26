@@ -3560,6 +3560,31 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.menu.emptyType': 'None yet: open the list to make the first',
   // objectstack#37360 — the fold's last row, under no group (ADR-0084, amended 2026-11-25).
   'engine.studio.menu.allTypes': 'All types',
+  // objectstack#37454 — 概览 Overview, the package's own page (ADR-0084, amended 2026-11-26).
+  'engine.studio.menu.overview': 'Overview',
+  'engine.studio.menu.overviewPending': '{count} changes wait for a publish',
+  'engine.studio.menu.overviewPendingOne': '{count} change waits for a publish',
+  'engine.studio.overview.chip.readOnly': 'Built-in',
+  'engine.studio.overview.chip.writable': 'Writable',
+  'engine.studio.overview.chip.enabled': 'In use',
+  'engine.studio.overview.chip.disabled': 'Disabled',
+  'engine.studio.overview.tab.info': 'Info',
+  'engine.studio.overview.tab.pending': 'Pending',
+  'engine.studio.overview.basics': 'Basic information',
+  'engine.studio.overview.field.name': 'Name',
+  'engine.studio.overview.field.description': 'Description',
+  'engine.studio.overview.field.source': 'Source',
+  'engine.studio.overview.field.version': 'Version',
+  'engine.studio.overview.field.app': 'Open app',
+  'engine.studio.overview.field.id': 'ID',
+  'engine.studio.overview.field.namespace': 'Namespace',
+  'engine.studio.overview.field.type': 'Type',
+  'engine.studio.overview.technical': 'Technical details',
+  'engine.studio.overview.notSet': 'Not set',
+  'engine.studio.overview.readOnlySource': '{source}. Read-only: it cannot be changed directly.',
+  'engine.studio.overview.pendingNote': 'Changes the AI assistant drafted wait here until you publish them. Your own saves go live at once.',
+  'engine.studio.overview.loadFailed': 'Could not read this package: {error}',
+  'engine.studio.overview.loading': 'Reading this package…',
   // objectstack#36502 — the notice on a retired Interfaces link's landing.
   'engine.studio.interfacesRetired.sentence': 'Interface edits have moved into the app.',
   'engine.studio.interfacesRetired.backToApp': 'Back to the app',
@@ -3571,7 +3596,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.backToApp': 'Back to app',
   'engine.studio.backToAppTitle': 'Leave Studio and go back to {app}',
   'engine.studio.backToAppTitleNoApp': 'Leave Studio and go back to your apps',
-  'engine.studio.mark': 'Studio',
+  // The Studio brand (ADR-0084): App Studio; a Chinese interface reads 应用搭建.
+  'engine.studio.mark': 'App Studio',
   // objectstack#37139 — the 「⋯」 package menu beside the app or package name:
   // the development face's whole-package actions, for a manage_metadata holder.
   'engine.studio.packageMenu.trigger': 'Package actions',

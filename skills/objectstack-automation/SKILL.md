@@ -8,10 +8,10 @@ description: >
   for validation rules or record hooks on an object (objectstack-data), or
   kernel / plugin events (objectstack-platform).
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
+compatibility: Requires @objectstack/spec 19.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.6.0"
+  version: "19.0.0-next.0"
   domain: automation
   tags: flow, workflow, trigger, approval, state-machine, scheduled, webhook
 ---
@@ -322,10 +322,10 @@ Most are caught by `objectstack build`:
 
 4. **A `select` is compared and written by its option `value`, never its label.**
    The request says "Lost"; the row stores `lost`.
-   A start `condition: "record.status == 'Lost'"` or `fields: { status: 'Lost' }`
-   is refused at publish (inline options), else matches no row or fails the
-   run (`invalid_option`). A label in a `filter` or an edge `condition` is never
-   checked: it silently matches nothing. Read the field's `options`.
+   A start or edge `condition: "record.status == 'Lost'"`, or `filter` /
+   `fields: { status: 'Lost' }`, is refused at publish (inline options), else
+   matches no row or fails the run (`invalid_option`); a filter for rows still
+   holding the label takes a CEL envelope operand. Read the field's `options`.
 
 ---
 

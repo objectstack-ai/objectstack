@@ -930,7 +930,7 @@ snake_case, so the code and the schema property are the same word.
 | Presence and shape | `required`, `invalid_type`, `invalid_shape`, `unknown_field` |
 | Per-type parse | `invalid_boolean`, `invalid_number`, `invalid_date`, `invalid_time`, `invalid_email`, `invalid_url`, `invalid_phone`, `invalid_json`, `invalid_format` |
 | Bounded ranges | `min_length`, `max_length`, `min_value`, `max_value`, `max_scale`, `max_precision`, `min_items`, `max_items` |
-| Closed sets and references | `invalid_option`, `value_domain` (the written value is not a member of the field's declared `valueDomain` standard), `invalid_value`, `reference_not_found`, `reference_ambiguous` |
+| Closed sets and references | `invalid_option`, `value_domain` (the written value is not a member of the field's declared `valueDomain` standard), `invalid_value`, `reference_not_found`, `reference_ambiguous`, `reference_out_of_scope` (an import lookup cell whose value matches a record only under another parent than the row's own; the cell error names that parent's columns in `scope`) |
 | Declarative rules | `rule_violation`, `json_schema_violation`, `invalid_initial_state`, `invalid_transition` |
 
 Branch on `code` to decide *how* to mark an input; show `message` to the user.

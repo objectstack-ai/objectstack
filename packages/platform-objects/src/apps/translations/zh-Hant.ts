@@ -136,7 +136,7 @@ export const zhHant: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: '應用搭建',
       description: '供開發者、分析師與導入人員使用的中繼資料工作台',
       navigation: {
         group_overview: { label: '總覽' },

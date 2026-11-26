@@ -13,7 +13,7 @@
  * load, so it imports no chat code (objectui#13410).
  */
 import * as React from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { NavigationType, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { useIsMobile } from '@object-ui/components';
 import { useAssistant } from '../assistant/assistantBus.js';
 import { useChatDockState, ChatDockPanel, ChatDockMobileSheet } from './ChatDock.js';
@@ -54,6 +54,36 @@ export interface ConsoleChatDock {
   rail: React.ReactNode;
   /** The phone presentation (a bottom sheet); `null` off a phone. */
   sheet: React.ReactNode;
+}
+
+/**
+ * objectstack#37556 — the history entry (`location.key`) the phone sheet was
+ * last shown open on, per tab (sessionStorage, like the drawer's own state).
+ * Absent while the sheet is closed. Where sessionStorage throws (private
+ * mode), the entry is kept in this module instead: it then lasts as long as
+ * the page, which covers every in-app navigation, layout swaps included.
+ */
+const DOCK_SHEET_SHOWN_AT_STORAGE_KEY = 'ai-chat-dock-sheet-shown-at';
+/** The width the drawer is a sheet below: `useIsMobile`'s breakpoint (`@object-ui/components`). */
+const SHEET_WIDTH_BELOW = 768;
+let sheetShownAtInMemory: string | null = null;
+
+function readSheetShownAt(): string | null {
+  try {
+    return window.sessionStorage.getItem(DOCK_SHEET_SHOWN_AT_STORAGE_KEY);
+  } catch {
+    return sheetShownAtInMemory;
+  }
+}
+
+function writeSheetShownAt(key: string | null): void {
+  sheetShownAtInMemory = key;
+  try {
+    if (key === null) window.sessionStorage.removeItem(DOCK_SHEET_SHOWN_AT_STORAGE_KEY);
+    else window.sessionStorage.setItem(DOCK_SHEET_SHOWN_AT_STORAGE_KEY, key);
+  } catch {
+    /* private mode: the module copy above stands in */
+  }
 }
 
 function hasHandoff(state: BuilderHandoffState | undefined): state is BuilderHandoffState {
@@ -119,7 +149,7 @@ export function useConsoleChatDock({
     }
   }, []);
 
-  const { expand, toggle, fullWindow, setFullWindow, expanded } = dock;
+  const { expand, collapse, toggle, fullWindow, setFullWindow, expanded } = dock;
   const open = React.useCallback(
     (next?: ChatDockTarget | null, nextHandoff?: BuilderHandoffState) => {
       if (next === null) setTarget(undefined);
@@ -153,6 +183,57 @@ export function useConsoleChatDock({
     lastPageRef.current = page;
     if (fullWindow) setFullWindow(false);
   }, [page, fullWindow, setFullWindow]);
+
+  // objectstack#37556 — on a phone the drawer is a sheet over the page, so a
+  // page the chat opens (a citation chip's cited section, a record, a list)
+  // stays hidden under it. A PUSH or POP away from the history entry the sheet
+  // was shown on closes it, a PUSH onto the same URL included (clicking the
+  // same chip again opens its section again); the conversation is kept, so
+  // reopening shows it. A REPLACE (a page rewriting its own query, the handoff
+  // hand-over above, an old `/ai…` link landing with the drawer armed open)
+  // leaves it open. The entry is kept per tab, not in this hook: a chip that
+  // opens another app's record, or leaves Home for an app, mounts another
+  // layout, and this host with it. The desktop rail sits beside the page and
+  // stays as it is.
+  //
+  // The move away is noted on the navigation itself, before the phone check:
+  // `useIsMobile` answers `false` on a host's first render, and a page that
+  // REPLACEs its address on mount (an app named by an alias moving to its
+  // package address) lands in that same first commit, so by the time the host
+  // knows it is on a phone the navigation type it sees is that REPLACE.
+  //
+  // At a desktop width there is no sheet, so the entry is dropped: a tablet
+  // turned from portrait (sheet) to landscape (rail) and back does not close
+  // the drawer on the turn. Desktop is read off the window, not `isMobile`,
+  // whose first-render `false` would drop a phone's entry on every remount.
+  const navigationType = useNavigationType();
+  const movedAwayRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!enabled) return;
+    if (!isMobile && window.innerWidth >= SHEET_WIDTH_BELOW) {
+      movedAwayRef.current = false;
+      writeSheetShownAt(null);
+      return;
+    }
+    const shownAt = readSheetShownAt();
+    if (shownAt !== null && shownAt !== location.key && navigationType !== NavigationType.Replace) {
+      movedAwayRef.current = true;
+    }
+    // A phone host's first render: `isMobile` is not measured yet.
+    if (!isMobile) return;
+    if (!expanded) {
+      movedAwayRef.current = false;
+      writeSheetShownAt(null);
+      return;
+    }
+    if (movedAwayRef.current) {
+      movedAwayRef.current = false;
+      writeSheetShownAt(null);
+      collapse();
+      return;
+    }
+    writeSheetShownAt(location.key);
+  }, [enabled, isMobile, expanded, location.key, navigationType, collapse]);
 
   // A designer surface can ask the assistant to open through the assistant bus
   // (e.g. an "Ask AI" button).

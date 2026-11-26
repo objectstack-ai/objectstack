@@ -1,5 +1,517 @@
 # @object-ui/plugin-kanban
 
+## 19.0.0-next.0
+
+### Minor Changes
+
+- 73f2cf4: feat(kanban): the board's own 视图设置, a lane header 「+」 and 「⋯」, and a lane statistic and card toggles on `KanbanConfig`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `KanbanConfigSchema` gains three optional keys, none with a default; a view that declares none of them renders as before:
+  
+  - `summary` — a lane statistic drawn at the foot of each lane (`KanbanLaneSummary`): `{ type: 'count' }`, or `{ type: 'sum', field }` of a number field over the cards the lane has loaded, not every record of the lane; `{ type: 'none' }` shows nothing. It takes precedence over `summarizeField`. A sum over a lane holding more cards than were loaded says so (「仅已加载的卡片」). The whole-lane sum, and average, minimum and maximum, wait for a server lane read (#36520).
+  - `showFieldLabels` — absent means `true`: a card names each field beside its value; `false` draws the values alone.
+  - `hideEmptyFields` — absent means `true`: a card leaves out an empty field; `false` keeps its line.
+  
+  On a board, the view settings show the lane field, which lanes show and in what order, the card fields (order, hide, add), the two card toggles and the lane-foot statistic, in place of the table's columns, group, row height and row colour. Each change applies at once and is held as the list's draft until Save. Each lane header gets 「+」 (a new record with the lane prefilled; an empty lane also gets a 「+ New」 row) and 「⋯」 (collapse, kept in this browser; hide). Hiding a lane moves its cards into 「未分类」, as `kanban.lanes` (#28211) always has, and the menu and the lanes list say so. The lane field picker offers select and radio fields; collapse is kept per reader, object and view. The Console now relays the view's `kanban.lanes`, which it used to drop, and both producers of the board node (`ListView` and `ObjectView#generateViewSchema`) relay the three new keys. `ObjectKanban` takes the host's `laneMenu` request (`KanbanLaneMenuRequest`). `@objectstack/lint` walks `kanban.summary.field` and refuses a `sum` over a field that is no number, a yes / no field included (`list-view-summary-field-type-refused`). Saving a board whose view declares no `kanban` block stores the lane field the board draws with the changed keys.
+- 8f141a2: feat(kanban): a lane's sum, average, minimum and maximum cover every record of the lane, computed in the query
+  
+  Clause-②: yes
+  Metadata-protocol: semantic
+  Skills-docs: follow-up #36422 (skills/objectstack-ui/rules/list-views.md teaches the board lane summary, now including avg / min / max)
+  
+  A stored `kanban.summary` of type `sum` now totals every record in the lane (computed in the query) instead of the loaded cards; where the board cannot ask the server, no figure is drawn.
+  
+  A board's lane foot statistic, `kanban.summary`, now takes `{ type: 'avg' | 'min' | 'max', field }` beside `none`, `count` and `sum`, and every one of `sum`, `avg`, `min` and `max` covers all of the lane's records:
+  
+  - **One grouped aggregate, no fetch-then-add.** The board asks ONE aggregate over its own query — its filter and its host's search, grouped by the lane field — through the data door a grouped list view's headers already ride (`DataSource.queryGroupHeaders`, `POST /data/:object/query`). A lane longer than its page (50 records) shows the whole lane's figure; the "loaded cards" label is gone. Records with no lane value, and records in a value that is no lane, are folded into the trailing "Uncategorized" lane. A lane with no record shows `0` for a sum and no figure for the other three; a lane that holds records but that the answer has no group for (the door can cut the group rows under a deployment's default page size) shows no figure rather than `0`. A whole answer needs the door to hand back that the rows were cut: follow-up #36870.
+  - **Under the reader's permissions.** The platform runs the aggregate with the reader's row filter, and refuses an aggregate over a field the reader may not read; the board asks nothing for such a field, and a refused read draws no figure.
+  - **No figure rather than a partial one.** A data source without `queryGroupHeaders`, or a filter the read cannot repeat, draws no `sum` / `avg` / `min` / `max` figure. Over cards a host hands to the board, a `sum` is still added up on the board and the other three draw nothing. Known gap, follow-up #36871: the list view hands a board whose lanes it cannot know before the query (lanes over a lookup field, a view with grouping) its fetched page, so there `sum` totals that page, unmarked.
+  - **`@objectstack/lint`** judges `avg`, `min` and `max` the way it judges `sum` (`list-view-summary-field-type-refused`): the aggregate × field-type table's row for that function over the field's declaration, less the boolean class, which it now reads from the spec (`BOOLEAN_VALUE_TYPES`) instead of listing `boolean` and `toggle` itself. The list view's lane-statistic picker reads the same class, and now offers and names `avg` (Average), `min` (Minimum) and `max` (Maximum) over the number fields it offers for `sum`; the locale packs carry the three names and drop the retired loaded-cards label.
+  
+  A stored `sum` keeps its key and its field; what it draws is now the whole lane's total where it drew a total over the loaded cards before, and no figure over a data source that cannot answer the lane read.
+
+### Patch Changes
+
+- 9a98a46: feat(list,detail): a change that makes other fields required asks for them in place — the kanban drop's fill-in, now shared by the list cell and the record page
+  
+  Clause-②: yes (widening) — `@object-ui/fields` exports `collectRequiredWhenPromptFields`, `RequiredFieldsDialog` and their types (moved from `@object-ui/plugin-kanban`, which never exported them) and the new `requiredWhenPromptReads`; nothing removed or renamed
+  Metadata-protocol: none
+  
+  When a value about to be written makes another field's `requiredWhen` true while that field is still empty, the write is held and one dialog asks for the missing values:
+  
+  - **Where:** a list cell in the select-first grid every `ListView` draws, the record page's inline Save, and the kanban drop (as before).
+  - **What it shows:** the record's name, the change that set it off (read-only), and one row per field to fill, with the editors the record form uses. A value typed there that makes one more field required adds that field; Save waits for it.
+  - **Save** writes the change and the typed values as ONE update. **Cancel** writes nothing: the list cell keeps its value; on the record page the edit session and its draft stay.
+  - **A refusal of that update stays in the dialog:** under the field it names, as a new row for another field the reader can fill, or at the dialog's foot.
+  - **Not asked for**, and written and refused as before: a field that already has a value, is hidden or read-only, that the reader may not write, or that has no in-place editor (a file, rich text, a formula). The record drawer's per-field save does not ask either.
+  
+  The pre-evaluation is the one the kanban drop already used (`resolveFieldRuleState`, the evaluator the form and the server share, judged as the engine's transition gate), generalised from one key to any set of changed keys.
+- be91bfc: fix(ui): the kanban, calendar, timeline and map views draw the no-access state for a refused read, not the raw error
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A reader who may open a page but is not granted the records its kanban board, calendar, timeline or map reads saw the transport's own string where the view would be, untranslated (for example `Error loading kanban data: ApiDataSource: HTTP 403 Forbidden — {…}`). Each of the four views now classifies a failed load with the shared load-error verdict the list page, the related list and the Gantt chart use, and for a permission refusal (a 403, or a `PERMISSION_DENIED` / `FORBIDDEN` code) draws the calm no-access state those surfaces draw: a neutral status panel with the shared `list.loadErrorForbiddenTitle` / `list.loadErrorForbiddenMessage` sentence in the reader's language, and none of the server's text. Every other failure (a 500, a dropped connection) keeps each view's existing error screen. The map's tile-style failure is not a data load and is unchanged.
+- 6c7c6db: feat(ui): the console's pages set text in two sizes, 14 and 12, and two weights, 400 and 500
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Two sizes.** Body text, list cells, field values, inputs, menu items, toolbar controls and buttons are 14px (`text-sm`); field labels, column headers, counts, timestamps, hints and chip text are 12px (`text-xs`). The hard-coded 13px is gone from the console's runtime pages, and the 10px, 11px and other odd sizes there are 12px. The in-cell editor is 14px, like the cell it edits.
+  - **Two weights.** Record names, tabs, buttons, section titles and column headers are 500 (`font-medium`); body text is 400. Weight 600 and 700 stay only on page and dialog titles 18px and larger. `DropdownMenuLabel` is weight 500 through a declared local patch on the Shadcn primitive (`dropdown-menu-label-medium-weight` in `ui/scripts/shadcn-local-patches.mjs`), so it survives a registry sync.
+  - **Not changed:** Studio and metadata administration internals, the settings pages, developer tools, phone-only layouts, avatar initials, authored markdown and SDUI heading typography, the docs reader's prose size, and the shape of coloured option badges (still pills).
+  - A list column with no declared width measures its content, so it grows with the 14px text; a column whose width a view or a user set keeps that width and shows about 8% fewer characters before it truncates.
+- f2ef7d8: fix(ui): the kanban card owner, history timeline, user menu and presence stack draw letters-only initials
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A person whose display name carries punctuation, such as `Alice (Sales)`, now shows `AS` on the kanban card owner's avatar, the history timeline, the user menu and the presence stack, where those four faces drew `A(`. They now use the same rule as the people cell and the avatar widget: initials are made of letters only, a single-word name gives its first two letters (`Admin` → `AD`), a name of three or more words gives its first and last words' first letters (`John Michael Doe` → `JD`), a single CJK word gives its last one or two characters, and a name with no letter gives `?`. The user menu still falls back to the email's first character when there is no name.
+  
+  The rule, `getPersonInitials`, is now exported by `@object-ui/types`, the lowest package all of these faces can reach; `@object-ui/fields` re-exports the same function, so its `getPersonInitials` export is unchanged. `@object-ui/auth` now depends on `@object-ui/types`.
+- e9fa6b5: fix(kanban): a board grouped by a lookup, user, master-detail or tree field draws one lane per referenced record
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The board reads the lane field off records fetched with `$expand`, so a reference field's value is the referenced record, not its key. The lanes were built from the stringified value: one lane per card, every one titled "[object Object]", each holding every card. A lane on a reference field is now keyed by the foreign key and titled by the referenced record's name (the field's `displayField`, then the target object's `nameField`, then the shared record-title ladder); cards bucket by the foreign key, also into declared `columns` keyed by it; a drag to another lane writes the foreign key, and the moved card keeps naming its new value until the board refetches. A card with no value is drawn in "Uncategorized", as before; a data-derived board no longer draws a lane titled "null" for it.
+- 021524c: feat(spec,ui): a field can be read-only by hand at the console while actions, imports, the API and flows keep writing it (`uiReadonly` / `uiReadonlyWhen`)
+  
+  Clause-②: yes (widening: two new optional authorable keys `Field.uiReadonly` and `Field.uiReadonlyWhen`)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37405
+  
+  A status column that only moves through actions, or a field an integration fills, used to have no honest declaration: `readonly: true` also strips every client write, so the action, the import and the API lost the field too. Fields now carry two lock tiers:
+  
+  | | server lock: no client writes | hand lock: no person edits at the console |
+  |:--|:--|:--|
+  | always | `readonly` | `uiReadonly` |
+  | conditional | `readonlyWhen` | `uiReadonlyWhen` (CEL, the same scope as `readonlyWhen`) |
+  
+  - **`uiReadonly: true` / `uiReadonlyWhen`.** These console surfaces lock the field: the create and edit dialogs (the field is left off them and out of the payload they submit, so a create from the console lands on the field's `defaultValue`, and a `required` field therefore needs one), the record page's inline edit and stage path, the highlight-strip chip, grid inline edit and its multi-row save, kanban drag between columns grouped by the field, calendar drag, and the line-item grid (a `uiReadonly` child field is not a derived column, and an authored column over it is locked; a `uiReadonlyWhen` one locks its cell per row). The Gantt, the timesheet cell, the kanban swimlane drag and the in-app assistant do not read the keys yet. The engine never reads either key, so REST, import, declarative and script actions, and flows write the field, and the object's validations (a `state_machine`, for one) judge each write.
+  - **`uiReadonlyWhen` is judged on an existing record only** (the create dialog does not read it, nor does a new line-item row), over the host's predicate scope on every surface. Grids and list views fetch the operands of a shown or dragged field's lock predicates. A predicate that cannot be evaluated LOCKS the field (no server judges the hand lock), the edit dialog refuses to submit until it is fixed, and `os validate` checks it as it checks `readonlyWhen`.
+  - **Refused: `uiReadonly: true` beside `readonly: true`** (at `['uiReadonly']`, at every door that parses a field: `defineStack`, `os validate`, metadata save). Keep one: `readonly` when no client may write the field, `uiReadonly` when people at the console may not. `uiReadonlyWhen` beside `readonlyWhen` is accepted.
+  - **Kanban: a `readonly` lane field no longer drags.** The board read no field lock before, so a card grouped by a `readonly` field could be dragged and its PATCH was silently stripped. The board now reads both locks.
+  - **`@object-ui/core` exports the one verdict:** `fieldReadOnlyByHand(def, record?, context?)`, `fieldStaticallyReadOnlyByHand(def)`, `fieldHasConditionalHandLock(def)`. `resolveFieldRuleState` takes `uiReadonlyWhen` in its rules and `uiReadonly` in its statics. The import wizard's target mapping and the Studio/designer reads stay on the raw `readonly`.
+  - **MCP `describe_object`** reports `uiReadonly` and `uiReadonlyWhen` as their own keys where set (never folded into `readonly`, which tells an agent to leave the field out of a write), on the HTTP and the stdio transport, and the tool description names them.
+  - **Censuses and Studio.** The FLS reference scrub classifies both keys (`@objectstack/metadata-core`: `uiReadonly` kept, `uiReadonlyWhen` an expression position). A caller denied a field the `uiReadonlyWhen` reads is served the field with `uiReadonly: true` in place of the predicate, so the lock never opens for them. The Studio field form offers both rows beside Read-only and Read-only when, with their labels and help translated in every metadata-forms locale pack (`@objectstack/platform-objects`).
+- 9be1741: fix(plugin-kanban): a board swimlaned by a lookup or user field keys each swimlane by the referenced record's id and titles it by the record's name
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A kanban board whose `swimlaneField` is a reference field (lookup, user, master-detail) reads the field's value off records fetched with `$expand`, so the value is the referenced record. The swimlanes were built from that value stringified: every heading read `[object Object]`, and cards pointing at different records were drawn in one swimlane.
+  
+  Each swimlane is now keyed the way a column lane on a reference field is keyed: by the referenced record's id. Its heading is the record's name, read through the field's `displayField` and then the shared record-title ladder, and falls back to the id when neither names the record. The swimlane order and the collapsed-swimlane memory kept in the browser use the id. A card with no value still sits in the "Uncategorized" swimlane, and a swimlane field that holds plain values is unchanged.
+- 4ed453d: fix(ui): a grouped read the server cut says so, and a kanban board draws no lane figure over it
+  
+  Clause-②: yes (widening) — `@object-ui/types` exports the new type `ListViewGroupHeaderAnswer` (the header rows array plus an optional `hasMore`), and `DataSource.queryGroupHeaders` answers it in place of `ListViewGroupHeaderRow[]`; a source that returns a plain array still satisfies the member, and a caller that reads the answer as an array reads it unchanged; nothing removed or renamed
+  Metadata-protocol: none
+  
+  On a deployment that sets a default page size (`OS_DATA_DEFAULT_PAGE_SIZE` or `OS_DATA_MAX_PAGE_SIZE`), `POST /data/:object/query` cuts a grouped read with no `limit` to that page size and answers `hasMore: true`. `ObjectStackAdapter.queryGroupHeaders` used to return the header rows alone, so a caller could not tell a cut answer from a whole one. It now sets `hasMore: true` on the answer it returns when the server says groups were dropped; a whole answer carries no `hasMore`.
+  
+  The kanban lane statistic (`kanban.summary` of type `sum`, `avg`, `min` or `max`) reads that flag: over a cut answer it draws no figure for any lane. Before, the trailing "Uncategorized" lane could total only the groups the answer carried, and on a board of one query a lane whose group was dropped could draw "Sum 0". A whole answer draws every lane's figure as before.
+  
+  The grouped grid and the currency-code read keep reading the answer as the same array.
+- 6210a08: fix(kanban): a list view board whose lanes come from a lookup field shows each lane's whole sum, average, minimum and maximum, not one page's
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A list view board whose lanes it cannot know before the query (lanes over a lookup field) is handed one page of records. Its lane statistic (`kanban.summary`) used to add up that page under the name of the lane's total, and drew no average, minimum or maximum at all although the view settings offer them.
+  
+  - **`@object-ui/plugin-list`**: the list view now hands that board the query of its page too: the node's `filter` is the effective filter its own fetch sent, and a new host prop, `laneStatisticQuery`, carries its search term and fields and its refetch signal (Refresh, `refreshTrigger`, a declared write).
+  - **`@object-ui/plugin-kanban`**: a board handed its cards with `laneStatisticQuery` asks the lane read a board that queries its own cards asks: one grouped aggregate (`DataSource.queryGroupHeaders`) over every record of each lane. `sum`, `avg`, `min` and `max` are the whole lane's figures; a source without that door, a refused read or a cut answer draws no figure, never the page's. A board handed its cards without their query (records handed in whole) still adds up a `sum` over them and draws none of the other three.
+  - **`@objectstack/spec`**: the `KanbanConfig.summary` description drops the "known gap" sentence and says what such a board draws.
+  - **What widens:** `ObjectKanbanComponentProps` (exported by `@object-ui/plugin-kanban`) gains the optional `laneStatisticQuery?: KanbanLaneStatisticRequest`. Every existing caller is unchanged.
+  
+  This supersedes the "known gap" line of #36857's note (follow-up #36871) for the list view board whose lanes come from a lookup field: that board's `sum`, `avg`, `min` and `max` now cover every record of each lane.
+- 7b56b3a: fix(plugin-kanban): a reference swimlane heading names its record through the target object's declared `nameField`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A board whose swimlanes group by a lookup now titles each swimlane the way a column lane over the same reference is titled: the field's `displayField`, then the referenced object's `nameField` (ADR-0079), then the shared title ladder. Before, the swimlane skipped the referenced object's `nameField`, so one record could be named differently in a swimlane heading and in a column heading. `ObjectKanban` reads the referenced object once per board; no exported type changes.
+- 829a45e: fix(plugin-kanban): a collapsed lane's Chinese, Japanese or Korean title reads upright, top to bottom
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A collapsed kanban lane draws its title down a narrow spine. The title was set vertical and then turned 180°, which reads well for a Latin title (bottom to top, like a book spine) but stood every Chinese, Japanese or Korean character on its head, so a lane such as 「已取消」 could not be read. A title that contains Han, kana or Hangul now drops the turn and sets every character upright, reading top to bottom; a title in Latin script renders as before.
+- 68b2430: fix(kanban): a list view board whose lanes come from the data counts and totals each whole lane, and a board laned by a lookup draws a lane whose records all sit past the first page
+  
+  Clause-②: yes (widening) — @object-ui/i18n kanban.notLoaded
+  Metadata-protocol: none
+  
+  A list view hands its board one page of records when it cannot know the lanes before the query: the lane field has no options (a lookup, or a text, number, boolean or date field). That board's lane header count and a foot `count` counted the page with no `+`, its `summarizeField` header total summed the page, and a lane whose records all sat past the first page was not drawn.
+  
+  - The board's one grouped lane read (`DataSource.queryGroupHeaders`, the read that already answers its `sum`, `avg`, `min` and `max`) now also asks each lane's record count and the `SUM` of the view's `summarizeField`, and is asked whether or not the view draws a lane statistic. It is still one read per board, never one per lane.
+  - Each lane header and a foot `count` read the whole lane's count, and the header total reads the whole lane's sum, printed without binary residue (`0.3`, never `0.30000000000000004`), as the page's total is. The foot `sum` gets the same rounding. The trailing "Uncategorized" lane, when it is drawn, reads its whole count and total too.
+  - On a board laned by a lookup (a field that names the object it references), the read's groups name every lane, so a lane whose records all sit past the page is drawn after the page's lanes, titled by its referenced record, and says how many cards it did not load (new string `kanban.notLoaded`, in every locale). A board laned by any other field draws the page's lanes only.
+  - Over a source without that door, a refused read or a cut answer, the counts and the header total are the page's, marked `+`, and no lane past the page is drawn.
+  - Unchanged: the swimlane layout, and an "Uncategorized" lane whose records all sit past the page, which is still not drawn.
+- Updated dependencies [2b57044]
+- Updated dependencies [a0b4ecf]
+- Updated dependencies [ee5fdc8]
+- Updated dependencies [d6d9645]
+- Updated dependencies [1c05546]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [c3fb37a]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [8896822]
+- Updated dependencies [dc53d4a]
+- Updated dependencies [0739dee]
+- Updated dependencies [ad15579]
+- Updated dependencies [89364b4]
+- Updated dependencies [eed422e]
+- Updated dependencies [2df9691]
+- Updated dependencies [bfd6b6b]
+- Updated dependencies [55020c3]
+- Updated dependencies [50f85e9]
+- Updated dependencies [6f2bd4f]
+- Updated dependencies [99a0e4f]
+- Updated dependencies [a9b36ef]
+- Updated dependencies [9f352e8]
+- Updated dependencies [fd471d3]
+- Updated dependencies [1b2cd80]
+- Updated dependencies [6ffa816]
+- Updated dependencies [f2078e3]
+- Updated dependencies [7702f09]
+- Updated dependencies [05e0eb8]
+- Updated dependencies [c890070]
+- Updated dependencies [5bd7257]
+- Updated dependencies [5dd856f]
+- Updated dependencies [34308dc]
+- Updated dependencies [eb1f85d]
+- Updated dependencies [58d00db]
+- Updated dependencies [3819afe]
+- Updated dependencies [a5ddeb6]
+- Updated dependencies [61722e9]
+- Updated dependencies [3d6dea2]
+- Updated dependencies [e6fa510]
+- Updated dependencies [285ad8d]
+- Updated dependencies [bfd1049]
+- Updated dependencies [6a35635]
+- Updated dependencies [9212119]
+- Updated dependencies [cda16d4]
+- Updated dependencies [9b3227f]
+- Updated dependencies [fe75349]
+- Updated dependencies [dab4712]
+- Updated dependencies [141a826]
+- Updated dependencies [8145424]
+- Updated dependencies [b65488a]
+- Updated dependencies [83a79e6]
+- Updated dependencies [dda665f]
+- Updated dependencies [98b3f87]
+- Updated dependencies [46ad134]
+- Updated dependencies [f71d488]
+- Updated dependencies [ccded86]
+- Updated dependencies [ec24363]
+- Updated dependencies [e01b8be]
+- Updated dependencies [238661f]
+- Updated dependencies [d96c878]
+- Updated dependencies [72d19c4]
+- Updated dependencies [b0c624a]
+- Updated dependencies [9b6db73]
+- Updated dependencies [1e018d6]
+- Updated dependencies [6d86b43]
+- Updated dependencies [bae933b]
+- Updated dependencies [a3a74f2]
+- Updated dependencies [f98f18c]
+- Updated dependencies [74d3d83]
+- Updated dependencies [227a16a]
+- Updated dependencies [598a34d]
+- Updated dependencies [0585797]
+- Updated dependencies [811858c]
+- Updated dependencies [fac1e7d]
+- Updated dependencies [4609c48]
+- Updated dependencies [8500ee7]
+- Updated dependencies [a6607c7]
+- Updated dependencies [c00be39]
+- Updated dependencies [1c87956]
+- Updated dependencies [5345905]
+- Updated dependencies [af566c2]
+- Updated dependencies [f909734]
+- Updated dependencies [a03c3d4]
+- Updated dependencies [c9b0a23]
+- Updated dependencies [a8126d2]
+- Updated dependencies [f51578e]
+- Updated dependencies [65fddc8]
+- Updated dependencies [6b360ab]
+- Updated dependencies [d19d875]
+- Updated dependencies [c7174c3]
+- Updated dependencies [78f7160]
+- Updated dependencies [1d7015a]
+- Updated dependencies [9972432]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5a68b57]
+- Updated dependencies [fddb9cb]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [647eb92]
+- Updated dependencies [7de1bad]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [dea68e9]
+- Updated dependencies [b113178]
+- Updated dependencies [138faaa]
+- Updated dependencies [411fe24]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [48c732c]
+- Updated dependencies [52fb30c]
+- Updated dependencies [8807dcb]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [9ed18a5]
+- Updated dependencies [c261a7c]
+- Updated dependencies [76cb366]
+- Updated dependencies [32409a9]
+- Updated dependencies [cf45e4f]
+- Updated dependencies [f548bdc]
+- Updated dependencies [9f6f306]
+- Updated dependencies [c757e07]
+- Updated dependencies [a5a5312]
+- Updated dependencies [c1b35c3]
+- Updated dependencies [9a98a46]
+- Updated dependencies [96b66ca]
+- Updated dependencies [8c8ff0f]
+- Updated dependencies [27e414b]
+- Updated dependencies [eb53d63]
+- Updated dependencies [dda5e74]
+- Updated dependencies [f2a990b]
+- Updated dependencies [035a12c]
+- Updated dependencies [33d0169]
+- Updated dependencies [a23164e]
+- Updated dependencies [f3d0a9f]
+- Updated dependencies [6aacad9]
+- Updated dependencies [0d0ed81]
+- Updated dependencies [8aed508]
+- Updated dependencies [a60740a]
+- Updated dependencies [43580a3]
+- Updated dependencies [cc05e60]
+- Updated dependencies [dc10b3b]
+- Updated dependencies [dca608a]
+- Updated dependencies [baf2678]
+- Updated dependencies [13d1e95]
+- Updated dependencies [15b7f51]
+- Updated dependencies [c297dff]
+- Updated dependencies [1cd4762]
+- Updated dependencies [3f7fdd0]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [9ae874a]
+- Updated dependencies [3ae62ac]
+- Updated dependencies [6c7c6db]
+- Updated dependencies [eebb893]
+- Updated dependencies [493ad09]
+- Updated dependencies [3543b51]
+- Updated dependencies [4ab2c82]
+- Updated dependencies [04f9861]
+- Updated dependencies [c30ce97]
+- Updated dependencies [28749e3]
+- Updated dependencies [e605773]
+- Updated dependencies [0628e08]
+- Updated dependencies [713545f]
+- Updated dependencies [cbd582f]
+- Updated dependencies [031325d]
+- Updated dependencies [1705ec9]
+- Updated dependencies [a2dc858]
+- Updated dependencies [a6756a2]
+- Updated dependencies [b3bcfef]
+- Updated dependencies [aad35e6]
+- Updated dependencies [0b2118f]
+- Updated dependencies [71e02ff]
+- Updated dependencies [d12ac84]
+- Updated dependencies [28ba01f]
+- Updated dependencies [5e8e243]
+- Updated dependencies [4099ef2]
+- Updated dependencies [8466fca]
+- Updated dependencies [e3054b4]
+- Updated dependencies [6a73185]
+- Updated dependencies [0d2bb8d]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [740720c]
+- Updated dependencies [6e643cc]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [96b7975]
+- Updated dependencies [e8b494a]
+- Updated dependencies [bbc7e03]
+- Updated dependencies [27895d7]
+- Updated dependencies [543585d]
+- Updated dependencies [7e89bc6]
+- Updated dependencies [42e4096]
+- Updated dependencies [a10422d]
+- Updated dependencies [dcc9b07]
+- Updated dependencies [1a2a8a9]
+- Updated dependencies [24366ff]
+- Updated dependencies [f2ef7d8]
+- Updated dependencies [17dbea4]
+- Updated dependencies [ff60149]
+- Updated dependencies [ee651ce]
+- Updated dependencies [dad9b55]
+- Updated dependencies [d076975]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [8a741ab]
+- Updated dependencies [60e79ed]
+- Updated dependencies [3cf6a44]
+- Updated dependencies [5fecc22]
+- Updated dependencies [53733c1]
+- Updated dependencies [6cfa758]
+- Updated dependencies [4f19091]
+- Updated dependencies [e377918]
+- Updated dependencies [3b58921]
+- Updated dependencies [9c283a1]
+- Updated dependencies [c45dd80]
+- Updated dependencies [52971ff]
+- Updated dependencies [06c3e5a]
+- Updated dependencies [2da2979]
+- Updated dependencies [e4e3bcf]
+- Updated dependencies [ad50d61]
+- Updated dependencies [87c7bba]
+- Updated dependencies [50bfbb8]
+- Updated dependencies [f26469a]
+- Updated dependencies [7501d0c]
+- Updated dependencies [4ef1ea9]
+- Updated dependencies [cb909d7]
+- Updated dependencies [41dd132]
+- Updated dependencies [45ef94e]
+- Updated dependencies [d7411fa]
+- Updated dependencies [c6075a7]
+- Updated dependencies [cd51dbb]
+- Updated dependencies [3f568c1]
+- Updated dependencies [573a376]
+- Updated dependencies [5c2d5cf]
+- Updated dependencies [43916f3]
+- Updated dependencies [f590f3e]
+- Updated dependencies [9fa05c6]
+- Updated dependencies [ed0edb1]
+- Updated dependencies [a10987a]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [fed637c]
+- Updated dependencies [f77d078]
+- Updated dependencies [3110de5]
+- Updated dependencies [1948c5f]
+- Updated dependencies [0e83fe0]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [70f454a]
+- Updated dependencies [9f84e5f]
+- Updated dependencies [368deee]
+- Updated dependencies [6156fdd]
+- Updated dependencies [0d6589d]
+- Updated dependencies [c54aa57]
+- Updated dependencies [53257a5]
+- Updated dependencies [03cb550]
+- Updated dependencies [115d387]
+- Updated dependencies [e0050ba]
+- Updated dependencies [2f8e8ba]
+- Updated dependencies [14f4d8f]
+- Updated dependencies [fa23941]
+- Updated dependencies [183ed23]
+- Updated dependencies [08bf7d2]
+- Updated dependencies [4d4ec16]
+- Updated dependencies [d763ee7]
+- Updated dependencies [8018e00]
+- Updated dependencies [844218f]
+- Updated dependencies [8cce05b]
+- Updated dependencies [0d727b7]
+- Updated dependencies [ff0d1f1]
+- Updated dependencies [021524c]
+- Updated dependencies [4f7d6f7]
+- Updated dependencies [b848b47]
+- Updated dependencies [129e637]
+- Updated dependencies [dfdebfa]
+- Updated dependencies [47ed85d]
+- Updated dependencies [0819cab]
+- Updated dependencies [97e0f93]
+- Updated dependencies [c8d4b90]
+- Updated dependencies [69c3dc4]
+- Updated dependencies [76eea0f]
+- Updated dependencies [b3d953e]
+- Updated dependencies [62692b7]
+- Updated dependencies [8695703]
+- Updated dependencies [49c6bf3]
+- Updated dependencies [4ed453d]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [66452df]
+- Updated dependencies [00dd362]
+- Updated dependencies [bac4864]
+- Updated dependencies [8c29b81]
+- Updated dependencies [a68b475]
+- Updated dependencies [c75453e]
+- Updated dependencies [1e96009]
+- Updated dependencies [4fb03eb]
+- Updated dependencies [ff04943]
+- Updated dependencies [ab91323]
+- Updated dependencies [fbb62e1]
+- Updated dependencies [57445a6]
+- Updated dependencies [0212714]
+- Updated dependencies [15d2766]
+- Updated dependencies [1f3e9f6]
+- Updated dependencies [305fe60]
+- Updated dependencies [e91149e]
+- Updated dependencies [06c1f54]
+- Updated dependencies [706c8c6]
+- Updated dependencies [c0dd417]
+- Updated dependencies [517e415]
+- Updated dependencies [6ddb97b]
+- Updated dependencies [2af9729]
+- Updated dependencies [f339060]
+- Updated dependencies [40914bd]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [6161010]
+- Updated dependencies [875ae40]
+- Updated dependencies [8316d3d]
+- Updated dependencies [6cc6177]
+- Updated dependencies [057cedf]
+- Updated dependencies [5cf9941]
+- Updated dependencies [5f34d65]
+- Updated dependencies [8fe4eaf]
+- Updated dependencies [84a27e7]
+- Updated dependencies [7939732]
+- Updated dependencies [9e6533b]
+- Updated dependencies [0ad44a3]
+- Updated dependencies [dbc1765]
+- Updated dependencies [82a8510]
+- Updated dependencies [2d18ba8]
+- Updated dependencies [6361b99]
+- Updated dependencies [c2f8bff]
+- Updated dependencies [68b2430]
+- Updated dependencies [bbb4ad3]
+- Updated dependencies [276174a]
+- Updated dependencies [c385d3b]
+- Updated dependencies [061e342]
+- Updated dependencies [b89f1b5]
+- Updated dependencies [da7c559]
+- Updated dependencies [e8740c5]
+- Updated dependencies [3aa008d]
+- Updated dependencies [7d3b8d6]
+- Updated dependencies [15f8357]
+- Updated dependencies [378c955]
+- Updated dependencies [56fa31b]
+- Updated dependencies [5315599]
+- Updated dependencies [39e9a82]
+- Updated dependencies [9c5fb3e]
+- Updated dependencies [abb5449]
+- Updated dependencies [d280de9]
+  - @object-ui/plugin-detail@19.0.0-next.0
+  - @object-ui/i18n@19.0.0-next.0
+  - @object-ui/fields@19.0.0-next.0
+  - @object-ui/types@19.0.0-next.0
+  - @object-ui/core@19.0.0-next.0
+  - @object-ui/components@19.0.0-next.0
+  - @object-ui/react@19.0.0-next.0
+  - @object-ui/permissions@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes
