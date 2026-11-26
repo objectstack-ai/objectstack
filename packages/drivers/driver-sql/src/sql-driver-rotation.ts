@@ -189,7 +189,7 @@ export class RotationFacet {
   }
 
   /** The body of `SqlDriver#ensureShardTable`; the method's docblock there is its contract. */
-  static async ensureShardTable(this: Pick<RotationHost, 'computeAndRecordTenantField' | 'createAuditTimestampColumn' | 'createColumn' | 'knex' | 'resolveTenantField' | 'syncDeclaredIndexes' | 'warnBuiltinColumnCollisions'>, shardName: string, obj: { fields?: Record<string, any>; tenancy?: any; indexes?: any[] }, baseTable: string = shardName): Promise<void> {
+  static async ensureShardTable(this: Pick<RotationHost, 'computeAndRecordTenantField' | 'createAuditTimestampColumn' | 'createColumn' | 'isSqlite' | 'knex' | 'resolveTenantField' | 'syncDeclaredIndexes' | 'warnBuiltinColumnCollisions'>, shardName: string, obj: { fields?: Record<string, any>; tenancy?: any; indexes?: any[] }, baseTable: string = shardName): Promise<void> {
     const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
     // [#12015] Both branches below drop a declared field named after a builtin
     // column — the create branch skips it explicitly, the column-sync branch
@@ -448,7 +448,7 @@ export class RotationFacet {
   }
 
   /** The body of `SqlDriver#initObjects`; the method's docblock there is its contract. */
-  static async initObjects(this: Pick<RotationHost, 'assertSchemaMutable' | 'autoNumberFields' | 'backfillCanonicalBooleans' | 'backfillCanonicalDatetimes' | 'backfillCanonicalJsonEncoding' | 'backfillCanonicalTimes' | 'carryDeclaredRenames' | 'createAuditTimestampColumn' | 'createColumn' | 'dateFields' | 'dateFieldsOnInstantColumn' | 'deferredDdl' | 'deferredSchemaObjects' | 'dialectName' | 'ensureDatabaseExists' | 'ensureRotation' | 'ensureSequencesTable' | 'knex' | 'migrateMysqlDatetimeColumns' | 'migrateMysqlTimeColumns' | 'reconcileAndWarnDrift' | 'registerObjectMetadata' | 'resolveFileColumnsMoved' | 'rethrowWithRowSizeExplanation' | 'retireIndexesNamedForOldKeys' | 'supportsRotation' | 'syncTableIndexes' | 'tablesCreatedHere' | 'tablesFoundExisting' | 'tablesWithTimestamps' | 'tenantFieldByTable' | 'warnBuiltinColumnCollisions'>, objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>): Promise<void> {
+  static async initObjects(this: Pick<RotationHost, 'assertSchemaMutable' | 'autoNumberFields' | 'backfillCanonicalBooleans' | 'backfillCanonicalDatetimes' | 'backfillCanonicalJsonEncoding' | 'backfillCanonicalTimes' | 'carryDeclaredRenames' | 'createAuditTimestampColumn' | 'createColumn' | 'dateFields' | 'dateFieldsOnInstantColumn' | 'deferredDdl' | 'deferredSchemaObjects' | 'dialectName' | 'ensureDatabaseExists' | 'ensureRotation' | 'ensureSequencesTable' | 'isSqlite' | 'knex' | 'migrateMysqlDatetimeColumns' | 'migrateMysqlTimeColumns' | 'reconcileAndWarnDrift' | 'registerObjectMetadata' | 'resolveFileColumnsMoved' | 'rethrowWithRowSizeExplanation' | 'retireIndexesNamedForOldKeys' | 'supportsRotation' | 'syncTableIndexes' | 'tablesCreatedHere' | 'tablesFoundExisting' | 'tablesWithTimestamps' | 'tenantFieldByTable' | 'warnBuiltinColumnCollisions'>, objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>): Promise<void> {
     // The ADR-0104 media arm, resolved BEFORE registration because
     // `registerObjectMetadata` below freezes `isJsonField`'s answer into
     // `jsonFields` for every media column it sees. Memoized, and every failure

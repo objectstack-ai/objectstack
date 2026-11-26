@@ -43,12 +43,15 @@
  *    existing row takes the default and neither differ reports drift. ⛔ Never
  *    loosen the NOT NULL to make this pass: the local face keeps it.
  *
- *    A `NOW()` default there is NOT one answer yet, and the case records it:
- *    SQLite refuses a non-constant DEFAULT on `ADD COLUMN` to a table holding
- *    rows, the local face sends one and fails the sync, and this face withholds
- *    it, so it keeps the answer it always gave (nullable: added with no
- *    DEFAULT; `storage.notNull`: refused). The local defect and this face's
- *    `NOW()` half after it are #37413; when it lands, make this one outcome.
+ *    [#37413] A `NOW()` default there: SQLite refuses a non-constant DEFAULT
+ *    on `ADD COLUMN` to a table holding rows, so both faces add the column
+ *    nullable with no DEFAULT and fill the existing row in the same sync
+ *    (`datetime`, `date`, `time`; nullable and `storage.notNull`), and each
+ *    differ reports the owed `set_column_default` (plus `tighten_not_null`
+ *    under `storage.notNull`). The local ceremony rebuild applies them and
+ *    drift is empty. The remote half: both entries answer
+ *    `needs-table-rebuild` on this face, which runs no table rebuild —
+ *    carried by #37430.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -56,7 +59,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { createClient, type Client } from '@libsql/client';
-import { TursoDriver } from './turso-driver.js';
+import { REMOTE_DRIFT_OP_ANSWERS, TursoDriver } from './turso-driver.js';
 
 const scratch = mkdtempSync(join(tmpdir(), 'turso-remote-not-null-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -277,29 +280,50 @@ describe('ADD COLUMN on a populated table', () => {
     });
   });
 
-  describe('with a NOW() defaultValue: recorded, not one answer yet (#37413)', () => {
-    const NOW_ADDED = { type: 'datetime', defaultValue: 'NOW()' };
+  // [#37413] One answer on both faces: added nullable with no DEFAULT, the
+  // existing row filled in the same sync with the instant the DEFAULT would
+  // have given, and the owed DEFAULT (and NOT NULL) reported as drift. The
+  // local ceremony rebuild applies it; the remote face answers
+  // `needs-table-rebuild` for both entries — carried by #37430.
+  describe.each(['datetime', 'date', 'time'])('with a NOW() defaultValue on a %s field: one answer on both faces', (type) => {
+    const SHAPE: Record<string, RegExp> = {
+      datetime: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+      date: /^\d{4}-\d{2}-\d{2}$/,
+      time: /^\d{2}:\d{2}:\d{2}(\.\d{3})?$/,
+    };
+    const cases: Array<[string, object, string[]]> = [
+      ['nullable', { type, defaultValue: 'NOW()' }, ['set_column_default']],
+      ['storage.notNull', { type, defaultValue: 'NOW()', storage: { notNull: true } }, ['set_column_default', 'tighten_not_null']],
+    ];
 
-    it('the local face refuses the non-constant DEFAULT, nullable or storage.notNull', async () => {
-      for (const added of [NOW_ADDED, { ...NOW_ADDED, storage: { notNull: true } }]) {
-        const local = await populated('local');
-        await expect(local.driver.syncSchema('rows_t', WITH_ADDED(added))).rejects.toThrow(
-          /Cannot add a column with non-constant default/,
-        );
-      }
-    });
+    describe.each(cases)('%s', (_, added, owed) => {
+      const declared = WITH_ADDED(added);
 
-    it.each<Door>(['syncSchemasBatch', 'syncSchema'])('this face keeps its answer through %s: nullable accepted with no DEFAULT, storage.notNull refused', async (door) => {
-      const nullable = await populated('remote');
-      await SYNC[door](nullable.driver, [WITH_ADDED(NOW_ADDED)]);
-      expect(await notNullFlags(nullable.file, 'rows_t')).toMatchObject({ added: 0 });
-      expect((await columnDefaults(nullable.file, 'rows_t')).added).toBeNull();
+      it.each<Door | 'local'>(['local', 'syncSchemasBatch', 'syncSchema'])('through %s: accepted, the row filled, the owed entries reported', async (door) => {
+        const face = await populated(door === 'local' ? 'local' : 'remote');
+        if (door === 'local') await face.driver.syncSchema(declared.name, declared);
+        else await SYNC[door](face.driver, [declared]);
 
-      const notNull = await populated('remote');
-      await expect(SYNC[door](notNull.driver, [WITH_ADDED({ ...NOW_ADDED, storage: { notNull: true } })])).rejects.toThrow(
-        /Cannot add a NOT NULL column with default value NULL/,
-      );
-      expect(await notNullFlags(notNull.file, 'rows_t')).not.toHaveProperty('added');
+        expect(await notNullFlags(face.file, 'rows_t')).toMatchObject({ added: 0 });
+        expect((await columnDefaults(face.file, 'rows_t')).added).toBeNull();
+        expect(String((await face.driver.findOne('rows_t', { where: { id: 'r1' } }))?.added)).toMatch(SHAPE[type]!);
+        const drift = await face.driver.detectManagedDrift([declared as never]);
+        expect(drift.filter((e) => e.column === 'added').map((e) => e.op.type).sort()).toEqual(owed);
+
+        const { applied, skipped } = await face.driver.applyMigrationEntries(drift, { allowDestructive: true });
+        if (door === 'local') {
+          // The ceremony rebuild imposes the DEFAULT (and NOT NULL), and drift is empty.
+          expect(applied.filter((e) => e.column === 'added')).toHaveLength(owed.length);
+          expect((await columnDefaults(face.file, 'rows_t')).added).not.toBeNull();
+          expect(await notNullFlags(face.file, 'rows_t')).toMatchObject({ added: owed.length === 2 ? 1 : 0 });
+          expect(await face.driver.detectManagedDrift([declared as never])).toEqual([]);
+        } else {
+          // The remote half: both entries need the table rebuild this transport does not run (#37430).
+          for (const op of owed) expect(REMOTE_DRIFT_OP_ANSWERS[op as keyof typeof REMOTE_DRIFT_OP_ANSWERS]).toBe('needs-table-rebuild');
+          expect(applied).toEqual([]);
+          expect(skipped.filter((e) => e.column === 'added').map((e) => e.op.type).sort()).toEqual(owed);
+        }
+      });
     });
   });
 });
