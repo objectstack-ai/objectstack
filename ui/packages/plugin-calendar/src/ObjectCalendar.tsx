@@ -25,7 +25,8 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import type { ObjectCalendarSchema, DataSource, CalendarConfig } from '@object-ui/types';
 import { errorCodeIs } from '@object-ui/types';
-import { CalendarView, isTailwindColorToken, type CalendarViewEvent } from './CalendarView';
+import { CalendarView, type CalendarViewEvent } from './CalendarView';
+import { isTailwindColorToken } from './eventColorToken';
 import { getVisibleDateRange } from './visibleDays';
 import {
   anchorDateFromResult,

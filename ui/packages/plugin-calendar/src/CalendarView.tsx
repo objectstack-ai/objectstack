@@ -25,6 +25,7 @@ import {
 } from "@object-ui/components"
 import { createSafeTranslation, firstDayOfWeek, useDisplayLocale, type WeekdayIndex } from "@object-ui/i18n"
 import { getMonthDays, getWeekStart } from "./visibleDays"
+import { isTailwindColorToken } from "./eventColorToken"
 
 const DEFAULT_EVENT_COLOR = "bg-blue-100 text-blue-900 border border-blue-200"
 const STABLE_DEFAULT_DATE = new Date()
@@ -47,19 +48,6 @@ const FAMILY_EVENT_COLORS: Readonly<Record<string, string>> = {
 
 // Hex colors (#abc, #aabbcc) are treated as direct values via inline style.
 const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i
-// Recognize tokens that already look like Tailwind color utilities and pass
-// them through. Covers `bg-*-500`, `bg-blue-500`, `text-*`, etc.
-const TAILWIND_TOKEN_RE = /(^|\s)(bg|text|from|to|via)-/
-
-/**
- * Whether a raw value already is a Tailwind colour utility string (`bg-*`,
- * `text-*`, …), the one shape `ObjectCalendar` hands on raw when no option
- * colour answers: a utility string is itself a colour, while a palette family
- * name stored as a record value is data, not a declaration (objectstack#36882).
- */
-export function isTailwindColorToken(raw: unknown): raw is string {
-  return typeof raw === "string" && TAILWIND_TOKEN_RE.test(raw)
-}
 
 /**
  * Resolve a raw `event.color` value into a Tailwind class string.
@@ -78,7 +66,7 @@ export function isTailwindColorToken(raw: unknown): raw is string {
 function resolveEventColor(raw: string | undefined | null): { className: string; inlineColor?: string } {
   if (!raw) return { className: DEFAULT_EVENT_COLOR }
   if (HEX_COLOR_RE.test(raw)) return { className: "text-white", inlineColor: raw }
-  if (TAILWIND_TOKEN_RE.test(raw)) return { className: raw }
+  if (isTailwindColorToken(raw)) return { className: raw }
   const family = Object.prototype.hasOwnProperty.call(FAMILY_EVENT_COLORS, raw)
     ? FAMILY_EVENT_COLORS[raw]
     : undefined
