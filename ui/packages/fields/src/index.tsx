@@ -625,6 +625,16 @@ export { formatCurrency };
 export { formatNumberFieldValue };
 
 /**
+ * A quantity with its unit (ADR-0158): the face `NumberCellRenderer` and
+ * `NumberField`'s read-only branch share, the hook that resolves the unit, and
+ * the one formatter. Exported so a host face that draws a quantity outside a
+ * cell makes the same calls.
+ */
+export { QuantityText, UnitCodeText };
+export { formatQuantity, quantityDisplayPlaces, type QuantityDisplay } from './widgets/quantity-format.js';
+export { useQuantityUnit, useStandardUnitLabel, readUnitCatalog } from './widgets/useQuantityUnit.js';
+
+/**
  * Format currency value in compact form for mobile display.
  * E.g., $150,000 → $150K, $1,200,000 → $1.2M
  * When `currency` is undefined, returns a compact number without symbol.
