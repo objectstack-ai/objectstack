@@ -110,6 +110,9 @@ const UPSERT_ATTEMPTS = 3;
 /** How many times {@link PgvectorKnowledgeAdapter.search} runs again when the active generation was switched under it. */
 const SEARCH_ATTEMPTS = 3;
 
+/** The standard ADR-0112 code of a search whose source's index was switched under it on every attempt. */
+const CONCURRENT_MODIFICATION = 'CONCURRENT_MODIFICATION';
+
 /** A generation row: one complete index of one source under one fingerprint. */
 interface GenerationRow {
   generation: number;
@@ -258,6 +261,12 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
   private readonly tables = new Set<number>();
   /** The builder locks this adapter holds, by source id. */
   private readonly builders = new Map<string, BuilderLock>();
+  /**
+   * The builds this adapter began and has not ended, by source id: the
+   * generation each one builds into. A build's writes, removals and
+   * completion are refused once its lock is gone (the fence).
+   */
+  private readonly builds = new Map<string, number>();
 
   constructor(opts: PgvectorKnowledgeAdapterOptions) {
     this.id = opts.id ?? 'pgvector';
@@ -296,6 +305,8 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     this.requirePool();
     const readiness = await this.ready();
     const embedder = this.requireEmbedder();
+    // A build's page is embedded only while its builder lock holds.
+    await this.fenceBuild(ctx);
     this.touchBuilderLock(ctx);
     // An unchanged passage is rewritten in place, keeping its vector. When its
     // row is gone by the time the write runs (a concurrent rewrite of the same
@@ -438,6 +449,7 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     if (documentIds.length === 0) return;
     const pool = this.requirePool();
     await this.ready();
+    await this.fenceBuild(ctx);
     this.touchBuilderLock(ctx);
     // From every generation of the source: a removed document leaves them all.
     const widths = await pool.query<{ dim: number }>(
@@ -495,8 +507,11 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       const hits = await this.searchAttempt(query, opts);
       if (hits !== undefined) return hits;
       if (attempt >= SEARCH_ATTEMPTS) {
-        throw new Error(
-          `knowledge-pgvector: the active generation of source '${opts.source.id}' changed ${SEARCH_ATTEMPTS} times during one search; retry it.`,
+        throw Object.assign(
+          new Error(
+            `Knowledge source '${opts.source.id}' switched to a newly built index ${SEARCH_ATTEMPTS} times during one search; retry it.`,
+          ),
+          { code: CONCURRENT_MODIFICATION, status: 409 },
         );
       }
     }
@@ -647,8 +662,11 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
    * then rebuilds inside the active generation, takes up the generation under
    * construction for this fingerprint (resumed: what it holds is kept), or
    * opens one beside the active generation. A generation under construction
-   * for another fingerprint is abandoned: retired, and deleted in batches. So
-   * is any generation a switch left retired.
+   * for another fingerprint is abandoned: retired, and deleted in batches —
+   * also when the fingerprint went back to the active one's, so a reverted
+   * change leaves no generation behind. So is any generation a switch left
+   * retired. The generation taken is the one this build writes into and
+   * completes.
    */
   async beginBuild(ctx: AdapterContext): Promise<void> {
     const index = requireIndex(ctx, 'beginBuild');
@@ -672,7 +690,9 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       });
       await this.ensureVectorTable(target.dim, readiness);
       await this.sweepRetired(sourceId);
+      this.builds.set(sourceId, target.generation);
     } catch (err) {
+      this.builds.delete(sourceId);
       await this.releaseBuilderLock(sourceId);
       throw err;
     }
@@ -685,6 +705,12 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
    * retired in the same transaction, then its passages are deleted in batches
    * and its row last. Under the active fingerprint, the recipe hash is
    * recorded. The builder lock is let go either way.
+   *
+   * Only the build this adapter began completes, and only the generation it
+   * began: a build whose builder lock is gone (let go after its idle time, or
+   * its session ended), or whose generation is no longer the one under this
+   * fingerprint, is refused `LOCK_CONFLICT` (409) and switches, records and
+   * deletes nothing — another process may have taken the source up since.
    */
   async completeBuild(ctx: AdapterContext): Promise<void> {
     const index = requireIndex(ctx, 'completeBuild');
@@ -692,9 +718,16 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     await this.ready();
     const sourceId = ctx.source.id;
     try {
+      const mine = this.builds.get(sourceId);
+      if (mine === undefined || !(await this.holdsBuilderLock(sourceId))) throw builderLost(sourceId);
       await this.inTransaction(async (client) => {
         const { active, building } = await this.generations(sourceId, client, true);
         const t = qualified(this.schema, GENERATION_TABLE);
+        const target =
+          building !== undefined && building.fingerprint === index.fingerprint
+            ? building
+            : active !== undefined && active.fingerprint === index.fingerprint ? active : undefined;
+        if (target !== undefined && target.generation !== mine) throw generationReplaced(sourceId);
         if (building !== undefined && building.fingerprint === index.fingerprint) {
           // The switch: one statement retires the old generation, the next
           // makes the new one active (one active row per source at a time).
@@ -729,12 +762,14 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
         );
       }
     } finally {
+      this.builds.delete(sourceId);
       await this.releaseBuilderLock(sourceId);
     }
   }
 
   /** Let go of every builder lock this adapter holds; the plugin calls it before it closes its pool. */
   async close(): Promise<void> {
+    this.builds.clear();
     for (const sourceId of [...this.builders.keys()]) await this.releaseBuilderLock(sourceId);
   }
 
@@ -1011,14 +1046,20 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
 
   /**
    * Take the source's builder lock on a session of its own, or keep the one
-   * this adapter already holds (the knowledge service runs one walk of a
-   * source at a time, so that one is an earlier build's that ended without
-   * `completeBuild`). Refused `LOCK_CONFLICT` while another session holds it.
+   * this adapter already holds when its session still holds it (the
+   * knowledge service runs one walk of a source at a time, so that one is an
+   * earlier build's that ended without `completeBuild`). Refused
+   * `LOCK_CONFLICT` while another session holds it.
    */
   private async takeBuilderLock(sourceId: string): Promise<void> {
     if (this.builders.has(sourceId)) {
-      this.restartIdleTimer(sourceId);
-      return;
+      // Kept only while its session still holds it: a session that ended
+      // took the lock with it, and another process may hold it now.
+      if (await this.holdsBuilderLock(sourceId)) {
+        this.restartIdleTimer(sourceId);
+        return;
+      }
+      await this.releaseBuilderLock(sourceId);
     }
     const pool = this.requirePool();
     const client = pool.connectSession ? await pool.connectSession() : await pool.connect();
@@ -1037,6 +1078,48 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     }
     this.builders.set(sourceId, { client, key });
     this.restartIdleTimer(sourceId);
+  }
+
+  /**
+   * Whether the session this adapter holds the source's builder lock on
+   * still holds it, read from `pg_locks` on that session. A session that
+   * cannot answer holds nothing: PostgreSQL frees a lock with its session.
+   */
+  private async holdsBuilderLock(sourceId: string): Promise<boolean> {
+    const held = this.builders.get(sourceId);
+    if (!held) return false;
+    // An advisory lock on one bigint key shows in pg_locks as its high 32
+    // bits (classid) and low 32 bits (objid), objsubid 1.
+    const key = BigInt.asUintN(64, BigInt(held.key));
+    try {
+      const found = await held.client.query<{ held: boolean }>(
+        `SELECT EXISTS (SELECT 1 FROM pg_locks
+                         WHERE locktype = 'advisory' AND pid = pg_backend_pid() AND granted AND objsubid = 1
+                           AND classid = $1::bigint::oid AND objid = $2::bigint::oid) AS held`,
+        [(key >> 32n).toString(), (key & 0xffffffffn).toString()],
+      );
+      return found.rows[0]?.held === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The fence of a build this adapter began (ADR-0161 K7, rule 2): a call of
+   * the build (`ctx.reason === 'reindex'`) is refused `LOCK_CONFLICT` once the
+   * source's builder lock is gone — let go after its idle time, or its
+   * session ended — so a build that lost the lock embeds no further page and
+   * removes nothing. The build is ended here; its completion is refused too.
+   * A call outside a build this adapter began is not fenced.
+   */
+  private async fenceBuild(ctx: AdapterContext): Promise<void> {
+    if (ctx.reason !== 'reindex') return;
+    const sourceId = ctx.source.id;
+    if (!this.builds.has(sourceId)) return;
+    if (await this.holdsBuilderLock(sourceId)) return;
+    this.builds.delete(sourceId);
+    await this.releaseBuilderLock(sourceId);
+    throw builderLost(sourceId);
   }
 
   /**
@@ -1163,6 +1246,37 @@ function builderBusy(sourceId: string, idleMs: number): Error {
         'One process builds a source at a time. Start the reindex again once that build ends: a build whose process ' +
         `stopped lets go at once, and one that stopped part-way on a running process lets go after ${Math.round(idleMs / 60000)} ` +
         'minute(s) without progress.',
+    },
+  );
+}
+
+/** A build refused because it no longer holds the source's builder lock. */
+function builderLost(sourceId: string): Error {
+  return Object.assign(
+    new Error(
+      `This build of knowledge source '${sourceId}' no longer holds the source's builder lock; it writes and completes nothing more.`,
+    ),
+    {
+      code: LOCK_CONFLICT,
+      status: 409,
+      remedy:
+        'The lock was let go after the build made no progress for its idle time, or its database session ended, and ' +
+        'another process may be building the source. What this build wrote is kept and skipped by the next build; ' +
+        'start a reindex again if none is running.',
+    },
+  );
+}
+
+/** A completion refused because the generation the build began is no longer the one under its fingerprint. */
+function generationReplaced(sourceId: string): Error {
+  return Object.assign(
+    new Error(
+      `The index this build of knowledge source '${sourceId}' began was replaced by another build; this one completes nothing.`,
+    ),
+    {
+      code: LOCK_CONFLICT,
+      status: 409,
+      remedy: 'Another build took the source up after this one lost its builder lock. Start a reindex again if none is running.',
     },
   );
 }
