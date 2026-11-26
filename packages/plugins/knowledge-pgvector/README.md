@@ -62,7 +62,17 @@ pgvector's HNSW index takes at most 2,000 dimensions (`vector` type); a 3072-wid
 
 ## Rebuilds
 
-Every source's index is built under one index fingerprint (the embedding model and dimensions, the split, the content list — ADR-0161 K7). A write or a search under another fingerprint is refused `KNOWLEDGE_REBUILD_REQUIRED` (409) and never served from the stored vectors. This store does not yet build a second generation beside the first: when the fingerprint changes, a complete reindex is refused, and its result carries the exact statements that clear the source — one `DELETE` per passage table, then the generation row. Run them as printed, and reindex. A first generation never takes over passage rows left without a generation row: they are deleted when it opens, so deleting only the generation row cannot carry old vectors into the new index.
+Every source's index is built under one index fingerprint (the embedding model and dimensions, the split, the content list — ADR-0161 K7). A write or a search under another fingerprint is refused `KNOWLEDGE_REBUILD_REQUIRED` (409) and never served from the stored vectors.
+
+When the fingerprint changes, a complete reindex builds a **new generation** beside the active one; nothing has to be cleared by hand:
+
+- The reindex writes into the new generation, and so do the event-sync writes that arrive while it runs: they carry the new fingerprint. Nothing is written into the active generation under the new one.
+- A search of the source during the build is refused `KNOWLEDGE_REBUILD_REQUIRED`, saying the source is being rebuilt. It is never answered from the old generation.
+- When the walk and its purge are done, the new generation becomes the active one and the old one is retired, in one transaction. The old one's passages are then deleted in batches of 1,000 rows (`deleteBatchSize` on the adapter), and its generation row last. A deletion that stops part-way is finished by the source's next build; a retired generation is never searched.
+- One builder per source: a build holds a PostgreSQL advisory lock on the source, on a connection of its own, from its start to the switch. A second build from another process is refused `LOCK_CONFLICT` (409). The lock is freed when the build completes, when the process or its connection dies, or after 15 minutes without progress (`buildLockIdleMs`).
+- A build that stops is resumed: the next build under the same fingerprint takes up the generation under construction with what it holds, and skips every document it already holds unchanged. A build under yet another fingerprint abandons it and deletes it.
+
+A generation never takes over passage rows left without a generation row (a generation row deleted by hand, its passages not): they are deleted before any generation opens, so old vectors cannot be carried into a new index.
 
 A passage whose text is unchanged is not embedded again on a reindex.
 
