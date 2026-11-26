@@ -123,7 +123,6 @@
     "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@objectstack/formula": "workspace:*",
     "@objectstack/knowledge-pgvector": "workspace:*",
-    "@objectstack/knowledge-turso": "workspace:*",
     "@objectstack/lint": "workspace:*",
     "@objectstack/mcp": "workspace:*",
     "@objectstack/metadata": "workspace:*",
@@ -187,6 +186,7 @@
     }
   },
   "optionalDependencies": {
+    "@objectstack/knowledge-turso": "workspace:*",
     "better-sqlite3": "^13.0.3"
   },
   "devDependencies": {

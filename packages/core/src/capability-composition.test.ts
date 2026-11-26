@@ -246,11 +246,27 @@ describe('resolveKnowledgeStore — which store the knowledge token mounts', () 
       { driver: 'mysql', url: 'mysql://db/app' },
       { driver: 'mongodb', url: 'mongodb://db/app' },
     ]) {
-      expect(resolveKnowledgeStore({ stack: {}, packageRoot: root, database })).toEqual({
+      expect(resolveKnowledgeStore({ stack: {}, packageRoot: root, env: {}, database })).toEqual({
         store: KNOWLEDGE_STORE_PROVIDERS.turso,
         argument: { projectRoot: root, urlFromSettings: true },
       });
     }
+  });
+
+  it('OS_HOME moves the store with the platform database: the store is handed the state directory', () => {
+    // `os start --home` sets OS_HOME; the default database is `<OS_HOME>/data/objectstack.db`.
+    const database = { driver: 'sqlite', url: 'file:/var/lib/os/data/objectstack.db' };
+    expect(resolveKnowledgeStore({ stack: {}, packageRoot: root, env: { OS_HOME: ' /var/lib/os ' }, database })).toEqual({
+      store: KNOWLEDGE_STORE_PROVIDERS.turso,
+      argument: { projectRoot: root, stateDir: '/var/lib/os', urlFromSettings: true },
+    });
+    // Unset or empty: the app's own `.objectstack/`, as before.
+    expect(resolveKnowledgeStore({ stack: {}, packageRoot: root, env: { OS_HOME: '  ' }, database }).argument).toEqual({
+      projectRoot: root,
+      urlFromSettings: true,
+    });
+    // The other two arms take no directory.
+    expect(resolveKnowledgeStore({ stack: {}, packageRoot: root, env: { OS_HOME: '/h' }, database: { url: ':memory:' } }).argument).toEqual({ url: ':memory:' });
   });
 
   it('an in-memory platform database: an in-memory store', () => {

@@ -29,7 +29,6 @@
   "dependencies": {
     "@objectstack/core": "workspace:*",
     "@objectstack/knowledge-pgvector": "workspace:*",
-    "@objectstack/knowledge-turso": "workspace:*",
     "@objectstack/mcp": "workspace:*",
     "@objectstack/metadata": "workspace:*",
     "@objectstack/objectql": "workspace:*",
@@ -66,6 +65,9 @@
     "@objectstack/trigger-record-change": "workspace:*",
     "@objectstack/trigger-schedule": "workspace:*",
     "@objectstack/types": "workspace:*"
+  },
+  "optionalDependencies": {
+    "@objectstack/knowledge-turso": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

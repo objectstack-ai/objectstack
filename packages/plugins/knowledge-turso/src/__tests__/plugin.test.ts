@@ -8,7 +8,7 @@
  */
 
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PluginContext } from '@objectstack/core';
@@ -77,6 +77,25 @@ describe('resolveStoreUrl', () => {
       from: 'the default location',
     });
     expect(defaultStoreUrl('/srv/app')).toBe('file:/srv/app/.objectstack/data/knowledge.db');
+  });
+
+  it('a state directory (OS_HOME, os start --home) moves the data directory with the platform database', () => {
+    expect(dataDirectoryOf('/srv/app', '/var/lib/os')).toBe('/var/lib/os/data');
+    expect(dataDirectoryOf('/srv/app', '~/os-home')).toBe(join(homedir(), 'os-home', 'data'));
+    expect(dataDirectoryOf('/srv/app', '  ')).toBe('/srv/app/.objectstack/data');
+    expect(resolveStoreUrl({ projectRoot: '/srv/app', stateDir: '/var/lib/os', env: {} })).toEqual({
+      url: 'file:/var/lib/os/data/knowledge.db',
+      from: 'the default location',
+    });
+    // A settings URL is held to that directory, and the app's own is outside it.
+    const home = tempDir();
+    const app = tempDir();
+    expect(resolveSettingsStoreUrl(`file:${join(home, 'data', 'saved.db')}`, { projectRoot: app, stateDir: home, env: {} })).toMatchObject({
+      url: `file:${join(home, 'data', 'saved.db')}`,
+    });
+    expect(
+      resolveSettingsStoreUrl(`file:${join(dataDirectoryOf(app), 'saved.db')}`, { projectRoot: app, stateDir: home, env: {} }),
+    ).toMatchObject({ reason: expect.stringContaining('outside the data directory') });
   });
 
   it("refuses the platform's own database file, by name and by the platform's URL", () => {
@@ -207,6 +226,29 @@ describe('resolveSettingsStoreUrl', () => {
         reason: expect.stringContaining('NUL byte'),
       });
       expect(resolveStoreUrl({ url, projectRoot: root, env: {} })).toMatchObject({ reason: expect.stringContaining('NUL byte') });
+    }
+  });
+
+  it('refuses a percent-encoded control character too: libSQL decodes the path it opens', () => {
+    const root = tempDir();
+    const data = dataDirectoryOf(root);
+    for (const url of [
+      `file:${data}/k%00.db`,
+      `file:${data}/k%0a.db`,
+      `file:${data}/k%0A.db`,
+      `file:${data}/k.db%7f`,
+      `file://${data}/k%00.db`,
+      'libsql://db.turso.io/%00',
+    ]) {
+      expect(resolveSettingsStoreUrl(url, { projectRoot: root, env: {} })).toMatchObject({
+        reason: expect.stringContaining('percent-encoded'),
+      });
+      expect(resolveStoreUrl({ url, projectRoot: root, env: {} })).toMatchObject({ reason: expect.stringContaining('percent-encoded') });
+    }
+    // The control: an escape that decodes to an ordinary character names a file, and one
+    // encoded twice is the text `%00`, which libSQL decodes once and opens as a name.
+    for (const name of ['k%20v.db', 'k%2500.db']) {
+      expect(resolveSettingsStoreUrl(`file:${data}/${name}`, { projectRoot: root, env: {} })).toMatchObject({ url: `file:${data}/${name}` });
     }
   });
 
@@ -350,6 +392,8 @@ describe('KnowledgeTursoPlugin — the store URL from settings (urlFromSettings)
     const root = tempDir();
     for (const [url, reason] of [
       [`file:${join(dataDirectoryOf(root), 'k.db')}${String.fromCharCode(0)}x`, 'NUL byte'],
+      [`file:${join(dataDirectoryOf(root), 'k%00.db')}`, 'percent-encoded'],
+      [`file:${join(dataDirectoryOf(root), 'k%0a.db')}`, 'percent-encoded'],
       [`file:${join(tempDir(), 'k.db')}`, 'outside the data directory'],
     ] as const) {
       const settings = settingsOf({ turso_url: url });

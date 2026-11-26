@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 22 — spawns the real producer once per single-cause fixture: eleven in-process bootStack boots, no two the same configuration (a top-level requires, a package body's, the top level over the bodies, the control, an explicit instance, triggers with its hard dependencies, record-context with mcp, its no-token control, a host-mounted record-context, knowledge with realtime, its no-token control), each its case's subject; 5.9 s in a local run for the first six, 10.0 s with the three record-context boots, 14.8 s with the two knowledge boots (local, verbose reporter); slowest CI reading 11.4 s (scheduled full-battery run 41199450735, Test Core shard log) read before the record-context boots, scaled by the local ratio to 16.9 s, x 1.25, rounded up — the first CI reading after the knowledge boots re-measures it
+// test-budget: 28 — spawns the real producer once per single-cause fixture: twelve in-process bootStack boots, no two the same configuration (a top-level requires, a package body's, the top level over the bodies, the control, an explicit instance, triggers with its hard dependencies, record-context with mcp, its no-token control, a host-mounted record-context, knowledge with realtime, its no-token control, knowledge on a file database under OS_HOME), each its case's subject; 5.9 s in a local run for the first six, 10.0 s with the three record-context boots, 14.8 s with the two knowledge boots, 19.0 s with the file-database knowledge boot (local, verbose reporter); slowest CI reading 11.4 s (scheduled full-battery run 41199450735, Test Core shard log) read before the record-context boots, scaled by the local ratio to 21.7 s, x 1.25, rounded up — the first CI reading after the knowledge boots re-measures it
 
 /**
  * #22301 item 1 — `bootStack` mounts the providers an app's `requires` names,
@@ -25,8 +25,10 @@
  * of the slate.
  */
 
-import { readFileSync } from 'node:fs';
-import { afterEach, describe, expect, it } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CAPABILITY_PROVIDERS, KNOWLEDGE_STORE_PROVIDERS } from '@objectstack/core';
 import { composeStacks, defineStack } from '@objectstack/spec';
 import { bootStack, type VerifyStack } from './harness.js';
@@ -145,14 +147,21 @@ describe('every provider the table names is a dependency of this package', () =>
   it('so a declared token never fails to import from @objectstack/verify', () => {
     const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
       dependencies: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
     };
+    const stores = Object.values(KNOWLEDGE_STORE_PROVIDERS);
     const packages = [
       ...Object.values(CAPABILITY_PROVIDERS).flatMap((spec) => [spec.pkg, ...(spec.extras ?? []).map((extra) => extra.pkg)]),
-      // The stores the `knowledge` token chooses between (`resolveCapabilityExtras`).
-      ...Object.values(KNOWLEDGE_STORE_PROVIDERS).map((store) => store.pkg),
+      // The stores the `knowledge` token chooses between (`resolveCapabilityExtras`), bar the optional one.
+      ...stores.filter((store) => !store.optional).map((store) => store.pkg),
     ];
     expect(packages.length).toBeGreaterThan(0);
     expect(packages.filter((pkg) => !(pkg in manifest.dependencies))).toEqual([]);
+    // A store the table marks optional is an OPTIONAL dependency, and only that: as a hard one its
+    // native client would refuse this package's install on a platform outside its os / cpu list.
+    const optional = stores.filter((store) => store.optional).map((store) => store.pkg);
+    expect(optional).toEqual(['@objectstack/knowledge-turso']);
+    expect(optional.filter((pkg) => !(pkg in (manifest.optionalDependencies ?? {})) || pkg in manifest.dependencies)).toEqual([]);
   });
 });
 
@@ -359,5 +368,100 @@ describe("requires: ['knowledge'] — the knowledge service and one store", () =
     ).map((p) => (p as { name?: string }).name);
     expect(served).toEqual(expect.arrayContaining([KNOWLEDGE, TURSO]));
     expect(served).not.toContain(PGVECTOR);
+  });
+
+  // The arm `os dev` and `os serve` mount on SQLite: a FILE database, so the
+  // store is a libSQL file whose URL the operator may save in Settings. On a
+  // real kernel, because what is under test is the kernel's own order: the
+  // settings service binds in `kernel:ready`, the saved value is written
+  // after that, and the store opens at `kernel:bootstrapped`.
+  it('a file database: the store opens the file the operator saved, in the directory OS_HOME names, and indexes into it', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'rqp-knowledge-'));
+    const home = join(root, 'home');
+    const saved = join(home, 'data', 'saved.db');
+    const previousHome = process.env.OS_HOME;
+    process.env.OS_HOME = home;
+    try {
+      const served = await constructServedProviders({
+        config: app({ requires: ['knowledge'] }),
+        held: [],
+        packageRoot: join(root, 'app'),
+        database: { driver: 'sqlite', url: `file:${join(home, 'data', 'objectstack.db')}` },
+      });
+      const mounted = served.filter((p) => [KNOWLEDGE, TURSO, PGVECTOR].includes((p as { name: string }).name));
+      expect(mounted.map((p) => (p as { name: string }).name)).toEqual([KNOWLEDGE, TURSO]);
+
+      /** The operator's save: after the settings service has bound, before the boot completes. */
+      class SavesStoreUrl {
+        readonly name = 'com.example.rqp.saves-store-url';
+        readonly version = '0.0.0';
+        readonly type = 'standard';
+        readonly optionalDependencies = ['com.objectstack.service.settings'];
+        outcome: unknown;
+        async init(): Promise<void> {}
+        async start(ctx: { getService<T>(name: string): T; hook(name: string, handler: () => Promise<void>): void }): Promise<void> {
+          const settings = ctx.getService<{ set(ns: string, key: string, value: unknown, ec: unknown): Promise<unknown> }>('settings');
+          ctx.hook('kernel:ready', async () => {
+            this.outcome = await settings.set('knowledge', 'turso_url', `file:${saved}`, { isSystem: true }).then(
+              () => 'saved',
+              (e: unknown) => e,
+            );
+          });
+        }
+      }
+      const saver = new SavesStoreUrl();
+      // The two providers the file arm constructed are this boot's own: held, so the boot adds no second pair.
+      stack = await bootStack(app({ requires: ['realtime', 'knowledge'] }), {
+        extraPlugins: [...mounted, new AppKnowledge(), saver],
+      } as never);
+      expect(saver.outcome).toBe('saved');
+
+      const knowledge = await stack.kernel.getServiceAsync<any>('knowledge');
+      expect(await knowledge.getAdapter('turso').healthCheck()).toMatchObject({ ok: true });
+      expect(existsSync(saved)).toBe(true);
+      // Neither default was made: not the one under OS_HOME, and nothing under the app's own directory.
+      expect(existsSync(join(home, 'data', 'knowledge.db'))).toBe(false);
+      expect(existsSync(join(root, 'app', '.objectstack'))).toBe(false);
+
+      const ql = await stack.kernel.getServiceAsync<any>('objectql');
+      await ql.insert('rqp_article', { title: 'Slate quarry RQP', body: 'slate and shale tiles' }, { context: { isSystem: true } });
+      const ec = { isSystem: true, userId: 'system', roles: [], permissions: [] };
+      let hits: Array<{ sourceId: string }> = [];
+      for (let i = 0; i < 50 && hits.length === 0; i++) {
+        hits = (await knowledge.searchWithRefusals('slate quarry', { executionContext: ec, sourceIds: ['rqp_articles'] })).hits;
+        if (hits.length === 0) await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(hits.map((h) => h.sourceId)).toEqual(['rqp_articles']);
+    } finally {
+      await stack?.stop();
+      stack = undefined;
+      if (previousHome === undefined) delete process.env.OS_HOME;
+      else process.env.OS_HOME = previousHome;
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  // LAST in the file: it clears the module cache to make the store's package unimportable.
+  it('an install without the optional libSQL store: the service is constructed, the store is not, and the boot says so once', async () => {
+    vi.resetModules();
+    vi.doMock('@objectstack/knowledge-turso', () => {
+      throw new Error("Cannot find module '@objectstack/knowledge-turso'");
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const served = (
+        await constructServedProviders({ config: app({ requires: ['knowledge'] }), held: [], packageRoot: process.cwd() })
+      ).map((p) => (p as { name?: string }).name);
+      expect(served).toContain(KNOWLEDGE);
+      expect(served).not.toContain(TURSO);
+      const said = warn.mock.calls.map(([m]) => String(m)).filter((m) => m.includes('@objectstack/knowledge-turso'));
+      expect(said).toHaveLength(1);
+      expect(said[0]).toContain("requires: ['knowledge'] mounts KnowledgeTursoPlugin");
+      expect(said[0]).toContain('an optional dependency this install does not have');
+    } finally {
+      warn.mockRestore();
+      vi.doUnmock('@objectstack/knowledge-turso');
+      vi.resetModules();
+    }
   });
 });

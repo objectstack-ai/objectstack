@@ -265,6 +265,13 @@ export type KnowledgeStoreSpec = {
   identities: CapabilityIdentities;
   /** The adapter id the store registers: the value a `KnowledgeSource.adapter` names. */
   adapterId: string;
+  /**
+   * The package is an optional dependency of the CLI and of the verification
+   * handle, so an install may not have it: a boot that cannot import it says
+   * so once and goes on with the service alone, and a source naming the store
+   * answers `SERVICE_UNAVAILABLE`.
+   */
+  optional?: boolean;
 };
 
 /**
@@ -293,6 +300,10 @@ export const KNOWLEDGE_STORE_PROVIDERS: Readonly<Record<'pgvector' | 'turso', Kn
     export: 'KnowledgeTursoPlugin',
     identities: ['com.objectstack.plugin.knowledge-turso', 'KnowledgeTursoPlugin'],
     adapterId: 'turso',
+    // Its libSQL client is a native module with an `os` / `cpu` list: as a hard
+    // dependency it would refuse the whole CLI install on a platform outside
+    // that list, whether or not the app asks for `knowledge`.
+    optional: true,
   },
 };
 

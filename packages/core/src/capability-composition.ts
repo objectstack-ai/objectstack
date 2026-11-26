@@ -265,6 +265,12 @@ export interface CapabilityExtra {
   readonly identities: CapabilityIdentities;
   /** Construct the provider with this, or with no argument when `undefined`. */
   readonly argument?: unknown;
+  /**
+   * The package is an optional dependency of the boots that mount it: one
+   * that cannot import it warns and goes on without it, on `os serve` and on
+   * the verification handle alike.
+   */
+  readonly optional?: boolean;
 }
 
 /**
@@ -282,7 +288,9 @@ export interface CapabilityExtra {
 export function resolveCapabilityExtras(token: string, input: CapabilityArgumentInput): CapabilityExtra[] {
   if (token === 'knowledge') {
     const { store, argument } = resolveKnowledgeStore(input);
-    return [{ pkg: store.pkg, export: store.export, identities: store.identities, argument }];
+    return [
+      { pkg: store.pkg, export: store.export, identities: store.identities, argument, ...(store.optional ? { optional: true } : {}) },
+    ];
   }
   return (CAPABILITY_PROVIDERS[token]?.extras ?? []).map((extra) => ({ ...extra }));
 }
@@ -301,12 +309,15 @@ const POSTGRES_URL = /^postgres(ql)?:\/\//i;
  *    (`@objectstack/knowledge-pgvector`), handed that URL, so the store's
  *    tables live in the platform's own database, in a schema of their own;
  *  - any other database ⇒ `turso` (`@objectstack/knowledge-turso`), a libSQL
- *    file of its own: `knowledge.db` under the app's `.objectstack/data/`,
- *    beside the dev database and never its file. The operator can name
- *    another store in the `knowledge.turso_url` setting, which the store holds
- *    to that data directory and refuses when it carries a NUL byte, before it
- *    reaches the libSQL client. An in-memory platform database (`:memory:`,
- *    or the `memory` driver) gets an in-memory store (`:memory:`).
+ *    file of its own: `knowledge.db` in the directory the boot keeps the
+ *    default platform database in, and never that database's file —
+ *    `<OS_HOME>/data/` when `OS_HOME` is set (`os start --home` sets it),
+ *    else the app's `.objectstack/data/`. A database named by URL does not
+ *    move it. The operator can name another store in the `knowledge.turso_url`
+ *    setting, which the store holds to that data directory and refuses when
+ *    it carries a NUL byte, written out or percent-encoded, before it reaches
+ *    the libSQL client. An in-memory platform database (`:memory:`, or the
+ *    `memory` driver) gets an in-memory store (`:memory:`).
  *
  * The database is the one the boot resolved ({@link CapabilityArgumentInput.database});
  * a boot that resolved none (a host whose own plugin provides the driver)
@@ -334,9 +345,10 @@ export function resolveKnowledgeStore(input: CapabilityArgumentInput): {
   if (url === ':memory:' || input.database?.driver === 'memory') {
     return { store: KNOWLEDGE_STORE_PROVIDERS.turso, argument: { url: ':memory:' } };
   }
+  const home = env.OS_HOME?.trim();
   return {
     store: KNOWLEDGE_STORE_PROVIDERS.turso,
-    argument: { projectRoot: input.packageRoot, urlFromSettings: true },
+    argument: { projectRoot: input.packageRoot, ...(home ? { stateDir: home } : {}), urlFromSettings: true },
   };
 }
 

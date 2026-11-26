@@ -28,12 +28,15 @@ Which store is mounted depends on the platform database:
 | Platform database | Store | Adapter id | Where the vectors live |
 |:--|:--|:--|:--|
 | PostgreSQL | `@objectstack/knowledge-pgvector` | `pgvector` | the platform database, schema `os_knowledge` ([below](#self-hosted-vector-store-postgresql--pgvector)) |
-| anything else (SQLite under `os dev`, libSQL, MySQL, MongoDB) | `@objectstack/knowledge-turso` | `turso` | `.objectstack/data/knowledge.db`, beside the dev database and never its file ([below](#local-vector-store-a-libsql-file)) |
+| anything else (SQLite under `os dev`, libSQL, MySQL, MongoDB) | `@objectstack/knowledge-turso` | `turso` | `knowledge.db` in the directory of the default database and never its file: `.objectstack/data/`, or `<OS_HOME>/data/` when `OS_HOME` is set ([below](#local-vector-store-a-libsql-file)) |
 
 - **Sources are still written in code**: register them on the `knowledge` service from your own plugin, and name the adapter of the store your database gets (`adapter: 'turso'` or `adapter: 'pgvector'`).
 - **A source naming a store that is not mounted** does not stop the boot: the server logs one error naming the source and the stores that are mounted, and indexing or searching that source answers `SERVICE_UNAVAILABLE` (503) with the same choices; `search_knowledge` lists it in `refused`.
 - **The embedder** comes from Settings → AI & Embedder ([below](#configuring-the-embedder-from-settings)).
-- **Another libSQL store** for the `turso` case: save its URL as `turso_url` (and `turso_auth_token` for a managed `libsql://` database) in Settings → Knowledge, then restart. A `file:` URL saved there must name a file inside the project's `.objectstack/data/` directory, and a URL carrying a NUL byte is refused; either way the store answers `SERVICE_UNAVAILABLE` saying why, and the boot goes on.
+- **Another libSQL store** for the `turso` case: save its URL as `turso_url` (and `turso_auth_token` for a managed `libsql://` database) in Settings → Knowledge, then restart. A `file:` URL saved there must name a file inside that same data directory, and a URL carrying a NUL byte or another control character, written out or percent-encoded (`%00`), is refused; either way the store answers `SERVICE_UNAVAILABLE` saying why, and the boot goes on.
+- **Where the file is**: `os start --home` and `OS_HOME` move it with the default database, so on a container put `OS_HOME` on a volume and the index survives a redeploy. A database named by URL (`OS_DATABASE_URL`) does not move it.
+- **More than one replica** on MySQL, MongoDB or a remote libSQL database: each replica keeps its own local `knowledge.db` and indexes only the record writes that replica itself handles, so replicas answer from indexes that differ. Give them one store: save a shared `libsql://` URL in `turso_url`, or run on PostgreSQL, where the vectors live in the one database.
+- **An install without the libSQL client**: `@objectstack/knowledge-turso` is an optional dependency of the CLI, because its client is a native module. Where it could not be installed the server warns at boot that the store was not mounted, and sources naming `turso` answer `SERVICE_UNAVAILABLE`.
 - **Without the token** nothing is mounted: no knowledge service, no store and no Knowledge settings page. `knowledge-memory` is never mounted for you.
 - **Mounting it yourself** still works: an app whose `plugins` already hold `KnowledgeServicePlugin` keeps its own, and the runtime adds neither a second service nor a store.
 

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { mkdirSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, relative as relativePath, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Client } from '@libsql/client';
@@ -66,18 +67,35 @@ export interface KnowledgeTursoPluginOptions {
   urlFromSettings?: boolean;
   /** The project directory the default file and the data directory are under. @default process.cwd() */
   projectRoot?: string;
+  /**
+   * The platform's state directory (`OS_HOME`, `os start --home`), where the
+   * boot keeps the platform database: the data directory is then
+   * `<stateDir>/data`, so the store's file moves with the database's. A leading
+   * `~` is the user's home. The runtime's `knowledge` capability mount passes
+   * `OS_HOME`. @default `<projectRoot>/.objectstack`
+   */
+  stateDir?: string;
   /** The environment the platform's database URL is read from. @default process.env */
   env?: Record<string, string | undefined>;
 }
 
-/** The store's default URL: `file:` + `<projectRoot>/.objectstack/data/knowledge.db`. */
-export function defaultStoreUrl(projectRoot: string = process.cwd()): string {
-  return `file:${resolvePath(projectRoot, '.objectstack', 'data', DEFAULT_KNOWLEDGE_FILE)}`;
+/** The store's default URL: `file:` + `knowledge.db` in the data directory ({@link dataDirectoryOf}). */
+export function defaultStoreUrl(projectRoot: string = process.cwd(), stateDir?: string): string {
+  return `file:${resolvePath(dataDirectoryOf(projectRoot, stateDir), DEFAULT_KNOWLEDGE_FILE)}`;
 }
 
-/** The project's data directory: `<projectRoot>/.objectstack/data`, where the default file is. */
-export function dataDirectoryOf(projectRoot: string = process.cwd()): string {
-  return resolvePath(projectRoot, '.objectstack', 'data');
+/**
+ * The data directory, where the default file is and where a settings URL must
+ * stay: `<stateDir>/data` when a state directory is given (the order the boot
+ * resolves the platform database's own directory in: `--home`, `OS_HOME`, then
+ * the project), else `<projectRoot>/.objectstack/data`.
+ */
+export function dataDirectoryOf(projectRoot: string = process.cwd(), stateDir?: string): string {
+  const state = stateDir?.trim();
+  if (state === undefined || state === '') return resolvePath(projectRoot, '.objectstack', 'data');
+  return state.startsWith('~')
+    ? resolvePath(homedir(), state.slice(1).replace(/^[/\\]/, ''), 'data')
+    : resolvePath(state, 'data');
 }
 
 /**
@@ -87,6 +105,21 @@ export function dataDirectoryOf(projectRoot: string = process.cwd()): string {
  * control character in it names a store, so none reaches the client.
  */
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
+
+/** One percent escape (`%00`, `%0a`), read byte by byte: a malformed one is left as written. */
+const PERCENT_ESCAPE = /%([0-9a-f]{2})/gi;
+
+/**
+ * Whether `url` carries a control character, as written or behind a percent
+ * escape. libSQL percent-decodes the path it opens, so `k%00.db` reaches its
+ * native library as the NUL byte itself, and ends the process the same way.
+ */
+function carriesControlCharacter(url: string): boolean {
+  return (
+    CONTROL_CHARACTER.test(url) ||
+    CONTROL_CHARACTER.test(url.replace(PERCENT_ESCAPE, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16))))
+  );
+}
 
 /** The bound on one request to a remote database (`requestTimeoutMs`). */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
@@ -149,13 +182,17 @@ function platformFileOf(url: string): string | undefined {
 
 /** The libSQL URL the store opens, and where it was read from — or why there is none. */
 export function resolveStoreUrl(
-  opts: Pick<KnowledgeTursoPluginOptions, 'url' | 'projectRoot' | 'env'>,
+  opts: Pick<KnowledgeTursoPluginOptions, 'url' | 'projectRoot' | 'stateDir' | 'env'>,
 ): { url: string; from: string } | { url?: undefined; reason: string } {
   const given = opts.url?.trim();
-  const url = given === undefined || given === '' ? defaultStoreUrl(opts.projectRoot) : given;
+  const url = given === undefined || given === '' ? defaultStoreUrl(opts.projectRoot, opts.stateDir) : given;
   const from = given === undefined || given === '' ? 'the default location' : 'the plugin option `url`';
-  if (CONTROL_CHARACTER.test(url)) {
-    return { reason: 'its `url` option carries a NUL byte or another control character, which names no file or database.' };
+  if (carriesControlCharacter(url)) {
+    return {
+      reason:
+        'its `url` option carries a NUL byte or another control character, written out or percent-encoded, ' +
+        'which names no file or database.',
+    };
   }
   if (!/^(file:|libsql:\/\/|https?:\/\/|wss?:\/\/)/i.test(url) && url !== ':memory:') {
     return { reason: 'its `url` option is not a file:, :memory: or libsql:// URL.' };
@@ -213,10 +250,12 @@ function realPathAllowingMissing(path: string): string {
  * operator who never touches the server's disk, so what it may name is held
  * tighter than a URL written in code:
  *
- * - a control character (a NUL byte above all) is refused before anything
- *   else, so it never reaches the native client;
- * - a `file:` URL must name a file inside the project's data directory
- *   (`.objectstack/data/`, {@link dataDirectoryOf}), compared as the file it
+ * - a control character (a NUL byte above all), written out or
+ *   percent-encoded, is refused before anything else, so it never reaches the
+ *   native client;
+ * - a `file:` URL must name a file inside the data directory
+ *   (`.objectstack/data/` of the project, or `data/` of the state directory:
+ *   {@link dataDirectoryOf}), compared as the file it
  *   resolves to, so neither `..` nor a link leads out of it. A relative path is
  *   read from the process's working directory, as libSQL opens it;
  * - `:memory:` and a remote `libsql://`, `https://` or `wss://` URL open no
@@ -227,14 +266,14 @@ function realPathAllowingMissing(path: string): string {
  */
 export function resolveSettingsStoreUrl(
   url: string,
-  opts: Pick<KnowledgeTursoPluginOptions, 'projectRoot' | 'env'> = {},
+  opts: Pick<KnowledgeTursoPluginOptions, 'projectRoot' | 'stateDir' | 'env'> = {},
 ): { url: string; from: string } | { url?: undefined; reason: string } {
   const from = 'the knowledge setting `turso_url`';
-  if (CONTROL_CHARACTER.test(url)) {
+  if (carriesControlCharacter(url)) {
     return {
       reason:
-        `${from} carries a NUL byte or another control character, which names no file or database. ` +
-        'Save the URL again without it.',
+        `${from} carries a NUL byte or another control character, written out or percent-encoded, which names ` +
+        'no file or database. Save the URL again without it.',
     };
   }
   const trimmed = url.trim();
@@ -243,7 +282,7 @@ export function resolveSettingsStoreUrl(
     if (file === undefined) {
       return { reason: `${from} is not a valid file: URL.` };
     }
-    const dataDir = realPathAllowingMissing(dataDirectoryOf(opts.projectRoot));
+    const dataDir = realPathAllowingMissing(dataDirectoryOf(opts.projectRoot, opts.stateDir));
     const inside = relativePath(dataDir, realPathAllowingMissing(file));
     if (inside === '' || inside.startsWith('..') || isAbsolute(inside)) {
       return {
@@ -254,7 +293,7 @@ export function resolveSettingsStoreUrl(
       };
     }
   }
-  const target = resolveStoreUrl({ url: trimmed, projectRoot: opts.projectRoot, env: opts.env });
+  const target = resolveStoreUrl({ url: trimmed, projectRoot: opts.projectRoot, stateDir: opts.stateDir, env: opts.env });
   return target.url === undefined ? { reason: target.reason.replace('its `url` option', from) } : { url: target.url, from };
 }
 
