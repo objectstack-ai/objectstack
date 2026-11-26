@@ -20,6 +20,7 @@
  * cannot drift from the code.
  */
 
+import { RECORD_DETAIL_TAB_PARAM } from '../../urlParams.js';
 import { DESIGNER_SURFACE_PARAM } from '../metadata-admin/nav-selection.js';
 import { CATALOG_SCOPE_PARAM, ENVIRONMENT_SCOPE } from '../metadata-admin/catalog-scope.js';
 import {
@@ -35,6 +36,7 @@ import {
   STUDIO_HOME_PILLAR,
   STUDIO_ITEM_REVIEW_PARAM,
   STUDIO_ITEM_REVIEW_VALUE,
+  STUDIO_OVERVIEW_SECTION,
   STUDIO_OWD_OBJECT_PARAM,
   STUDIO_OWD_SECTION,
   type StudioPillarKey,
@@ -93,6 +95,13 @@ export const STUDIO_ADDRESS_FAMILIES: readonly StudioAddressFamily[] = Object.fr
     today: `/studio/<package>/${STUDIO_OWD_SECTION}[?${STUDIO_OWD_OBJECT_PARAM}=<object>]`,
     builder: 'studioOwdOverviewPath',
     meaning: "A package's organization-wide default sharing overview (objectstack#36905), optionally on one object. Not a metadata item and not a pillar.",
+  },
+  {
+    id: 'overview',
+    today: `/studio/<package>/${STUDIO_OVERVIEW_SECTION}[?${RECORD_DETAIL_TAB_PARAM}=pending]`,
+    builder: 'studioPackageOverviewPath',
+    meaning:
+      "A package's own page, 概览 Overview (objectstack#37454, ADR-0084 as amended 2026-11-26): the menu's first entry, on its Info tab or its Pending tab. Not a metadata item: there is no package type. Its builder is in `studioOverviewAddress.ts`, beside this module's others in all but file: it reads the console's `tab` key from `urlParams.ts`, which `studioAddress.ts` cannot import.",
   },
   {
     id: 'org-scope',
@@ -284,6 +293,14 @@ export const STUDIO_QUERY_PARAMS: readonly StudioQueryParamRow[] = Object.freeze
     key: CATALOG_SCOPE_PARAM,
     values: ENVIRONMENT_SCOPE,
     meaning: "The area's environment scope: the cross-package leg; the area does not send it to a pillar.",
+    onMetadataAddress: 'verbatim',
+    keptOnRetiredInterfaces: false,
+  },
+  {
+    key: RECORD_DETAIL_TAB_PARAM,
+    values: "an item page's tab (ITEM_TOOL_TABS); on the overview, pending",
+    meaning:
+      "The console's reserved open-tab key (`urlParams.ts`), not a Studio constant. Studio's item pages read it through ITEM_TOOL_TAB_PARAM, which aliases it; the overview (objectstack#37454) reads it too: `pending` opens 待发布 Pending, where the menu's badge leads, and anything else or absent opens 信息 Info.",
     onMetadataAddress: 'verbatim',
     keptOnRetiredInterfaces: false,
   },

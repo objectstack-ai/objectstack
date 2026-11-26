@@ -163,13 +163,16 @@ describe('ISharingService write-gate bypass documentation parity', () => {
       // added to this interface without deciding whether it documents the
       // bypass — the loop below is what that decision is written into.
       'checkDelete',
+      // [#35934] The optional set forms of the two tri-state primaries.
+      'checkDeleteMany',
       'checkEdit',
+      'checkEditMany',
       'grant',
       'listShares',
       'revoke',
     ]);
 
-    for (const gate of ['canEdit', 'canDelete', 'canManageShares', 'checkEdit', 'checkDelete'] as const) {
+    for (const gate of ['canEdit', 'canDelete', 'canManageShares', 'checkEdit', 'checkDelete', 'checkEditMany', 'checkDeleteMany'] as const) {
       expect(docOf.get(gate), `${gate} must document the modifyAllRecords bypass`)
         .toContain('modifyAllRecords');
     }

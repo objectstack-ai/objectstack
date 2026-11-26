@@ -52,7 +52,7 @@ import {
 } from './DashboardInPageEditor.js';
 import { StudioReturnButton, useStudioReturnPath } from './StudioReturnButton.js';
 import { useInSetupApp } from '../console/setupApp.js';
-import { useCustomizeDoorWalled } from './studio-design/StudioCustomizeControls.js';
+import { useCustomizeDoorWalled } from './studio-design/customizeOverride.js';
 import { readDashboardEditArrival, withoutDashboardEditArrival } from '../layout/designModeArrival.js';
 
 /**

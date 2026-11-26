@@ -1290,7 +1290,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       compactToolbar: {
         label: "緊湊工具列",
-        helpText: "將分組 / 顏色 / 密度 / 隱藏欄位收進同一個「檢視設定」彈出框"
+        helpText: "將分組 / 顏色 / 密度 / 隱藏欄位收進同一個「檢視設定」彈出框。預設開啟：省略或為 `true` 時，轉譯器繪製這個緊湊工具列；為 `false` 時繪製寬工具列，每個控制項一個按鈕。緊湊工具列不繪製重新整理按鈕，因此 `userActions.refresh` 只作用於寬工具列；下拉重新整理不受這兩個鍵影響。"
       },
       rowHeight: {
         label: "列高",

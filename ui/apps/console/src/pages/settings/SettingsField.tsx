@@ -974,6 +974,14 @@ export function SettingsField(props: SettingsFieldProps) {
           />,
         );
       }
+      // A stored value the manifest no longer offers (an option removed in a
+      // later release) has no item to name it, so the trigger would read
+      // blank. It gets one disabled item of its own, named with the stored
+      // code and a "no longer available" mark; picking a current option is
+      // an ordinary write, and the retired item cannot be picked back.
+      const stored = value == null ? '' : String(value);
+      const retired =
+        stored !== '' && !(spec.options ?? []).some((opt) => String(opt.value) === stored);
       return wrapper(
         <Select
           value={value == null ? undefined : String(value)}
@@ -987,6 +995,14 @@ export function SettingsField(props: SettingsFieldProps) {
             <SelectValue placeholder={t('common.select', { defaultValue: 'Select…' })} />
           </SelectTrigger>
           <SelectContent>
+            {retired ? (
+              <SelectItem value={stored} disabled data-testid="settings-select-retired">
+                {t('console.settingsView.selectValueRetired', {
+                  value: stored,
+                  defaultValue: '{{value}} (no longer available)',
+                })}
+              </SelectItem>
+            ) : null}
             {spec.options?.map((opt) => (
               <SelectItem key={String(opt.value)} value={String(opt.value)}>
                 {renderOptionLabel(opt)}
@@ -996,7 +1012,13 @@ export function SettingsField(props: SettingsFieldProps) {
         </Select>,
       );
     }
-    case 'radio':
+    case 'radio': {
+      // Same named state as the closed select above: a stored value the
+      // manifest no longer offers gets one disabled, checked item of its own,
+      // so the group does not read as nothing chosen.
+      const stored = value == null ? '' : String(value);
+      const retired =
+        stored !== '' && !(spec.options ?? []).some((opt) => String(opt.value) === stored);
       return wrapper(
         <RadioGroup
           value={value == null ? undefined : String(value)}
@@ -1004,6 +1026,17 @@ export function SettingsField(props: SettingsFieldProps) {
           disabled={disabled}
           aria-labelledby={labelId}
         >
+          {retired ? (
+            <div className="flex items-center space-x-2" data-testid="settings-radio-retired">
+              <RadioGroupItem value={stored} id={`${id}-retired`} disabled />
+              <Label htmlFor={`${id}-retired`} className="text-sm font-normal text-muted-foreground">
+                {t('console.settingsView.selectValueRetired', {
+                  value: stored,
+                  defaultValue: '{{value}} (no longer available)',
+                })}
+              </Label>
+            </div>
+          ) : null}
           {spec.options?.map((opt) => (
             <div key={String(opt.value)} className="flex items-center space-x-2">
               <RadioGroupItem value={String(opt.value)} id={`${id}-${opt.value}`} />
@@ -1015,10 +1048,42 @@ export function SettingsField(props: SettingsFieldProps) {
         </RadioGroup>,
         undefined,
       );
+    }
     case 'multiselect': {
       const arr = Array.isArray(value) ? (value as (string | number)[]) : [];
+      // Stored members the manifest no longer offers are named, checked, in
+      // the same "no longer available" words as the select and radio arms.
+      // Ticking a current option keeps them in the array (the next set is
+      // built from the whole stored array, as before), and the server refuses
+      // a write of this key while one is in it (`invalid_option`), so each
+      // stays UNTICKABLE: unticking drops it, and once dropped it is gone
+      // from the list, so it cannot be ticked back.
+      const offered = new Set((spec.options ?? []).map((opt) => String(opt.value)));
+      const retiredMembers = Array.from(new Set(arr.map(String))).filter(
+        (v) => v !== '' && !offered.has(v),
+      );
       return wrapper(
         <div role="group" aria-labelledby={labelId} className="grid grid-cols-2 gap-2">
+          {retiredMembers.map((v) => (
+            <label
+              key={`retired-${v}`}
+              className="flex items-center gap-2 text-sm text-muted-foreground"
+              data-testid="settings-multiselect-retired"
+            >
+              <Checkbox
+                checked
+                disabled={disabled}
+                onCheckedChange={(c) => {
+                  if (c) return;
+                  onChange(arr.map(String).filter((m) => m !== v));
+                }}
+              />
+              {t('console.settingsView.selectValueRetired', {
+                value: v,
+                defaultValue: '{{value}} (no longer available)',
+              })}
+            </label>
+          ))}
           {spec.options?.map((opt) => {
             const v = String(opt.value);
             const checked = arr.map(String).includes(v);

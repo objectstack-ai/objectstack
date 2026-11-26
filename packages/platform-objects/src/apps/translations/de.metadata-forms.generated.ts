@@ -1290,7 +1290,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       compactToolbar: {
         label: "Kompakte Symbolleiste",
-        helpText: "Gruppierung/Farbe/Dichte/Felder ausblenden in einem einzigen Popover für Ansichtseinstellungen zusammenfassen"
+        helpText: "Gruppierung/Farbe/Dichte/Felder ausblenden in einem einzigen „Ansichtseinstellungen“-Popover zusammenfassen. Standardmäßig aktiv: Fehlt der Schlüssel oder ist er `true`, zeichnet der Renderer diese kompakte Symbolleiste; `false` zeichnet die breite Symbolleiste mit je einer Schaltfläche pro Steuerelement. Die kompakte Symbolleiste hat keine Schaltfläche „Aktualisieren“, daher steuert `userActions.refresh` nur die breite Symbolleiste; Ziehen zum Aktualisieren ist von keinem der beiden Schlüssel betroffen."
       },
       rowHeight: {
         label: "Zeilenhöhe",

@@ -29,9 +29,9 @@
  * Leaving asks first when a pillar holds unsaved work, like every other
  * header departure (`beforeNavigate`).
  *
- * objectstack#37139 — right of the name, the host may draw the package's 「⋯」
- * menu (`menu`, `StudioPackageMenu`): only where there is a current package and
- * only for a `manage_metadata` holder, which the host decides.
+ * objectstack#37454 — the package's 「⋯」 menu, which sat right of the name
+ * (objectstack#37139), moved to 概览 Overview's header (ADR-0084, amended
+ * 2026-11-26).
  */
 
 import * as React from 'react';
@@ -138,7 +138,6 @@ export function StudioBackToApp({
   locale,
   beforeNavigate,
   navigate,
-  menu,
 }: {
   /** The open package, or `null` in the package-less scope. */
   packageId: string | null;
@@ -154,8 +153,6 @@ export function StudioBackToApp({
   /** The header's unsaved-work veto: return false to stay in Studio. */
   beforeNavigate: () => boolean;
   navigate: (path: string) => void;
-  /** objectstack#37139 — the package's 「⋯」 menu, drawn right of the name; absent draws none. */
-  menu?: React.ReactNode;
 }): React.ReactElement {
   // Read once per visit: nothing in Studio is an app page, so the record
   // cannot change while the author is here.
@@ -203,7 +200,6 @@ export function StudioBackToApp({
           </span>
         </>
       )}
-      {menu}
       <span aria-hidden="true" className="shrink-0 text-muted-foreground">
         ·
       </span>

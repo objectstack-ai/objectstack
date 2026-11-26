@@ -130,6 +130,28 @@ interface BulkFailure {
 const BULK_FAILURES_IN_TOAST = 3;
 
 /**
+ * The history-state key a bulk run that settled after the inbox unmounted
+ * hands its failed rows back under. The run's toast outlives the page, so its
+ * "Show all" cannot open the old page's dialog; it navigates back to the inbox
+ * the run started on with the rows in this key, and the inbox opens its
+ * dialog on them.
+ */
+const BULK_FAILURES_STATE_KEY = 'approvalsBulkFailures';
+
+/** The failed rows a navigation handed this inbox, or `null` when it handed none. */
+function handedBulkFailures(state: unknown): BulkFailure[] | null {
+  if (!state || typeof state !== 'object') return null;
+  const list = (state as Record<string, unknown>)[BULK_FAILURES_STATE_KEY];
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const rows = list.filter((f): f is BulkFailure =>
+    !!f && typeof f === 'object'
+    && typeof (f as BulkFailure).id === 'string'
+    && typeof (f as BulkFailure).title === 'string'
+    && typeof (f as BulkFailure).reason === 'string');
+  return rows.length > 0 ? rows : null;
+}
+
+/**
  * Semantic status colors (green = approved, amber = waiting, red = rejected,
  * slate = recalled, violet = returned for revision) — variant-based Badge
  * colors read as monochrome chrome, not as state.
@@ -396,10 +418,13 @@ type Translate = (key: string, defaultValue: string, opts?: Record<string, unkno
  */
 
 function RequestCell({ r, tr }: { r: ApprovalRequestRow; tr: Translate }) {
+  // The label and step wrap rather than truncate: a one-line label's
+  // unbreakable width would size this column and push the table past its card
+  // (see the column heads in the page body).
   return (
     <div className="min-w-0">
-      <div className="font-medium truncate">{processLabel(r)}</div>
-      <div className="text-xs text-muted-foreground truncate">
+      <div className="font-medium break-words">{processLabel(r)}</div>
+      <div className="text-xs text-muted-foreground break-words">
         {stepLabel(r) || '—'}
         {(r.round ?? 1) > 1 && (
           <span className="ml-1.5 text-violet-600 dark:text-violet-400">
@@ -604,17 +629,17 @@ function RecordCell({ r, href, linkState, figureField, deadLabel, unresolvableLa
       ) : unresolvableLabel !== null ? (
         <UnresolvableRecordReference label={unresolvableLabel} className="text-sm max-w-full" />
       ) : href === null ? (
-        <div className="text-sm truncate max-w-full" title={title}>{title}</div>
+        <div className="text-sm line-clamp-2 break-words max-w-full" title={title}>{title}</div>
       ) : (
       <Link
         to={href}
         state={linkState}
         onClick={(e) => e.stopPropagation()}
-        className="inline-flex items-center gap-1 text-sm hover:underline truncate max-w-full"
+        className="inline-flex items-start gap-1 text-sm hover:underline max-w-full"
         title={title}
       >
-        <span className="truncate">{title}</span>
-        <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
+        <span className="line-clamp-2 break-words">{title}</span>
+        <ExternalLink className="h-3 w-3 mt-1 shrink-0 text-muted-foreground" />
       </Link>
       )}
       <div className="text-xs text-muted-foreground truncate">
@@ -1120,9 +1145,41 @@ function ApprovalsQueue() {
    * they leave with the page.
    */
   const bulkFailureToasts = useRef(new Set<string | number>());
-  useEffect(() => () => {
-    for (const id of bulkFailureToasts.current) toast.dismiss(id);
+  /**
+   * Whether this page is still mounted. A bulk run keeps going after the user
+   * leaves; when it settles it must not touch this page's state, and its
+   * toast's action must not open this page's dialog — nothing would show.
+   */
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    const raised = bulkFailureToasts.current;
+    return () => {
+      mounted.current = false;
+      for (const id of raised) toast.dismiss(id);
+    };
   }, []);
+  // A run that settled after the inbox unmounted handed its failed rows back
+  // through the navigation its toast's "Show all" made: open the dialog on
+  // them once per navigation, then drop them from the history entry so a
+  // reload or Back does not open it again.
+  const handedFailures = handedBulkFailures(location.state);
+  const [handedKey, setHandedKey] = useState<string | null>(null);
+  if (handedFailures && handedKey !== location.key) {
+    setHandedKey(location.key);
+    setBulkFailures(handedFailures);
+    setBulkFailuresOpen(true);
+  }
+  const handedRows = handedFailures !== null;
+  useEffect(() => {
+    if (!handedRows) return;
+    const rest = { ...(location.state as Record<string, unknown>) };
+    delete rest[BULK_FAILURES_STATE_KEY];
+    navigate(
+      { pathname: location.pathname, search: location.search, hash: location.hash },
+      { replace: true, state: Object.keys(rest).length > 0 ? rest : null },
+    );
+  }, [handedRows, location, navigate]);
 
   // Inline decision confirmations (row-level quick action / mobile card /
   // keyboard). BOTH decisions confirm before executing (#2762 P0-2): the
@@ -1501,6 +1558,9 @@ function ApprovalsQueue() {
   const runBulk = useCallback(async (kind: 'approve' | 'reject', comment?: string) => {
     const targets = actionableSelectedRows;
     if (targets.length === 0) return;
+    // Where this run started: a run that settles after the user left hands
+    // its failed rows back to this inbox from here.
+    const inboxPath = `${location.pathname}${location.search}`;
     setBulkRunning(true);
     let ok = 0;
     const failures: BulkFailure[] = [];
@@ -1522,8 +1582,13 @@ function ApprovalsQueue() {
         });
       }
     }
-    setBulkRunning(false);
-    setSelectedRowIds(new Set());
+    // The user may have left while the run was going: an unmounted page's
+    // state is not touched, and its list and badge count are not reloaded.
+    const live = mounted.current;
+    if (live) {
+      setBulkRunning(false);
+      setSelectedRowIds(new Set());
+    }
     if (failures.length === 0) {
       toast.success(kind === 'approve'
         ? tr('bulkApproved', 'Approved {{count}} requests', { count: ok })
@@ -1543,23 +1608,36 @@ function ApprovalsQueue() {
         onDismiss: () => { bulkFailureToasts.current.delete(toastId); },
         // More failures than the toast shows: the rest are one click away.
         // The action closes over THIS run's list, never the page's latest.
+        // A run that settled after the page unmounted raises a toast the
+        // page never sees dismissed, so its action cannot open the gone
+        // page's dialog: it goes back to the inbox the run started on and
+        // hands the list over (`BULK_FAILURES_STATE_KEY`).
         ...(overflow
           ? {
               action: {
                 label: tr('bulkFailuresShowAll', 'Show all ({{n}})', { n: failures.length }),
-                onClick: () => {
-                  setBulkFailures(failures);
-                  setBulkFailuresOpen(true);
-                },
+                onClick: live
+                  ? () => {
+                      setBulkFailures(failures);
+                      setBulkFailuresOpen(true);
+                    }
+                  : () => {
+                      navigate(inboxPath, { state: { [BULK_FAILURES_STATE_KEY]: failures } });
+                    },
               },
             }
           : {}),
       });
-      if (toastId != null) bulkFailureToasts.current.add(toastId);
+      if (live && toastId != null) bulkFailureToasts.current.add(toastId);
     }
-    void load();
-    refreshBadge();
-  }, [actionableSelectedRows, identities, user?.id, load, refreshBadge, humanizeError, tr]);
+    if (live) {
+      void load();
+      refreshBadge();
+    }
+  }, [
+    actionableSelectedRows, identities, user?.id, load, refreshBadge, humanizeError, tr,
+    location.pathname, location.search, navigate,
+  ]);
 
   /** Confirmed row-level approve (from the shared dialog). */
   const inlineApprove = useCallback(async (r: ApprovalRequestRow) => {
@@ -1676,6 +1754,14 @@ function ApprovalsQueue() {
                     widths so they never crowd — instead of the browser
                     spreading five auto columns evenly and leaving 审批事项
                     over-wide next to a cramped 状态. */}
+                {/* objectstack#37534 — the three text columns (Request,
+                    Record, Requester) WRAP instead of holding one line, so
+                    none of them sets a minimum width the card cannot give:
+                    from a 928 px card up the table fits, and the pinned
+                    Approve / Reject column covers no other column at rest.
+                    Narrower, the table scrolls under the pin (#12708).
+                    `e2e/approvals-inbox-desktop-columns-37534.spec.ts`
+                    measures it in Chromium. */}
                 <TableHead className="w-[22%]">{tr('colRequest', 'Request')}</TableHead>
                 {/* objectui#12816 — the Record cells are `max-w-0` (below),
                     so this floor is the column's only minimum: enough to
@@ -1710,9 +1796,10 @@ function ApprovalsQueue() {
                   )}
                   <TableCell><RequestCell r={r} tr={tr} /></TableCell>
                   {/* objectui#12816 — `max-w-0` takes the record title's
-                      unbreakable width out of the auto-layout table's
-                      column sizing, so a long title truncates (full text
-                      in its `title`) instead of widening the table. */}
+                      width out of the auto-layout table's column sizing,
+                      so a long title wraps to two lines and is then
+                      clamped (full text in its `title`, objectstack#37534)
+                      instead of widening the table. */}
                   <TableCell className="max-w-0">
                     <RecordCell
                       r={r}
@@ -1736,9 +1823,9 @@ function ApprovalsQueue() {
                         <span className="truncate italic">{tr('flowOrigin', 'Flow-initiated')}</span>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-1.5 text-sm">
+                      <div className="flex flex-wrap items-center gap-1.5 text-sm">
                         <UserIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                        <span className="truncate" title={r.submitter_id || ''}>{submitterDisplay(r)}</span>
+                        <span className="min-w-0 break-words" title={r.submitter_id || ''}>{submitterDisplay(r)}</span>
                         {tab !== 'submitted' && r.viewer?.is_submitter === true && (
                           <SelfSubmittedBadge label={tr('submittedByYou', 'You submitted this')} />
                         )}

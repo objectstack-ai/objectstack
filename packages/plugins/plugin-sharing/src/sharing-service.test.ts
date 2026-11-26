@@ -11,7 +11,8 @@ import { buildSharingMiddleware } from './sharing-plugin.js';
 import { bootRequestContext } from './exec-context-seam.testkit.js';
 import { SysRecordShare } from './objects/sys-record-share.object.js';
 import { SysSharingRule } from './objects/sys-sharing-rule.object.js';
-import { SharedRecordIds, isSharedRecordIds } from '@objectstack/spec/data';
+import { QUEUE_FIELD_DEF, SharedRecordIds, isSharedRecordIds } from '@objectstack/spec/data';
+import { OWNER_FIELD_DEF } from '@objectstack/metadata-core';
 import { WRITE_ACCESS_LEVELS } from './access-level.js';
 import { inMembers } from './shared-record-ids.testkit.js';
 
@@ -2450,5 +2451,347 @@ describe('[ADR-0057] a missing hierarchy-scope resolver is said once per boot', 
     expect(await (svc as any).resolveOwnerScopeIds(bob, 'unit')).toEqual(['bob']);
     expect(await (svc as any).resolveOwnerScopeIds(bob, 'unit')).toEqual(['bob']);
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// [#35934] The set form of the write verdict
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * A double of the engine for the set-form pins: rows indexed by id, so a
+ * `where` on `id` (a scalar or an `$in` list) is a lookup and 10,000 records
+ * stay cheap; every other key is an equality or an `$in` list. It counts the
+ * reads per object and can be told to throw on a read that names a poisoned id.
+ */
+function makeVerdictEngine(schemas: Record<string, any>, inert: ReadonlySet<string>) {
+  const tables: Record<string, Map<string, Record<string, unknown>>> = {};
+  const shares: Record<string, unknown>[] = [];
+  const reads: Record<string, number> = {};
+  const poisoned = new Set<string>();
+  /** A scalar as a row key; anything else is no key at all. */
+  const keyOf = (value: unknown): string | null =>
+    typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint' ? String(value) : null;
+  const listOf = (wanted: unknown): string[] => {
+    const members = wanted != null && typeof wanted === 'object' ? (wanted as { $in?: unknown }).$in : [wanted];
+    return Array.isArray(members) ? members.map(keyOf).filter((k): k is string => k !== null) : [];
+  };
+  /**
+   * Each `$in` list as a Set, built once per list rather than once per row it is tested
+   * against: a read costs the rows it scans plus the ids it names, never rows x ids.
+   */
+  const inSets = new WeakMap<object, ReadonlySet<string>>();
+  const valueMatches = (actual: unknown, wanted: unknown): boolean => {
+    if (wanted != null && typeof wanted === 'object') {
+      let members = inSets.get(wanted);
+      if (members === undefined) {
+        members = new Set(listOf(wanted));
+        inSets.set(wanted, members);
+      }
+      const key = keyOf(actual);
+      return key !== null && members.has(key);
+    }
+    return actual === wanted;
+  };
+  /** Counts the read, and fails it when it names a poisoned id. */
+  const noteRead = (object: string, where: Record<string, unknown>) => {
+    const seen = reads[object];
+    reads[object] = (typeof seen === 'number' ? seen : 0) + 1;
+    const named = (k: string) => (where[k] === undefined ? [] : listOf(where[k]));
+    if ([...named('id'), ...named('record_id')].some((id) => poisoned.has(id))) throw new Error('store unavailable');
+  };
+  /** The object's rows a `where` on `id` can match, by lookup; every row when it names no id. */
+  const rowsNamed = (object: string, where: Record<string, unknown>): Record<string, unknown>[] => {
+    const table = tables[object] ?? new Map<string, Record<string, unknown>>();
+    if (where.id === undefined) return [...table.values()];
+    return listOf(where.id).map((k) => table.get(k)).filter((row): row is Record<string, unknown> => row !== undefined);
+  };
+  const double = {
+    reads,
+    poisoned,
+    insert(object: string, rows: Record<string, unknown>[]) {
+      if (object === 'sys_record_share') { shares.push(...rows); return; }
+      const table = (tables[object] ??= new Map());
+      for (const row of rows) table.set(String(row.id), row);
+    },
+    getSchema: (object: string) => schemas[object],
+    getDriverForObject: (object: string) => (inert.has(object)
+      ? { name: 'mongo-like', supports: {} }
+      : { name: 'sql', supports: { fixedReadLeaves: ['SharedRecordIds'] } }),
+    fixedReadLeafClassOf: () => null,
+    /** The double's reads, counted and failed where told to — {@link storeFind} answers them. */
+    async find(object: string, options?: any) {
+      noteRead(object, (options?.where ?? {}) as Record<string, unknown>);
+      return storeFind(object, options);
+    },
+    async insertOne() { return {}; },
+  };
+  return double;
+
+  /** The store's answer: the rows the `where` matches, then the caller's bound, applied only when one is given. */
+  async function storeFind(object: string, options?: any) {
+    const where = (options?.where ?? {}) as Record<string, unknown>;
+    const source = object === 'sys_record_share' ? shares : rowsNamed(object, where);
+    const out = source.filter((row) => Object.entries(where).every(([key, wanted]) => {
+      // The verdict reads are plain field conjunctions; a combinator is refused, never read as a field name.
+      if (key.startsWith('$')) throw new Error(`verdict engine double: combinator ${key} is not implemented`);
+      return valueMatches(row[key], wanted);
+    }));
+    return typeof options?.limit === 'number' ? out.slice(0, options.limit) : out;
+  }
+}
+
+const VERDICT_ORG = 'org_v';
+const ME = 'u_me';
+const OTHER = 'u_other';
+const MODIFY_ALL = 'u_modify_all';
+/** Owns the bulk rows the caller does not, and is in nobody's hierarchy. */
+const THIRD = 'u_third';
+/** The ids of the record-sharing matrix: every row class one object can hold. */
+const MATRIX_IDS = [
+  'own', 'own_created_by_other', 'created_not_owned', 'edit_shared', 'read_shared',
+  'queued_mine', 'queued_not_mine', 'queued_other_org', 'ownerless', 'missing',
+] as const;
+const matrixRows = (object: string): Record<string, unknown>[] => [
+  { id: `${object}:own`, owner_id: ME, created_by: ME, organization_id: VERDICT_ORG },
+  { id: `${object}:own_created_by_other`, owner_id: ME, created_by: OTHER, organization_id: VERDICT_ORG },
+  { id: `${object}:created_not_owned`, owner_id: OTHER, created_by: ME, organization_id: VERDICT_ORG },
+  { id: `${object}:edit_shared`, owner_id: OTHER, created_by: OTHER, organization_id: VERDICT_ORG },
+  { id: `${object}:read_shared`, owner_id: OTHER, created_by: OTHER, organization_id: VERDICT_ORG },
+  { id: `${object}:queued_mine`, owner_id: null, queue: 'q_mine', organization_id: VERDICT_ORG },
+  { id: `${object}:queued_not_mine`, owner_id: null, queue: 'q_other', organization_id: VERDICT_ORG },
+  { id: `${object}:queued_other_org`, owner_id: null, queue: 'q_mine', organization_id: 'org_elsewhere' },
+  { id: `${object}:ownerless`, owner_id: null, organization_id: VERDICT_ORG },
+];
+const matrixShares = (object: string) => [
+  { object_name: object, record_id: `${object}:edit_shared`, recipient_type: 'user', recipient_id: ME, access_level: 'edit' },
+  { object_name: object, record_id: `${object}:read_shared`, recipient_type: 'user', recipient_id: ME, access_level: 'read' },
+];
+
+/** Owner-scoped, with the platform's queue column: every basis applies. */
+const V_DEAL = 'v_deal';
+/** The same, write-open (`public_read_write`): abstains, after the queue basis. */
+const V_OPEN = 'v_open';
+/** No owner field: record sharing does not enforce on it. */
+const V_MEMO = 'v_memo';
+/** A federated object whose `owner_id` is the platform's phantom anchor. */
+const V_PHANTOM = 'v_phantom';
+/** Stored by a driver that does not evaluate a share grant: shares do not count (ADR-0155 R2). */
+const V_INERT = 'v_inert';
+/** No registered schema. */
+const V_UNKNOWN = 'v_unknown';
+const VERDICT_SCHEMAS: Record<string, any> = {
+  [V_DEAL]: { name: V_DEAL, sharingModel: 'private', fields: { id: {}, owner_id: {}, created_by: {}, queue: { ...QUEUE_FIELD_DEF } } },
+  [V_OPEN]: { name: V_OPEN, sharingModel: 'public_read_write', fields: { id: {}, owner_id: {}, queue: { ...QUEUE_FIELD_DEF } } },
+  [V_MEMO]: { name: V_MEMO, sharingModel: 'private', fields: { id: {}, created_by: {} } },
+  [V_PHANTOM]: { name: V_PHANTOM, sharingModel: 'private', external: { remoteName: 'customers' }, fields: { owner_id: { ...OWNER_FIELD_DEF }, name: { type: 'text' } } },
+  [V_INERT]: { name: V_INERT, sharingModel: 'private', fields: { id: {}, owner_id: {}, created_by: {} } },
+  sys_record_share: { name: 'sys_record_share' },
+};
+const VERDICT_OBJECTS = [V_DEAL, V_OPEN, V_MEMO, V_PHANTOM, V_INERT, V_UNKNOWN, 'sys_user'] as const;
+
+/** The callers: each write authority, and each context a by-id gate treats specially. */
+const VERDICT_CALLERS: Record<string, Record<string, unknown>> = {
+  member: { userId: ME, tenantId: VERDICT_ORG },
+  'member at unit depth': { userId: ME, tenantId: VERDICT_ORG, __writeScope: 'unit' },
+  'Modify All holder': { userId: MODIFY_ALL, tenantId: VERDICT_ORG },
+  'Modify All holder at org depth': { userId: MODIFY_ALL, tenantId: VERDICT_ORG, __writeScope: 'org' },
+  'member on behalf of the Modify All holder (delegated)': { userId: ME, tenantId: VERDICT_ORG, onBehalfOf: { userId: MODIFY_ALL } },
+  'principal-less': { tenantId: VERDICT_ORG },
+  guest: { tenantId: VERDICT_ORG, principalKind: 'guest' },
+  system: { isSystem: true },
+};
+
+function verdictRig(options: { logger?: { error?: (...a: unknown[]) => void; warn?: (...a: unknown[]) => void } } = {}) {
+  const engine = makeVerdictEngine(VERDICT_SCHEMAS, new Set([V_INERT]));
+  for (const object of [V_DEAL, V_OPEN, V_MEMO, V_PHANTOM, V_INERT]) {
+    // The phantom anchor's remote table has no owner column: its rows carry none.
+    engine.insert(object, object === V_PHANTOM
+      ? matrixRows(object).map(({ owner_id: _owner, ...row }) => row)
+      : matrixRows(object));
+    engine.insert('sys_record_share', matrixShares(object));
+  }
+  const counters = { bypassProbes: 0, memberships: 0, ownerSets: 0 };
+  const svc = new SharingService({
+    engine: engine as never,
+    // The by-id gates' bypass, as plugin-security answers it: Modify All for its
+    // holder, and never for an on-behalf-of context (ADR-0111 D2, fail-closed).
+    securityService: () => ({
+      hasWriteBypass: async (_object: string, context: any) => {
+        counters.bypassProbes += 1;
+        return context?.userId === MODIFY_ALL && !context?.onBehalfOf;
+      },
+    }) as never,
+    hierarchyResolver: () => ({
+      resolveOwnerIds: async (who: { userId: string }) => {
+        counters.ownerSets += 1;
+        return [who.userId, OTHER];
+      },
+    }),
+    tenancy: () => ({ posture: 'single' }),
+    ownershipQueues: () => ({
+      queuesOf: async () => ['q_mine'],
+      isMember: async (_user: string, queue: string, organizationId: string | null) => {
+        counters.memberships += 1;
+        return queue === 'q_mine' && organizationId === VERDICT_ORG;
+      },
+    }),
+    logger: { warn: () => undefined, error: () => undefined, ...options.logger } as never,
+  });
+  return { engine, svc, counters };
+}
+
+const idsOf = (object: string, ids: readonly string[] = MATRIX_IDS) => ids.map((id) => `${object}:${id}`);
+/** A verdict list as letters: `a` allow, `d` deny, `-` abstain. */
+const letters = (verdicts: readonly string[]) =>
+  verdicts.map((v) => (v === 'allow' ? 'a' : v === 'deny' ? 'd' : v === 'abstain' ? '-' : '?')).join(' ');
+
+describe('[#35934] checkEditMany / checkDeleteMany answer, per id, the verdict checkEdit / checkDelete answer', () => {
+  // Named for V_DEAL, so the comparison below cannot pass by both forms
+  // drifting together. `a` allow, `d` deny, in MATRIX_IDS order.
+  const EXPECTED_DEAL: Record<string, { update: string; delete: string }> = {
+    //                                                      own  ownCbO  crNotOwn edit  read  qMine qOther qOrg  ownerless missing
+    member: { update: 'a a d a d a d d d d', delete: 'a a d d d d d d d d' },
+    'member at unit depth': { update: 'a a a a a a d d d d', delete: 'a a a a a d d d d d' },
+    'Modify All holder': { update: 'a a a a a a a a a a', delete: 'a a a a a a a a a a' },
+    'Modify All holder at org depth': { update: 'a a a a a a a a a a', delete: 'a a a a a a a a a a' },
+    'member on behalf of the Modify All holder (delegated)': { update: 'a a d a d a d d d d', delete: 'a a d d d d d d d d' },
+    'principal-less': { update: 'd d d d d d d d d d', delete: 'd d d d d d d d d d' },
+    guest: { update: 'd d d d d d d d d d', delete: 'd d d d d d d d d d' },
+    system: { update: 'a a a a a a a a a a', delete: 'a a a a a a a a a a' },
+  };
+
+  for (const object of VERDICT_OBJECTS) {
+    for (const [name, caller] of Object.entries(VERDICT_CALLERS)) {
+      for (const verb of ['update', 'delete'] as const) {
+        it(`${object} · ${name} · ${verb}: the set form equals the per-row verdict on every row`, async () => {
+          const { svc } = verdictRig();
+          const ids = idsOf(object);
+          const perRow: string[] = [];
+          for (const id of ids) {
+            perRow.push(verb === 'update' ? await svc.checkEdit(object, id, caller as never) : await svc.checkDelete(object, id, caller as never));
+          }
+          const set = verb === 'update'
+            ? await svc.checkEditMany(object, ids, caller as never)
+            : await svc.checkDeleteMany(object, ids, caller as never);
+          expect(set).toEqual(perRow);
+          if (object === V_DEAL) expect(letters(set)).toBe(EXPECTED_DEAL[name][verb]);
+        });
+      }
+    }
+  }
+
+  it('the named row classes on the other objects: queue before the open-OWD abstain, phantom and inert-share rows', async () => {
+    const { svc } = verdictRig();
+    const member = VERDICT_CALLERS.member as never;
+    // Open OWD: abstains on every row but the one sitting in the caller's queue.
+    expect(letters(await svc.checkEditMany(V_OPEN, idsOf(V_OPEN), member))).toBe('- - - - - a - - - -');
+    expect(await svc.checkEditMany(V_OPEN, idsOf(V_OPEN, ['own', 'queued_mine']), member)).toEqual(['abstain', 'allow']);
+    expect(await svc.checkDeleteMany(V_OPEN, idsOf(V_OPEN, ['queued_mine']), member)).toEqual(['abstain']);
+    // No owner field, no schema, a bypass-listed table: abstain throughout.
+    expect(new Set(await svc.checkEditMany(V_MEMO, idsOf(V_MEMO), member))).toEqual(new Set(['abstain']));
+    expect(new Set(await svc.checkEditMany(V_UNKNOWN, idsOf(V_UNKNOWN), member))).toEqual(new Set(['abstain']));
+    expect(new Set(await svc.checkEditMany('sys_user', idsOf('sys_user'), member))).toEqual(new Set(['abstain']));
+    // The phantom anchor: no row has a provisioned owner, so ownership admits
+    // none; the by-id gate still reads the edit share, and so does the set form.
+    expect(letters(await svc.checkEditMany(V_PHANTOM, idsOf(V_PHANTOM), member))).toBe('d d d a d d d d d d');
+    expect(letters(await svc.checkDeleteMany(V_PHANTOM, idsOf(V_PHANTOM), member))).toBe('d d d d d d d d d d');
+    // Shares do not count: the edit share admits nothing there.
+    expect(await svc.checkEditMany(V_INERT, idsOf(V_INERT, ['own', 'edit_shared']), member)).toEqual(['allow', 'deny']);
+  });
+
+  it('answers an empty list with an empty list, and keeps the order and length of the ids it was handed, repeats included', async () => {
+    const { svc } = verdictRig();
+    const member = VERDICT_CALLERS.member as never;
+    expect(await svc.checkEditMany(V_DEAL, [], member)).toEqual([]);
+    const ids = idsOf(V_DEAL, ['missing', 'own', 'edit_shared', 'own', 'read_shared']);
+    expect(await svc.checkEditMany(V_DEAL, ids, member)).toEqual(['deny', 'allow', 'allow', 'allow', 'deny']);
+  });
+});
+
+describe('[#35934] the set form reads per chunk, not per row', () => {
+  const seedBulk = (engine: ReturnType<typeof makeVerdictEngine>, n: number) => {
+    const ids = Array.from({ length: n }, (_, i) => `bulk_${i}`);
+    // Every class the reads must not grow with: owned, edit-shared, other's.
+    engine.insert(V_DEAL, ids.map((id, i) => ({
+      id, owner_id: i % 3 === 0 ? ME : THIRD, organization_id: VERDICT_ORG,
+    })));
+    engine.insert('sys_record_share', ids.filter((_, i) => i % 3 === 1).map((id) => ({
+      object_name: V_DEAL, record_id: id, recipient_type: 'user', recipient_id: ME, access_level: 'edit',
+    })));
+    return ids;
+  };
+
+  it('10,000 records: two reads per chunk of 1,000, one bypass probe per call, one owner set', async () => {
+    const { engine, svc, counters } = verdictRig();
+    const ids = seedBulk(engine, 10_000);
+    for (const key of Object.keys(engine.reads)) engine.reads[key] = 0;
+    const member = { ...VERDICT_CALLERS['member at unit depth'] } as never;
+    const set = await svc.checkEditMany(V_DEAL, ids, member);
+    expect(engine.reads[V_DEAL]).toBe(10);
+    expect(engine.reads.sys_record_share).toBe(10);
+    expect(counters.bypassProbes).toBe(1);
+    expect(counters.ownerSets).toBe(1);
+    // Owned (every third row from the first) and edit-shared rows are allowed; the rest denied by the one probe.
+    expect(set.filter((v) => v === 'allow')).toHaveLength(6_667);
+    expect(set.filter((v) => v === 'deny')).toHaveLength(3_333);
+
+    // The delete verb reads no share at all.
+    engine.reads[V_DEAL] = 0;
+    engine.reads.sys_record_share = 0;
+    await svc.checkDeleteMany(V_DEAL, ids, VERDICT_CALLERS.member as never);
+    expect(engine.reads[V_DEAL]).toBe(10);
+    expect(engine.reads.sys_record_share ?? 0).toBe(0);
+  });
+
+  it('CONTROL: the per-row gate over the same records reads per row', async () => {
+    const { engine, svc, counters } = verdictRig();
+    const ids = seedBulk(engine, 300);
+    for (const key of Object.keys(engine.reads)) engine.reads[key] = 0;
+    for (const id of ids) await svc.checkEdit(V_DEAL, id, VERDICT_CALLERS.member as never);
+    expect(engine.reads[V_DEAL]).toBe(300);
+    expect(engine.reads.sys_record_share).toBe(200);
+    expect(counters.bypassProbes).toBe(100);
+  });
+
+  it('a queue membership is asked once per queue, not once per record sitting in it', async () => {
+    const { engine, svc, counters } = verdictRig();
+    const ids = Array.from({ length: 2_500 }, (_, i) => `queued_${i}`);
+    engine.insert(V_DEAL, ids.map((id) => ({ id, owner_id: null, queue: 'q_mine', organization_id: VERDICT_ORG })));
+    const set = await svc.checkEditMany(V_DEAL, ids, VERDICT_CALLERS.member as never);
+    expect(new Set(set)).toEqual(new Set(['allow']));
+    expect(counters.memberships).toBe(1);
+    expect(engine.reads[V_DEAL]).toBe(3);
+  });
+});
+
+describe('[#35934] the set form fails closed per chunk', () => {
+  it('a chunk whose read throws answers deny for each of its records, logged once; the other chunk keeps its answers', async () => {
+    const error = vi.fn();
+    const { engine, svc } = verdictRig({ logger: { error } });
+    const ids = Array.from({ length: 1_500 }, (_, i) => `fc_${i}`);
+    engine.insert(V_DEAL, ids.map((id) => ({ id, owner_id: ME, organization_id: VERDICT_ORG })));
+    engine.poisoned.add('fc_1200');
+    const set = await svc.checkEditMany(V_DEAL, ids, VERDICT_CALLERS.member as never);
+    expect(set).toHaveLength(1_500);
+    expect(new Set(set.slice(0, 1_000))).toEqual(new Set(['allow']));
+    expect(new Set(set.slice(1_000))).toEqual(new Set(['deny']));
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(String(error.mock.calls[0][0])).toContain(`could not resolve a verdict for '${V_DEAL}' 500 records`);
+  });
+
+  it('a share read that throws denies its chunk too, owned rows included — never abstain', async () => {
+    const { engine, svc } = verdictRig();
+    const ids = ['fs_owned', 'fs_other'];
+    engine.insert(V_DEAL, [
+      { id: 'fs_owned', owner_id: ME, organization_id: VERDICT_ORG },
+      { id: 'fs_other', owner_id: OTHER, organization_id: VERDICT_ORG },
+    ]);
+    const find = engine.find.bind(engine);
+    engine.find = async (object: string, options: any) => {
+      if (object === 'sys_record_share') throw new Error('share store unavailable');
+      return find(object, options);
+    };
+    expect(await svc.checkEditMany(V_DEAL, ids, VERDICT_CALLERS.member as never)).toEqual(['deny', 'deny']);
   });
 });
