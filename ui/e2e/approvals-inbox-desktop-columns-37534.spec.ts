@@ -258,6 +258,16 @@ test.describe('Approvals inbox desktop table at common desktop widths (objectsta
     }
   }
 
+  test('a record name too long for two lines is clamped, keeps its full text as a tooltip, and widens nothing', async ({ page }) => {
+    const long = 'ACC-000011 - Contoso Pharmaceuticals and Life Sciences Group Holdings';
+    const r = await measure(page, { labels: EN.labels, rows: [{ ...EN.rows[0], record: long }, EN.rows[1]] }, 928);
+    expect(r.scroller.scroll).toBeLessThanOrEqual(r.scroller.client);
+    const rec = r.records.find((x) => x.text === long)!;
+    expect(rec.cut, 'the long name is not clamped, so this case measures nothing').toBe(true);
+    expect(rec.lines).toBe(2);
+    expect(rec.title).toBe(long);
+  });
+
   test('not vacuous: at 700 px the same table is wider than its box and the pin covers Submitted', async ({ page }) => {
     const r = await measure(page, EN, 700);
     expect(r.scroller.scroll).toBeGreaterThan(r.scroller.client);

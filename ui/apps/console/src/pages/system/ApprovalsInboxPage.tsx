@@ -396,10 +396,13 @@ type Translate = (key: string, defaultValue: string, opts?: Record<string, unkno
  */
 
 function RequestCell({ r, tr }: { r: ApprovalRequestRow; tr: Translate }) {
+  // The label and step wrap rather than truncate: a one-line label's
+  // unbreakable width would size this column and push the table past its card
+  // (see the column heads in the page body).
   return (
     <div className="min-w-0">
-      <div className="font-medium truncate">{processLabel(r)}</div>
-      <div className="text-xs text-muted-foreground truncate">
+      <div className="font-medium break-words">{processLabel(r)}</div>
+      <div className="text-xs text-muted-foreground break-words">
         {stepLabel(r) || '—'}
         {(r.round ?? 1) > 1 && (
           <span className="ml-1.5 text-violet-600 dark:text-violet-400">
@@ -604,17 +607,17 @@ function RecordCell({ r, href, linkState, figureField, deadLabel, unresolvableLa
       ) : unresolvableLabel !== null ? (
         <UnresolvableRecordReference label={unresolvableLabel} className="text-sm max-w-full" />
       ) : href === null ? (
-        <div className="text-sm truncate max-w-full" title={title}>{title}</div>
+        <div className="text-sm line-clamp-2 break-words max-w-full" title={title}>{title}</div>
       ) : (
       <Link
         to={href}
         state={linkState}
         onClick={(e) => e.stopPropagation()}
-        className="inline-flex items-center gap-1 text-sm hover:underline truncate max-w-full"
+        className="inline-flex items-start gap-1 text-sm hover:underline max-w-full"
         title={title}
       >
-        <span className="truncate">{title}</span>
-        <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
+        <span className="line-clamp-2 break-words">{title}</span>
+        <ExternalLink className="h-3 w-3 mt-1 shrink-0 text-muted-foreground" />
       </Link>
       )}
       <div className="text-xs text-muted-foreground truncate">
@@ -1676,6 +1679,14 @@ function ApprovalsQueue() {
                     widths so they never crowd — instead of the browser
                     spreading five auto columns evenly and leaving 审批事项
                     over-wide next to a cramped 状态. */}
+                {/* objectstack#37534 — the three text columns (Request,
+                    Record, Requester) WRAP instead of holding one line, so
+                    none of them sets a minimum width the card cannot give:
+                    from a 928 px card up the table fits, and the pinned
+                    Approve / Reject column covers no other column at rest.
+                    Narrower, the table scrolls under the pin (#12708).
+                    `e2e/approvals-inbox-desktop-columns-37534.spec.ts`
+                    measures it in Chromium. */}
                 <TableHead className="w-[22%]">{tr('colRequest', 'Request')}</TableHead>
                 {/* objectui#12816 — the Record cells are `max-w-0` (below),
                     so this floor is the column's only minimum: enough to
@@ -1710,9 +1721,10 @@ function ApprovalsQueue() {
                   )}
                   <TableCell><RequestCell r={r} tr={tr} /></TableCell>
                   {/* objectui#12816 — `max-w-0` takes the record title's
-                      unbreakable width out of the auto-layout table's
-                      column sizing, so a long title truncates (full text
-                      in its `title`) instead of widening the table. */}
+                      width out of the auto-layout table's column sizing,
+                      so a long title wraps to two lines and is then
+                      clamped (full text in its `title`, objectstack#37534)
+                      instead of widening the table. */}
                   <TableCell className="max-w-0">
                     <RecordCell
                       r={r}
@@ -1736,9 +1748,9 @@ function ApprovalsQueue() {
                         <span className="truncate italic">{tr('flowOrigin', 'Flow-initiated')}</span>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-1.5 text-sm">
+                      <div className="flex flex-wrap items-center gap-1.5 text-sm">
                         <UserIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                        <span className="truncate" title={r.submitter_id || ''}>{submitterDisplay(r)}</span>
+                        <span className="min-w-0 break-words" title={r.submitter_id || ''}>{submitterDisplay(r)}</span>
                         {tab !== 'submitted' && r.viewer?.is_submitter === true && (
                           <SelfSubmittedBadge label={tr('submittedByYou', 'You submitted this')} />
                         )}
