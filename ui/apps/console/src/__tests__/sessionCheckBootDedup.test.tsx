@@ -27,10 +27,10 @@ import { readConsoleDiscovery } from '../lib/early-discovery';
 import { getSharedDiscovery } from '@object-ui/data-objectstack';
 import { clearSharedDiscoveryCache } from '../../../../packages/data-objectstack/src/sharedDiscovery';
 import { SessionUserScope } from '../../../../packages/auth/src/ActiveOrganizationStorage';
-import { resetInflightGetsForTesting } from '../../../../packages/types/src/http-inflight';
+import { inflightGetKey, resetInflightGetsForTesting } from '../../../../packages/types/src/http-inflight';
 import { readCachedLanguageSeed, useLocalization } from '@object-ui/i18n';
 import { PLATFORM_LOCALE_READ_ALIASES, PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
-import { __resetPreferredLocaleForTests, pickPreferredLocale, seedTenantLanguage } from '../languageSeed';
+import { __resetPreferredLocaleForTests, meLocalizationInit, pickPreferredLocale, seedTenantLanguage } from '../languageSeed';
 import { LocalizationFetchProvider } from '../LocalizationFetchProvider';
 
 const TOKEN = 'tok_valid';
@@ -896,5 +896,118 @@ describe("the language seed's me/localization starts at parse time beside discov
     expect(() => parse()).not.toThrow();
     await settle();
     expect(localizationCalls()).toHaveLength(1);
+  });
+});
+
+describe('a bearer-only session: the stored Bearer rides me/localization on all three legs, and they still share one request (objectstack#37225)', () => {
+  const DISCOVERY_SLOT = Symbol.for('objectui.earlyDiscovery');
+  const SEED_SLOT = Symbol.for('objectui.earlyLanguageSeed');
+  const ME = '/api/v1/auth/me/localization';
+  const BEARER = 'tok_bearer_only';
+  const SIGNED_IN = { authenticated: true, locale: 'zh-CN', currency: 'CNY', timezone: 'Asia/Shanghai' };
+  const localizationCalls = () => fetchStub.mock.calls.filter(([input]) => urlOf(input).includes('/me/localization'));
+  const authorizationOf = (call: unknown[] | undefined) =>
+    new Headers((call?.[1] as RequestInit | undefined)?.headers).get('Authorization');
+  const parse = () => {
+    runScript('startEarlyDiscovery');
+    runScript('startEarlyLanguageSeed');
+  };
+  const forget = () => {
+    const holder = globalThis as unknown as Record<symbol, unknown>;
+    delete holder[DISCOVERY_SLOT];
+    delete holder[SEED_SLOT];
+    clearSharedDiscoveryCache();
+    resetInflightGetsForTesting();
+    __resetPreferredLocaleForTests();
+  };
+
+  function Value() {
+    const { locale, currency } = useLocalization();
+    return <span data-testid="localization">{`${locale ?? '-'}/${currency ?? '-'}`}</span>;
+  }
+
+  beforeEach(() => {
+    forget();
+    discoveryAnswer = () => json({ locale: { default: 'en', supported: ['en', 'zh-CN'] } });
+    vi.spyOn(window.navigator, 'language', 'get').mockReturnValue('zh-CN');
+    // A server that sees only the bearer: no cookie rides in a unit test, so a
+    // read without it is a caller it cannot see.
+    localizationAnswer = () =>
+      authorizationOf(fetchStub.mock.lastCall) === `Bearer ${BEARER}` ? json(SIGNED_IN) : json({ authenticated: false });
+  });
+  afterEach(forget);
+
+  it('one cold load, one me/localization: parse time, seed and provider share it, and it carries the Bearer', async () => {
+    localStorage.setItem('auth-session-token', BEARER);
+    parse();
+    await settle();
+
+    await seedTenantLanguage('', 1_000);
+    expect(readCachedLanguageSeed()).toBe('zh-CN');
+    render(
+      <LocalizationFetchProvider endpoint={ME}>
+        <Value />
+      </LocalizationFetchProvider>,
+    );
+    expect(await screen.findByText('zh-CN/CNY')).toBeTruthy();
+
+    expect(localizationCalls()).toHaveLength(1);
+    const [, init] = localizationCalls()[0]!;
+    expect(init).toMatchObject({ credentials: 'include' });
+    expect(authorizationOf(localizationCalls()[0])).toBe(`Bearer ${BEARER}`);
+    expect(new Headers(init?.headers).get('Accept-Language')).toBe('zh-CN');
+  });
+
+  it("the share key still matches: index.html's request is keyed as the seed's and the provider's init", async () => {
+    localStorage.setItem('auth-session-token', BEARER);
+    parse();
+    await settle();
+    const slot = (globalThis as unknown as Record<symbol, { url: string; init: RequestInit }>)[SEED_SLOT]!;
+    expect(inflightGetKey(slot.url, slot.init)).toBe(inflightGetKey(ME, meLocalizationInit('zh-CN')));
+    expect(inflightGetKey(ME, meLocalizationInit('zh-CN'))).toContain(`authorization=Bearer ${BEARER}`);
+  });
+
+  it('every later boot (a cached seed): the provider reads alone, with the Bearer, and is answered as the user', async () => {
+    localStorage.setItem('auth-session-token', BEARER);
+    localStorage.setItem('objectui-locale-seed', 'zh-CN');
+    render(
+      <LocalizationFetchProvider endpoint={ME}>
+        <Value />
+      </LocalizationFetchProvider>,
+    );
+    expect(await screen.findByText('zh-CN/CNY')).toBeTruthy();
+    expect(localizationCalls()).toHaveLength(1);
+    expect(authorizationOf(localizationCalls()[0])).toBe(`Bearer ${BEARER}`);
+  });
+
+  it('CONTROL: no stored token, the cookie session: one request, no Authorization, as before', async () => {
+    parse();
+    await settle();
+    await seedTenantLanguage('', 1_000);
+    render(
+      <LocalizationFetchProvider endpoint={ME}>
+        <Value />
+      </LocalizationFetchProvider>,
+    );
+    await settle();
+    expect(localizationCalls()).toHaveLength(1);
+    expect(localizationCalls()[0]![1]).toMatchObject({ credentials: 'include' });
+    expect(authorizationOf(localizationCalls()[0])).toBeNull();
+    // The bearer-only server cannot see it: nothing of the user's is cached or shown.
+    expect(readCachedLanguageSeed()).toBeNull();
+    expect(screen.getByTestId('localization').textContent).toBe('-/-');
+  });
+
+  it('CONTROL: a token stored since parse time is not answered by the parse-time request; the seed asks once itself, with it', async () => {
+    parse();
+    await settle();
+    localStorage.setItem('auth-session-token', BEARER);
+
+    await seedTenantLanguage('', 1_000);
+
+    expect(localizationCalls()).toHaveLength(2);
+    expect(authorizationOf(localizationCalls()[0])).toBeNull();
+    expect(authorizationOf(localizationCalls()[1])).toBe(`Bearer ${BEARER}`);
+    expect(readCachedLanguageSeed()).toBe('zh-CN');
   });
 });
