@@ -1056,6 +1056,8 @@ const ja = {
       kanbanAddCardField: "項目を追加",
       kanbanShowFieldLabels: "項目名を表示",
       kanbanHideEmptyFields: "空の項目を隠す",
+      kanbanFooterComments: "コメント数を表示",
+      kanbanFooterAttachments: "添付ファイル数を表示",
       kanbanSummary: "列の集計",
       kanbanSummaryAvg: "平均",
       kanbanSummaryMin: "最小",
@@ -1114,6 +1116,11 @@ const ja = {
       hideHint: "カードは「未分類」に移ります",
       createIn: "{{column}} に新規作成",
       create: "新規",
+    },
+    // objectstack#36423 — a card's foot counts (`kanban.cardFooter`).
+    cardFooter: {
+      comments: "未解決のコメント: {{count}}",
+      attachments: "添付ファイル: {{count}}",
     },
     uncategorized: "未分類",
     loadMore: "さらに読み込む",

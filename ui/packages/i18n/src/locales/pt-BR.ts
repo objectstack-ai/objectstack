@@ -1084,6 +1084,8 @@ const pt = {
       kanbanAddCardField: "Adicionar campo",
       kanbanShowFieldLabels: "Mostrar nomes dos campos",
       kanbanHideEmptyFields: "Ocultar campos vazios",
+      kanbanFooterComments: "Mostrar número de comentários",
+      kanbanFooterAttachments: "Mostrar número de anexos",
       kanbanSummary: "Resumo da coluna",
       kanbanSummaryAvg: "Média",
       kanbanSummaryMin: "Mínimo",
@@ -1143,6 +1145,11 @@ const pt = {
       hideHint: "Os cartões vão para Sem categoria",
       createIn: "Novo registro em {{column}}",
       create: "Novo",
+    },
+    // objectstack#36423 — a card's foot counts (`kanban.cardFooter`).
+    cardFooter: {
+      comments: "Comentários abertos: {{count}}",
+      attachments: "Anexos: {{count}}",
     },
     uncategorized: "Sem categoria",
     loadMore: "Carregar mais",

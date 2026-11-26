@@ -37,6 +37,7 @@ import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
   RecordDetailPanel,
   deriveRecordPageHref,
+  useRecordCounts,
 } from '@object-ui/plugin-detail';
 import {
   fieldReadOnlyByHand,
@@ -572,6 +573,11 @@ type GateBoundKanbanSchema = ObjectKanbanSchema & {
   summary?: { type?: string; field?: string };
   showFieldLabels?: boolean;
   hideEmptyFields?: boolean;
+  /**
+   * objectstack#36423 — the view's `KanbanConfig.cardFooter`: the counts each
+   * card shows at its foot, relayed by `ListView` the way the toggles above are.
+   */
+  cardFooter?: { comments?: boolean; attachments?: boolean };
 };
 
 export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
@@ -1956,7 +1962,35 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   }, [statisticType, statisticField, statisticFieldDrawable, laneFigures, summarizeField, summarizeTotalDrawable, summarizeFieldDef, headerTotals, objectDef, schema.objectName, fieldLabel, tt]);
   // objectstack#36370 — how a card draws its fields (`kanban.showFieldLabels`).
   const showFieldLabels = schema.showFieldLabels !== false;
-  const cardDisplay = useMemo(() => ({ showFieldLabels }), [showFieldLabels]);
+  // objectstack#36423 — the counts at each card's foot (`kanban.cardFooter`):
+  // ONE grouped read per counted object over the cards loaded, never one per
+  // card, and none for a count the view does not ask. Comments are asked on an
+  // object whose discussion is on (`enable.feeds`, opt-out, as the record
+  // page's comments icon); attachments only on one that takes files
+  // (`enable.files`, opt-in). Both wait for the definition to settle, so an
+  // object without the capability is never asked.
+  const footerComments = schema.cardFooter?.comments === true && objectDefReady && objectDef?.enable?.feeds !== false;
+  const footerAttachments = schema.cardFooter?.attachments === true && objectDefReady && objectDef?.enable?.files === true;
+  const footerRecordIds = useMemo(
+    () => (footerComments || footerAttachments ? effectiveData.map((card) => card.id) : []),
+    [footerComments, footerAttachments, effectiveData],
+  );
+  const footerRead = useRecordCounts({
+    dataSource,
+    objectName: schema.objectName,
+    recordIds: footerRecordIds,
+    comments: footerComments,
+    attachments: footerAttachments,
+    reloadKey: `${refreshKey}:${invalidationNonce}:${hostReloadKey}`,
+  });
+  const footerShown = footerComments || footerAttachments;
+  const cardDisplay = useMemo(
+    () => ({
+      showFieldLabels,
+      ...(footerShown ? { footerCounts: { comments: footerRead.comments, attachments: footerRead.attachments } } : {}),
+    }),
+    [showFieldLabels, footerShown, footerRead.comments, footerRead.attachments],
+  );
 
   // Clone schema to inject data and className
   const effectiveSchema = {

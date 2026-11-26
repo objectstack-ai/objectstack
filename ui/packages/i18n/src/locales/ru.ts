@@ -1118,6 +1118,8 @@ const ru = {
       kanbanAddCardField: "Добавить поле",
       kanbanShowFieldLabels: "Показывать названия полей",
       kanbanHideEmptyFields: "Скрывать пустые поля",
+      kanbanFooterComments: "Показывать число комментариев",
+      kanbanFooterAttachments: "Показывать число вложений",
       kanbanSummary: "Итог по столбцу",
       kanbanSummaryAvg: "Среднее",
       kanbanSummaryMin: "Минимум",
@@ -1178,6 +1180,11 @@ const ru = {
       hideHint: "Карточки переместятся в «Без категории»",
       createIn: "Новая запись в {{column}}",
       create: "Создать",
+    },
+    // objectstack#36423 — a card's foot counts (`kanban.cardFooter`).
+    cardFooter: {
+      comments: "Открытые комментарии: {{count}}",
+      attachments: "Вложения: {{count}}",
     },
     uncategorized: "Без категории",
     loadMore: "Загрузить ещё",

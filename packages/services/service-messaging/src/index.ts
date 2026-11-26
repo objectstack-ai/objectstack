@@ -110,11 +110,15 @@ export { SLACK_SETUP_UI_BUNDLE, SLACK_SETUP_COMPONENT_REF } from './slack-setup-
 export {
     NotificationTextRenderer,
     assertNotificationTextKeys,
+    NOTIFICATION_LIST_PARAM_MAX_ITEMS,
 } from './notification-text.js';
 export type {
     NotificationTextKeys,
     NotificationTextParam,
     NotificationObjectLabelParam,
+    NotificationScalarParam,
+    NotificationListParam,
+    NotificationListItem,
     NotificationTextI18n,
     NotificationTextItem,
     NotificationTextRendererOptions,

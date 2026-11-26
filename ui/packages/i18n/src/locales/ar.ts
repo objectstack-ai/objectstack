@@ -1177,6 +1177,8 @@ const ar = {
       kanbanAddCardField: "إضافة حقل",
       kanbanShowFieldLabels: "إظهار أسماء الحقول",
       kanbanHideEmptyFields: "إخفاء الحقول الفارغة",
+      kanbanFooterComments: "إظهار عدد التعليقات",
+      kanbanFooterAttachments: "إظهار عدد المرفقات",
       kanbanSummary: "ملخص العمود",
       kanbanSummaryAvg: "المتوسط",
       kanbanSummaryMin: "الأدنى",
@@ -1239,6 +1241,11 @@ const ar = {
       hideHint: "تنتقل بطاقاته إلى «غير مصنّف»",
       createIn: "سجل جديد في {{column}}",
       create: "جديد",
+    },
+    // objectstack#36423 — a card's foot counts (`kanban.cardFooter`).
+    cardFooter: {
+      comments: "التعليقات المفتوحة: {{count}}",
+      attachments: "المرفقات: {{count}}",
     },
     uncategorized: "غير مصنّف",
     loadMore: "تحميل المزيد",

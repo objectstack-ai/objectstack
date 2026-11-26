@@ -1362,6 +1362,8 @@ const en = {
       kanbanAddCardField: "Add field",
       kanbanShowFieldLabels: "Show field names",
       kanbanHideEmptyFields: "Hide empty fields",
+      kanbanFooterComments: "Show comment count",
+      kanbanFooterAttachments: "Show attachment count",
       kanbanSummary: "Column summary",
       kanbanSummaryAvg: "Average",
       kanbanSummaryMin: "Minimum",
@@ -1420,6 +1422,11 @@ const en = {
       hideHint: "Its cards move to Uncategorized",
       createIn: "New record in {{column}}",
       create: "New",
+    },
+    // objectstack#36423 — a card's foot counts (`kanban.cardFooter`).
+    cardFooter: {
+      comments: "Open comments: {{count}}",
+      attachments: "Attachments: {{count}}",
     },
     addCard: 'Add card',
     addColumn: 'Add column',

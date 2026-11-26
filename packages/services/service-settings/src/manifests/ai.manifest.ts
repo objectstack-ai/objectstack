@@ -3,6 +3,7 @@
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { PLATFORM_CAPABILITY_PROVIDERS } from '@objectstack/spec/kernel';
 import type { SettingsActionHandler } from '../settings-service.types.js';
+import { AI_PROVIDERS, type AiProviderId } from './ai-models.js';
 
 // Visibility expressions are written as inline strings here for
 // readability. The spec's ExpressionInputSchema accepts a bare string
@@ -16,6 +17,56 @@ import type { SettingsActionHandler } from '../settings-service.types.js';
 // env-derived defaults without redeploying. AIServicePlugin binds to this
 // namespace once the kernel is ready; env-locked settings values use the
 // OS_AI_* convention and win over UI-stored values.
+
+/** The provider options, shared by the default provider and the structured-output provider. */
+const PROVIDER_OPTIONS = [
+  { value: 'gateway', label: 'Vercel AI Gateway' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'google', label: 'Google Generative AI' },
+  // Below: providers expose an OpenAI-compatible Chat Completions API,
+  // so they reuse the @ai-sdk/openai SDK with a preset base_url. The
+  // plugin's buildAdapterFromValues maps these onto provider="openai"
+  // + an auto-filled openai_base_url at runtime.
+  { value: 'deepseek', label: 'DeepSeek (OpenAI-compatible)' },
+  { value: 'dashscope', label: '阿里通义 DashScope (OpenAI-compatible)' },
+  { value: 'cloudflare', label: 'Cloudflare AI Gateway (OpenAI-compatible)' },
+  { value: 'siliconflow', label: '硅基流动 SiliconFlow (OpenAI-compatible)' },
+  { value: 'openrouter', label: 'OpenRouter (OpenAI-compatible)' },
+];
+
+/** A provider/model id as Vercel AI Gateway takes it. */
+const GATEWAY_MODEL_ID = '[A-Za-z0-9_-]+\\/[A-Za-z0-9._:-]+';
+/** A provider/model id as Cloudflare's /compat endpoint takes it. */
+const CLOUDFLARE_MODEL_ID = '[A-Za-z0-9_-]+\\/[A-Za-z0-9._:@-]+';
+/** Any model id: no whitespace and no comma, which separate ids in a list. */
+const ANY_MODEL_ID = '[^\\s,]+';
+
+/** A model list of `item` ids, separated by line breaks or commas; blank is allowed. */
+const listPattern = (item: string): string => `^\\s*(?:${item}(?:\\s*[\\n,]\\s*${item})*)?\\s*$`;
+
+/** Shown while the provider is on: it is the default provider, or its toggle is on. */
+const on = (provider: string): string =>
+  `\${data.provider === '${provider}' || data.${provider}_enabled === true}`;
+
+/** The provider's further models, beside its first model (`<provider>_model`). */
+const modelList = (provider: string, pattern: string = listPattern(ANY_MODEL_ID)) => ({
+  type: 'textarea', key: `${provider}_models`, label: 'More models', required: false, rows: 3,
+  description: 'Further model ids of this provider, one per line. The model above comes first.',
+  pattern,
+  visible: on(provider),
+});
+
+/**
+ * The provider's own "Test connection". The default handler checks the
+ * provider's form; the AI runtime registers the live check over it.
+ */
+const testButton = (provider: string) => ({
+  type: 'action_button', id: `test_${provider}`, label: 'Test connection', required: false, icon: 'Plug',
+  visible: on(provider),
+  handler: { kind: 'http', method: 'POST', url: `/api/settings/ai/test_${provider}` },
+});
+
 const manifest = {
   namespace: 'ai',
   version: 1,
@@ -34,86 +85,95 @@ const manifest = {
   category: 'Infrastructure',
   order: 30,
   specifiers: [
-    // ── Provider selection ────────────────────────────────────────
+    // ── Providers ─────────────────────────────────────────────────
     //
-    // [#31960] No `default` and no `memory` option. An unset provider reads as
-    // unset: a default here is what the page shows as the chosen provider, and
-    // `memory` (the echo adapter) is one the AI runtime does not honour as AI,
-    // so presenting or saving it told an administrator AI was configured while
-    // it was disabled. Whether AI is disabled is the AI runtime's own decision;
-    // it states it on this page itself (`registerLiveStatus`), never derived here.
-    // Not `required` either: unset is a served state (a provider may come from
-    // boot environment variables), and the console blocks every save on the
-    // page while a visible required key reads empty, which would keep the
-    // Embedder and Observability sections from saving on their own.
-    { type: 'group', id: 'provider', label: 'Provider', required: false,
-      description: 'Choose the LLM backend.' },
-    { type: 'select', key: 'provider', label: 'Provider', required: false,
-      options: [
-        { value: 'gateway', label: 'Vercel AI Gateway' },
-        { value: 'openai', label: 'OpenAI' },
-        { value: 'anthropic', label: 'Anthropic' },
-        { value: 'google', label: 'Google Generative AI' },
-        // Below: providers expose an OpenAI-compatible Chat Completions API,
-        // so they reuse the @ai-sdk/openai SDK with a preset base_url. The
-        // plugin's buildAdapterFromValues maps these onto provider="openai"
-        // + an auto-filled openai_base_url at runtime.
-        { value: 'deepseek', label: 'DeepSeek (OpenAI-compatible)' },
-        { value: 'dashscope', label: '阿里通义 DashScope (OpenAI-compatible)' },
-        { value: 'cloudflare', label: 'Cloudflare AI Gateway (OpenAI-compatible)' },
-        { value: 'siliconflow', label: '硅基流动 SiliconFlow (OpenAI-compatible)' },
-        { value: 'openrouter', label: 'OpenRouter (OpenAI-compatible)' },
-      ],
+    // Several providers may be on at once (see `ai-models.ts` for the model
+    // configuration these keys describe and the save rule over them).
+    // `provider` keeps its key and its stored values: it is the DEFAULT
+    // provider, always on, so a value stored when it was the only provider
+    // reads as before. Every other provider is turned on with its
+    // `<provider>_enabled` toggle, which the page hides for the default one.
+    //
+    // [#31960] `provider` has no `default` and no `memory` option. An unset
+    // provider reads as unset: a default here is what the page shows as the
+    // chosen provider, and `memory` (the echo adapter) is one the AI runtime
+    // does not honour as AI, so presenting or saving it told an administrator
+    // AI was configured while it was disabled. Whether AI is disabled is the AI
+    // runtime's own decision; it states it on this page itself
+    // (`registerLiveStatus`), never derived here. Not `required` either: unset
+    // is a served state (a provider may come from boot environment variables),
+    // and the console blocks every save on the page while a visible required
+    // key reads empty, which would keep the Embedder and Observability
+    // sections from saving on their own.
+    { type: 'group', id: 'provider', label: 'Providers', required: false,
+      description: 'Turn on each provider whose models may be used. The default provider is always on.' },
+    { type: 'select', key: 'provider', label: 'Default provider', required: false,
+      description: 'Serves every request that names no model.',
+      options: PROVIDER_OPTIONS,
     },
+    { type: 'text', key: 'default_model', label: 'Default model', required: false,
+      description: "One of the default provider's models. Leave blank to use its first model." },
+    ...AI_PROVIDERS.map((p) => ({
+      type: 'toggle', key: `${p.id}_enabled`, label: p.label, required: false, default: false,
+      visible: `\${data.provider !== '${p.id}'}`,
+    })),
 
     // ── Vercel AI Gateway ─────────────────────────────────────────
     { type: 'group', id: 'gateway', label: 'Vercel AI Gateway', required: false,
-      visible: "${data.provider === 'gateway'}",
+      visible: on('gateway'),
       description: 'Multi-provider router. The model is written provider/model, e.g. openai/gpt-4o.' },
     { type: 'text', key: 'gateway_model', label: 'Gateway model', required: true,
       description: 'Used instead of the model set in the server configuration. Format: provider/model, e.g. openai/gpt-4o or anthropic/claude-sonnet-4.6.',
-      pattern: '^[A-Za-z0-9_-]+\\/[A-Za-z0-9._:-]+$',
-      visible: "${data.provider === 'gateway'}" },
+      pattern: `^${GATEWAY_MODEL_ID}$`,
+      visible: on('gateway') },
+    modelList('gateway', listPattern(GATEWAY_MODEL_ID)),
     { type: 'password', key: 'gateway_api_key', label: 'Gateway API key',
       required: false, encrypted: true,
       description: 'Optional — required only if the gateway enforces auth.',
-      visible: "${data.provider === 'gateway'}" },
+      visible: on('gateway') },
+    testButton('gateway'),
 
     // ── OpenAI ───────────────────────────────────────────────────
     { type: 'group', id: 'openai', label: 'OpenAI', required: false,
-      visible: "${data.provider === 'openai'}" },
+      visible: on('openai') },
     { type: 'password', key: 'openai_api_key', label: 'OpenAI API key',
       required: true, encrypted: true,
       description: 'Used instead of the key set in the server configuration. Stored encrypted at rest.',
-      visible: "${data.provider === 'openai'}" },
+      visible: on('openai') },
     { type: 'text', key: 'openai_model', label: 'Model', required: false, default: 'gpt-4o',
       description: 'Default model id. Per-agent overrides take precedence.',
-      visible: "${data.provider === 'openai'}" },
+      visible: on('openai') },
+    modelList('openai'),
     { type: 'text', key: 'openai_base_url', label: 'Base URL', required: false,
       description: 'Override for Azure OpenAI or self-hosted gateways. Leave blank for api.openai.com.',
-      visible: "${data.provider === 'openai'}" },
+      visible: on('openai') },
+    testButton('openai'),
 
     // ── Anthropic ────────────────────────────────────────────────
     { type: 'group', id: 'anthropic', label: 'Anthropic', required: false,
-      visible: "${data.provider === 'anthropic'}" },
+      visible: on('anthropic') },
     { type: 'password', key: 'anthropic_api_key', label: 'Anthropic API key',
       required: true, encrypted: true,
       description: 'Used instead of the key set in the server configuration. Stored encrypted at rest.',
-      visible: "${data.provider === 'anthropic'}" },
+      visible: on('anthropic') },
     { type: 'text', key: 'anthropic_model', label: 'Model', required: false,
       default: 'claude-sonnet-4-20250514',
-      visible: "${data.provider === 'anthropic'}" },
+      visible: on('anthropic') },
+    modelList('anthropic'),
+    testButton('anthropic'),
 
     // ── Google Generative AI ─────────────────────────────────────
     { type: 'group', id: 'google', label: 'Google', required: false,
-      visible: "${data.provider === 'google'}" },
+      visible: on('google') },
     { type: 'password', key: 'google_api_key', label: 'Google API key',
       required: true, encrypted: true,
       description: 'Used instead of the key set in the server configuration. Stored encrypted at rest.',
-      visible: "${data.provider === 'google'}" },
+      visible: on('google') },
     { type: 'text', key: 'google_model', label: 'Model', required: false,
       default: 'gemini-2.0-flash',
-      visible: "${data.provider === 'google'}" },
+      visible: on('google') },
+    modelList('google'),
+    testButton('google'),
 
     // ── OpenAI-compatible presets (DeepSeek / DashScope / Cloudflare / …) ──
     //
@@ -124,75 +184,97 @@ const manifest = {
     // model id. Users only fill in API key + (optionally) model — the URL
     // is preset, eliminating the #1 onboarding mistake.
     { type: 'group', id: 'deepseek', label: 'DeepSeek', required: false,
-      visible: "${data.provider === 'deepseek'}",
+      visible: on('deepseek'),
       description: 'OpenAI-compatible API at https://api.deepseek.com. Base URL is auto-filled.' },
     { type: 'password', key: 'deepseek_api_key', label: 'DeepSeek API key',
       required: true, encrypted: true,
       description: 'sk-... — issued at platform.deepseek.com.',
-      visible: "${data.provider === 'deepseek'}" },
+      visible: on('deepseek') },
     { type: 'text', key: 'deepseek_model', label: 'Model', required: false,
       default: 'deepseek-chat',
       description: 'Examples: deepseek-chat (V3), deepseek-reasoner (R1 thinking).',
-      visible: "${data.provider === 'deepseek'}" },
+      visible: on('deepseek') },
+    modelList('deepseek'),
+    testButton('deepseek'),
 
     { type: 'group', id: 'dashscope', label: '阿里通义 DashScope', required: false,
-      visible: "${data.provider === 'dashscope'}",
+      visible: on('dashscope'),
       description: 'OpenAI-compatible endpoint at dashscope.aliyuncs.com/compatible-mode/v1. Base URL is auto-filled.' },
     { type: 'password', key: 'dashscope_api_key', label: 'DashScope API key',
       required: true, encrypted: true,
       description: 'sk-... — issued at dashscope.console.aliyun.com.',
-      visible: "${data.provider === 'dashscope'}" },
+      visible: on('dashscope') },
     { type: 'text', key: 'dashscope_model', label: 'Model', required: false,
       default: 'qwen-plus',
       description: 'Examples: qwen-plus, qwen-max, qwen3-max, qwen-turbo.',
-      visible: "${data.provider === 'dashscope'}" },
+      visible: on('dashscope') },
+    modelList('dashscope'),
+    testButton('dashscope'),
 
     { type: 'group', id: 'cloudflare', label: 'Cloudflare AI Gateway', required: false,
-      visible: "${data.provider === 'cloudflare'}",
+      visible: on('cloudflare'),
       description:
         'Uses the /compat endpoint, so the model is written provider/model (e.g. ' +
         'openai/gpt-4o-mini, anthropic/claude-3-5-sonnet, deepseek/deepseek-chat). ' +
         'Note: alibaba/qwen* is NOT supported by Cloudflare /compat — use the DashScope provider for Qwen.' },
     { type: 'text', key: 'cloudflare_account_id', label: 'Cloudflare account id', required: true,
       description: 'The 32-char hex id from your Cloudflare dashboard URL.',
-      visible: "${data.provider === 'cloudflare'}" },
+      visible: on('cloudflare') },
     { type: 'text', key: 'cloudflare_gateway_id', label: 'Gateway id', required: false, default: 'default',
       description: 'Gateway name configured in Cloudflare → AI Gateway. Defaults to "default".',
-      visible: "${data.provider === 'cloudflare'}" },
+      visible: on('cloudflare') },
     { type: 'password', key: 'cloudflare_api_key', label: 'Cloudflare AI Gateway token',
       required: true, encrypted: true,
       description: 'Issued in AI Gateway → "API tokens" tab (cfut_… or sk_…).',
-      visible: "${data.provider === 'cloudflare'}" },
+      visible: on('cloudflare') },
     { type: 'text', key: 'cloudflare_model', label: 'Model', required: false,
       default: 'openai/gpt-4o-mini',
-      pattern: '^[A-Za-z0-9_-]+\\/[A-Za-z0-9._:@-]+$',
+      pattern: `^${CLOUDFLARE_MODEL_ID}$`,
       description:
         'Format: provider/model. Allowed providers (per Cloudflare /compat): anthropic, openai, groq, ' +
         'mistral, cohere, perplexity, workers-ai, google-ai-studio, vertex, grok, deepseek, cerebras, baseten, parallel.',
-      visible: "${data.provider === 'cloudflare'}" },
+      visible: on('cloudflare') },
+    modelList('cloudflare', listPattern(CLOUDFLARE_MODEL_ID)),
+    testButton('cloudflare'),
 
     { type: 'group', id: 'siliconflow', label: '硅基流动 SiliconFlow', required: false,
-      visible: "${data.provider === 'siliconflow'}",
+      visible: on('siliconflow'),
       description: 'OpenAI-compatible endpoint at api.siliconflow.cn/v1. Base URL is auto-filled.' },
     { type: 'password', key: 'siliconflow_api_key', label: 'SiliconFlow API key',
       required: true, encrypted: true,
-      visible: "${data.provider === 'siliconflow'}" },
+      visible: on('siliconflow') },
     { type: 'text', key: 'siliconflow_model', label: 'Model', required: false,
       default: 'Qwen/Qwen2.5-7B-Instruct',
       description: 'Examples: Qwen/Qwen2.5-72B-Instruct, deepseek-ai/DeepSeek-V3, meta-llama/Meta-Llama-3.1-8B-Instruct.',
-      visible: "${data.provider === 'siliconflow'}" },
+      visible: on('siliconflow') },
+    modelList('siliconflow'),
+    testButton('siliconflow'),
 
     { type: 'group', id: 'openrouter', label: 'OpenRouter', required: false,
-      visible: "${data.provider === 'openrouter'}",
+      visible: on('openrouter'),
       description: 'Multi-provider router at openrouter.ai/api/v1. Base URL is auto-filled.' },
     { type: 'password', key: 'openrouter_api_key', label: 'OpenRouter API key',
       required: true, encrypted: true,
       description: 'sk-or-...',
-      visible: "${data.provider === 'openrouter'}" },
+      visible: on('openrouter') },
     { type: 'text', key: 'openrouter_model', label: 'Model', required: false,
       default: 'openai/gpt-4o-mini',
       description: 'Format: provider/model (e.g. anthropic/claude-3.5-sonnet, deepseek/deepseek-chat).',
-      visible: "${data.provider === 'openrouter'}" },
+      visible: on('openrouter') },
+    modelList('openrouter'),
+    testButton('openrouter'),
+
+    // ── Structured output ────────────────────────────────────────
+    // Its own knob, apart from the default model: strict structured-output
+    // calls keep the model measured for them whatever the default model is.
+    { type: 'group', id: 'structured_output', label: 'Structured output', required: false,
+      description: 'The model used for calls that must answer in a fixed data shape. Leave blank to use the default model.' },
+    { type: 'select', key: 'structured_output_provider', label: 'Provider', required: false,
+      description: 'A provider that is on. Leave blank to use the default provider.',
+      options: PROVIDER_OPTIONS,
+    },
+    { type: 'text', key: 'structured_output_model', label: 'Model', required: false,
+      description: "One of that provider's models. Leave blank to use its first model." },
 
     // ── Generation defaults ──────────────────────────────────────
     { type: 'group', id: 'defaults', label: 'Generation defaults', required: false,
@@ -461,6 +543,26 @@ export const aiTestActionHandler: SettingsActionHandler = async ({ values, paylo
     message: `${provider} configured (model=${model}). ${AI_RUNTIME_HINT}`,
   };
 };
+
+/**
+ * Built-in fallback handler for one provider's own "Test connection"
+ * (`ai/test_<provider>`): the `ai/test` form check, run for that provider
+ * whichever provider is the default. The AI runtime replaces it with a live
+ * call via `registerAction`, as it does `ai/test`.
+ */
+export function aiProviderTestActionHandler(provider: AiProviderId): SettingsActionHandler {
+  return (args) =>
+    aiTestActionHandler({
+      ...args,
+      values: { ...args.values, ...extractOverrides(args.payload), provider },
+      payload: undefined,
+    });
+}
+
+/** The fallback handler of every provider's "Test connection", keyed by action id. */
+export const aiProviderTestActionHandlers: Readonly<Record<string, SettingsActionHandler>> = Object.freeze(
+  Object.fromEntries(AI_PROVIDERS.map((p) => [`test_${p.id}`, aiProviderTestActionHandler(p.id)])),
+);
 
 /**
  * Handler for `ai/test_embedder` ("Test embedder"). Registered by
