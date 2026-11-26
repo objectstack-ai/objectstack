@@ -121,8 +121,9 @@ import {
   type PackageRemoval,
   type ReplayOutcome,
 } from './mapMessages';
-import type { DatasetProvenance, ObjectQuerySource } from '@objectstack/spec/ai';
+import type { DatasetProvenance, ObjectQuerySource, RecordCitationParsed } from '@objectstack/spec/ai';
 import { AnswerSourceBlock } from './AnswerSource';
+import { RecordCitations } from './RecordCitations';
 
 /**
  * One chat message as `<ChatbotEnhanced>` RENDERS it — the runtime contract of
@@ -176,6 +177,13 @@ export interface ChatbotEnhancedMessage {
    * only a wall of text.
    */
   charts?: ChatChart[];
+  /**
+   * The answer's verified record citations (ADR-0160 D9), lifted from the
+   * message's `data-record-citations` part by `extractRecordCitations`. Drawn
+   * as chips beside the "How this was computed" block; a click opens the
+   * cited record at its section through `onOpenRecord`.
+   */
+  recordCitations?: RecordCitationParsed[];
 }
 
 /**
@@ -875,8 +883,13 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    * → the button is disabled (nothing to route to).
    */
   onOpenBuilder?: (handoff: { prompt: string; packageId?: string }) => void;
-  /** cloud#1658 — open the record an `open_record` hand-off points at. */
-  onOpenRecord?: (handoff: { objectName: string; recordId: string; label?: string; reason?: string }) => void;
+  /**
+   * cloud#1658 — open the record an `open_record` hand-off points at. A
+   * record citation's chip calls it too (ADR-0160 D9), with the `anchor` of
+   * the body section it cites when it names one; the host opens the record at
+   * that section.
+   */
+  onOpenRecord?: (handoff: { objectName: string; recordId: string; label?: string; reason?: string; anchor?: string }) => void;
   /**
    * objectstack#31869 — open the list a `/list/OBJECT` link in an answer
    * names: the object, and optionally a view and the Filter panel conditions.
@@ -5658,6 +5671,10 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                               : [],
                           )}
                         />
+                      ) : null}
+                      {/* ADR-0160 D9 — the records the answer rests on. */}
+                      {!isUser && message.recordCitations ? (
+                        <RecordCitations citations={message.recordCitations} onOpenRecord={onOpenRecord} />
                       ) : null}
                       {!isUser && sources.length > 0 ? (
                         <Sources>

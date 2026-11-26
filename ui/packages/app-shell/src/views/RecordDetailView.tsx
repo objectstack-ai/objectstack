@@ -66,7 +66,8 @@ import {
 import { applySavedRecordEcho } from './recordSaveEcho.js';
 import { authoredRecordPageApplies } from './recordPageSurface.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
-import { RECORD_COMMENT_PARAM, RECORD_COMMENTS_PARAM, RECORD_COMMENTS_PUSHED_STATE as COMMENTS_PUSHED, RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
+import { RECORD_COMMENT_PARAM, RECORD_COMMENTS_PARAM, RECORD_SECTION_PARAM, RECORD_COMMENTS_PUSHED_STATE as COMMENTS_PUSHED, RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
+import { focusRecordSection, sectionCandidates } from './recordSectionAnchor.js';
 import { resolveActionParams } from '@object-ui/fields';
 import { createConsoleServerActionHandler } from '../utils/consoleServerAction.js';
 import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
@@ -4939,6 +4940,21 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // only for a loaded record with nothing to be named by.
   const holdsRouteRecord =
     pageRecordFor === routeRecordKey && !!readablePageRecord && typeof readablePageRecord === 'object';
+  // ADR-0160 D9 — `?section=ANCHOR`, a passage the assistant cited: once the
+  // record is held, the body heading the anchor names is scrolled to and
+  // marked (`recordSectionAnchor.ts`); a stale anchor leaves the page at its
+  // top. Judged once per record and anchor.
+  const sectionAnchor = tabSearchParams.get(RECORD_SECTION_PARAM) || null;
+  const citedSectionCandidates = holdsRouteRecord
+    ? sectionCandidates(objectDef?.fields, readablePageRecord as Record<string, unknown>, sectionAnchor)
+    : [];
+  const citedSectionKey = citedSectionCandidates.length > 0 ? `${routeRecordKey}\n${sectionAnchor}` : null;
+  const citedSectionCandidatesRef = useRef(citedSectionCandidates);
+  citedSectionCandidatesRef.current = citedSectionCandidates;
+  useEffect(() => {
+    if (!pageRootEl || !citedSectionKey) return undefined;
+    return focusRecordSection(pageRootEl, citedSectionCandidatesRef.current);
+  }, [pageRootEl, citedSectionKey]);
   const landedRecordName = holdsRouteRecord && !recordTitle && objectDef
     ? getRecordDisplayName(objectDef, readablePageRecord)
     : undefined;
