@@ -390,3 +390,183 @@ describe('a lookup-laned board under a list view draws each lane\'s whole statis
     expect(foot('acc-b')).toBeNull();
   });
 });
+
+/**
+ * objectstack#37327 — the same lookup-laned board, handed one page of 25 of 70
+ * deals, wrote every other lane figure off that page: its header count and a
+ * foot `count` read 13 and 12 for lanes of 30 and 30, the `summarizeField`
+ * header total summed the page, and the 10 deals of a third account, all past
+ * the page, drew no lane. The grouped lane read now asks each lane's record
+ * count and the header total's `SUM` beside the statistic, and its group keys
+ * name every lane. Over a source with no grouped door the page's figures are
+ * marked `+` and no lane past the page is drawn.
+ *
+ * Deals 0–59 alternate over `acc-a` (even amounts 0…58) and `acc-b` (odd,
+ * 1…59); deals 60–69 are `acc-c`'s (60…69), all past the first page.
+ */
+describe('a lookup-laned board under a list view counts and totals each whole lane, and draws a lane past the page (objectstack#37327)', () => {
+  const DEAL = 'crm_deal';
+  const ACCOUNT = 'crm_account';
+  const DEALS: Row[] = Array.from({ length: 70 }, (_, i) => ({
+    id: `deal-${String(i).padStart(2, '0')}`,
+    name: `Deal ${String(i).padStart(2, '0')}`,
+    account: i >= 60 ? 'acc-c' : i % 2 === 0 ? 'acc-a' : 'acc-b',
+    amount: i,
+  }));
+  const ACCOUNTS: Row[] = [
+    { id: 'acc-a', name: 'Amber Ltd' },
+    { id: 'acc-b', name: 'Birch Inc' },
+    { id: 'acc-c', name: 'Cyan Corp' },
+  ];
+  const DEFS: Record<string, unknown> = {
+    [DEAL]: {
+      name: DEAL,
+      label: 'Deal',
+      fields: {
+        name: { type: 'text', label: 'Deal Name' },
+        account: { type: 'lookup', label: 'Account', reference: ACCOUNT },
+        amount: { type: 'number', label: 'Amount' },
+      },
+    },
+    [ACCOUNT]: { name: ACCOUNT, label: 'Account', nameField: 'name', fields: { name: { type: 'text', label: 'Name' } } },
+  };
+  const BOARD_VIEW = {
+    type: 'list-view',
+    objectName: DEAL,
+    viewType: 'kanban',
+    columns: [{ field: 'name' }, { field: 'account' }, { field: 'amount' }],
+    pagination: { pageSize: 25 },
+    kanban: { groupByField: 'account', titleField: 'name' },
+  };
+
+  /** The platform's grouped-aggregate door: `COUNT(*)` counts rows, the rest read `field`. */
+  function dealSource(withDoor = true) {
+    const stores: Record<string, ValueDataSource<Row>> = {
+      [DEAL]: new ValueDataSource<Row>({ items: DEALS }),
+      [ACCOUNT]: new ValueDataSource<Row>({ items: ACCOUNTS }),
+    };
+    const queryGroupHeaders = vi.fn(async (object: string, query: any) => {
+      const kept = (await stores[object].find(object, { ...(query.where ? { $filter: query.where } : {}), $top: 100000 } as any)) as any;
+      const rows: Row[] = Array.isArray(kept) ? kept : kept.data ?? kept.records ?? [];
+      const key = query.groupBy[0];
+      const groups = new Map<unknown, Row[]>();
+      for (const row of rows) groups.set(row[key] ?? null, [...(groups.get(row[key] ?? null) ?? []), row]);
+      return [...groups].map(([k, members]) => {
+        const out: Row = { [key]: k };
+        for (const agg of query.aggregations) {
+          if (agg.function === 'count' && !agg.field) {
+            out[agg.alias] = members.length;
+            continue;
+          }
+          const values = members.map((m) => m[agg.field]).filter((v) => typeof v === 'number') as number[];
+          out[agg.alias] =
+            agg.function === 'count' ? values.length
+            : values.length === 0 ? null
+            : agg.function === 'sum' ? values.reduce((a, b) => a + b, 0)
+            : agg.function === 'avg' ? values.reduce((a, b) => a + b, 0) / values.length
+            : agg.function === 'min' ? Math.min(...values)
+            : Math.max(...values);
+        }
+        return out;
+      });
+    });
+    return {
+      find: vi.fn(async (object: string, params: any) => stores[object].find(object, params)),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async (object: string) => DEFS[object]),
+      ...(withDoor ? { queryGroupHeaders } : {}),
+    } as any;
+  }
+
+  /** The count badge beside a lane title, as a person reads it. */
+  const laneBadge = (title: string) =>
+    (within(lane(title)).getByRole('heading').parentElement!.querySelector('span')!.textContent ?? '').trim();
+  /** The `summarizeField` total in a lane header, thousands separators dropped. */
+  const headerTotal = (title: string) =>
+    (lane(title).querySelector('[data-kanban-lane-total]')?.textContent ?? '').replace(/,/g, '').replace('Amount', '').trim();
+  const foot = (title: string) => lane(title).querySelector<HTMLElement>('[data-kanban-lane-statistic]');
+  const footFigure = (title: string) => (foot(title)?.lastElementChild?.textContent ?? '').replace(/,/g, '');
+
+  /** RIG SELF-CHECK — the board drew the view's first page: 13 + 12 cards, no `acc-c` card. */
+  async function onePageDrawn() {
+    await waitFor(() => expect(cards()).toHaveLength(25));
+    expect(within(lane('acc-a')).getAllByRole('listitem')).toHaveLength(13);
+    expect(within(lane('acc-b')).getAllByRole('listitem')).toHaveLength(12);
+  }
+
+  it('each lane header counts the whole lane, 30 and 30, never the page\'s 13 and 12', async () => {
+    const ds = dealSource();
+    mountBoard(ds, BOARD_VIEW);
+
+    await onePageDrawn();
+    await waitFor(() => expect(laneBadge('acc-a')).toBe('30'));
+    expect(laneBadge('acc-b')).toBe('30');
+    // ONE grouped read by the lane field, asking `COUNT(*)`, with no statistic drawn.
+    expect(ds.queryGroupHeaders).toHaveBeenCalledTimes(1);
+    expect(ds.queryGroupHeaders.mock.calls[0][1].groupBy).toEqual(['account']);
+    expect(ds.queryGroupHeaders.mock.calls[0][1].aggregations).toEqual([{ function: 'count', alias: 'count' }]);
+  });
+
+  it('a foot `count` reads the whole lane too', async () => {
+    mountBoard(dealSource(), { ...BOARD_VIEW, kanban: { ...BOARD_VIEW.kanban, summary: { type: 'count' } } });
+
+    await onePageDrawn();
+    await waitFor(() => expect(footFigure('acc-a')).toBe('30'));
+    expect(footFigure('acc-b')).toBe('30');
+  });
+
+  it('CONTROL: over a source with no grouped door each count is the page\'s, marked `+`', async () => {
+    mountBoard(dealSource(false), { ...BOARD_VIEW, kanban: { ...BOARD_VIEW.kanban, summary: { type: 'count' } } });
+
+    await onePageDrawn();
+    expect(laneBadge('acc-a')).toBe('13+');
+    expect(laneBadge('acc-b')).toBe('12+');
+    expect(footFigure('acc-a')).toBe('13+');
+  });
+
+  it('a lane whose records all sit past the page is drawn, titled by its account, counting its 10 records', async () => {
+    const ds = dealSource();
+    mountBoard(ds, BOARD_VIEW);
+
+    await onePageDrawn();
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Cyan Corp' })).toBeInTheDocument());
+    expect(within(lane('Cyan Corp')).queryAllByRole('listitem')).toHaveLength(0);
+    expect(laneBadge('Cyan Corp')).toBe('10');
+  });
+
+  it('CONTROL: over a source with no grouped door no lane past the page is drawn', async () => {
+    mountBoard(dealSource(false), BOARD_VIEW);
+
+    await onePageDrawn();
+    expect(screen.getAllByRole('group').map((g) => g.getAttribute('aria-label'))).not.toContain('Cyan Corp');
+    expect(screen.queryByRole('group', { name: 'acc-c' })).toBeNull();
+  });
+
+  it('the `summarizeField` header total sums the whole lane: 870, 900 and 645, never the page\'s 156 and 144', async () => {
+    const ds = dealSource();
+    mountBoard(ds, { ...BOARD_VIEW, kanban: { ...BOARD_VIEW.kanban, summarizeField: 'amount' } });
+
+    await onePageDrawn();
+    await waitFor(() => expect(headerTotal('acc-a')).toBe('870'));
+    expect(headerTotal('acc-b')).toBe('900');
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Cyan Corp' })).toBeInTheDocument());
+    expect(headerTotal('Cyan Corp')).toBe('645');
+    // The count and the total ride ONE read.
+    expect(ds.queryGroupHeaders).toHaveBeenCalledTimes(1);
+    expect(ds.queryGroupHeaders.mock.calls[0][1].aggregations).toEqual([
+      { function: 'count', alias: 'count' },
+      { function: 'sum', field: 'amount', alias: 'sum_amount' },
+    ]);
+  });
+
+  it('CONTROL: over a source with no grouped door the header total is the page\'s, marked `+`', async () => {
+    mountBoard(dealSource(false), { ...BOARD_VIEW, kanban: { ...BOARD_VIEW.kanban, summarizeField: 'amount' } });
+
+    await onePageDrawn();
+    await waitFor(() => expect(headerTotal('acc-a')).toBe('156+'));
+    expect(headerTotal('acc-b')).toBe('144+');
+  });
+});
