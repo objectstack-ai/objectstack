@@ -387,6 +387,8 @@
     "data/Field:trackHistory",
     "data/Field:transferBehavior",
     "data/Field:type",
+    "data/Field:uiReadonly",
+    "data/Field:uiReadonlyWhen",
     "data/Field:unique",
     "data/Field:unitConfig",
     "data/Field:useGrouping",

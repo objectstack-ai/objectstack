@@ -6,9 +6,10 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { render, RenderOptions } from '@testing-library/react';
+import { fireEvent, render, RenderOptions } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import type { BaseSchema } from '@object-ui/types';
+import { GridCellSelectionProvider, type GridCellSelection } from '../context/gridCellSelection';
 
 /**
  * Test utility for rendering components from schema.
@@ -27,6 +28,34 @@ export function renderComponent(schema: BaseSchema, options?: RenderOptions) {
   }
 
   return render(<Component schema={schema} />, options);
+}
+
+/**
+ * Renders a `data-table` the one way an editable one edits (objectstack#35827):
+ * inside a select-first host (`GridCellSelection`) with a per-cell save
+ * (`onRowSave`, a resolved no-op unless the schema names one). Without both, an
+ * editable table renders read-only. `rerender` takes the next schema and keeps
+ * the same host and default save.
+ */
+export function renderSelectFirstTable(
+  schema: BaseSchema & Record<string, unknown>,
+  { selection = {}, ...options }: RenderOptions & { selection?: GridCellSelection } = {},
+) {
+  const DataTable = ComponentRegistry.get('data-table')!;
+  const defaultSave = () => Promise.resolve();
+  const tree = (next: BaseSchema & Record<string, unknown>) => (
+    <GridCellSelectionProvider value={selection}>
+      <DataTable schema={{ onRowSave: defaultSave, ...next }} />
+    </GridCellSelectionProvider>
+  );
+  const utils = render(tree(schema), options);
+  return { ...utils, rerender: (next: BaseSchema & Record<string, unknown>) => utils.rerender(tree(next)) };
+}
+
+/** Opens a cell's editor the select-first way: a click selects it, a double-click edits. */
+export function openCellEditor(cell: HTMLElement) {
+  fireEvent.click(cell);
+  fireEvent.doubleClick(cell);
 }
 
 /**

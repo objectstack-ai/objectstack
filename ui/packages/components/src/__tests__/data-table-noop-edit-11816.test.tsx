@@ -9,23 +9,22 @@
 /**
  * objectui#11816 — inline edit on an `editable` data-table:
  *
- *  1. a row counts as modified only when a value differs from the one it
- *     loaded with. Every commit used to be staged, so opening a cell and
- *     leaving it as it was showed "1 row modified · Save All (1)";
- *  2. staging the loaded value back un-marks the row;
- *  3. the trailing column that only ever holds a modified row's cancel/save
- *     pair is not headed "Actions" — `ObjectGrid` already draws a host column
- *     of that name beside it — and the "Actions" label takes the data-column
- *     header styling instead of the cell's larger default type.
+ *  1. a commit saves only when a value differs from the one the row loaded
+ *     with. Every commit used to be staged, so opening a cell and leaving it
+ *     as it was showed "1 row modified · Save All (1)"; under the per-cell
+ *     save (objectstack#35827) such a commit sends no save;
+ *  2. the "Actions" label takes the data-column header styling instead of the
+ *     cell's larger default type. (The staged arm's edit-only column, headed by
+ *     its own name, is retired with that arm.)
  *
- * Each case drives the real renderer through the user's own gestures and reads
- * the toolbar the user reads.
+ * Each case drives the real renderer, select-first, through the user's own
+ * gestures and reads the saves it sends.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, screen } from '@testing-library/react';
+import { act, fireEvent, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
-import { renderComponent } from './test-utils';
+import { openCellEditor, renderSelectFirstTable } from './test-utils';
 // Registers the renderers at module scope, NOT inside a `beforeAll`
 // (object-ui/no-dynamic-import-in-test-hook, objectui#3010/#3021).
 import '../renderers';
@@ -66,9 +65,8 @@ const makeSchema = (extra: Record<string, unknown> = {}) =>
   ({
     type: 'data-table' as const,
     editable: true,
-    singleClickEdit: true,
     rowActions: true,
-    onBatchSave: vi.fn(),
+    onRowSave: vi.fn(() => Promise.resolve()),
     renderCellEditor,
     columns: [
       { header: 'Name', accessorKey: 'name' },
@@ -90,99 +88,107 @@ const NOTE = 2;
 const TAGS = 3;
 const PRIORITY = 4;
 
-/** What the toolbar says about staged edits; `null` when nothing is staged. */
-const modified = () => screen.queryByText(/rows? modified/)?.textContent ?? null;
+/** Renders the table select-first; `saves()` is how many row saves it sent. */
+function renderTable(extra: Record<string, unknown> = {}) {
+  const schema = makeSchema(extra);
+  const utils = renderSelectFirstTable(schema);
+  const saves = () => (schema.onRowSave as ReturnType<typeof vi.fn>).mock.calls.length;
+  const lastSave = () => (schema.onRowSave as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1];
+  return { ...utils, saves, lastSave };
+}
 
 /** Open `td`'s built-in editor, run `edit` on its input, then blur it. */
-function editBuiltIn(td: HTMLElement, edit: (input: HTMLInputElement) => void = () => {}) {
-  fireEvent.click(td);
-  const input = td.querySelector('input') as HTMLInputElement;
+async function editBuiltIn(td: HTMLElement, edit: (input: HTMLInputElement) => void = () => {}) {
+  openCellEditor(td);
+  const input = document.querySelector('td[data-editing-cell] input') as HTMLInputElement;
   expect(input).toBeTruthy();
   edit(input);
   fireEvent.blur(input);
+  await act(async () => {});
 }
 
-describe('data-table inline edit — a row is modified only by a real change (objectui#11816)', () => {
-  it('a text cell opened and left as it was stages nothing', () => {
-    const { container } = renderComponent(makeSchema());
-    editBuiltIn(cell(container, NAME));
-    expect(modified()).toBeNull();
-    expect(screen.queryByText(/Save All/)).toBeNull();
+describe('data-table inline edit — a commit saves only a real change (objectui#11816)', () => {
+  // Under the staged model a no-op commit marked the row modified; now each
+  // commit saves at once (objectstack#35827), so a no-op commit must send no
+  // save at all.
+  it('a text cell opened and left as it was saves nothing', async () => {
+    const { container, saves } = renderTable();
+    await editBuiltIn(cell(container, NAME));
+    expect(saves()).toBe(0);
   });
 
-  it('an empty cell left empty stages nothing (the editor seeds it with an empty string)', () => {
-    const { container } = renderComponent(makeSchema());
-    editBuiltIn(cell(container, NOTE), (input) => expect(input.value).toBe(''));
-    expect(modified()).toBeNull();
+  it('an empty cell left empty saves nothing (the editor seeds it with an empty string)', async () => {
+    const { container, saves } = renderTable();
+    await editBuiltIn(cell(container, NOTE), (input) => expect(input.value).toBe(''));
+    expect(saves()).toBe(0);
   });
 
-  it('a number retyped as the same numeral stages nothing; a different number does', () => {
-    const { container } = renderComponent(makeSchema());
+  it('a number retyped as the same numeral saves nothing; a different number does', async () => {
+    const { container, saves, lastSave } = renderTable();
     // Through `7` first so the editor really holds the input's STRING `'5'`.
-    editBuiltIn(cell(container, QTY), (input) => {
+    await editBuiltIn(cell(container, QTY), (input) => {
       fireEvent.change(input, { target: { value: '7' } });
       fireEvent.change(input, { target: { value: '5' } });
     });
-    expect(modified()).toBeNull();
+    expect(saves()).toBe(0);
 
-    editBuiltIn(cell(container, QTY), (input) => fireEvent.change(input, { target: { value: '6' } }));
-    expect(modified()).toBe('1 row modified');
+    await editBuiltIn(cell(container, QTY), (input) => fireEvent.change(input, { target: { value: '6' } }));
+    expect(saves()).toBe(1);
+    expect(Number((lastSave() as { qty: unknown }).qty)).toBe(6);
   });
 
-  it('staging the loaded value back un-marks the row', () => {
-    const { container } = renderComponent(makeSchema());
-    editBuiltIn(cell(container, QTY), (input) => fireEvent.change(input, { target: { value: '6' } }));
-    expect(modified()).toBe('1 row modified');
-
-    editBuiltIn(cell(container, QTY), (input) => fireEvent.change(input, { target: { value: '5' } }));
-    expect(modified()).toBeNull();
-    expect(screen.queryByText(/Save All/)).toBeNull();
-  });
-
-  it('a discrete editor committing the loaded code stages nothing', () => {
-    const { container } = renderComponent(makeSchema());
-    fireEvent.click(cell(container, PRIORITY));
+  it('a discrete editor committing the loaded code saves nothing', async () => {
+    const { container, saves } = renderTable();
+    openCellEditor(cell(container, PRIORITY));
     fireEvent.click(screen.getByTestId('pick-high'));
+    await act(async () => {});
     expect(screen.queryByTestId('pick-high')).toBeNull(); // committed and closed
-    expect(modified()).toBeNull();
+    expect(saves()).toBe(0);
   });
 
-  it('an injected editor left by a click outside stages nothing (the reported gesture)', () => {
-    const { container } = renderComponent(makeSchema());
-    fireEvent.click(cell(container, PRIORITY));
+  it('an injected editor left by a click outside saves nothing (the reported gesture)', async () => {
+    const { container, saves } = renderTable();
+    openCellEditor(cell(container, PRIORITY));
     expect(screen.getByTestId('pick-high')).toBeInTheDocument();
     fireEvent.pointerDown(document.body);
+    await act(async () => {});
     expect(screen.queryByTestId('pick-high')).toBeNull(); // left edit mode
-    expect(modified()).toBeNull();
+    expect(saves()).toBe(0);
   });
 
-  it('a multi-value set in another order is the same value; a smaller set is not', () => {
-    const { container } = renderComponent(makeSchema());
-    fireEvent.click(cell(container, TAGS));
+  it('a multi-value set in another order is the same value; a smaller set is not', async () => {
+    const { container, saves, lastSave } = renderTable();
+    openCellEditor(cell(container, TAGS));
     fireEvent.click(screen.getByTestId('tags-reorder'));
-    expect(modified()).toBeNull();
+    fireEvent.pointerDown(document.body);
+    await act(async () => {});
+    expect(saves()).toBe(0);
+
+    openCellEditor(cell(container, TAGS));
     fireEvent.click(screen.getByTestId('tags-drop'));
-    expect(modified()).toBe('1 row modified');
-    fireEvent.click(screen.getByTestId('tags-restore'));
-    expect(modified()).toBeNull();
+    fireEvent.pointerDown(document.body);
+    await act(async () => {});
+    expect(saves()).toBe(1);
+    expect(lastSave()).toEqual({ tags: ['a'] });
   });
+
+  // "staging the loaded value back un-marks the row" pinned the staged bar's
+  // count; with no staging there is no mark to take back.
 });
 
 describe('data-table inline edit — the edit column is not a second "Actions" (objectui#11816)', () => {
-  it('the save-only column is headed by its own name, not "Actions"', () => {
-    renderComponent(makeSchema());
-    expect(screen.queryByRole('columnheader', { name: 'Actions' })).toBeNull();
-    expect(screen.getByRole('columnheader', { name: 'Edit' })).toBeInTheDocument();
-  });
+  // "the save-only column is headed by its own name" pinned the staged arm's
+  // edit-only column; select-first draws none (objectstack#35827), pinned in
+  // data-table-select-first-35684 "no edit-only column, ever".
 
   it('a column that can hold a row menu stays "Actions"', () => {
-    renderComponent(makeSchema({ onRowEdit: () => {} }));
+    renderTable({ onRowEdit: () => {} });
     expect(screen.getByRole('columnheader', { name: 'Actions' })).toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Edit' })).toBeNull();
   });
 
   it('the "Actions" label is set in the data-column header type', () => {
-    renderComponent(makeSchema({ editable: false, onRowEdit: () => {} }));
+    renderTable({ editable: false, onRowEdit: () => {} });
     const label = (name: string) =>
       screen.getByRole('columnheader', { name }).querySelector('span') as HTMLElement;
     // 12px since objectstack#36047 (a header is secondary type).

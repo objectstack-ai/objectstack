@@ -42,6 +42,7 @@ interface RawModel {
   label?: string;
   default?: boolean;
   costMultiplier?: unknown;
+  tierLabel?: unknown;
   [key: string]: unknown;
 }
 
@@ -69,15 +70,26 @@ function costMultiplierOf(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
+/**
+ * objectstack#35578 — `tierLabel` is kept only as the spec declares it
+ * (`AiModelsResponseSchema`: a non-empty string). Anything else is no tier
+ * name, so the closed picker shows the label rather than a blank.
+ */
+function tierLabelOf(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
 function normalize(raw: RawModel[]): ChatbotModelOption[] {
   return raw
     .filter((m) => typeof m?.id === 'string' && (m.id as string).length > 0)
     .map((m) => {
       const costMultiplier = costMultiplierOf(m.costMultiplier);
+      const tierLabel = tierLabelOf(m.tierLabel);
       return {
         id: m.id as string,
         label: m.label || (m.id as string),
         ...(costMultiplier !== undefined ? { costMultiplier } : {}),
+        ...(tierLabel !== undefined ? { tierLabel } : {}),
       };
     });
 }

@@ -893,6 +893,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "읽기 전용",
         helpText: "양식에서 필드가 읽기 전용임"
       },
+      uiReadonly: {
+        label: "화면에서 읽기 전용",
+        helpText: "콘솔에서는 이 필드를 직접 편집할 수 없습니다(대화 상자, 레코드 페이지, 그리드, 칸반 및 캘린더 끌기). 작업, 가져오기, API, 플로우는 계속 기록할 수 있으며 각 기록은 개체의 유효성 검사로 판정됩니다. 읽기 전용이 켜져 있으면 끈 상태로 두세요. 읽기 전용이 이미 모든 클라이언트 기록을 막습니다."
+      },
       hidden: {
         label: "숨김",
         helpText: "기본 UI 뷰에서 필드 숨김"
@@ -916,6 +920,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       readonlyWhen: {
         label: "읽기 전용 조건",
         helpText: "레코드에 대한 CEL 조건식(예: record.status == 'paid')입니다. TRUE인 동안 필드가 읽기 전용이며 서버에서 강제됩니다. 업데이트가 잠긴 필드를 바꾸면 그 변경은 버려지고 저장된 값이 유지됩니다. 레코드 자체의 열을 읽으며, objectstack validate는 참조 필드를 통한 읽기를 거부합니다."
+      },
+      uiReadonlyWhen: {
+        label: "화면에서 읽기 전용 조건",
+        helpText: "레코드에 대한 CEL 조건식(예: record.status != 'draft') — TRUE인 동안 기존 레코드의 이 필드는 콘솔에서 편집할 수 없습니다(편집 대화상자, 레코드 페이지, 그리드, 칸반 및 캘린더 드래그). 새 레코드의 생성 대화상자는 판단하지 않습니다. 작업, 가져오기, API 및 흐름은 계속 기록하며, 객체의 유효성 검사가 판단합니다. '읽기 전용 조건'처럼 레코드 자체의 열을 읽습니다."
       },
       requiredWhen: {
         label: "필수 조건",

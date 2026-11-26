@@ -179,7 +179,7 @@ export const KnowledgeSourceSchema = lazySchema(() => z.object({
   /** Optional description. */
   description: z.string().optional(),
   /**
-   * Adapter id this source binds to (e.g. `'ragflow'`, `'memory'`).
+   * Adapter id this source binds to (e.g. `'pgvector'`, `'memory'`).
    * Resolved at runtime by `IKnowledgeService.registerAdapter`.
    */
   adapter: z.string().describe('Adapter id'),
@@ -189,7 +189,7 @@ export const KnowledgeSourceSchema = lazySchema(() => z.object({
   source: KnowledgeSourceKindSchema,
   /**
    * Optional embedding model reference. Adapters that manage
-   * embeddings internally (RAGFlow, Dify, Vectara) may ignore this.
+   * embeddings internally (Dify, Vectara) may ignore this.
    */
   embedding: EmbeddingModelSchema.optional(),
   /**

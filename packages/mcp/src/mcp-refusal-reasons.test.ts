@@ -32,12 +32,37 @@
  *    #7450); a list the shared recogniser does not read gets none; a
  *    `userMessage` that does not begin with the lines gets no invented closing
  *    line.
+ *
+ * [#37512] The follow-ups:
+ *
+ *  - The withholding's reach: the security gate's own refusal (a served
+ *    `PERMISSION_DENIED` with no `declaredCode`) gets no relay and serves none
+ *    of its `details`; a listed refusal an app declared at 403, which the doors
+ *    demote to `PERMISSION_DENIED` beside `declaredCode`, gets it. The parity
+ *    case reads both REST doors' own answer to that throw (`mapDataError`,
+ *    `actionsDoorAnswerOf`): each serves the same lines as `details.refusals`.
+ *  - A listed throw at a 5xx gets no relay (`run_action`, `resume_run`, the
+ *    only tools whose renderer reaches the relay on a fault).
+ *  - The record read tools and `delete_records`' outer catch, the not-recorded
+ *    members beside a relay, and a `FLOW_FAILED` throw that is also listed.
+ *  - `delete_records`' per-row groups name a listed refusal whole in `reason`
+ *    (the catalogue's caller sentence IS its `userMessage`, `asCatalogue`), so
+ *    they carry no relay block.
  */
 
 import { describe, it, expect } from 'vitest';
 
+import { GET_RECORD_CONTEXT_TOOL_NAME } from '@objectstack/spec/ai';
+import { createRecordContextTools } from '@objectstack/service-record-context';
+import { actionsDoorAnswerOf, mapDataError } from '@objectstack/types';
+
 import { MCPServerRuntime } from './mcp-server-runtime.js';
-import { REFUSAL_REASONS_RELAY_LEAD, type McpActionBridge, type McpDataBridge } from './mcp-http-tools.js';
+import {
+  FLOW_FAILURE_RELAY_LEAD,
+  REFUSAL_REASONS_RELAY_LEAD,
+  type McpActionBridge,
+  type McpDataBridge,
+} from './mcp-http-tools.js';
 
 type Bridge = McpDataBridge & McpActionBridge;
 
@@ -72,18 +97,30 @@ const TWO: Listed = {
  */
 function listedRefusal(
   listed: Listed,
-  opts: { withList?: boolean; code?: string; status?: number; userMessage?: string; refusals?: unknown } = {},
+  opts: {
+    withList?: boolean;
+    code?: string;
+    status?: number;
+    userMessage?: string;
+    refusals?: unknown;
+    /** The caller sentence; the catalogue sets it to `userMessage` (`asCatalogue`). */
+    innerMessage?: string;
+    asCatalogue?: boolean;
+    name?: string;
+    details?: unknown;
+  } = {},
 ): () => Error {
   return () => {
     const userMessage = opts.userMessage ?? [...listed.lines.map((line) => line.message), listed.closing].join('\n');
     const err = Object.assign(new Error(`hook 'expense_submit_guard' threw: Error: ${CODE}`), {
-      innerMessage: CODE,
+      innerMessage: opts.innerMessage ?? (opts.asCatalogue ? userMessage : CODE),
       code: opts.code ?? CODE,
       status: opts.status ?? 400,
       userMessage,
+      ...(opts.details !== undefined ? { details: opts.details } : {}),
       ...(opts.withList === false ? {} : { refusals: opts.refusals ?? listed.lines.map((line) => ({ ...line })) }),
     });
-    err.name = 'SandboxError';
+    err.name = opts.name ?? 'SandboxError';
     return err;
   };
 }
@@ -109,7 +146,7 @@ function refusingBridge(thrown: () => Error): Bridge {
 let nextId = 1;
 
 /** One `tools/call` over the real HTTP transport; answers the parsed tool result. */
-async function callOverHttp(bridge: Bridge, name: string, args: Record<string, unknown>) {
+async function callOverHttp(bridge: Bridge, name: string, args: Record<string, unknown>, isError = true) {
   const body = { jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: { name, arguments: args } };
   const runtime = new MCPServerRuntime({ name: 'pin', version: '0.0.0' });
   const res = await runtime.handleHttpRequest(
@@ -123,8 +160,8 @@ async function callOverHttp(bridge: Bridge, name: string, args: Record<string, u
   expect(res.status, `${name}: the HTTP transport itself answered ${res.status}`).toBe(200);
   const json = JSON.parse(await res.text()) as { result?: any; error?: unknown };
   expect(json.error, `${name}: JSON-RPC error ${JSON.stringify(json.error)}`).toBeUndefined();
-  expect(json.result.isError, `${name}: not a tool error`).toBe(true);
-  return json.result as { isError: true; content: Array<{ type: string; text: string }> };
+  expect(json.result.isError === true, `${name}: isError`).toBe(isError);
+  return json.result as { isError?: true; content: Array<{ type: string; text: string }> };
 }
 
 /** The tools whose catch renders the door's `userMessage`, and which door that is. */
@@ -212,5 +249,159 @@ describe('MCP tools: a refusal with several declared reasons names every line, w
     );
     expect(content).toHaveLength(2);
     expect(content[1].text).toBe(`${REFUSAL_REASONS_RELAY_LEAD}${LINE_ON_REPORT}\n${LINE_APPROVED}`);
+  });
+});
+
+/** The record read tools and `delete_records`' selection read: the refusal is thrown by the read. */
+function readRefusingBridge(thrown: () => Error): Bridge {
+  return {
+    ...refusingBridge(thrown),
+    async query() { throw thrown(); },
+    async get() { throw thrown(); },
+    async aggregate() { throw thrown(); },
+    async getRecordContext() { throw thrown(); },
+    recordContextToolDefinitions: () => createRecordContextTools().definitions,
+  };
+}
+
+/** The tools whose refusal the read throws, each rendered through the `/data` door's answer. */
+const READ_DOORS = [
+  { tool: 'query_records', args: { objectName: OBJECT } },
+  { tool: 'aggregate_records', args: { objectName: OBJECT, aggregations: [{ function: 'count', alias: 'n' }] } },
+  { tool: 'get_record', args: { objectName: OBJECT, recordId: RECORD_ID } },
+  { tool: GET_RECORD_CONTEXT_TOOL_NAME, args: { objectName: OBJECT, recordId: RECORD_ID } },
+  // The selection read is the outer catch's coded throw.
+  { tool: 'delete_records', args: { objectName: OBJECT, recordIds: [RECORD_ID], confirm: true } },
+] as const;
+
+describe('[#37512] the relay\'s reach: the security gate\'s own refusal is withheld, an app\'s 403 is not', () => {
+  const appAt403 = listedRefusal(TWO, { status: 403, asCatalogue: true });
+
+  for (const door of DOORS) {
+    it(`${door.tool} (${door.door}): a listed refusal an app declared at 403 names its lines; no details are served`, async () => {
+      const { content } = await callOverHttp(refusingBridge(appAt403), door.tool, door.args);
+      expect(content).toHaveLength(2);
+      const envelope = JSON.parse(content[0].text);
+      expect(envelope.error).toMatchObject({ code: 'PERMISSION_DENIED', declaredCode: CODE, status: 403 });
+      expect(envelope.error.details).toBeUndefined();
+      expect(content[1]).toEqual({ type: 'text', text: relayOf(TWO) });
+    });
+  }
+
+  it('parity: both REST doors serve the same caller every relayed line for that throw', () => {
+    const data = mapDataError(appAt403(), OBJECT);
+    expect(data.status).toBe(403);
+    expect(data.body).toMatchObject({ code: 'PERMISSION_DENIED', declaredCode: CODE });
+    expect((data.body.details as { refusals?: unknown }).refusals).toEqual(TWO.lines);
+
+    const actions = actionsDoorAnswerOf(appAt403(), OBJECT);
+    expect(actions).toMatchObject({ status: 403, code: 'PERMISSION_DENIED', declaredCode: CODE });
+    expect(actions.details?.refusals).toEqual(TWO.lines);
+    // `/actions` serves userMessage uncut, so the closing line is served there too.
+    const served = actions.userMessage!.split('\n');
+    expect(served[served.length - 1]).toBe(CLOSING);
+
+    // Every line the relay names is one of those: nothing beyond what REST serves.
+    const relayed = relayOf(TWO).slice(REFUSAL_REASONS_RELAY_LEAD.length).split('\n');
+    expect(relayed).toEqual([...TWO.lines.map((line) => line.message), CLOSING]);
+  });
+
+  it('control: the gate\'s own PERMISSION_DENIED (no declaredCode) gets no relay and serves none of its details', async () => {
+    const gate = listedRefusal(TWO, {
+      code: 'PERMISSION_DENIED',
+      status: 403,
+      name: 'PermissionDeniedError',
+      details: { positions: ['pin37512_position'], permissionSets: ['pin37512_set'] },
+    });
+    for (const door of DOORS) {
+      const { content } = await callOverHttp(refusingBridge(gate), door.tool, door.args);
+      expect(content, door.tool).toHaveLength(1);
+      const error = JSON.parse(content[0].text).error;
+      expect(error.code, door.tool).toBe('PERMISSION_DENIED');
+      expect(error.declaredCode, door.tool).toBeUndefined();
+      expect(content[0].text, door.tool).not.toContain('pin37512_');
+    }
+  });
+});
+
+describe('[#37512] a listed throw at a 5xx is a fault: no relay block', () => {
+  for (const door of DOORS.filter((d) => d.door === '/actions')) {
+    it(`${door.tool}: a listed throw at 503 answers the envelope alone`, async () => {
+      const { content } = await callOverHttp(
+        refusingBridge(listedRefusal(TWO, { status: 503, asCatalogue: true })), door.tool, door.args,
+      );
+      expect(content).toHaveLength(1);
+      const error = JSON.parse(content[0].text).error;
+      expect(error.status).toBe(503);
+      expect(error.details).toBeUndefined();
+    });
+  }
+});
+
+describe('[#37512] the record read tools and delete_records\' outer catch relay a listed refusal', () => {
+  for (const door of READ_DOORS) {
+    it(`${door.tool}: every line rides as a second text block; the envelope is unchanged`, async () => {
+      const listed = await callOverHttp(readRefusingBridge(listedRefusal(TWO)), door.tool, door.args);
+      const unlisted = await callOverHttp(readRefusingBridge(listedRefusal(TWO, { withList: false })), door.tool, door.args);
+      expect(unlisted.content).toHaveLength(1);
+      expect(listed.content).toHaveLength(2);
+      expect(listed.content[0]).toEqual(unlisted.content[0]);
+      expect(JSON.parse(listed.content[0].text).error).toMatchObject({ status: 400, declaredCode: CODE });
+      expect(listed.content[1]).toEqual({ type: 'text', text: relayOf(TWO) });
+    });
+  }
+
+  it('query_records: the not-recorded members stay beside the envelope, and the relay still follows it', async () => {
+    const { content } = await callOverHttp(
+      readRefusingBridge(listedRefusal(TWO)), 'query_records', { objectName: OBJECT, fields: ['pin37512_missing'] },
+    );
+    expect(content).toHaveLength(2);
+    const envelope = JSON.parse(content[0].text);
+    expect(envelope.notRecorded).toEqual({ object: OBJECT, fields: ['pin37512_missing'] });
+    expect(typeof envelope.ifNotRecorded).toBe('string');
+    expect(content[1]).toEqual({ type: 'text', text: relayOf(TWO) });
+  });
+});
+
+describe('[#37512] a FLOW_FAILED throw that is also listed answers three blocks', () => {
+  it('run_action: the envelope, then the flow sentence, then every listed line', async () => {
+    const thrown = listedRefusal(TWO, {
+      code: 'FLOW_FAILED',
+      status: 400,
+      asCatalogue: true,
+      details: { errorMessage: 'pin37512 The approval flow refused the report.' },
+    });
+    const { content } = await callOverHttp(refusingBridge(thrown), 'run_action', DOORS[0].args);
+    expect(content).toHaveLength(3);
+    expect(JSON.parse(content[0].text).error.code).toBe('FLOW_FAILED');
+    expect(content[1]).toEqual({ type: 'text', text: `${FLOW_FAILURE_RELAY_LEAD}pin37512 The approval flow refused the report.` });
+    expect(content[2]).toEqual({ type: 'text', text: relayOf(TWO) });
+  });
+});
+
+describe('[#37512] delete_records: a row\'s listed refusal is named whole in its group, with no relay block', () => {
+  it('a list longer than the door\'s 500-character cut: the group reason is every line whole, the closing line last', async () => {
+    const lines = Array.from({ length: 6 }, (_, i) => ({
+      reason: 'on_report',
+      message: `pin37512 Expense line ${i + 1} (${'x'.repeat(90)}) is already on another report.`,
+    }));
+    const whole = [...lines.map((line) => line.message), CLOSING].join('\n');
+    expect(whole.length).toBeGreaterThan(500);
+    const bridge: Bridge = {
+      ...refusingBridge(listedRefusal({ lines, closing: CLOSING }, { asCatalogue: true })),
+      async query() { return { object: OBJECT, records: [{ id: 'er_1' }, { id: 'er_2' }], total: 2 }; },
+    };
+
+    const { content } = await callOverHttp(
+      bridge, 'delete_records', { objectName: OBJECT, recordIds: ['er_1', 'er_2'], confirm: true }, false,
+    );
+
+    expect(content).toHaveLength(1);
+    const outcome = JSON.parse(content[0].text);
+    expect(outcome).toMatchObject({ deleted: 0, refused: 2 });
+    expect(outcome.refusals).toHaveLength(1);
+    expect(outcome.refusals[0]).toMatchObject({ code: CODE, status: 400, count: 2, recordIds: ['er_1', 'er_2'] });
+    expect(outcome.refusals[0].reason).toBe(whole);
+    expect(outcome.refusals[0].reason.split('\n')).toEqual([...lines.map((line) => line.message), CLOSING]);
   });
 });

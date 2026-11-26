@@ -195,6 +195,7 @@ const ja = {
     uploadInFlight: "アップロードが完了してから保存してください。",
     clearedOnHide: "現在の値に該当しなくなった項目をクリアしました: {{fields}}",
     visibleWhenFaulted: "送信できません: {{fields}} の visibleWhen ルールを評価できませんでした。このフォームを送信するには、先にルールを修正する必要があります。",
+    uiReadonlyWhenFaulted: "送信できません: {{fields}} の uiReadonlyWhen ルールを評価できませんでした。このフォームを送信するには、先にルールを修正する必要があります。",
     discardTitle: "変更を破棄しますか？",
     discardMessage: "保存されていない変更があります。このままフォームを閉じると編集内容は失われます。",
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
@@ -4683,6 +4684,9 @@ const ja = {
       dataset: 'データセット',
       metrics: '指標',
       noAddedFilter: 'データセットの定義に追加されたフィルターなし',
+    },
+    recordCitations: {
+      title: 'レコードからの引用',
     },
     tool: {
       aggregate_data: "関連データを集計する",

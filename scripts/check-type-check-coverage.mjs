@@ -1016,9 +1016,10 @@ const EXEMPT = {
 // ── #14062: three plugin entries GRADUATED, and what replaced them ───────────
 //
 // `plugin-approvals` (345), `plugin-auth` (94) and `plugin-sharing` (3) left
-// this ledger on 2026-09-02, and `knowledge-ragflow` (4) left DEBT above in the
-// same change. ⛔ None of them was PAID DOWN — read that first, because a
-// deleted debt entry normally means the errors are gone and here it does not.
+// this ledger on 2026-09-02, and a fourth plugin package, since retired (4),
+// left DEBT above in the same change. ⛔ None of them was PAID DOWN — read that
+// first, because a deleted debt entry normally means the errors are gone and
+// here it does not.
 //
 // The director ruling of 2026-09-01 on #14062 (maintainer verbatim: 「同意」)
 // onboarded all fourteen `packages/plugins/**` packages into the

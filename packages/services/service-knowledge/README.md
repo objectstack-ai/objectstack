@@ -3,7 +3,7 @@
 Orchestrator implementing `IKnowledgeService` over pluggable
 `IKnowledgeAdapter` backends. Ships zero RAG infrastructure of its own
 — that's the job of adapter plugins (`knowledge-memory`,
-`knowledge-ragflow`, …).
+`knowledge-pgvector`, `knowledge-turso`, …).
 
 See [Knowledge Protocol](https://objectstack.ai/docs/protocol/knowledge).
 

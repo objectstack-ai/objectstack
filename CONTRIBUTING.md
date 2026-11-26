@@ -382,7 +382,6 @@ start when you add a component.
 | [`@objectstack/plugin-pinyin-search`](packages/plugins/plugin-pinyin-search) | Pinyin recall for CJK search |
 | [`@objectstack/plugin-dev`](packages/plugins/plugin-dev) | Zero-config local development assembly |
 | [`@objectstack/knowledge-memory`](packages/plugins/knowledge-memory) | In-memory knowledge adapter (dev / test) |
-| [`@objectstack/knowledge-ragflow`](packages/plugins/knowledge-ragflow) | RAGFlow knowledge adapter |
 | [`@objectstack/embedder-openai`](packages/plugins/embedder-openai) | OpenAI-compatible embedder (OpenAI, DashScope, Ollama, and any drop-in endpoint) |
 
 #### Connectors & triggers

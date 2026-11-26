@@ -1521,7 +1521,6 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
                 return info?.invalid ? 'red' : info?.warnOnly ? 'amber' : null;
               }}
               rowOpensRecord={false}
-              cellSelection={false}
               onRowClick={(rec, event) => {
                 const info = rowInfoOf(rec);
                 if (!info || (event && (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey))) return;

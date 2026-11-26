@@ -186,20 +186,8 @@ describe('ObjectGrid cellSelection — the relay (objectstack#35684)', () => {
     expect(container.querySelector('td[data-editing-cell]')).toBeNull();
   });
 
-  it('control: `cellSelection: false` keeps the staged click-to-edit', async () => {
-    const { container } = render(
-      <ObjectGridRenderer
-        schema={{ type: 'object-grid', objectName: 'probe', columns: ['name'], data: { provider: 'value', items: ROWS }, editable: true }}
-        objectFields={FIELDS}
-        cellSelection={false}
-      />,
-    );
-    await screen.findByText('Gamma', {}, { timeout: 5000 });
-    const first = container.querySelector<HTMLElement>('tbody tr td[data-grid-cell]')!;
-    fireEvent.click(first);
-    await waitFor(() => expect(container.querySelector('td[data-editing-cell]')).not.toBeNull());
-    expect(first).not.toHaveAttribute('data-selected-cell');
-  });
+  // objectstack#35827 — the `cellSelection: false` control left with the staged
+  // click-to-edit it pinned: an editable grid has no other editing model.
 });
 
 describe('ObjectGrid cellSelection — why a cell opens no editor', () => {

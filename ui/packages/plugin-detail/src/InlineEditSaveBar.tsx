@@ -76,6 +76,7 @@ import { Button, cn } from '@object-ui/components';
 import { Check, X, Loader2 } from 'lucide-react';
 import {
   useInlineEdit,
+  usePredicateScope,
   useRecordContext,
   useSafeFieldLabel,
   extractFieldErrors,
@@ -83,7 +84,7 @@ import {
   isExternalWriteRefusal,
   type WriteFieldError,
 } from '@object-ui/react';
-import { getRecordDisplayName, resolveFieldAffordance } from '@object-ui/core';
+import { fieldReadOnlyByHand, getRecordDisplayName, resolveFieldAffordance } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   collectRequiredWhenPromptFields,
@@ -416,15 +417,18 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
   // than the draft alone, which the server would refuse again. `null` for a
   // conflict of the plain Save, whose write is the draft.
   const conflictWriteRef = React.useRef<Record<string, unknown> | null>(null);
+  // The host's predicate scope, as the edit dialog binds it (objectstack#36806).
+  const predicateScope = usePredicateScope();
   /** A field this reader may fill on this page: the question the inline editors ask. */
   const fillable = React.useCallback(
     (name: string, def: Record<string, unknown>) =>
-      def.readonly !== true
+      // The one hand-lock verdict over this record (`fieldReadOnlyByHand`).
+      !fieldReadOnlyByHand(def, data, { scope: predicateScope })
       && !isComputedDetailField(undefined, def as never)
       && !NON_EDITABLE_SYSTEM_FIELDS.has(name)
       && !!objectName
       && resolveFieldAffordance('recordEdit', perms, objectName, name),
-    [objectName, perms],
+    [objectName, perms, data, predicateScope],
   );
 
   /**

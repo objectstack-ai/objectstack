@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { MCPServerRuntime } from '../mcp-server-runtime.js';
+import { MCPServerRuntime, describeServedObject } from '../mcp-server-runtime.js';
 import type { MCPServerRuntimeConfig } from '../mcp-server-runtime.js';
 import type { AIToolDefinition, ToolCallPart } from '@objectstack/spec/contracts';
 import type { ToolRegistry, ToolExecutionResult } from '../types.js';
@@ -341,5 +341,33 @@ describe('MCPServerRuntime', () => {
       await runtime.stop();
       expect(runtime.isStarted).toBe(false);
     });
+  });
+});
+
+// [#36806] The stdio twin of the HTTP bridge's describe: the hand lock
+// (`uiReadonly`, `uiReadonlyWhen`) is reported as its own keys, never folded
+// into `readonly`, and a field that authors neither keeps its shape. The HTTP
+// half is `packages/runtime/src/domains/mcp-object-hand-lock-36806.test.ts`.
+describe('[#36806] describeServedObject reports the hand lock as its own keys', () => {
+  const described = describeServedObject({
+    name: 'hand_order',
+    fields: {
+      status: { type: 'text', uiReadonly: true },
+      note: { type: 'text', uiReadonlyWhen: { dialect: 'cel', source: "record.status != 'draft'" } },
+      subject: { type: 'text' },
+    },
+  } as never) as { fields: Array<Record<string, unknown>> };
+  const field = (name: string) => described.fields.find((f) => f.name === name)!;
+
+  it('uiReadonly: true beside readonly: false', () => {
+    expect(field('status')).toMatchObject({ readonly: false, uiReadonly: true });
+  });
+
+  it('uiReadonlyWhen as its predicate text, from an envelope too', () => {
+    expect(field('note')).toMatchObject({ readonly: false, uiReadonlyWhen: "record.status != 'draft'" });
+  });
+
+  it('CONTROL — a field authoring neither carries neither key', () => {
+    expect('uiReadonly' in field('subject') || 'uiReadonlyWhen' in field('subject')).toBe(false);
   });
 });

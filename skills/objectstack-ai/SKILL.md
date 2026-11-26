@@ -264,17 +264,17 @@ collection for them — they are registered at runtime, and the ☁️
 **Wiring (open packages).** `KnowledgeServicePlugin({ sources })` from
 `@objectstack/service-knowledge` registers `IKnowledgeService` with the kernel and
 each source at boot (`service.registerSource` still works later). The `adapter`
-id resolves against an adapter plugin — `@objectstack/knowledge-memory`
-(`'memory'`, dev/test) or `@objectstack/knowledge-ragflow` (`'ragflow'`).
+id resolves against an adapter plugin — `@objectstack/knowledge-memory` (`'memory'`,
+dev/test), `@objectstack/knowledge-pgvector` (`'pgvector'`) or `@objectstack/knowledge-turso` (`'turso'`).
 
 | Property | Purpose |
 |:---------|:--------|
 | `id` | Snake_case source id |
 | `label` / `description` | Display metadata |
-| `adapter` | Adapter id (e.g. `'ragflow'`, `'memory'`), resolved via `IKnowledgeService.registerAdapter` |
+| `adapter` | Adapter id, resolved via `IKnowledgeService.registerAdapter` |
 | `adapterConfig` | Adapter-specific configuration (opaque to the service) |
 | `source` | What gets indexed — discriminated on `kind`: `'object'` \| `'file'` \| `'http'` |
-| `embedding` | Optional `EmbeddingModelSchema` ref (`provider`, `model`, `dimensions`) — adapters managing embeddings internally (RAGFlow, Dify, Vectara) may ignore it |
+| `embedding` | Optional `EmbeddingModelSchema` ref (`provider`, `model`, `dimensions`) — adapters managing embeddings internally may ignore it |
 | `vectorStore` | Optional `VectorStoreSchema` ref (`provider`, `collection`) — same caveat |
 | `refresh` | `onRecordChange` (default `true` for object sources) + optional `cron` (for an external scheduler; not self-scheduled) |
 | `aiExposed` | May `search_knowledge` expose this source to agents (default `true`) — `false` indexes it without making it agent-searchable |
@@ -292,7 +292,7 @@ import { KnowledgeSourceSchema, type KnowledgeSource } from '@objectstack/spec/a
 export const supportKb: KnowledgeSource = KnowledgeSourceSchema.parse({
   id: 'support_kb',
   label: 'Support Knowledge Base',
-  adapter: 'ragflow',
+  adapter: 'pgvector',
   source: {
     kind: 'object',
     object: 'kb_article',
@@ -306,8 +306,8 @@ export const supportKb: KnowledgeSource = KnowledgeSourceSchema.parse({
 
 **Splitting (`split`, object sources only).** The knowledge service cuts each
 document into passages for an adapter declaring `capabilities.chunks`
-(`memory`). Any other adapter (`ragflow`) receives whole documents; `split` has
-no effect on it. `split: { strategy, maxChars?, minChars? }`:
+(`memory`, `pgvector`, `turso`). Any other adapter receives whole documents;
+`split` has no effect on it. `split: { strategy, maxChars?, minChars? }`:
 
 - `recursive` (default): cuts at blank lines, then line breaks, then sentence
   ends. For prose.

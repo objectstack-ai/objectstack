@@ -35,7 +35,7 @@ import {
   useRecordContext,
   useRecordPagePreferences,
 } from '@object-ui/react';
-import { resolveFieldAffordance, isDeadlineSettled } from '@object-ui/core';
+import { fieldReadOnlyByHand, resolveFieldAffordance, isDeadlineSettled } from '@object-ui/core';
 import { withHomeAmountSource } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import {
@@ -648,7 +648,10 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     // framework flags `readonly:true` even when the view schema doesn't). And
     // never offer inline edit on immutable audit/identity fields by name
     // (created_at / id / …), in case a schema surfaces one as a section row.
-    const isReadonly = field.readonly === true || objectDefField?.readonly === true;
+    // The object field's lock goes through the one hand-lock verdict — `readonly`,
+    // `readonlyWhen`, `uiReadonly`, `uiReadonlyWhen` over this record
+    // (`fieldReadOnlyByHand`, `@object-ui/core`) — never `readonly` alone.
+    const isReadonly = field.readonly === true || fieldReadOnlyByHand(objectDefField, data, { scope: predicateScope });
     const isSystemField = NON_EDITABLE_SYSTEM_FIELDS.has(field.name);
     // Types the fields package excludes from in-place editing — the SAME
     // alias-aware contract the grid consults, not a second list (objectui#4221).
@@ -952,6 +955,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
           } : undefined}
           role={copyOffered ? 'button' : undefined}
           tabIndex={copyOffered ? 0 : undefined}
+          data-detail-field={field.name}
         >
           <span className="text-[15px] text-muted-foreground shrink-0">{fieldLabelText}</span>
           <span className="text-[15px] text-foreground text-right break-words min-w-0 leading-snug">{displayValue}</span>
@@ -978,6 +982,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
           listFace && 'border-b border-border/50 py-1.5 last:border-b-0',
         )}
         data-detail-field-row={frameless ? '' : undefined}
+        // The field this row draws: how a page finds a field's place, e.g. to
+        // open a record at a cited section of its body (ADR-0160 D9).
+        data-detail-field={field.name}
       >
         {/* The label as authored, in the header highlights' style: no case
             transform, which only Latin text takes, so a translated label and

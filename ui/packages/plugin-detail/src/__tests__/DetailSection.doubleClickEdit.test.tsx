@@ -184,3 +184,64 @@ describe('DetailSection inline-edit — object-readonly & system-field gate', ()
     expect(screen.queryByDisplayValue('CR-1')).toBeNull();
   });
 });
+
+/**
+ * #36806 — the record page's inline edit reads the hand lock: a `uiReadonly`
+ * field, and a `uiReadonlyWhen` field whose predicate is TRUE over the record,
+ * offer no inline edit (no double-click entry, no input in global edit mode),
+ * exactly like `readonly`. A `uiReadonlyWhen` FALSE over the record stays
+ * editable (the control).
+ */
+describe('DetailSection hand lock (uiReadonly / uiReadonlyWhen, #36806)', () => {
+  beforeAll(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+  });
+
+  const objectSchema = {
+    fields: {
+      title: { type: 'text' },
+      status: { type: 'text', uiReadonly: true },
+      note: { type: 'text', uiReadonlyWhen: "record.status != 'draft'" },
+    },
+  };
+  const section: DetailViewSection = {
+    fields: [
+      { name: 'title', label: 'Title' },
+      { name: 'status', label: 'Status' },
+      { name: 'note', label: 'Note' },
+    ],
+  } as DetailViewSection;
+
+  it('a uiReadonly field and a uiReadonlyWhen-TRUE field offer no inline-edit entry', () => {
+    const onEnter = vi.fn();
+    render(
+      <DetailSection
+        section={section}
+        data={{ title: 'Hello', status: 'approved', note: 'N-1' }}
+        objectSchema={objectSchema}
+        onEnterInlineEdit={onEnter}
+      />,
+    );
+    fireEvent.doubleClick(screen.getByText('approved'));
+    fireEvent.doubleClick(screen.getByText('N-1'));
+    expect(onEnter).not.toHaveBeenCalled();
+    fireEvent.doubleClick(screen.getByText('Hello'));
+    expect(onEnter).toHaveBeenCalledWith('title');
+  });
+
+  it('stays read-only in global inline-edit mode; uiReadonlyWhen FALSE stays editable', () => {
+    render(
+      <DetailSection
+        section={section}
+        data={{ title: 'Hello', status: 'draft', note: 'N-1' }}
+        objectSchema={objectSchema}
+        isEditing
+        onEnterInlineEdit={vi.fn()}
+      />,
+    );
+    expect(screen.getByDisplayValue('Hello')).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('draft')).toBeNull();
+    // status == 'draft' → the predicate is FALSE → note is an input.
+    expect(screen.getByDisplayValue('N-1')).toBeInTheDocument();
+  });
+});
