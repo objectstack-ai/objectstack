@@ -137,8 +137,8 @@ const result = GetRecordContextInputSchema.parse(data);
 | **object** | `string` | ✅ | The child object |
 | **label** | `string` | ✅ | The child object's plural label at the caller's locale |
 | **field** | `string` | ✅ | The child's field that points at the record |
-| **rows** | `{ id?: string; displayName?: string; fields: object[] }[]` | ✅ | The rows the caller may read, up to the row cap |
-| **truncated** | `true` | optional | Present when more rows existed past the row cap |
+| **rows** | `{ id?: string; displayName?: string; fields: object[] }[]` | ✅ | The rows the caller may read, up to the list's `limit` (the row cap when it names none), or fewer when the door's page cap is lower |
+| **truncated** | `true` | optional | Present when more rows existed past the rows given: at the list's `limit`, at the row cap, or below either at the door's page cap |
 
 ### Nested Shape: `RecordContextData.body`
 
@@ -221,8 +221,8 @@ const result = GetRecordContextInputSchema.parse(data);
 | **object** | `string` | ✅ | The child object |
 | **label** | `string` | ✅ | The child object's plural label at the caller's locale |
 | **field** | `string` | ✅ | The child's field that points at the record |
-| **rows** | `{ id?: string; displayName?: string; fields: object[] }[]` | ✅ | The rows the caller may read, up to the row cap |
-| **truncated** | `true` | optional | Present when more rows existed past the row cap |
+| **rows** | `{ id?: string; displayName?: string; fields: object[] }[]` | ✅ | The rows the caller may read, up to the list's `limit` (the row cap when it names none), or fewer when the door's page cap is lower |
+| **truncated** | `true` | optional | Present when more rows existed past the rows given: at the list's `limit`, at the row cap, or below either at the door's page cap |
 
 ### Nested Shape: `RecordContextRelatedList.rows[number]`
 
