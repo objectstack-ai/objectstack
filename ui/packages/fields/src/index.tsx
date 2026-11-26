@@ -8,7 +8,7 @@
 
 import React from 'react';
 import type { DateFieldMetadata, DateTimeFieldMetadata, FieldMetadata, SelectOptionMetadata } from '@object-ui/types';
-import { ComponentRegistry, percentDisplayValue, type PercentScale, getRecordDisplayName, humanizeLabel, isEmptyValue, optionDisplayLabel, isMissingForRequired, formatDate, formatDateTime, formatDateTimeCompactParts, formatRelativeDate, toDisplayDate, extractRecords, withoutDeniedFields, type RegistryComponentMeta, type DateDisplayOptions } from '@object-ui/core';
+import { ComponentRegistry, declaresQuantityUnit, percentDisplayValue, type PercentScale, getRecordDisplayName, humanizeLabel, isEmptyValue, optionDisplayLabel, isMissingForRequired, formatDate, formatDateTime, formatDateTimeCompactParts, formatRelativeDate, toDisplayDate, extractRecords, withoutDeniedFields, type RegistryComponentMeta, type DateDisplayOptions } from '@object-ui/core';
 // The platform's own value-shape contract, asked rather than restated
 // (objectui#6744). See `locationStoredValueSchemaFor` below for why this is a
 // runtime import in the barrel and not a hand-written coordinate range.
@@ -35,6 +35,7 @@ import { deriveHexBadgePalette } from './hexBadgePalette.js';
 // `NumberField`'s read-only branch (objectui#11431), and likewise for currency
 // (`CurrencyField`) and percent (`PercentField`) (objectui#11444).
 import { formatNumberFieldValue, formatCurrency, formatPercentPoints, percentCellScale } from './widgets/number-format.js';
+import { QuantityText, UnitCodeText } from './widgets/QuantityText.js';
 import { useFieldTranslation } from './widgets/useFieldTranslation.js';
 import { useBooleanValueLabel } from './widgets/booleanValueLabel.js';
 import { GridField } from './widgets/GridField.js';
@@ -833,13 +834,18 @@ function findDeclaredOption(
  * reads too. Only a scalar stored value is matched; an array or an expanded
  * record keeps the coerced text, since neither is one option's code.
  */
-export function TextCellRenderer({ value, field }: CellRendererProps): React.ReactElement {
+export function TextCellRenderer({ value, field, dependentValues }: CellRendererProps): React.ReactElement {
   const safe = coerceToSafeValue(value);
   // THE FLOOR by name and nothing more (objectui#8496), on the coerced text.
   // ⛔ Deliberately NOT `isBlankCellText`: a stored `'   '` is a value of a text
   // cell and keeps its spaces — the trim belongs to the renderers that go on to
   // coerce the text into a number, a date or an `href`.
   if (isEmptyValue(safe)) return <EmptyValue />;
+  // A unit-code field (ADR-0158 Open item 8): the code's label, or the bare
+  // code when the unit has none to show.
+  if (typeof value === 'string' && declaresQuantityUnit(field)) {
+    return <UnitCodeText value={value} field={field} record={dependentValues} />;
+  }
   // `options` is a spec key on every field (`FieldSchema.options`), but the
   // per-type metadata of the types this cell draws does not name it, so it is
   // read structurally, as `LookupCellRenderer` reads its static options.
@@ -854,7 +860,7 @@ export function TextCellRenderer({ value, field }: CellRendererProps): React.Rea
 /**
  * Number field cell renderer
  */
-export function NumberCellRenderer({ value, field }: CellRendererProps): React.ReactElement {
+export function NumberCellRenderer({ value, field, dependentValues }: CellRendererProps): React.ReactElement {
   // Hook before the empty-value early return — a value flipping between null
   // and set must not change the hook count between renders (same rule as
   // CurrencyCellRenderer below).
@@ -866,6 +872,12 @@ export function NumberCellRenderer({ value, field }: CellRendererProps): React.R
   if (isBlankCellText(safe)) return <EmptyValue />;
 
   const num = Number(safe);
+  // A quantity (ADR-0158): its unit's label and display width, through the
+  // face `NumberField`'s read-only branch draws too. The row is the record a
+  // `record`-mode quantity reads its code from.
+  if (!isNaN(num) && declaresQuantityUnit(field)) {
+    return <QuantityText value={num} field={field} record={dependentValues} className="tabular-nums" />;
+  }
   // The width (`scale` through `resolveFieldScale`), the grouping policy
   // (`scale` / `useGrouping`) and the two fraction-digit arms are assembled in
   // `formatNumberFieldValue`, the one call `NumberField`'s read-only branch

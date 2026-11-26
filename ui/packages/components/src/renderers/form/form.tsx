@@ -1387,6 +1387,14 @@ function renderFieldDescription(
  */
 const RECORD_CURRENCY_WIDGET_TYPES = new Set(['currency', 'formula', 'summary']);
 
+/**
+ * Widget keys whose display reads a sibling field's value for a quantity's
+ * unit (ADR-0158): a `record`-mode quantity shows the unit its record's code
+ * field holds, and its organization picks the unit's display decimal places.
+ * `NumberField` takes `dependentValues` by name, so it never reaches the DOM.
+ */
+const QUANTITY_WIDGET_TYPES = new Set(['number']);
+
 function stripRegisteredFieldProps(type: string, props: RenderFieldProps): RenderFieldProps {
   const {
     dataSource,
@@ -1438,6 +1446,8 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     // A record-mode amount's symbol and decimals follow the code the user picks
     // in its sibling select, so the amount box needs the live record too.
     ...(RECORD_CURRENCY_WIDGET_TYPES.has(normalizedType) ? { dependentValues } : {}),
+    // A record-mode quantity's unit follows the code in its sibling field.
+    ...(QUANTITY_WIDGET_TYPES.has(normalizedType) ? { dependentValues } : {}),
     // Only the widgets that report unparseable text read it; every other one
     // would spread an unknown handler onto its DOM (objectstack#27483).
     ...(INVALID_INPUT_REPORTING_WIDGET_TYPES.has(normalizedType) ? { onInvalidInputChange } : {}),
