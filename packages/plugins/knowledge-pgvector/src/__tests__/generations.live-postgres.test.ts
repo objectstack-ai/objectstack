@@ -249,15 +249,31 @@ describe.skipIf(!PG_URL)('knowledge-pgvector generations on a LIVE PostgreSQL', 
     expect(await b.indexStatus(ctx(s))).toEqual({ fingerprint: FP_B.fingerprint, recipeHash: FP_B.recipeHash });
   });
 
-  it('a build that stops on a running process lets go of its lock after the idle time', async () => {
-    const a = store.adapter({ buildLockIdleMs: 150 });
+  it('a build that stops on a running process lets go after the idle time; event-sync writes do not hold it', async () => {
+    const a = store.adapter({ buildLockIdleMs: 300 });
     const b = store.adapter({ schema: schemaOf(a) });
     const s = source('idle');
     await a.upsert([doc(s, '1', 'granite quarry')], ctx(s, FP_A));
+    const started = Date.now();
     await a.beginBuild(ctx(s, FP_B));
     await expect(b.beginBuild(ctx(s, FP_B))).rejects.toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
-    await new Promise((r) => setTimeout(r, 400));
-    await expect(b.beginBuild(ctx(s, FP_B))).resolves.toBeUndefined();
+    // The walk has stopped; record events keep arriving for the source under
+    // the new fingerprint. They are not progress of the build, so the lock
+    // still goes once the idle time has passed since the build's last call.
+    let released = false;
+    for (let i = 0; i < 60 && !released; i++) {
+      await a.upsert([doc(s, '2', `marble quarry ${i}`)], { source: s, reason: 'event-sync', index: FP_B });
+      await new Promise((r) => setTimeout(r, 50));
+      released = await b.beginBuild(ctx(s, FP_B)).then(
+        () => true,
+        (e: unknown) => {
+          if ((e as { code?: string }).code !== 'LOCK_CONFLICT') throw e;
+          return false;
+        },
+      );
+    }
+    expect(released).toBe(true);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(300);
     await b.completeBuild(ctx(s, FP_B));
   });
 

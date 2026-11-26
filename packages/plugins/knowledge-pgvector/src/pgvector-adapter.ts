@@ -84,11 +84,12 @@ export interface PgvectorKnowledgeAdapterOptions {
    */
   queryPrefix?: string;
   /**
-   * How long a build may go without a call for its source (a page written,
-   * the listing, a delete) before its builder lock is let go, so a build that
-   * stopped part-way on a process that keeps running does not keep every
-   * other process from building the source. A process that stops lets go at
-   * once. @default 900000 (15 minutes)
+   * How long a build may go without a call of its own (a call whose
+   * `ctx.reason` is `'reindex'`: the listing, a page written, a removal)
+   * before its builder lock is let go, so a build that stopped part-way on a
+   * process that keeps running does not keep every other process from
+   * building the source. Event-sync writes do not count as progress. A process
+   * that stops lets go at once. @default 900000 (15 minutes)
    */
   buildLockIdleMs?: number;
   /** How many passage rows of a replaced generation one DELETE removes. @default 1000 */
@@ -207,8 +208,11 @@ interface Readiness {
  * A second `beginBuild` from another process is refused `LOCK_CONFLICT`
  * (409) and its walk does not run. The lock goes when the build completes,
  * when the process or its connection dies (PostgreSQL frees it), or after
- * {@link PgvectorKnowledgeAdapterOptions.buildLockIdleMs} without a call for
- * the source, so a walk that failed on a running process does not hold it.
+ * {@link PgvectorKnowledgeAdapterOptions.buildLockIdleMs} without a call of
+ * the build (event-sync writes do not count), so a walk that failed on a
+ * running process does not hold it. A session advisory lock belongs to one
+ * server session: the store needs a direct or session-mode connection, never
+ * a transaction-mode pooler; a release the session no longer held is logged.
  * The knowledge service runs one walk of a source at a time, so a lock this
  * adapter still holds when it begins a build again is the earlier build's,
  * and is kept for the new one.
@@ -292,7 +296,7 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     this.requirePool();
     const readiness = await this.ready();
     const embedder = this.requireEmbedder();
-    this.touchBuilderLock(ctx.source.id);
+    this.touchBuilderLock(ctx);
     // An unchanged passage is rewritten in place, keeping its vector. When its
     // row is gone by the time the write runs (a concurrent rewrite of the same
     // document removed it), or its generation was switched or retired, the
@@ -434,7 +438,7 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     if (documentIds.length === 0) return;
     const pool = this.requirePool();
     await this.ready();
-    this.touchBuilderLock(ctx.source.id);
+    this.touchBuilderLock(ctx);
     // From every generation of the source: a removed document leaves them all.
     const widths = await pool.query<{ dim: number }>(
       `SELECT DISTINCT dim FROM ${qualified(this.schema, GENERATION_TABLE)} WHERE source_id = $1`,
@@ -459,7 +463,7 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     // fingerprint carries no model or width, and comparing it would refuse a
     // healthy index as one to rebuild. No embedder is SERVICE_UNAVAILABLE.
     const embedder = this.requireEmbedder();
-    this.touchBuilderLock(ctx.source.id);
+    this.touchBuilderLock(ctx);
     // The generation the writes go to (ADR-0161 K8, item 1): during a build,
     // the one under construction, so the walk skips what it already holds.
     const generation = await this.writeTarget(ctx, embedder, false);
@@ -491,8 +495,11 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       const hits = await this.searchAttempt(query, opts);
       if (hits !== undefined) return hits;
       if (attempt >= SEARCH_ATTEMPTS) {
-        throw new Error(
-          `knowledge-pgvector: the active generation of source '${opts.source.id}' changed ${SEARCH_ATTEMPTS} times during one search; retry it.`,
+        throw Object.assign(
+          new Error(
+            `knowledge-pgvector: the active generation of source '${opts.source.id}' changed ${SEARCH_ATTEMPTS} times during one search; retry it.`,
+          ),
+          { code: 'CONCURRENT_MODIFICATION', status: 409 },
         );
       }
     }
@@ -1009,7 +1016,7 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
    */
   private async takeBuilderLock(sourceId: string): Promise<void> {
     if (this.builders.has(sourceId)) {
-      this.touchBuilderLock(sourceId);
+      this.restartIdleTimer(sourceId);
       return;
     }
     const pool = this.requirePool();
@@ -1028,11 +1035,21 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       throw builderBusy(sourceId, this.buildLockIdleMs);
     }
     this.builders.set(sourceId, { client, key });
-    this.touchBuilderLock(sourceId);
+    this.restartIdleTimer(sourceId);
   }
 
-  /** A call for the source while this adapter builds it: the lock's idle time starts again. */
-  private touchBuilderLock(sourceId: string): void {
+  /**
+   * A call of the build (`ctx.reason === 'reindex'`: the walk's listing, its
+   * pages, its removals) while this adapter holds the source's lock: the lock's
+   * idle time starts again. An event-sync write does not, so a walk that failed
+   * on a process that keeps receiving record events still lets go.
+   */
+  private touchBuilderLock(ctx: AdapterContext): void {
+    if (ctx.reason !== 'reindex') return;
+    this.restartIdleTimer(ctx.source.id);
+  }
+
+  private restartIdleTimer(sourceId: string): void {
     const held = this.builders.get(sourceId);
     if (!held) return;
     if (held.timer !== undefined) clearTimeout(held.timer);
@@ -1047,7 +1064,17 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     this.builders.delete(sourceId);
     if (held.timer !== undefined) clearTimeout(held.timer);
     try {
-      await held.client.query('SELECT pg_advisory_unlock($1::bigint)', [held.key]);
+      const unlocked = await held.client.query<{ unlocked: boolean }>('SELECT pg_advisory_unlock($1::bigint) AS unlocked', [held.key]);
+      if (unlocked.rows[0]?.unlocked !== true) {
+        // The session that took the lock no longer holds it: a connection
+        // pooler in transaction mode ran the two statements on different
+        // server connections, or the session was replaced. The lock may stay
+        // held elsewhere, or two builders may have run.
+        this.logger?.warn?.(
+          `knowledge-pgvector: the builder lock of source '${sourceId}' was not held by its session when released. ` +
+            'The store needs a direct or session-mode PostgreSQL connection: a transaction-mode pooler breaks session advisory locks.',
+        );
+      }
       held.client.release();
     } catch (err) {
       // A session that is gone has let go of its lock already.

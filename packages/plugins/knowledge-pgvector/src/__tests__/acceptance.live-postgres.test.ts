@@ -239,6 +239,9 @@ describe.skipIf(!PG_URL)('knowledge-pgvector acceptance on a LIVE PostgreSQL', (
     );
     expect(err).toMatchObject({ code: KNOWLEDGE_REBUILD_REQUIRED, status: 409, message: expect.stringContaining('needs a rebuild') });
     expect(err?.message).not.toContain('DELETE');
+    // The operator's remedy is a complete reindex, never statements to run by hand.
+    expect(err?.remedy).toContain('complete reindex');
+    expect(err?.remedy).not.toMatch(/DELETE FROM|DROP |TRUNCATE/);
     expect(await adapter.indexStatus(ctx(s))).toEqual({ fingerprint: FP_A.fingerprint, recipeHash: FP_A.recipeHash });
   });
 

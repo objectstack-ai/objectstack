@@ -571,8 +571,10 @@ an exact scan.
   PostgreSQL advisory lock, held on a connection of its own from
   `beginBuild` to `completeBuild`. A second builder is refused
   `LOCK_CONFLICT` (409). The lock is freed at completion, when the process or
-  its connection dies, or after `buildLockIdleMs` (15 minutes) without
-  progress. A stopped build is resumed by the next `beginBuild` under the same
+  its connection dies, or after `buildLockIdleMs` (15 minutes) without a
+  call of the build (event-sync writes do not count). It is a session lock,
+  so the store needs a direct or session-mode connection, never a
+  transaction-mode pooler. A stopped build is resumed by the next `beginBuild` under the same
   fingerprint, with what it wrote. A generation never takes over passage rows
   left without a generation row: they are deleted before any generation opens.
 - **An approximate index is an operator's step.** The store creates no
