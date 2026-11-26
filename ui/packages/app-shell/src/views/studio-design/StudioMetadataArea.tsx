@@ -323,6 +323,17 @@ function AreaCreate({ customization }: { customization: StudioBaseCustomization 
       <StudioAreaAppOpen packageId={host.packageId} target={{ kind: 'new-report' }} fallback={<AreaOwnCreate customization={customization} />} />
     );
   }
+  // objectstack#36907 — a dashboard is made in its app's design mode, in the
+  // 「Add menu item」 picker, so it hangs in a menu (objectstack#36359): the
+  // app opens with the mode entered and the picker on its dashboards. What
+  // the mode saves goes to the package, or a read-only base's pair. With no
+  // app to open, or on a phone, the area's own create, as for a report; the
+  // list offers no New in either case (`useStudioDashboardNew`).
+  if (type === 'dashboard' && host?.packageId && (!host.readOnly || host.pairCreate)) {
+    return (
+      <StudioAreaAppOpen packageId={host.packageId} target={{ kind: 'new-dashboard' }} fallback={<AreaOwnCreate customization={customization} />} />
+    );
+  }
   return <AreaOwnCreate customization={customization} />;
 }
 
