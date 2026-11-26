@@ -103,6 +103,7 @@ vi.mock('../../preview/DraftChangesPanel', async () => {
 import '@objectstack/lint';
 import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
@@ -187,7 +188,7 @@ async function openFlow(): Promise<void> {
     <MemoryRouter initialEntries={[at]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );

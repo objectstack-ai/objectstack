@@ -98,6 +98,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { pressStudioSave } from './__tests__/studioSaveHarness';
 import { t, tFormat } from '../metadata-admin/i18n';
 
@@ -240,7 +241,7 @@ function renderPillarAddress(set: string, extra = '') {
     <MemoryRouter initialEntries={[`/studio/${BASE}/access?surface=${encodeURIComponent(`permission:${set}`)}${extra}`]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
       <LocationProbe />
     </MemoryRouter>,

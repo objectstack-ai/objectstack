@@ -368,24 +368,26 @@ describe('/studio/* — the entry decision, both ways', () => {
     expect(screen.queryByTestId('studio-access-required')).not.toBeInTheDocument();
   });
 
-  it('NEGATIVE CONTROL: a holder still gets the pillar builder, unchanged', async () => {
+  it('NEGATIVE CONTROL: a holder still gets the builder, on the page the old pillar address names', async () => {
     answerWith(OPERATOR_CAPS);
     renderStudioDeepLink('/studio/hotcrm/data');
 
     await waitFor(() => expect(screen.getByTestId('studio-pillar-builder')).toBeInTheDocument());
     expect(designSurface).toHaveBeenCalled();
-    expect(pathname()).toBe('/studio/hotcrm/data');
+    // objectstack#36909 — the retired Data pillar's address lands on the object list.
+    expect(pathname()).toBe('/studio/hotcrm/metadata/object?package=hotcrm');
     expect(screen.queryByText(NOTICE)).not.toBeInTheDocument();
   });
 
-  it('the package-less scope\'s bare leg lands on its one pillar, the builder mounted (objectui#11553)', async () => {
+  it('the package-less scope\'s bare leg lands on its flow list, the builder mounted (objectui#11553)', async () => {
     // `~org` is the reserved segment for the organization's own, package-less
     // flows. Without its own leg it falls to `:packageId`, whose redirect
-    // targets a Data pillar that scope does not have.
+    // targets an object list that scope does not have. objectstack#36909 — in
+    // one hop, not through the retired Automations pillar's address.
     answerWith(OPERATOR_CAPS);
     renderStudioDeepLink('/studio/~org');
 
-    await waitFor(() => expect(pathname()).toBe('/studio/~org/automations'));
+    await waitFor(() => expect(pathname()).toBe('/studio/~org/metadata/flow?source=runtime'));
     await waitFor(() => expect(screen.getByTestId('studio-pillar-builder')).toBeInTheDocument());
     expect(designSurface).toHaveBeenCalled();
   });

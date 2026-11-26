@@ -14,7 +14,7 @@ function pkg(id: string, version: string, dependencies?: Record<string, string>)
       namespace: 'crm',
       version,
       type: id.endsWith('.core') ? 'app' : 'module',
-      engines: { protocol: '^18' },
+      engines: { protocol: '^19' },
       ...(dependencies ? { dependencies } : {}),
     },
   });

@@ -177,7 +177,7 @@ const optionBStack = (reference: string): Record<string, unknown> => ({
 const perPackageOnlyStack = (): Record<string, unknown> => {
   const coreManifest = {
     id: 'com.example.obflip.core', name: 'obflip core', namespace: 'ob',
-    version: '1.0.0', type: 'app', engines: { protocol: '^18' },
+    version: '1.0.0', type: 'app', engines: { protocol: '^19' },
   };
   const coreObjects = [{
     name: 'ob_account', label: 'Account', pluralLabel: 'Accounts', sharingModel: 'private',
@@ -195,7 +195,7 @@ const perPackageOnlyStack = (): Record<string, unknown> => {
   }];
   const ordersManifest = {
     id: 'com.example.obflip.orders', name: 'obflip orders', namespace: 'ob',
-    version: '1.0.0', type: 'module', engines: { protocol: '^18' },
+    version: '1.0.0', type: 'module', engines: { protocol: '^19' },
     dependencies: { 'com.example.obflip.core': '^1.0.0' },
   };
   const ordersObjects = [{

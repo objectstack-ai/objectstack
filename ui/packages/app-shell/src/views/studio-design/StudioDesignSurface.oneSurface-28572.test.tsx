@@ -87,6 +87,7 @@ vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => nul
 import '@objectstack/lint';
 import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { t, tFormat } from '../metadata-admin/i18n';
 // The source under test reaches these dynamic imports (the command palette's
@@ -361,7 +362,7 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
       <LocationProbe />
     </MemoryRouter>,

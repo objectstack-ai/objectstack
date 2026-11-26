@@ -77,6 +77,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 
 // jsdom ships neither of these; useIsMobile / useIsWideViewport and the Radix
 // popover's floating-ui measurement need them.
@@ -118,7 +119,7 @@ function renderSurface(tab = 'data') {
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/${tab}`]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
         <Route path="/home" element={<div data-testid="home-page" />} />
       </Routes>
     </MemoryRouter>,
