@@ -189,6 +189,46 @@
               "evidence": "packages/spec/src/system/i18n-resolver.ts#translateFormSubmitBehavior (the thank-you panel's `message`, read off `forms.<name>.submitBehavior.message` first, then the `_views.<key>.submitBehavior.message` tail)"
             }
           }
+        },
+        "sections": {
+          "status": "live",
+          "verifiedAt": "2026-11-26",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupSectionText (`forms.<name>.sections.<section>.{label,description}` read first when translateForm passes the form's name, then `objects.<object>._sections.<section>`); packages/spec/src/system/i18n-resolver.ts#lookupSectionEntryText (`forms.<name>.sections.<section>.fields.<field>.{label,placeholder,helpText}` first, then the `_sections` entry)",
+          "note": "ADR-0159 D8: the form's own section copy, key by key over the object-level `_sections` default that field groups share on purpose. The extractor scaffolds the `_sections` default only (packages/lint/src/i18n-walk.ts#walkForms emits no `forms.<name>.sections` key): a form-specific section string is an author's override of the shared default, not a key every form owes.",
+          "children": {
+            "label": {
+              "status": "live",
+              "verifiedAt": "2026-11-26",
+              "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupSectionText (`forms.<name>.sections.<section>.label`, then `_sections.<section>.label`)"
+            },
+            "description": {
+              "status": "live",
+              "verifiedAt": "2026-11-26",
+              "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupSectionText (`forms.<name>.sections.<section>.description`, then `_sections.<section>.description`)"
+            },
+            "fields": {
+              "status": "live",
+              "verifiedAt": "2026-11-26",
+              "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupSectionEntryText (`forms.<name>.sections.<section>.fields.<field>.*`, keyed by the entry's own `field`)",
+              "children": {
+                "label": {
+                  "status": "live",
+                  "verifiedAt": "2026-11-26",
+                  "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupSectionEntryText (`forms.<name>.sections.<section>.fields.<field>.label`, then the `_sections` entry's)"
+                },
+                "placeholder": {
+                  "status": "live",
+                  "verifiedAt": "2026-11-26",
+                  "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupSectionEntryText (`forms.<name>.sections.<section>.fields.<field>.placeholder`, then the `_sections` entry's)"
+                },
+                "helpText": {
+                  "status": "live",
+                  "verifiedAt": "2026-11-26",
+                  "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupSectionEntryText (`forms.<name>.sections.<section>.fields.<field>.helpText`, then the `_sections` entry's)"
+                }
+              }
+            }
+          }
         }
       }
     },

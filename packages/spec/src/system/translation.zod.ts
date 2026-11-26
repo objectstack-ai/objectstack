@@ -554,6 +554,38 @@ const submitBehaviorTranslationSchema = (surface: string) => strictObject({
   message: z.string().optional().describe('Translated thank-you panel message (overlays `submitBehavior.message`)'),
 });
 
+/**
+ * The copy of one named form section: its `label`, `description` and, under
+ * `fields`, the `label` / `placeholder` / `helpText` each entry authors, keyed
+ * by the entry's own `field`. Two faces carry it: the object-level default at
+ * `objects.<object>._sections.<section>` (shared with field groups and record
+ * pages on purpose) and a form's own `forms.<form>.sections.<section>`
+ * (ADR-0159 D8), which the translator reads first. Built by a factory for
+ * {@link actionTranslationSchema}'s reason: the two cannot drift, and
+ * `surface` says which of the two a rejected key was written on.
+ */
+const sectionTranslationSchema = (surface: string, entrySurface: string) => strictObject({
+  surface,
+  history: TRANSLATION_HISTORY,
+  aliases: { name: 'label', title: 'label', heading: 'label', entries: 'fields' },
+}, {
+  label: z.string().optional().describe('Translated section label'),
+  description: z.string().optional().describe('Translated section description'),
+  fields: z.record(z.string(), strictObject({
+    surface: entrySurface,
+    history: TRANSLATION_HISTORY,
+    // `helpText` is the spelling a form section entry declares
+    // (`FormFieldSchema.helpText`); `help` is the FIELD translation's, one
+    // level up at `objects.<object>.fields.<field>`. Neighbouring-surface
+    // borrowing, which edit distance reads as a legitimate word.
+    aliases: { help: 'helpText', hint: 'helpText', tooltip: 'helpText', name: 'label', title: 'label' },
+  }, {
+    label: z.string().optional().describe('Translated entry label (overlays the section entry\'s `label` override)'),
+    placeholder: z.string().optional().describe('Translated entry placeholder (overlays the section entry\'s `placeholder` override)'),
+    helpText: z.string().optional().describe('Translated entry help text (overlays the section entry\'s `helpText` override)'),
+  })).optional().describe('Form section entry translations keyed by the entry\'s `field`'),
+});
+
 export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
   surface: 'this object translation',
   history: TRANSLATION_HISTORY,
@@ -814,27 +846,8 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    * none of the three keeps the object field's own copy, translated at
    * `objects.<object>.fields.<field>`.
    */
-  _sections: z.record(z.string(), strictObject({
-    surface: 'this section translation',
-    history: TRANSLATION_HISTORY,
-    aliases: { name: 'label', title: 'label', heading: 'label', entries: 'fields' },
-  }, {
-    label: z.string().optional().describe('Translated section label'),
-    description: z.string().optional().describe('Translated section description'),
-    fields: z.record(z.string(), strictObject({
-      surface: 'this form section entry translation',
-      history: TRANSLATION_HISTORY,
-      // `helpText` is the spelling a form section entry declares
-      // (`FormFieldSchema.helpText`); `help` is the FIELD translation's, one
-      // level up at `objects.<object>.fields.<field>`. Neighbouring-surface
-      // borrowing, which edit distance reads as a legitimate word.
-      aliases: { help: 'helpText', hint: 'helpText', tooltip: 'helpText', name: 'label', title: 'label' },
-    }, {
-      label: z.string().optional().describe('Translated entry label (overlays the section entry\'s `label` override)'),
-      placeholder: z.string().optional().describe('Translated entry placeholder (overlays the section entry\'s `placeholder` override)'),
-      helpText: z.string().optional().describe('Translated entry help text (overlays the section entry\'s `helpText` override)'),
-    })).optional().describe('Form section entry translations keyed by the entry\'s `field`'),
-  })).optional().describe('Section translations keyed by section name'),
+  _sections: z.record(z.string(), sectionTranslationSchema('this section translation', 'this form section entry translation'))
+    .optional().describe('Section translations keyed by section name'),
 
   /**
    * Filter-preset tab translations keyed by tab name (`ViewTabSchema.name`).
@@ -1817,14 +1830,22 @@ const appTranslationDataShape = () => ({
    *   forms.<form_name>.title
    *   forms.<form_name>.submitBehavior.title     (a `thank-you` panel)
    *   forms.<form_name>.submitBehavior.message
+   *   forms.<form_name>.sections.<section_name>.label
+   *   forms.<form_name>.sections.<section_name>.description
+   *   forms.<form_name>.sections.<section_name>.fields.<field>.label
+   *   forms.<form_name>.sections.<section_name>.fields.<field>.placeholder
+   *   forms.<form_name>.sections.<section_name>.fields.<field>.helpText
    *
    * The translator reads `forms.NAME` first; the form tails a form defined in
    * a view had under `objects.OBJECT._views.KEY` (`title`, `submitBehavior`)
    * are the declared fallback, so a bundle written for the old shape keeps
    * translating the same form. `label` and `description` under `_views.KEY`
    * are a view's, not form tails: they are neither moved nor read as a
-   * fallback. Section copy keeps `objects.OBJECT._sections.SECTION` as its
-   * object-level default.
+   * fallback. A section with no key under `forms.NAME.sections` reads
+   * `objects.OBJECT._sections.SECTION`, its object-level default: field
+   * groups and forms of one object share section names on purpose, so that
+   * is not a legacy fallback, and an entry key the form's section lacks falls
+   * back the same way, one key at a time.
    */
   forms: z.record(z.string(), strictObject({
     surface: 'this form translation',
@@ -1835,6 +1856,8 @@ const appTranslationDataShape = () => ({
     description: z.string().optional().describe('Translated form description'),
     title: z.string().optional().describe('Translated form heading (overlays the form\'s `title`)'),
     submitBehavior: submitBehaviorTranslationSchema('this form submit behavior translation').optional().describe("Translated thank-you panel copy — overlays the form's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'`"),
+    sections: z.record(z.string(), sectionTranslationSchema('this form section translation', 'this form section entry translation'))
+      .optional().describe("The form's own section copy keyed by section name; a key absent here reads `objects.OBJECT._sections.SECTION`"),
   })).optional().describe('Form translations keyed by form name (ADR-0159 D8)'),
 
   /**

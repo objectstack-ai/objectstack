@@ -78,3 +78,81 @@ describe('translateForm — the `forms` family, `_views` tails as fallback', () 
     expect(translateForm(doc, { 'zh-CN': {} as any }, { locale: 'zh-CN' })).toBe(doc);
   });
 });
+
+/**
+ * [ADR-0159 D8] `forms.NAME.sections.SECTION`: a form's own section copy is
+ * read first, key by key, and `objects.OBJECT._sections.SECTION` is the
+ * object-level default for any key the form's node does not carry.
+ */
+describe('translateForm — `forms.NAME.sections` first, `_sections` as the object-level default', () => {
+  const SECTIONED = {
+    name: 'crm_lead.web_to_lead',
+    object: 'crm_lead',
+    sections: [{
+      name: 'about',
+      label: 'About you',
+      description: 'Who you are',
+      fields: [{ field: 'email', label: 'Work email', placeholder: 'you@example.com', helpText: 'We never share it' }],
+    }],
+  };
+  const OWN = {
+    forms: {
+      'crm_lead.web_to_lead': {
+        sections: { about: { label: '关于您', fields: { email: { label: '工作邮箱', helpText: '我们不会分享' } } } },
+      },
+    },
+  };
+  const OBJECT_DEFAULT = {
+    objects: {
+      crm_lead: {
+        _sections: {
+          about: {
+            label: '对象级标签', description: '对象级描述',
+            fields: { email: { label: '对象级邮箱', placeholder: '对象级占位' } },
+          },
+        },
+      },
+    },
+  };
+
+  it('composes a legal pack: `forms.NAME.sections` parses', () => {
+    const parsed = TranslationDataSchema.safeParse(OWN);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+  });
+
+  it('REFUSES an unknown key under `forms.NAME.sections.SECTION`, as `_sections` does', () => {
+    const parsed = TranslationDataSchema.safeParse({
+      forms: { 'crm_lead.web_to_lead': { sections: { about: { lable: 'x' } } } },
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('reads the form\'s own section node first, and `_sections` for each key it lacks', () => {
+    const bundle: TranslationBundle = { 'zh-CN': { ...OBJECT_DEFAULT, ...OWN } as any };
+    const out = translateForm(clone(SECTIONED), bundle, { locale: 'zh-CN' }) as any;
+    expect(out.sections[0]).toMatchObject({
+      label: '关于您',
+      description: '对象级描述',
+      fields: [{ field: 'email', label: '工作邮箱', placeholder: '对象级占位', helpText: '我们不会分享' }],
+    });
+  });
+
+  it('CONTROL: with no `forms.NAME.sections` node, `_sections` translates the section as before', () => {
+    const bundle: TranslationBundle = { 'zh-CN': OBJECT_DEFAULT as any };
+    const out = translateForm(clone(SECTIONED), bundle, { locale: 'zh-CN' }) as any;
+    expect(out.sections[0]).toMatchObject({
+      label: '对象级标签',
+      description: '对象级描述',
+      fields: [{ field: 'email', label: '对象级邮箱', placeholder: '对象级占位', helpText: 'We never share it' }],
+    });
+  });
+
+  it('CONTROL: a view is not a form — `translateView` never reads `forms.NAME.sections`', () => {
+    const view = {
+      name: 'crm_lead.web_to_lead', object: 'crm_lead', viewKind: 'form',
+      config: { type: 'simple', sections: clone(SECTIONED.sections) },
+    };
+    const out = translateMetadataDocument('view', view, { 'zh-CN': OWN as any }, { locale: 'zh-CN' }) as any;
+    expect(out.config.sections[0].label).toBe('About you');
+  });
+});

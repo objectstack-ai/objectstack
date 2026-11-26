@@ -1456,6 +1456,11 @@ function translateBulkActionDefs(
  * One string off a form section's `objects.<object>._sections.<section>` node,
  * across the locale chain — `undefined` when no locale carries it, and the
  * caller then leaves the authored value in place.
+ *
+ * A `form` item passes its `formName`: its own
+ * `forms.<form>.sections.<section>` node is read first, across the whole
+ * locale chain, and `_sections` is the object-level default after it
+ * (ADR-0159 D8), the order {@link translateForm} reads `title` in.
  */
 function lookupSectionText(
   bundle: TranslationBundle | undefined,
@@ -1463,8 +1468,13 @@ function lookupSectionText(
   sectionName: string,
   attr: 'label' | 'description',
   opts: ResolveOptions | undefined,
+  formName?: string,
 ): string | undefined {
   if (!bundle) return undefined;
+  if (formName !== undefined) {
+    const own = lookupFormText(bundle, formName, ['sections', sectionName, attr], opts);
+    if (own !== undefined) return own;
+  }
   for (const code of localeChain(opts)) {
     const candidate = pickData(bundle, code)?.objects?.[objectName]?._sections?.[sectionName]?.[attr];
     if (typeof candidate === 'string' && candidate.length > 0) return candidate;
@@ -1476,7 +1486,9 @@ function lookupSectionText(
  * One string off a form section entry's
  * `objects.<object>._sections.<section>.fields.<field>` node, across the
  * locale chain — `undefined` when no locale carries it, and the caller then
- * leaves the authored value in place.
+ * leaves the authored value in place. A `form` item's `formName` reads
+ * `forms.<form>.sections.<section>.fields.<field>` first, as
+ * {@link lookupSectionText} does.
  */
 function lookupSectionEntryText(
   bundle: TranslationBundle | undefined,
@@ -1485,8 +1497,13 @@ function lookupSectionEntryText(
   fieldName: string,
   attr: FormSectionEntryAttr,
   opts: ResolveOptions | undefined,
+  formName?: string,
 ): string | undefined {
   if (!bundle) return undefined;
+  if (formName !== undefined) {
+    const own = lookupFormText(bundle, formName, ['sections', sectionName, 'fields', fieldName, attr], opts);
+    if (own !== undefined) return own;
+  }
   for (const code of localeChain(opts)) {
     const candidate = pickData(bundle, code)?.objects?.[objectName]?._sections?.[sectionName]
       ?.fields?.[fieldName]?.[attr];
@@ -1560,6 +1577,7 @@ function translateFormSections(
   objectName: string,
   opts: ResolveOptions | undefined,
   packagedConfig: Record<string, unknown> | undefined,
+  formName?: string,
 ): unknown {
   if (!Array.isArray(sections)) return sections;
   let changed = false;
@@ -1573,7 +1591,7 @@ function translateFormSections(
         ? undefined
         : lookupSectionText(
           catalogFor(catalogs, valueOverridesPackagedBase(packagedSection, attr, authored)),
-          objectName, sectionName, attr, opts,
+          objectName, sectionName, attr, opts, formName,
         );
 
     const label = text('label', section.label);
@@ -1585,6 +1603,7 @@ function translateFormSections(
       sectionName,
       opts,
       packagedSection,
+      formName,
     );
     if (label === undefined && description === undefined && fields === section.fields) return raw;
     changed = true;
@@ -1622,6 +1641,7 @@ function translateFormSectionEntries(
   sectionName: string,
   opts: ResolveOptions | undefined,
   packagedSection: Record<string, unknown> | undefined,
+  formName?: string,
 ): unknown {
   if (!Array.isArray(entries)) return entries;
   let changed = false;
@@ -1635,7 +1655,7 @@ function translateFormSectionEntries(
         ? undefined
         : lookupSectionEntryText(
           catalogFor(catalogs, valueOverridesPackagedBase(packagedEntry, attr, entry[attr])),
-          objectName, sectionName, fieldName, attr, opts,
+          objectName, sectionName, fieldName, attr, opts, formName,
         );
 
     const label = text('label');
@@ -1980,8 +2000,9 @@ function lookupFormText(
  * has no value, so a bundle written for the old shape keeps translating the
  * same form. `label` and `description` read `forms.<name>` only: under
  * `_views.<key>` they are the view's own strings, never a form's. Section
- * copy keeps `objects.<object>._sections.<section>` as its object-level
- * default ({@link translateFormSections}). The override rule is the view's:
+ * copy reads `forms.<name>.sections.<section>` first and keeps
+ * `objects.<object>._sections.<section>` as its object-level default, key by
+ * key ({@link translateFormSections}). The override rule is the view's:
  * a string authored on top of the packaged form keeps its text against the
  * catalog (ADR-0029 D9.2a, {@link valueOverridesPackagedBase}).
  */
@@ -2018,7 +2039,7 @@ export function translateForm<T extends FormLike>(
     base,
   );
   const sections = catalogs.unchanged
-    ? translateFormSections(form.sections, catalogs, formSectionObjectName(form, objectName), opts, base)
+    ? translateFormSections(form.sections, catalogs, formSectionObjectName(form, objectName), opts, base, name)
     : form.sections;
   if (label === undefined && description === undefined && title === form.title
     && submitBehavior === form.submitBehavior && sections === form.sections) {

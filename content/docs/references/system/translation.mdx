@@ -198,7 +198,7 @@ Platform translation data — the per-app groups plus the platform-only `setting
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
-| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
+| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object; … }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
@@ -304,6 +304,7 @@ Translation data for a single object
 | **description** | `string` | optional | Translated form description |
 | **title** | `string` | optional | Translated form heading (overlays the form's `title`) |
 | **submitBehavior** | `{ title?: string; message?: string }` | optional | Translated thank-you panel copy — overlays the form's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'` |
+| **sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | The form's own section copy keyed by section name; a key absent here reads `objects.OBJECT._sections.SECTION` |
 
 ### Nested Shape: `PlatformTranslationData.flows[string]`
 
@@ -400,7 +401,7 @@ Served translation data — the platform groups the browser reads, without the s
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
-| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
+| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object; … }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
@@ -505,6 +506,7 @@ Translation data for a single object
 | **description** | `string` | optional | Translated form description |
 | **title** | `string` | optional | Translated form heading (overlays the form's `title`) |
 | **submitBehavior** | `{ title?: string; message?: string }` | optional | Translated thank-you panel copy — overlays the form's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'` |
+| **sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | The form's own section copy keyed by section name; a key absent here reads `objects.OBJECT._sections.SECTION` |
 
 ### Nested Shape: `ServedTranslationData.flows[string]`
 
@@ -664,7 +666,7 @@ Per-app translation data for objects, apps, and UI messages
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
-| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
+| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object; … }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
@@ -769,6 +771,7 @@ Translation data for a single object
 | **description** | `string` | optional | Translated form description |
 | **title** | `string` | optional | Translated form heading (overlays the form's `title`) |
 | **submitBehavior** | `{ title?: string; message?: string }` | optional | Translated thank-you panel copy — overlays the form's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'` |
+| **sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | The form's own section copy keyed by section name; a key absent here reads `objects.OBJECT._sections.SECTION` |
 
 ### Nested Shape: `TranslationData.flows[string]`
 
@@ -886,7 +889,7 @@ One locale of translations — the `translation` metadata type
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
-| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
+| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object; … }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
@@ -1002,6 +1005,7 @@ Translation data for a single object
 | **description** | `string` | optional | Translated form description |
 | **title** | `string` | optional | Translated form heading (overlays the form's `title`) |
 | **submitBehavior** | `{ title?: string; message?: string }` | optional | Translated thank-you panel copy — overlays the form's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'` |
+| **sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | The form's own section copy keyed by section name; a key absent here reads `objects.OBJECT._sections.SECTION` |
 
 ### Nested Shape: `TranslationItem.flows[string]`
 
