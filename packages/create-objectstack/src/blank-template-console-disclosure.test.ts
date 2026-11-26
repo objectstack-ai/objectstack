@@ -29,6 +29,11 @@
 // (an object appears in Console navigation only when an app lists it) and how
 // to add more, and no longer claims an empty Console.
 //
+// Card #36945 replaced the sample object with the platform's Starter app as
+// source: `src/objects/company.object.ts` and `contact.object.ts`, a list view
+// for each, and a menu of companies, contacts and the platform's tasks and
+// notes in the same `src/apps/main.app.ts`.
+//
 // The assertion is deliberately BIDIRECTIONAL. A one-way "README must say X"
 // check rots the moment someone adds an app to the template — the README would
 // keep claiming an empty starting point and the test would stay green on a
@@ -65,10 +70,10 @@ describe('blank template — tree and README agree about the Console', () => {
   // tree, so a test that read the wrong directory would silently assert
   // nothing. This proves the tree really was read.
   it('reads the real template tree', () => {
-    expect(srcFiles).toContain(path.join('objects', 'note.object.ts'));
+    expect(srcFiles).toContain(path.join('objects', 'company.object.ts'));
   });
 
-  it('ships the starter app and the sample object\'s list view', () => {
+  it('ships the app and the companies\' and contacts\' list views', () => {
     // The measured starting point the README section is written against:
     // the first Console visit lists this project's app. Removing it is a
     // product decision, and the failure message says so rather than inviting
@@ -80,7 +85,8 @@ describe('blank template — tree and README agree about the Console', () => {
         '"The Console" to describe what actually renders, then update this ' +
         'expectation.',
     ).toEqual([path.join('apps', 'main.app.ts')]);
-    expect(srcFiles).toContain(path.join('views', 'note.view.ts'));
+    expect(srcFiles).toContain(path.join('views', 'company.view.ts'));
+    expect(srcFiles).toContain(path.join('views', 'contact.view.ts'));
   });
 
   it('discloses that no app means no Console navigation', () => {
@@ -122,38 +128,34 @@ describe('blank template — tree and README agree about the Console', () => {
     ).toMatch(/Console navigation only when an app lists it/i);
   });
 
-  it('reaches the sample object by `Note.name`, never by the template\'s own name', () => {
+  it('names its objects under the template namespace, so scaffolding moves every reference', () => {
     // Scaffolding moves the template's namespace onto the project's by
-    // rewriting `name: 'blank_…'` literals only (`rewriteObjectNamePrefix`).
-    // A `blank_note` typed out anywhere else — an app's `objectName`, a
-    // view's `object` — would ship literally into `my-app`, pointing at an
-    // object that no longer exists there. So outside a `name:` literal, the
-    // template's namespace prefix is never written in its source.
+    // rewriting every quoted `blank_…` literal (`rewriteObjectNamePrefix`):
+    // the names the objects declare and every reference to them, a lookup's
+    // target, a related list, a view's object, a menu entry. A reference
+    // spelled any other way would ship literally into `my-app`, pointing at an
+    // object that no longer exists there. So every object the app or a view
+    // reaches is spelled with the template's namespace prefix, or is a
+    // platform object (`sys_…`).
     const namespace = /\bnamespace:\s*'([a-z0-9_]+)'/.exec(
       fs.readFileSync(path.join(blankRoot, 'objectstack.config.ts'), 'utf8'),
     )?.[1];
     expect(namespace, 'the template config declares its namespace').toBeTruthy();
-    const literal = new RegExp(`(['"\`])${namespace}_[a-z0-9_]+\\1`, 'g');
-    const outsideName: string[] = [];
+    const references: string[] = [];
     for (const rel of srcFiles.filter((f) => f.endsWith('.ts'))) {
-      for (const line of fs.readFileSync(path.join(blankRoot, 'src', rel), 'utf8').split('\n')) {
-        for (const m of line.matchAll(literal)) {
-          const before = line.slice(0, m.index);
-          if (!/\bname:\s*$/.test(before)) outsideName.push(`src/${rel}: ${line.trim()}`);
-        }
-      }
+      const text = fs.readFileSync(path.join(blankRoot, 'src', rel), 'utf8');
+      for (const m of text.matchAll(/\b(?:objectName|object|list|requiresObject):\s*'([a-z0-9_]+)'/g)) references.push(m[1]);
+      for (const m of text.matchAll(/Field\.lookup\('([a-z0-9_]+)'/g)) references.push(m[1]);
     }
-    expect(outsideName).toEqual([]);
-    // Vacuity guard: the starter app and view really do reach the object.
-    for (const rel of [path.join('apps', 'main.app.ts'), path.join('views', 'note.view.ts')]) {
-      expect(fs.readFileSync(path.join(blankRoot, 'src', rel), 'utf8')).toMatch(/\bNote\.name\b/);
-    }
+    // Vacuity guard: the menu, the views, the lookup and the related list were read.
+    expect(references.length).toBeGreaterThanOrEqual(8);
+    expect(references.filter((r) => !r.startsWith(`${namespace}_`) && !r.startsWith('sys_'))).toEqual([]);
   });
 
   it('does not hard-code the rewritten object name', () => {
     // `rewrite-identity.ts` rewrites `.ts` files only, so a README naming the
-    // template's own `blank_note` would ship literally into `my-app`, where the
-    // object is `my_app_note`. The README must stay generic.
-    expect(readme).not.toMatch(/\bblank_note\b/);
+    // template's own `blank_company` would ship literally into `my-app`, where
+    // the object is `my_app_company`. The README must stay generic.
+    expect(readme).not.toMatch(/\bblank_[a-z0-9_]+\b/);
   });
 });

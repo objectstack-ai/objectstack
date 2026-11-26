@@ -92,7 +92,12 @@ export const NotificationReceipt = ObjectSchema.create({
             description: 'Channel id this receipt is for (inbox / email / push / …)',
         }),
 
-        state: Field.select(['delivered', 'read', 'clicked', 'dismissed'], {
+        state: Field.select([
+            { label: 'delivered', value: 'delivered', color: 'purple' },
+            'read',
+            'clicked',
+            'dismissed',
+        ], {
             label: 'State',
             required: true,
             defaultValue: 'delivered',

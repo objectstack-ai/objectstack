@@ -5069,6 +5069,9 @@ const ar = {
       metrics: 'المقاييس',
       noAddedFilter: 'لا يوجد عامل تصفية مضاف إلى تعريف مجموعة البيانات',
     },
+    recordCitations: {
+      title: 'مقتبس من السجلات',
+    },
     tool: {
       aggregate_data: "تجميع البيانات ذات الصلة",
       get_record: "قراءة هذا السجل",

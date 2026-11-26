@@ -4682,6 +4682,9 @@ const ko = {
       metrics: '지표',
       noAddedFilter: '데이터셋 정의에 추가된 필터 없음',
     },
+    recordCitations: {
+      title: '레코드에서 인용',
+    },
     tool: {
       aggregate_data: "관련 데이터 집계하기",
       get_record: "이 레코드 읽기",

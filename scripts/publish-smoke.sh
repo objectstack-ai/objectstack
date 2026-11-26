@@ -1180,36 +1180,52 @@ log "REST CRUD probes (seeded dev admin)"
 # The admin session was established by the bootstrap-bypass probe above and is
 # reused here — one sign-in, not two.
 
-# The scaffolder renames the template's `blank_note` object after the project
-# (e.g. smoke_app_note) — read the real name from the generated source.
-NOTE_OBJECT=$(node -e "
-  const src = require('fs').readFileSync('$APP_DIR/src/objects/note.object.ts', 'utf8');
+# The probe drives the starter object the scaffolder actually wrote, and one
+# field that object requires. Which template that is depends on the mode, not on
+# this script: `pack` scaffolds with the repo-built create-objectstack, whose
+# template starts with companies (`company.object.ts`, `name` required), while
+# `registry` scaffolds with the published create-objectstack, which ships the
+# older `note` template (`note.object.ts`, `title`) until the release that
+# carries the companies template. So the file present decides; a project with
+# neither fails here, by name, instead of at an unreadable path.
+#
+# The scaffolder renames the template's `blank_*` object after the project
+# (e.g. smoke_app_company), so the real name is read from the generated source.
+if [ -f "$APP_DIR/src/objects/company.object.ts" ]; then
+  STARTER_FILE="company.object.ts"; STARTER_FIELD="name"
+elif [ -f "$APP_DIR/src/objects/note.object.ts" ]; then
+  STARTER_FILE="note.object.ts"; STARTER_FIELD="title"
+else
+  fail "the scaffolded project has neither src/objects/company.object.ts nor src/objects/note.object.ts — the REST CRUD probe has no starter object to drive"
+fi
+STARTER_OBJECT=$(node -e "
+  const src = require('fs').readFileSync('$APP_DIR/src/objects/$STARTER_FILE', 'utf8');
   const m = /name:\s*'([a-z0-9_]+)'/.exec(src);
-  if (!m) { console.error('object name not found'); process.exit(1); }
+  if (!m) { console.error('object name not found in $STARTER_FILE'); process.exit(1); }
   console.log(m[1]);
 ")
-echo "  scaffolded object: $NOTE_OBJECT"
+echo "  scaffolded object: $STARTER_OBJECT ($STARTER_FILE, writes '$STARTER_FIELD')"
 
-probe "POST /data/$NOTE_OBJECT (create)" 201 \
+probe "POST /data/$STARTER_OBJECT (create)" 201 \
   -b "$COOKIES_ADMIN" \
   -X POST -H 'content-type: application/json' \
-  -d '{"title":"publish smoke"}' \
-  "$BASE_URL/api/v1/data/$NOTE_OBJECT"
+  -d "{\"$STARTER_FIELD\":\"publish smoke\"}" \
+  "$BASE_URL/api/v1/data/$STARTER_OBJECT"
 RECORD_ID=$(jq -r '.id // .data.id // empty' "$BODY")
 [ -n "$RECORD_ID" ] || fail "create response carried no record id (body: $(cat "$BODY"))"
 
-probe "GET /data/$NOTE_OBJECT/$RECORD_ID (read)" 200 \
-  -b "$COOKIES_ADMIN" "$BASE_URL/api/v1/data/$NOTE_OBJECT/$RECORD_ID"
+probe "GET /data/$STARTER_OBJECT/$RECORD_ID (read)" 200 \
+  -b "$COOKIES_ADMIN" "$BASE_URL/api/v1/data/$STARTER_OBJECT/$RECORD_ID"
 
-probe "PATCH /data/$NOTE_OBJECT/$RECORD_ID (update)" 200 \
+probe "PATCH /data/$STARTER_OBJECT/$RECORD_ID (update)" 200 \
   -b "$COOKIES_ADMIN" \
   -X PATCH -H 'content-type: application/json' \
-  -d '{"title":"publish smoke (updated)"}' \
-  "$BASE_URL/api/v1/data/$NOTE_OBJECT/$RECORD_ID"
+  -d "{\"$STARTER_FIELD\":\"publish smoke (updated)\"}" \
+  "$BASE_URL/api/v1/data/$STARTER_OBJECT/$RECORD_ID"
 
-probe "DELETE /data/$NOTE_OBJECT/$RECORD_ID (delete)" 200 \
+probe "DELETE /data/$STARTER_OBJECT/$RECORD_ID (delete)" 200 \
   -b "$COOKIES_ADMIN" \
-  -X DELETE "$BASE_URL/api/v1/data/$NOTE_OBJECT/$RECORD_ID"
+  -X DELETE "$BASE_URL/api/v1/data/$STARTER_OBJECT/$RECORD_ID"
 
 # ── 4. log scan ─────────────────────────────────────────────────────────────
 # What is left for this section to catch, now that the boot gate above runs

@@ -48,7 +48,7 @@
 - 标签序 = NORTH-STAR「Priority」第 3 条(无级殿后),本车道开放卡现读 `card-pick.mjs --order <序>`。
 - 开放 = 未派发(无 `pm:dispatched`、无 assignee);在飞的 P0/P1 不挡任何候选,只余取卡全序。
 - `card-pick.mjs` 仍印每行 `domain:*` 与 lane ownership 页脚,脚本行为未改:`domain:*` 读作文件归属,cloud 与安全卡照旧不认领。
-- 取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/lanes/spec.md`)> 标签序。
+- 取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/domains/spec.md`)> 标签序。
 - 云车道同按专题派,⛔ 不按 `cloud/ROADMAP.md` 行序;细则照 `lanes/cloud.md` 所指的 cloud 仓文件。
 - 全序每级现读/现算,零逐卡维护;无级/无 area/无 type 轮报记分诊缺口。
 - 同级先非车队卡(作者非 `Bot` 且首行非席位签名),再 `Bug`、卡龄;⛔ 不升级、不越 p0。
@@ -97,7 +97,7 @@
 - 一单一次 `Agent` 调用,`subagent_type` 为 `os-dev`,后台并行;`mode:thread` 一卡一线程见 runbook。
 - 档位与 effort 的取值只住本节末〈定档〉:认领、派发、开线程与起子代理前照它定,⛔ 不凭记忆。
 - 实施卡文件面 ⛔ 不含 `docs/adr/**`、`skills/**`、`SKILL.md`、`os-dev.md`:各立 `domain:skills` 卡。
-- 例外仅新增:枚举行(见 `lanes/skills.md`)随实施卡同笔,派发令文件面只点该行。
+- 例外仅新增:枚举行(见 `domains/skills.md`)随实施卡同笔,派发令文件面只点该行。
 - ADR 记账行(resolved by/修订注记)归落地席:ACCEPT 记 `carrier:` 注,合并后同轮在 open「ADR revisions, week of …」卡
   追加一行(ADR、节、原文所说、现在实情、落地 PR),无 open 卡则开下周卡;周卡以一个受管 `docs/adr/**` PR 落地。
 - 只收与 `main` 矛盾的 ADR 文本;纯补记 ⛔ 不立。

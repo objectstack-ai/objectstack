@@ -112,7 +112,10 @@ const CHANNEL_FIELD = {
   name: 'channel',
   type: 'picklist',
   label: 'Channel',
-  options: [{ value: 'email', label: 'Email', color: 'amber' }],
+  // A palette family the badge renders (`amber` is none of the nine, so since
+  // objectstack#36882 it reads as no declaration and renders neutral; the
+  // green pill captured below came from the retired value hash).
+  options: [{ value: 'email', label: 'Email', color: 'green' }],
 };
 
 /** The legacy heuristic's own badge field — reached with no `cardFields`. */

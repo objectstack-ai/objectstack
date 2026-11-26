@@ -4944,6 +4944,9 @@ const zhHant = {
       metrics: '指標',
       noAddedFilter: '未在資料集定義之外新增篩選條件',
     },
+    recordCitations: {
+      title: '引自記錄',
+    },
     tool: {
       aggregate_data: '彙總相關資料',
       get_record: '讀取這條記錄',

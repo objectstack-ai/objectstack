@@ -29,12 +29,11 @@
  *   1. the field's own option `color` for that value;
  *   2. the value itself when it already IS a CSS colour literal.
  *
- * The LAST rung deliberately stays with each caller, because each one has a
- * different right answer for "a value that is neither": the gantt derives a
- * semantic token hex (a bar must be painted), the calendar hashes onto its
- * theme-aware 8-stop class palette (a soft tint, not a solid fill), and the
- * timeline draws its default marker variant. Pulling those together would be a
- * repaint of existing views, not a bug fix.
+ * For "a value that is neither" each caller paints its own default: the gantt
+ * its default bar colour, the calendar its default event colour, the timeline
+ * its default marker variant. No caller derives a colour from the value, by a
+ * lookup table or a hash (objectstack#36882, ruled option A): a record is
+ * coloured if and only if a colour was declared for it.
  *
  * ## Keyed by option `value` only
  *
@@ -92,8 +91,8 @@ export function buildFieldColorMap(fieldDef: FieldColorDefinition | undefined | 
 
 /**
  * Build the per-field colour resolver: rung 1 (option colour) then rung 2 (the
- * value is already a colour literal), else `undefined` so the caller runs its
- * own last rung.
+ * value is already a colour literal), else `undefined` so the caller paints
+ * its own default.
  *
  * A factory rather than a plain function because callers resolve one field
  * across every row of a view — the option map is built once, not per record.

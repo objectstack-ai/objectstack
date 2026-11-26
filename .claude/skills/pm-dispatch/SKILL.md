@@ -167,11 +167,11 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 
 | 标签 | 包家族 |
 |:--|:--|
-| `domain:server` | 服务端:引擎 + 服务插件 + CLI/运行时;`objectql core formula metadata* platform-objects drivers/* services/* connectors/* triggers/* plugin-* embedder-openai knowledge-* cli runtime verify types rest mcp observability client* cloud-connection create-objectstack adapters/*`;详见 `references/lanes/server.md` |
-| `domain:devx` | `sdui-parser`、`packages/qa`、`apps/docs`、`docs/qa`、`.githooks`、`.github/workflows/**`、`docker/README.md`、`content/docs` 横切与 `examples/**` 测试基建(见 `lanes/devx.md`);`packages/lint`、`scripts`(门禁类)按锚定规则归 spec,门禁按 SUBJECT:受管面归 skills,代码/文档质量归本域 |
+| `domain:server` | 服务端:引擎 + 服务插件 + CLI/运行时;`objectql core formula metadata* platform-objects drivers/* services/* connectors/* triggers/* plugin-* embedder-openai knowledge-* cli runtime verify types rest mcp observability client* cloud-connection create-objectstack adapters/*`;见 `references/domains/server.md` |
+| `domain:devx` | `sdui-parser`、`packages/qa`、`apps/docs`、`docs/qa`、`.githooks`、`.github/workflows/**`、`docker/README.md`、`content/docs` 横切与 `examples/**` 测试基建(见 `domains/devx.md`);`packages/lint`、`scripts`(门禁类)按锚定规则归 spec,门禁按 SUBJECT:受管面归 skills,代码/文档质量归本域 |
 | `domain:skills` | 规则文本:`AGENTS.md`+`CLAUDE.md`+`.claude/**`(含本文件)+`skills/**`+`docs/adr/**`+`docs/NORTH-STAR.md`;非门禁的 `scripts/pm/**`(PM 循环工具);governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
-| `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/lanes/spec.md`) |
-| `domain:ui` | `ui/**` 全部代码:`@object-ui/*` 库与 `ui/apps/*`、`ui/packages/types` 与 schema 语料、`ui/scripts` 与门禁工具、文档随所记录的面走;`packages/console`(dist 由 `pnpm console:build` 生成 ⛔ 不手改);协议恒归 `domain:spec`,受管面归 `domain:skills`;详见 `references/lanes/ui.md` |
+| `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/domains/spec.md`) |
+| `domain:ui` | `ui/**` 全部代码:`@object-ui/*` 库与 `ui/apps/*`、`ui/packages/types` 与 schema 语料、`ui/scripts` 与门禁工具、文档随所记录的面走;`packages/console`(dist 由 `pnpm console:build` 生成 ⛔ 不手改);协议恒归 `domain:spec`,受管面归 `domain:skills`;见 `references/domains/ui.md` |
 | `domain:cloud` | 涉 cloud(专题打 `area:cloud`)即整卡归 cloud PM(`repo:cloud` 席):读或改 cloud 代码、生产方或带 cloud 半边;本仓车道 ⛔ 不认领;只缺事实读数者留车道敲信箱;cloud PM 跟到关卡,余下本仓活写明 cloud 事实后另立卡;判据见 `references/cross-repo-coordination.md` |
 | `security` · `l2-review` · `eval`(车道,无 `domain:*` 标签) | 本仓安全公告(私有仓卡归该仓车道,cloud 即上行);席位 `security#N` 见 `references/lanes/security.md`;永不公开的规则只住 `references/security-findings.md`。L2 席、AI 评测席见 `references/lanes/l2-review.md`、`references/lanes/eval.md` |
 | `repo:objectstack`(全仓调度,无 `domain:*` 标签) | 跨各域按座位贴点名的专题认领本仓卡;cloud 与安全公告除外;见 `references/lanes/objectstack.md` |

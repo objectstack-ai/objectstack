@@ -4886,6 +4886,9 @@ const ru = {
       metrics: 'Метрики',
       noAddedFilter: 'Без фильтров сверх определения набора данных',
     },
+    recordCitations: {
+      title: 'Цитаты из записей',
+    },
     tool: {
       aggregate_data: "Агрегировать данные",
       get_record: "Прочитать запись",

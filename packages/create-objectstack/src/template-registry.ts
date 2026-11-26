@@ -24,7 +24,7 @@ export interface TemplateInfo {
  */
 export const TEMPLATES: Record<string, TemplateInfo> = {
   blank: {
-    description: 'Minimal starter — one object, REST API, ready to extend',
+    description: 'Companies and contacts, with platform tasks and notes in the menu — ready to extend',
     source: { kind: 'bundled', dir: 'blank' },
   },
 };

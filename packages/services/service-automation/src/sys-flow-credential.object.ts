@@ -86,7 +86,10 @@ export const SysFlowCredential = ObjectSchema.create({
       description: 'The app the flow this credential belongs to comes from. Filled in by the platform; empty for flows created here.',
     }),
 
-    state: Field.select(['draft', 'active'], {
+    state: Field.select([
+      { label: 'draft', value: 'draft', color: 'gray' },
+      { label: 'active', value: 'active', color: 'green' },
+    ], {
       label: 'State',
       required: true,
       description:

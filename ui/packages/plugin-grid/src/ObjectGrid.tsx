@@ -4986,8 +4986,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         ? opts.find((o: any) => String(o.label) === label || String(o.value) === label)
         : undefined;
       // Same resolution as the cell below the header (`SelectCellRenderer`):
-      // a declared hex renders as declared (objectui#5141/#5183), everything
-      // else keeps resolving to a palette family. `labelColorStyle` carries
+      // a declared hex renders as declared (objectui#5141/#5183), a declared
+      // family name resolves to its palette family, and an option with no
+      // declared colour renders neutral (objectstack#36882). `labelColorStyle` carries
       // the CSS custom properties the hex className reads — the pill needs
       // BOTH halves or it references undefined variables.
       const hexBadge = getBadgeHexAppearance(matched?.color);

@@ -97,10 +97,10 @@ export const SystemUploadSession = ObjectSchema.create({
       label: 'Status',
       required: true,
       options: [
-        { label: 'In Progress', value: 'in_progress' },
+        { label: 'In Progress', value: 'in_progress', color: 'blue' },
         { label: 'Completing', value: 'completing' },
-        { label: 'Completed', value: 'completed' },
-        { label: 'Failed', value: 'failed' },
+        { label: 'Completed', value: 'completed', color: 'green' },
+        { label: 'Failed', value: 'failed', color: 'red' },
         { label: 'Expired', value: 'expired' },
       ],
     }),
