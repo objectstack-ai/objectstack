@@ -1282,7 +1282,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       compactToolbar: {
         label: "Barra compacta",
-        helpText: "Agrupa Grupo / Color / Densidad / Ocultar campos en un único menú emergente de «Configuración de la vista»"
+        helpText: "Agrupa Grupo / Color / Densidad / Ocultar campos en un único menú emergente de «Visualización». Activado por defecto: si se omite o es `true`, el renderizador dibuja esta barra compacta; `false` dibuja la barra ancha, con un botón por control. La barra compacta no dibuja el botón Actualizar, así que `userActions.refresh` solo afecta a la barra ancha; deslizar para actualizar no depende de ninguna de las dos claves."
       },
       rowHeight: {
         label: "Altura de fila",

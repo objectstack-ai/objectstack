@@ -1282,7 +1282,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       compactToolbar: {
         label: "Barra de ferramentas compacta",
-        helpText: "Reunir Agrupar/Cor/Densidade/Ocultar campos em um único popover de configurações da visualização"
+        helpText: "Reunir Agrupar/Cor/Densidade/Ocultar campos em um único popover “Exibição”. Ativado por padrão: omitido ou `true`, o renderizador desenha esta barra de ferramentas compacta; `false` desenha a barra de ferramentas larga, com um botão por controle. A barra compacta não desenha o botão Atualizar, portanto `userActions.refresh` rege apenas a barra larga; puxar para atualizar não é afetado por nenhuma das duas chaves."
       },
       rowHeight: {
         label: "Altura da linha",

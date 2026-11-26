@@ -2947,8 +2947,10 @@ export interface NamedListView {
    * Collapse the toolbar's settings into the single "Display" popover: the
    * bar keeps Filter, Sort, Display and Search, and Display carries the
    * layout switcher, Group, Color, Hide fields, Density, Row numbers, Edit
-   * inline, Refresh and Export. On unless a view writes `false`, which keeps
-   * one toolbar button per control (objectui#12423).
+   * inline, Reset to view default and Export. The compact toolbar draws no
+   * Refresh button anywhere: Refresh is a wide-toolbar button only, so
+   * `userActions.refresh` changes nothing here. On unless a view writes
+   * `false`, which keeps one toolbar button per control (objectui#12423).
    * @default true
    */
   compactToolbar?: boolean;

@@ -1282,7 +1282,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       compactToolbar: {
         label: "コンパクトツールバー",
-        helpText: "グループ / 色 / 密度 / フィールド非表示を 1 つの「ビュー設定」ポップオーバーにまとめます"
+        helpText: "グループ / 色 / 密度 / フィールド非表示を 1 つの「表示」ポップオーバーにまとめます。既定でオン：省略または `true` のとき、レンダラーはこのコンパクトツールバーを描画し、`false` のときはコントロールごとにボタンが並ぶ幅広ツールバーを描画します。コンパクトツールバーには更新ボタンがないため、`userActions.refresh` が効くのは幅広ツールバーだけです。プルして更新はどちらのキーにも影響されません。"
       },
       rowHeight: {
         label: "行の高さ",
