@@ -89,6 +89,8 @@ export interface ImportRowResult {
   /**
    * [#25582] Every cell error of a failed row, one element per failed cell in
    * column order, each `{ field, code, message }` (`ImportRowResultSchema.errors`),
+   * plus `scope` on a `reference_out_of_scope` cell (the row's own columns the
+   * lookup was resolved within, #36794),
    * so one import names every bad cell instead of one per re-import. Filled
    * only from `coerceRow`'s cell errors, where `field` / `code` / `error` above
    * are element 0. ⛔ Never on a validate-verdict row or a refused write: their
@@ -829,6 +831,21 @@ function isScopeFieldDenial(e: unknown, scope: Readonly<Record<string, unknown>>
 }
 
 /**
+ * [#36794] Whether a scoped lookup read was refused because its scope names a
+ * target field the engine cannot filter by (a `formula`): the filter seam's
+ * refusal (`code: 'INVALID_FIELD'`, the code both filter doors declare) naming
+ * at least one scope field in its `fields`. Read off the error's declared
+ * properties, never its message, so any other refusal of the read (no read
+ * grant on the target, a driver fault) is not taken for this one.
+ */
+function isScopeFilterRefusal(e: unknown, scope: Readonly<Record<string, unknown>>): boolean {
+  const err = e as { code?: unknown; fields?: unknown; details?: { fields?: unknown } } | null;
+  if (err?.code !== 'INVALID_FIELD') return false;
+  const fields = Array.isArray(err.fields) ? err.fields : Array.isArray(err.details?.fields) ? err.details!.fields : [];
+  return (fields as unknown[]).some((f) => typeof f === 'string' && Object.prototype.hasOwnProperty.call(scope, f));
+}
+
+/**
  * [#27465] The refusal of a match key naming a field that holds a list or a
  * structured value, or `undefined` when every named field can be a key.
  *
@@ -997,6 +1014,12 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       .filter((f) => !scope || !Object.prototype.hasOwnProperty.call(scope, f));
     const lookup = async (): Promise<RefMatch> => {
       let match: RefMatch = {};
+      // [#36794] Whether any candidate read ran to an answer, and whether a read
+      // was refused because the scope names a target field the engine cannot
+      // filter by (a formula). A scoped lookup none of whose reads answered, and
+      // at least one of whose refusals said so, never asked its question.
+      let asked = false;
+      let scopeUnfilterable = false;
       for (const f of candidates) {
         try {
           const r = await p.findData(findArgsBase({
@@ -1006,6 +1029,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
             // more conditions on the same read, run as the same caller.
             query: { object: referenceObject, where: { [f]: display, ...(scope ?? {}) }, limit: 2 },
           }));
+          asked = true;
           const recs = findRows(r);
           if (recs.length === 0) continue;
           if (recs.length > 1) { match = { ambiguous: true, matchedField: f }; break; }
@@ -1016,9 +1040,13 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
           // about where the value lives: report it as such, never as a record
           // that lives under another parent.
           if (scope && isScopeFieldDenial(e, scope)) { match = { scopeDenied: true }; break; }
+          if (scope && isScopeFilterRefusal(e, scope)) scopeUnfilterable = true;
           /* field absent on target object — try the next candidate */
         }
       }
+      // Any other refusal (no read grant on the target, a driver fault) keeps the
+      // plain miss: nothing says the scope column was the cause.
+      if (scope && !asked && scopeUnfilterable && !match.scopeDenied) match = { scopeUnqueryable: true };
       return match;
     };
     let match = await lookup();

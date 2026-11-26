@@ -804,6 +804,9 @@ const zh = {
       // 服务端结构化导入错误的友好文案
       referenceNotFound: '找不到匹配 "{{value}}" 的记录',
       referenceAmbiguous: '"{{value}}" 匹配到多条记录，请使用唯一值或记录 ID',
+      referenceOutOfScope: '找到了 "{{value}}"，但它不在 {{scope}} 下',
+      scopeEntry: '{{label}} "{{value}}"',
+      scopeSeparator: '、',
       invalidBoolean: '"{{value}}" 不是有效的是/否值',
       invalidNumber: '"{{value}}" 不是有效的数字',
       invalidDate: '"{{value}}" 不是有效的日期',
