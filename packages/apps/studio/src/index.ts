@@ -28,6 +28,7 @@
 import { STUDIO_APP } from '@objectstack/platform-objects/apps';
 
 import { STUDIO_OVERVIEW_DOC } from './studio-overview.doc.js';
+import { STUDIO_MANUAL_BOOK } from './studio-manual.book.js';
 
 export const STUDIO_APP_PACKAGE_ID = 'com.objectstack.studio';
 export const STUDIO_APP_NAMESPACE = 'studio';
@@ -72,6 +73,9 @@ export class StudioAppPlugin {
       apps: [STUDIO_APP],
       // ADR-0046 package docs — grouped under "Studio" at /_console/docs.
       docs: [STUDIO_OVERVIEW_DOC],
+      // ADR-0046 §6.7 — the manual claiming those docs, read only by the
+      // callers who may open the Studio app (its `audience`).
+      books: [STUDIO_MANUAL_BOOK],
     });
   }
 }
@@ -83,3 +87,4 @@ export function createStudioAppPlugin(): StudioAppPlugin {
 
 export { STUDIO_APP };
 export { STUDIO_OVERVIEW_DOC };
+export { STUDIO_MANUAL_BOOK };
