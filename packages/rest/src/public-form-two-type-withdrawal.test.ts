@@ -468,3 +468,344 @@ describe('[ADR-0159 D7-b, measure first] does a write door admit a declared over
     await closedOnBothDoors(b);
   });
 });
+
+/** The pair's (or `packageId`'s) ACTIVE stored rows of `type` at `name`, as the store holds them: metadata bytes and checksum. */
+async function rawRows(b: Booted, type: string, name: string, packageId: string | null) {
+  const rows = (await b.engine.find('sys_metadata', { where: { type, name, state: 'active' } }, { context: { isSystem: true } })) as any[];
+  return rows
+    .filter((r) => (r.package_id ?? null) === packageId)
+    .map((r) => ({ metadata: typeof r.metadata === 'string' ? r.metadata : JSON.stringify(r.metadata), checksum: r.checksum }));
+}
+
+/** The newest version the history holds for `(type, name)` at `packageId`. */
+async function newestVersion(b: Booted, type: string, name: string): Promise<number> {
+  const history: any = await b.protocol.historyMetaItem({ type, name });
+  return Math.max(...(history.events as any[]).map((e) => Number(e.version)).filter((v) => Number.isFinite(v)));
+}
+
+const LIST = { name: NAME, object: OBJECT, viewKind: 'list', label: 'A list', config: { type: 'grid', columns: ['name'], data: { provider: 'object', object: OBJECT } } };
+/** A container on {@link OBJECT} whose bare `list` expands to `<object>.<container name>`. */
+const listContainer = (name: string) => ({ name, object: OBJECT, list: { type: 'grid', columns: ['name'], data: { provider: 'object', object: OBJECT } } });
+
+describe('[ADR-0159 D6, D5] the `form` half of the layer, served rows only, and the closed reading', () => {
+  const engines: ObjectQL[] = [];
+  afterAll(async () => {
+    for (const engine of engines) await engine.destroy().catch(() => {});
+  });
+  const booted = async (ships: { forms?: unknown[]; views?: unknown[] }): Promise<Booted> => {
+    const b = await boot(ships);
+    engines.push(b.engine);
+    return b;
+  };
+  const servedAt = async (b: Booted) => ((await b.protocol.getMetaItems({ type: 'form' })).items as any[])
+    .filter((f) => f?.name === NAME)
+    .map((f) => [f._packageId ?? null, f.sharing?.allowAnonymous ?? null]);
+
+  it('pin 2b — the `form` half alone: the base authors the form switched off with its link kept, and a dependent\'s old-shape row of the name stands open on that link (ablate: the `form` half of the layer)', async () => {
+    const b = await booted({ forms: [formItem(false)] });
+    await b.install(DEPENDENT);
+    await b.saveBeforeTheGate('view', DEPENDENT, viewItem(true));
+    // The premise: the open old shape is a candidate, and the only body that
+    // withdraws the name is the base's `form` item: no `view` body does.
+    expect(await servedAt(b)).toEqual(expect.arrayContaining([[BASE, false], [DEPENDENT, true]]));
+    const views = ((await b.protocol.getMetaItems({ type: 'view' })).items as any[]).filter((v) => v?.name === NAME);
+    expect(views.map((v) => v.config?.sharing?.allowAnonymous)).toEqual([true]);
+    await closedOnBothDoors(b);
+  });
+
+  it('pin 2b, twin — a package-less old-shape row open over the base\'s switched-off `form` item: the base\'s own document still withdraws it', async () => {
+    const b = await booted({ forms: [formItem(false)] });
+    await b.seedRow('view', NAME, null, viewItem(true));
+    await closedOnBothDoors(b);
+  });
+
+  it('served rows only — a writable package\'s own list beside a package-less open old shape of the name: 404 before and after (ablate: project every stored `view` row)', async () => {
+    const b = await booted({});
+    await b.install(DEPENDENT);
+    await b.saveInto('view', DEPENDENT, LIST);
+    await b.seedRow('view', NAME, null, viewItem(true));
+    await closedOnBothDoors(b);
+  });
+
+  it('served rows only, at the address — a read-only package\'s open `form` item under a package-less row whose form has no link: 404 before and after a list of the name is saved beside it (ablate: take the served rows from the effective `view` list)', async () => {
+    const b = await booted({ forms: [formItem(true)] });
+    await b.seedRow('view', NAME, null, viewItem(null));
+    await closedOnBothDoors(b);
+    await b.install(DEPENDENT);
+    await b.saveInto('view', DEPENDENT, LIST);
+    await b.install(PAIR);
+    await b.saveInto('view', PAIR, LIST);
+    await closedOnBothDoors(b);
+  });
+
+  it('the closed reading — a stored package-less list at the name keeps both doors at 404 at the package\'s address (ablate: fall through to the package\'s source `form` item)', async () => {
+    const b = await booted({ forms: [formItem(true)] });
+    await openOnBothDoors(b);
+    await b.seedRow('view', NAME, null, LIST);
+    await closedOnBothDoors(b);
+  });
+
+  it('the closed reading — so does a stored package-less container whose expansion writes a list at the name', async () => {
+    const ALL = `${OBJECT}.all`;
+    const b = await booted({ forms: [{ ...formItem(true), name: ALL }] });
+    await openOnBothDoors(b);
+    await b.seedRow('view', 'all', null, listContainer('all'));
+    await closedOnBothDoors(b);
+  });
+});
+
+describe('[ADR-0159 D5, card ② item 5] the bound: a package-less list at the form\'s name is refused, the saves beside it are admitted', () => {
+  const engines: ObjectQL[] = [];
+  afterAll(async () => {
+    for (const engine of engines) await engine.destroy().catch(() => {});
+  });
+  const booted = async (ships: { forms?: unknown[]; views?: unknown[] }): Promise<Booted> => {
+    const b = await boot(ships);
+    engines.push(b.engine);
+    return b;
+  };
+  const ALL = `${OBJECT}.all`;
+  const refused = async (p: Promise<unknown>) => {
+    const err: any = await p.then(() => undefined, (e: any) => e);
+    expect(err, 'refused').toBeDefined();
+    expect([err.status, err.code]).toEqual([400, 'VALIDATION_ERROR']);
+  };
+
+  it('refused where the base\'s pair cannot be ensured too; the list saved into an app of the environment\'s own and into the pair as its own item saves; after all of them the doors serve the package\'s form (ablate: the bound; the expansion half)', async () => {
+    const b = await booted({ forms: [formItem(true), { ...formItem(true, {}, OTHER_SLUG), name: ALL }] });
+    await refused(b.protocol.saveMetaItem({ type: 'view', name: NAME, mode: 'draft', item: LIST }));
+    await refused(b.protocol.saveMetaItem({ type: 'view', name: 'all', mode: 'draft', item: listContainer('all') }));
+    // Another package holds the namespace the pair would take: the ensure door refuses to form it.
+    await b.protocol.installPackage({ manifest: { id: 'com.default.squatter37086', name: 'squatter', version: '0.1.0', type: 'app', namespace: 'ftt_custom' } });
+    const ensured = await b.protocol.ensureCustomizationPackage({ basePackageId: BASE }).then(() => 'ensured', (e: any) => e.status);
+    expect(ensured).not.toBe('ensured');
+    await refused(b.protocol.saveMetaItem({ type: 'view', name: NAME, mode: 'draft', item: LIST }));
+    await refused(b.protocol.saveMetaItem({ type: 'view', name: 'all', mode: 'draft', item: listContainer('all') }));
+    expect(await rawRows(b, 'view', NAME, null)).toEqual([]);
+    expect(await rawRows(b, 'view', 'all', null)).toEqual([]);
+    await openOnBothDoors(b);
+    await openOnBothDoors(b, OTHER_SLUG);
+  });
+
+  it('…and with the pair ensurable: the list into an app of the environment\'s own and into the pair as its own item saves, and the doors still serve the package\'s form', async () => {
+    const b = await booted({ forms: [formItem(true)] });
+    await b.install(DEPENDENT);
+    await expect(b.saveInto('view', DEPENDENT, LIST)).resolves.toBeUndefined();
+    await b.install(PAIR);
+    await expect(b.saveInto('view', PAIR, LIST)).resolves.toBeUndefined();
+    await refused(b.protocol.saveMetaItem({ type: 'view', name: NAME, mode: 'draft', item: LIST }));
+    await openOnBothDoors(b);
+  });
+});
+
+describe('[ADR-0159 D5, D6 rule 9, card ② items 2, 5 and 7] the `form` write doors', () => {
+  const engines: ObjectQL[] = [];
+  afterAll(async () => {
+    for (const engine of engines) await engine.destroy().catch(() => {});
+  });
+  const booted = async (ships: { forms?: unknown[]; views?: unknown[] }): Promise<Booted> => {
+    const b = await boot(ships);
+    engines.push(b.engine);
+    return b;
+  };
+  const SECOND = `${OBJECT}.second`;
+  const THIRD = `${OBJECT}.third`;
+  const failure = (p: Promise<unknown>) => p.then(() => undefined, (e: any) => e);
+
+  it('rule 9 — an organization-scoped `form` save is refused as the same `view` save is, the withdrawal held in the other type, and nothing is written', async () => {
+    // A form withdrawn in `form`, an organization-scoped `view` save that would leave it open…
+    const a = await booted({ forms: [formItem(false)] });
+    const viewErr = await failure(a.protocol.saveMetaItem({ type: 'view', name: NAME, mode: 'draft', item: viewItem(true), organizationId: 'org_a' } as any));
+    expect([viewErr?.status, viewErr?.code]).toEqual([403, 'NOT_OVERRIDABLE']);
+    // …and the mirror: withdrawn in an old shape, an organization-scoped `form` save.
+    const b = await booted({ views: [container(false)] });
+    const formErr = await failure(b.protocol.saveMetaItem({ type: 'form', name: NAME, mode: 'draft', item: formItem(true), organizationId: 'org_a' } as any));
+    expect([formErr?.status, formErr?.code]).toEqual([403, 'NOT_OVERRIDABLE']);
+    expect(await rawRows(a, 'view', NAME, null)).toEqual([]);
+    expect((await b.engine.find('sys_metadata', { where: { type: 'form' } }, { context: { isSystem: true } }) as any[]).length).toBe(0);
+    await closedOnBothDoors(a);
+    await closedOnBothDoors(b);
+  });
+
+  it('a `form` override of a name the base ships in neither type is refused `declared_package_ships_no_such_item` (ablate: the projection half of the gate\'s "ships" read; the CONTROL below is then refused)', async () => {
+    const b = await booted({ views: [container(true)] });
+    await b.install(PAIR);
+    const verdicts: any[] = [];
+    const real = b.protocol.overrideWriteVerdict.bind(b.protocol);
+    b.protocol.overrideWriteVerdict = (...a: any[]) => { const v = real(...a); verdicts.push(v); return v; };
+    const NOWHERE = `${OBJECT}.nowhere`;
+    const err = await failure(b.protocol.saveMetaItem({ type: 'form', name: NOWHERE, packageId: PAIR, mode: 'draft', item: { ...formItem(null, overrides), name: NOWHERE } }));
+    expect([err?.status, err?.code]).toEqual([403, 'NOT_OVERRIDABLE']);
+    expect(verdicts.map((v) => v.rule)).toContain('declared_package_ships_no_such_item');
+    // CONTROL: the same override of the name the base ships as an old shape is admitted.
+    verdicts.length = 0;
+    await expect(b.saveInto('form', PAIR, formItem(false, overrides))).resolves.toBeUndefined();
+    expect(verdicts.map((v) => v.verdict)).toContain('admit');
+    await closedOnBothDoors(b);
+  });
+
+  it('an old-shape `view` write on a taken slug still saves as before', async () => {
+    const b = await booted({ forms: [formItem(true)] });
+    await b.install(DEPENDENT);
+    await expect(b.saveInto('view', DEPENDENT, viewItem(true, { name: SECOND }, SLUG), SECOND)).resolves.toBeUndefined();
+    expect((await rawRows(b, 'view', SECOND, DEPENDENT)).length).toBe(1);
+  });
+
+  it('publish — a `form` draft left open on an address another form took after the draft was saved is refused 409 FORM_ADDRESS_TAKEN, naming both forms, and nothing is promoted', async () => {
+    const b = await booted({});
+    await b.install(PAIR);
+    await b.protocol.saveMetaItem({ type: 'form', name: SECOND, packageId: PAIR, mode: 'draft', item: { ...formItem(true), name: SECOND } });
+    await b.saveInto('form', PAIR, { ...formItem(true), name: THIRD }, THIRD);
+    const err = await failure(b.protocol.publishMetaItem({ type: 'form', name: SECOND, packageId: PAIR }));
+    expect([err?.status, err?.code]).toEqual([409, 'FORM_ADDRESS_TAKEN']);
+    expect(String(err.message)).toContain(SECOND);
+    expect(String(err.message)).toContain(THIRD);
+    expect(await rawRows(b, 'form', SECOND, PAIR)).toEqual([]);
+  });
+
+  it('publish CONTROL — the same draft, its address free, is promoted', async () => {
+    const b = await booted({});
+    await b.install(PAIR);
+    await b.protocol.saveMetaItem({ type: 'form', name: SECOND, packageId: PAIR, mode: 'draft', item: { ...formItem(true), name: SECOND } });
+    await expect(b.protocol.publishMetaItem({ type: 'form', name: SECOND, packageId: PAIR })).resolves.toBeDefined();
+    expect((await rawRows(b, 'form', SECOND, PAIR)).length).toBe(1);
+    await openOnBothDoors(b);
+  });
+
+  it('restore — a rollback to a version open on an address another form holds now is refused 409 FORM_ADDRESS_TAKEN, and the row stays as it is; CONTROL: the address free, it is restored', async () => {
+    const run = async (holderTakesIt: boolean) => {
+      const b = await booted({});
+      await b.install(PAIR);
+      await b.saveInto('form', PAIR, { ...formItem(true), name: SECOND }, SECOND);
+      const openVersion = await newestVersion(b, 'form', SECOND);
+      await b.saveInto('form', PAIR, { ...formItem(null), name: SECOND }, SECOND);
+      if (holderTakesIt) await b.saveInto('form', PAIR, { ...formItem(true), name: THIRD }, THIRD);
+      const before = await rawRows(b, 'form', SECOND, PAIR);
+      const outcome = await b.protocol.rollbackMetaItem({ type: 'form', name: SECOND, toVersion: openVersion })
+        .then(() => 'restored', (e: any) => e);
+      return { b, outcome, before };
+    };
+    const taken = await run(true);
+    expect([taken.outcome?.status, taken.outcome?.code]).toEqual([409, 'FORM_ADDRESS_TAKEN']);
+    expect(String(taken.outcome.message)).toContain(THIRD);
+    expect(await rawRows(taken.b, 'form', SECOND, PAIR)).toEqual(taken.before);
+    const free = await run(false);
+    expect(free.outcome).toBe('restored');
+    await openOnBothDoors(free.b);
+  });
+});
+
+describe('[ADR-0159 D5] a `form` save, reset and delete: the old-shape row of the address goes in the same transaction, a list of the name stays byte-equal', () => {
+  const engines: ObjectQL[] = [];
+  afterAll(async () => {
+    for (const engine of engines) await engine.destroy().catch(() => {});
+  });
+  const booted = async (ships: { forms?: unknown[]; views?: unknown[] }): Promise<Booted> => {
+    const b = await boot(ships);
+    engines.push(b.engine);
+    return b;
+  };
+  const failure = (p: Promise<unknown>) => p.then(() => undefined, (e: any) => e);
+
+  it('a list row of the name stays byte-equal across the `form` draft save, its publish and its reset (ablate: the form-content test of the old-shape row removal)', async () => {
+    const b = await booted({ forms: [formItem(true)] });
+    await b.install(PAIR);
+    await b.saveInto('view', PAIR, LIST);
+    const list = await rawRows(b, 'view', NAME, PAIR);
+    expect(list.length).toBe(1);
+    await b.protocol.saveMetaItem({ type: 'form', name: NAME, packageId: PAIR, mode: 'draft', item: formItem(false, overrides) });
+    expect(await rawRows(b, 'view', NAME, PAIR)).toEqual(list);
+    await b.protocol.publishMetaItem({ type: 'form', name: NAME, packageId: PAIR });
+    expect(await rawRows(b, 'view', NAME, PAIR)).toEqual(list);
+    const reset: any = await b.protocol.deleteMetaItem({ type: 'form', name: NAME, packageId: PAIR });
+    expect(reset.success).toBe(true);
+    expect(await rawRows(b, 'form', NAME, PAIR)).toEqual([]);
+    expect(await rawRows(b, 'view', NAME, PAIR)).toEqual(list);
+  });
+
+  it('…and across the `form` delete of an override whose base ships the form as an old shape', async () => {
+    const b = await booted({ views: [container(true)] });
+    await b.install(PAIR);
+    await b.saveBeforeTheGate('view', PAIR, LIST);
+    const list = await rawRows(b, 'view', NAME, PAIR);
+    await b.saveInto('form', PAIR, formItem(false, overrides));
+    expect(await rawRows(b, 'view', NAME, PAIR)).toEqual(list);
+    await b.protocol.deleteMetaItem({ type: 'form', name: NAME, packageId: PAIR });
+    expect(await rawRows(b, 'form', NAME, PAIR)).toEqual([]);
+    expect(await rawRows(b, 'view', NAME, PAIR)).toEqual(list);
+  });
+
+  it('a `form` reset at the pair removes the pair\'s old-shape row of the name', async () => {
+    const b = await booted({ forms: [formItem(true)] });
+    await b.install(PAIR);
+    await b.saveInto('form', PAIR, formItem(false, overrides));
+    await b.saveBeforeTheGate('view', PAIR, viewItem(false, overrides));
+    expect((await rawRows(b, 'view', NAME, PAIR)).length).toBe(1);
+    await b.protocol.deleteMetaItem({ type: 'form', name: NAME, packageId: PAIR });
+    expect(await rawRows(b, 'form', NAME, PAIR)).toEqual([]);
+    expect(await rawRows(b, 'view', NAME, PAIR)).toEqual([]);
+    await openOnBothDoors(b);
+  });
+
+  it('a `form` delete at the pair removes the pair\'s old-shape row of the name', async () => {
+    const b = await booted({ views: [container(true)] });
+    await b.install(PAIR);
+    await b.saveInto('form', PAIR, formItem(false, overrides));
+    await b.saveInto('view', PAIR, viewItem(false, overrides));
+    expect((await rawRows(b, 'view', NAME, PAIR)).length).toBe(1);
+    await b.protocol.deleteMetaItem({ type: 'form', name: NAME, packageId: PAIR });
+    expect(await rawRows(b, 'form', NAME, PAIR)).toEqual([]);
+    expect(await rawRows(b, 'view', NAME, PAIR)).toEqual([]);
+    await openOnBothDoors(b);
+  });
+
+  it('a stored container is re-saved without the member, its lists byte-equal', async () => {
+    const b = await booted({ forms: [formItem(true)] });
+    await b.install(PAIR);
+    const stored = { name: 'intake', object: OBJECT, list: { type: 'grid', columns: ['name', 'email'], data: { provider: 'object', object: OBJECT } }, formViews: { contact: { ...body(false), data: { provider: 'object', object: OBJECT } } } };
+    await b.saveBeforeTheGate('view', PAIR, stored, 'intake');
+    const [before] = await rawRows(b, 'view', 'intake', PAIR);
+    expect(JSON.parse(before.metadata).formViews?.contact).toBeDefined();
+    await b.saveInto('form', PAIR, formItem(false, overrides));
+    const [after] = await rawRows(b, 'view', 'intake', PAIR);
+    expect(after).toBeDefined();
+    const was = JSON.parse(before.metadata);
+    const now = JSON.parse(after.metadata);
+    expect(now.formViews).toBeUndefined();
+    expect(JSON.stringify(now.list)).toBe(JSON.stringify(was.list));
+  });
+
+  it('a `form` write that fails leaves both rows as they were', async () => {
+    const b = await booted({ views: [container(true)] });
+    await b.install(PAIR);
+    await b.saveInto('view', PAIR, viewItem(true, overrides));
+    const view = await rawRows(b, 'view', NAME, PAIR);
+    await b.protocol.saveMetaItem({ type: 'form', name: NAME, packageId: PAIR, mode: 'draft', item: formItem(false, overrides) });
+    // The old-shape row's removal, the second write of the transaction, fails.
+    const realRepo = b.protocol.getOverlayRepo.bind(b.protocol);
+    b.protocol.getOverlayRepo = (...a: any[]) => {
+      const repo = realRepo(...a);
+      return new Proxy(repo, {
+        get(target, prop, receiver) {
+          if (prop === 'delete') {
+            return async (ref: any, ...rest: any[]) => {
+              if (ref?.type === 'view') throw new Error('the old-shape removal failed');
+              return target.delete(ref, ...rest);
+            };
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    };
+    let err: any;
+    try {
+      err = await failure(b.protocol.publishMetaItem({ type: 'form', name: NAME, packageId: PAIR }));
+    } finally {
+      b.protocol.getOverlayRepo = realRepo;
+    }
+    expect(String(err?.message)).toContain('the old-shape removal failed');
+    expect(await rawRows(b, 'form', NAME, PAIR)).toEqual([]);
+    expect(await rawRows(b, 'view', NAME, PAIR)).toEqual(view);
+  });
+});
