@@ -31,7 +31,8 @@
  *     ownership columns) or {@link INLINE_GRID_SORT_FIELDS} (a line's sort
  *     position: the grid stamps it on drag-reorder instead);
  *   - the relationship field back to the parent, and any name in `exclude`;
- *   - a field flagged `system`, `readonly` or `hidden`;
+ *   - a field flagged `system`, `readonly`, `uiReadonly` or `hidden` (a cell is
+ *     an edit by hand, so the hand lock skips it as the server lock does);
  *   - a field whose `type` is in {@link INLINE_GRID_NON_EDITABLE_TYPES}.
  *
  * NOTHING is dropped by the column budget. Past `maxColumns` (default
@@ -241,7 +242,7 @@ export function deriveInlineGridColumns(
   const candidates: Candidate[] = [];
   for (const [name, field] of Object.entries(fields as AnyRec)) {
     if (INLINE_GRID_SYSTEM_FIELDS.has(name) || exclude.has(name) || INLINE_GRID_SORT_FIELDS.has(name)) continue;
-    if (prop(field, 'system') || prop(field, 'readonly') || prop(field, 'hidden')) continue;
+    if (prop(field, 'system') || prop(field, 'readonly') || prop(field, 'uiReadonly') || prop(field, 'hidden')) continue;
     if (INLINE_GRID_NON_EDITABLE_TYPES.has(prop(field, 'type'))) continue;
     candidates.push({
       name,

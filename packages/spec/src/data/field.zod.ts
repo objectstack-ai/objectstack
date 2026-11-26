@@ -2915,6 +2915,29 @@ export const FieldSchema = lazySchema(() => {
    */
   visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'`. On a `required` field the server reads it on every write: where it is not TRUE (FALSE, or null such as an unset boolean) the field is not required for that write, and a predicate the server cannot evaluate counts as shown, so the field stays required. Reads the record's own columns, with `formula` fields computed over the record being written, as the form computes them over the record being edited; a read THROUGH a reference field, or a formula that reads through one, calls label(), calls can() on a write that picks no permission-gated option, or reads current_user on a system write with no user, cannot be evaluated there."),
   readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'`. Reads the bound record's OWN columns: the field level never reads a related record, so a read THROUGH a reference field (`record.account.tier`) faults on every row and refuses every update that writes the field — `objectstack validate` refuses it. Put such a check in a `validations[]` `script` rule, whose `condition` is read one hop through a reference."),
+  /**
+   * The CONDITIONAL hand lock (ruling record 7180466652, the two-tier field-lock
+   * model): while TRUE no person edits the field of an existing record at the
+   * console surfaces that honour `uiReadonly`, and every other write keeps it.
+   * The conditional twin of `uiReadonly` — see there for which writes are "by
+   * hand". A create is not judged (the create dialog has no record to read).
+   * Same scope as `readonlyWhen`: the bound record's OWN columns, e.g.
+   * P`record.status != 'draft'`.
+   *
+   * A predicate that cannot be evaluated (a syntax error, a missing operand)
+   * fails CLOSED — the field is locked — because no server judges this key
+   * (ADR-0137 D2); the edit dialog also refuses to submit, as it does for a
+   * faulted `visibleWhen`. `objectstack validate` checks the predicate.
+   *
+   * Allowed beside `readonlyWhen` (unlike `uiReadonly` beside `readonly`): the
+   * two predicates can differ, and where `readonlyWhen` is TRUE the server lock
+   * is the stricter one — it also drops the field from non-system writes.
+   *
+   * Read by the console only, through the one hand-lock verdict in
+   * `@object-ui/core` (`fieldReadOnlyByHand`); the engine never reads it, so a
+   * TRUE predicate refuses no API, import, action or flow write.
+   */
+  uiReadonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — the field is read-only BY HAND on an existing record while TRUE: the console surfaces that honour `uiReadonly` (the edit dialog, record-page inline edit and the stage path, the highlight-strip chip, grid inline edit and multi-row save, kanban column drag, calendar drag, the line-item grid) do not let a person edit it, while REST, import, action and flow writes keep it, judged by the object's validations — see `uiReadonly`. A create is not judged: the create dialog offers the field whatever the predicate says. A predicate the console cannot evaluate locks the field, and the edit dialog refuses to submit until it is fixed. Same scope as `readonlyWhen`: the bound record's OWN columns, e.g. P`record.status != 'draft'`. Allowed beside `readonlyWhen`, which is the stricter lock: where `readonlyWhen` is TRUE non-system writes are dropped as well. The engine never reads this key."),
   requiredWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. A TRANSITION GATE, not an invariant: the write is refused only when the merged record violates the requirement AND the pre-write record complied — so the write that flips the predicate TRUE, an INSERT born inside the gate, and a write that clears the cell are all refused, while a row that was already missing the value keeps passing unrelated edits and state moves that stay inside the gate (ADR-0113 non-regression: adding the rule to a deployed object never bricks existing rows). Need an invariant every write must satisfy instead ('X may never exceed Y') — declare a `validations[]` `script` rule, which re-checks the merged record with no exemption. Enforced by `evaluateValidationRules`. Reads the bound record's OWN columns: the field level never reads a related record, so a read THROUGH a reference field (`record.account.tier`) faults on every row and refuses every write that reaches it — `objectstack validate` refuses it; put such a check in a `validations[]` `script` rule, whose `condition` is read one hop through a reference. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
 
   /**
@@ -3045,6 +3068,42 @@ export const FieldSchema = lazySchema(() => {
   internal: z.boolean().optional().describe("Never return this field's value on the generic data path — the engine OMITS the key from `find`/`findOne` results, the 201 create body and the by-id update body, on the default projection AND when a client names the field in `?select=`. Storage, filtering and indexing are untouched, so a server-side verifier can still match on the column and a purpose-built mint route can still return the value once at creation. The read protection for ADR-0100's third credential channel (auth-subsystem one-way hashes on `text` columns). Omission, not masking: a mask signals 'a value is set', which carries no information on a `required` column."),
 
   readonly: z.boolean().default(false).describe('Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE and on INSERT (a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip on BOTH paths: `isSystem` writes (seed replay, migration). Exempt on the UPDATE path ONLY: an opt-in "historical" import (`preserveAudit`) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). On INSERT the exemption does NOT apply: a non-system create that requests `preserveAudit` still has its readonly fields stripped, and is warned loudly that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. A normal (non-system) import is NOT system-context and still strips.'),
+
+  /**
+   * The HAND lock (ruling record 7180466652, the two-tier field-lock model).
+   * `readonly` is the SERVER lock — no client may write the field. This is
+   * the lock below it: no PERSON edits the field by hand at the console, and
+   * every other write keeps it, judged by the object's validations exactly as
+   * an ordinary field (a `state_machine` rule included). It is the shape of a
+   * status that moves only through actions — an order confirmed or cancelled
+   * by its buttons, never typed.
+   *
+   * "By hand" = the create and edit dialogs and the payload they submit, the
+   * record page's inline edit and stage path, the highlight-strip chip, grid
+   * inline edit and its multi-row save, kanban drag between columns grouped by
+   * the field, calendar drag, and the line-item grid. Those are the surfaces
+   * that honour it today; the Gantt's drag and in-place edit, the timesheet
+   * cell, the kanban swimlane drag and the in-app assistant acting for a
+   * person do not read it yet (#37448). NOT by hand = REST create/update,
+   * import (the console import wizard included), declarative and script
+   * actions, flows. A console create leaves the field out, so the server
+   * applies its `defaultValue` — a `required` field with no `defaultValue`
+   * therefore fails every console create; an API, import or action insert may
+   * set it, judged by validations (a state machine's `initialStates`).
+   *
+   * Refused beside `readonly: true` (the superRefine below): the server lock
+   * already keeps every client out, so the pair says two things at once.
+   * Absent reads as `false`; no default is materialised, so a field that does
+   * not author it parses unchanged.
+   *
+   * Read by the console only, through the one hand-lock verdict in
+   * `@object-ui/core` (`fieldReadOnlyByHand`); `describe_object` (MCP) reports
+   * it as its own key. The engine never reads it — no write is stripped or
+   * reported in `x-objectstack-dropped-fields` for it. Not a security
+   * boundary: a caller who may edit the object can write the field through
+   * the API; field permissions (`editable` on a permission set) are that.
+   */
+  uiReadonly: z.boolean().optional().describe("Read-only BY HAND: the console's editing surfaces do not let a person edit the field — the create and edit dialogs (it is left off them and out of their payload), record-page inline edit and the stage path, the highlight-strip chip, grid inline edit and multi-row save, kanban column drag, calendar drag and the line-item grid; other console surfaces do not read it yet. Every other write KEEPS it — REST create/update, import, declarative and script actions and flows write it, judged by the object's validations exactly as an ordinary field (a `state_machine` rule included). For a field that changes only through actions, e.g. an order `status` moved by Confirm / Cancel buttons. A console create leaves the field out and the server applies its `defaultValue`, so a `required` field needs a `defaultValue`: without one every create from the console fails. An API, import or action insert may set it, judged by validations (a state machine's `initialStates`). Absent = false. Refused beside `readonly: true`, which already keeps every client out: `readonly` when no client may write the field, `uiReadonly` when only people at the console may not. Not a security boundary — field permissions are. The conditional twin is `uiReadonlyWhen`."),
 
   /**
    * [ADR-0066 D3] Capabilities required to READ/EDIT this field. A field
@@ -3331,6 +3390,24 @@ export const FieldSchema = lazySchema(() => {
       });
     }
   }
+  // The hand lock beside the server lock (ruling record 7180466652): a
+  // `readonly: true` field already keeps every client out, so `uiReadonly`
+  // beside it says two things at once — refused at every door that parses a
+  // field (`defineStack`, `os validate`, the metadata save). The conditional
+  // pair (`uiReadonlyWhen` beside `readonlyWhen`) is allowed: the predicates
+  // can differ, and the server lock is the stricter where both hold.
+  if (field.uiReadonly === true && field.readonly === true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['uiReadonly'],
+      message:
+        '`uiReadonly: true` locks the field against editing by hand at the console while API, import, action and '
+        + 'flow writes keep it, and this field is also `readonly: true`, which keeps every client write out. Keep '
+        + 'one: `readonly` when no client may write the field, `uiReadonly` when people at the console may not but '
+        + 'actions, imports and the API may (each write judged by the object\'s validations).',
+    });
+  }
+
   // A required field is always asked for when a record is created: the
   // person creating the record sees every value the record must have, so
   // `showOnCreate: false` beside `required: true` is refused (#36425 item 6,

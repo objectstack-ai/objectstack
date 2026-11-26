@@ -902,6 +902,7 @@ export const WizardForm: React.FC<WizardFormProps> = ({
             {
               visibleWhen,
               readonlyWhen: (field as any).readonlyWhen,
+              uiReadonlyWhen: (field as any).uiReadonlyWhen,
               requiredWhen: (field as any).requiredWhen,
             },
             ruleRecord,

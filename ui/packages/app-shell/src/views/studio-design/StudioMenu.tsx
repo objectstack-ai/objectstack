@@ -44,6 +44,14 @@
  * opens the area's type directory, where every type of the six groups is
  * listed, the ones the package holds none of yet included. A search lists it
  * last, after the matching groups.
+ *
+ * ## 概览 Overview (ADR-0084, amended 2026-11-26; objectstack#37454)
+ *
+ * On a package the first row, above the groups and under no group's label,
+ * is 概览 Overview, the package's own page. While drafts wait for a publish it
+ * carries their count as a badge (the surface's pending ledger,
+ * `StudioPendingDraftsContext`), and one click on the badge opens the
+ * overview's Pending tab. A search lists it first when its name matches.
  */
 
 import * as React from 'react';
@@ -73,6 +81,7 @@ import {
   ListTree,
   Mail,
   MousePointerClick,
+  Package,
   PanelLeft,
   Puzzle,
   Rows3,
@@ -107,6 +116,9 @@ import { NavigationGroupSection } from '@object-ui/layout';
 import {
   STUDIO_MENU_ENTRY_LABEL_KEYS,
   STUDIO_MENU_GROUP_ICONS,
+  STUDIO_MENU_OVERVIEW_LABEL_KEY,
+  STUDIO_MENU_OVERVIEW_PENDING_KEY,
+  STUDIO_MENU_OVERVIEW_PENDING_ONE_KEY,
   StudioMenuDataContext,
   useStudioMenuData,
   useStudioMenuTypes,
@@ -114,6 +126,7 @@ import {
 } from './studioMenuData.js';
 import { t, tFormat, translateMetadataType } from '../metadata-admin/i18n.js';
 import { studioMenuGroupLabel } from './studioMenuGroupLabel.js';
+import { StudioPendingDraftsContext } from './studioItemDraftStatus.js';
 import { STUDIO_ACCENT, STUDIO_HEADER_ICON_BUTTON } from './studio-tokens.js';
 import {
   STUDIO_MENU_ADVANCED_COOKIE,
@@ -123,6 +136,8 @@ import {
   studioMenuAllTypesEntry,
   studioMenuCurrentKey,
   studioMenuEntryMatches,
+  studioMenuOverviewEntry,
+  studioMenuOverviewMatches,
   studioMenuScope,
   studioMenuTiers,
   type StudioMenuEntry,
@@ -345,6 +360,11 @@ function StudioMenuBody({
   // objectstack#37360 — 全部类型 All types: a package's, under no group.
   const allTypes = studioMenuAllTypesEntry(scope);
   const allTypesMatches = !!allTypes && studioMenuEntryMatches(allTypes, labelOf(allTypes), query);
+  // objectstack#37454 — 概览 Overview, a package's first row, with the pending count as its badge.
+  const pendingDrafts = React.useContext(StudioPendingDraftsContext);
+  const overview = studioMenuOverviewEntry(scope, pendingDrafts?.count ?? null);
+  const overviewLabel = t(STUDIO_MENU_OVERVIEW_LABEL_KEY, locale);
+  const overviewMatches = !!overview && studioMenuOverviewMatches(overviewLabel, query);
   // The fold is a package's: a search, `~org` and `~all` list their entries flat.
   const folded = scope.kind === 'package' && !searching;
   const tiers = studioMenuTiers(menu);
@@ -418,6 +438,53 @@ function StudioMenuBody({
       </StudioMenuGroupSection>
     ));
 
+  // objectstack#37454 — the menu's first row, under no group. The badge is a
+  // link of its own beside the row's (a link holds no link), to the Pending tab.
+  const renderOverview = () => {
+    if (!overview) return null;
+    const isCurrent = current === overview.key;
+    const pendingLabel = (count: number) =>
+      tFormat(count === 1 ? STUDIO_MENU_OVERVIEW_PENDING_ONE_KEY : STUDIO_MENU_OVERVIEW_PENDING_KEY, locale, { count });
+    const closeDrawer = () => {
+      if (isMobile) setOpenMobile(false);
+    };
+    return (
+      <div className="px-2 pb-1 pt-2" data-testid="studio-menu-overview">
+        <SidebarMenu aria-label={overviewLabel}>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild isActive={isCurrent}>
+              <Link
+                to={overview.to}
+                aria-current={isCurrent ? 'page' : undefined}
+                data-testid="studio-menu-entry-overview"
+                onClick={(e) => {
+                  if (!e.defaultPrevented) closeDrawer();
+                }}
+              >
+                <Package aria-hidden="true" data-testid="studio-menu-icon-overview" />
+                <span className={cn('min-w-0 flex-1 truncate', overview.pending !== undefined && 'pr-7')}>{overviewLabel}</span>
+              </Link>
+            </SidebarMenuButton>
+            {overview.pending !== undefined && (
+              <Link
+                to={overview.pendingTo}
+                data-testid="studio-menu-overview-pending"
+                aria-label={pendingLabel(overview.pending)}
+                title={pendingLabel(overview.pending)}
+                onClick={(e) => {
+                  if (!e.defaultPrevented) closeDrawer();
+                }}
+                className="absolute right-2 top-1/2 inline-flex h-[18px] min-w-[18px] -translate-y-1/2 items-center justify-center rounded-full bg-amber-400/20 px-1.5 text-[11px] font-semibold tabular-nums text-amber-700 outline-none ring-sidebar-ring hover:bg-amber-400/30 focus-visible:ring-2 dark:text-amber-300"
+              >
+                {overview.pending}
+              </Link>
+            )}
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </div>
+    );
+  };
+
   // The fold's last row, under no group: no label above it, no group around it.
   const renderAllTypes = (entry: StudioMenuEntry) => (
     <div className="px-2 py-1" data-testid="studio-menu-all-types">
@@ -450,7 +517,8 @@ function StudioMenuBody({
         </SidebarHeader>
         <SidebarContent>
           <nav aria-label={t('engine.studio.menu.label', locale)} data-testid="studio-menu">
-            {matching.length === 0 && !allTypesMatches && (
+            {(!searching || overviewMatches) && renderOverview()}
+            {matching.length === 0 && !allTypesMatches && !overviewMatches && (
               <p role="status" className="px-4 py-3 text-xs text-muted-foreground" data-testid="studio-menu-no-matches">
                 {t('engine.studio.menu.noMatches', locale)}
               </p>

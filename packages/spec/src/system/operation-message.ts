@@ -361,7 +361,8 @@ export function operationMessageTranslationKey(messageKey: string): string {
  * kernel with no `http.server` (`own-door-bridge.ts`, `@objectstack/runtime`):
  * no service is registered for the door's slot, or the registered one lacks
  * the door's member. `{{door}}` is the door's noun, itself a key of this
- * catalog (`own_door_print`), capitalized; `{{slot}}`, `{{producer}}` and
+ * catalog (`own_door_print`, `own_door_personal_view_delete`,
+ * `own_door_attachment_mutate`), capitalized; `{{slot}}`, `{{producer}}` and
  * `{{member}}` are the slot, package and member names, never translated. The
  * bridge reads the request's top `Accept-Language` tag, as the print door
  * does, and holds no `i18n` service either, so no `errors.own_door_*`
@@ -442,6 +443,8 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       '{{door}} is not available: no {{slot}} service is registered on this kernel. {{producer}} registers it.',
     own_door_member_missing: '{{door}} is not available: the registered {{slot}} service does not implement {{member}}.',
     own_door_print: 'the print door',
+    own_door_personal_view_delete: 'the personal view delete door',
+    own_door_attachment_mutate: 'the attachment removal and rename doors',
   },
   'zh-CN': {
     permission_denied: '您没有执行此操作的权限，如需访问请联系管理员。',
@@ -492,6 +495,8 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     own_door_service_unregistered: '{{door}}不可用：此内核上未注册 {{slot}} 服务。该服务由 {{producer}} 注册。',
     own_door_member_missing: '{{door}}不可用：已注册的 {{slot}} 服务未实现 {{member}}。',
     own_door_print: '打印接口',
+    own_door_personal_view_delete: '个人视图删除接口',
+    own_door_attachment_mutate: '附件删除和重命名接口',
   },
   'ja-JP': {
     permission_denied: 'この操作を実行する権限がありません。アクセスが必要な場合は管理者にお問い合わせください。',
@@ -561,6 +566,8 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       '{{door}}は利用できません。このカーネルには {{slot}} サービスが登録されていません。このサービスは {{producer}} が登録します。',
     own_door_member_missing: '{{door}}は利用できません。登録されている {{slot}} サービスは {{member}} を実装していません。',
     own_door_print: '印刷エンドポイント',
+    own_door_personal_view_delete: '個人ビュー削除エンドポイント',
+    own_door_attachment_mutate: '添付ファイルの削除・名前変更エンドポイント',
   },
   'es-ES': {
     permission_denied:
@@ -635,6 +642,8 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       '{{door}} no está disponible: no hay ningún servicio {{slot}} registrado en este kernel. Lo registra {{producer}}.',
     own_door_member_missing: '{{door}} no está disponible: el servicio {{slot}} registrado no implementa {{member}}.',
     own_door_print: 'el punto de acceso de impresión',
+    own_door_personal_view_delete: 'el punto de acceso para eliminar vistas personales',
+    own_door_attachment_mutate: 'el punto de acceso para eliminar y renombrar adjuntos',
   },
 };
 

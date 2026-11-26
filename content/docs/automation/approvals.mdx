@@ -417,7 +417,8 @@ the run that opened the request still write the lines. Children joined by a plai
 
 **Deleting the record while it is pending** is not refused: the delete lands and
 its pending request is cancelled (`status: 'cancelled'`, with `cancel_reason` on
-the row). The delete removes the record's `master_detail` lines with it. In the
+the row), and the request's timeline says so in a system note, in the reader's
+language. The delete removes the record's `master_detail` lines with it. In the
 cases below the server refuses the whole delete with `409 RECORD_LOCKED` instead, and
 the record, its lines and its pending request all stay:
 
@@ -750,6 +751,12 @@ side, and both objects declare `schemaReadDelegate: 'approvals'`, so
 `GET /api/v1/meta/object/sys_approval_action` (and the object list) serves it
 to a caller who can see at least one request by the rule above. A member who
 can see none is answered `404` for it.
+
+Whoever reads `sys_approval_action` rows on the data side (Setup's Approval
+Actions list, an action's record page, an export) is served each row's step
+label and system note in their own language, by the same render as the
+request's timeline. The row itself keeps the authored step label and the
+English note.
 </Callout>
 
 <Callout type="info">

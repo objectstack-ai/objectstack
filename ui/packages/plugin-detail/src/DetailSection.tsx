@@ -35,7 +35,7 @@ import {
   useRecordContext,
   useRecordPagePreferences,
 } from '@object-ui/react';
-import { resolveFieldAffordance, isDeadlineSettled } from '@object-ui/core';
+import { fieldReadOnlyByHand, resolveFieldAffordance, isDeadlineSettled } from '@object-ui/core';
 import { withHomeAmountSource } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import {
@@ -648,7 +648,10 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     // framework flags `readonly:true` even when the view schema doesn't). And
     // never offer inline edit on immutable audit/identity fields by name
     // (created_at / id / …), in case a schema surfaces one as a section row.
-    const isReadonly = field.readonly === true || objectDefField?.readonly === true;
+    // The object field's lock goes through the one hand-lock verdict — `readonly`,
+    // `readonlyWhen`, `uiReadonly`, `uiReadonlyWhen` over this record
+    // (`fieldReadOnlyByHand`, `@object-ui/core`) — never `readonly` alone.
+    const isReadonly = field.readonly === true || fieldReadOnlyByHand(objectDefField, data, { scope: predicateScope });
     const isSystemField = NON_EDITABLE_SYSTEM_FIELDS.has(field.name);
     // Types the fields package excludes from in-place editing — the SAME
     // alias-aware contract the grid consults, not a second list (objectui#4221).

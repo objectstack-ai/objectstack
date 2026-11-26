@@ -573,6 +573,11 @@ export class KnowledgeServicePlugin implements Plugin {
         });
       }
     });
+    // Every store registers its adapter in its own start(), so the reading of
+    // which sources name an unmounted one is taken once all have started.
+    ctx.hook('kernel:bootstrapped', () => {
+      this.service?.reportUnmountedAdapters();
+    });
 
     if (this.options.enableEventSync === false) return;
     const service = this.service;

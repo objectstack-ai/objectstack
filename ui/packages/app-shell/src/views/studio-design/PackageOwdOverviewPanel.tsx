@@ -25,6 +25,10 @@
  *     (objectstack#36962, as objectstack#36726 pins the Studio editors): a
  *     publish over a row another writer published since is refused and the
  *     author is asked (reload, overwrite, keep editing), never replaced.
+ *   • Each row's draft save goes through the same guard, pinned to the draft
+ *     read of the load the edit was made on (objectstack#37515): a draft
+ *     written since, or one that appeared after the page loaded, is refused
+ *     and asked about, never overwritten or published unseen.
  *   • `controlled_by_parent` rows show the master link (read-only) under the
  *     row's dial.
  *   • There is no external column: `externalSharingModel` is retired by
@@ -67,7 +71,12 @@ import { readFields } from '../metadata-admin/previews/object-fields-io.js';
 import { t, tFormat, type SupportedLocale } from '../metadata-admin/i18n.js';
 import { cbpMasterDetailDefaultsRequired, deriveMasterObject, requireCbpMasterDetails } from './owd-sharing.js';
 import { toast } from 'sonner';
-import { type DraftPin, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
+import {
+  type DraftPin,
+  type DraftReadForSave,
+  readDraftForSave,
+  useDraftSaveGuard,
+} from '../metadata-admin/DraftConflictDialog.js';
 import {
   STUDIO_SAVE_TOAST_ID,
   publishSavedItem,
@@ -102,6 +111,18 @@ interface OwdRow {
   hasDraft: boolean;
   /** True when the package's published list held this object at load (objectui#11799). */
   saved: boolean;
+  /** What this load read, for an edit made on this row ({@link RowBasis}). */
+  basis: RowBasis;
+}
+
+/**
+ * objectstack#37515 — what a row's edit was made against: the reads of the
+ * load the author saw. A Save writes the edit over THIS, never over a read
+ * taken at Save time, so a draft another writer saved since, or one that
+ * appeared after the page loaded, is refused at the draft door and asked
+ * about, never overwritten and never published under the author's Save.
+ */
+interface RowBasis {
   /**
    * objectstack#36962 — the published row this row was loaded at, the pin its
    * Save's publish sends (`publishedPinOfLayers` of the row's layers read). A
@@ -110,6 +131,60 @@ interface OwdRow {
    * failed pins nothing.
    */
   published: DraftPin | null;
+  /**
+   * The pin its draft save sends (`readDraftForSave` at the package the save
+   * writes): `If-Match` the draft read, `If-None-Match: *` when the load read
+   * none. A draft read that failed pins nothing.
+   */
+  draft: DraftPin | null;
+  /** The pending draft the load read, as-is; `null` when it read none. */
+  draftBody: Record<string, unknown> | null;
+  /**
+   * True when a draft was pending before this edit's first Save: a refused
+   * publish then takes back nothing (`publishSavedItem`'s `hadDraft`).
+   */
+  hadDraft: boolean;
+  /** True when the draft read neither served a draft nor said there is none: a failure. */
+  draftUnread: boolean;
+  /** The server's refusal, when the draft read was refused `403` (`readDraftForSave`). */
+  draftRefused?: unknown;
+}
+
+/** One draft read, as the basis of an edit made over it. */
+function draftBasisOf(read: DraftReadForSave<Record<string, unknown>>): Omit<RowBasis, 'published'> {
+  const draftBody = extractDraftBody(read.answer) ?? null;
+  return {
+    draft: read.pin,
+    draftBody,
+    hadDraft: !!draftBody,
+    // `pin` is `If-None-Match: *` for an answer of "no draft"; a read that
+    // failed answers nothing and pins nothing.
+    draftUnread: !draftBody && read.pin === null && !('refused' in read),
+    ...('refused' in read ? { draftRefused: read.refused } : {}),
+  };
+}
+
+/** The key a row's {@link RowBasis} is held under: the package and the object, never the name alone. */
+function basisKey(packageId: string, name: string): string {
+  return JSON.stringify([packageId, name]);
+}
+
+/** An object's layers at the package this table lists and saves; a read that fails answers `null`. */
+function readLayeredAt(
+  client: MetadataClient,
+  packageId: string,
+  name: string,
+): Promise<MetadataLayered<Record<string, unknown>> | null> {
+  // ADR-0048 — the layers at the package this table lists and saves, the
+  // object's owner here: a layered read naming no package is refused for a
+  // name two packages hold.
+  return client.layered<Record<string, unknown>>('object', name, { packageId }).catch(() => null);
+}
+
+/** The published baseline a layers read serves, `{}` for none. */
+function baselineOf(layered: unknown): Record<string, unknown> {
+  const lay = (layered ?? {}) as { effective?: Record<string, unknown>; code?: Record<string, unknown> };
+  return (lay.effective ?? lay.code ?? {}) as Record<string, unknown>;
 }
 
 /**
@@ -128,21 +203,20 @@ async function readObjectBodies(
   packageId: string,
   name: string,
   saved: boolean,
-): Promise<[MetadataLayered<Record<string, unknown>> | null, unknown]> {
-  // ADR-0048 — the layers at the package this table lists and saves, the
-  // object's owner here: a layered read naming no package is refused for a
-  // name two packages hold.
-  const readLayered = () => client.layered<Record<string, unknown>>('object', name, { packageId }).catch(() => null);
-  const readDraft = () => client.getDraft<Record<string, unknown>>('object', name).catch(() => null);
+): Promise<[MetadataLayered<Record<string, unknown>> | null, DraftReadForSave<Record<string, unknown>>]> {
+  const readLayered = () => readLayeredAt(client, packageId, name);
+  // objectstack#37515 — the draft is read at the address the row's draft save
+  // writes (`?package=`), so the version it serves pins that save.
+  const readDraft = () => readDraftForSave<Record<string, unknown>>(client, 'object', name, packageId);
   if (saved) return Promise.all([readLayered(), readDraft()]);
-  const draftResp = await readDraft();
-  if (extractDraftBody(draftResp)) return [null, draftResp];
-  return [await readLayered(), draftResp];
+  const draftRead = await readDraft();
+  if (extractDraftBody(draftRead.answer)) return [null, draftRead];
+  return [await readLayered(), draftRead];
 }
 
 /**
  * objectstack#36962 — the pin a row's Save publishes with, from the load's
- * reads ({@link OwdRow.published}): the layers it read, else, for a row the
+ * reads ({@link RowBasis.published}): the layers it read, else, for a row the
  * published list does not hold (its layers not asked while its draft is in
  * hand), no published row. A saved row whose layers read failed pins nothing.
  */
@@ -290,17 +364,32 @@ export function PackageOwdOverviewPanel({
   const [prereq, setPrereq] = React.useState<CbpPrereq | null>(null);
   // objectstack#36962 — each row's publish is pinned to the published row its
   // load read (`recordPublished`), so a Save over a row another writer
-  // published since opens the conflict dialog instead of replacing it. The
-  // guard's own reload is not used: the Save that met the conflict re-reads
-  // the table itself once its pass ends (`reloadKeeping`), keeping the edits
-  // of the rows it did not save, which a reload of the whole table would drop.
-  const { recordPublished, publish: publishPinned, dialog: conflictDialog } = useDraftSaveGuard(client, keepPageOnReload);
-  // The pin each row's edit was made against: a load that keeps a row's edit
-  // keeps that row pinned to the read the edit was made on, never the fresh one.
-  // It is the panel's own record, sent to the guard again before each row's
-  // publish: a conflict's reload clears every pin the guard holds, for every
-  // row, while this pass goes on with the rows after it.
-  const editPinsRef = React.useRef(new Map<string, DraftPin | null>());
+  // published since opens the conflict dialog instead of replacing it.
+  // objectstack#37515 — and each row's draft save to the draft its load read
+  // (`recordRead`, `save`), so a draft another writer saved since, or one that
+  // appeared after the load, opens the same dialog. The guard's own reload is
+  // not used: the Save that met the conflict re-reads the table itself once
+  // its pass ends (`reloadKeeping`), keeping the edits of the rows it did not
+  // save, which a reload of the whole table would drop.
+  const {
+    save: saveDraftGuarded,
+    recordRead,
+    recordPublished,
+    publish: publishPinned,
+    heldDraftVersion,
+    dialog: conflictDialog,
+  } = useDraftSaveGuard(client, keepPageOnReload);
+  // What each row's edit was made against ({@link RowBasis}), keyed by package
+  // and name: a load that keeps a row's edit keeps the basis the edit was made
+  // on, never the fresh read. It is the panel's own record, sent to the guard
+  // again before each row's save: a conflict's reload clears every pin the
+  // guard holds, for every row, while this pass goes on with the rows after
+  // it. Each installed load rebuilds it from its own rows, and a row's entry
+  // goes once its publish lands: the guard then holds the receipt's pin.
+  const editPinsRef = React.useRef(new Map<string, RowBasis>());
+  // Loads are sequenced: only the last one started installs its rows and pins,
+  // so an earlier load finishing late never re-pins a kept edit to its read.
+  const loadSeqRef = React.useRef(0);
   // The master a `controlled_by_parent` row derives under is named by its
   // label (`ux-conventions.labels-over-machine-names`): this package's own
   // object as this table reads it (its pending draft included), else the
@@ -318,7 +407,10 @@ export function PackageOwdOverviewPanel({
     master;
 
   // `keep` names the rows whose edits the caller puts back over this load.
-  const load = React.useCallback(async (keep?: ReadonlySet<string>) => {
+  // Resolves `false` when a later load superseded this one: it installed nothing.
+  const load = React.useCallback(async (keep?: ReadonlySet<string>): Promise<boolean> => {
+    const seq = ++loadSeqRef.current;
+    const current = () => seq === loadSeqRef.current;
     setLoaded(false);
     setLoadError(null);
     try {
@@ -356,10 +448,10 @@ export function PackageOwdOverviewPanel({
         names.map(async (name): Promise<OwdRow> => {
           // objectui#11799 — saved = held by the published list read above.
           const saved = publishedLabel.has(name);
-          const [layRaw, draftResp] = await readObjectBodies(client, packageId, name, saved);
-          const lay = (layRaw ?? {}) as { effective?: Record<string, unknown>; code?: Record<string, unknown> };
-          const baseline = (lay.effective ?? lay.code ?? {}) as Record<string, unknown>;
-          const draftBody = extractDraftBody(draftResp);
+          const [layRaw, draftRead] = await readObjectBodies(client, packageId, name, saved);
+          const baseline = baselineOf(layRaw);
+          const draftBasis = draftBasisOf(draftRead);
+          const draftBody = draftBasis.draftBody;
           // The pending draft is the whole document: read it as-is, and the
           // published baseline only when no draft exists (objectui#10765). A
           // spread over `effective` showed a model the draft had cleared as
@@ -375,28 +467,35 @@ export function PackageOwdOverviewPanel({
             ),
             hasDraft: !!draftBody,
             saved,
-            published: publishedPinOfRow(layRaw, saved),
+            basis: { ...draftBasis, published: publishedPinOfRow(layRaw, saved) },
           };
         }),
       );
+      if (!current()) return false;
       built.sort((a, b) => a.label.localeCompare(b.label) || a.name.localeCompare(b.name));
-      // objectstack#36962 — each row's publish is pinned to what this load read;
-      // a kept edit stays pinned to the read it was made on.
+      // objectstack#36962, objectstack#37515 — each row's save is pinned to
+      // what this load read; a kept edit stays pinned to the reads it was made on.
+      const bases = new Map<string, RowBasis>();
       for (const r of built) {
-        const kept = keep?.has(r.name) && editPinsRef.current.has(r.name);
-        const pin = kept ? (editPinsRef.current.get(r.name) ?? null) : r.published;
-        editPinsRef.current.set(r.name, pin);
-        recordPublished('object', r.name, packageId, pin);
+        const key = basisKey(packageId, r.name);
+        const prior = keep?.has(r.name) ? editPinsRef.current.get(key) : undefined;
+        const basis = prior ?? r.basis;
+        bases.set(key, basis);
+        recordRead('object', r.name, packageId, basis.draft);
+        recordPublished('object', r.name, packageId, basis.published);
       }
+      editPinsRef.current = bases;
       setRows(built);
       // Reset working edits to the freshly loaded baseline.
       setEdits(Object.fromEntries(built.map((r) => [r.name, { internal: r.internal }])));
+      return true;
     } catch (e) {
-      setLoadError(formatMetadataError(e));
+      if (current()) setLoadError(formatMetadataError(e));
+      return current();
     } finally {
-      setLoaded(true);
+      if (current()) setLoaded(true);
     }
-  }, [client, packageId, recordPublished]);
+  }, [client, packageId, recordPublished, recordRead]);
 
   React.useEffect(() => {
     void load();
@@ -470,28 +569,57 @@ export function PackageOwdOverviewPanel({
     // Read the rows back from the server, then put back the edits of the rows
     // this pass did not save.
     const reloadKeeping = async (unsaved: ReadonlyArray<{ row: { name: string }; edit: OwdEdit }>) => {
-      await load(new Set(unsaved.map((u) => u.row.name)));
+      // A later load (the package was published meanwhile) superseded this
+      // one: it reset every row, as a plain load does, so no edit is put back.
+      if (!(await load(new Set(unsaved.map((u) => u.row.name))))) return;
       if (unsaved.length > 0) {
         setEdits((prev) => ({ ...prev, ...Object.fromEntries(unsaved.map((u) => [u.row.name, u.edit])) }));
       }
     };
     try {
-      // Each changed row lands as that object's package-scoped DRAFT: read the
-      // fresh body (below), apply just `sharingModel` (unset → drop the key),
-      // save, and publish that one object. Identical to the per-object
-      // Settings write, N times.
+      // Each changed row lands as that object's package-scoped DRAFT: the edit
+      // applied to just `sharingModel` (unset → drop the key) of the body the
+      // edit was made over (below), saved through the guard, then that one
+      // object published. Identical to the per-object Settings write, N times.
       for (const s of changed) {
-        // objectui#11799 — the row's saved state from the load decides whether
-        // the baseline is asked before the draft is in hand.
-        const [layRaw, draftResp] = await readObjectBodies(client, packageId, s.row.name, s.row.saved);
-        const lay = (layRaw ?? {}) as { effective?: Record<string, unknown>; code?: Record<string, unknown> };
-        const baseline = (lay.effective ?? lay.code ?? {}) as Record<string, unknown>;
-        const draftBody = extractDraftBody(draftResp);
+        const key = basisKey(packageId, s.row.name);
+        const held = editPinsRef.current.get(key);
+        let basis: Omit<RowBasis, 'published'>;
+        let baseline: Record<string, unknown> = {};
+        if (held && !held.draftUnread) {
+          // objectstack#37515 — the draft the load read is the body the edit
+          // was made over, and its version pins the save: a draft another
+          // writer saved since, or one that appeared after the load (`If-None-
+          // Match: *`), is refused at the door and asked about. With no draft
+          // read, the published baseline is read now; its publish pin holds it.
+          basis = held;
+          if (!held.draftBody) baseline = baselineOf(await readLayeredAt(client, packageId, s.row.name));
+        } else {
+          // No load read says what the draft is: the load's draft read failed,
+          // or this row went live earlier and has not been read back since.
+          // The body is read now, at the address the save writes, and that
+          // read pins the save. objectui#11799 — the row's saved state from the
+          // load decides whether the baseline is asked before the draft is in hand.
+          const [layRaw, draftRead] = await readObjectBodies(client, packageId, s.row.name, s.row.saved);
+          basis = draftBasisOf(draftRead);
+          baseline = baselineOf(layRaw);
+        }
+        // objectstack#29148 — a draft the server refused to read is no absence:
+        // a body seeded from the published layer would be saved over it.
+        if (basis.draftRefused !== undefined) {
+          refused.push({
+            name: s.row.name,
+            label: s.row.label,
+            reason: t('engine.studio.refusal.draftUnreadable', locale),
+            edit: s.edit,
+          });
+          continue;
+        }
         // The pending draft is the whole document — the edit lands on it as-is,
         // and on the published baseline only when no draft exists
         // (objectui#10765): a spread over `effective` would put back every key
         // the draft had deleted and save them again as this object's draft.
-        const next: Record<string, unknown> = { ...(draftBody ?? baseline) };
+        const next: Record<string, unknown> = { ...(basis.draftBody ?? baseline) };
         if (s.edit.internal) next.sharingModel = s.edit.internal;
         else delete next.sharingModel;
         // objectui#12326 — switching to `controlled_by_parent` sets
@@ -509,8 +637,12 @@ export function PackageOwdOverviewPanel({
         // runtime resolved from the list; the authoring door refuses the two
         // together, for the whole object. So the resolved `options` stay out of
         // the body, on every bound field and on nothing else.
+        const body = dropServedPicklistOptions(next);
+        // Sent to the guard again before each row's save: an earlier row's
+        // reload in this pass cleared the guard's pins.
+        recordRead('object', s.row.name, packageId, basis.draft);
         try {
-          await client.save('object', s.row.name, dropServedPicklistOptions(next), {
+          const wrote = await saveDraftGuarded('object', s.row.name, body, {
             mode: 'draft',
             packageId,
             surface: 'studio',
@@ -518,6 +650,12 @@ export function PackageOwdOverviewPanel({
             // prerequisite below, and only on the rows that carry one.
             ...(force && relations.length > 0 ? { force: true } : {}),
           });
+          // The draft moved and the author chose to reload: nothing was
+          // written, and the row is read back once the pass ends.
+          if (wrote === 'reloaded') {
+            reloadedNames.add(s.row.name);
+            continue;
+          }
         } catch (e) {
           // objectstack#27458 — making the relationship required is a change
           // the server's destructive-change guard asks to confirm (409). Name
@@ -543,18 +681,37 @@ export function PackageOwdOverviewPanel({
           refused.push({ name: s.row.name, label: s.row.label, reason: formatMetadataError(e), edit: s.edit });
           continue;
         }
-        // A draft that was pending before this save (a copilot's) is published
-        // with it; a refused publish takes back only the draft this save wrote.
+        // The draft now holds this save: the next save of the row's edit is
+        // pinned to the version it left (the guard's receipt), over this body.
+        const token = heldDraftVersion('object', s.row.name, packageId);
+        const written: RowBasis = {
+          ...basis,
+          published: held?.published ?? null,
+          draft: token ? { ifMatch: token } : null,
+          draftBody: body,
+          draftUnread: false,
+        };
+        if (held) editPinsRef.current.set(key, written);
+        // A draft that was pending when the edit was made over it is published
+        // with it, the author having seen it; a refused publish takes back only
+        // the draft this save wrote.
         // objectstack#36962 — pinned to the published row this row was loaded at,
         // sent again here because an earlier row's reload in this pass cleared
-        // the guard's pins (and a re-read that failed sent none back).
-        recordPublished('object', s.row.name, packageId, editPinsRef.current.get(s.row.name) ?? null);
+        // the guard's pins. A row with no entry went live earlier in this
+        // session: the guard holds that publish's receipt, and nothing is re-sent.
+        if (held) recordPublished('object', s.row.name, packageId, held.published);
         const live = await publishSavedItem(
           client,
-          { type: 'object', name: s.row.name, packageId },
-          s.row.hasDraft,
+          // objectstack#37440 — and to the draft this save wrote (`token`, its
+          // receipt): a draft another writer changed in between is not published.
+          { type: 'object', name: s.row.name, packageId, ...(token ? { draftVersion: token } : {}) },
+          basis.hadDraft,
           publishPinned,
         );
+        // The draft this save wrote was taken back: the row holds no draft again.
+        if (!live.ok && live.draftDiscarded && held) {
+          editPinsRef.current.set(key, { ...written, draft: { ifNoneMatch: '*' }, draftBody: null });
+        }
         // The published row moved and the author chose to reload it: the row
         // is read back once the pass ends, and the pass goes on with the other
         // rows, each still pinned to its own load. The draft this Save wrote is
@@ -571,6 +728,8 @@ export function PackageOwdOverviewPanel({
         }
         saved += 1;
         savedNames.add(s.row.name);
+        // Live: no draft is left, and the guard holds the publish's receipt.
+        editPinsRef.current.delete(key);
       }
       // A Save leaves no draft: the publish told the ledger behind Changes.
       // The reload puts every dial back at what the server holds: a refused
@@ -586,7 +745,7 @@ export function PackageOwdOverviewPanel({
     } finally {
       setSaving(false);
     }
-  }, [rowState, client, packageId, load, locale, publishPinned, recordPublished]);
+  }, [rowState, client, packageId, load, locale, publishPinned, recordPublished, recordRead, saveDraftGuarded, heldDraftVersion]);
 
   // Cancel: every dial back at what the server holds, nothing sent.
   const doCancel = React.useCallback(() => {

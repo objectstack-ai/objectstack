@@ -21,6 +21,7 @@ import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
 import { toast } from 'sonner';
 import { Package as PackageIcon, Sparkles as SparklesIcon } from 'lucide-react';
 import { useAdapter } from '../../providers/AdapterProvider.js';
+import { CONSOLE_FULL_HEIGHT } from '../../layout/chromeBannerHost.js';
 import { isPlatformBuiltinApp } from '../../utils/platformApp.js';
 import { useMetadata } from '../../providers/MetadataProvider.js';
 import { formatPublishFailures, type PublishFailure } from '../../views/studio-design/metadataError.js';
@@ -77,7 +78,7 @@ import {
   detectAuthoringVerdict,
   detectBuiltAppPackage,
   buildProgressFromDraftReview,
-  chartsFromParts,
+  storedAnswerData,
   // The authoring/honest -> runtime message seam (objectui#4399 / PR #4416),
   // consumed here one hop up from the plugin's own renderers (objectui#4437).
   // See `runtimeMessages` below for why this host calls it exactly once.
@@ -411,7 +412,11 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
     // persisted, each at the offset into `content` where its part sat. The
     // live stream's chart part is never stored, so this is the only way a
     // chart survives a reload.
-    const charts = message.role === 'assistant' ? chartsFromParts(message.parts) : undefined;
+    // objectstack#37487 — with every other kept data part
+    // (`STORED_ANSWER_DATA_PARTS`): the persisted, already-verified
+    // `data-record-citations` list, drawn again as chips, never re-verified.
+    const { charts, recordCitations } =
+      message.role === 'assistant' ? storedAnswerData(message.parts) : {};
 
     return {
       id: message.id,
@@ -420,6 +425,7 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
       ...(toolInvocations.length > 0 ? { toolInvocations } : {}),
       ...(buildProgress ? { buildProgress } : {}),
       ...(charts ? { charts } : {}),
+      ...(recordCitations ? { recordCitations } : {}),
     };
   });
 }
@@ -1567,7 +1573,7 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
   );
 
   return (
-    <div className="flex h-svh w-full flex-col bg-background" data-testid="ai-chat-page">
+    <div className={cn('flex w-full flex-col bg-background', CONSOLE_FULL_HEIGHT.svh)} data-testid="ai-chat-page">
       <header className={cn(CONSOLE_TOP_BAR, 'bg-background/95 backdrop-blur')}>
         {/* Mobile: open the chats list as a sheet. The DESKTOP collapse toggle
             is NOT in the top nav — it lives at the bottom-left of the chats

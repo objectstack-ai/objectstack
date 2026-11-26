@@ -34,6 +34,12 @@
  *      {@link SharingWriteVerdict} for the measured fail-open that
  *      collapsing the two into one `true` produced (#5492 E2).
  *
+ *      [#35934] The tri-state primaries have an optional SET form,
+ *      `checkEditMany()` / `checkDeleteMany()`: the same verdict for each of
+ *      a list of record ids, answered with reads that grow per chunk rather
+ *      than per row. A caller feature-detects it and asks per record where it
+ *      is absent; the answers are the same either way.
+ *
  *   3. **Enforcement runs on the FULL envelope.** Every method on both
  *      interfaces below adjudicates access, so each takes a complete
  *      {@link ExecutionContext} — the whole `resolveAuthzContext` result,
@@ -425,6 +431,46 @@ export interface ISharingService {
     recordId: string,
     context: ExecutionContext,
   ): Promise<boolean>;
+
+  /**
+   * [#35934] The SET form of {@link checkEdit}: the UPDATE verdict for every
+   * record of `object` that `recordIds` names, in one call. `answer[i]` is the
+   * verdict for `recordIds[i]`, the answer is exactly as long as `recordIds`,
+   * and each verdict is the one {@link checkEdit} answers for that id under the
+   * same `context`: ownership (widened by write DEPTH), a write-level
+   * ({@link ShareAccessLevel} `edit`) share, a record sitting in a queue the
+   * caller belongs to, or the `modifyAllRecords` super-user bypass for `allow`;
+   * the same `abstain` and `deny` rules, the same order. Only the cost differs:
+   * a list of N records is answered with a number of store reads that grows
+   * with N divided by the implementation's chunk, never with N itself, so a
+   * predicate update over many rows asks once rather than once per row.
+   *
+   * Optional. A caller feature-detects it (`typeof … === 'function'`) and
+   * asks {@link checkEdit} once per record where it is absent, with the same
+   * answers. The implementation owns the chunking. **Fail-closed per chunk**,
+   * as {@link checkEdit} is per record: a chunk whose lookup throws answers
+   * `deny` for each of its records, never `abstain`.
+   */
+  checkEditMany?(
+    object: string,
+    recordIds: readonly string[],
+    context: ExecutionContext,
+  ): Promise<SharingWriteVerdict[]>;
+
+  /**
+   * [#35934] The SET form of {@link checkDelete}, on the terms of
+   * {@link checkEditMany}: `answer[i]` is the DELETE verdict
+   * {@link checkDelete} answers for `recordIds[i]`. The verb boundary comes
+   * with it (ADR-0111 D3): `allow` is ownership (widened by write DEPTH), the
+   * `modifyAllRecords` super-user bypass or system context ONLY, so an `edit`
+   * share that makes {@link checkEditMany} answer `allow` leaves this one at
+   * `deny`. Optional and feature-detected; fail-closed per chunk.
+   */
+  checkDeleteMany?(
+    object: string,
+    recordIds: readonly string[],
+    context: ExecutionContext,
+  ): Promise<SharingWriteVerdict[]>;
 
   /**
    * [ADR-0111 D1] May the principal in `context` MANAGE shares (grant / revoke

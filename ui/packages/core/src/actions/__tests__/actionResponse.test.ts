@@ -107,3 +107,33 @@ describe('readActionPayload — legacy double wrap vs #3962 single wrap', () => 
         expect(readActionPayload([1, 2])).toEqual([1, 2]);
     });
 });
+
+/**
+ * A refusal that names several reasons (objectstack#36877) answers each
+ * reason's sentence on `error.details.refusals`; the outcome carries the list
+ * so the console can show every reason (objectstack#37403). The list is read
+ * whole or not at all, as the server's own reader reads it.
+ */
+describe('interpretActionResponse — a refusal with several reasons (objectstack#37403)', () => {
+    const refusals = [
+        { reason: 'on_report', message: 'Expense Taxi 12 is already on an expense report.' },
+        { reason: 'approved', message: 'Expense Hotel 7 is already approved.' },
+    ];
+    const text = `${refusals[0].message}\n${refusals[1].message}\nNothing was submitted.`;
+    const refused = (details: unknown) => interpretActionResponse({ ok: false, status: 409 }, {
+        success: false,
+        error: { code: 'NOT_SUBMITTED', message: text, userMessage: text, details },
+    }, 'Action "submit_expenses"');
+
+    it('carries error.details.refusals in order, each copied to reason and message', () => {
+        const out = refused({ refusals: refusals.map((r) => ({ ...r, extra: 1 })) });
+        expect(out).toMatchObject({ ok: false, error: text, userMessage: text });
+        expect(out.refusals).toEqual(refusals);
+    });
+
+    it('CONTROL: no list, an empty list or a list with a malformed element carries none', () => {
+        for (const details of [undefined, {}, { refusals: [] }, { refusals: [refusals[0], { reason: 'approved' }] }, { refusals: 'x' }]) {
+            expect('refusals' in refused(details)).toBe(false);
+        }
+    });
+});

@@ -10,7 +10,11 @@ export const TASK_DONE_STATUS = 'done';
  *
  * Every environment carries it, whichever application is installed, so an app
  * puts tasks in its menu with a `type: 'object'` navigation entry naming
- * `sys_task` instead of declaring its own task object. It is an ordinary
+ * `sys_task` instead of declaring its own task object:
+ * `{ type: 'object', objectName: 'sys_task', requiresObject: 'sys_task' }`.
+ * The entry needs `requiresObject` — `defineStack` refuses a menu entry for an
+ * object the stack does not declare unless the entry says the object comes
+ * from elsewhere. It is an ordinary
  * customizable object: an organization adds fields and views to it, and
  * comments and attachments work on it as on any record (`enable.files` is on;
  * the comment feed is on by default).

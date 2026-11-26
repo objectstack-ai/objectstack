@@ -464,3 +464,28 @@ describe('createServerActionHandler — userMessage relay (objectstack#34173)', 
     }
   });
 });
+
+/**
+ * The reasons of a refusal that names several (`error.details.refusals`,
+ * objectstack#36877) ride on `ActionResult.refusals`, beside `userMessage`,
+ * so the param dialog's refusal box can list them (objectstack#37403).
+ */
+describe('createServerActionHandler — refusal reasons relay (objectstack#37403)', () => {
+  it('relays error.details.refusals beside error and userMessage', async () => {
+    const refusals = [
+      { reason: 'on_report', message: 'Expense Taxi 12 is already on an expense report.' },
+      { reason: 'approved', message: 'Expense Hotel 7 is already approved.' },
+    ];
+    const text = `${refusals[0].message}\n${refusals[1].message}\nNothing was submitted.`;
+    const fetch = vi.fn(async () => ({
+      ok: false,
+      status: 409,
+      json: async () => ({ success: false, error: { code: 'NOT_SUBMITTED', message: text, userMessage: text, details: { refusals } } }),
+    })) as unknown as ServerActionFetch;
+    const handler = createServerActionHandler({ fetch });
+
+    const res = await handler({ type: 'script', name: 'submit_expenses' } as ActionDef);
+
+    expect(res).toEqual({ success: false, error: text, userMessage: text, refusals });
+  });
+});

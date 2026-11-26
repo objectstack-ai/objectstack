@@ -3905,7 +3905,10 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // <os-generated retired-key:18>
     // </os-generated retired-key:18>
   ],
-  // Protocol 19's retirements, registered at the major they ship in.
+  // The v19 line: `PROTOCOL_VERSION` reads 19 (step19 above), and once the
+  // spec package itself moves to 19 every retirement `check:authorable-surface`
+  // prescribes is registered under major 19. Opened empty so that first entry
+  // has a region to land in.
   19: [
     // One file per entry under `entries/retired-keys/`, concatenated here sorted by
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
@@ -4042,7 +4045,9 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // <os-generated retired-def:18>
     // </os-generated retired-def:18>
   ],
-  // Protocol 19's whole-def removals, registered at the major they ship in.
+  // The v19 line, for the same reason as RETIRED_KEYS_BY_MAJOR[19] above: the
+  // manifest deletion gate prescribes each removal under the spec package's
+  // own major. Opened empty so that first entry has a region to land in.
   19: [
     // One file per entry under `entries/retired-defs/`, concatenated here sorted by
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a

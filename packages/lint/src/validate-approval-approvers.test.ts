@@ -18,6 +18,7 @@ import {
   APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED,
 } from './validate-approval-approvers.js';
 import { explainRule } from './rule-explanations.js';
+import { runRuntimeAuthoringRules } from './runtime-gate.js';
 
 // [#22161] Each finding of the two converted ids is one verdict sentence; the
 // reasoning it used to carry is the id's `os explain` entry. Every call below
@@ -1048,5 +1049,72 @@ describe('[#22161] one-line fixes — the expression and membership-tier ids', (
       const text = entry!.paragraphs.join('\n');
       for (const fact of list) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
     }
+  });
+});
+
+// #35143: a lookup detail table the approval lock does not cover.
+
+const DETAIL_EDITABLE_WHILE_PENDING = 'approval-detail-editable-while-pending';
+const ruleIdsOf = (findings: readonly { rule: string }[]) => findings.map((f) => f.rule);
+
+describe('approval-detail-editable-while-pending', () => {
+  const EXPENSE = (fieldGroups?: Record<string, any>[]): Record<string, any> => ({
+    name: 'expense',
+    label: 'Expense',
+    fields: { name: { type: 'text', label: 'Name' } },
+    ...(fieldGroups ? { fieldGroups } : {}),
+  });
+  const LINE = (fk: Record<string, any>): Record<string, any> => ({
+    name: 'expense_line',
+    label: 'Expense line',
+    fields: { name: { type: 'text', label: 'Name' }, expense: { label: 'Expense', reference: 'expense', ...fk } },
+  });
+  const approvalFlow = (config: Record<string, any> = {}): Record<string, any> => ({
+    name: 'expense_approval',
+    label: 'Expense approval',
+    type: 'autolaunched',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start', config: { objectName: 'expense' } },
+      {
+        id: 'approve',
+        type: 'approval',
+        label: 'Approve',
+        config: { approvers: [{ type: 'user', value: 'u1' }], ...config },
+      },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'approve' }],
+  });
+  const stack = (objects: Record<string, any>[], config: Record<string, any> = {}): Record<string, any> => ({ objects, flows: [approvalFlow(config)] });
+
+  it('warns when a lookup child is a body table of the record under a locking approval', () => {
+    const primary = validateApprovalApprovers(stack([EXPENSE(), LINE({ type: 'lookup', relatedList: 'primary' })]));
+    const hit = primary.filter((f) => f.rule === DETAIL_EDITABLE_WHILE_PENDING);
+    expect(hit).toHaveLength(1);
+    expect(hit[0]).toMatchObject({ severity: 'warning', path: 'flows[0].nodes[1].config.lockRecord' });
+    expect(hit[0].message).toContain('expense_line.expense');
+    expect(hit[0].hint).toContain('master_detail');
+  });
+
+  it('is silent for a master_detail child (the lock covers it), a lookup that is no body table, and lockRecord: false', () => {
+    const md = validateApprovalApprovers(
+      stack([EXPENSE([{ key: 'lines', label: 'Lines', relatedList: 'expense_line' }]), LINE({ type: 'master_detail', required: true })]),
+    );
+    expect(ruleIdsOf(md)).not.toContain(DETAIL_EDITABLE_WHILE_PENDING);
+    const plain = validateApprovalApprovers(stack([EXPENSE(), LINE({ type: 'lookup' })]));
+    expect(ruleIdsOf(plain)).not.toContain(DETAIL_EDITABLE_WHILE_PENDING);
+    const optedOut = validateApprovalApprovers(
+      stack([EXPENSE(), LINE({ type: 'lookup', relatedList: 'primary' })], { lockRecord: false }),
+    );
+    expect(ruleIdsOf(optedOut)).not.toContain(DETAIL_EDITABLE_WHILE_PENDING);
+  });
+
+  it('rides the runtime publish gate on the flow write as an advisory, never a refusal', () => {
+    const verdict = runRuntimeAuthoringRules({
+      type: 'flow',
+      item: approvalFlow(),
+      context: { objects: [EXPENSE(), LINE({ type: 'lookup', relatedList: 'primary' })] },
+    });
+    expect(ruleIdsOf(verdict.errors)).not.toContain(DETAIL_EDITABLE_WHILE_PENDING);
+    expect(ruleIdsOf(verdict.advisories)).toContain(DETAIL_EDITABLE_WHILE_PENDING);
   });
 });

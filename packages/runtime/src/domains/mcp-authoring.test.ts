@@ -38,7 +38,7 @@ import {
 // paid here, during collection, never inside a clocked case.
 import { MetadataManager } from '@objectstack/metadata';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
-import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataCreateSeed, getMetadataTypeSchema } from '@objectstack/spec/kernel';
+import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataCreateSeed, getMetadataTypeSchema, SEMVER_2_0_0_VERSION_PATTERN } from '@objectstack/spec/kernel';
 import { z } from 'zod';
 import { PLATFORM_PROVIDED_TOOL_NAMES, PLATFORM_TOOL_FAMILY_PREFIXES } from '@objectstack/spec/system';
 import { handleMcpRequest } from './mcp.js';
@@ -1043,7 +1043,15 @@ describe('[ADR-0161 K4] save_metadata_draft asks the knowledge service to admit 
 /** [#34774] `clientSpecVersion` on the save (#34659 ruling D4 = A). */
 describe('[#34774] save_metadata_draft judges the client\'s declared spec version', () => {
   const SERVER = (createRequire(import.meta.url)('@objectstack/spec/package.json') as { version: string }).version;
-  const [major, minor] = SERVER.split('.').map(Number);
+  // Parsed with the SemVer 2.0.0 grammar the door itself judges with, never a
+  // `split('.')`: on a prerelease line (`19.0.0-next.0`) the third dot-field is
+  // `0-next`, and a patch read from it is NaN. The prerelease is DROPPED from
+  // every version built below: each case is about major and minor, and a plain
+  // release triple is the one shape every case means. The prerelease itself is
+  // exercised by its own case, declared verbatim.
+  const parsed = SEMVER_2_0_0_VERSION_PATTERN.exec(SERVER);
+  if (!parsed) throw new Error(`@objectstack/spec resolves to ${SERVER}, which is not a SemVer 2.0.0 version`);
+  const [major, minor, patch] = parsed.slice(1, 4).map(Number);
   const SAVE = { type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm' };
   const writes = (calls: unknown[]) => calls.filter((c: any) => ['saveMetaItem', 'draftPublishJudgement'].includes(c[0]));
   const save = async (clientSpecVersion?: unknown) => {
@@ -1058,9 +1066,19 @@ describe('[#34774] save_metadata_draft judges the client\'s declared spec versio
     expect(without.tool.parameters.properties.clientSpecVersion).toMatchObject({ type: 'string' });
     expect(without.tool.parameters.required).toEqual(['type', 'name', 'item']);
     expect(Object.keys(without.body)).toEqual(['saved', 'verdict', 'review']);
-    const same = await save(`${major}.${minor}.${Number(SERVER.split('.')[2]) + 1}`);
+    const same = await save(`${major}.${minor}.${patch + 1}`);
     expect(same.result.output.value).toBe(without.result.output.value);
     expect(same.writes).toEqual(without.writes);
+  });
+
+  it('a prerelease of the same major and minor saves as before, and so does the server\'s own version verbatim', async () => {
+    const without = await save();
+    for (const declared of [SERVER, `${major}.${minor}.0-next.0`]) {
+      const { result, writes: written } = await save(declared);
+      expect(result.isError, declared).toBeUndefined();
+      expect(result.output.value, declared).toBe(without.result.output.value);
+      expect(written, declared).toEqual(without.writes);
+    }
   });
 
   it('done when: a client declaring the previous major is refused with the command to run, and nothing is written', async () => {

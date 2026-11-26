@@ -138,7 +138,7 @@ export const ru: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'Мастерская метаданных для разработчиков, аналитиков и интеграторов',
       navigation: {
         group_overview: { label: 'Обзор' },

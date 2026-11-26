@@ -40,7 +40,7 @@ export interface KnowledgeBuildProgressView {
 /** A build record, as the server reports it. */
 export interface KnowledgeBuildView {
   trigger?: string;
-  status?: 'running' | 'done' | 'failed' | 'not-run';
+  status?: 'running' | 'done' | 'failed' | 'not-run' | 'lease-lost' | 'timed-out';
   startedAt?: string;
   finishedAt?: string;
   progress?: KnowledgeBuildProgressView;

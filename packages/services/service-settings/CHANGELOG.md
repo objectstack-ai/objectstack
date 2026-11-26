@@ -1,5 +1,386 @@
 # @objectstack/service-settings
 
+## 19.0.0-next.0
+
+### Patch Changes
+
+- a73edb3: fix(settings)!: the knowledge settings page and the AI page's embedder section appear only where the knowledge service is mounted
+  
+  Clause-②: no (narrowing) — narrowed: on a deployment that does not mount `KnowledgeServicePlugin` (every stock boot), `GET` / `PUT /api/settings/knowledge` and `POST /api/settings/knowledge/test` now answer `404 UNKNOWN_NAMESPACE`, where they served the Knowledge page; a write of an `ai.embedder_*` key (`embedder_provider`, `embedder_api_key`, `embedder_model`, `embedder_base_url`, `embedder_dimensions`, `embedder_batch_size`) now answers `400 UNKNOWN_KEY`, and `POST /api/settings/ai/test_embedder` answers that no handler is registered; the hub list no longer carries `knowledge`, and the Setup sidebar no longer carries `nav_settings_knowledge`. `builtinSettingsManifests` drops `knowledgeSettingsManifest`, and `aiSettingsManifest` drops its embedder section.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the knowledge settings page or the `ai.embedder_*` keys; `skills/objectstack-ai` teaches wiring `KnowledgeServicePlugin`, which is unchanged.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: settings manifests are runtime registrations, not authorable metadata. The moved answers are settings doors that a deployment without the knowledge service no longer serves; a deployment that mounts it serves them exactly as before, and stored rows are untouched, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** for a deployment that does not mount the knowledge service: the knowledge base is not a default capability, so its settings are no longer offered by default. The Knowledge page, the AI page's Embedder section, their "Test connection" / "Test embedder" buttons and the Setup entry are now contributed by `@objectstack/service-knowledge` when `KnowledgeServicePlugin` is mounted beside `SettingsServicePlugin`, and only then. Values already stored under `knowledge.*` or `ai.embedder_*` stay in the database and are served again as soon as the service is mounted.
+  
+  The AI page's description no longer names the knowledge base, in every bundled locale.
+  
+  `@objectstack/service-settings` now exports `knowledgeSettingsManifest`, `knowledgeTestActionHandler`, `aiSettingsManifest`, `aiEmbedderSettingsSpecifiers`, `withAiEmbedderSection` and `aiTestEmbedderActionHandler` from its package entry, and its default `actionHandlers` map no longer registers `knowledge.test` or `ai.test_embedder`. `@objectstack/service-knowledge` depends on `@objectstack/service-settings` and declares the settings plugin in `optionalDependencies`, so the kernel inits it first.
+  
+  What to do: nothing, unless you configure an embedder or a knowledge backend from Setup. Then mount `KnowledgeServicePlugin` from `@objectstack/service-knowledge` (with a knowledge adapter plugin) beside `SettingsServicePlugin`; the page, the embedder section and the Setup entry come back with it. A host that passed its own `ai` manifest to `SettingsServicePlugin({ manifests })` adds `aiEmbedderSettingsSpecifiers` to it (or wraps it with `withAiEmbedderSection`) to keep the embedder keys. The embedder section joins only the bundled `ai` page, recognised as that very declaration; a host's own `ai` page (or one served through an option source) is left as it is, and the plugin logs a warning saying so. A host that passes its own `actionHandlers` to `SettingsServicePlugin` keeps a `knowledge` entry there only beside the knowledge manifest: without it the settings plugin refuses to register the handler for an unknown namespace at boot.
+  
+  Stored credentials: on a deployment that does not mount the knowledge service, `ai.embedder_api_key`, `knowledge.turso_auth_token` and `knowledge.ragflow_api_key` stay stored (as `sys_secret` handles) but no settings door serves, edits or clears them, and the AI page's reset clears declared keys only. To remove them, mount `KnowledgeServicePlugin` once and clear the keys from Setup, or delete their rows from `sys_platform_setting` (the `knowledge` namespace and the `ai.embedder_*` keys) and the `sys_secret` rows whose `id` those rows hold in `value_enc` (a `sec_` handle); until then the `sys_secret` orphan report may list them.
+- 37e7fdf: fix(settings): Setup → Access policy explains its five fields in the admin's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On Setup → Access policy, the help under Allowed IP ranges, Idle timeout, Absolute session lifetime, Max concurrent sessions per user and Require multi-factor authentication showed the English manifest description in every translated locale, because no locale bundle carried a `help` for those keys. All ten translated locales (zh-CN, zh-Hant, ja-JP, ko, de, es-ES, fr, pt-BR, ru, ar) now carry `settings.access_policy.keys.KEY.help` for each of the five, translated from the English description. The settings translation coverage test no longer exempts them: its shrink-only owed-help list is empty, so every described settings field is held to a translated help in every locale. No keys, labels or option values change.
+- c349576: fix(settings)!: `@objectstack/knowledge-ragflow` is retired, and the Knowledge settings page no longer offers the RAGFlow adapter
+  
+  Clause-②: no (narrowing) — narrowed: `PUT /api/settings/knowledge` refuses `adapter: 'ragflow'` (`400 SETTINGS_VALIDATION`, field code `invalid_option`) and refuses `ragflow_base_url`, `ragflow_api_key` and `ragflow_default_dataset` (`400 UNKNOWN_KEY`), where it stored all four; `POST /api/settings/knowledge/test` answers `adapter = ragflow` as an unknown adapter (`400 SETTINGS_ACTION_FAILED`), where it answered a form check
+  Metadata-protocol: none
+  Skills-docs: updated here — `skills/objectstack-ai/SKILL.md` and its eval case 3 teach the `pgvector` adapter where they taught `ragflow`; `content/docs/protocol/knowledge.mdx`, `content/docs/ai/knowledge-rag.mdx` and `content/docs/ai/index.mdx` name the adapters this repository builds.
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/knowledge-ragflow#*) the package is deleted whole: what it published (`KnowledgeRagflowPlugin`, `KnowledgeRagflowAdapter` and their option types) is runtime code a host registers; no `packages/spec` schema, metadata type or stored shape names it, and `KnowledgeSource.adapter` stays a free string, so there is nothing for `objectstack migrate meta` to rewrite. The settings half has the same answer: a settings manifest is a runtime registration, not authorable metadata; the narrowed answers are doors of one settings namespace, and stored rows are untouched. -->
+  
+  **BREAKING** for a deployment that saved the RAGFlow adapter on the Knowledge settings page, or that registers `KnowledgeRagflowPlugin`.
+  
+  The package `@objectstack/knowledge-ragflow` is removed from this repository and gets no further release. Its requests did not match the RAGFlow HTTP API (it wrote and filtered on chunk metadata the API neither stores nor returns), so a knowledge source bound to it never retrieved anything, and nothing reported that. It is retired rather than repaired; the last published version stays on npm and will be marked deprecated.
+  
+  On the Knowledge settings page (`knowledge` namespace, manifest `version` 3):
+  
+  - The **Adapter** select offers `memory` and `turso`. The `ragflow` option, the RAGFlow group and its three keys (`ragflow_base_url`, `ragflow_api_key`, `ragflow_default_dataset`) are gone, with their strings in all eleven bundled locales.
+  - A stored `adapter = ragflow` is still served as stored, since the settings service never rewrites a stored value. The Console shows the Adapter select with nothing selected. Saving other keys works; saving `ragflow` again is refused; "Test connection" answers "Unknown adapter: ragflow". No code ever read this setting, so nothing else changes behaviour.
+  - Stored rows for the three removed keys are kept, never deleted. The page no longer serves them, and no settings door clears them, the encrypted `ragflow_api_key` included.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `@objectstack/knowledge-ragflow` TO an adapter package this repository builds: `@objectstack/knowledge-pgvector` (`adapter: 'pgvector'`, PostgreSQL with pgvector), `@objectstack/knowledge-turso` (`adapter: 'turso'`, a libSQL file) or `@objectstack/knowledge-memory` (`adapter: 'memory'`, development and tests). Fix: stop registering `KnowledgeRagflowPlugin`, remove the dependency, and bind your sources to one of those; to keep an external engine, register your own `IKnowledgeAdapter` under an id of your choice.
+  
+  On a deployment that used it, also:
+  
+  - A knowledge source that still names `adapter: 'ragflow'` with no such adapter registered boots without an error: searches over it answer no hits and log `references unknown adapter`, and indexing it throws `unknown adapter 'ragflow'`. Change the source's `adapter`.
+  - Pick an adapter on the Knowledge settings page and save, which replaces the stored `ragflow` value.
+  - To remove the stored API key, delete the `knowledge` rows named `ragflow_base_url`, `ragflow_api_key` and `ragflow_default_dataset` from `sys_platform_setting`, and the `sys_secret` row whose `id` the `ragflow_api_key` row holds in `value_enc` (a `sec_` handle). Until then the `sys_secret` orphan report may list it. An earlier note in this release says mounting the knowledge service and clearing the key from Setup removes it; for `ragflow_api_key` that no longer applies, because the page no longer declares the key.
+  
+  Also in this change, text only: `@objectstack/spec` comments on `KnowledgeSource.adapter`, `KnowledgeSource.embedding`, `IKnowledgeAdapter` and `IKnowledgeService` name adapters that exist; the `@objectstack/service-knowledge` README and package description, and the `@objectstack/embedder-openai` README, name the adapters this repository builds (the embedder README now says which of them take an `embedder`).
+  
+  In `@objectstack/skills`, `skills/objectstack-ai/SKILL.md` (*Knowledge Sources (RAG)*, rewritten in place, 487 lines and 6798 tokens before and after):
+  
+  - The wiring paragraph names `@objectstack/knowledge-memory` (`'memory'`, dev/test), `@objectstack/knowledge-pgvector` (`'pgvector'`) and `@objectstack/knowledge-turso` (`'turso'`), where it named the retired package and `'ragflow'`.
+  - The example source uses `'pgvector'`. An agent following the old example wrote a source bound to an adapter that never retrieved anything. The `adapter` row no longer repeats example ids, and the `embedding` row no longer names engines no adapter here serves.
+  - The splitting paragraph says which adapters take the service's passages (`memory`, `pgvector`, `turso`); any other adapter receives whole documents.
+  - `evals/skills-tools-knowledge.json`, case 3: the prompt says the deployment runs PostgreSQL with pgvector, and the expected answer writes `adapter: 'pgvector'` and no `split` key, because the default `recursive` split fits article prose. The case keeps what it exercised (an object source with `where`, `metadataFields` and `refresh`, registered through `KnowledgeServicePlugin`); the in-memory adapter is already case 9.
+- b8c8c88: feat(service-knowledge): the open edition registers `EMBEDDER_SERVICE` from the `ai.embedder_*` settings when the knowledge service is mounted
+  
+  Clause-②: yes (widening) — `@objectstack/embedder-openai` gains one export, `documentedMaxBatchSize(model): number | undefined`
+  Metadata-protocol: none
+  
+  - **An embedder from the settings page.** `KnowledgeServicePlugin` reads the saved `ai.embedder_*` settings once, at `kernel:bootstrapped`, and registers an `@objectstack/embedder-openai` embedder as `EMBEDDER_SERVICE` (`'embedder'`) for the saved provider. The saved Base URL applies only to the custom and Azure providers; other providers use their preset endpoint. The boot line names the endpoint host. "Saved" means any layer but the manifest default, an `OS_*` override included; `ai.embedder_dimensions` and `ai.embedder_batch_size` are read as positive integers whether they arrive as numbers or as text (an `OS_AI_EMBEDDER_DIMENSIONS=256` override), and a value that is not one is refused with a `warn`, not dropped. Completeness is the Test embedder button's own check. `@objectstack/service-knowledge` now depends on `@objectstack/embedder-openai`.
+  - **An embedder already registered is kept.** One registered by ObjectOS Cloud or by a host's own plugin in `init()`, `start()` or a `kernel:ready` handler is kept, with one `info` line, and the settings are not applied.
+  - **The batch size is passed only when it was saved, and is held to the model's documented cap.** Unsaved (the form shows 64), the embedder batches at the model's documented cap. Saved, it is passed as `min(saved, documented cap)` when the saved model has a documented cap (DashScope `text-embedding-v3`: a saved 64 sends 10 per request), and as saved for a model with none.
+  - **No embedder configured: the boot succeeds, and every use of the embedder answers an error naming the missing settings.** With no provider saved, `none` saved, or incomplete settings, `EMBEDDER_SERVICE` is an embedder whose `embed()` and `dimensions` refuse with that reason and the restart it needs, so an adapter that embeds refuses indexing and search with it. Nothing is sent to a provider until one is saved, and the API key is never logged or put in an error.
+  - **A saved change waits for a restart, and the page says so** — help under the Embedder provider field (`@objectstack/service-settings`, all locales). There is no hot replacement.
+  - **New export `documentedMaxBatchSize(model)` from `@objectstack/embedder-openai`**: the provider-documented per-request input cap for a model, read from the same known-model table `OpenAIEmbedder` batches by, or `undefined` for a model the table does not document. Read-only. `OpenAIEmbedder` is unchanged: an explicit `maxBatchSize` passed to it directly is still used as given, above the documented cap included.
+  - If your own plugin registers `EMBEDDER_SERVICE` after `kernel:ready` (in `kernel:bootstrapped` or later, or after boot), move that registration into `init()`, `start()` or `kernel:ready`: the knowledge plugin has registered one by then, and a second registration of the name is refused.
+- 91138ec: feat(service-knowledge)!: one splitter in the knowledge service (whole / recursive / markdown, aware of Chinese text), the chunk channel to adapters, and the `split` key on an object source; `KnowledgeChunk.metadata` and the Knowledge page's chunk overlap retired
+  
+  Clause-②: yes (narrowing) — widens the knowledge contract (the `split` key, `chunks`, `headingPath`, the adapter's `capabilities` and `embedding`, `IEmbedder.maxInputTokens`, the reindex `failed` / `failures`) and narrows two accept sets: `KnowledgeChunk.metadata` is refused, and `knowledge.chunk_overlap` is no longer a key of the `knowledge` settings namespace
+  Metadata-protocol: narrowed
+  Skills-docs: none in this change — `skills/objectstack-ai/SKILL.md` lists the object source's keys and does not yet name `split`, and names neither retired key; that file is a governed surface outside this change, so teaching the new key is left to its owner. `content/docs/protocol/knowledge.mdx` (new section 3.5) and `content/docs/ai/knowledge-rag.mdx` document the key, the strategies, the limits and the removals in this change.
+  
+  <!-- adr-0087: registered knowledge-chunk-metadata-retired -->
+  
+  **BREAKING** in two places, each with its fix:
+  
+  - `KnowledgeChunk.metadata` (`@objectstack/spec/ai`): FROM an optional `Record<string, unknown>` accepted and stripped TO a `retiredKey()` tombstone — `KnowledgeChunkSchema.parse()` (and a `KnowledgeDocument` whose `chunks` carry one) refuses it with the prescription, and `tsc` types the key `never`. Nothing ever wrote or read it: the knowledge service cuts the passages and sets no per-passage metadata, and no adapter consulted one. The fix: delete the key; a passage takes its document's `metadata` (`KnowledgeDocument.metadata`), which is what adapters filter on. D3 entry: `knowledge-chunk-metadata-retired`.
+  - `knowledge.chunk_overlap` (the Knowledge settings page's **Chunk overlap**): FROM a `number` key of the `knowledge` settings namespace (default 80) TO no key — the page no longer shows it, the service no longer resolves it, and a write naming it is refused `400 UNKNOWN_KEY`. Nothing ever read it and the splitter cuts without overlap, so a value set there never had an effect. A stored value is kept, never deleted. The fix: stop writing the key (a script or seed that sets it); there is nothing to replace it with. **Target chunk size** (`knowledge.chunk_target`) is the setting that now shapes passages.
+  
+  The knowledge service now cuts documents into passages itself, once, and hands the same passages to every adapter that accepts them, so one source gives the same passages on each adapter.
+  
+  New in `@objectstack/spec`, all optional:
+  
+  - `ObjectKnowledgeSource.split?`: `{ strategy: 'whole' | 'recursive' | 'markdown', maxChars?, minChars? }`. Omitted, documents are cut `recursive`. New exports `KnowledgeSplitSchema`, `KnowledgeSplitStrategySchema` and the types `KnowledgeSplit`, `KnowledgeSplitStrategy` (`@objectstack/spec/ai`).
+  - `KnowledgeDocument.chunks?`: the document's passages, set by the service. `KnowledgeChunk` gains `headingPath?` (the headings a passage sits under, outermost first); its `id` is set by the service to `documentId#index`.
+  - `IKnowledgeAdapter.capabilities?: { chunks?: boolean }`: an adapter that sets `chunks: true` receives every document with `chunks` and indexes those passages as given. An adapter that does not set it receives whole documents, without `chunks`, as before.
+  - `IKnowledgeAdapter.embedding?: { maxInputTokens? }` and `IEmbedder.maxInputTokens?`: the longest input the adapter's embedder accepts, in tokens. The service reads it each time it splits. New exported types `AdapterCapabilities`, `AdapterEmbeddingDescriptor` (`@objectstack/spec/contracts`).
+  - `KnowledgeReindexResult.failed?` and `failures?` (`[{ documentId, reason }]`, at most 20 named; `failed` counts all).
+  
+  How the service cuts (`@objectstack/service-knowledge`):
+  
+  - `recursive` cuts at blank lines, then line breaks, then sentence ends, then semicolons, then characters. `。？！` end a sentence anywhere; `. ? !` only before whitespace or the end of the text, so 「3.2 条」 and 「400.50 元」 stay whole; an end mark followed by a closing quote or bracket ends nothing. A Markdown table or list item is never cut while it fits; a table that does not fit is cut between rows, each piece repeating the header row. Adjacent pieces shorter than `minChars` (default 200) are merged.
+  - `markdown` cuts one section per heading; every passage begins with its heading path, which counts toward its length and is embedded, and carries it as `headingPath`.
+  - `whole` keeps one passage per document.
+  - A passage is at most `split.maxChars` characters, else the settings page's `knowledge.chunk_target`, else 800; and, when the adapter reports `embedding.maxInputTokens`, its `estimateTokens` is at most 80% of that limit.
+  - A `whole` document over that budget is removed from the index and reported, never truncated: `reindexSource` counts it in `failed` and names it in `failures`, the record event sync logs it at `error` (source, record id, estimate, limit), and `indexDocument` throws. With no limit known nothing is checked.
+  - `indexDocument` refuses a document that already carries `chunks` (it throws, naming the field), as it refuses `docHash`.
+  - Known limit: `docHash` does not cover the passages, so a changed `split`, `chunk_target` or embedder limit re-splits a document only when the document itself next changes. The index fingerprint (ADR-0161 K7) will rebuild a source when its split changes.
+  
+  `@objectstack/knowledge-memory` no longer splits documents itself: it declares `capabilities.chunks` and indexes the service's passages as given (a document handed to it directly without `chunks` is one passage of its whole text). Its hits are now the service's passages, with the service's `chunkId`s.
+  
+  `@objectstack/embedder-openai`: `OpenAIEmbedder.maxInputTokens` is now public (`IEmbedder.maxInputTokens`): the `maxInputTokens` option, else the model's documented limit from the known-model table, else absent.
+  
+  `@objectstack/service-settings`: the Knowledge page's **Target chunk size** (`knowledge.chunk_target`) is now read: it is the splitter's `maxChars` beneath a source's own `split.maxChars`, and it is shown for the in-memory adapter too. **Chunk overlap** (`knowledge.chunk_overlap`) is retired: nothing ever read it and the splitter cuts without overlap. The `knowledge` manifest is now `version: 2`. A stored value for it is kept, never deleted; it is no longer shown or resolved, and a write naming it is refused `400 UNKNOWN_KEY`.
+  
+  `@objectstack/service-knowledge/testing`: `runKnowledgeAdapterContract`'s `implements` gains a required `chunks: boolean` (whether the adapter sets `capabilities.chunks`), and the suite runs the chunk-channel cases for it.
+  
+  What to do:
+  
+  - An adapter package that runs `runKnowledgeAdapterContract`: add `chunks: false` to `implements` (or `chunks: true` once the adapter takes the service's passages).
+  - An adapter that wants the service's passages: set `capabilities: { chunks: true }`, index each `doc.chunks` entry as given, and report its embedder's limit as `embedding.maxInputTokens` (from `IEmbedder.maxInputTokens`), from a getter if the embedder resolves late.
+  - A caller of `indexDocument` stops setting `chunks`.
+  - A deployment that set **Chunk overlap**: nothing to do; the value had no effect and keeps having none. A script or seed that writes `knowledge.chunk_overlap` drops the key.
+  - Code or a test that builds a `KnowledgeChunk` with `metadata`: delete the key; filter on the document's `metadata`.
+  
+  The retirement kit: the `retiredKey()` tombstone on `KnowledgeChunkSchema.metadata` in `ai/knowledge-document.zod.ts`, `RETIRED_KEYS_BY_MAJOR[18]` row `ai/KnowledgeChunk:metadata`, D3 `knowledge-chunk-metadata-retired` with its step-18 rationale fragment (no D2 conversion: a chunk is a runtime contract shape, never stored in stack metadata, so `os migrate meta` has no source to rewrite — the `ActionDescriptor.isAsync` disposition), the `[RETIRED]` line in `authorable-surface/ai.json`, the regenerated `knowledge-document.mdx` reference, and the pin `ai/knowledge-document.test.ts`. The settings key follows the Localization format keys' retirement: the specifier removed from `knowledge.manifest.ts` and from the 11 translation packs, the manifest at `version: 2`, stored rows kept, and the manifest pins updated.
+- 40570d6: feat(knowledge): the libSQL vector store moves into the open framework, with generations, listing and the adapter contract suite
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  ADR-0161 Execution row 7; cloud ADR-0119 D5 (#37107).
+  
+  - **`@objectstack/knowledge-turso` now ships from this repository**, Apache-2.0 (its `LICENSE` file is the Apache-2.0 text). `KnowledgeTursoPlugin` registers a `TursoKnowledgeAdapter` (adapter id `turso`) that keeps passages and vectors in a libSQL database of its own with libSQL's native vectors: the `url` option (`file:`, `:memory:`, `libsql://`), else `knowledge.db` under the project's `.objectstack/data/` (`defaultStoreUrl`). A URL naming the platform's own database file (`objectstack.db`, `dev.db`, `standalone.db`, or the file `OS_DATABASE_URL` names) is refused: two engines writing one SQLite file lose rows. On a file the store sets WAL and a busy timeout (`busyTimeoutMs`, default 5000), and in one process every call of the store runs its database work one at a time. On a remote database (`libsql://`) each request is bounded (`requestTimeoutMs`, default 10000; a write sends one request per document): past it the call answers `SERVICE_UNAVAILABLE`, a write stopped before its commit is rolled back, and the queue moves on.
+  - **The platform embedder and splitter.** The package's own OpenAI embedding provider, hash embedder and chunker are gone: it embeds with the kernel's `embedder` service, read at each call (or the `embedder` option), reports `embedding` (model, dimensions, input limit), and declares `capabilities.chunks`, indexing the service's passages as given. Removed exports of the cloud-repo releases: `HashEmbedder`, `HashEmbeddingProvider`, `EmbeddingProvider`, `TursoAdapterOptions` and the default export; removed options: `embedding` (now `embedder`), `chunkTarget`, `overFetch`, and `adapterConfig.tableName` / `dimensions` on a source.
+  - **Generations under the index fingerprint (ADR-0161 K7; K8, item 8).** A generation table `knowledge_generation` and one passage table per source and generation, `knowledge_<source>_g<n>`. A write or a search under another fingerprint is refused `409 KNOWLEDGE_REBUILD_REQUIRED` (registered in the error-code ledger for this package). `beginBuild` under a new fingerprint opens a generation beside the active one, which keeps answering its own fingerprint; `completeBuild` switches to it, records the recipe hash and drops the old table; `indexStatus` answers the fingerprint, the recipe hash and whether a build is under way. The unique index keeps one generation under construction per source; it does not refuse a second builder: a second `beginBuild` under the same fingerprint joins the build, and one under another fingerprint replaces it, after which the first builder's writes are refused `KNOWLEDGE_REBUILD_REQUIRED`. Either way no generation mixes two fingerprints. A table of the cloud-repo releases (`knowledge_<source>` with exactly their columns) is never served: a search answers `KNOWLEDGE_REBUILD_REQUIRED`, and the table is dropped when the first complete reindex finishes.
+  - **Listing, hashes, organizations.** `listDocuments` pages the generation the writes go to, each document's `docHash` as stored; hits carry `docHash` and the passage's `headingPath`; the organization filter, the record scope (`scope`, ADR-0161 K8 item 17) and the metadata `filter` run in SQL before ranking, by an exact cosine scan (no DiskANN index, which ranks before it filters). A passage whose text is unchanged is not embedded again.
+  - **When it cannot run**, because the database cannot be opened or `@libsql/client` has no native build for the platform (Windows on ARM), the plugin still registers and boot goes on; `healthCheck` answers `ok: false` and every call answers `503 SERVICE_UNAVAILABLE`, its reason in the error's `remedy`.
+  - **Settings → Knowledge, "Test connection" on Turso** no longer says the package ships from another repository, or that a store with no URL reuses the platform's database: it names `@objectstack/knowledge-turso`, registered beside the knowledge service, and its default file.
+  - The package runs `runKnowledgeAdapterContract` with every member declared (`scope` included), on `:memory:` and on a `file:` URL, in its own unit tests.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [9abc732]
+- Updated dependencies [52a2398]
+- Updated dependencies [a73edb3]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [a98c077]
+- Updated dependencies [236c804]
+- Updated dependencies [d71fe59]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a5a5312]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6943af1]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [81eae2b]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [ec545de]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [24ff03c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [c8d4b90]
+- Updated dependencies [00aa574]
+- Updated dependencies [15e80d2]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [9c57bd2]
+- Updated dependencies [fbb62e1]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [088852b]
+- Updated dependencies [66452df]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [b3247dd]
+- Updated dependencies [372ce7c]
+- Updated dependencies [c059e60]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [bc2aaf1]
+- Updated dependencies [4e55e4e]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/types@19.0.0-next.0
+  - @objectstack/platform-objects@19.0.0-next.0
+  - @objectstack/core@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

@@ -361,9 +361,14 @@ export {
   buildProgressFromDraftReview,
   chartsFromParts,
   chartAnswerParts,
+  storedAnswerParts,
+  storedAnswerData,
+  STORED_ANSWER_DATA_PARTS,
 } from './mapMessages';
 export type {
   ChartAnswerPart,
+  StoredAnswerData,
+  StoredAnswerPart,
   DraftReview,
   ProposedPlan,
   BuilderHandoff,

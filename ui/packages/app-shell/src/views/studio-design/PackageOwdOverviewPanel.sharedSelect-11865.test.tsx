@@ -130,8 +130,10 @@ describe('the OWD overview dials are the shared Select (objectui#11865)', () => 
   });
 });
 
+// objectstack#37515 — the draft save is pinned to the load's draft read; these
+// rows loaded with no draft, so it asserts none (`If-None-Match: *`).
 const SAVED = (name: string, body: Body) =>
-  JSON.stringify([{ name, body, opts: { mode: 'draft', packageId: 'pkg.a', surface: 'studio' } }]);
+  JSON.stringify([{ name, body, opts: { mode: 'draft', packageId: 'pkg.a', surface: 'studio', ifNoneMatch: '*' } }]);
 
 /**
  * [dial, option label, the JSON text of the saves Save sent]. `null`: the

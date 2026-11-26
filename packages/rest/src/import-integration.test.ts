@@ -1534,3 +1534,78 @@ describe('GET /meta/mapping — items are raw documents, not publish envelopes (
     expectRawDocumentShape(await listMapping(rest));
   });
 });
+
+/**
+ * [#36794] The REST import door's answer for a scoped lookup cell naming a
+ * record that exists only under ANOTHER parent: `reason`
+ * `reference_out_of_scope`, with the scoping column and its cell as data on the
+ * cell error, while a value that matches no record at all keeps
+ * `reference_not_found`. A real engine and a real `dependsOn` declaration, so
+ * the scope is the one a deployment resolves, not a fake's.
+ */
+describe('import route — a scoped lookup miss whose value exists under another parent', () => {
+  const XP_PROJECT = {
+    name: 'xp_project', label: 'Project', systemFields: false,
+    fields: {
+      id: { name: 'id', type: 'text' as const, primaryKey: true },
+      name: { name: 'name', type: 'text' as const, label: 'Name' },
+    },
+  };
+  const XP_TASK = {
+    name: 'xp_task', label: 'Task', systemFields: false,
+    fields: {
+      id: { name: 'id', type: 'text' as const, primaryKey: true },
+      name: { name: 'name', type: 'text' as const, label: 'Name' },
+      project: { name: 'project', type: 'lookup' as const, label: 'Project', reference: 'xp_project', displayField: 'name' },
+    },
+  };
+  const XP_TIMESHEET = {
+    name: 'xp_timesheet', label: 'Timesheet', systemFields: false,
+    fields: {
+      id: { name: 'id', type: 'text' as const, primaryKey: true },
+      project: { name: 'project', type: 'lookup' as const, label: 'Project', reference: 'xp_project', displayField: 'name' },
+      task: {
+        name: 'task', type: 'lookup' as const, label: 'Task', reference: 'xp_task', displayField: 'name',
+        dependsOn: [{ field: 'project', param: 'project' }],
+      },
+    },
+  };
+
+  it('answers reference_out_of_scope naming Project and its cell, and keeps reference_not_found for a value nobody has', async () => {
+    const { engine, route } = await boot();
+    for (const o of [XP_PROJECT, XP_TASK, XP_TIMESHEET]) engine.registry.registerObject(o as any);
+    await engine.syncSchemas();
+    await engine.insert('xp_project', { id: 'p1', name: 'Apollo' });
+    await engine.insert('xp_project', { id: 'p2', name: 'Gemini' });
+    await engine.insert('xp_task', { id: 't1', name: 'Design review', project: 'p1' });
+
+    expect(route).toBeDefined();
+    const res = makeRes();
+    await route!.handler({
+      params: { object: 'xp_timesheet' },
+      body: {
+        format: 'json',
+        rows: [
+          { id: 's1', project: 'Apollo', task: 'Design review' },  // under its own project → resolves
+          { id: 's2', project: 'Gemini', task: 'Design review' },  // Apollo's task, row says Gemini
+          { id: 's3', project: 'Gemini', task: 'Retrospective' },  // no task has this name
+        ],
+      },
+    } as any, res);
+
+    expect(res._json).toMatchObject({ created: 1, errors: 2 });
+    const [, outOfScope, missing] = res._json.results;
+    expect(outOfScope).toMatchObject({
+      row: 2, ok: false, field: 'task', code: 'reference_out_of_scope',
+      error: 'Task: no record matches "Design review" (Project = "Gemini")',
+    });
+    expect(outOfScope.errors).toEqual([{
+      field: 'task', code: 'reference_out_of_scope',
+      message: 'Task: no record matches "Design review" (Project = "Gemini")',
+      scope: [{ field: 'project', value: 'Gemini' }],
+    }]);
+    expect(missing).toMatchObject({ row: 3, ok: false, field: 'task', code: 'reference_not_found' });
+    expect(missing.errors[0]).not.toHaveProperty('scope');
+    expect(await engine.findOne('xp_timesheet', { where: { id: 's1' } })).toMatchObject({ task: 't1' });
+  });
+});

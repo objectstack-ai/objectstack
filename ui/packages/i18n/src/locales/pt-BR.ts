@@ -198,6 +198,7 @@ const pt = {
     uploadInFlight: "Aguarde a conclusão do upload antes de salvar.",
     clearedOnHide: "O que não se aplica mais aos valores atuais foi limpo: {{fields}}",
     visibleWhenFaulted: "Não é possível enviar: não foi possível avaliar a regra visibleWhen de {{fields}}. A regra precisa ser corrigida antes que este formulário possa ser enviado.",
+    uiReadonlyWhenFaulted: "Não é possível enviar: não foi possível avaliar a regra uiReadonlyWhen de {{fields}}. A regra precisa ser corrigida antes que este formulário possa ser enviado.",
     discardTitle: "Descartar as alterações?",
     discardMessage: "Você tem alterações não salvas. Se fechar este formulário agora, suas edições serão perdidas.",
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
@@ -1151,6 +1152,7 @@ const pt = {
     addColumn: "Adicionar coluna",
     moveCard: "Mover cartão",
     noCards: "Sem cartões",
+    notLoaded: "Cartões não carregados: {{count}}",
     columnCards: "Cartões da coluna {{column}}",
     laneCards: "Cartões de {{column}} - {{lane}}",
     dropBlocked: "Um cartão em {{from}} não pode ser movido para {{to}}.",
@@ -2197,7 +2199,7 @@ const pt = {
   },
   console: {
     studio: {
-      title: "Studio",
+      title: "App Studio",
       accessRequired: "Você precisa de acesso ao Studio para abrir o Studio. Um administrador pode concedê-lo com um conjunto de permissões em Configuração → Atribuição de conjuntos de permissões.",
     },
     saveAdvisoryTitle: "Salvo — a verificação de criação gerou {{count}} recomendação(ões)",
@@ -2657,6 +2659,7 @@ const pt = {
       savedCleared: "Valor salvo limpo",
       deprecatedBadge: "Obsoleto",
       deprecatedBadgeReplacedBy: "Obsoleto → {{replacedBy}}",
+      selectValueRetired: "{{value}} (não está mais disponível)",
       unsupportedSpecifierType: "Tipo de configuração não suportado: {{type}}",
       mapAddRow: "Adicionar uma linha",
       mapRemoveRow: "Remover {{key}}",
@@ -3805,11 +3808,11 @@ const pt = {
       tooltip: "Esta plataforma está em pré-visualização — os recursos podem mudar.",
     },
     aiAssistant: "Assistente de IA",
-    designInStudio: "Projetar no Studio",
+    designInStudio: "Projetar no App Studio",
     designLayout: "Projetar layout",
     editApp: "Editar aplicativo",
-    openAppInStudio: "Ver {{app}} no Studio",
-    viewInStudio: "Ver no Studio",
+    openAppInStudio: "Ver {{app}} no App Studio",
+    viewInStudio: "Ver no App Studio",
   },
   home: {
     build: {
@@ -3951,8 +3954,8 @@ const pt = {
       backToAppHome: "Voltar ao menu do aplicativo",
       appsAvailable: "{{count}} aplicativos disponíveis",
       allApps: "Todos os aplicativos",
-      editAppInStudio: "Editar {{app}} no Studio",
-      openAppInStudio: "Ver {{app}} no Studio",
+      editAppInStudio: "Editar {{app}} no App Studio",
+      openAppInStudio: "Ver {{app}} no App Studio",
       backToHome: "Voltar à página inicial do app",
       settings: "Configurações",
       productHome: "Início do {{product}}",
