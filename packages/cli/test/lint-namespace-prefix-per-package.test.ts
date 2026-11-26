@@ -82,7 +82,7 @@ const B = {
   id: 'com.example.b', name: 'b', version: '1.0.0', type: 'module', namespace: 'beta',
   dependencies: { 'com.example.a': '^1.0.0' },
 };
-const TOP = { ...A, engines: { protocol: '^18' } };
+const TOP = { ...A, engines: { protocol: '^19' } };
 
 const obj = () => ({
   name: 'ob_order', label: 'Order', sharingModel: 'private', nameField: 'number',

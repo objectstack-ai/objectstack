@@ -120,6 +120,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { t } from '../metadata-admin/i18n';
 
 // The notice's sentence lives in `@object-ui/i18n`'s `studio` namespace, whose
@@ -193,7 +194,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
         <Route path="/apps/*" element={<output data-testid="the-app" />} />
         {/* objectstack#36899 — a menu type entry opens that type's area list; this stand-in links back to Data. */}
         <Route
