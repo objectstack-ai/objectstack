@@ -2798,7 +2798,9 @@ export class ObjectStackClient {
              * `409 METADATA_CONFLICT` and nothing is promoted. Omitted, the
              * publish replaces whatever is live, as before. It pins the live
              * row only; the draft's own pin is `draftVersion`, and the two
-             * may be sent together (the door judges the draft first).
+             * may be sent together (the door judges the draft first). An
+             * empty string pins nothing and is not sent, as for
+             * `draftVersion`.
              */
             parentVersion?: string | null;
         },

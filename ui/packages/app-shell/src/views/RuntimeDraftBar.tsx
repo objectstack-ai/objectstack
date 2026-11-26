@@ -73,6 +73,21 @@ export interface RuntimeDraftBarProps {
    * host that does not know it), the Publish after the save goes unpinned.
    */
   savedDraftVersion?: string;
+  /**
+   * objectstack#37648 — monotonic counter the host bumps when it replaced its
+   * buffer with a fresh read of the stored item (a refused save resolved with
+   * "reload" in the draft-conflict dialog), with {@link reloadedDraftVersion}
+   * and {@link reloadedHasDraft} from THAT read. The draft the bar now shows
+   * is the one that read found, so its Publish is pinned to that read's
+   * version, not to the draft the bar read before the reload (which the
+   * reload exists because it moved). ⛔ Never a re-read of the bar's own: it
+   * would pin whatever draft is pending by then, which the host never showed.
+   */
+  reloadedSignal?: number;
+  /** The draft version the host's reload read (absent: that read named none, and the Publish goes unpinned). */
+  reloadedDraftVersion?: string;
+  /** Whether the host's reload read found a pending draft. */
+  reloadedHasDraft?: boolean;
 }
 
 /**
@@ -100,6 +115,9 @@ export function RuntimeDraftBar({
   onAfterChange,
   savedSignal,
   savedDraftVersion,
+  reloadedSignal,
+  reloadedDraftVersion,
+  reloadedHasDraft,
 }: RuntimeDraftBarProps) {
   const locale = useMetadataLocale();
   const refusalTitles = useRefusalTitles();
@@ -164,6 +182,19 @@ export function RuntimeDraftBar({
       setHasDraft(true);
     }
   }, [savedSignal, savedDraftVersion]);
+
+  // objectstack#37648 — the host re-read the stored item into its buffer (a
+  // conflict resolved with "reload"): the draft shown is the one that read
+  // found, and the Publish is pinned to it. Skip the initial mount.
+  const lastReloadedSignal = useRef(reloadedSignal);
+  useEffect(() => {
+    if (reloadedSignal === lastReloadedSignal.current) return;
+    lastReloadedSignal.current = reloadedSignal;
+    if (reloadedSignal) {
+      shownDraftVersionRef.current = reloadedDraftVersion;
+      setHasDraft(reloadedHasDraft === true);
+    }
+  }, [reloadedSignal, reloadedDraftVersion, reloadedHasDraft]);
 
   const handlePublish = useCallback(async () => {
     if (!name) return;
