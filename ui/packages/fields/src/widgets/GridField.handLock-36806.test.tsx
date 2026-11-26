@@ -30,7 +30,7 @@ describe('line-item grid hand lock (uiReadonlyWhen, #36806)', () => {
   it('locks the cell where the predicate is TRUE, per row and over the header', () => {
     render(
       <GridField
-        value={[{ product: 'A', qty: 1, shipped: true }, { product: 'B', qty: 2, shipped: false }]}
+        value={[{ id: 'l1', product: 'A', qty: 1, shipped: true }, { id: 'l2', product: 'B', qty: 2, shipped: false }]}
         onChange={() => {}}
         field={field}
         contextRecord={{ status: 'draft' }}
@@ -45,13 +45,38 @@ describe('line-item grid hand lock (uiReadonlyWhen, #36806)', () => {
   it('locks every row when the header makes the predicate TRUE', () => {
     render(
       <GridField
-        value={[{ product: 'B', qty: 2, shipped: false }]}
+        value={[{ id: 'l2', product: 'B', qty: 2, shipped: false }]}
         onChange={() => {}}
         field={field}
         contextRecord={{ status: 'approved' }}
       />,
     );
     expect((screen.getAllByLabelText('Qty')[0] as HTMLInputElement).disabled).toBe(true);
+  });
+
+  // Contract delta S5: a create is not judged. A new line (no id) seeds only
+  // the grid's columns, so an operand that is not a column (`status`, a
+  // hand-locked child field) is absent and the fail-closed verdict would lock
+  // the cell on every new line.
+  it('does not judge uiReadonlyWhen on a new line, even when its operand is not a column', () => {
+    render(
+      <GridField
+        value={[{ id: 'stored', product: 'A', qty: 1 }, { product: 'B', qty: null }]}
+        onChange={() => {}}
+        field={{
+          columns: [
+            { name: 'product', label: 'Product', type: 'text' },
+            { name: 'qty', label: 'Qty', type: 'number', uiReadonlyWhen: "record.status != 'draft'" },
+          ],
+        } as any}
+        contextRecord={{}}
+      />,
+    );
+    const qty = screen.getAllByLabelText('Qty') as HTMLInputElement[];
+    // The stored line has no `status`: judged, faulted, locked (fail-closed).
+    expect(qty[0].disabled).toBe(true);
+    // The new line is not judged: editable.
+    expect(qty[1].disabled).toBe(false);
   });
 
   // REWORK S3(a): an authored column over a `uiReadonly` child field carries

@@ -847,7 +847,13 @@ function GridFieldBody({
       // row, no predicate to judge.
       const uiReadonly = (c as { uiReadonly?: boolean }).uiReadonly === true;
       if (uiReadonly) return { readonly: true, required: !!c.required };
-      const uiReadonlyWhen = (c as { uiReadonlyWhen?: FieldRulePredicate }).uiReadonlyWhen;
+      // The hand lock's predicate judges a STORED line only (objectstack#36806,
+      // S5): a create is not judged, as the create dialog does not judge it,
+      // and a new line seeds only the grid's columns, so an operand that is not
+      // a column is an absent key the fail-closed verdict would lock on.
+      const uiReadonlyWhen = rowHasId(row)
+        ? (c as { uiReadonlyWhen?: FieldRulePredicate }).uiReadonlyWhen
+        : undefined;
       if (!c.readonlyWhen && !uiReadonlyWhen && !c.requiredWhen) {
         return { readonly: false, required: !!c.required };
       }

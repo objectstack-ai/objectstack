@@ -449,6 +449,29 @@ describe('[ADR-0106 D1] references to a denied field — inside a READABLE field
         expect(served.fields.title).not.toHaveProperty('inlineAmountField');
     });
 
+    // [#36806] No server judges the hand lock, and the console fails it closed:
+    // a predicate the caller cannot be served must not silently OPEN the field.
+    it('[#36806] serves a field locked by hand (`uiReadonly: true`) when its `uiReadonlyWhen` reads the denied field', () => {
+        const served = mask({ name: 'thing', fields: fieldsWith({ uiReadonlyWhen: 'record.secret_score > 0' }) });
+        expect(served.fields.title).not.toHaveProperty('uiReadonlyWhen');
+        expect(served.fields.title.uiReadonly).toBe(true);
+    });
+
+    it('[#36806] CONTROL: a `uiReadonlyWhen` over readable fields is served as written, with no static lock added', () => {
+        const served = mask({ name: 'thing', fields: fieldsWith({ uiReadonlyWhen: "record.id != ''" }) });
+        expect(served.fields.title.uiReadonlyWhen).toBe("record.id != ''");
+        expect(served.fields.title).not.toHaveProperty('uiReadonly');
+    });
+
+    it('[#36806] CONTROL: a deleted `readonlyWhen` adds no hand lock (the server still judges it), nor does a field already `readonly`', () => {
+        const served = mask({ name: 'thing', fields: fieldsWith({ readonlyWhen: 'record.secret_score > 0' }) });
+        expect(served.fields.title).not.toHaveProperty('readonlyWhen');
+        expect(served.fields.title).not.toHaveProperty('uiReadonly');
+        const locked = mask({ name: 'thing', fields: fieldsWith({ readonly: true, uiReadonlyWhen: 'record.secret_score > 0' }) });
+        expect(locked.fields.title).not.toHaveProperty('uiReadonly');
+        expect(locked.fields.title.readonly).toBe(true);
+    });
+
     it('drops a `lookupAutofill` pair whose target is denied, and keeps a source named on the referenced object', () => {
         // #27945 — `target` is a field of THIS object; `source` names a field of
         // the lookup's `reference` object, which this projection cannot judge.

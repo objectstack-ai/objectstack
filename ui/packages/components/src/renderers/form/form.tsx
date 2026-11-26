@@ -2268,8 +2268,11 @@ ComponentRegistry.register('form',
         const visibleOn = (f as any).visibleOn;
         const uiReadonlyWhen = isCreateForm ? undefined : (f as any).uiReadonlyWhen;
         if (uiReadonlyWhen != null && visibleWhen == null && f.type !== 'section-divider') {
+          // `readonlyWhen` rides along so the verdict short-circuits exactly as
+          // on the `visibleWhen` path below: a field the server lock already
+          // holds never has its hand lock judged, so it never blocks the save.
           const handLock = resolveFieldRuleState(
-            { uiReadonlyWhen },
+            { readonlyWhen: (f as any).readonlyWhen, uiReadonlyWhen },
             ruleRecord,
             { readonly: (f as any).readonly === true },
             previousRecord,

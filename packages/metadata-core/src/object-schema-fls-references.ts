@@ -684,7 +684,9 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     visibleWhen: expression,
     readonlyWhen: expression,
     // The hand lock's predicate (#36806), CEL over this object's record as
-    // `readonlyWhen` is.
+    // `readonlyWhen` is. Deleted when it mentions a denied field, and the
+    // field is then served `uiReadonly: true` (`readableField` below): no
+    // server judges the hand lock, so a deleted predicate must not open it.
     uiReadonlyWhen: expression,
     requiredWhen: expression,
     // The deadline's settle predicate (#22227), a `visibleWhen`-family CEL over
@@ -705,7 +707,27 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     ...PROTECTION_ENVELOPE,
 };
 
-const readableField = block(FIELD_REFERENCE_POSITIONS);
+/**
+ * [#36806] A served field whose hand lock's predicate (`uiReadonlyWhen`) the
+ * caller may not evaluate — it mentions a field denied to them, so the table
+ * deletes it — is served LOCKED by hand instead (`uiReadonly: true`). Every
+ * other predicate the table deletes is still judged where it matters: the
+ * server evaluates `readonlyWhen` / `requiredWhen` on the write. Nothing
+ * judges the hand lock but the console, and the console fails it CLOSED, so
+ * deleting the predicate outright would silently OPEN the field for exactly the
+ * caller who cannot see why it is locked. A field already `readonly: true` is
+ * locked harder and gains nothing (the spec refuses the pair).
+ */
+const readableFieldTable = block(FIELD_REFERENCE_POSITIONS);
+const readableField: Scrub = (value, denied, scope) => {
+    const out = readableFieldTable(value, denied, scope);
+    if (out === value || !out || typeof out !== 'object' || Array.isArray(out)) return out;
+    const before = value as Record<string, unknown>;
+    const after = out as Record<string, unknown>;
+    const lockDeleted = before.uiReadonlyWhen != null && !('uiReadonlyWhen' in after);
+    if (!lockDeleted || after.readonly === true || after.uiReadonly === true) return out;
+    return { ...after, uiReadonly: true };
+};
 
 // ── Object level ──────────────────────────────────────────────────────────────
 

@@ -100,6 +100,18 @@ describe('objectstack#36806 — a faulted uiReadonlyWhen refuses an edit form\'s
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  // Contract delta N6: the same verdict on both evaluation paths — a field the
+  // server lock already holds never has its hand lock judged.
+  it('CONTROL — a field readonlyWhen already locks submits, with or without a visibleWhen', async () => {
+    for (const extra of [{}, { visibleWhen: 'true' }]) {
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      const view = renderForm(base({ ...extra, readonlyWhen: "record.stage == 'open'", uiReadonlyWhen: BROKEN }), onSubmit, EDIT);
+      submit();
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      view.unmount();
+    }
+  });
+
   it('CONTROL — a uiReadonlyWhen that evaluates submits', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     renderForm(base({ uiReadonlyWhen: "record.stage == 'won'" }), onSubmit, EDIT);

@@ -4540,8 +4540,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // faulted `No such key`: open for `readonlyWhen` (the server drops
           // the write), locked for the hand lock (nothing behind it judges
           // one). Through `addSpeculative`, like every binding here: an
-          // operand the viewer may not read is never requested, and that
-          // field then stays locked by hand.
+          // operand the viewer may not read is never requested — and that
+          // viewer is never served the predicate either: the definition's FLS
+          // scrub (`@objectstack/metadata-core`) deletes it and serves the
+          // field `uiReadonly: true` in its place, so it stays locked by hand.
           const lockDefs = objectDef?.fields as Record<string, { readonlyWhen?: unknown; uiReadonlyWhen?: unknown } | undefined> | undefined;
           const editedInPlace = [
             ...cols,
