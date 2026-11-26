@@ -81,6 +81,56 @@ export function studioBackTarget({
   return { path: `/apps/${segment}`, appLabel: labelOf(first) };
 }
 
+/**
+ * The way back as one control (objectstack#37456; ADR-0084, amended
+ * 2026-11-26, `#amendment-2026-11-26-frame`): the first control of the top
+ * left's package row, and of the collapsed rail. It leads where
+ * {@link studioBackTarget} says, the same place {@link StudioBackToApp} goes;
+ * the name beside it is the package switcher's, so the button carries the
+ * name only in its accessible name and tooltip.
+ */
+export function StudioBackButton({
+  packageId,
+  apps,
+  locale,
+  beforeNavigate,
+  navigate,
+  className,
+}: {
+  packageId: string | null;
+  apps: readonly StudioAppTarget[];
+  locale: string;
+  beforeNavigate: () => boolean;
+  navigate: (path: string) => void;
+  className?: string;
+}): React.ReactElement {
+  const [remembered] = React.useState(readAppReturnPage);
+  const homePath = useHomePath();
+  const target = studioBackTarget({ remembered, packageId, apps, locale, landingPath: homePath });
+  const title = target.appLabel
+    ? tFormat('engine.studio.backToAppTitle', locale, { app: target.appLabel })
+    : t('engine.studio.backToAppTitleNoApp', locale);
+  return (
+    <button
+      type="button"
+      data-testid="studio-package-back"
+      data-target={target.path}
+      onClick={() => {
+        if (!beforeNavigate()) return;
+        navigate(target.path);
+      }}
+      aria-label={title}
+      title={title}
+      className={
+        className ??
+        'inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring'
+      }
+    >
+      <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+    </button>
+  );
+}
+
 export function StudioBackToApp({
   packageId,
   packageLabel,

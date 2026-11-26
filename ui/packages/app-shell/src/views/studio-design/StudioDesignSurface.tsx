@@ -125,7 +125,7 @@ import {
   studioOrgScopePath,
 } from './studioScope.js';
 import { STUDIO_METADATA_AREA, isStudioAllPackagesScope, settledAreaAddress } from './metadataArea.js';
-import { StudioMenu, StudioMenuDataProvider, StudioMenuProvider, StudioMenuTrigger } from './StudioMenu.js';
+import { StudioMenu, StudioMenuDataProvider, StudioMenuProvider } from './StudioMenu.js';
 import { StudioMetadataArea } from './StudioMetadataArea.js';
 import { StudioOwdOverviewPage } from './StudioOwdOverviewPage.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
@@ -167,7 +167,9 @@ import {
   type DraftPublishOptions,
 } from '../../preview/DraftChangesPanel.js';
 import { toast } from 'sonner';
-import { STUDIO_OWD_SECTION, studioItemPath, studioMetadataTypePath, studioPillarPath } from './studioAddress.js';
+import { STUDIO_OWD_SECTION, studioItemPath, studioMetadataTypePath, studioPackagePath, studioPillarPath } from './studioAddress.js';
+import { StudioTopLeft } from './StudioTopLeft.js';
+import { StudioTitleRowFallback } from './StudioTitleRowFallback.js';
 
 /** The batch door's `backfillApplied` receipt, by reference to what the client returns (objectui#12929). */
 type PublishBackfillReceipt = NonNullable<
@@ -1368,7 +1370,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 and Publish stay at the right end; objectstack#37455 — Cancel
                 and Save moved to the page's item header. */}
             <div className={cn('flex min-w-0 items-center gap-1', STUDIO_HEADER_PACKAGE_COLUMN)}>
-              {showMenu && <StudioMenuTrigger locale={locale} />}
+              {/* objectstack#37456 — the menu's show / hide control moved to Studio's row (`StudioTopLeft`). */}
               {/* objectstack#36501 — 「‹ Back to app」, the app's name and the
                   Studio mark: Studio's one way out. objectstack#36899
                   (decision 5) — it names the CURRENT package's app; with none,
@@ -1529,7 +1531,29 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
           {/* objectstack#36899 — the left menu and the page beside it. The
               menu docks in this row, below the header (a drawer under 768 px). */}
           <div className="relative flex min-h-0 flex-1 overflow-hidden">
-          {showMenu && <StudioMenu segment={scopeSegment} locale={locale} onReenterPillar={reenterPillar} />}
+          {showMenu && (
+            <StudioMenu
+              segment={scopeSegment}
+              locale={locale}
+              onReenterPillar={reenterPillar}
+              // objectstack#37456 — the top left's two rows: Studio's, then the
+              // way back and the package switcher (`StudioTopLeft.tsx`).
+              head={
+                <StudioTopLeft
+                  packageId={packageId}
+                  scope={allScope ? 'all' : packageId === null ? 'org' : undefined}
+                  openEntry={pkgEntry}
+                  readOnly={readOnly}
+                  canCreate={canAuthorPackage}
+                  apps={publishedApps}
+                  locale={locale}
+                  beforeNavigate={confirmLeavePillar}
+                  navigate={shellNavigate}
+                  packagePath={studioPackagePath}
+                />
+              }
+            />
+          )}
           <div
             className={cn('min-h-0 min-w-0 flex-1', STUDIO_PILLARS_HOST)}
             data-testid="studio-pillars-host"
@@ -1627,6 +1651,8 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
             )}
             </StudioPendingDraftsContext.Provider>
           </div>
+          {/* objectstack#37456 — the page controls of a page with no title row. */}
+          <StudioTitleRowFallback />
           </div>
         </div>
 

@@ -3572,6 +3572,14 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.backToAppTitle': 'Leave Studio and go back to {app}',
   'engine.studio.backToAppTitleNoApp': 'Leave Studio and go back to your apps',
   'engine.studio.mark': 'Studio',
+  // objectstack#37456 — the top left's two rows (ADR-0084, amended 2026-11-26):
+  // Studio's row (its mark and name, and the collapse control), then the
+  // package row (the way back, then the package switcher).
+  'engine.studio.brand': 'App Studio',
+  'engine.studio.pkg.switcher': 'Switch package',
+  'engine.studio.pkg.search': 'Search packages',
+  'engine.studio.pkg.noMatches': 'No package matches',
+  'engine.studio.pkg.newPackage': 'New package',
   // objectstack#37139 — the 「⋯」 package menu beside the app or package name:
   // the development face's whole-package actions, for a manage_metadata holder.
   'engine.studio.packageMenu.trigger': 'Package actions',

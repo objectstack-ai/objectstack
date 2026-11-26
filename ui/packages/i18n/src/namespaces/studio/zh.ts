@@ -3154,6 +3154,14 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.backToAppTitle': '离开 Studio，回到 {app}',
   'engine.studio.backToAppTitleNoApp': '离开 Studio，回到你的应用',
   'engine.studio.mark': 'Studio',
+  // objectstack#37456 — the top left's two rows (ADR-0084, amended 2026-11-26):
+  // Studio's row (its mark and name, and the collapse control), then the
+  // package row (the way back, then the package switcher).
+  'engine.studio.brand': '应用搭建',
+  'engine.studio.pkg.switcher': '切换软件包',
+  'engine.studio.pkg.search': '搜索软件包',
+  'engine.studio.pkg.noMatches': '没有匹配的软件包',
+  'engine.studio.pkg.newPackage': '新建软件包',
   // objectstack#37139 — 应用名或包名右侧的「⋯」软件包菜单。
   'engine.studio.packageMenu.trigger': '软件包操作',
   'engine.studio.packageMenu.editInfo': '编辑软件包信息',
