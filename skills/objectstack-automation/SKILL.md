@@ -324,8 +324,8 @@ Most are caught by `objectstack build`:
    The request says "Lost"; the row stores `lost`.
    A start or edge `condition: "record.status == 'Lost'"`, or `filter` /
    `fields: { status: 'Lost' }`, is refused at publish (inline options), else
-   matches no row or fails the run (`invalid_option`); a filter meant to find
-   the label takes a CEL envelope operand. Read the field's `options`.
+   matches no row or fails the run (`invalid_option`); a filter for rows still
+   holding the label takes a CEL envelope operand. Read the field's `options`.
 
 ---
 

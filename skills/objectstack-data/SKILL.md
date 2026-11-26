@@ -31,8 +31,8 @@ metadata:
 
 ## Quick Reference — Detailed Rules
 
-- **[Naming Conventions](./rules/naming.md)** — snake_case rules, option values, config properties
-- **[Field Types](./rules/field-types.md)** — All field types and configs
+- **[Naming Conventions](./rules/naming.md)**
+- **[Field Types](./rules/field-types.md)**
 - **[Relationships](./rules/relationships.md)** — lookup vs master_detail, junction patterns, delete behaviors
 - **[Validation Rules](./rules/validation.md)** — All validation types, script inversion, severity levels
 - **[Index Strategy](./rules/indexing.md)** — btree/gin/gist/fulltext, composite indexes
@@ -384,9 +384,10 @@ field in a `.custom` extension, is refused at save, publish and install and by
 `os validate` / `os build`.
 Only the pair's extension also writes `fieldGroups`, `relatedLists` and `actionLayout`
 (**objectstack-ui**), shaped as on an object. A written key replaces that arrangement
-whole (the owner's and every `place`): an unlisted field shows after the last group,
-an unnamed tab after the listed ones, and `{ list: 'crm_note', hidden: true }` hides
-a tab. Outside a `.custom` package they are refused at those doors: use `place`.
+whole (the owner's and every `place`; `actionLayout`, each arm it writes): an unlisted
+field shows after the last group, an unnamed tab after the listed ones, and
+`{ list: 'crm_note', hidden: true }` hides a tab. Outside a `.custom` package they are
+refused at those doors: use `place`, or for an action its own `locations` and `order`.
 Studio's **Add field** on a base object writes the same extension, as an
 `object_extension` item of the pair.
 
