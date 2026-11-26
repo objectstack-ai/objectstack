@@ -13,7 +13,7 @@
  * load, so it imports no chat code (objectui#13410).
  */
 import * as React from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { NavigationType, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { useIsMobile } from '@object-ui/components';
 import { useAssistant } from '../assistant/assistantBus.js';
 import { useChatDockState, ChatDockPanel, ChatDockMobileSheet } from './ChatDock.js';
@@ -119,7 +119,7 @@ export function useConsoleChatDock({
     }
   }, []);
 
-  const { expand, toggle, fullWindow, setFullWindow, expanded } = dock;
+  const { expand, collapse, toggle, fullWindow, setFullWindow, expanded } = dock;
   const open = React.useCallback(
     (next?: ChatDockTarget | null, nextHandoff?: BuilderHandoffState) => {
       if (next === null) setTarget(undefined);
@@ -153,6 +153,23 @@ export function useConsoleChatDock({
     lastPageRef.current = page;
     if (fullWindow) setFullWindow(false);
   }, [page, fullWindow, setFullWindow]);
+
+  // objectstack#37556 — on a phone the drawer is a sheet over the page, so a
+  // page the chat opens (a citation chip's cited section, a record, a list)
+  // stays hidden under it. A navigation that leaves the page, or a PUSH onto
+  // the same page (clicking the same chip again opens its section again),
+  // closes the sheet; the conversation is kept, so reopening shows it. A
+  // REPLACE that keeps the page (the handoff hand-over above) leaves it open.
+  // The desktop rail sits beside the page and stays as it is.
+  const navigationType = useNavigationType();
+  const lastNavRef = React.useRef({ key: location.key, page });
+  React.useEffect(() => {
+    const last = lastNavRef.current;
+    if (last.key === location.key) return;
+    lastNavRef.current = { key: location.key, page };
+    if (!isMobile || !expanded) return;
+    if (last.page !== page || navigationType === NavigationType.Push) collapse();
+  }, [location.key, page, navigationType, isMobile, expanded, collapse]);
 
   // A designer surface can ask the assistant to open through the assistant bus
   // (e.g. an "Ask AI" button).
