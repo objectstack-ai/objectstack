@@ -1781,7 +1781,9 @@ const COLOR_NAME_HEX: Record<string, string> = {
  */
 export function getSemanticHex(name?: string, fallback: string = '#3b82f6'): string {
   if (!name) return fallback;
-  return COLOR_NAME_HEX[name] ?? fallback;
+  // Own keys only: a name spelled like an inherited key (`constructor`,
+  // `toString`) is no palette family and takes the fallback, never a function.
+  return Object.prototype.hasOwnProperty.call(COLOR_NAME_HEX, name) ? COLOR_NAME_HEX[name] : fallback;
 }
 
 /**

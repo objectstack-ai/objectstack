@@ -223,6 +223,16 @@ describe('objectui#7243 — calendar colorField ladder', () => {
     expect(resolveEventColor('open').inlineColor).toBeUndefined();
   });
 
+  // objectstack#36882 S5: rung 2 hands on rgb() / hsl() as well as hex, and
+  // the event paints each of them, as the colorField describe says.
+  it('an rgb() or hsl() literal reaches the DOM as a real colour, as hex does', async () => {
+    const rows = [{ ...ROWS[0], category: 'rgb(12, 34, 56)' }];
+    expect(await colorsFor('category', rows)).toEqual(['rgb(12, 34, 56)']);
+    for (const literal of ['rgb(12, 34, 56)', 'rgba(12, 34, 56, 0.5)', 'hsl(210 40% 50%)', 'hsla(210, 40%, 50%, 0.5)']) {
+      expect(resolveEventColor(literal)).toEqual({ className: 'text-white', inlineColor: literal });
+    }
+  });
+
   it('no last rung: a value no option colours hands on nothing, so the event takes the default colour', async () => {
     expect(await colorsFor('category')).toEqual([undefined]);
     expect(resolveEventColor(undefined)).toEqual({ className: 'bg-blue-100 text-blue-900 border border-blue-200' });

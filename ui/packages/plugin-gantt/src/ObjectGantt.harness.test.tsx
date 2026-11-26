@@ -1711,6 +1711,29 @@ describe('ObjectGantt.colorFieldLadder-7243', () => {
       const tasks = await tasksFor({ borderColorField: 'status' });
       expect(tasks[0].borderColor).toBe('#7c3aed');
     });
+
+    it('borderColorField, a declared palette family: the stroke paints that family palette hex, as the bar fills', async () => {
+      // objectstack#36882 S4: `color: 'blue'` on an option strokes #3b82f6,
+      // never the CSS named colour `blue` (#0000ff).
+      const familySchema = {
+        ...OBJECT_SCHEMA,
+        fields: {
+          ...OBJECT_SCHEMA.fields,
+          status: {
+            name: 'status',
+            type: 'select',
+            options: [
+              { value: 'open', label: 'Open', color: 'blue' },
+              { value: 'done', label: 'Done', color: 'green' },
+            ],
+          },
+        },
+      };
+      const rows = [ROWS[0], { ...ROWS[0], id: '2', status: 'done' }];
+      const tasks = await tasksFor({ colorField: 'status', borderColorField: 'status' }, rows, familySchema);
+      expect(tasks.map((t) => t.borderColor)).toEqual(['#3b82f6', '#22c55e']);
+      expect(tasks.map((t) => t.borderColor)).toEqual(tasks.map((t) => t.color));
+    });
   });
 });
 

@@ -1537,18 +1537,22 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
       const color = declaredColor ? getSemanticHex(declaredColor, declaredColor) : undefined;
       // Alert stroke: the option colour first (same rung 1 as the bar — an
       // authored option colour is an authored option colour whichever slot it
-      // paints), then today's behaviour: semantic palette names map to their
-      // hex, anything else (hex, css color) passes through untouched.
+      // paints), then the value itself, which `borderColorField`'s contract
+      // makes the stroke colour ("any CSS color or semantic palette name",
+      // typically a server-computed alert field). Either way a palette family
+      // name paints its palette hex — `color: 'blue'` on an option strokes
+      // #3b82f6, as the bar fills, never the CSS named colour #0000ff — and
+      // anything else (hex, css color) passes through untouched.
       //
       // Deliberately NO rung 3 here. The stroke is opt-in and exceptional —
       // deriving one for every record would draw an alert on records that have
       // none, which is a repaint, not a fix.
       const borderColorRaw = borderColorField ? record[borderColorField] : undefined;
-      const borderColor =
+      const strokeColor =
         borderColorRaw != null && borderColorRaw !== ''
-          ? resolveBorderColorFieldValue(borderColorRaw)
-            ?? getSemanticHex(String(borderColorRaw), String(borderColorRaw))
+          ? resolveBorderColorFieldValue(borderColorRaw) ?? String(borderColorRaw)
           : undefined;
+      const borderColor = strokeColor ? getSemanticHex(strokeColor, strokeColor) : undefined;
 
       return {
         id: record.id || record._id || `task-${index}`,

@@ -46,13 +46,17 @@ const FAMILY_EVENT_COLORS: Readonly<Record<string, string>> = {
   pink: "bg-pink-100 text-pink-900 border border-pink-200",
 }
 
-// Hex colors (#abc, #aabbcc) are treated as direct values via inline style.
+// Colour literals painted as direct values via inline style: hex (#abc,
+// #aabbcc, #aabbccdd) and the rgb() / hsl() functions (with their `a` forms),
+// the literals `colorField`'s ladder hands on (objectstack#36882, S5).
 const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i
+const COLOR_FUNCTION_RE = /^(rgb|hsl)a?\(.*\)$/i
 
 /**
  * Resolve a raw `event.color` value into a Tailwind class string.
  *
- * - `#aabbcc` and `#abc` are returned as-is (rendered via inline style).
+ * - `#aabbcc`, `#abc`, `rgb(…)` and `hsl(…)` are returned as-is (rendered via
+ *   inline style).
  * - Strings that already look like Tailwind utilities (e.g. `bg-blue-500
  *   text-white`) pass through unchanged.
  * - A palette family name (`green`, `red`, …) — the colour an author declares
@@ -65,7 +69,7 @@ const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i
  */
 function resolveEventColor(raw: string | undefined | null): { className: string; inlineColor?: string } {
   if (!raw) return { className: DEFAULT_EVENT_COLOR }
-  if (HEX_COLOR_RE.test(raw)) return { className: "text-white", inlineColor: raw }
+  if (HEX_COLOR_RE.test(raw) || COLOR_FUNCTION_RE.test(raw)) return { className: "text-white", inlineColor: raw }
   if (isTailwindColorToken(raw)) return { className: raw }
   const family = Object.prototype.hasOwnProperty.call(FAMILY_EVENT_COLORS, raw)
     ? FAMILY_EVENT_COLORS[raw]
