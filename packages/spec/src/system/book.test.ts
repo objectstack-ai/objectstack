@@ -472,14 +472,25 @@ describe('resolveDocAudiences — union over claiming books (§6.7)', () => {
     const setupBook: Book & { packageId?: string } = {
       name: 'setup_manual',
       audience: { systemPermission: 'setup.access' },
-      groups: [{ key: 'all', label: 'All', include: '*' }],
+      groups: [{ key: 'all', label: 'All', include: 'setup_*' }],
       packageId: 'com.objectstack.setup',
     };
-    const docs: ResolverDoc[] = [...corpus, { name: 'setup_overview', packageId: 'com.objectstack.setup' }];
+    const docs: ResolverDoc[] = [
+      ...corpus,
+      { name: 'setup_overview', packageId: 'com.objectstack.setup' },
+      // A stored doc bound to no package: in EVERY package scope (see the
+      // "no stamped packageId" pin above), so only the name glob keeps it out.
+      { name: 'loose_note' },
+    ];
     const audiences = resolveDocAudiences([publicBook, adminBook, setupBook], docs);
     expect(audiences.get('setup_overview')).toEqual([{ systemPermission: 'setup.access' }]);
-    // `include: '*'` reaches only the book's own package.
+    // Another package's doc is outside the book's package scope …
     expect(audiences.get('crm_unclaimed')).toEqual(['org']);
+    // … and an unstamped doc outside its namespace keeps the org fallback.
+    expect(audiences.get('loose_note')).toEqual(['org']);
+    // Control: a catch-all `'*'` in the same scope WOULD claim the unstamped doc.
+    const catchAll = { ...setupBook, groups: [{ key: 'all', label: 'All', include: '*' }] };
+    expect(resolveDocAudiences([catchAll], docs).get('loose_note')).toEqual([{ systemPermission: 'setup.access' }]);
     const holder = { authenticated: true, systemPermissions: ['setup.access'] };
     const member = { authenticated: true, permissionSets: ['member_default'], systemPermissions: [] };
     expect(docAudienceAllows(audiences.get('setup_overview'), holder)).toBe(true);

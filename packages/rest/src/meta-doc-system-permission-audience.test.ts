@@ -34,7 +34,15 @@ const SETUP_MANUAL = {
     label: 'Setup',
     audience: { systemPermission: 'setup.access' },
     _packageId: 'com.objectstack.setup',
-    groups: [{ key: 'all', label: 'Documentation', include: '*' }],
+    // The namespace, as the shipped manual does — not '*' (see the unstamped-doc pins).
+    groups: [{ key: 'all', label: 'Documentation', include: 'setup_*' }],
+};
+const STUDIO_MANUAL = {
+    name: 'studio_manual',
+    label: 'Studio',
+    audience: { systemPermission: 'studio.access' },
+    _packageId: 'com.objectstack.studio',
+    groups: [{ key: 'all', label: 'Documentation', include: 'studio_*' }],
 };
 const HELP_CENTER = {
     name: 'help_center',
@@ -74,10 +82,11 @@ interface SetupOpts {
     /** No resolved session at all. */
     anonymous?: boolean;
     books?: any[];
+    docs?: any[];
 }
 
 function setup(opts: SetupOpts = {}) {
-    const byType: Record<string, any[]> = { book: opts.books ?? [SETUP_MANUAL, HELP_CENTER], doc: DOCS };
+    const byType: Record<string, any[]> = { book: opts.books ?? [SETUP_MANUAL, HELP_CENTER], doc: opts.docs ?? DOCS };
     const protocol: any = {
         getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' } }),
         getMetaTypes: vi.fn().mockResolvedValue([]),
@@ -205,5 +214,32 @@ describe('fail closed, and no wider than it needs', () => {
     it('control: with no gated book anywhere, every authenticated caller reads every doc (the fast path)', async () => {
         const { rest } = setup({ systemPermissions: [], books: [HELP_CENTER] });
         expect(listed((await listDocs(rest)).body)).toEqual(['crm_intro', 'setup_overview']);
+    });
+});
+
+describe('a stored doc bound to no package keeps the org fallback beside both manuals', () => {
+    // A stored doc row bound to no package is served with no `_packageId`, and
+    // a package scope drops only a doc stamped with ANOTHER package — so an
+    // unstamped doc is in every scope. The manuals claim by namespace; this
+    // pins that such a doc, claimed by no other book, stays readable by a member.
+    const LOOSE = { name: 'loose_note', label: 'Loose note', content: 'Unbound page.' };
+    const docs = [...DOCS, LOOSE];
+    const books = [SETUP_MANUAL, STUDIO_MANUAL, HELP_CENTER];
+    const member = () => setup({ systemPermissions: ['api.read'], books, docs });
+
+    it('the member lists it, with and without content, and reads it', async () => {
+        expect(listed((await listDocs(member().rest)).body)).toEqual(['crm_intro', 'loose_note']);
+        const withContent = await listDocs(member().rest, { include: 'content' });
+        expect(JSON.stringify(withContent.body)).toContain('Unbound page.');
+        expect(JSON.stringify(withContent.body)).not.toContain(SETUP_BODY);
+        const single = await readDoc(member().rest, 'loose_note');
+        expect(single.statusCode).toBe(200);
+    });
+
+    it('control: a catch-all manual would claim it and shut the member out', async () => {
+        const catchAll = { ...SETUP_MANUAL, groups: [{ key: 'all', label: 'Documentation', include: '*' }] };
+        const rest = setup({ systemPermissions: ['api.read'], books: [catchAll, HELP_CENTER], docs }).rest;
+        expect(listed((await listDocs(rest)).body)).toEqual(['crm_intro']);
+        expect(envelope(await readDoc(rest, 'loose_note'))).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
     });
 });

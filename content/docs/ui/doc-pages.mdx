@@ -254,6 +254,11 @@ manual of an app gated on a capability several sets grant: naming one of those s
 shut out the holders of every other one. A caller whose holdings cannot be resolved is
 denied — the gate fails closed.
 
+Claim a gated book's pages by name (a namespace glob such as `include: 'crm_runbook_*'`, or
+pinned `pages`), not with `include: '*'`. A package scope leaves out only a doc stamped with
+*another* package, so a stored doc bound to no package is in every scope: a catch-all gated
+book would claim it as well and take it away from every reader outside the audience.
+
 <Callout type="info">
 The gate is a **capability** reference, never a distribution one: packages own permission
 sets but never positions, so a package gating its own Admin Guide keeps provenance and

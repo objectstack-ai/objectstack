@@ -349,6 +349,33 @@ describe('a manual gated on a capability: found and read by its holders only', (
         const envelope = { ...(await oauthEnvelope('u1', ['data:read'])), systemPermissions: ['crm.read_rules'] };
         expect(await reach(await bridgeFor(envelope, items))).toEqual(CLOSED);
     });
+
+    // A stored doc bound to no package carries no `_packageId`, and so is in
+    // every package scope: a manual claiming by namespace leaves it alone, a
+    // catch-all would gate it on the manual's capability.
+    const LOOSE = { name: 'loose_payment_note', label: '回款备注', content: '# 回款备注\n\n回款登记后核对。\n' };
+    const SETUP_MANUAL = (include: string) => ({
+        name: 'setup_manual',
+        slug: 'setup',
+        label: 'Setup',
+        audience: { systemPermission: 'setup.access' },
+        _packageId: 'com.objectstack.setup',
+        groups: [{ key: 'all', label: 'Documentation', include }],
+    });
+    const looseReach = async (include: string) => {
+        const bridge = await bridgeFor(member(['api.read']), { doc: [...DOCS, LOOSE], book: [...BOOKS, SETUP_MANUAL(include)] });
+        const found = (await bridge.searchPackageDocs({ terms: ['回款'] }, MAX)).results.map((r: any) => r.name);
+        const reads = await bridge.readPackageDoc({ name: 'loose_payment_note' }).then(() => true, () => false);
+        return { found: found.includes('loose_payment_note'), reads };
+    };
+
+    it('an unstamped doc no other manual claims stays found and read by a member beside a namespaced manual', async () => {
+        expect(await looseReach('setup_*')).toEqual({ found: true, reads: true });
+    });
+
+    it('control: a catch-all manual would claim that doc and shut the member out', async () => {
+        expect(await looseReach('*')).toEqual({ found: false, reads: false });
+    });
 });
 
 describe('[#35442] search and read details', () => {

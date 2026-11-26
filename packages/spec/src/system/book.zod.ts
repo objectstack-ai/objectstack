@@ -132,7 +132,9 @@ export type BookGroup = {
  *  - `{ permissionSet }` — the reader holds that ONE named set;
  *  - `{ systemPermission }` — the reader holds that capability (a
  *    `systemPermissions` token, ADR-0066 D1) through ANY set, the same answer
- *    an app's `requiredPermissions: [token]` gets. This is the form for a
+ *    an app's `requiredPermissions: [token]` gets in a session (on a delegated
+ *    OAuth grant the delegating person's own capabilities decide, whatever the
+ *    token carries — ADR-0090 D10). This is the form for a
  *    manual that belongs to an app gated on a capability several sets grant
  *    (Setup's `setup.access`): a set name would shut out every other holder.
  */
@@ -484,8 +486,10 @@ export interface AudienceCaller {
   /**
    * The capabilities the caller effectively holds — the `systemPermissions`
    * list the `/meta` read gate's `requiredPermissions` arms read, so a
-   * `{ systemPermission }` book opens exactly for whoever can open an app
-   * gated on that token. Absent/undefined means "unknown" and
+   * `{ systemPermission }` book opens, in a session, exactly for whoever can
+   * open an app gated on that token. A transport acting for someone else (the
+   * MCP door on a delegated OAuth grant) fills it with THAT person's
+   * capabilities, not the token's. Absent/undefined means "unknown" and
    * `{ systemPermission }` audiences DENY (fail closed, ADR-0049).
    */
   systemPermissions?: readonly string[];
