@@ -195,8 +195,13 @@ describe('Studio: a package id no package has renders "package not found" (objec
 
     const notFound = await screen.findByTestId('studio-package-not-found');
     expect(notFound).toHaveTextContent(tFormat('engine.studio.notFound.package', 'en', { id: PHANTOM }));
-    // objectstack#37456 — no top bar, and no left column (its rows live in the menu).
+    // objectstack#37456 — no top bar, and no left column (its rows live in the menu)…
     expect(screen.queryByTestId('studio-shell-header')).toBeNull();
+    // …but the way back the bar drew stays, on a strip of its own, to the apps home.
+    const strip = screen.getByTestId('studio-missing-package-strip');
+    const back = within(strip).getByTestId('studio-package-back');
+    expect(back).toHaveAccessibleName(t('engine.studio.backToAppTitleNoApp', 'en'));
+    expect(back).toHaveAttribute('data-target', '/home');
     expect(screen.queryByTestId('studio-menu')).toBeNull();
     expect(screen.queryByTestId('studio-menu-toggle')).toBeNull();
     expect(screen.queryByTestId('studio-mobile-strip')).toBeNull();

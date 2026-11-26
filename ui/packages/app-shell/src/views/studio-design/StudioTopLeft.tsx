@@ -188,3 +188,29 @@ export function StudioMobileStrip({ locale }: { locale: string }): React.ReactEl
     </div>
   );
 }
+
+/**
+ * A package id no package has draws no left column (there is nothing to list
+ * or switch to), so its way back needs a place of its own: a strip at the top
+ * of the page with the way back and Studio's name, where the top bar's
+ * 「‹ Back to app」 was drawn before objectstack#37456. Drawn at every width.
+ */
+export function StudioMissingPackageStrip({
+  locale,
+  apps,
+  beforeNavigate,
+  navigate,
+}: {
+  locale: string;
+  apps: readonly StudioAppTarget[];
+  beforeNavigate: () => boolean;
+  navigate: (path: string) => void;
+}): React.ReactElement {
+  return (
+    <div className="flex h-11 shrink-0 items-center gap-2 border-b px-2" data-testid="studio-missing-package-strip">
+      <StudioBackButton packageId={null} apps={apps} locale={locale} beforeNavigate={beforeNavigate} navigate={navigate} />
+      <StudioBrandMark />
+      <span className="min-w-0 flex-1 truncate text-sm font-semibold">{t('engine.studio.mark', locale)}</span>
+    </div>
+  );
+}

@@ -163,7 +163,7 @@ import {
   studioPillarPath,
 } from './studioAddress.js';
 import { studioPackageOverviewPath } from './studioOverviewAddress.js';
-import { StudioMobileStrip, StudioTopLeft } from './StudioTopLeft.js';
+import { StudioMissingPackageStrip, StudioMobileStrip, StudioTopLeft } from './StudioTopLeft.js';
 import { StudioTitleRowFallback } from './StudioTitleRowFallback.js';
 
 /** The batch door's `backfillApplied` receipt, by reference to what the client returns (objectui#12929). */
@@ -1264,6 +1264,15 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               of the page's title row (objectstack#37455). Under 768 px the
               menu is a drawer, opened from the strip below. */}
           {showMenu && <StudioMobileStrip locale={locale} />}
+          {/* …and a package that is not there, with no column, keeps its way back here. */}
+          {pkgMissing && (
+            <StudioMissingPackageStrip
+              locale={locale}
+              apps={publishedApps}
+              beforeNavigate={confirmLeavePillar}
+              navigate={shellNavigate}
+            />
+          )}
 
           {retiredLanding && (
             <StudioInterfacesRetiredNotice
