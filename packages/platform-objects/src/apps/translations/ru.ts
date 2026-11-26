@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { ruObjects } from './ru.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * Русский (ru) — Setup App Translations
  */
 export const ru: TranslationData = {
   objects: ruObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('ru'),
   apps: {
     account: {
       label: 'Учётная запись',

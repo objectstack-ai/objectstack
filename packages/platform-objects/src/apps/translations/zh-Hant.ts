@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { zhHantObjects } from './zh-Hant.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * 繁體中文 (zh-Hant) — Setup App Translations
  */
 export const zhHant: TranslationData = {
   objects: zhHantObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('zh-Hant'),
   apps: {
     account: {
       label: '帳戶',
