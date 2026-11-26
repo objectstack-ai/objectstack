@@ -18,6 +18,9 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server.js';
+// Paid at collection, not inside a clocked case: the routes reached through
+// RestServer load it lazily (check:test-source-alias).
+import '@objectstack/objectql';
 
 /** The served shape `getMetaTypes()` derives for a `dashboard` entry, trimmed to the header. */
 const DASHBOARD_SCHEMA = () => ({
