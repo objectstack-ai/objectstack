@@ -568,12 +568,12 @@ export interface RegisterObjectToolsOptions {
    */
   grantedScopes?: readonly string[];
   /**
-   * [#37666] Where a tool's 5xx fault line goes (`logServerFault`,
-   * `@objectstack/types`): the host's logger, so its sink and its configured
-   * redact words apply to the line and its cause chain. `MCPServerRuntime`
-   * hands its own (the kernel's `ObjectLogger`, through the plugin context).
-   * Omitted, the line falls back to the console with the default redact words.
-   * It changes where the line is written, never what the tool answers.
+   * [#37666] Where a tool's 5xx fault lines go (`logServerFault`,
+   * `@objectstack/types`, and `run_action` / `resume_run`'s operator lines):
+   * the host's logger, so they go through its sink and its configured redact
+   * list. `MCPServerRuntime` hands its own (the kernel's `ObjectLogger`,
+   * through the plugin context). Omitted, the lines fall back to the console.
+   * It changes where a line is written, never what the tool answers.
    */
   logger?: Logger;
 }
@@ -798,7 +798,7 @@ export interface RegisterActionToolsOptions {
    * tools require `actions:execute`; undefined = not scope-limited.
    */
   grantedScopes?: readonly string[];
-  /** [#37666] `list_actions`' fault line, as {@link RegisterObjectToolsOptions.logger}. */
+  /** [#37666] `list_actions`', `run_action`'s and `resume_run`'s fault lines, as {@link RegisterObjectToolsOptions.logger}. */
   logger?: Logger;
 }
 
@@ -1376,9 +1376,13 @@ function fixedAmountCurrencies(
  * [#31317] A driver string code (`SQLITE_BUSY`) answers what `/actions`
  * answers, which is the `/api/v1/data` door's fault: `500 DATABASE_ERROR`.
  */
-function errorResultFromThrown(err: unknown, request: string, objectName?: string) {
+function errorResultFromThrown(err: unknown, request: string, objectName: string | undefined, logger: Logger | undefined) {
   const answer = actionsDoorAnswerOf(err, objectName);
-  for (const line of answer.operatorLines) console.error(`[MCP] ${request}: ${line}`);
+  // [#37666] The host's logger when one is handed ({@link RegisterActionToolsOptions.logger}), else the console.
+  for (const line of answer.operatorLines) {
+    if (logger) logger.error(`[MCP] ${request}: ${line}`);
+    else console.error(`[MCP] ${request}: ${line}`);
+  }
   const envelope = {
     code: answer.code,
     message: answer.message,
@@ -5260,7 +5264,7 @@ export function registerActionTools(
         return landedWriteResultOrError(
           err,
           objectName,
-          (thrown) => errorResultFromThrown(thrown, `run_action ${actionName}`, objectName),
+          (thrown) => errorResultFromThrown(thrown, `run_action ${actionName}`, objectName, faultLogger),
         );
       }
     },
@@ -5349,7 +5353,7 @@ export function registerActionTools(
               : await resumeRun(runId, request);
           return textResult(result);
         } catch (err) {
-          return errorResultFromThrown(err, `resume_run ${runId}`);
+          return errorResultFromThrown(err, `resume_run ${runId}`, undefined, faultLogger);
         }
       },
     );

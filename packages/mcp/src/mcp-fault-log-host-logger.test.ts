@@ -46,7 +46,7 @@ function hostLogger(): ObjectLogger {
   return createLogger({ level: 'error', format: 'json', redact: [HOST_REDACT_WORD] });
 }
 
-function bridgeThrowing(member: keyof Bridge): Bridge {
+function bridgeThrowing(member: keyof Bridge, thrown: () => unknown = fault): Bridge {
   const bridge: Bridge = {
     async listObjects() { return [{ name: 'task', label: 'Task', fieldCount: 1 }]; },
     async describeObject() { return { name: 'task', fields: [{ name: 'title', type: 'text' }] }; },
@@ -59,7 +59,7 @@ function bridgeThrowing(member: keyof Bridge): Bridge {
     async runAction(name) { return { ok: true, action: name }; },
   };
   (bridge as unknown as Record<string, unknown>)[member] = async () => {
-    throw fault();
+    throw thrown();
   };
   return bridge;
 }
@@ -70,6 +70,8 @@ interface Site {
   member: keyof Bridge;
   /** What the fault line names as the request. */
   path: string;
+  /** What the member throws; {@link fault} when omitted. */
+  thrown?: () => unknown;
 }
 
 /** One tool per rendering helper: the record read, the record write, the metadata read and `list_actions`. */
@@ -80,26 +82,43 @@ const SITES: readonly Site[] = [
   { tool: 'list_actions', args: {}, member: 'listActions', path: 'list_actions' },
 ];
 
+/** An in-process handler's crash: the `/actions` door answers it as a fault and prints one operator line. */
+const CRASH = "Cannot read properties of undefined (reading 'id')";
+
+/** `run_action` renders through the actions door's reader, whose operator lines are printed, not `logServerFault`'s line. */
+const RUN_ACTION_SITE: Site = {
+  tool: 'run_action',
+  args: { actionName: 'complete' },
+  member: 'runAction',
+  path: 'run_action complete',
+  thrown: () => new TypeError(CRASH),
+};
+const RUN_ACTION_OPERATOR_LINE = `[MCP] run_action complete: unexpected fault (TypeError): ${CRASH}`;
+
 const FAULT_BODY = { error: { code: 'INTERNAL_ERROR', message: 'Internal server error', status: 500 } };
 
 /** The fault lines a host `ObjectLogger` wrote, parsed from its stderr records. */
 interface Captured {
   lines: Array<{ level: string; msg: string; error?: { causes?: Array<{ message: string }> } }>;
+  /** The `[MCP] …` operator lines the host logger wrote, as `{ level, msg }`. */
+  operator: Array<{ level: string; msg: string }>;
   console: ReturnType<typeof vi.spyOn>;
 }
 
 function capture(): Captured {
   const lines: Captured['lines'] = [];
+  const operator: Captured['operator'] = [];
   vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: unknown) => {
     const text = String(chunk).trim();
     if (text.startsWith('{')) {
       const record = JSON.parse(text);
       if (String(record.msg).startsWith('[5xx]')) lines.push(record);
+      if (String(record.msg).startsWith('[MCP] ')) operator.push({ level: record.level, msg: record.msg });
     }
     return true;
   }) as typeof process.stderr.write);
   vi.spyOn(console, 'warn').mockImplementation(() => {});
-  return { lines, console: vi.spyOn(console, 'error').mockImplementation(() => {}) };
+  return { lines, operator, console: vi.spyOn(console, 'error').mockImplementation(() => {}) };
 }
 
 afterEach(() => {
@@ -116,7 +135,7 @@ async function callOverHttp(logger: Logger | undefined, site: Site): Promise<{ i
       headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
       body: JSON.stringify(body),
     }),
-    { bridge: bridgeThrowing(site.member), parsedBody: body },
+    { bridge: bridgeThrowing(site.member, site.thrown), parsedBody: body },
   );
   expect(res.status).toBe(200);
   const result = ((await res.json()) as { result: { isError: boolean; content: Array<{ text: string }> } }).result;
@@ -134,7 +153,7 @@ async function stdioClient(runtime: MCPServerRuntime): Promise<Client> {
 
 async function callOverStdio(logger: Logger | undefined, site: Site): Promise<{ isError: boolean; text: string }> {
   const runtime = new MCPServerRuntime({ name: 'pin', version: '0.0.0', ...(logger ? { logger } : {}) });
-  runtime.bridgeDataTools(bridgeThrowing(site.member));
+  runtime.bridgeDataTools(bridgeThrowing(site.member, site.thrown));
   const client = await stdioClient(runtime);
   try {
     const result = (await client.callTool({ name: site.tool, arguments: site.args })) as {
@@ -198,6 +217,23 @@ describe.each([
       expect(await call(undefined, site)).toEqual(answer);
     });
   }
+
+  it('run_action: the actions door\'s operator line reaches the host logger, the answer unchanged', async () => {
+    const captured = capture();
+    const answer = await call(hostLogger(), RUN_ACTION_SITE);
+    expect(captured.console).not.toHaveBeenCalled();
+    expect(captured.operator).toEqual([{ level: 'error', msg: RUN_ACTION_OPERATOR_LINE }]);
+
+    expect(answer.isError).toBe(true);
+    expect(JSON.parse(answer.text)).toEqual(FAULT_BODY);
+    expect(answer.text).not.toContain(CRASH);
+    // Byte for byte what a runtime with no logger answers, whose line falls back to the console.
+    vi.restoreAllMocks();
+    const fallback = capture();
+    expect(await call(undefined, RUN_ACTION_SITE)).toEqual(answer);
+    expect(fallback.operator).toEqual([]);
+    expect(fallback.console.mock.calls).toEqual([[RUN_ACTION_OPERATOR_LINE]]);
+  });
 
   it('CONTROL: with no logger the line falls back to the console, where the host word does not apply', async () => {
     const captured = capture();

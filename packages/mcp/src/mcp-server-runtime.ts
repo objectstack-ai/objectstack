@@ -2044,14 +2044,10 @@ export interface McpHttpCaller {
 }
 
 /**
- * [#31836] The one line a skipped AI-registry tool leaves: which name, which
- * source was not served, and which was ({@link MCPServerRuntime.yieldBridgedTool}).
- */
-/**
  * [#37666] The tool options with this runtime's logger as the fault-line logger
  * ({@link RegisterObjectToolsOptions.logger}), unless the caller handed its own.
  * The plugin builds the runtime with the kernel's logger (`ctx.logger`), so the
- * `/mcp` and stdio doors' 5xx lines go through the host's sink and redact words.
+ * `/mcp` and stdio doors' 5xx lines go through the host's sink.
  */
 function withFaultLogger(
   toolOptions: (RegisterObjectToolsOptions & RegisterActionToolsOptions) | undefined,
@@ -2061,6 +2057,10 @@ function withFaultLogger(
   return { ...toolOptions, logger };
 }
 
+/**
+ * [#31836] The one line a skipped AI-registry tool leaves: which name, which
+ * source was not served, and which was ({@link MCPServerRuntime.yieldBridgedTool}).
+ */
 function logNativeToolServed(logger: Logger | undefined, name: string): void {
   logger?.debug(
     `[MCP] Tool "${name}": serving the native data tool; the ToolRegistry tool of that name is not bridged`,
