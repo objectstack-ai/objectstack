@@ -974,6 +974,14 @@ export function SettingsField(props: SettingsFieldProps) {
           />,
         );
       }
+      // A stored value the manifest no longer offers (an option removed in a
+      // later release) has no item to name it, so the trigger would read
+      // blank. It gets one disabled item of its own, named with the stored
+      // code and a "no longer available" mark; picking a current option is
+      // an ordinary write, and the retired item cannot be picked back.
+      const stored = value == null ? '' : String(value);
+      const retired =
+        stored !== '' && !(spec.options ?? []).some((opt) => String(opt.value) === stored);
       return wrapper(
         <Select
           value={value == null ? undefined : String(value)}
@@ -987,6 +995,14 @@ export function SettingsField(props: SettingsFieldProps) {
             <SelectValue placeholder={t('common.select', { defaultValue: 'Select…' })} />
           </SelectTrigger>
           <SelectContent>
+            {retired ? (
+              <SelectItem value={stored} disabled data-testid="settings-select-retired">
+                {t('console.settingsView.selectValueRetired', {
+                  value: stored,
+                  defaultValue: '{{value}} (no longer available)',
+                })}
+              </SelectItem>
+            ) : null}
             {spec.options?.map((opt) => (
               <SelectItem key={String(opt.value)} value={String(opt.value)}>
                 {renderOptionLabel(opt)}

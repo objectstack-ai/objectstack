@@ -2656,6 +2656,7 @@ const pt = {
       savedCleared: "Valor salvo limpo",
       deprecatedBadge: "Obsoleto",
       deprecatedBadgeReplacedBy: "Obsoleto → {{replacedBy}}",
+      selectValueRetired: "{{value}} (não está mais disponível)",
       unsupportedSpecifierType: "Tipo de configuração não suportado: {{type}}",
       mapAddRow: "Adicionar uma linha",
       mapRemoveRow: "Remover {{key}}",

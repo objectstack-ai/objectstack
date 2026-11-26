@@ -2661,6 +2661,7 @@ const es = {
       savedCleared: "Valor guardado borrado",
       deprecatedBadge: "Obsoleto",
       deprecatedBadgeReplacedBy: "Obsoleto → {{replacedBy}}",
+      selectValueRetired: "{{value}} (ya no está disponible)",
       unsupportedSpecifierType: "Tipo de ajuste no admitido: {{type}}",
       mapAddRow: "Añadir una fila",
       mapRemoveRow: "Quitar {{key}}",

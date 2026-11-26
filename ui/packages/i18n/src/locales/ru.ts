@@ -2737,6 +2737,7 @@ const ru = {
       savedCleared: "Сохранённое значение очищено",
       deprecatedBadge: "Устарело",
       deprecatedBadgeReplacedBy: "Устарело → {{replacedBy}}",
+      selectValueRetired: "{{value}} (больше недоступно)",
       unsupportedSpecifierType: "Неподдерживаемый тип настройки: {{type}}",
       mapAddRow: "Добавить строку",
       mapRemoveRow: "Удалить {{key}}",

@@ -2589,6 +2589,7 @@ const ja = {
       savedCleared: "保存された値をクリアしました",
       deprecatedBadge: "非推奨",
       deprecatedBadgeReplacedBy: "非推奨 → {{replacedBy}}",
+      selectValueRetired: "{{value}}（現在は利用できません）",
       unsupportedSpecifierType: "サポートされていない設定項目の種類: {{type}}",
       mapAddRow: "行を追加",
       mapRemoveRow: "{{key}} を削除",

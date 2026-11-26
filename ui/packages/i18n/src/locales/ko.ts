@@ -2587,6 +2587,7 @@ const ko = {
       savedCleared: "저장된 값을 지웠습니다",
       deprecatedBadge: "지원 중단됨",
       deprecatedBadgeReplacedBy: "지원 중단됨 → {{replacedBy}}",
+      selectValueRetired: "{{value}} (더 이상 사용할 수 없음)",
       unsupportedSpecifierType: "지원되지 않는 설정 항목 유형: {{type}}",
       mapAddRow: "행 추가",
       mapRemoveRow: "{{key}} 삭제",

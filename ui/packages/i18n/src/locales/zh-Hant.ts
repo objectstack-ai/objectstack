@@ -2383,6 +2383,7 @@ const zhHant = {
       savedCleared: '已清除儲存的值',
       deprecatedBadge: '已棄用',
       deprecatedBadgeReplacedBy: '已棄用 → {{replacedBy}}',
+      selectValueRetired: '{{value}}（已不可用）',
       unsupportedSpecifierType: '不支援的設定項型別：{{type}}',
       mapAddRow: '新增一行',
       mapRemoveRow: '移除 {{key}}',
