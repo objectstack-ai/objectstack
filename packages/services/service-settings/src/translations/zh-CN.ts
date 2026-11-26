@@ -547,6 +547,7 @@ export const zhCN: PlatformTranslationData = {
         log_prompts: { label: '记录完整提示词', help: '在追踪记录中包含完整提示词,而非仅元数据。' },
         embedder_provider: {
           label: '提供商',
+          help: '服务启动时读取：任何向量化设置保存后，需重启服务才会生效。',
           options: {
             none: '禁用(不做向量化)',
             openai: 'OpenAI',
@@ -582,7 +583,6 @@ export const zhCN: PlatformTranslationData = {
       groups: {
         adapter: { title: '后端', description: '选择文档分块及其向量的存储位置。' },
         turso: { title: 'Turso / libSQL', description: '支持托管 Turso、本地文件、内存三种模式。' },
-        ragflow: { title: 'RAGFlow', description: '外部 RAGFlow 部署。自部署文档见 https://ragflow.io 。' },
         indexing: { title: '索引默认值', description: '在知识源上单独设定的值优先于这些默认值。' },
         permissions: { title: '权限' },
       },
@@ -592,14 +592,10 @@ export const zhCN: PlatformTranslationData = {
           options: {
             memory: '内存(仅开发/测试)',
             turso: 'Turso / libSQL(云端或本地)',
-            ragflow: 'RAGFlow(外部)',
           },
         },
         turso_url: { label: '连接 URL', help: '示例:libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:' },
         turso_auth_token: { label: 'Auth Token', help: '仅托管 Turso URL 需要。' },
-        ragflow_base_url: { label: 'Base URL', help: '示例:http://localhost:9380' },
-        ragflow_api_key: { label: 'API Key' },
-        ragflow_default_dataset: { label: '默认 Dataset ID', help: '知识源未指定自己的 RAGFlow 数据集时使用。' },
         chunk_target: { label: '目标 chunk 大小(字符)', help: '知识服务切分文档时每个片段的最大字符数。知识源自身设置的大小优先；嵌入模型的输入上限可能将其调低。' },
         over_fetch: { label: '过取倍数', help: '检索时按请求结果数的这一倍数取回候选,以便按文档信息过滤后仍有足够结果可返回。' },
         enforce_rls: { label: '搜索时强制 RLS', help: '对每条命中再次校验调用方的行级权限。' },

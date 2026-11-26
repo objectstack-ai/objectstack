@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { esESObjects } from './es-ES.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * Español (es-ES) — Setup App Translations
  */
 export const esES: TranslationData = {
   objects: esESObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('es-ES'),
   apps: {
     account: {
       label: 'Cuenta',
@@ -86,6 +89,7 @@ export const esES: TranslationData = {
         nav_settings_localization: { label: 'Localización' },
         nav_exchange_rates: { label: 'Tipos de cambio' },
         nav_units_of_measure: { label: 'Unidades de medida' },
+        nav_standard_unit_settings: { label: 'Ajustes de unidades estándar' },
         nav_work_calendars: { label: 'Calendarios laborales' },
         nav_work_calendar_exceptions: { label: 'Excepciones de calendario' },
         nav_settings_company: { label: 'Empresa' },

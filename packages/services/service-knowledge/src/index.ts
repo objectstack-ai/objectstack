@@ -34,6 +34,27 @@ export type {
   SearchKnowledgeSourceSummary,
 } from './knowledge-tools.js';
 export type { KnowledgeFieldSecurity } from './knowledge-source-admission.js';
+export {
+  BUILD_LEASE_MS,
+  BUILD_PROGRESS_LOG_INTERVAL_MS,
+  buildLockKey,
+} from './knowledge-build.js';
+export type {
+  KnowledgeBuildLock,
+  KnowledgeBuildLockHandle,
+  KnowledgeBuildProgress,
+  KnowledgeBuildRecord,
+  KnowledgeBuildTrigger,
+  KnowledgeIndexReading,
+  KnowledgeIndexState,
+} from './knowledge-build.js';
+export {
+  KNOWLEDGE_INDEX_STATUS_ACTION,
+  KNOWLEDGE_REBUILD_ACTION,
+  knowledgeIndexStatusActionHandler,
+  knowledgeRebuildActionHandler,
+} from './knowledge-build-actions.js';
+export type { KnowledgeIndexStatusEntry } from './knowledge-build-actions.js';
 export { KnowledgeServicePlugin } from './knowledge-service-plugin.js';
 export type { KnowledgeServicePluginOptions } from './knowledge-service-plugin.js';
 export {

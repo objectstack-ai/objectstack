@@ -12,27 +12,33 @@ describe('knowledgeSettingsManifest', () => {
     expect(() => SettingsManifestSchema.parse(knowledgeSettingsManifest)).not.toThrow();
   });
 
-  it('declares namespace=knowledge, scope=global, version=2 (chunk_overlap retired)', () => {
+  it('declares namespace=knowledge, scope=global, version=3 (chunk_overlap, then the ragflow option and its keys, retired)', () => {
     const parsed = SettingsManifestSchema.parse(knowledgeSettingsManifest);
     expect(parsed.namespace).toBe('knowledge');
     expect(parsed.scope).toBe('global');
-    expect(parsed.version).toBe(2);
+    expect(parsed.version).toBe(3);
     const keys = parsed.specifiers.map((sp: any) => sp.key).filter(Boolean);
     expect(keys).toContain('chunk_target');
     expect(keys).not.toContain('chunk_overlap');
+    // Non-vacuity for the absence below: the other adapter's keys are there.
+    expect(keys).toContain('turso_url');
+    for (const key of ['ragflow_base_url', 'ragflow_api_key', 'ragflow_default_dataset']) {
+      expect(keys, key).not.toContain(key);
+    }
+    expect(parsed.specifiers.some((sp: any) => sp.type === 'group' && sp.id === 'ragflow')).toBe(false);
   });
 
-  it('exposes adapter select with memory + turso + ragflow', () => {
+  it('exposes adapter select with memory + turso, and no retired ragflow option', () => {
     const f = (knowledgeSettingsManifest.specifiers as any[]).find(
       (s) => s.key === 'adapter' && s.type === 'select',
     );
     expect(f).toBeDefined();
     expect(f.default).toBe('memory');
-    expect(f.options.map((o: any) => o.value).sort()).toEqual(['memory', 'ragflow', 'turso']);
+    expect(f.options.map((o: any) => o.value).sort()).toEqual(['memory', 'turso']);
   });
 
   it('marks every secret field as encrypted password', () => {
-    const secretKeys = ['turso_auth_token', 'ragflow_api_key'];
+    const secretKeys = ['turso_auth_token'];
     for (const key of secretKeys) {
       const f = (knowledgeSettingsManifest.specifiers as any[]).find((s) => s.key === key);
       expect(f, `${key} missing`).toBeDefined();
@@ -97,11 +103,13 @@ describe('knowledgeTestActionHandler', () => {
     expect(r.severity).toBe('warning');
   });
 
-  it('accepts turso with no URL (will reuse tenant connection)', async () => {
+  it('accepts turso with no URL (the plugin defaults to its own file)', async () => {
     const r = await knowledgeTestActionHandler({ values: { adapter: 'turso' } } as any);
     expect(r.ok).toBe(true);
     expect(r.severity).toBe('info');
-    expect(r.message).toMatch(/reuse the tenant/);
+    // The plugin opens a file of its own, never the platform's database (#37107).
+    expect(r.message).toMatch(/knowledge\.db/);
+    expect(r.message).not.toMatch(/reuse the tenant/);
   });
 
   it('accepts turso with local file URL', async () => {
@@ -130,20 +138,19 @@ describe('knowledgeTestActionHandler', () => {
     expect(r.ok).toBe(true);
   });
 
-  // The turso adapter's plugin package is NOT built in this repo, so the live-call
-  // hint an operator reads in Settings -> AI & Embedder cannot be a bare "Mount
-  // @objectstack/knowledge-turso": that instruction was un-followable — it named a
-  // package with no directory here and no statement of where it comes from. Pinned
-  // as a property (names the package AND where it ships), not as a literal, so the
-  // wording can be improved without the guard going stale.
-  it('turso live-call hint says where the out-of-repo package comes from', async () => {
+  // The turso adapter's plugin package is built in this repo since #37107. The
+  // live-call hint names the package and how a deployment registers it, and no
+  // longer says it ships elsewhere. Pinned as a property, not as a literal, so
+  // the wording can be improved without the guard going stale.
+  it('turso live-call hint names the package and how it is registered, not an outside origin', async () => {
     const r = await knowledgeTestActionHandler({
       values: { adapter: 'turso', turso_url: 'file:./knowledge.db' },
     } as any);
     expect(r.ok).toBe(true);
     const message = String(r.message);
     expect(message).toContain('@objectstack/knowledge-turso');
-    expect(message).toMatch(/ObjectOS Cloud monorepo/);
+    expect(message).toMatch(/registered beside the knowledge service/);
+    expect(message).not.toMatch(/ObjectOS Cloud monorepo|does not ship/);
     // the un-followable form this card retired: named, with no origin stated
     expect(message).not.toMatch(/Mount @objectstack\/knowledge-turso to exercise live calls/);
   });
@@ -152,16 +159,13 @@ describe('knowledgeTestActionHandler', () => {
   // default map), and what it answers is a form check: no package in this repo
   // reads this namespace or registers `knowledge/test`, so nothing replaces it
   // with a live probe. Every green answer on a remote adapter must say no
-  // connection was attempted. Ragflow's hint used to be "Mount
-  // @objectstack/knowledge-ragflow to exercise live calls" — followable (the
-  // plugin IS built here) but false for this button, which mounting it never
-  // made live; no answer may carry that promise.
+  // connection was attempted, and none may promise that mounting a package
+  // makes this button live — no package does.
   it('every green answer on a remote adapter says no connection was attempted', async () => {
     const remote: Array<[string, Record<string, unknown>]> = [
       ['turso, no URL', { adapter: 'turso' }],
       ['turso, local file', { adapter: 'turso', turso_url: 'file:./knowledge.db' }],
       ['turso, managed', { adapter: 'turso', turso_url: 'libsql://x.turso.io', turso_auth_token: 't' }],
-      ['ragflow', { adapter: 'ragflow', ragflow_base_url: 'http://localhost:9380', ragflow_api_key: 'k' }],
     ];
     for (const [label, values] of remote) {
       const r = await knowledgeTestActionHandler({ values } as any);
@@ -172,32 +176,21 @@ describe('knowledgeTestActionHandler', () => {
     }
   });
 
-  it('rejects ragflow without base URL', async () => {
-    const r = await knowledgeTestActionHandler({
-      values: { adapter: 'ragflow', ragflow_api_key: 'k' },
-    } as any);
-    expect(r.ok).toBe(false);
-    expect(r.severity).toBe('error');
-  });
-
-  it('rejects ragflow without api key', async () => {
-    const r = await knowledgeTestActionHandler({
-      values: { adapter: 'ragflow', ragflow_base_url: 'http://x' },
-    } as any);
-    expect(r.ok).toBe(false);
-    expect(r.severity).toBe('error');
-  });
-
-  it('accepts ragflow with base URL + api key', async () => {
-    const r = await knowledgeTestActionHandler({
-      values: {
-        adapter: 'ragflow',
-        ragflow_base_url: 'http://localhost:9380',
-        ragflow_api_key: 'k',
-      },
-    } as any);
-    expect(r.ok).toBe(true);
-    expect(r.message).toContain('localhost:9380');
+  // The ragflow adapter was retired with its package. A deployment that saved
+  // it before keeps `adapter = ragflow` stored, with its old keys beside it; the
+  // button must answer that as a failure, never as a configured adapter.
+  it('answers a stored retired adapter (ragflow) as a failure, complete old keys or not', async () => {
+    const stored: Array<Record<string, unknown>> = [
+      { adapter: 'ragflow' },
+      { adapter: 'ragflow', ragflow_base_url: 'http://localhost:9380', ragflow_api_key: 'k' },
+    ];
+    for (const values of stored) {
+      const r = await knowledgeTestActionHandler({ values } as any);
+      expect(r.ok).toBe(false);
+      expect(r.severity).toBe('error');
+    }
+    // Non-vacuity: the same call on an offered adapter passes.
+    expect((await knowledgeTestActionHandler({ values: { adapter: 'turso' } } as any)).ok).toBe(true);
   });
 
   it('prefers payload.values over persisted values', async () => {

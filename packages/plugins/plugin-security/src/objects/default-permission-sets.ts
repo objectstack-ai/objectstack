@@ -469,6 +469,14 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // so an administrator edits every unit of their organization without
       // them.
       sys_unit: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+      // [ADR-0158 U6, Open item 10 option A] The organization's display decimal
+      // places for a standard unit code: set, changed and cleared here.
+      // Clearing is deleting the row, so this line keeps the delete the
+      // wildcard gives (unlike `sys_unit`, whose rows hold codes records use).
+      // WITHOUT the superuser bits, like the line above: settings carry no
+      // owner scope for an administrator, so an administrator edits every
+      // setting of their organization without them.
+      sys_standard_unit_setting: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
     },
     // `manage_mailboxes` (ruling 6116489638, Q4 → A): an organization
     // administrator reads its organization's mailboxes and their unassociated
@@ -936,6 +944,15 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // (ADR-0090 D5). An external member resolves `external_default` and gets
       // no such line.
       sys_unit: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      // [ADR-0158 U6, Open item 10 option A] The organization's display decimal
+      // places for a standard unit code, READ only, on the `sys_unit` line's
+      // reasoning: a quantity displays with the same default for every member
+      // who reads it. ⛔ No row policy (every row is the member's own
+      // organization's reference data, behind Layer 0, ADR-0095 D1) and ⛔ no
+      // write bit: organization administrators set and clear these through
+      // `organization_admin`'s line. An external member resolves
+      // `external_default` and gets no such line, as with `sys_unit`.
+      sys_standard_unit_setting: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
       // [#36942 — maintainer ruling 7131539862, verbatim 「1. #36942 任务/备忘默认权限： A。」]
       // The platform's built-in tasks and notes (`@objectstack/platform-objects`
       // `work/`), for every member, whichever application is installed: read,

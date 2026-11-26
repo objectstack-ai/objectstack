@@ -2,9 +2,12 @@
 
 /**
  * A dashboard or a report opened from a Studio list opens in the app's own
- * edit state (objectstack#36906, epic #36890), and a report's New opens the
- * app's new-report page (decision 13). This component is the one step between
- * the two places:
+ * edit state (objectstack#36906, epic #36890), a report's New opens the
+ * app's new-report page (decision 13), and a dashboard's New opens the app in
+ * its design mode, the 「Add menu item」 picker open on its dashboards
+ * (objectstack#36907, the maintainer's 「新建跳到设计模式加菜单」: a dashboard
+ * is made where it hangs in a menu, objectstack#36359). This component is the
+ * one step between the two places:
  *
  *  1. It reads the open package's published apps and, when the author came
  *     from an app outside the package, that app's menu. A dashboard or a
@@ -12,16 +15,26 @@
  *     of its own reads its base's apps instead, one read more: the pair has
  *     no surface of its own (ADR-0146 D3), and the base's app is the one that
  *     shows the pair's items.
- *  2. It picks the app (decision 6, `studioAppEditSegment`), by the same rule
- *     over the base's apps on the pair leg.
+ *     A dashboard's New of such a pair takes the same leg; a report's New
+ *     does not (it keeps the area's own create there).
+ *  2. It picks the app (decision 6, `studioAppEditSegment`; for a New,
+ *     `studioAppCreateSegment`), by the same rule over the base's apps on the
+ *     pair leg.
  *  3. It replaces the Studio address with the app's. A dashboard or a report
  *     carries its arrival in the navigation state, so the page opens the
  *     dashboard's edit state or the report's builder as its Edit does, and
  *     the address carries the Studio list (`?studio=`, decision 15), so the
- *     page's × goes back to the list, after a reload too.
+ *     page's × goes back to the list, after a reload too. A dashboard's New
+ *     opens the app's root with the arrival that enters the design mode
+ *     (`designModeAddDashboardArrival`), which carries the list instead: the
+ *     dashboard created there opens with it in its address
+ *     (`DesignModeMenu`). The mode has no address, so neither has the list
+ *     before then.
  *
  * With no app to open in, it renders `fallback`: the generic item page, or
- * the area's own create (decision 3). So does an item with no published
+ * the area's own create (decision 3). So does a dashboard's New on a phone,
+ * where the design mode is never on; the list offers no such New there, nor
+ * with no app ({@link useStudioDashboardNew}). So does an item with no published
  * version (a draft only, such as an AI draft or a create whose publish was
  * refused): the app page reads the published world, so it would answer
  * 「not found」, and the generic item page is the one that opens the draft.
@@ -36,8 +49,9 @@
 
 import * as React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { readAppReturnPage } from '../../utils/appReturnPage.js';
-import { dashboardEditArrival } from '../../layout/designModeArrival.js';
+import { readAppReturnPage, type AppReturnPage } from '../../utils/appReturnPage.js';
+import { usePhoneViewport } from '../../hooks/usePhoneViewport.js';
+import { dashboardEditArrival, designModeAddDashboardArrival } from '../../layout/designModeArrival.js';
 import { reportBuilderArrival } from '../reportBuilderArrival.js';
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
 import { ITEM_ONLY_PARAMS, detailListHref } from '../metadata-admin/ResourceDetailHeader.js';
@@ -46,6 +60,7 @@ import { t, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { withStudioReturn } from './studioAddress.js';
 import { customizationPairBaseOf } from './StudioRailCustomizations.js';
 import {
+  appHomePath,
   appItemPath,
   appNewReportPath,
   isStudioAppEditType,
@@ -56,10 +71,93 @@ import {
   type StudioAppTarget,
 } from './studioAppEdit.js';
 
-/** What opens in the app: an item's page, or the new-report page. */
-export type StudioAreaAppTarget = { kind: 'item'; type: StudioAppEditType; name: string } | { kind: 'new-report' };
+/**
+ * What opens in the app: an item's page, the new-report page, or the app in
+ * its design mode with the 「Add menu item」 picker on its dashboards.
+ */
+export type StudioAreaAppTarget =
+  | { kind: 'item'; type: StudioAppEditType; name: string }
+  | { kind: 'new-report' }
+  | { kind: 'new-dashboard' };
 
-type Answer = { to: string; state: Record<string, string> | null } | 'fallback';
+type Answer = { to: string; state: Record<string, unknown> | null } | 'fallback';
+
+type MetadataClientLike = ReturnType<typeof useMetadataClient>;
+
+/**
+ * The published apps that an item, or a New, of `packageId` opens in, and
+ * the package they are of: the package's own, or, on the pair leg
+ * (`pairLeg`), for a customization pair (`<base>.custom`) with no published
+ * app of its own, its base's, one read more. A failed read is no app.
+ */
+export async function readStudioTargetApps(
+  client: MetadataClientLike,
+  packageId: string,
+  pairLeg: boolean,
+  cancelled: () => boolean = () => false,
+): Promise<{ appPackageId: string; apps: StudioAppTarget[] }> {
+  const readApps = async (scope: string): Promise<StudioAppTarget[]> => {
+    try {
+      const listed = (await client.list('app', { packageId: scope })) as Array<Record<string, unknown>>;
+      return (listed || [])
+        .filter((a) => typeof a?.name === 'string' && a.name)
+        .map((a) => ({ name: String(a.name), label: (a.label ?? a.name) as StudioAppTarget['label'] }));
+    } catch {
+      return [];
+    }
+  };
+  const apps = await readApps(packageId);
+  const pairBase = pairLeg && apps.length === 0 ? customizationPairBaseOf(packageId) : null;
+  if (pairBase === null || cancelled()) return { appPackageId: packageId, apps };
+  return { appPackageId: pairBase, apps: await readApps(pairBase) };
+}
+
+/** The app segment a dashboard's New opens in (decision 6, the pair leg too), or `null`. */
+async function readNewDashboardSegment(
+  client: MetadataClientLike,
+  packageId: string,
+  remembered: AppReturnPage | null,
+  cancelled: () => boolean = () => false,
+): Promise<string | null> {
+  const { appPackageId, apps } = await readStudioTargetApps(client, packageId, true, cancelled);
+  return studioAppCreateSegment({ packageId: appPackageId, apps, remembered });
+}
+
+/**
+ * Whether a Studio dashboard list offers its 「New」 (objectstack#36907): the
+ * New opens an app's design mode, so it is offered only where one opens.
+ *
+ * - `'off'`: not asked (`packageId` is `null`: not a dashboard list of a
+ *   package, or one that offers no create at all);
+ * - `'pending'`: the package's apps are being read; no New yet;
+ * - `'phone'`: a phone, where the design mode is never on; no New;
+ * - `'no-app'`: no app to open (decision 6 picks none, the pair leg
+ *   included); no New, and the list says why;
+ * - `'offered'`: the New is offered, and opens the app `StudioAreaAppOpen`
+ *   picks by the same reads.
+ */
+export type StudioDashboardNew = 'off' | 'pending' | 'phone' | 'no-app' | 'offered';
+
+export function useStudioDashboardNew(packageId: string | null): StudioDashboardNew {
+  const client = useMetadataClient();
+  const phone = usePhoneViewport();
+  const [read, setRead] = React.useState<{ packageId: string; segment: string | null } | null>(null);
+  const asked = packageId !== null && !phone;
+  React.useEffect(() => {
+    if (!asked || packageId === null) return undefined;
+    let cancelled = false;
+    void readNewDashboardSegment(client, packageId, readAppReturnPage(), () => cancelled).then((segment) => {
+      if (!cancelled) setRead({ packageId, segment });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [asked, packageId, client]);
+  if (packageId === null) return 'off';
+  if (phone) return 'phone';
+  if (!read || read.packageId !== packageId) return 'pending';
+  return read.segment ? 'offered' : 'no-app';
+}
 
 export function StudioAreaAppOpen({
   packageId,
@@ -74,6 +172,7 @@ export function StudioAreaAppOpen({
 }): React.ReactElement {
   const client = useMetadataClient();
   const locale = useMetadataLocale();
+  const phone = usePhoneViewport();
   const { pathname, search } = useLocation();
   // Read once per open, as the back link reads it: nothing in Studio is an app page.
   const [remembered] = React.useState(readAppReturnPage);
@@ -85,6 +184,24 @@ export function StudioAreaAppOpen({
     let cancelled = false;
     const type: StudioAppEditType = target.kind === 'item' ? target.type : 'report';
     const name = target.kind === 'item' ? target.name : '';
+    const opened = openedAt.current;
+    const list = detailListHref(opened.pathname, new URLSearchParams(opened.search));
+    // objectstack#36907 — a dashboard's New: the app's root, with the
+    // design mode entered and its picker open on its dashboards. Never on a
+    // phone, where the mode is never on.
+    if (target.kind === 'new-dashboard') {
+      if (phone) {
+        setAnswer('fallback');
+        return undefined;
+      }
+      void readNewDashboardSegment(client, packageId, remembered, () => cancelled).then((segment) => {
+        if (cancelled) return;
+        setAnswer(segment ? { to: appHomePath(segment), state: designModeAddDashboardArrival(list) } : 'fallback');
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
     void (async () => {
       // An item the app cannot show (no published version, or the read
       // failed) keeps the generic item page.
@@ -101,26 +218,9 @@ export function StudioAreaAppOpen({
           return;
         }
       }
-      const readApps = async (scope: string): Promise<StudioAppTarget[]> => {
-        try {
-          const listed = (await client.list('app', { packageId: scope })) as Array<Record<string, unknown>>;
-          return (listed || [])
-            .filter((a) => typeof a?.name === 'string' && a.name)
-            .map((a) => ({ name: String(a.name), label: (a.label ?? a.name) as StudioAppTarget['label'] }));
-        } catch {
-          return [];
-        }
-      };
       // The package whose apps the item opens in: the open package, or, for
       // an item of a pair with no app of its own, the pair's base.
-      let appPackageId = packageId;
-      let apps = await readApps(packageId);
-      const pairBase = target.kind === 'item' && apps.length === 0 ? customizationPairBaseOf(packageId) : null;
-      if (pairBase !== null) {
-        if (cancelled) return;
-        appPackageId = pairBase;
-        apps = await readApps(pairBase);
-      }
+      const { appPackageId, apps } = await readStudioTargetApps(client, packageId, target.kind === 'item', () => cancelled);
       // The remembered app's own menu counts only for an item, and only when
       // the app is not one of the package's: the package's own apps win first.
       let rememberedMenu: unknown;
@@ -141,8 +241,6 @@ export function StudioAreaAppOpen({
         setAnswer('fallback');
         return;
       }
-      const opened = openedAt.current;
-      const list = detailListHref(opened.pathname, new URLSearchParams(opened.search));
       if (target.kind === 'item') {
         setAnswer({
           to: withStudioReturn(appItemPath(segment, type, name), list),

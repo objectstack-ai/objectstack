@@ -163,7 +163,7 @@ export const SysAudienceBindingSuggestion = ObjectSchema.create({
       defaultValue: 'pending',
       description: 'pending = awaiting a decision; confirmed = the everyone definition carries the set (accepted, or observed in the baseline); dismissed = declined or revoked.',
       options: [
-        { value: 'pending', label: 'Pending' },
+        { value: 'pending', label: 'Pending', color: 'yellow' },
         { value: 'confirmed', label: 'Confirmed' },
         { value: 'dismissed', label: 'Dismissed' },
       ],

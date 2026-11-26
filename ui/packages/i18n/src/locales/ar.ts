@@ -209,6 +209,7 @@ const ar = {
     uploadInFlight: "انتظر حتى ينتهي الرفع قبل الحفظ.",
     clearedOnHide: "تم مسح ما لم يعد ينطبق على القيم الحالية: {{fields}}",
     visibleWhenFaulted: "تعذّر الإرسال: تعذّر تقييم قاعدة visibleWhen لـ {{fields}}. يجب إصلاح القاعدة قبل أن يصبح إرسال هذا النموذج ممكنًا.",
+    uiReadonlyWhenFaulted: "تعذّر الإرسال: تعذّر تقييم قاعدة uiReadonlyWhen لـ {{fields}}. يجب إصلاح القاعدة قبل أن يصبح إرسال هذا النموذج ممكنًا.",
     discardTitle: "تجاهل التغييرات؟",
     discardMessage: "لديك تغييرات غير محفوظة. إذا أغلقت هذا النموذج الآن، ستفقد تعديلاتك.",
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
@@ -5068,6 +5069,9 @@ const ar = {
       metrics: 'المقاييس',
       noAddedFilter: 'لا يوجد عامل تصفية مضاف إلى تعريف مجموعة البيانات',
     },
+    recordCitations: {
+      title: 'مقتبس من السجلات',
+    },
     tool: {
       aggregate_data: "تجميع البيانات ذات الصلة",
       get_record: "قراءة هذا السجل",
@@ -5303,6 +5307,7 @@ const ar = {
   },
   chatbotQuota: {
     title: "الترقية مطلوبة",
+    limitTitle: "تم بلوغ حد الذكاء الاصطناعي",
     fallbackMessage: "لقد بلغت حصتك من الذكاء الاصطناعي.",
     buyCredits: "شراء باقة أرصدة",
     upgradePlan: "ترقية الخطة",

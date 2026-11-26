@@ -87,6 +87,8 @@ export default defineConfig({
       { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../drivers/driver-sql/src/index.ts') },
       // [ADR-0160] The record-context executor, so `get_record_context`'s transport parity runs the real one.
       { find: /^@objectstack\/service-record-context$/, replacement: path.resolve(__dirname, '../services/service-record-context/src/index.ts') },
+      // [ADR-0161 K9] The knowledge tool's one definition and executor, so `search_knowledge`'s transport parity runs the real ones.
+      { find: /^@objectstack\/service-knowledge$/, replacement: path.resolve(__dirname, '../services/service-knowledge/src/index.ts') },
     ],
   },
 });

@@ -130,9 +130,9 @@ export const InboxMessage = ObjectSchema.create({
         severity: Field.select({
             label: 'Severity',
             options: [
-                { label: 'Info', value: 'info' },
-                { label: 'Warning', value: 'warning' },
-                { label: 'Critical', value: 'critical' },
+                { label: 'Info', value: 'info', color: 'blue' },
+                { label: 'Warning', value: 'warning', color: 'yellow' },
+                { label: 'Critical', value: 'critical', color: 'red' },
             ],
         }),
 

@@ -485,6 +485,7 @@ export const ko: PlatformTranslationData = {
         log_prompts: { label: '전체 프롬프트 기록', help: '추적 행에 메타데이터뿐 아니라 렌더링된 프롬프트도 포함합니다.' },
         embedder_provider: {
           label: '공급자',
+          help: '서버가 시작될 때 읽습니다. Embedder 설정을 저장한 변경 사항은 다음 재시작 후에 적용됩니다.',
           options: {
             none: '사용 안 함(임베딩 없음)',
             openai: 'OpenAI',
@@ -528,23 +529,19 @@ export const ko: PlatformTranslationData = {
       groups: {
         adapter: { title: '백엔드', description: '문서 청크와 그 벡터를 저장할 위치를 선택합니다.' },
         turso: { title: 'Turso / libSQL', description: '관리형 Turso, 로컬 파일, 인메모리 모두에서 동작합니다.' },
-        ragflow: { title: 'RAGFlow', description: '외부 RAGFlow 배포입니다. 자체 호스팅 방법은 https://ragflow.io를 참고하세요.' },
         indexing: { title: '인덱싱 기본값', description: '지식 소스 자체에 설정한 값이 이 기본값보다 우선합니다.' },
         permissions: { title: '권한' },
       },
       keys: {
         adapter: {
           label: '어댑터',
-          options: { memory: '인메모리(개발/테스트 전용)', turso: 'Turso / libSQL(클라우드 또는 로컬)', ragflow: 'RAGFlow(외부)' },
+          options: { memory: '인메모리(개발/테스트 전용)', turso: 'Turso / libSQL(클라우드 또는 로컬)' },
         },
         turso_url: {
           label: '연결 URL',
           help: '예: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
         },
         turso_auth_token: { label: '인증 토큰', help: '관리형 Turso URL에만 필요합니다.' },
-        ragflow_base_url: { label: 'Base URL', help: '예: http://localhost:9380' },
-        ragflow_api_key: { label: 'API 키' },
-        ragflow_default_dataset: { label: '기본 데이터 세트 ID', help: '지식 소스가 자체 RAGFlow 데이터 세트를 지정하지 않을 때 사용합니다.' },
         chunk_target: { label: '목표 청크 크기(자)', help: '지식 서비스가 문서를 나눌 때 구절 하나의 최대 문자 수입니다. 지식 소스 자체에 설정한 크기가 우선하며, 임베딩 모델의 입력 한도에 따라 더 작아질 수 있습니다.' },
         over_fetch: { label: '초과 조회 배수', help: '요청한 결과 수의 이 배수만큼 검색해, 문서 정보로 필터링한 뒤에도 돌려줄 결과가 충분히 남게 합니다.' },
         enforce_rls: { label: '검색 시 RLS 적용', help: '호출자의 레코드 수준 권한으로 모든 결과를 다시 확인합니다.' },

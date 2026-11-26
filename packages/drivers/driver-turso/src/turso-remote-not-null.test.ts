@@ -37,13 +37,21 @@
  *    remote) — the `storage.notNull` contract's "destructive migration gated
  *    by the schema-drift ceremony". The object stays writable. In one batch, a
  *    populated table and an empty one each get their own answer.
- * 5. RECORDED ASYMMETRY — a `storage.notNull` field that also declares a
- *    literal `defaultValue`, added to a populated table: the local face emits
- *    the DEFAULT and accepts; this face emits no declared DEFAULT and refuses.
- *    A DEFAULT question, not a nullability one (see
- *    `RemoteTransport.columnDeclarationSQL`). When this face starts emitting
- *    declared defaults, INVERT this case; ⛔ never loosen the NOT NULL to
- *    make it pass.
+ * 5. [#37345] A `storage.notNull` field that also declares a literal
+ *    `defaultValue`, added to a populated table: both faces emit the DEFAULT,
+ *    keep the NOT NULL and accept, through each remote `ADD COLUMN` door; the
+ *    existing row takes the default and neither differ reports drift. ⛔ Never
+ *    loosen the NOT NULL to make this pass: the local face keeps it.
+ *
+ *    [#37413] A `NOW()` default there: SQLite refuses a non-constant DEFAULT
+ *    on `ADD COLUMN` to a table holding rows, so both faces add the column
+ *    nullable with no DEFAULT and fill the existing row in the same sync
+ *    (`datetime`, `date`, `time`; nullable and `storage.notNull`), and each
+ *    differ reports the owed `set_column_default` (plus `tighten_not_null`
+ *    under `storage.notNull`). The local ceremony rebuild applies them and
+ *    drift is empty. The remote half: both entries answer
+ *    `needs-table-rebuild` on this face, which runs no table rebuild —
+ *    carried by #37430.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -51,7 +59,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { createClient, type Client } from '@libsql/client';
-import { TursoDriver } from './turso-driver.js';
+import { REMOTE_DRIFT_OP_ANSWERS, TursoDriver } from './turso-driver.js';
 
 const scratch = mkdtempSync(join(tmpdir(), 'turso-remote-not-null-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -94,6 +102,17 @@ async function notNullFlags(file: string, table: string): Promise<Record<string,
   try {
     const rows = (await c.execute(`PRAGMA table_info("${table}")`)).rows;
     return Object.fromEntries(rows.map((r) => [String(r.name), Number(r.notnull)]));
+  } finally {
+    c.close();
+  }
+}
+
+/** Each column's raw `dflt_value`, as the drift differ is fed it. */
+async function columnDefaults(file: string, table: string): Promise<Record<string, unknown>> {
+  const c = createClient({ url: `file:${file}` });
+  try {
+    const rows = (await c.execute(`PRAGMA table_info("${table}")`)).rows;
+    return Object.fromEntries(rows.map((r) => [String(r.name), r.dflt_value]));
   } finally {
     c.close();
   }
@@ -246,17 +265,65 @@ describe('ADD COLUMN on a populated table', () => {
     expect(await answer(remote, emptyAdded)).toEqual({ flags: { plain: 0, added: 1 }, tighten: [] });
   });
 
-  it('RECORDED ASYMMETRY: with a literal defaultValue the local face accepts and this face refuses', async () => {
-    const withDefault = WITH_ADDED({ ...ADDED, defaultValue: 'd' });
+  describe('with a literal defaultValue: both faces emit the DEFAULT, keep NOT NULL and accept', () => {
+    const declared = WITH_ADDED({ ...ADDED, defaultValue: 'd' });
 
-    const local = await populated('local');
-    await local.driver.syncSchema('rows_t', withDefault);
-    expect((await notNullFlags(local.file, 'rows_t')).added).toBe(1);
+    it.each<Door | 'local'>(['local', 'syncSchemasBatch', 'syncSchema'])('through %s', async (door) => {
+      const face = await populated(door === 'local' ? 'local' : 'remote');
+      if (door === 'local') await face.driver.syncSchema(declared.name, declared);
+      else await SYNC[door](face.driver, [declared]);
 
-    const remote = await populated('remote');
-    await expect(remote.driver.syncSchema('rows_t', withDefault)).rejects.toThrow(
-      /Cannot add a NOT NULL column with default value NULL/,
-    );
-    expect(await notNullFlags(remote.file, 'rows_t')).not.toHaveProperty('added');
+      expect(await answer(face, declared)).toEqual({ flags: { plain: 0, added: 1 }, tighten: [] });
+      expect(await face.driver.detectManagedDrift([declared as never])).toEqual([]);
+      // The existing row took the declared default.
+      expect((await face.driver.findOne('rows_t', { where: { id: 'r1' } }))?.added).toBe('d');
+    });
+  });
+
+  // [#37413] One answer on both faces: added nullable with no DEFAULT, the
+  // existing row filled in the same sync with the instant the DEFAULT would
+  // have given, and the owed DEFAULT (and NOT NULL) reported as drift. The
+  // local ceremony rebuild applies it; the remote face answers
+  // `needs-table-rebuild` for both entries — carried by #37430.
+  describe.each(['datetime', 'date', 'time'])('with a NOW() defaultValue on a %s field: one answer on both faces', (type) => {
+    const SHAPE: Record<string, RegExp> = {
+      datetime: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+      date: /^\d{4}-\d{2}-\d{2}$/,
+      time: /^\d{2}:\d{2}:\d{2}(\.\d{3})?$/,
+    };
+    const cases: Array<[string, object, string[]]> = [
+      ['nullable', { type, defaultValue: 'NOW()' }, ['set_column_default']],
+      ['storage.notNull', { type, defaultValue: 'NOW()', storage: { notNull: true } }, ['set_column_default', 'tighten_not_null']],
+    ];
+
+    describe.each(cases)('%s', (_, added, owed) => {
+      const declared = WITH_ADDED(added);
+
+      it.each<Door | 'local'>(['local', 'syncSchemasBatch', 'syncSchema'])('through %s: accepted, the row filled, the owed entries reported', async (door) => {
+        const face = await populated(door === 'local' ? 'local' : 'remote');
+        if (door === 'local') await face.driver.syncSchema(declared.name, declared);
+        else await SYNC[door](face.driver, [declared]);
+
+        expect(await notNullFlags(face.file, 'rows_t')).toMatchObject({ added: 0 });
+        expect((await columnDefaults(face.file, 'rows_t')).added).toBeNull();
+        expect(String((await face.driver.findOne('rows_t', { where: { id: 'r1' } }))?.added)).toMatch(SHAPE[type]!);
+        const drift = await face.driver.detectManagedDrift([declared as never]);
+        expect(drift.filter((e) => e.column === 'added').map((e) => e.op.type).sort()).toEqual(owed);
+
+        const { applied, skipped } = await face.driver.applyMigrationEntries(drift, { allowDestructive: true });
+        if (door === 'local') {
+          // The ceremony rebuild imposes the DEFAULT (and NOT NULL), and drift is empty.
+          expect(applied.filter((e) => e.column === 'added')).toHaveLength(owed.length);
+          expect((await columnDefaults(face.file, 'rows_t')).added).not.toBeNull();
+          expect(await notNullFlags(face.file, 'rows_t')).toMatchObject({ added: owed.length === 2 ? 1 : 0 });
+          expect(await face.driver.detectManagedDrift([declared as never])).toEqual([]);
+        } else {
+          // The remote half: both entries need the table rebuild this transport does not run (#37430).
+          for (const op of owed) expect(REMOTE_DRIFT_OP_ANSWERS[op as keyof typeof REMOTE_DRIFT_OP_ANSWERS]).toBe('needs-table-rebuild');
+          expect(applied).toEqual([]);
+          expect(skipped.filter((e) => e.column === 'added').map((e) => e.op.type).sort()).toEqual(owed);
+        }
+      });
+    });
   });
 });

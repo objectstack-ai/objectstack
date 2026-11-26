@@ -2,6 +2,7 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { enObjects } from './en.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * English (en) — Setup App Translations
@@ -23,6 +24,8 @@ import { enObjects } from './en.objects.generated.js';
  */
 export const en: TranslationData = {
   objects: enObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('en'),
   apps: {
     account: {
       label: 'Account',
@@ -131,6 +134,7 @@ export const en: TranslationData = {
         nav_settings_localization: { label: 'Localization' },
         nav_exchange_rates: { label: 'Exchange Rates' },
         nav_units_of_measure: { label: 'Units of Measure' },
+        nav_standard_unit_settings: { label: 'Standard Unit Settings' },
         nav_work_calendars: { label: 'Working Calendars' },
         nav_work_calendar_exceptions: { label: 'Calendar Exceptions' },
         nav_settings_company: { label: 'Company' },

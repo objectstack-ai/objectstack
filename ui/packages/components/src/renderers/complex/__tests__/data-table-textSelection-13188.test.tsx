@@ -11,7 +11,7 @@
  * selects text ends in a `click` on the row (or cell) it started in; that
  * click must neither open the record nor start an inline edit, and Ctrl/Cmd+C
  * must copy the selection rather than the cell's raw value. A plain click
- * (no selection) still opens / edits exactly as before.
+ * (no selection) still opens the record exactly as before.
  *
  * jsdom has no mouse-driven selection, so the drag's outcome is set directly
  * with the Selection API and then the trailing click is fired.
@@ -92,25 +92,13 @@ describe('data-table text selection (objectui#13188)', () => {
     expect(onRowClick).toHaveBeenCalledTimes(1);
   });
 
-  describe.each([
-    ['single-click edit', { singleClickEdit: true }, 'click'],
-    ['double-click edit', { singleClickEdit: false }, 'dblClick'],
-  ] as const)('editable, %s', (_label, mode, gesture) => {
-    it('selecting text does not enter edit mode', () => {
-      const { onRowClick } = renderTable({ editable: true, ...mode });
-      selectText(screen.getByText('Ada Lovelace'));
-      fireEvent[gesture](cellOf('Ada Lovelace'));
-      expect(cellOf('Ada Lovelace').querySelector('input')).toBeNull();
-      expect(onRowClick).not.toHaveBeenCalled();
-    });
-
-    it('the same gesture without a selection still enters edit mode', () => {
-      renderTable({ editable: true, ...mode });
-      const cell = cellOf('Ada Lovelace');
-      fireEvent[gesture](cell);
-      expect(cell.querySelector('input')).not.toBeNull();
-    });
-  });
+  // The `editable` cases pinned the staged arm's click-to-edit and
+  // double-click-to-edit against a text selection. That arm is retired
+  // (objectstack#35827): an editable table is select-first, where a click only
+  // selects a cell and a double-click edits even over the word the browser
+  // selected on the way, pinned in data-table-select-first-35684 ("a
+  // double-click over the text edits, though the browser selected a word on
+  // the way").
 
   it('Ctrl+C with text selected in the cell leaves the browser copy alone', () => {
     renderTable();

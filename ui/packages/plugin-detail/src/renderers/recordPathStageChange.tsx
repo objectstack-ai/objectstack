@@ -86,6 +86,7 @@ import {
   AlertDialogTitle,
 } from '@object-ui/components';
 import {
+  fieldReadOnlyByHand,
   getRecordDisplayName,
   resolveFieldAffordance,
   stateMachineNextValues,
@@ -106,6 +107,7 @@ import {
   isExternalWriteRefusal,
   isPermissionError,
   useInlineEdit,
+  usePredicateScope,
   useRecordContext,
   useSafeFieldLabel,
 } from '@object-ui/react';
@@ -164,10 +166,12 @@ export function stageRefusalLines(
 type FieldDef = {
   type?: unknown;
   readonly?: unknown;
+  uiReadonly?: unknown;
   required?: unknown;
   label?: unknown;
   visibleWhen?: any;
   readonlyWhen?: any;
+  uiReadonlyWhen?: any;
   requiredWhen?: any;
 };
 
@@ -225,6 +229,9 @@ export function useStageChange(
   const rereadRecord = async () => { await (ctx?.reread ?? ctx?.refresh)?.(); };
   const inline = useInlineEdit();
   const perms = usePermissions();
+  // The host's predicate scope (`current_user` and friends), as the form binds
+  // it, so a hand-lock predicate means the same here as in the edit dialog.
+  const predicateScope = usePredicateScope();
   const { t } = useDetailTranslation();
   const { fieldLabel, translateOptions } = useSafeFieldLabel();
   const { language } = useObjectTranslation();
@@ -247,7 +254,9 @@ export function useStageChange(
     && canUpdate(dataSource)
     && !!inline?.canEdit
     && !inline.editing
-    && fieldDef?.readonly !== true
+    // The one hand-lock verdict over the stored record (`fieldReadOnlyByHand`):
+    // a status that moves only through actions (`uiReadonly`) offers no stage.
+    && !fieldReadOnlyByHand(fieldDef, ctx?.data as Record<string, unknown> | undefined, { scope: predicateScope })
     && !isComputedDetailField(undefined, fieldDef)
     && !NON_EDITABLE_SYSTEM_FIELDS.has(statusField)
     && resolveFieldAffordance('recordEdit', perms, objectName, statusField);
@@ -262,7 +271,7 @@ export function useStageChange(
   // fill-in asks the same one).
   const fillable = (name: string, def: Record<string, unknown>): boolean =>
     name !== statusField
-    && def.readonly !== true
+    && !fieldReadOnlyByHand(def, record, { scope: predicateScope })
     && !isComputedDetailField(undefined, def as FieldDef)
     && !NON_EDITABLE_SYSTEM_FIELDS.has(name)
     && !!objectName
@@ -398,6 +407,10 @@ export function useStageChange(
     );
     const sendable = (values: Record<string, unknown>) =>
       noLongerAsked.size === 0 ? values : Object.fromEntries(Object.entries(values).filter(([k]) => !noLongerAsked.has(k)));
+    // The record the move would leave: the merge the collector judges its
+    // rows on. A row a refusal names carries it too, so its options read the
+    // move even when no collected row is shown (objectstack#37270).
+    const moved = { ...record, [statusField]: stage.value };
     return (
       <RequiredFieldsDialog
         // A new pick is a new collection: the dialog's typed values reset.
@@ -417,7 +430,7 @@ export function useStageChange(
           const def = objectFields?.[name] as Record<string, unknown> | undefined;
           if (!def || typeof def !== 'object' || name === statusField) return null;
           if (!hasFieldEditWidget(def.type as string | undefined) || !fillable(name, def)) return null;
-          return label({ name, def: { name, ...def } });
+          return label({ name, def: { name, ...def }, record: moved });
         }}
         // The stage field and an object-level (`_record`) reason read alone,
         // as `stageRefusalLines` reads them; another field by its label.

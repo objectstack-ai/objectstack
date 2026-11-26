@@ -937,7 +937,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (79)...
+  → Running author-time rules (80)...
   → Checking that every required capability has a provider installable in this edition...
   → Collecting package docs (ADR-0046)... 0 collected
   → Writing artifact...
@@ -1539,6 +1539,7 @@ where the data lives.
 | `os migrate option-codes` | Rewrite option values still stored as a number, a boolean or SQLite `"N.0"` text (rows written before option fields stored the code string) to that code string, so filters, reads and unique keys see one value. Values it cannot decide are listed, never rewritten. No flag; idempotent. See [below](#os-migrate-option-codes) |
 | `os migrate text-scalars` | Rewrite numbers and booleans still stored raw on text fields (rows written before text fields stored the string) to that string, so filters, reads and unique keys see one value. SQLite `"N.0"` text it cannot decide is listed, never rewritten. No flag; idempotent. See [below](#os-migrate-text-scalars) |
 | `os migrate record-currency-codes` | Write the currency code you give into the rows of a record-mode currency field that hold an amount and no code, the rows stored before the field was switched to `currencyMode: 'record'`. The code is never derived. No flag; idempotent. See [below](#os-migrate-record-currency-codes) |
+| `os migrate unit-codes` | Rewrite the free text a unit code field stored before it was declared one (`kg`, `公斤`) into unit codes, from a mapping file you give. Nothing is derived. Dry run by default, listing every stored value with its row count; `--apply` is refused while a value has no mapping entry. No flag; idempotent. See [below](#os-migrate-unit-codes) |
 | `os migrate recompute-home-amounts` | Recompute the home-currency amounts a record-mode currency field stores, at the exchange rates in force now, after a rate is corrected or added. Reports the rows that change and lists, without writing, the rows it cannot convert. No flag; idempotent. See [below](#os-migrate-recompute-home-amounts) |
 | `os migrate comment-reactions` | Carry the emoji reactions a 17.x deployment stored in the retired `sys_comment.reactions` column into `sys_comment_reaction` records, list every stored value that does not read, and record the verified run that lets `os migrate apply --allow-destructive` drop the column |
 | `os migrate organization-ownership` | The v18 ownership ceremony (ADR-0131 D10): write a plan of what each table's rows will become, then `--apply` that reviewed plan. It upgrades a database 17.x or an 18.0 pre-release (`18.0.0-next.*`) created; a v18 server refuses to start on one until it has run. See [below](#os-migrate-organization-ownership) |
@@ -1954,6 +1955,101 @@ requires the `setup.write` capability in that organization and answers `403`
 otherwise; the code, field and object refusals are the command's. It is mounted with
 the other maintenance routes, so `metadata.endpoints.maintenance: false` takes it away.
 There is no Setup button for it yet: that is separate UI work.
+
+#### `os migrate unit-codes`
+
+A `text` field holds whatever its writers typed: `kg`, `KG`, `公斤`. Once the field
+becomes a unit code field, because a quantity names it as its
+`unitConfig.unitField` or because it declares `unitConfig: { unitMode: 'code' }`
+itself, every write of it must hold a unit code, and editing a quantity beside a
+value there that is free text or blank is refused. The rows already stored keep
+their text. The save that makes the declaration answers 409 `destructive_change`
+naming this command (finding `unit_code_field_declared` on the code field, or
+`unit_mode_to_record` on a stored quantity switched to `unitMode: 'record'`;
+[Units](/docs/data-modeling/units#converting-a-field-that-already-holds-rows)
+covers the switch). This command rewrites the stored text, in place, into unit codes.
+
+```bash
+os migrate unit-codes --object material --field uom                                              # Dry run: lists every stored value, writes none
+os migrate unit-codes --object material --field uom --map-file units.json                        # Dry run: what the mapping does with each value
+os migrate unit-codes --object material --field uom --map-file units.json --org org_emea --apply # Write one organization's rows (prompts)
+os migrate unit-codes --object material --field uom --map-file units.json --all-organizations --apply   # Every organization, one mapping
+os migrate unit-codes --object material --field uom --map-file units.json --apply --yes --json   # CI / scripts
+```
+
+**The mapping is yours, never derived.** `--object` and `--field` are required, and
+`--field` names the unit code field itself (the `text` field), not the quantity: a
+quantity is refused with `INVALID_FIELD`, naming the field its unit is stored in.
+`--map-file` is a JSON object of stored text, exactly as written, to a unit code:
+
+```json
+{ "kg": "KGM", "KG": "KGM", "公斤": "KGM", "pcs": "H87", "": "H87" }
+```
+
+Matching is exact: `kg`, `KG` and `kg ` are three keys. Nothing guesses that `公斤`
+is `KGM`. The entry `""` is the one spelling for a **blank unit beside a quantity**:
+such a row is written only from that entry, and without it the row is counted and
+left blank. A blank unit with no quantity beside it is owed nothing and left alone.
+A key of white space only, or an entry that maps to no code, is refused with
+`VALIDATION_ERROR` / 400 before the database is opened, as is a file that does not
+read as JSON. Each target must be a unit code the field admits: a standard code, or
+one of the organization's own units, and of the field's `unitDimension` when it
+declares one. A target that is not is refused with `INVALID_FIELD` before any row
+is written.
+
+**Run it without `--map-file` first.** The dry run (the default) lists every
+distinct stored value with its row count and what the mapping does with it, and
+writes nothing, so a first run with no mapping is how you see the spellings to map.
+`--apply` counts first, read-only, and is refused (`VALIDATION_ERROR` / 400, exit 1)
+before any write while a non-blank value that is no unit code has no mapping entry,
+naming each one (under `--json`, in its `unmatched` array). So one apply run
+converts the whole field or nothing.
+
+**A unit code is never rewritten.** A row already holding a unit code is left as
+stored, even when the mapping has an entry for it (the report names such an entry
+as unused). That includes two codes the field does not admit, each listed and
+counted apart: a retired unit of the row's organization, and a unit code of
+another dimension than the field's `unitDimension`. Rewriting them from a mapping
+would change what the stored quantity means. A run that leaves any of these, or a
+blank beside a quantity with no `""` entry, ends with what is left instead of a
+success line.
+
+**One organization at a time, or all of them explicitly.** As on
+[`os migrate record-currency-codes`](#os-migrate-record-currency-codes):
+`--org <id>` converts only that organization's rows, and `--all-organizations`
+uses the one mapping for every organization's rows, counting each apart. When the
+object's rows belong to more than one organization and you give neither, the run
+(a dry run as well as `--apply`) is refused with `VALIDATION_ERROR` / 400 and exit 1
+before any write, listing each organization's counts (under `--json`, its
+`organizations` array). `--org` and `--all-organizations` together are a usage error.
+
+Each row is written through the engine like any other update, so the unit write
+check judges every code, and it is audited. Idempotent: a converted row holds a
+unit code and is never rewritten, so re-running until the report shows nothing to
+convert is the verification, which is why this command records no flag. A walk
+that reaches `--max-records` stops there and says the walk is incomplete; re-run
+without the cap to finish.
+
+**Without shell access, use the route.** An organization admin on a hosted
+deployment runs the same backfill over HTTP, for the rows of **the caller's current
+organization only**:
+
+```http
+POST /api/v1/meta/_migrate-unit-codes
+Content-Type: application/json
+
+{ "object": "material", "field": "uom", "mapping": { "kg": "KGM", "": "H87" }, "apply": true }
+```
+
+It answers `{ "success": true, "data": … }` with, as `data`, the report this command
+prints under `--json` (its `report` member), and is a **preview unless `apply` is
+literally `true`**; with no `mapping` the preview lists every stored value. The body
+takes `object`, `field`, `mapping` and `apply` and nothing else: `organizationId`,
+`allOrganizations` or any other key is refused with `VALIDATION_ERROR` / 400. A
+request with no current organization is refused `403`. It requires the `setup.write`
+capability in that organization and answers `403` otherwise; the field, mapping and
+unmatched-value refusals are the command's. It is mounted with the other
+maintenance routes, so `metadata.endpoints.maintenance: false` takes it away.
 
 #### `os migrate recompute-home-amounts`
 
@@ -3907,6 +4003,62 @@ the grant, use the environment's console: **Account → Connect an AI Assistant*
 | `-s, --server <url>` | `OS_CLOUD_URL` | Control-plane URL. Default `https://cloud.objectos.ai`, or the URL recorded by `os cloud login` |
 | `-t, --token <key>` | `OS_CLOUD_API_KEY` | Bearer token, used only to find the environment; `$OS_TOKEN` and `~/.objectstack/cloud.json` are the fallbacks |
 
+### Knowledge
+
+The administrator's view of the server's [knowledge sources](/docs/ai/knowledge-rag#the-first-build-and-rebuilding-a-source):
+what each source's index holds, and one complete rebuild of a source. Both
+commands call the `knowledge` settings actions (`POST /api/settings/knowledge/rebuild`
+and `/index_status`), which answer only an account with
+`manage_platform_settings`; any other caller is refused with `403` and is told
+nothing about the sources.
+
+| Command | Description |
+|---------|-------------|
+| `os knowledge status` | Each source's index state (built, never built, due a rebuild) and the last build the answering node ran |
+| `os knowledge rebuild` | Start one complete build of a source on the server and follow its progress |
+
+#### `os knowledge status`
+
+```bash
+os knowledge status                    # every source
+os knowledge status support_articles   # one source
+```
+
+Prints, per source, its adapter and kind, its index state against what the
+server expects (and whether a build is due), and the last build the node that
+answered ran: its progress while it runs, its counts once it ended. A build's
+record lives on the node that ran it, so behind a load balancer the node that
+answers may not be the one building; the index state is read from the store and
+is the same on every node. Exits `1` with the server's refusal text when the
+action is refused.
+
+#### `os knowledge rebuild`
+
+```bash
+os knowledge rebuild support_articles            # start and follow to the end
+os knowledge rebuild support_articles --no-wait  # start, and return at once
+```
+
+**A build costs money:** every row the source's `where` matches is read, and the
+content fields of each one the index does not already hold unchanged are sent to
+the embedding provider, which bills for them. The build runs on the server in
+the background; the command reads `index_status` every `--interval` seconds and
+prints the build's progress until it ends. It exits `0` when the build finished,
+and `1` when the server refused the rebuild (an unknown or `file` source, a
+build already running on that node), when the build did not run or did not
+finish, or when the progress was answered by another node than the one
+building (the build continues there). `--no-wait` exits `0` once the build has
+started and reports no outcome: the build can still end without running
+(another node holds the source's lock) or fail, which only `os knowledge status`
+then shows.
+
+| Flag | Commands | Env equivalent | Purpose |
+|---|---|---|---|
+| `-u, --url <url>` | both | `OS_CLOUD_URL` | Server URL (default `http://localhost:3000`) |
+| `-t, --token <token>` | both | `OS_TOKEN` | Bearer token of an administrator |
+| `--no-wait` | `rebuild` | — | Return once the build has started; its outcome is not reported |
+| `--interval <s>` | `rebuild` | — | Seconds between two progress reads (default `2`) |
+
 ### Skills
 
 The published skills catalog (`@objectstack/skills`, see [AI Skills](/docs/ai/skills))
@@ -4306,7 +4458,7 @@ export default defineStack({
     name: 'My App',
     description: 'My ObjectStack application',
     // Protocol major this app is authored against (ADR-0087 load-time check).
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
   },
 
   objects: Object.values(objects),

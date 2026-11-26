@@ -122,8 +122,10 @@ export const FIELD_KEY_STORAGE_CLASS: Readonly<Record<string, FieldKeyClass>> = 
   transferBehavior: 'presentation', // a Change Owner cascade of the relationship (ruling 7000907189 point 4) — read by the Change Owner action, never by `createColumn`
   internal: 'presentation',
   readonly: 'presentation',
+  uiReadonly: 'presentation', // the console's hand lock (#36806) — read by the console's edit surfaces, never by `createColumn`
   visibleWhen: 'presentation',
   readonlyWhen: 'presentation',
+  uiReadonlyWhen: 'presentation', // the hand lock's CEL predicate (#36806) — read by the console, never by `createColumn`
   requiredWhen: 'presentation',
   // `conditionalRequired` (the pre-17 spelling of `requiredWhen`) was a row
   // here while the spec carried its tombstone; the tombstone aged out of

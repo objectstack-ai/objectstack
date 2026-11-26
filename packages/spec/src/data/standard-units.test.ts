@@ -4,6 +4,8 @@ import { describe, it, expect } from 'vitest';
 import {
   ORGANIZATION_UNIT_CODE_PATTERN,
   STANDARD_UNITS,
+  STANDARD_UNIT_NAMES,
+  standardUnitName,
   UNIT_DIMENSIONS,
   UNIT_DIMENSION_BASE_CODES,
   type StandardUnit,
@@ -121,5 +123,34 @@ describe('ORGANIZATION_UNIT_CODE_PATTERN — the organization code namespace (AD
 
   it('can never match a standard code, so an organization code never collides with one', () => {
     for (const code of Object.keys(STANDARD_UNITS)) expect(orgCode.test(code), code).toBe(false);
+  });
+});
+
+describe('STANDARD_UNIT_NAMES — the English base name of every standard code (ADR-0158 L2, 2A)', () => {
+  it('names exactly the codes of STANDARD_UNITS, in the same order', () => {
+    expect(Object.keys(STANDARD_UNIT_NAMES)).toEqual(Object.keys(STANDARD_UNITS));
+  });
+
+  it('gives every code a non-empty, trimmed, lowercase English name, and no two codes one name', () => {
+    const names = Object.values(STANDARD_UNIT_NAMES);
+    for (const [code, name] of Object.entries(STANDARD_UNIT_NAMES)) {
+      expect(name, code).toMatch(/^\S(?:.*\S)?$/);
+      expect(name, code).toBe(name.replace(/^US /, 'US ').toLowerCase().replace(/^us /, 'US '));
+    }
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('is frozen, so no reader can rename a unit at runtime', () => {
+    expect(Object.isFrozen(STANDARD_UNIT_NAMES)).toBe(true);
+  });
+
+  it('answers by own property in exact uppercase, as standardUnitOf does', () => {
+    expect(standardUnitName('KGM')).toBe('kilogram');
+    expect(standardUnitName('H87')).toBe('piece');
+    expect(standardUnitName('kgm')).toBeUndefined();
+    expect(standardUnitName(' KGM')).toBeUndefined();
+    expect(standardUnitName('toString')).toBeUndefined();
+    expect(standardUnitName('BOX_12')).toBeUndefined();
+    expect(standardUnitName(undefined)).toBeUndefined();
   });
 });

@@ -440,6 +440,206 @@
         },
         { "revision":  6, "date":  "2026-11-24", "change":  "variants[2] reads the running app's design-mode menu editor, and knownGaps[0](b) marks Studio Interfaces' list-view Columns rows as retired with that pillar (#36502). No clause changed", "ref":  "#36502" }
       ]
+    },
+    {
+      "id": "ux-conventions.one-design-system-one-layout",
+      "title": "One design system, one layout: every console and Studio page an author gets without writing UI code draws from the same tokens, type scale, spacing and page frame, and a page that departs from them is caught before it ships",
+      "since": null,
+      "status": "planned",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "an end user moving between list, record, dashboard and custom pages",
+        "an author who writes metadata only and accepts the result"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a stated measure of consistency an oracle can read across page kinds; at the base sha only the list frame and the record header carry measured geometry (records-forms.list-view-capabilities, records-forms.record-open-path-and-header) and no gate reads the rest"
+        ]
+      },
+      "acceptance": [
+        {
+          "clause": "every page kind draws the shared page frame and design tokens, measured the same way on each",
+          "oracle": "screenshot",
+          "verify": "read the frame geometry and the computed token values on each page kind",
+          "evidence": "per-page screenshots and the computed values"
+        }
+      ],
+      "source": [
+        "docs/NORTH-STAR.md, Product areas, area:ux core feature 1: one design system, one consistent layout",
+        "docs/NORTH-STAR.md, Priority rule 4: looking wrong is as much a defect as failing to render",
+        "records-forms.list-view-capabilities (list frame geometry clauses)",
+        "records-forms.record-open-path-and-header (record header layout)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-25",
+          "change": "initial — planned. North Star core feature ux 1 has measured geometry on the list and record pages only; no item or gate verifies the rest of the page kinds at 49c8e0f0. Steps arrive with the oracle, in the edit that promotes this item after a run in which it passes",
+          "ref": "#35212"
+        }
+      ]
+    },
+    {
+      "id": "ux-conventions.phone-main-operations",
+      "title": "The main operations work on a phone: at 390×844 with touch an end user signs in, opens an app's menu, finds a record in a list, opens it, edits and saves it and creates one — nothing pushes the page sideways, every control is a 44px target, and Back closes the drawer before it leaves the page",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "a member end user on a phone-sized touch screen (390×844, hasTouch)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a member persona that can read, edit and create showcase_task",
+          "a browser context emulating a phone: viewport 390×844, hasTouch, isMobile"
+        ]
+      },
+      "steps": [
+        "sign in through the form on the phone context",
+        "open the showcase app; open its menu drawer (swipe in from the left edge, or the app bar's control); press Back once with the drawer open",
+        "open the task list; search for a task; open it",
+        "edit one field on the record and save; re-read the record over REST",
+        "create a task from the list; save; re-read over REST",
+        "on each page, read the document's scroll width against the viewport width and the bounding boxes of the page's own controls"
+      ],
+      "acceptance": [
+        {
+          "clause": "each main operation completes on the phone and its write persists",
+          "oracle": "api",
+          "verify": "sign-in holds a session, the edit and the create each read back over REST with the values entered",
+          "evidence": "the REST re-reads and a screenshot per step"
+        },
+        {
+          "clause": "nothing pushes the page sideways",
+          "oracle": "dom",
+          "verify": "document.documentElement.scrollWidth equals the viewport width on the list, the record and the create dialog",
+          "evidence": "the measured widths"
+        },
+        {
+          "clause": "the page's own controls are 44px touch targets and the create or edit dialog fills the viewport and no more",
+          "oracle": "dom",
+          "verify": "each control's bounding box is at least 44px tall below the sm breakpoint; the dialog's box equals the viewport (ui/packages/components/src/hooks/use-mobile.tsx#useIsMobile, #MOBILE_BREAKPOINT)",
+          "evidence": "the bounding boxes"
+        },
+        {
+          "clause": "Back with the menu drawer open closes the drawer and stays on the page",
+          "oracle": "dom",
+          "verify": "after Back the drawer is closed and the URL is unchanged",
+          "evidence": "the URL before and after and a screenshot"
+        }
+      ],
+      "negative": [
+        "an operation that can only be finished by zooming out or scrolling sideways is a FAIL",
+        "Back leaving the page while the drawer is open is a FAIL"
+      ],
+      "automated": {
+        "kind": "e2e",
+        "ref": "ui/e2e/record-flow-phone-targets.spec.ts, ui/e2e/live/phone-nav-drawer-back-29131.spec.ts, ui/e2e/sidebar-offcanvas-geometry.spec.ts"
+      },
+      "source": [
+        "docs/NORTH-STAR.md, Product areas, area:ux core feature 4: the main operations can be done on a phone",
+        "ui/packages/components/src/hooks/use-mobile.tsx#useIsMobile",
+        "ui/e2e/record-flow-phone-targets.spec.ts",
+        "ui/e2e/live/phone-nav-drawer-back-29131.spec.ts"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-25",
+          "change": "initial — maps North Star core feature ux 4 to an item; read from source at 49c8e0f0, no live run made",
+          "ref": "#35212"
+        }
+      ]
+    },
+    {
+      "id": "ux-conventions.first-screen-lcp",
+      "title": "Common pages paint their first screen within 2.5 s: signed in, on a cold cache, in desktop Chrome under Lighthouse's desktop profile, the median Largest Contentful Paint of 5 runs is at most 2.5 s on each of home, an object list and a record page",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "a signed-in user on desktop Chrome (on a stock showcase boot, the dev admin the boot seeds)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a showcase boot of the tree under test, with the Console rebuilt from it (`pnpm build`, then `pnpm console:build`): /_console/ serves the copy in packages/console/dist, so an older Console build measures an older Console",
+          "Lighthouse run with its desktop preset (`lighthouse --preset=desktop`, or its node API with `lighthouse/core/config/desktop-config.js`) against a Chrome whose session signed in before the measured navigation (attach with `--port`)",
+          "one showcase_task record id, read over REST (`GET /api/v1/data/showcase_task?limit=1`)"
+        ],
+        "knownGaps": [
+          "a container run measures headless Chrome for Testing on the container's CPU, not desktop Chrome on real hardware. The preset simulates the network leg (simulated throttling), but the CPU leg is the host's own. The run records which kind of reading it took (browser build, headless or not, host)"
+        ]
+      },
+      "steps": [
+        "boot the showcase and wait for the server's ready line before the first probe (trap first-boot-cold-start)",
+        "in the Chrome that Lighthouse attaches to, sign in through the Console login form at /_console/login; confirm the session holds (the Console's localStorage auth token and the better-auth.session_token cookie)",
+        "name the three pages: home, /_console/home (record the URL it lands on: on the showcase it redirects to the app's home page); an object list, /_console/apps/showcase_app/showcase_task; a record page, /_console/apps/showcase_app/showcase_task/record/:id with the id read over REST",
+        "for each page run Lighthouse 5 times with the desktop preset as shipped (performance category; storage reset left on, its default). Before each run the reset clears the HTTP cache, cache storage and service workers and keeps cookies and localStorage, so each run is on a cold cache and signed in",
+        "from each run read audits['largest-contentful-paint'].numericValue, finalDisplayedUrl, the LCP element (the node in audits['lcp-breakdown-insight']) and configSettings; take the median of the 5 values for each page"
+      ],
+      "acceptance": [
+        {
+          "clause": "every scored run measured the page itself, signed in, on a cold cache",
+          "oracle": "screenshot",
+          "verify": "the run's final screenshot and finalDisplayedUrl show the requested page, not /login or a loading screen; the LCP element is page content; the page's script requests have transferSize above 0 (fetched over the network, not from cache)",
+          "evidence": "per run: finalDisplayedUrl and the LCP element; one Lighthouse JSON report per page"
+        },
+        {
+          "clause": "the run profile is Lighthouse's desktop profile: about 10 Mbps, 40 ms RTT, no CPU throttle, a desktop viewport",
+          "oracle": "test",
+          "verify": "configSettings reads formFactor desktop, throttling.rttMs 40, throttling.throughputKbps 10240, throttling.cpuSlowdownMultiplier 1, screenEmulation.mobile false, disableStorageReset false",
+          "evidence": "the configSettings block, the Lighthouse version and the Chrome version"
+        },
+        {
+          "clause": "home: the median LCP of 5 runs is at most 2.5 s",
+          "oracle": "test",
+          "verify": "the median of the 5 largest-contentful-paint values is 2500 ms or less",
+          "evidence": "the five values and their median"
+        },
+        {
+          "clause": "an object list: the median LCP of 5 runs is at most 2.5 s",
+          "oracle": "test",
+          "verify": "the median of the 5 largest-contentful-paint values is 2500 ms or less",
+          "evidence": "the five values and their median"
+        },
+        {
+          "clause": "a record page: the median LCP of 5 runs is at most 2.5 s",
+          "oracle": "test",
+          "verify": "the median of the 5 largest-contentful-paint values is 2500 ms or less",
+          "evidence": "the five values and their median"
+        }
+      ],
+      "negative": [
+        "a median above 2500 ms on a page is a FAIL for that page's clause. One run above 2500 ms is not a FAIL when the median of the 5 runs is at or below it",
+        "a run whose final URL is the login page, or whose LCP element is the sign-in form or a loading screen, measured something else: discard it and run again, never score it",
+        "a reading under the default mobile preset, with a CPU slowdown added, or on a warm cache is not this item's reading. The threshold holds only under the conditions above"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "first-boot-cold-start"
+      ],
+      "source": [
+        "docs/NORTH-STAR.md, Product areas, area:ux core feature 6: common pages paint their first screen within an acceptable time",
+        "#35212, maintainer ruling 7178954860: LCP ≤ 2.5 s; cold cache, logged in, desktop Chrome, Lighthouse desktop profile (about 10 Mbps / 40 ms RTT, no CPU throttle); the median of 5 runs on each of home, an object list and a record page; a baseline reading before it gates",
+        "ui/apps/console/src/App.tsx#App (the /home and /apps/:appName/* routes the three pages load through)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-26",
+          "change": "initial — maps North Star core feature ux 6 to an item under ruling 7178954860. Baseline reading, the ruling's precondition before the item gates, taken at db77cc493a: a fresh showcase boot (`pnpm dev -- --fresh`, Console built from the same tree), dev admin signed in, Lighthouse 13.6.0 node API, desktop preset (simulated throttling, rttMs 40, throughputKbps 10240, cpuSlowdownMultiplier 1, 1350x940), 5 runs per page. LCP ms: home 3516, 3557, 3513, 3602, 3624 (median 3557); object list 4625, 4585, 4554, 4661, 4663 (median 4625); record page 4264, 4175, 4111, 4221, 4132 (median 4175). All three medians are above 2500 ms. Headless Chrome for Testing 158 in a 4-core container, not desktop Chrome on real hardware",
+          "ref": "#35212"
+        }
+      ]
     }
   ]
 }

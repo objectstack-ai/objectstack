@@ -6,6 +6,7 @@ import {
   AI_CONTEXT_FIELD_UNKNOWN,
   AI_CONTEXT_OBJECT_UNKNOWN,
   AI_CONTEXT_RELATED_LINK_UNKNOWN,
+  AI_CONTEXT_SORT_FIELD_UNSORTABLE,
   validateAiContext,
 } from './validate-ai-context.js';
 import { explainRule } from './rule-explanations.js';
@@ -24,7 +25,7 @@ const objects = [
   },
   {
     name: 'policy_revision',
-    fields: { version: { type: 'text' }, policy: { type: 'lookup', reference: 'policy' } },
+    fields: { version: { type: 'text' }, policy: { type: 'lookup', reference: 'policy' }, rank: { type: 'number', sortable: false } },
   },
   {
     name: 'policy_link',
@@ -69,6 +70,67 @@ describe('validateAiContext — ADR-0160 D1 author defects', () => {
     ]);
   });
 
+  it('reports a where or orderBy field the child does not define (ADR-0160 second amendment): the list is left out', () => {
+    const stack = {
+      objects,
+      aiContexts: [pack({
+        related: [{
+          object: 'policy_revision',
+          fields: ['version'],
+          where: { $or: [{ version: 'v1' }, { is_curent: true }] },
+          orderBy: [{ field: 'version', order: 'asc' }, { field: 'sortno', order: 'desc' }],
+          limit: 5,
+        }],
+      })],
+    };
+    expect(rulesOf(stack)).toEqual([
+      [AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].related[0].where'],
+      [AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].related[0].orderBy[1].field'],
+    ]);
+    const [whereFinding] = validateAiContext(stack);
+    expect(whereFinding.message).toContain("'is_curent'");
+    expect(whereFinding.message).toContain('left out');
+    // Control: the same keys on fields the child defines are clean.
+    expect(rulesOf({
+      objects,
+      aiContexts: [pack({ related: [{ object: 'policy_revision', where: { version: { $ne: 'v0' } }, orderBy: [{ field: 'version' }] }] })],
+    })).toEqual([]);
+  });
+
+  it('reports an orderBy field the child does not offer as a sort (sortable: false, a formula): the list is left out', () => {
+    const ranked = objects.map((o) => o.name !== 'policy_revision' ? o : {
+      ...o,
+      fields: {
+        ...o.fields,
+        score: { type: 'formula', expression: 'rank * 2' },
+        seq: { type: 'number' },
+      },
+    });
+    const stack = {
+      objects: ranked,
+      aiContexts: [pack({
+        related: [{
+          object: 'policy_revision',
+          where: { rank: { $gt: 0 } },
+          orderBy: [{ field: 'seq' }, { field: 'rank', order: 'desc' }, { field: 'score' }],
+        }],
+      })],
+    };
+    expect(rulesOf(stack)).toEqual([
+      [AI_CONTEXT_SORT_FIELD_UNSORTABLE, 'aiContexts[0].related[0].orderBy[1].field'],
+      [AI_CONTEXT_SORT_FIELD_UNSORTABLE, 'aiContexts[0].related[0].orderBy[2].field'],
+    ]);
+    const [declared, formula] = validateAiContext(stack);
+    expect(declared.severity).toBe('warning');
+    expect(declared.message).toContain("'rank'");
+    expect(declared.message).toContain('`sortable: false`');
+    expect(declared.message).toContain('left out');
+    expect(formula.message).toContain('formula');
+    // Control: the same fields in `where` and a sortable order are clean.
+    expect(rulesOf({ objects: ranked, aiContexts: [pack({ related: [{ object: 'policy_revision', where: { rank: 1, score: 2 }, orderBy: [{ field: 'seq' }] }] })] }))
+      .toEqual([]);
+  });
+
   it('reports an object the stack does not define once, without judging its fields; a sys_ object is not judged', () => {
     expect(rulesOf({ objects, aiContexts: [pack({ object: 'polcy', related: undefined, body: undefined })] })).toEqual([
       [AI_CONTEXT_OBJECT_UNKNOWN, 'aiContexts[0].object'],
@@ -98,10 +160,77 @@ describe('validateAiContext — ADR-0160 D1 author defects', () => {
     ]);
   });
 
+  // The runtime answer this verdict matches, measured over one real kernel (the
+  // `/mcp` door, the real protocol, `SqlDriver`): on an object that declares
+  // neither `owner_id` nor `created_at`, the served definition carries both,
+  // and `get_record_context` answers both in the root's `fields`, a related
+  // list's `fields`, its `where` and its `orderBy`. On an `ownership: 'org'`
+  // object the platform injects no `owner_id` and the tool leaves it out.
+  // `service-record-context`'s injected-system-columns test pins the
+  // executor's half over a door serving the same registry-injected shape.
+  it('an injected system column the object does not declare is no unknown field (owner_id, created_at)', () => {
+    const stack = {
+      objects,
+      aiContexts: [pack({
+        fields: ['title', 'owner_id', 'created_at'],
+        related: [{
+          object: 'policy_revision',
+          fields: ['version', 'owner_id', 'created_by'],
+          where: { owner_id: 'usr_1' },
+          orderBy: [{ field: 'created_at', order: 'desc' }],
+        }],
+      })],
+    };
+    expect(objects.flatMap((o) => Object.keys(o.fields))).not.toContain('owner_id');
+    expect(validateAiContext(stack)).toEqual([]);
+  });
+
+  it('a column the platform does not inject on the object is still unknown: owner_id under ownership org', () => {
+    const orgOwned = objects.map((o) => (o.name === 'policy' || o.name === 'policy_revision' ? { ...o, ownership: 'org' } : o));
+    const stack = {
+      objects: orgOwned,
+      aiContexts: [pack({
+        fields: ['title', 'owner_id', 'created_at'],
+        related: [{ object: 'policy_revision', fields: ['owner_id'], where: { owner_id: 'usr_1' }, orderBy: [{ field: 'owner_id' }] }],
+      })],
+    };
+    expect(rulesOf(stack)).toEqual([
+      [AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].fields[1]'],
+      [AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].related[0].fields[0]'],
+      [AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].related[0].where'],
+      [AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].related[0].orderBy[0].field'],
+    ]);
+    // And `systemFields: false` withholds every injected column, `created_at` included.
+    const optedOut = objects.map((o) => (o.name === 'policy' ? { ...o, systemFields: false } : o));
+    expect(rulesOf({ objects: optedOut, aiContexts: [pack({ fields: ['created_at'], related: undefined })] })).toEqual([
+      [AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].fields[0]'],
+    ]);
+  });
+
+  it('a body naming an injected column is judged by the injected definition, not reported unknown', () => {
+    expect(rulesOf({ objects, aiContexts: [pack({ body: { field: 'created_at' } })] })).toEqual([
+      [AI_CONTEXT_BODY_NOT_LONG_TEXT, 'aiContexts[0].body.field'],
+    ]);
+  });
+
+  it('on a sys_ root, the child\'s injected references to it are links, as get_record_context resolves them', () => {
+    const withUser = [
+      ...objects,
+      { name: 'sys_user', fields: { name: { type: 'text' } } },
+      { name: 'task', fields: { subject: { type: 'text' }, assignee: { type: 'lookup', reference: 'sys_user' } } },
+    ];
+    const userPack = { name: 'user_brief', object: 'sys_user', fields: ['name'] };
+    const [finding] = validateAiContext({ objects: withUser, aiContexts: [{ ...userPack, related: [{ object: 'task' }] }] });
+    expect([finding?.rule, finding?.path]).toEqual([AI_CONTEXT_RELATED_LINK_UNKNOWN, 'aiContexts[0].related[0]']);
+    expect(finding?.message).toContain('assignee');
+    expect(finding?.message).toContain('owner_id');
+    expect(validateAiContext({ objects: withUser, aiContexts: [{ ...userPack, related: [{ object: 'task', field: 'assignee' }] }] })).toEqual([]);
+  });
+
   it('every verdict is a warning, and every rule it emits has an `os explain` entry', () => {
     const findings = validateAiContext({ objects, aiContexts: [pack({ fields: ['nope'], body: { field: 'title' } })] });
     expect(findings.every((f) => f.severity === 'warning')).toBe(true);
-    for (const id of [AI_CONTEXT_OBJECT_UNKNOWN, AI_CONTEXT_FIELD_UNKNOWN, AI_CONTEXT_RELATED_LINK_UNKNOWN, AI_CONTEXT_BODY_NOT_LONG_TEXT]) {
+    for (const id of [AI_CONTEXT_OBJECT_UNKNOWN, AI_CONTEXT_FIELD_UNKNOWN, AI_CONTEXT_RELATED_LINK_UNKNOWN, AI_CONTEXT_BODY_NOT_LONG_TEXT, AI_CONTEXT_SORT_FIELD_UNSORTABLE]) {
       expect(explainRule(id), id).toBeTruthy();
     }
   });
@@ -132,6 +261,8 @@ describe('validateAiContext on the runtime publish door (ADR-0160 D1)', () => {
 
   const FAMILIES: ReadonlyArray<[string, Record<string, unknown>, string, string]> = [
     ['a misspelled field', pack({ fields: ['title', 'titel'] }), AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].fields[1]'],
+    ['a misspelled where field', pack({ related: [{ object: 'policy_revision', where: { verison: 'v1' } }] }), AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].related[0].where'],
+    ['an order on a field not offered as a sort', pack({ related: [{ object: 'policy_revision', orderBy: [{ field: 'rank' }] }] }), AI_CONTEXT_SORT_FIELD_UNSORTABLE, 'aiContexts[0].related[0].orderBy[0].field'],
     ['an unknown related object', pack({ related: [{ object: 'policy_revison' }] }), AI_CONTEXT_OBJECT_UNKNOWN, 'aiContexts[0].related[0].object'],
     ['a related list with no link', pack({ related: [{ object: 'account' }] }), AI_CONTEXT_RELATED_LINK_UNKNOWN, 'aiContexts[0].related[0]'],
     ['a body that is not long text', pack({ body: { field: 'title' } }), AI_CONTEXT_BODY_NOT_LONG_TEXT, 'aiContexts[0].body.field'],

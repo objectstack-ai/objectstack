@@ -280,6 +280,7 @@ const en = {
     // `validation.formInvalidJoiner` — because the fix is to the metadata, not
     // to anything the person filling the form can type.
     visibleWhenFaulted: "Can't submit: the visibleWhen rule of {{fields}} could not be evaluated. The rule must be fixed before this form can be submitted.",
+    uiReadonlyWhenFaulted: "Can't submit: the uiReadonlyWhen rule of {{fields}} could not be evaluated. The rule must be fixed before this form can be submitted.",
     fieldRequired: 'This field is required',
     saveError: 'Failed to save',
     unsavedChanges: 'You have unsaved changes. Are you sure you want to leave?',
@@ -5653,6 +5654,9 @@ const en = {
       metrics: 'Metrics',
       noAddedFilter: 'No filter added to the dataset definition',
     },
+    recordCitations: {
+      title: 'Cited from records',
+    },
     tool: {
       aggregate_data: 'Aggregate the data',
       get_record: 'Read the record',
@@ -5841,6 +5845,7 @@ const en = {
   },
   chatbotQuota: {
     title: 'Upgrade needed',
+    limitTitle: 'AI limit reached',
     fallbackMessage: 'You have reached your AI quota.',
     buyCredits: 'Buy a credit pack',
     upgradePlan: 'Upgrade plan',

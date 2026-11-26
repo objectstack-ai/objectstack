@@ -73,7 +73,7 @@ The scaffolder does more than copy files. It:
 ────────────────────────────────────────
   Environment: support-desk
   Namespace: support_desk
-  Template: blank — Minimal starter — one object, REST API, ready to extend
+  Template: blank — Companies and contacts, with platform tasks and notes in the menu — ready to extend
   …
   → Installing AI skills for your coding agent from @objectstack/skills@<version>...
   …
@@ -274,11 +274,12 @@ filename-suffix magic: metadata exists in the app only if its barrel exports it,
 so if a freshly-authored action doesn't show up, its export line is the first
 thing to check.
 
-What it does **not** touch is the starter `note` object the `blank` template
-scaffolded in step 1 (`src/objects/note.object.ts`, two fields). Nothing asked
-for it to go, so it stays in the project — which is why the counts below read
-**two** objects and **six** fields, not one and four. Delete it once the ticket
-object has replaced it and the same run reports `1 Objects  4 Fields`.
+What it does **not** touch is what the `blank` template scaffolded in step 1:
+the companies and contacts (`src/objects/company.object.ts` and
+`contact.object.ts`, seven fields each). Nothing asked for them to go, so they
+stay in the project — which is why the counts below read **three** objects and
+**eighteen** fields, not one and four. Delete them once the ticket object has
+replaced them and the same run reports `1 Objects  4 Fields`.
 
 This is the same metadata that powers the REST API, the Console UI, **and the MCP
 tools exposed to AI** — define it once, and ObjectStack derives the rest.
@@ -311,7 +312,7 @@ visible: 'status != "resolved"'
 ◆ Validate
 ────────────────────────────────────────
   → Validating against ObjectStack Protocol...
-  → Running author-time rules (79)...
+  → Running author-time rules (80)...
 
   ✗ Author-time rules failed (1 issue)
   • stack · action 'resolve_ticket' visible: bare reference `status` — a
@@ -340,8 +341,8 @@ Once it's clean:
 
   Support Desk v0.1.0
 
-  Data: 2 Objects  6 Fields
-  UI: 1 Apps  1 Views  1 Actions
+  Data: 3 Objects  18 Fields
+  UI: 1 Apps  3 Views  1 Actions
   Logic: 0 Flows
   Security: 0 Positions  0 Permissions
   Runtime: 3 plugins

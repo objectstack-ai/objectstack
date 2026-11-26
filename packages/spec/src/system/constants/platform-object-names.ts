@@ -96,6 +96,7 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_setting',
     'sys_setting_audit',
     'sys_sso_provider',
+    'sys_standard_unit_setting',
     'sys_task',
     'sys_team',
     'sys_team_member',

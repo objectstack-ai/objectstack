@@ -10,6 +10,7 @@ import {
   undeclaredActionRefusalCodeAtSave,
   undeclaredActionRefusalReasonAtRun,
   undeclaredActionRefusalReasonAtSave,
+  unreadableActionRefusalListAtRun,
   undeclaredHookRefusalAtRun,
   undeclaredHookRefusalCodeAtSave,
 } from '../data/hook-refusal-codes';
@@ -264,5 +265,58 @@ describe('the translation address — beside the action\'s other copy', () => {
     const r = TranslationDataSchema.safeParse({ globalActions: { export_all: { refusal: {} } } });
     expect(r.success).toBe(false);
     expect(issuesOf(r).find((i) => /unrecognized|rename|→/.test(i.message))?.message).toContain('`refusal` → `refusals`');
+  });
+});
+
+// #36877 (ruling 7178348458 letter A): an action refusing a whole selection
+// names an ordered list of declared reasons in one throw.
+describe('Action.refusals — a listed reason is refused at save where the body names it literally (#36877)', () => {
+  const refusals = {
+    NOT_DRAFT: { message: 'Only a draft invoice can be signed off.' },
+    STAGE_LOCKED: { message: 'Nothing changed.', reasons: { closed: { message: 'Closed.' }, won: { message: 'Won.' } } },
+  };
+
+  it('CONTROL: accepts a list of declared reasons', () => {
+    expect(ActionSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'STAGE_LOCKED', reasons: [{ reason: 'closed' }, { reason: 'won' }] };"),
+      refusals,
+    }).success).toBe(true);
+  });
+
+  it('refuses an undeclared listed reason at `body.source`', () => {
+    const r = ActionSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'STAGE_LOCKED', reasons: [{ reason: 'closed' }, { reason: 'lost' }] };"),
+      refusals,
+    });
+    expect(r.success).toBe(false);
+    const issue = issuesOf(r).find((i) => i.path.join('.') === 'body.source');
+    expect(issue?.message).toBe(undeclaredActionRefusalReasonAtSave('STAGE_LOCKED', 'lost', ['closed', 'won']));
+  });
+
+  it('refuses a listed reason under a code that declares no reasons', () => {
+    const r = ActionSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'NOT_DRAFT', reasons: [{ reason: 'closed' }] };"),
+      refusals,
+    });
+    expect(r.success).toBe(false);
+    const issue = issuesOf(r).find((i) => i.path.join('.') === 'body.source');
+    expect(issue?.message).toBe(undeclaredActionRefusalReasonAtSave('NOT_DRAFT', 'closed', []));
+  });
+
+  it('CONTROL: a `reasons` list nested under `params` is not a thrown list, so it saves under a code with no reasons', () => {
+    expect(ActionSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'NOT_DRAFT', params: { reasons: [{ reason: 'closed' }] } };"),
+      refusals,
+    }).success).toBe(true);
+  });
+
+  it('the run-time list fault names the action', () => {
+    expect(unreadableActionRefusalListAtRun('submit_signoff', 'STAGE_LOCKED', 'empty')).toContain(
+      "action 'submit_signoff' threw code 'STAGE_LOCKED' with a `reasons` list that names no reason",
+    );
   });
 });

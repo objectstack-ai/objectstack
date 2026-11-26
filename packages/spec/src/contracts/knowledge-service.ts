@@ -14,7 +14,7 @@ import type { IKnowledgeAdapter } from './knowledge-adapter';
  * `@objectstack/service-knowledge`.
  *
  * The service routes requests to one of many `IKnowledgeAdapter`
- * plugins (RAGFlow, LlamaIndex, Dify, …), wraps search results with a
+ * plugins (in-memory, pgvector, libSQL, …), wraps search results with a
  * permission-aware filter that uses the caller's `ExecutionContext`,
  * and drives event-based sync from ObjectQL.
  *
@@ -74,6 +74,37 @@ export interface KnowledgeSearchOptions {
    * `IDataEngine`.
    */
   executionContext?: ExecutionContext;
+  /**
+   * Search only inside these records (ADR-0161 K8, item 17, as its dated note
+   * of 2026-11-25 shapes it). Each entry names an object and record ids of it:
+   *
+   * - **The object a source indexes**: only the documents of those records
+   *   are searched in that source.
+   * - **A parent object**: only the documents whose lookup to it holds one of
+   *   those ids are searched, in a source that lists that lookup (a `lookup`
+   *   or `master_detail` field pointing at the object) in its
+   *   `metadataFields` — "the clauses of this policy". A source that lists no
+   *   such field, or two or more of them, is not reached by the entry; a
+   *   parent two hops away is not reached either.
+   *
+   * Several entries are a union: a document is searched when any entry holds
+   * for it. A source no entry reaches is not searched, and a `file` / `http`
+   * source answers nothing under a scope.
+   *
+   * - **Absent**: no scope, as before this option.
+   * - **Empty** (`[]`), or an entry whose `ids` is empty: nothing is in scope,
+   *   and the search answers no hits. Never read as "no scope".
+   *
+   * **Bounds.** At most 10 entries, each with at most 500 ids; `object` and
+   * every id a non-empty string, and no other key on an entry. A scope past
+   * them is refused before any adapter is called, with a coded error
+   * (ADR-0112: `code: 'VALIDATION_ERROR'`, `status: 400`).
+   *
+   * A ranking scope, not the access decision: every hit is still re-read as
+   * the caller, and an entry that reaches nothing answers the same empty
+   * answer a source withheld from the caller gives.
+   */
+  scope?: Array<{ object: string; ids: string[] }>;
 }
 
 /** Options accepted by `IKnowledgeService.reindexSource`. */

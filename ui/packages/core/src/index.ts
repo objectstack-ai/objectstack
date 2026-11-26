@@ -383,6 +383,9 @@ export * from './utils/parent-scope.js';
 // The other half of a view's field appetite: the fields its PREDICATES read,
 // which the column-derived `$select` never asked the server for.
 export * from './utils/predicate-fields.js';
+// Which unit a quantity is in and what it displays as (ADR-0158): the ONE
+// resolution every quantity face shares.
+export * from './utils/unit-display.js';
 export * from './utils/withheld-fields.js';
 // The THIRD source of a view's field appetite: the fields it GROUPS BY. The
 // spec's `grouping` block is a sibling of `columns`, not a subset, so a grid

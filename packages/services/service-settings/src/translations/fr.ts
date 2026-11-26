@@ -642,6 +642,7 @@ export const fr: PlatformTranslationData = {
         },
         embedder_provider: {
           label: 'Fournisseur',
+          help: 'Lu au démarrage du serveur : une modification enregistrée d’un paramètre de l’embedder prend effet au prochain redémarrage.',
           options: {
             none: 'Désactivé (aucun embedding)',
             openai: 'OpenAI',
@@ -697,10 +698,6 @@ export const fr: PlatformTranslationData = {
           description: 'Choisissez où sont stockés les morceaux de documents et leurs vecteurs.',
         },
         turso: { title: 'Turso / libSQL', description: 'Fonctionne avec Turso géré, un fichier local ou en mémoire.' },
-        ragflow: {
-          title: 'RAGFlow',
-          description: 'Déploiement RAGFlow externe. Voir https://ragflow.io pour l’auto-hébergement.',
-        },
         indexing: {
           title: 'Valeurs d’indexation par défaut',
           description: 'Une valeur définie sur la source de connaissances elle-même l’emporte sur ces valeurs par défaut.',
@@ -713,7 +710,6 @@ export const fr: PlatformTranslationData = {
           options: {
             memory: 'En mémoire (dév. / test uniquement)',
             turso: 'Turso / libSQL (cloud ou local)',
-            ragflow: 'RAGFlow (externe)',
           },
         },
         turso_url: {
@@ -723,12 +719,6 @@ export const fr: PlatformTranslationData = {
         turso_auth_token: {
           label: 'Jeton d’authentification',
           help: 'Nécessaire uniquement pour les URL Turso gérées.',
-        },
-        ragflow_base_url: { label: 'Base URL', help: 'Exemple : http://localhost:9380' },
-        ragflow_api_key: { label: 'Clé API' },
-        ragflow_default_dataset: {
-          label: 'ID du jeu de données par défaut',
-          help: 'Utilisé lorsqu’une source de connaissances ne désigne pas son propre jeu de données RAGFlow.',
         },
         chunk_target: {
           label: 'Taille cible des morceaux (caractères)',

@@ -55,8 +55,8 @@ The scaffolder (`create-objectstack`) does four things:
 1. **Copies a template** into `my-app/` and rewrites its identity — the npm
    package name, the manifest `name`/`displayName`, and a **namespace** derived
    from your project name (`my-app` → `my_app`). Every object in the template is
-   renamed to carry that prefix (`my_app_note`), which is what
-   `os validate` later enforces.
+   renamed to carry that prefix (`my_app_company`), and every reference to it
+   with it, which is what `os validate` later enforces.
 2. **Installs dependencies** (pnpm if available, otherwise npm).
 3. **Installs the AI skills bundle for one coding agent** from the
    `@objectstack/skills` package, at your installed `@objectstack/spec`'s
@@ -107,19 +107,22 @@ my-app/
 ├── objectstack.manifest.json    # displayName, namespace — the package listing
 ├── package.json
 ├── tsconfig.json
-├── note.test.ts                 # the starter test `npm test` runs
+├── starter.test.ts              # the starter test `npm test` runs
 ├── vitest.config.ts             # its test-runner config
 ├── AGENTS.md                    # conventions for coding agents
 └── src/
     ├── objects/
     │   ├── index.ts             # barrel — re-exports every object
-    │   └── note.object.ts       # a sample object
+    │   ├── company.object.ts    # companies the organization works with
+    │   └── contact.object.ts    # the people at them
     ├── views/
     │   ├── index.ts
-    │   └── note.view.ts         # the sample object's list view
+    │   ├── company.view.ts      # a grid and a board of companies
+    │   └── contact.view.ts      # a grid and a board of contacts
     ├── apps/
     │   ├── index.ts
-    │   └── main.app.ts          # the starter app, listing the notes
+    │   └── main.app.ts          # the menu: companies, contacts, and the
+    │                            # platform's tasks and notes
     ├── actions/index.ts         # an empty barrel for each other directory
     ├── flows/index.ts           # `os generate` writes into, already
     ├── dashboards/index.ts      # wired into objectstack.config.ts
@@ -156,7 +159,7 @@ export default defineStack({
     type: 'app',
     name: 'My App',
     // Protocol major this app is authored against (ADR-0087 load-time check).
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
   },
   // `automation` runs flows and, per ADR-0097, materializes declarative
   // `connectors:` entries at boot, through the provider factory a connector
@@ -217,27 +220,38 @@ and add a `connectors:` entry naming its `provider`; the `automation`
 capability materializes it into a live connector at boot — see
 [Automation → Connectors](/docs/automation/connectors).
 
-**`src/objects/note.object.ts`** is a complete data model — schema, validation,
-API surface, and searchability in one typed definition:
+**`src/objects/company.object.ts`** and **`contact.object.ts`** are the
+platform's Starter app — companies and the people at them — as source you own.
+Each is a complete data model — schema, validation, sharing and form layout in
+one typed definition (abridged):
 
-```typescript title="src/objects/note.object.ts"
+```typescript title="src/objects/contact.object.ts"
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
-export const Note = ObjectSchema.create({
-  name: 'my_app_note',          // namespace-prefixed, snake_case
-  label: 'Note',
-  pluralLabel: 'Notes',
-  icon: 'sticky-note',
+export const Contact = ObjectSchema.create({
+  name: 'my_app_contact',              // namespace-prefixed, snake_case
+  sharingModel: 'public_read_write',   // org-wide default — an explicit, authored decision
+  label: 'Contact',
+  pluralLabel: 'Contacts',
 
   fields: {
-    title: Field.text({ label: 'Title', required: true, searchable: true, maxLength: 200 }),
-    body: Field.textarea({ label: 'Body' }),
+    name: Field.text({ label: 'Name', required: true, searchable: true, maxLength: 120 }),
+    company: Field.lookup('my_app_company', { label: 'Company' }),
+    email: Field.email({ label: 'Email', searchable: true }),
+    // …title, influence, phone, notes
   },
 
-  sharingModel: 'private',      // org-wide default — an explicit, authored decision
-  enable: { apiEnabled: true, searchable: true },
+  fieldGroups: [
+    { key: 'basic', label: 'Basic Information', fields: ['name', 'company', 'title', 'influence', 'owner_id'] },
+    // …
+  ],
 });
 ```
+
+The menu's other two entries, **Tasks** and **Notes**, are the platform's own
+`sys_task` and `sys_note`, which every environment carries: the project
+declares no copy of them, so a task or a note never changes who may see the
+record it is about.
 
 ### The packages you depend on
 
@@ -251,7 +265,7 @@ framework surface you install:
 | `@objectstack/plugin-hono-server` | The HTTP server that mounts the generated REST API. |
 | `@objectstack/connector-rest` · `-openapi` · `-mcp` | The three generic connector executors — register the `rest` / `openapi` / `mcp` provider factories so declarative `connectors:` entries materialize ([ADR-0097](/docs/automation/flows)). |
 | `@objectstack/cli` *(dev)* | The `os` / `objectstack` CLI: `dev`, `validate`, `build`, `start`. |
-| `@objectstack/verify` *(dev)* | The test harness: `bootStack` boots this app's own stack in-process, on an in-memory database and with no server port, and returns the handle a test asserts through. `npm test` runs the starter test `note.test.ts` with it. |
+| `@objectstack/verify` *(dev)* | The test harness: `bootStack` boots this app's own stack in-process, on an in-memory database and with no server port, and returns the handle a test asserts through. `npm test` runs the starter test `starter.test.ts` with it. |
 
 No driver package is listed because none is installed directly: `@objectstack/runtime`
 depends on `driver-sql`, `driver-sqlite-wasm` and `driver-memory` and installs
@@ -276,8 +290,9 @@ Console — data browser, metadata explorer, API docs — is served at
 <Callout type="info">
 **The starter ships one app, so your project is in the Console from the first
 boot.** Next to the platform's own apps you will see **Main**, from
-`src/apps/main.app.ts`; its `Notes` entry opens the list that
-`src/views/note.view.ts` declares for `my_app_note`. **An object appears in
+`src/apps/main.app.ts`, with Companies, Contacts, Tasks and Notes in its menu;
+Companies opens the list `src/views/company.view.ts` declares for
+`my_app_company`. **An object appears in
 Console navigation only when an app lists it**, and a package whose manifest
 type is `app` holds at most one app, so `main.app.ts` is the one: for each
 object you add, add a navigation entry for it to that app (a `group` entry with
@@ -302,12 +317,12 @@ curl -c cookies.txt -X POST http://localhost:3000/api/v1/auth/sign-in/email \
   -d '{"email": "admin@objectos.ai", "password": "admin123"}'
 
 # Create a record
-curl -b cookies.txt -X POST http://localhost:3000/api/v1/data/my_app_note \
+curl -b cookies.txt -X POST http://localhost:3000/api/v1/data/my_app_company \
   -H "Content-Type: application/json" \
-  -d '{"title": "Hello ObjectStack", "body": "Created via the generated API"}'
+  -d '{"name": "Northwind Trading", "type": "customer"}'
 
 # Query records (filtering, sorting, pagination built in)
-curl -b cookies.txt "http://localhost:3000/api/v1/data/my_app_note?select=title&sort=-created_at&top=10"
+curl -b cookies.txt "http://localhost:3000/api/v1/data/my_app_company?select=name&sort=-created_at&top=10"
 ```
 
 See the [Data API](/docs/api/data-api) for the full CRUD, batch, and analytics
@@ -318,18 +333,23 @@ client (`@objectstack/client`).
 
 Add a field and a second object by hand — the same edit an agent would make.
 
-```typescript title="src/objects/note.object.ts"
+```typescript title="src/objects/company.object.ts"
   fields: {
-    title: Field.text({ label: 'Title', required: true, searchable: true, maxLength: 200 }),
-    body: Field.textarea({ label: 'Body' }),
-    status: Field.select({
-      label: 'Status',
+    name: Field.text({ label: 'Company Name', required: true, searchable: true, maxLength: 200 }),
+    // …type, industry, website, phone, address, description
+    tier: Field.select({
+      label: 'Tier',
       options: [
-        { label: 'Draft', value: 'draft', default: true },
-        { label: 'Published', value: 'published' },
+        { label: 'Standard', value: 'standard', default: true },
+        { label: 'Key Account', value: 'key_account' },
       ],
     }),
   },
+
+  fieldGroups: [
+    { key: 'basic', label: 'Basic Information', fields: ['name', 'type', 'industry', 'tier', 'owner_id'] },
+    // …
+  ],
 ```
 
 New objects follow the same pattern: create `src/objects/<name>.object.ts` with
@@ -376,8 +396,9 @@ prepared the project for that handoff: the **skills bundle** is installed (step
 validate gate. Open the project in Claude Code (or Cursor / Copilot) and
 describe the next feature instead of typing it:
 
-> Add a `status` filter to the note list view, a dashboard with a metric of
-> published notes, and a daily flow that archives notes older than 90 days.
+> Add a `tier` filter to the company list view, a dashboard with a metric of
+> key-account companies, and a daily flow that creates a follow-up task for
+> every key account no one has contacted in 90 days.
 > Run `npm run validate` when done.
 
 Each of those lands in a different metadata domain (UI, dashboards,

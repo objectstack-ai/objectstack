@@ -33,7 +33,10 @@
  *    package-less row that read falls back to — else `P`'s own slot when `P`
  *    ships the name in code and holds no row of it yet. A package that
  *    neither holds a row of the name nor ships it is refused `409` naming
- *    every holder (`not-held-by-qualifier`).
+ *    every holder (`not-held-by-qualifier`). [#37130] The package-less row is
+ *    `P`'s slot only when `P` ships the name (ADR-0150 D4: that row is then
+ *    `P`'s customization): a read naming any other package falls back to it
+ *    too, and ⛔ such a package never addresses it.
  *
  * A version belongs to a slot by its history row's attribution
  * (`historyRowAttribution`, `@objectstack/metadata`). A version attributed to
@@ -166,7 +169,8 @@ function refuseWhereBareReadRefuses(host: Pick<ProtocolHost, 'engine'>, type: st
  * @throws {PackageScopedNameRefusedError} `ambiguous-in-environment` for a
  *   bare request of a name two or more row slots hold (other than a row-held
  *   base's, above), or the bare plain read's own refusal; `not-held-by-qualifier` for a package that neither
- *   holds a row of the name nor ships it, while another slot holds one.
+ *   holds a row of the name nor ships it, while any slot holds one (the
+ *   package-less row included, which such a package never addresses).
  */
 export async function historySlotOf(
     host: Pick<ProtocolHost, 'declinesStoredRow' | 'engine' | 'findServedOverlayRow' | 'packagelessAddress' | 'readItemActiveRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf'>,
@@ -196,7 +200,11 @@ export async function historySlotOf(
     const slot: string | null = served === undefined
         ? packageId
         : typeof binding === 'string' && binding !== '' ? binding : null;
-    if (!slots.includes(slot) && slots.length > 0
+    // [#37130] `P` holds the slot it addresses by a row bound to it (its own,
+    // its pair's declared override); the package-less row the read falls back
+    // to is held by no package, and is `P`'s only when `P` ships the name.
+    const holdsSlot = slot !== null && slots.includes(slot);
+    if (!holdsSlot && slots.length > 0
         && !shippingPackageIds(host.shippedArtifactsOf(type, name, undefined, member)).has(packageId)) {
         throw slotRefusal(type, name, 'not-held-by-qualifier', packageId, slots);
     }

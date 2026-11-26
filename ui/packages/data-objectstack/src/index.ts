@@ -3436,6 +3436,19 @@ export function narrowPersonalizationOverlay<T>(row: T): T {
  * (ADR-0034 seam); the two live apart because the seam sits above this
  * adapter, not beside it.
  */
+/**
+ * objectstack#36350 — the pin `updateView`'s draft write is sent with, from
+ * its strict draft read (`MetadataClient.getDraft`'s answer): `null` (no draft
+ * pending) asserts "no draft" (`If-None-Match: *`); an envelope's `version`
+ * token pins `If-Match`; an envelope with no token pins nothing, and the write
+ * goes unpinned as it did before the read served one.
+ */
+function draftWritePin(answer: unknown): { ifMatch: string } | { ifNoneMatch: '*' } | Record<string, never> {
+  if (answer === null || answer === undefined) return { ifNoneMatch: '*' };
+  const version = (answer as { version?: unknown }).version;
+  return typeof version === 'string' && version.length > 0 ? { ifMatch: version } : {};
+}
+
 function unwrapViewDraft(resp: unknown): Record<string, any> | null {
   if (!resp || typeof resp !== 'object') return null;
   const env = resp as Record<string, any>;
@@ -3701,7 +3714,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   // Subscribers registered via onMutation(). Emitted after each successful
   // create/update/delete so data-bound views (ListView, ObjectView, kanban,
   // calendar) auto-refresh — the interface ListView relies on to reflect
-  // inline-edit "Save All" writes without a manual reload.
+  // inline-edit cell saves without a manual reload.
   private mutationListeners = new Set<(event: DataSourceMutationEvent<T>) => void>();
   // objectui#13442 — how many `batchMutationEvents` scopes are open, and the
   // events held back while any is. Keyed by type + resource, so a 100-row run
@@ -4370,7 +4383,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   /**
    * Subscribe to create/update/delete events on any resource. Returns an
    * unsubscribe function. Data-bound views use this to auto-refresh after a
-   * mutation (e.g. inline-edit "Save All", which writes through `update` and
+   * mutation (e.g. an inline-edit cell save, which writes through `update` and
    * must repaint the list without a manual reload).
    */
   onMutation(callback: (event: DataSourceMutationEvent<T>) => void): () => void {
@@ -6909,10 +6922,17 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     // `MetadataClient.get` answers `null` on 404 (no draft pending) and throws
     // on anything else, so a transport failure here is NOT read as "published".
     const metaClient = this.metadataClient();
-    const [servedDraft, layers] = await Promise.all([
-      metaClient.get('view', viewName, { state: 'draft' }).then(unwrapViewDraft),
-      metaClient.layered('view', viewName),
-    ]);
+    // objectstack#36350 — the draft write below is pinned to the draft this
+    // read saw: the strict draft read's envelope (`getDraft`) carries its
+    // `version`. Read BEFORE the layers the body is merged from, so a draft
+    // write landing between the two leaves the pin older than the body and the
+    // write is refused, never the other way round (a pin newer than the body
+    // would let a merge onto the older body through). No draft pending at this
+    // read pins "no draft" (`If-None-Match: *`); an envelope that carries no
+    // version (a server from before the read served one) pins nothing.
+    const draftAnswer = await metaClient.getDraft('view', viewName);
+    const layers = await metaClient.layered('view', viewName);
+    const servedDraft = unwrapViewDraft(draftAnswer);
     const authored = authoredBuffer('view', layers, servedDraft);
     if (authored.kind === 'unserved') {
       throw new Error(
@@ -6928,7 +6948,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
         throw new Error(`updateView: the pending draft of view "${viewName}" is empty. Nothing was written.`);
       }
       const mergedDraft = mergeViewPatch(stored, partial, viewName, objectName);
-      await metaClient.save('view', viewName, mergedDraft, { mode: 'draft' });
+      // A draft that moved since the read (another author's edit, or a
+      // "Save to this view" in flight) is refused `409 METADATA_CONFLICT` and
+      // this throws: the edit is not merged over a body it never read.
+      await metaClient.save('view', viewName, mergedDraft, { mode: 'draft', ...draftWritePin(draftAnswer) });
       this.invalidateViewKeys(objectName, viewName);
       return mergedDraft;
     }

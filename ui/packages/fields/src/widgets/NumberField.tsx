@@ -8,18 +8,29 @@ import { InCellTextInput } from './InCellTextInput.js';
 import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 import { useBadInputRefusal, BadInputMessage, BAD_INPUT_BORDER } from './numberBadInput.js';
 import { formatNumberFieldValue } from './number-format.js';
+import { declaresQuantityUnit } from '@object-ui/core';
+import { QuantityText } from './QuantityText.js';
+import { useQuantityUnit } from './useQuantityUnit.js';
 
 /**
  * NumberField - Numeric input with optional decimal precision
  * Supports min/max/step constraints and configurable decimal precision
  */
-export function NumberField({ value, onChange, field, readonly, error, inCell, onCommit: _onCommit, ...props }: FieldWidgetComponentProps<number>) {
+export function NumberField({ value, onChange, field, readonly, error, inCell, onCommit: _onCommit, dependentValues, ...props }: FieldWidgetComponentProps<number>) {
   // Before the readonly return: hooks are unconditional (objectui#6780).
   const { refusal, readBadInput } = useBadInputRefusal('1234');
   const locale = useDisplayLocale();
+  // The unit an edited quantity is entered in (ADR-0158), shown beside the box.
+  // Resolved for the read-only face inside `QuantityText` instead.
+  const editUnit = useQuantityUnit(readonly ? undefined : field, dependentValues);
 
   if (readonly) {
     if (value == null) return <EmptyValue />;
+    // A quantity (ADR-0158): the face `NumberCellRenderer` draws, with the
+    // form's live record for a `record`-mode quantity's code.
+    if (typeof value === 'number' && declaresQuantityUnit(field)) {
+      return <QuantityText value={value} field={field} record={dependentValues} className="text-sm" />;
+    }
     // The text `NumberCellRenderer` shows for the same field and value: both
     // make the one `formatNumberFieldValue` call, with the width
     // `resolveFieldScale` answers, the field's grouping policy and the display
@@ -92,43 +103,60 @@ export function NumberField({ value, onChange, field, readonly, error, inCell, o
     );
   }
 
+  const box = (
+    <Input
+      {...domProps}
+      type="number"
+      value={value ?? ''}
+      onChange={(e) => {
+        // objectui#6780: ask the browser whether it can READ the box before
+        // trusting `.value`. The emission below is deliberately unchanged —
+        // see `numberBadInput.tsx` for why refusing would wipe the very text
+        // the diagnostic points at.
+        readBadInput(e.target);
+        const val = e.target.value;
+        onChange(val === '' ? (null as any) : Number(val));
+      }}
+      onBlur={handleBlur}
+      placeholder={numberField?.placeholder}
+      disabled={readonly || domProps.disabled}
+      className={cn(PHONE_TOUCH_HEIGHT, refusal ? BAD_INPUT_BORDER : '', domProps.className)}
+      // Surface the field's declared range so the browser's spinner/keyboard
+      // affordances respect it (server-side validation still owns enforcement).
+      min={typeof numberField?.min === 'number' ? numberField.min : undefined}
+      max={typeof numberField?.max === 'number' ? numberField.max : undefined}
+      step={step}
+      // `refusal` is this widget's OWN reading and no host can produce it;
+      // `error` keeps its single author (objectui#3222 / objectui#6716) —
+      // the same two-name split `CurrencyField` and `PercentField` use.
+      //
+      // This was a CONDITIONAL spread (written only while `refusal` was
+      // active) for as long as the widget did not read `error`: an
+      // unconditional attribute computed from a prop it never consumed would
+      // have stamped `"false"` over the correct value `<FormControl>`'s Radix
+      // Slot hands down — the overwrite objectui#3222's e2e pins call out.
+      // Reading `error` here is what retires that hazard, so the two halves
+      // landed together (objectui#6803); neither is safe alone.
+      aria-invalid={!!error || !!refusal}
+    />
+  );
+
   return (
     <div className="space-y-1">
-      <Input
-        {...domProps}
-        type="number"
-        value={value ?? ''}
-        onChange={(e) => {
-          // objectui#6780: ask the browser whether it can READ the box before
-          // trusting `.value`. The emission below is deliberately unchanged —
-          // see `numberBadInput.tsx` for why refusing would wipe the very text
-          // the diagnostic points at.
-          readBadInput(e.target);
-          const val = e.target.value;
-          onChange(val === '' ? (null as any) : Number(val));
-        }}
-        onBlur={handleBlur}
-        placeholder={numberField?.placeholder}
-        disabled={readonly || domProps.disabled}
-        className={cn(PHONE_TOUCH_HEIGHT, refusal ? BAD_INPUT_BORDER : '', domProps.className)}
-        // Surface the field's declared range so the browser's spinner/keyboard
-        // affordances respect it (server-side validation still owns enforcement).
-        min={typeof numberField?.min === 'number' ? numberField.min : undefined}
-        max={typeof numberField?.max === 'number' ? numberField.max : undefined}
-        step={step}
-        // `refusal` is this widget's OWN reading and no host can produce it;
-        // `error` keeps its single author (objectui#3222 / objectui#6716) —
-        // the same two-name split `CurrencyField` and `PercentField` use.
-        //
-        // This was a CONDITIONAL spread (written only while `refusal` was
-        // active) for as long as the widget did not read `error`: an
-        // unconditional attribute computed from a prop it never consumed would
-        // have stamped `"false"` over the correct value `<FormControl>`'s Radix
-        // Slot hands down — the overwrite objectui#3222's e2e pins call out.
-        // Reading `error` here is what retires that hazard, so the two halves
-        // landed together (objectui#6803); neither is safe alone.
-        aria-invalid={!!error || !!refusal}
-      />
+      {editUnit ? (
+        <div className="flex items-center gap-2">
+          {box}
+          <span
+            className="shrink-0 text-sm text-muted-foreground"
+            data-quantity-unit={editUnit.code}
+            title={editUnit.label ? editUnit.code : undefined}
+          >
+            {editUnit.label ?? editUnit.code}
+          </span>
+        </div>
+      ) : (
+        box
+      )}
       <BadInputMessage refusal={refusal} />
     </div>
   );

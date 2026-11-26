@@ -642,6 +642,7 @@ export const ru: PlatformTranslationData = {
         },
         embedder_provider: {
           label: 'Провайдер',
+          help: 'Считывается при запуске сервера: сохранённое изменение любой настройки эмбеддера вступает в силу после следующего перезапуска.',
           options: {
             none: 'Отключено (без эмбеддингов)',
             openai: 'OpenAI',
@@ -694,10 +695,6 @@ export const ru: PlatformTranslationData = {
       groups: {
         adapter: { title: 'Бэкенд', description: 'Выберите, где хранятся фрагменты документов и их векторы.' },
         turso: { title: 'Turso / libSQL', description: 'Работает с управляемым Turso, локальным файлом или в памяти.' },
-        ragflow: {
-          title: 'RAGFlow',
-          description: 'Внешнее развёртывание RAGFlow. Инструкции по самостоятельному размещению: https://ragflow.io.',
-        },
         indexing: {
           title: 'Параметры индексации по умолчанию',
           description: 'Значение, заданное в самом источнике знаний, важнее этих значений по умолчанию.',
@@ -710,7 +707,6 @@ export const ru: PlatformTranslationData = {
           options: {
             memory: 'В памяти (только разработка / тесты)',
             turso: 'Turso / libSQL (облако или локально)',
-            ragflow: 'RAGFlow (внешний)',
           },
         },
         turso_url: {
@@ -718,12 +714,6 @@ export const ru: PlatformTranslationData = {
           help: 'Примеры: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
         },
         turso_auth_token: { label: 'Токен авторизации', help: 'Нужен только для URL управляемого Turso.' },
-        ragflow_base_url: { label: 'Base URL', help: 'Пример: http://localhost:9380' },
-        ragflow_api_key: { label: 'Ключ API' },
-        ragflow_default_dataset: {
-          label: 'Идентификатор набора данных по умолчанию',
-          help: 'Используется, если источник знаний не указывает собственный набор данных RAGFlow.',
-        },
         chunk_target: {
           label: 'Целевой размер фрагмента (символы)',
           help: 'Наибольшая длина фрагмента в символах, когда служба знаний разбивает документ. Размер, заданный в самом источнике знаний, имеет приоритет; лимит ввода модели эмбеддингов может его уменьшить.',

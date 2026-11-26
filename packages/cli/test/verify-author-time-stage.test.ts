@@ -60,7 +60,7 @@ function taskApp(planted: boolean): Record<string, unknown> {
       version: '1.0.0',
       name: 'Verify Gate',
       type: 'app',
-      engines: { protocol: '^18' },
+      engines: { protocol: '^19' },
     },
     objects: [
       {

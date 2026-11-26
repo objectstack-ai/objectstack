@@ -2,29 +2,22 @@
 
 /**
  * The Studio address mapping table (objectstack#36895, Studio redesign epic
- * #36890): every address family Studio answers to today, every `?surface=`
- * spelling, and every query parameter, with what each one becomes when a
- * designer card moves its type to the metadata address.
+ * #36890): every address family Studio answers to, every `?surface=`
+ * spelling, and every query parameter, with what each pillar address became
+ * when its type moved to the metadata address.
  *
- * The builders are in `studioAddress.ts`; this is their map. It is data a
- * card reads before it switches a type, and data the code reads where the
- * table decides something: the retired `/interfaces` redirect keeps exactly
- * the parameters this table marks as surviving it
+ * The builders are in `studioAddress.ts`; this is their map. It is data the
+ * code reads where the table decides something: the retired `/interfaces`
+ * redirect keeps exactly the parameters this table marks as surviving it
  * ({@link STUDIO_RETIRED_INTERFACES_KEPT_PARAMS}).
  *
- * ## How a designer card switches its type
+ * objectstack#36909 — every type has moved and every pillar retired: each
+ * `?surface=` row names where its pillar address now redirects, in one hop
+ * (`studioPillarRedirectModel.ts`).
  *
- *  1. Delete the type's row from `STUDIO_ITEM_PILLAR` (`studioAddress.ts`).
- *     Every producer calling `studioItemPath`, and the "All metadata" area's
- *     pillar redirect (`areaItemPillarPath`), then open the metadata address
- *     together, so the two never bounce.
- *  2. Carry each qualifier its row below lists onto the metadata address, or
- *     drop it, as the row's `onMetadataAddress` says.
- *  3. Add the redirect from the pillar address in that same PR.
- *  4. Update the type's row here: `today` becomes the metadata address.
- *
- * `studioAddressTable.test.ts` holds each row's example equal to its
- * builder's output, so the table cannot drift from the code.
+ * `studioAddress.test.ts` holds each row's example equal to its builder's
+ * output, and each row's redirect equal to the redirect's, so the table
+ * cannot drift from the code.
  */
 
 import { DESIGNER_SURFACE_PARAM } from '../metadata-admin/nav-selection.js';
@@ -77,13 +70,23 @@ export const STUDIO_ADDRESS_FAMILIES: readonly StudioAddressFamily[] = Object.fr
     builder: 'studioLandingPath',
     meaning: "A retired bookmark: Studio's entry forwards it to Setup → Packages with New Package open.",
   },
-  { id: 'package', today: '/studio/<package>', builder: 'studioPackagePath', meaning: `A package's Studio; the route lands it on its home, \`${STUDIO_HOME_PILLAR}\`, which redirects to the package's object list (objectstack#36904).` },
-  { id: 'pillar', today: '/studio/<package>/<pillar>', builder: 'studioPillarPath', meaning: 'One pillar of a package: data, automations or access.' },
+  {
+    id: 'package',
+    today: '/studio/<package>',
+    builder: 'studioPackagePath',
+    meaning: "A package's Studio; the route lands it on the package's object list in one redirect (objectstack#36904, objectstack#36909).",
+  },
+  {
+    id: 'pillar',
+    today: '/studio/<package>/<pillar>',
+    builder: 'studioPillarPath',
+    meaning: `A retired pillar of a package (\`${STUDIO_HOME_PILLAR}\`, automations, access, interfaces): no page of its own; the route redirects it in one hop (objectstack#36909, studioPillarRedirectModel.ts).`,
+  },
   {
     id: 'pillar-item',
     today: `/studio/<package>/<pillar>?${DESIGNER_SURFACE_PARAM}=<type>:<name>`,
-    builder: 'studioItemPath',
-    meaning: 'A pillar opened on one item. The family the designer cards move, one type at a time (STUDIO_ITEM_TYPES).',
+    builder: 'studioPillarPath',
+    meaning: "A retired pillar opened on one item: redirects to the item's own address (STUDIO_ITEM_TYPES, redirectsTo).",
   },
   {
     id: 'owd',
@@ -117,7 +120,8 @@ export const STUDIO_ADDRESS_FAMILIES: readonly StudioAddressFamily[] = Object.fr
     id: 'changes-review',
     today: `/studio/<package>/${STUDIO_HOME_PILLAR}?${STUDIO_CHANGES_PARAM}=${STUDIO_CHANGES_REVIEW}`,
     builder: 'studioChangesReviewPath',
-    meaning: "A package's Changes drawer, opened from outside its Studio. The server's draft review link (studioChangesReviewLink in @objectstack/types) spells the same address.",
+    meaning:
+      "A package's Changes drawer, opened from outside its Studio. The server's draft review link (studioChangesReviewLink in @objectstack/types) spells the same address; it redirects, with `changes=review` kept, to the package's object list, where the drawer opens (objectstack#36909).",
   },
   {
     id: 'item-review',
@@ -129,7 +133,8 @@ export const STUDIO_ADDRESS_FAMILIES: readonly StudioAddressFamily[] = Object.fr
     id: 'retired-interfaces',
     today: `/studio/<package>/${RETIRED_INTERFACES_SEGMENT}[?…]`,
     builder: 'retiredInterfacesTarget',
-    meaning: `The retired Interfaces pillar (objectstack#36502). Redirects to the package's home, \`${STUDIO_HOME_PILLAR}\` (and from there to its object list, objectstack#36904), keeping only STUDIO_RETIRED_INTERFACES_KEPT_PARAMS.`,
+    meaning:
+      "The retired Interfaces pillar (objectstack#36502). Redirects to the package's object list in one hop (objectstack#36909), keeping only STUDIO_RETIRED_INTERFACES_KEPT_PARAMS.",
   },
 ]);
 
@@ -137,25 +142,22 @@ export const STUDIO_ADDRESS_FAMILIES: readonly StudioAddressFamily[] = Object.fr
 // Item types: where each opens today, and what it switches to
 // ---------------------------------------------------------------------------
 
-/** One `?surface=` type: the pillar it opens today and the metadata address it moves to. */
+/** One `?surface=` type: the pillar that opened it, and where that pillar address redirects now. */
 export interface StudioItemTypeRow {
   /** The `?surface=` type. */
   readonly type: string;
-  /** The pillar that opens it today. */
+  /** The retired pillar that opened it. */
   readonly pillar: StudioPillarKey;
-  /** Today's `?surface=` value. */
+  /** The pillar address's `?surface=` value. */
   readonly surface: string;
-  /** The qualifiers that ride beside `?surface=` for this type today. */
+  /** The qualifiers that rode beside `?surface=` for this type. */
   readonly qualifiers: readonly string[];
-  /** The `?surface=` spellings producers write today (`StudioSurfaceSpelling`). */
+  /** The `?surface=` spellings producers wrote (`StudioSurfaceSpelling`); the redirect reads each. */
   readonly spellings: readonly StudioSurfaceSpelling[];
-  /** The metadata address it moves to, or `null` when it is a pillar page with no item of its own. */
+  /** The metadata address it moved to, or `null` when it is a page with no item of its own. */
   readonly onMetadataAddress: string | null;
-  /**
-   * Set once the type has moved: the address its pillar address now redirects
-   * to (step 3 above). Absent while the pillar still opens it.
-   */
-  readonly redirectsTo?: string;
+  /** The settled address its pillar address redirects to, in one hop (objectstack#36909). */
+  readonly redirectsTo: string;
 }
 
 export const STUDIO_ITEM_TYPES: readonly StudioItemTypeRow[] = Object.freeze([
@@ -169,6 +171,7 @@ export const STUDIO_ITEM_TYPES: readonly StudioItemTypeRow[] = Object.freeze([
     qualifiers: [DESIGNER_SURFACE_VIEW_PARAM, DESIGNER_SURFACE_ACTION_PARAM, DESIGNER_SURFACE_NAV_PARAM],
     spellings: ['component', 'name', 'form'],
     onMetadataAddress: '/studio/<package>/metadata/object/<name>',
+    redirectsTo: '/studio/<package>/metadata/object/<name>?package=<package>',
   },
   {
     // objectstack#36903 — switched: a flow opens its designer on its metadata
@@ -180,6 +183,7 @@ export const STUDIO_ITEM_TYPES: readonly StudioItemTypeRow[] = Object.freeze([
     qualifiers: [],
     spellings: ['component'],
     onMetadataAddress: '/studio/<package>/metadata/flow/<name>',
+    redirectsTo: '/studio/<package>/metadata/flow/<name>?package=<package>',
   },
   {
     type: 'permission',

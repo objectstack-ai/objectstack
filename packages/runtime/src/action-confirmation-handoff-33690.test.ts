@@ -861,3 +861,71 @@ describe('[#34515] a resume approval is bound to the screen it was given on', ()
         expect(h.runs.get(runId)?.status).toBe('completed');
     });
 });
+
+/**
+ * [#34325] The `no_confirmation_service` refusal names the route that works on
+ * the door that asked. Every door: a person performs it in the app, and the
+ * caller makes no such change through another tool (an agent that read only
+ * "in the app" completed the change with a raw record update). The stdio door
+ * for a client without `elicitation` (no door, and the fourth argument
+ * `facts.elicitsCapableClients`, set by `@objectstack/mcp`'s
+ * `actionCallDoorFor`) also names a client that supports confirmation
+ * (step 3); the Streamable HTTP door, which asks no client and passes
+ * neither, does not, since that sentence would be false there. The
+ * envelope is unchanged: same code, status and details on both doors.
+ */
+describe('[#34325] the no_confirmation_service refusal names the route that works on the door that asked', () => {
+    const IN_APP = 'a person performs it in the app: do not make the same change with another tool.';
+    const CLIENT = 'A client that supports confirmation (MCP elicitation) is asked in place on this server';
+    const STDIO_NO_ELICITATION = { elicitsCapableClients: true } as const;
+
+    async function pausedRun(h: ReturnType<typeof makeHarness>): Promise<string> {
+        const started: any = await h.automation.execute(GATED_FLOW.target, { userId: 'u1', object: OBJECT, record: { id: 'lead_1' } });
+        return started.runId;
+    }
+
+    /** Each tool's no-service refusal through the real bridge, with the facts the tool would pass after an undefined door (or neither). */
+    async function refusedAt(tool: 'run_action' | 'resume_run', facts: Record<string, unknown> | undefined) {
+        const h = makeHarness();
+        const bridge = h.bridgeAs(PERSON);
+        const args: unknown[] = tool === 'run_action'
+            ? [GATED.name, { recordId: 'lead_1' }]
+            : [await pausedRun(h), { values: { reason: 'x' } }];
+        if (facts) args.push(undefined, facts);
+        const refused = await refusalOf(tool === 'run_action' ? bridge.runAction(...args) : bridge.resumeRun(...args));
+        expect({ code: refused.code, status: refused.status }, tool).toEqual({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+        expect(refused.details?.reason, tool).toBe('no_confirmation_service');
+        expect(h.ql.executeAction).not.toHaveBeenCalled();
+        expect(h.automation.resume).not.toHaveBeenCalled();
+        return refused;
+    }
+
+    for (const tool of ['run_action', 'resume_run'] as const) {
+        it(`stdio, a client without elicitation (${tool}): names a client that supports confirmation, then the app, and no other tool`, async () => {
+            const refused = await refusedAt(tool, STDIO_NO_ELICITATION);
+            expect(refused.message).toContain(`${CLIENT}: use one to confirm it here. Otherwise ${IN_APP}`);
+        });
+
+        it(`Streamable HTTP, no door (${tool}): the app and no other tool, never the client sentence`, async () => {
+            const refused = await refusedAt(tool, undefined);
+            expect(refused.message).toContain(`does not count. A${IN_APP.slice(1)}`);
+            expect(refused.message).not.toContain('supports confirmation');
+            expect(refused.message).not.toContain('elicitation');
+        });
+
+        it(`no new response field (${tool}): both doors answer the same details`, async () => {
+            const stdio = await refusedAt(tool, STDIO_NO_ELICITATION);
+            const http = await refusedAt(tool, undefined);
+            expect(stdio.details).toEqual(http.details);
+        });
+    }
+
+    it('CONTROL: the door fact is never handed to the host\'s service (the hand-off is the contract\'s shape)', async () => {
+        const service = makeConfirmationService();
+        const h = makeHarness({ service });
+        await h.bridgeAs(PERSON).runAction(GATED.name, { recordId: 'lead_1' }, undefined, STDIO_NO_ELICITATION);
+        expect((service.submit.mock.calls[0] as any[])[0]).toEqual({
+            actionName: GATED.name, objectName: OBJECT, recordId: 'lead_1', params: {}, door: 'mcp',
+        });
+    });
+});

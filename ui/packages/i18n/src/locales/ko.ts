@@ -195,6 +195,7 @@ const ko = {
     uploadInFlight: "업로드가 완료된 후에 저장하세요.",
     clearedOnHide: "현재 값에 더 이상 해당하지 않는 항목을 비웠습니다: {{fields}}",
     visibleWhenFaulted: "제출할 수 없습니다: {{fields}}의 visibleWhen 규칙을 평가할 수 없습니다. 이 양식을 제출하려면 먼저 규칙을 수정해야 합니다.",
+    uiReadonlyWhenFaulted: "제출할 수 없습니다: {{fields}}의 uiReadonlyWhen 규칙을 평가할 수 없습니다. 이 양식을 제출하려면 먼저 규칙을 수정해야 합니다.",
     discardTitle: "변경 내용을 버릴까요?",
     discardMessage: "저장하지 않은 변경 내용이 있습니다. 지금 이 양식을 닫으면 편집 내용이 사라집니다.",
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
@@ -4681,6 +4682,9 @@ const ko = {
       metrics: '지표',
       noAddedFilter: '데이터셋 정의에 추가된 필터 없음',
     },
+    recordCitations: {
+      title: '레코드에서 인용',
+    },
     tool: {
       aggregate_data: "관련 데이터 집계하기",
       get_record: "이 레코드 읽기",
@@ -4868,6 +4872,7 @@ const ko = {
   },
   chatbotQuota: {
     title: "업그레이드 필요",
+    limitTitle: "AI 사용 한도 도달",
     fallbackMessage: "AI 사용 한도에 도달했습니다.",
     buyCredits: "크레딧 팩 구매",
     upgradePlan: "요금제 업그레이드",

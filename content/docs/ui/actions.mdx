@@ -403,9 +403,11 @@ ObjectSchema.create({
   permissions leaves its button out; no other action takes its place.
 - The `record` arm is a scope, not a page: it orders the record header wherever it is
   drawn, on the record page, in the side preview and in a phone's bottom action bar.
-  It also orders the actions in a list row's ⋮ menu and right-click menu: the ones it
-  names first, `pinned` then `more`, then the rest as before. Which action a row draws
-  as its button does not change.
+  It also orders the actions a list row already offers, adding none: the row's ⋮ menu,
+  its right-click menu and, on a list page, the selection bar's actions for one
+  selected record list the ones it names first, `pinned` then `more`, then the rest as
+  before. The selection bar's buttons, at most three, are the first of that order; the
+  row's own inline button does not change.
   A record page whose `page:header` authors its own `actions` list keeps that list.
 - The list scope can also pin its built-in Import and Export as `$import` and
   `$export`. A built-in is only ever pinned: not pinned, the list page draws it in its

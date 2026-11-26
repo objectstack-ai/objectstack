@@ -131,7 +131,13 @@ export const SysJob = ObjectSchema.create({
     // A degraded run leaves `failure_count` below untouched and puts its reason
     // in `last_error` — that column may therefore carry a non-error note.
     last_status: Field.select(
-      ['success', 'failed', 'timeout', 'running', 'degraded'],
+      [
+        'success',
+        { label: 'failed', value: 'failed', color: 'red' },
+        'timeout',
+        'running',
+        'degraded',
+      ],
       { label: 'Last Status', required: false, group: 'State' },
     ),
     last_error: Field.textarea({ label: 'Last Error', required: false, group: 'State' }),

@@ -10,25 +10,16 @@ import type { SettingsActionHandler } from '../settings-service.types.js';
  * knowledge sources and any future agent that needs to embed ad-hoc
  * inputs.
  *
- * Adapter list — two of these plugin packages are built in this repo and one
- * is not, which is the difference that matters to an operator told to mount
- * one of them:
- *   - memory    @objectstack/knowledge-memory   built here (dev / test ref)
- *   - ragflow   @objectstack/knowledge-ragflow  built here (external RAGFlow)
- *   - turso     @objectstack/knowledge-turso    NOT built here — libSQL native
- *                                               F32_BLOB, works for cloud
- *                                               Turso AND local file mode
+ * Adapter list — every one of these plugin packages is built in this repo:
+ *   - memory    @objectstack/knowledge-memory   (dev / test ref)
+ *   - turso     @objectstack/knowledge-turso    libSQL native vectors, in a
+ *                                               file of its own or on Turso;
+ *                                               built here since #37107 (its
+ *                                               6.x releases came from the
+ *                                               ObjectOS Cloud monorepo)
  *
- * Spelled out for `turso` because the undated claim that used to stand here —
- * "mirrors the plugin packages currently published" — stopped being true and
- * nothing caught it. The package IS published on the public npm registry, but
- * on its own version track: `latest` was 6.9.0 (published 2026-05-27) while
- * this repo shipped 17.2.0, and 6.9.0 exact-pins `@objectstack/spec@6.9.0`, so
- * mounting it into an app on this platform version resolves a SECOND spec
- * rather than reusing this one. Its source lives in the ObjectOS Cloud
- * monorepo (see this repo's README). Measured against the registry on
- * 2026-08-23 with `@objectstack/spec` + `@objectstack/cli` as positive
- * controls; re-measure before treating those numbers as current.
+ * None of them reads this namespace yet: a deployment registers the plugin
+ * beside the knowledge service itself.
  *
  * As with the AI manifest, the real adapter wiring happens in the
  * knowledge plugins; this manifest is the canonical settings surface
@@ -46,10 +37,19 @@ import type { SettingsActionHandler } from '../settings-service.types.js';
  * renamed/removed"). A `sys_setting` row stored for it is kept, never
  * deleted; the service no longer resolves it, and a write naming the key is
  * refused `400 UNKNOWN_KEY`, the answer every undeclared key gets.
+ *
+ * `version` is 3 for the same reason: the `ragflow` adapter option and its
+ * three keys (`ragflow_base_url`, `ragflow_api_key`, `ragflow_default_dataset`)
+ * were removed when `@objectstack/knowledge-ragflow` was retired. Stored rows
+ * for those keys are kept, never deleted; the service no longer serves them,
+ * and a write naming one is refused `400 UNKNOWN_KEY`. A stored
+ * `adapter = ragflow` is still served as stored; saving that value again is
+ * refused `400 SETTINGS_VALIDATION` (`invalid_option`), and "Test connection"
+ * answers it as an unknown adapter.
  */
 const manifest = {
   namespace: 'knowledge',
-  version: 2,
+  version: 3,
   label: 'Knowledge',
   icon: 'BookOpen',
   description:
@@ -68,7 +68,6 @@ const manifest = {
       options: [
         { value: 'memory', label: 'In-memory (dev / test only)' },
         { value: 'turso', label: 'Turso / libSQL (cloud or local)' },
-        { value: 'ragflow', label: 'RAGFlow (external)' },
       ],
     },
     // Warnings are `info_banner` rows with `bannerSeverity: 'warning'`, never a
@@ -94,21 +93,6 @@ const manifest = {
       required: false, encrypted: true,
       description: 'Only required for managed Turso URLs. Leave blank for local file / :memory:.',
       visible: "${data.adapter === 'turso'}" },
-
-    // ── RAGFlow ───────────────────────────────────────────────────
-    { type: 'group', id: 'ragflow', label: 'RAGFlow', required: false,
-      visible: "${data.adapter === 'ragflow'}",
-      description: 'External RAGFlow deployment. See https://ragflow.io for self-host instructions.' },
-    { type: 'text', key: 'ragflow_base_url', label: 'Base URL', required: true,
-      description: 'Example: http://localhost:9380',
-      visible: "${data.adapter === 'ragflow'}" },
-    { type: 'password', key: 'ragflow_api_key', label: 'API key',
-      required: true, encrypted: true,
-      visible: "${data.adapter === 'ragflow'}" },
-    { type: 'text', key: 'ragflow_default_dataset', label: 'Default dataset id',
-      required: false,
-      description: 'Used when a knowledge source does not name its own RAGFlow dataset.',
-      visible: "${data.adapter === 'ragflow'}" },
 
     // ── Indexing defaults ─────────────────────────────────────────
     { type: 'group', id: 'indexing', label: 'Indexing defaults', required: false,
@@ -158,11 +142,11 @@ const FORM_CHECK_ONLY = 'This checks the form only — no connection was attempt
  * `@objectstack/service-knowledge` with the manifest it contributes (#33933).
  *
  * It checks form completeness only — a Turso auth token beside a managed
- * `libsql://` URL, a RAGFlow Base URL and API key — and opens NO connection.
+ * `libsql://` URL — and opens NO connection.
  * Nothing in this repository replaces it with a live probe:
- * `@objectstack/service-knowledge` registers exactly this handler, and
- * `@objectstack/knowledge-memory` and `@objectstack/knowledge-ragflow` neither
- * read this namespace nor register `knowledge/test` (a plugin that did would call
+ * `@objectstack/service-knowledge` registers exactly this handler, and no
+ * adapter package reads this namespace or registers `knowledge/test` (a
+ * plugin that did would call
  * `SettingsService.registerAction`, which replaces this handler). So every
  * answer on a remote adapter says no connection was attempted, and none names
  * a package whose mounting would make this check live — none does.
@@ -187,7 +171,8 @@ export const knowledgeTestActionHandler: SettingsActionHandler = async ({ values
         ok: true,
         severity: 'info',
         message:
-          'No URL configured — adapter will reuse the tenant\'s primary libSQL connection at runtime. ' +
+          'No URL configured — the @objectstack/knowledge-turso plugin defaults to its own file, ' +
+          'knowledge.db under .objectstack/data/, never the platform database. ' +
           FORM_CHECK_ONLY,
       };
     }
@@ -203,24 +188,8 @@ export const knowledgeTestActionHandler: SettingsActionHandler = async ({ values
       ok: true,
       severity: 'info',
       message:
-        `Turso adapter configured (${u}). ${FORM_CHECK_ONLY} Live calls need @objectstack/knowledge-turso, ` +
-        'which this platform does not ship: it is built in the ObjectOS Cloud monorepo ' +
-        'and published on its own version track, so check that it offers a release ' +
-        'compatible with your platform version before mounting it.',
-    };
-  }
-
-  if (adapter === 'ragflow') {
-    if (!merged.ragflow_base_url) {
-      return { ok: false, severity: 'error', message: 'RAGFlow requires a Base URL.' };
-    }
-    if (!merged.ragflow_api_key) {
-      return { ok: false, severity: 'error', message: 'RAGFlow requires an API key.' };
-    }
-    return {
-      ok: true,
-      severity: 'info',
-      message: `RAGFlow adapter configured (${merged.ragflow_base_url}). ${FORM_CHECK_ONLY}`,
+        `Turso adapter configured (${u}). ${FORM_CHECK_ONLY} Live calls need the ` +
+        '@objectstack/knowledge-turso plugin registered beside the knowledge service, with this URL.',
     };
   }
 

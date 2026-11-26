@@ -629,6 +629,7 @@ export const ptBR: PlatformTranslationData = {
         },
         embedder_provider: {
           label: 'Provedor',
+          help: 'Lido na inicialização do servidor: uma alteração salva em qualquer configuração do embedder entra em vigor após a próxima reinicialização.',
           options: {
             none: 'Desativado (sem embeddings)',
             openai: 'OpenAI',
@@ -684,10 +685,6 @@ export const ptBR: PlatformTranslationData = {
           description: 'Escolha onde as partes dos documentos e seus vetores são armazenados.',
         },
         turso: { title: 'Turso / libSQL', description: 'Funciona com Turso gerenciado, arquivo local ou em memória.' },
-        ragflow: {
-          title: 'RAGFlow',
-          description: 'Implantação externa do RAGFlow. Veja https://ragflow.io para instruções de auto-hospedagem.',
-        },
         indexing: {
           title: 'Padrões de indexação',
           description: 'Um valor definido na própria fonte de conhecimento prevalece sobre estes padrões.',
@@ -700,7 +697,6 @@ export const ptBR: PlatformTranslationData = {
           options: {
             memory: 'Em memória (apenas dev / teste)',
             turso: 'Turso / libSQL (nuvem ou local)',
-            ragflow: 'RAGFlow (externo)',
           },
         },
         turso_url: {
@@ -708,12 +704,6 @@ export const ptBR: PlatformTranslationData = {
           help: 'Exemplos: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
         },
         turso_auth_token: { label: 'Token de autenticação', help: 'Necessário apenas para URLs do Turso gerenciado.' },
-        ragflow_base_url: { label: 'Base URL', help: 'Exemplo: http://localhost:9380' },
-        ragflow_api_key: { label: 'Chave de API' },
-        ragflow_default_dataset: {
-          label: 'ID do conjunto de dados padrão',
-          help: 'Usado quando uma fonte de conhecimento não indica o próprio conjunto de dados do RAGFlow.',
-        },
         chunk_target: {
           label: 'Tamanho-alvo da parte (caracteres)',
           help: 'Tamanho máximo de um trecho, em caracteres, quando o serviço de conhecimento divide um documento. Um tamanho definido na própria fonte tem prioridade; o limite de entrada do modelo de embeddings pode reduzi-lo.',

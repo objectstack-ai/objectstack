@@ -1,7 +1,7 @@
 ---
 title: Ai Context schema — AI Protocol reference
 navTitle: Ai Context
-description: "Ai Context schemas of the ObjectStack AI Protocol: AiContext, AiContextBody, AiContextRelated — each property with its type, default and a TypeScript example."
+description: "Ai Context schemas of the ObjectStack AI Protocol: AiContext, AiContextBody and 2 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Ai Context schemas of the ObjectStack AI Protocol: AiContext, AiCo
 ## TypeScript Usage
 
 ```typescript
-import { AiContextSchema, AiContextBodySchema, AiContextRelatedSchema } from '@objectstack/spec/ai';
-import type { AiContext, AiContextBody, AiContextRelated } from '@objectstack/spec/ai';
+import { AiContextSchema, AiContextBodySchema, AiContextRelatedSchema, AiContextRelatedWhereSchema } from '@objectstack/spec/ai';
+import type { AiContext, AiContextBody, AiContextRelated, AiContextRelatedWhere } from '@objectstack/spec/ai';
 
 // Validate data
 const result = AiContextSchema.parse(data);
@@ -32,7 +32,7 @@ const result = AiContextSchema.parse(data);
 | **label** | `string` | ✅ | Pack display name — the header of the tool answer |
 | **object** | `string` | ✅ | The root object: a pack reads one record of it |
 | **fields** | `string[]` | optional | The root object's fields handed to the model, in order (at most 30). A lookup among them is answered with the name of the record it points at |
-| **related** | `{ object: string; field?: string; fields?: string[] }[]` | optional | Child lists that point at the record (at most 3), one level deep |
+| **related** | `{ object: string; field?: string; fields?: string[]; where?: any; … }[]` | optional | Child lists that point at the record (at most 3), one level deep |
 | **body** | `{ field: string }` | optional | The one long-text field read as the record's body |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -49,6 +49,9 @@ const result = AiContextSchema.parse(data);
 | **object** | `string` | ✅ | A child object with a reference field (lookup, master-detail, user or tree) that points at the pack's root object |
 | **field** | `string` | optional | The child's reference field that points at the root. Required when the child has several such fields; with one, it may be omitted. Resolved once, on the published definition |
 | **fields** | `string[]` | optional | The columns read for each row, in order (at most 10). A lookup among them is answered with the name of the record it points at. Omit to read the row's name only |
+| **where** | `any` | optional | Which child rows the list carries: a filter on the child's own fields, in the object filter form. A bare value is `$eq`; the operators are $eq, $ne, $in, $nin, $gt, $gte, $lt, $lte, $null, $exists, joined by $and / $or nested at most 32 deep. Comparands are literal values: no dotted path, no field-to-field comparand, no $now anchor and no `{…}` placeholder. Joined to the link with $and and read as the caller, so it grants nothing |
+| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | The order of the rows: `{ field, order }[]` on the child's own fields, `order` `asc` (the default) or `desc`. Without it the rows come in the data engine's order. A field the child does not offer as a sort (it declares `sortable: false`, or is a formula) leaves the list out of every answer |
+| **limit** | `integer` | optional | The most rows the list carries (at most 20, the default). A list cut at it says so in the answer |
 
 ### Nested Shape: `AiContext.body`
 
@@ -79,6 +82,16 @@ const result = AiContextSchema.parse(data);
 | **object** | `string` | ✅ | A child object with a reference field (lookup, master-detail, user or tree) that points at the pack's root object |
 | **field** | `string` | optional | The child's reference field that points at the root. Required when the child has several such fields; with one, it may be omitted. Resolved once, on the published definition |
 | **fields** | `string[]` | optional | The columns read for each row, in order (at most 10). A lookup among them is answered with the name of the record it points at. Omit to read the row's name only |
+| **where** | `any` | optional | Which child rows the list carries: a filter on the child's own fields, in the object filter form. A bare value is `$eq`; the operators are $eq, $ne, $in, $nin, $gt, $gte, $lt, $lte, $null, $exists, joined by $and / $or nested at most 32 deep. Comparands are literal values: no dotted path, no field-to-field comparand, no $now anchor and no `{…}` placeholder. Joined to the link with $and and read as the caller, so it grants nothing |
+| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | The order of the rows: `{ field, order }[]` on the child's own fields, `order` `asc` (the default) or `desc`. Without it the rows come in the data engine's order. A field the child does not offer as a sort (it declares `sortable: false`, or is a formula) leaves the list out of every answer |
+| **limit** | `integer` | optional | The most rows the list carries (at most 20, the default). A list cut at it says so in the answer |
+
+
+---
+
+## AiContextRelatedWhere
+
+**Type:** `Record<string, any> & { $and?: any[]; $or?: any[]; $not?: any }`
 
 
 ---

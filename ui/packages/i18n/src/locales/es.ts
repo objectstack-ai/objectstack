@@ -202,6 +202,7 @@ const es = {
     uploadInFlight: "Espere a que finalice la carga antes de guardar.",
     clearedOnHide: "Se borró lo que ya no corresponde a los valores actuales: {{fields}}",
     visibleWhenFaulted: "No se puede enviar: no se pudo evaluar la regla visibleWhen de {{fields}}. Hay que corregir la regla antes de poder enviar este formulario.",
+    uiReadonlyWhenFaulted: "No se puede enviar: no se pudo evaluar la regla uiReadonlyWhen de {{fields}}. Hay que corregir la regla antes de poder enviar este formulario.",
     discardTitle: "¿Descartar los cambios?",
     discardMessage: "Tiene cambios sin guardar. Si cierra este formulario ahora, sus ediciones se perderán.",
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
@@ -4779,6 +4780,9 @@ const es = {
       metrics: 'Métricas',
       noAddedFilter: 'Sin filtro añadido a la definición del conjunto de datos',
     },
+    recordCitations: {
+      title: 'Citado de registros',
+    },
     tool: {
       aggregate_data: "Resumir los datos",
       get_record: "Leer el registro",
@@ -4978,6 +4982,7 @@ const es = {
   },
   chatbotQuota: {
     title: "Se requiere actualizar",
+    limitTitle: "Límite de IA alcanzado",
     fallbackMessage: "Ha alcanzado su cuota de IA.",
     buyCredits: "Comprar un paquete de créditos",
     upgradePlan: "Mejorar el plan",

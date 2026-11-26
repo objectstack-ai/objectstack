@@ -186,7 +186,7 @@ describe('[ADR-0160 D4] get_record_context — registration', () => {
     expect(stdio).toEqual(http);
     expect(http.description).toBe(createRecordContextTools().definitions[0].description);
     expect(http.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
-    expect(Object.keys(http.inputSchema.properties).sort()).toEqual(['anchor', 'context', 'objectName', 'recordId']);
+    expect(Object.keys(http.inputSchema.properties).sort()).toEqual(['anchor', 'context', 'objectName', 'outlineFrom', 'recordId']);
   });
 
   it('is not listed on a bridge without the record-context service, nor for a grant without data:read', async () => {

@@ -698,6 +698,25 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                     return;
                 }
                 const parentVersion = precondition.request.parentVersion;
+                // [ruling 7168616260 on #36350] The pin on the DRAFT this
+                // promotion reads (`PublishMetaItemRequestSchema.draftVersion`),
+                // a body member beside `message`: `If-Match` above keeps its
+                // shipped meaning (the active row's token). A present member
+                // that is not a string is refused `400`, never read as absent —
+                // dropped, it would publish unpinned exactly the draft the
+                // caller meant to guard.
+                const draftVersion: unknown = (body as Record<string, unknown>).draftVersion;
+                if (draftVersion !== undefined && typeof draftVersion !== 'string') {
+                    res.status(400).json({
+                        error: {
+                            code: 'VALIDATION_ERROR',
+                            message: 'draftVersion must be a string: the version token of the draft this publish '
+                                + 'promotes (a draft save\'s receipt version, or the draft read\'s version). '
+                                + 'Leave it out to publish whichever draft is pending.',
+                        },
+                    });
+                    return;
+                }
 
                 // [ADR-0131 D6] No organization, as on the `PUT` twin: a
                 // draft is saved environment-wide, so the promotion looks in
@@ -742,6 +761,8 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                     ...(packageId ? { packageId } : {}),
                     // [#36601] Present only when the caller pinned the active row.
                     ...(parentVersion !== undefined ? { parentVersion } : {}),
+                    // [#36350] Present only when the caller pinned the draft.
+                    ...(typeof draftVersion === 'string' ? { draftVersion } : {}),
                     // [#22877] Publishes ONE member's draft of a bundled type.
                     ...metaMemberSelector(req.query),
                     // [#32656] The languages the findings' `userMessage` is

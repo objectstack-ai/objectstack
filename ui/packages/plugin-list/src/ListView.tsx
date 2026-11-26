@@ -64,7 +64,7 @@ import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
 import { AUDIT_FIELD_NAMES, detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, isObjectExportOffered, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob, readWithheldFieldNames, refersToWithheldField, withHeaderSortPick } from '@object-ui/core';
+import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, isObjectExportOffered, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob, readWithheldFieldNames, refersToWithheldField, withHeaderSortPick, shownQuantityUnitReads } from '@object-ui/core';
 import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField, recordCurrencyReadField } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -2900,7 +2900,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
   // --- P2: Auto-subscribe to DataSource mutation events ---
   // Refetch whenever the bound object is mutated through the DataSource. This
-  // is the ONLY refresh signal for inline-edit "Save All": ObjectGrid persists
+  // is the ONLY refresh signal for inline-edit cell saves: ObjectGrid persists
   // those edits by calling dataSource.update() directly, with no form-success
   // handler to bump an external refreshTrigger — so subscribing even when
   // `refreshTrigger` is provided is required, not redundant. Form/delete flows
@@ -4377,6 +4377,15 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             if (!read.expand) addSpeculative(read.field);
           }
 
+          // [ADR-0158] A shown quantity's unit: a `record`-mode quantity's code
+          // field, and the row's organization, which picks the unit's display
+          // decimal places (`useQuantityUnit` reads both off the row). The
+          // code field through the speculative gate; `organization_id` is a
+          // platform column every object carries but none declares.
+          for (const f of shownQuantityUnitReads(schema.columns, objectDef?.fields)) {
+            addPredicateField(f);
+          }
+
           // View-specific runtime fields. Each non-grid view binds to one
           // or more record fields (groupBy for kanban, dates for calendar/
           // timeline/gantt, image/title for gallery). Without these in the
@@ -4529,6 +4538,32 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               .map((c) => deadlineDefs?.[c])
               .filter((def) => def?.dueLike === true && def.settledWhen != null)
               .map((def) => def!.settledWhen),
+          )) addSpeculative(f);
+
+          // [objectstack#36806] The field locks' operands (`readonlyWhen`,
+          // `uiReadonlyWhen`) of every field a person edits in place from
+          // this list: the shown grid columns, the kanban's lane field (a card
+          // drag writes it) and the calendar's start / end fields (an event
+          // drag writes them). Each surface judges the lock over the ROW
+          // (`fieldReadOnlyByHand`), so a row projected without the operand
+          // faulted `No such key`: open for `readonlyWhen` (the server drops
+          // the write), locked for the hand lock (nothing behind it judges
+          // one). Through `addSpeculative`, like every binding here: an
+          // operand the viewer may not read is never requested — and that
+          // viewer is never served the predicate either: the definition's FLS
+          // scrub (`@objectstack/metadata-core`) deletes it and serves the
+          // field `uiReadonly: true` in its place, so it stays locked by hand.
+          const lockDefs = objectDef?.fields as Record<string, { readonlyWhen?: unknown; uiReadonlyWhen?: unknown } | undefined> | undefined;
+          const editedInPlace = [
+            ...cols,
+            (schema.kanban as { groupByField?: unknown } | undefined)?.groupByField,
+            (schema.calendar as { startDateField?: unknown } | undefined)?.startDateField,
+            (schema.calendar as { endDateField?: unknown } | undefined)?.endDateField,
+          ].filter((name): name is string => typeof name === 'string' && name.length > 0);
+          for (const f of collectPredicateFieldRefs(
+            editedInPlace
+              .flatMap((name) => [lockDefs?.[name]?.readonlyWhen, lockDefs?.[name]?.uiReadonlyWhen])
+              .filter((pred) => pred != null),
           )) addSpeculative(f);
 
           // [objectui#13036] A shown `referenceVia` pointer column's TYPE

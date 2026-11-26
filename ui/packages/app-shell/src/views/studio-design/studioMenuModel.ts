@@ -20,10 +20,10 @@
  * `scopeDirectoryEntries`), plus every 常用 Common type
  * ({@link STUDIO_MENU_ALWAYS_TYPES}), so a package that holds no app, page,
  * dashboard, report, flow, permission set or agent still shows where the
- * first is made. Each opens the type's list in the "All metadata" area; an
- * item opened there that a pillar designs still opens its pillar until the
- * pillars become full-screen pages (`areaItemPillarPath`). objectstack#36905
- * — a permission set already has.
+ * first is made. Each opens the type's list in the "All metadata" area,
+ * where an object, a flow and a permission set open their designers
+ * full-screen (objectstack#36903-36905; objectstack#36909 retired the last of
+ * the pillar redirects).
  *
  * And four entries that open no type's list, each in the group of what it
  * holds (the amendment's "Entries that are not a type"):
@@ -32,6 +32,15 @@
  *    route (`/studio/<package>/owd`, objectstack#36905);
  *  - diagnostics, under Platform;
  *  - the cross-package environment catalog (`~all`), under Access.
+ *
+ * And on a package one entry under no group, 全部类型 All types
+ * ({@link studioMenuAllTypesEntry}; ADR-0084, amended 2026-11-25,
+ * objectstack#37360): the 高级 fold's last row, below its groups. It opens the
+ * area's type directory, which lists every type of the six groups, the ones
+ * the package holds no item of yet included, so the first item of a 高级 type
+ * the fold does not draw has a door on screen. It is not part of
+ * {@link buildStudioMenu}'s groups: the fold's rule — a 高级 type is drawn when
+ * the package holds one — does not change.
  *
  * ## Order and tier (ADR-0084, amended 2026-11-25; objectstack#37201)
  *
@@ -57,10 +66,9 @@
 
 import { ENVIRONMENT_SCOPE_QUERY } from '../metadata-admin/catalog-scope.js';
 import { SETUP_DATASOURCES_PATH } from '../metadata-admin/metadataAreaHost.js';
-import { AREA_PILLAR_FOR_TYPE, isStudioAllPackagesScope } from './metadataArea.js';
+import { isStudioAllPackagesScope } from './metadataArea.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
-  STUDIO_METADATA_AREA,
   STUDIO_OWD_SECTION,
   studioMetadataAreaAddress,
   studioMetadataAreaRoot,
@@ -109,7 +117,7 @@ export const STUDIO_MENU_ALWAYS_TYPES: readonly string[] = Object.freeze(
   STUDIO_MENU_PLACEMENT.filter((row) => row.tier === 'common').map((row) => row.type),
 );
 
-export type StudioMenuEntryKind = 'type' | 'orgFlows' | 'owd' | 'diagnostics' | 'environment';
+export type StudioMenuEntryKind = 'type' | 'orgFlows' | 'owd' | 'diagnostics' | 'environment' | 'allTypes';
 
 export interface StudioMenuEntry {
   /** Unique within the menu: `type:<type>` for a type, the kind otherwise. */
@@ -211,6 +219,16 @@ export function buildStudioMenu(input: {
 }
 
 /**
+ * The 高级 fold's last row on a package, 全部类型 All types, which sits under no
+ * group (objectstack#37360): it opens the area's type directory. `null` on
+ * `~org` and `~all`, which draw no fold.
+ */
+export function studioMenuAllTypesEntry(scope: StudioMenuScope): StudioMenuEntry | null {
+  if (scope.kind !== 'package') return null;
+  return { key: 'allTypes', kind: 'allTypes', to: studioMetadataAreaRoot(scope.packageId), tier: 'advanced' };
+}
+
+/**
  * The menu split into its two tiers on a package: the 常用 groups and the
  * 高级 fold's groups, each holding only that tier's entries, and a group only
  * where it holds one (ADR-0084, amended 2026-11-25, §3.3).
@@ -223,20 +241,17 @@ export function studioMenuTiers(menu: readonly StudioMenuGroupModel[]): Record<S
   return { common: of('common'), advanced: of('advanced') };
 }
 
-/** The entry keys of the type each pillar designs (the transition's pillar pages). */
-const PILLAR_TYPE: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.entries(AREA_PILLAR_FOR_TYPE).map(([type, pillar]) => [pillar, type]),
-);
-
 /**
  * The entry the open page is (`aria-current`), or `null` when it is none of
- * them (the area's type directory, a not-found pillar).
+ * them (a not-found pillar).
  *
  *  - the package-less scope: its flows;
- *  - an area URL: its type, diagnostics, or on the cross-package leg's root
- *    the environment catalog;
+ *  - an area URL: its type, diagnostics, or at the area's root the type
+ *    directory — 全部类型 All types on a package (objectstack#37360), the
+ *    environment catalog on the cross-package leg;
  *  - the sharing overview's route: the OWD overview;
- *  - a pillar page: the type the pillar designs.
+ *  - a retired pillar's address: none, since it draws no page
+ *    (objectstack#36909: it redirects, `studioPillarRedirectModel.ts`).
  */
 export function studioMenuCurrentKey(input: { segment: string; pathname: string; search: string }): string | null {
   const { segment, pathname } = input;
@@ -244,17 +259,13 @@ export function studioMenuCurrentKey(input: { segment: string; pathname: string;
   const areaRoot = studioMetadataAreaRoot(segment);
   if (pathname === areaRoot || pathname.startsWith(`${areaRoot}/`)) {
     const [first] = pathname.slice(areaRoot.length).split('/').filter(Boolean);
-    if (!first) return isStudioAllPackagesScope(segment) ? 'environment' : null;
+    if (!first) return isStudioAllPackagesScope(segment) ? 'environment' : 'allTypes';
     if (first === '_diagnostics') return isStudioAllPackagesScope(segment) ? null : 'diagnostics';
     return `type:${decodeURIComponent(first)}`;
   }
   const prefix = `${studioPackagePath(segment)}/`;
   const raw = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : '';
-  const pillar = raw.split('/')[0];
-  if (pillar === STUDIO_METADATA_AREA) return null;
-  if (pillar === STUDIO_OWD_SECTION) return 'owd';
-  const type = PILLAR_TYPE[pillar];
-  return type ? `type:${type}` : null;
+  return raw.split('/')[0] === STUDIO_OWD_SECTION ? 'owd' : null;
 }
 
 /** Whether `entry` matches a menu search, by its label or its type's machine name. */

@@ -197,6 +197,7 @@ const pt = {
     uploadInFlight: "Aguarde a conclusão do upload antes de salvar.",
     clearedOnHide: "O que não se aplica mais aos valores atuais foi limpo: {{fields}}",
     visibleWhenFaulted: "Não é possível enviar: não foi possível avaliar a regra visibleWhen de {{fields}}. A regra precisa ser corrigida antes que este formulário possa ser enviado.",
+    uiReadonlyWhenFaulted: "Não é possível enviar: não foi possível avaliar a regra uiReadonlyWhen de {{fields}}. A regra precisa ser corrigida antes que este formulário possa ser enviado.",
     discardTitle: "Descartar as alterações?",
     discardMessage: "Você tem alterações não salvas. Se fechar este formulário agora, suas edições serão perdidas.",
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
@@ -4774,6 +4775,9 @@ const pt = {
       metrics: 'Métricas',
       noAddedFilter: 'Nenhum filtro adicionado à definição do conjunto de dados',
     },
+    recordCitations: {
+      title: 'Citado de registros',
+    },
     tool: {
       aggregate_data: "Resumir os dados",
       get_record: "Ler o registro",
@@ -4973,6 +4977,7 @@ const pt = {
   },
   chatbotQuota: {
     title: "Upgrade necessário",
+    limitTitle: "Limite de IA atingido",
     fallbackMessage: "Você atingiu sua cota de IA.",
     buyCredits: "Comprar um pacote de créditos",
     upgradePlan: "Fazer upgrade do plano",

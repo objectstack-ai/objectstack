@@ -3232,6 +3232,83 @@
           "ref": "#33984"
         }
       ]
+    },
+    {
+      "id": "integration-system.mapping-pull-sync-lossless",
+      "title": "A sync loses nothing: a job's pull of a mapping's connectorSource writes every record the source answered through the import runner, a re-run sends the watermark and duplicates nothing, a refused row is counted and named rather than dropped, and every pull leaves one sys_sync_run row with its counts",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin, who reads the target object and sys_sync_run"
+      ],
+      "fixtures": {
+        "app": "none — a scratch app directory (requires), not the showcase",
+        "requires": [
+          "a scratch app declaring a rest connector instance whose action answers records at a recordsPath, served by a local stub that honours a watermark query parameter",
+          "a mapping with targetObject, fieldMapping, mode upsert with an upsertKey, a connectorSource naming that connector and action, and a watermark field",
+          "a job whose pull names the mapping, and a way to run it on demand (the job's run door, or a short schedule)"
+        ],
+        "knownGaps": [
+          "the showcase declares no mapping with a connectorSource, so a run provisions the scratch app; the connector's own paging is not followed by design (one response per pull, caught up by the watermark on the next run), so a stub that pages is a fixture error, not a verdict"
+        ]
+      },
+      "steps": [
+        "seed the stub with N records; run the job once; read the target object's rows and the newest sys_sync_run row",
+        "run the job again with the stub unchanged; record the watermark the stub received, the target row count and the new sys_sync_run row",
+        "add M records to the stub past the watermark and change one existing record; run again; read the target rows",
+        "add one record that violates the target's validation (a required field blank); run again; read the target rows and the sys_sync_run row",
+        "point the connectorSource at an action the connector does not declare; run again; read the sys_sync_run row and the target count"
+      ],
+      "acceptance": [
+        {
+          "clause": "the first pull writes every record the source answered, mapped field by field",
+          "oracle": "api",
+          "verify": "the target holds N rows whose mapped fields equal the stub's records, and sys_sync_run reads completed with N written",
+          "evidence": "the target read, the stub's records and the run row"
+        },
+        {
+          "clause": "a re-run sends the stored watermark and duplicates nothing; new and changed records land",
+          "oracle": "api",
+          "verify": "the second pull's request carries the highest written watermark value and the count stays N; after the third pull the count is N plus M and the changed record reads its new value (upsert by the key)",
+          "evidence": "the stub's request log and the target reads"
+        },
+        {
+          "clause": "a row the runner refuses is counted and named, never silently dropped, and the good rows still land",
+          "oracle": "api",
+          "verify": "the run row reads degraded with one refused row and its reason, and the other rows of that pull are written",
+          "evidence": "the run row and the target read"
+        },
+        {
+          "clause": "a pull that cannot honour its binding is refused before anything is written, and the run row says why",
+          "oracle": "api",
+          "verify": "the run row reads failed with the refusal reason, and the target count is unchanged (packages/services/service-automation/src/connector-pull.ts#pullConnectorSource)",
+          "evidence": "the run row and the count"
+        }
+      ],
+      "negative": [
+        "a pull that writes fewer rows than the source answered while the run row reads completed is a FAIL",
+        "a re-run that duplicates rows already written is a FAIL",
+        "a refused row that appears in no count is a FAIL"
+      ],
+      "source": [
+        "docs/NORTH-STAR.md, Product areas, area:workflow core feature 4: a sync loses nothing",
+        "packages/services/service-automation/src/connector-pull.ts#pullConnectorSource",
+        "packages/services/service-automation/src/connector-pull.ts#CONNECTOR_PULL_PROVIDERS",
+        "packages/services/service-automation/src/sys-sync-run.object.ts#SysSyncRun",
+        "packages/spec/src/data/mapping.zod.ts (connectorSource and watermark)",
+        "packages/spec/docs/SYNC_ARCHITECTURE.md"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-25",
+          "change": "initial — maps the sync half of North Star core feature workflow 4 to an item; read from source at 49c8e0f0, no live run made",
+          "ref": "#35212"
+        }
+      ]
     }
   ]
 }

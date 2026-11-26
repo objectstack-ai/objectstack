@@ -66,7 +66,7 @@ import { SystemFieldName } from '@objectstack/spec/system';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
-import { actionsDoorAnswerOf, earnedAnswerOf, isEngineDuplicateRecordEnvelope, isSandboxCrash, isServerFault, logServerFault, mapDataError, resolveQueryReadLimits, resolveThrownHttpError, sandboxBusinessMessage, serverFaultProvenance, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { actionsDoorAnswerOf, declaredRefusalLines, declaredUserMessage, earnedAnswerOf, isEngineDuplicateRecordEnvelope, isSandboxCrash, isServerFault, logServerFault, mapDataError, resolveQueryReadLimits, resolveThrownHttpError, sandboxBusinessMessage, serverFaultProvenance, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -137,7 +137,7 @@ import {
 } from './metadata-completeness.js';
 // [#30892] The file seam and what `read_file` renders from it.
 import { READ_FILE_MAX_BYTES, ReadFileExtractionBusyError, renderReadFile, type McpFileBridge } from './file-content.js';
-import { actionConfirmationElicitorFor, type McpActionCallDoor } from './action-confirmation-elicitation.js';
+import { actionCallDoorFor, type McpActionCallDoor, type McpActionCallDoorFacts } from './action-confirmation-elicitation.js';
 import type { McpLatestPer } from './types.js';
 // [#35145] `expand` and `related`: the relation reads, judged before any read.
 import {
@@ -684,6 +684,10 @@ export interface McpActionBridge {
    * the person through `door.elicitConfirmation` first, once every admission
    * gate has passed: `accept` runs the call, any other answer refuses it, and
    * nothing is handed off. Without `door` the call is handed off as above.
+   * [#34325] `facts.elicitsCapableClients`, passed only without `door`, says
+   * this door would have asked a client that advertised `elicitation`: the
+   * `no_confirmation_service` refusal then names that route too. A bridge
+   * that does not read `facts` answers exactly as before.
    */
   runAction(
     name: string,
@@ -699,6 +703,7 @@ export interface McpActionBridge {
       params?: Record<string, unknown>;
     } & AIActionConfirmation,
     door?: McpActionCallDoor,
+    facts?: McpActionCallDoorFacts,
   ): Promise<unknown>;
   /**
    * [#30771] The capability refusal `runAction` would throw for an action on
@@ -727,7 +732,8 @@ export interface McpActionBridge {
    * gated action resolves to `ActionConfirmationPending` instead, as
    * {@link runAction} does, and the run stays parked. [#33712] `door` as on
    * {@link runAction}: an elicited `accept` resumes the run, any other
-   * answer refuses it and the run stays parked.
+   * answer refuses it and the run stays parked. [#34325] `facts` as on
+   * {@link runAction}.
    *
    * OPTIONAL, like {@link McpDataBridge.aggregate}. A host that cannot resume
    * runs omits it, and `resume_run` is then not registered.
@@ -736,6 +742,7 @@ export interface McpActionBridge {
     runId: string,
     input: { values?: Record<string, unknown> } & AIActionConfirmation,
     door?: McpActionCallDoor,
+    facts?: McpActionCallDoorFacts,
   ): Promise<unknown>;
 }
 
@@ -1367,7 +1374,11 @@ function errorResultFromThrown(err: unknown, request: string, objectName?: strin
     ...(answer.declaredCode !== undefined ? { declaredCode: answer.declaredCode } : {}),
     ...(answer.userMessage !== undefined ? { userMessage: answer.userMessage } : {}),
   };
-  if (answer.code === StandardErrorCode.enum.PERMISSION_DENIED) return codedErrorResult(envelope);
+  // [#37512] Its `details` stay withheld; a listed refusal an app declared at
+  // 403 still names its lines ({@link withRefusalReasonsRelay} says which).
+  if (answer.code === StandardErrorCode.enum.PERMISSION_DENIED) {
+    return withRefusalReasonsRelay(codedErrorResult(envelope), err, envelope);
+  }
   // A fault (5xx) carries nothing but the door's sanitised answer: a thrown
   // `details` rides only on a refusal, as `/actions` serves no producer
   // context on a fault.
@@ -1377,9 +1388,96 @@ function errorResultFromThrown(err: unknown, request: string, objectName?: strin
   // is the one arm whose `details` are the run's artefacts; `satisfies` keeps
   // the spelling checked against the registered vocabulary.
   const relay = answer.code === ('FLOW_FAILED' satisfies ErrorCode) ? flowFailureRelaySentence(details, answer.userMessage) : undefined;
-  return relay === undefined
+  const flowed = relay === undefined
     ? result
     : { ...result, content: [...result.content, { type: 'text' as const, text: `${FLOW_FAILURE_RELAY_LEAD}${relay}` }] };
+  // [#37416] A declared refusal thrown as a `reasons` list names each line.
+  return withRefusalReasonsRelay(flowed, err, envelope);
+}
+
+/**
+ * [#37416] The lead of the plain text a refusal thrown as a declared `reasons`
+ * list carries beside its envelope ({@link withRefusalReasonsRelay}). Exported
+ * for the pin; not on the package entry.
+ */
+export const REFUSAL_REASONS_RELAY_LEAD =
+  'Tell the user every line below, whole and in this order, in place of userMessage:\n';
+
+/**
+ * [#37416] A refusal thrown as a declared `reasons` list (#36877, ruling
+ * 7178348458 term 3) names every line to the agent, whole, in order, with the
+ * refusal's closing line last — as a second text block, the
+ * {@link flowFailureRelaySentence} pattern: `content[0]` stays the door's
+ * envelope byte for byte, and the lines ride beside it as plain text.
+ *
+ * ## Why
+ *
+ * The runtime's refusal catalogue renders each listed reason in the caller's
+ * locale and answers them as `userMessage`, the lines joined by a line break
+ * with the code's own `message` closing them. The `/data` door bounds that
+ * `userMessage` at 500 characters (#5423), and the record data tools serve the
+ * door's value, so on a long list an agent read a cut sentence with its
+ * closing line lost. The doors carry the lines structured as
+ * `details.refusals`, unbounded; the closing line is on no list.
+ *
+ * ## How it is read
+ *
+ * - The lines through `declaredRefusalLines` (`@objectstack/types`), the one
+ *   recogniser every door reads `details.refusals` with: a non-empty list of
+ *   `{ reason, message }` on an error that also carries a declared
+ *   `userMessage`. ⛔ Never a second reading of the shape here. A thrown value
+ *   it does not recognise — a single-reason refusal among them — gets no block,
+ *   so it reads exactly as before.
+ * - The closing line from the thrown value's own declared `userMessage`
+ *   (`declaredUserMessage`, unbounded: the bound is the `/data` door's, applied
+ *   when it builds its answer), the part after the listed lines. When that
+ *   text does not begin with the listed lines, no closing line is invented and
+ *   the block carries the lines alone.
+ *
+ * ## When it is withheld
+ *
+ * - [#37512] The security gate's own refusal gets no block: a served
+ *   `PERMISSION_DENIED` with no `declaredCode` (the ruling on #7450,
+ *   {@link errorResultFromThrown}). A refusal an app's catalogue declared at
+ *   `403` under its own code is served as `PERMISSION_DENIED` too, the doors'
+ *   demotion of an unregistered code, with that code in `declaredCode`; it
+ *   gets the block. It is not the gate's refusal, and both REST doors serve
+ *   its lines whole to the same caller as `details.refusals` (`mapDataError`,
+ *   `thrownAnswerOf`). The relay never reads `details`, so the gate's
+ *   `positions` and `permissionSets` reach it on no path, and the `details`
+ *   withholding in {@link errorResultFromThrown} is unchanged.
+ * - An answer that serves no `userMessage` gets none: there is no sentence for
+ *   the lines to stand in for.
+ * - A fault (5xx) gets none. The block's lines are a refusal's reasons, and a
+ *   refusal catalogue declares only a 4xx (`declaredRefusalEntrySchema`,
+ *   `@objectstack/spec`), so a listed throw at a 5xx is no catalogue refusal.
+ *   The doors still serve its `userMessage` (and `/data` its
+ *   `details.refusals`); this tool serves the `userMessage` in the envelope,
+ *   and serves a fault no `details`.
+ */
+function withRefusalReasonsRelay<R extends { content: Array<{ type: 'text'; text: string }> }>(
+  result: R,
+  err: unknown,
+  served: { code?: string; status?: number; declaredCode?: string; userMessage?: string },
+): R {
+  if (served.code === StandardErrorCode.enum.PERMISSION_DENIED && served.declaredCode === undefined) return result;
+  if (served.userMessage === undefined) return result;
+  if (served.status !== undefined && isServerFault(served.status)) return result;
+  const text = refusalReasonsRelayText(err);
+  return text === undefined
+    ? result
+    : { ...result, content: [...result.content, { type: 'text' as const, text: `${REFUSAL_REASONS_RELAY_LEAD}${text}` }] };
+}
+
+/** [#37416] The listed lines, then the closing line when the declared `userMessage` carries it after them. */
+function refusalReasonsRelayText(err: unknown): string | undefined {
+  const lines = declaredRefusalLines(err);
+  if (lines === undefined) return undefined;
+  const listed = lines.map((line) => line.message);
+  const joined = listed.join('\n');
+  const whole = declaredUserMessage(err);
+  const closing = whole !== undefined && whole.startsWith(`${joined}\n`) ? whole.slice(joined.length + 1) : '';
+  return [...listed, ...(closing.trim() !== '' ? [closing] : [])].join('\n');
 }
 
 /**
@@ -1671,7 +1769,8 @@ function dataDoorErrorResult(
   beside?: NotRecordedMembers,
 ) {
   const envelope = dataDoorRefusalEnvelope(err, objectName);
-  if (envelope) return codedErrorResult({ ...envelope }, beside);
+  // [#37416] The door may cut `userMessage` at 500; a listed refusal's lines ride whole beside it.
+  if (envelope) return withRefusalReasonsRelay(codedErrorResult({ ...envelope }, beside), err, envelope);
   const door = dataDoorAnswerOf(err, objectName);
   if (isServerFault(door.status)) {
     logServerFault({
@@ -1746,7 +1845,10 @@ function sentFieldHead(name: string): string {
 /**
  * The field names a `where` the caller sent addresses, in order: each
  * condition key, through the logical operators. Other `$` keys are operators,
- * never names.
+ * never names. Nor is the search companion key (`SEARCH_COMPANION_FIELD`): it
+ * is the engine's own column, present only where search provisions it and in
+ * no schema's field list, so a `where` refused for another reason never names
+ * it as not recorded.
  */
 function whereFieldNames(where: unknown, into: string[]): string[] {
   if (Array.isArray(where)) {
@@ -1759,6 +1861,7 @@ function whereFieldNames(where: unknown, into: string[]): string[] {
       if (WHERE_LOGICAL_OPERATORS.has(key)) whereFieldNames(value, into);
       continue;
     }
+    if (key === SEARCH_COMPANION_FIELD) continue;
     into.push(key);
   }
   return into;
@@ -2306,6 +2409,13 @@ interface DeleteEachOutcome {
  *
  * Measured on a booted stack: REST `DELETE` answers the sandboxed refusal
  * `400 HOOK_ABORTED` and the code hook's bare throw `500 INTERNAL_ERROR`.
+ *
+ * [#37512] A refusal thrown as a declared `reasons` list needs no relay block
+ * here ({@link withRefusalReasonsRelay}). It is coded, so its `reason` is the
+ * thrown value's own sentence, never the door's 500-character cut: the
+ * runtime's refusal catalogue sets that sentence to the same text as
+ * `userMessage`, every listed line whole and in order, its closing line last.
+ * So the group already names each line as ruling 7178348458 term 3 asks.
  */
 function rowRefusalOf(err: unknown, objectName: string): Omit<DeleteRefusalGroup, 'count' | 'recordIds'> | undefined {
   const door = dataDoorAnswerOf(err, objectName);
@@ -2666,6 +2776,16 @@ const WITHHELD_FIELDS_DESCRIPTION =
  */
 const OBJECT_QUERY_SOURCE_DESCRIPTION =
   'Quote the answer\'s source.line as the source of any figure you give from it.';
+
+/**
+ * [#35138] The one line `query_records`, `aggregate_records` and `get_record`
+ * describe the `notRecorded` / `ifNotRecorded` members with
+ * ({@link NotRecordedMembers}): read up front, so a refusal that carries them
+ * is never read as an empty answer. It names nothing; the members do.
+ */
+const NOT_RECORDED_DESCRIPTION =
+  'A refusal that carries notRecorded means what it names is not recorded in this app: '
+  + 'follow its ifNotRecorded, and never report 0 or empty for it.';
 
 /**
  * [#35138] The caller's locale ladder for a sentence the tools compose into a
@@ -3846,13 +3966,18 @@ export function registerObjectTools(
       },
     );
 
+    // #36806: the uiReadonly clause names only the console surfaces that honour
+    // the hand lock; the Gantt, the timesheet cell, the swimlane drag and the
+    // assistant are #37448.
     server.registerTool(
       note('describe_object'),
       {
         description:
           'Get the schema of a data object as you may read it, with what a write needs: name, label, description; '
           + 'each field\'s name, type, label, description (where set: the author\'s, or the platform\'s on a column '
-          + 'it injects), required, readonly (leave it out of a write), system, '
+          + 'it injects), required, readonly (leave it out of a write), uiReadonly / uiReadonlyWhen where set '
+          + '(a person cannot edit the field in the console\'s dialogs, record page, grids, kanban or calendar; '
+          + 'your write may still set it, judged by the validations), system, '
           + 'options (send the value) and defaultValue (omit the field to get it; never copy the value); the active '
           + 'validations; the enabled features. readonly is the schema\'s, not your edit permission.',
         inputSchema: strictToolInput(
@@ -4111,6 +4236,7 @@ export function registerObjectTools(
           'matched, so do not sum, count or rank the rows as if whole: read on with offset, or use aggregate_records ' +
           'where offered. ' +
           OBJECT_QUERY_SOURCE_DESCRIPTION + ' ' +
+          NOT_RECORDED_DESCRIPTION + ' ' +
           'A filter value "{current_user_id}" stands for you, e.g. approvals waiting on you: objectName ' +
           '"sys_approval_request", where {"status":"pending","pending_approvers":{"$contains":"{current_user_id}"}}. ' +
           // [ruling B] A person field holds a user id; names repeat, so email.
@@ -4267,6 +4393,7 @@ export function registerObjectTools(
             'totals and breakdowns. An amount whose records each carry their own currency is answered only grouped by ' +
             'its currency code field. Name a lookup group by its <key>__label, never by the id. ' +
             OBJECT_QUERY_SOURCE_DESCRIPTION + ' ' +
+            NOT_RECORDED_DESCRIPTION + ' ' +
             // [aggregate order and cut] A ranking question ("the top five
             // customers by revenue") is answered by the database: ordered,
             // cut, and the number of groups before the cut stated.
@@ -4481,6 +4608,8 @@ export function registerObjectTools(
           `To read it with the records that point at it, pass related: up to ${GET_RECORD_MAX_RELATED_LISTS} child ` +
           `objects, e.g. [{"object":"crm_opportunity"}], each list at most ${relatedMaxRows} rows; the answer is then ` +
           '{ record, related: [...] }. ' +
+          // [#35138] get_record sends no field names, so its notRecorded only ever names an object.
+          NOT_RECORDED_DESCRIPTION + ' ' +
           WITHHELD_FIELDS_DESCRIPTION,
         inputSchema: strictToolInput(
           { surface: 'this get_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
@@ -5097,12 +5226,17 @@ export function registerActionTools(
         };
         // [#33712] Step 1 of the amended confirmation contract: a client that
         // advertised `elicitation` on a server that read its `initialize` (the
-        // stdio door) is asked in place. Otherwise the bridge is called
-        // exactly as before and hands a gated call off.
-        const elicitConfirmation = actionConfirmationElicitorFor(server, extra);
-        const result = elicitConfirmation
-          ? await bridge.runAction(actionName, request, { elicitConfirmation })
-          : await bridge.runAction(actionName, request);
+        // stdio door) is asked in place. Otherwise the bridge hands a gated
+        // call off. [#34325] On that door a client without the capability is
+        // named to the bridge (`facts.elicitsCapableClients`), so a no-service
+        // refusal names the client route; the per-request HTTP server calls
+        // the bridge exactly as before.
+        const { door, facts } = actionCallDoorFor(server, extra);
+        const result = door
+          ? await bridge.runAction(actionName, request, door)
+          : facts
+            ? await bridge.runAction(actionName, request, undefined, facts)
+            : await bridge.runAction(actionName, request);
         return textResult(result);
       } catch (err) {
         return landedWriteResultOrError(
@@ -5188,10 +5322,13 @@ export function registerActionTools(
           // at the closed input, as on `run_action`.
           const request = { values };
           // [#33712] As `run_action`: asked in place where the client can be.
-          const elicitConfirmation = actionConfirmationElicitorFor(server, extra);
-          const result = elicitConfirmation
-            ? await resumeRun(runId, request, { elicitConfirmation })
-            : await resumeRun(runId, request);
+          // [#34325] And the same door facts for a no-service refusal.
+          const { door, facts } = actionCallDoorFor(server, extra);
+          const result = door
+            ? await resumeRun(runId, request, door)
+            : facts
+              ? await resumeRun(runId, request, undefined, facts)
+              : await resumeRun(runId, request);
           return textResult(result);
         } catch (err) {
           return errorResultFromThrown(err, `resume_run ${runId}`);

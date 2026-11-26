@@ -187,15 +187,9 @@ describe('an editable `object-grid` always has it on: it selects a cell first (o
     expect(cellAt(container, 1, 0)).toHaveAttribute('data-selected-cell');
   });
 
-  it('CONTROL: a host that keeps the staged model (`cellSelection: false`) keeps the roving cell focus, and `false` turns it off', async () => {
-    const on = render(<ObjectGridRenderer schema={grid({ editable: true })} cellSelection={false} />);
-    await screen.findByText('Gamma', {}, { timeout: 5000 });
-    expect(reading(on.container)).toEqual(ON);
-    cleanup();
-    const off = render(<ObjectGridRenderer schema={grid({ editable: true, keyboardNavigation: false })} cellSelection={false} />);
-    await screen.findByText('Gamma', {}, { timeout: 5000 });
-    expect(reading(off.container)).toEqual(OFF);
-  });
+  // objectstack#35827 — the staged-model control (`cellSelection: false`, where
+  // `keyboardNavigation: false` turned the roving focus off on an editable grid)
+  // left with the staged model: an editable grid is always select-first.
 });
 
 /* ── 3. The `editable` that counts is the one the grid renders ───────────── */

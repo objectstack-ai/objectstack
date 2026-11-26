@@ -39,7 +39,7 @@ const pkg = (id: string, type: 'app' | 'module', version: string, dependencies?:
     namespace: 'crm',
     version,
     type,
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
     ...(dependencies ? { dependencies } : {}),
   },
 });

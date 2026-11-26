@@ -3,12 +3,12 @@
 /**
  * StudioDesignSurface — the open-source WYSIWYG design surface (ADR-0080).
  *
- * Routed as /studio/:packageId/{data|automations|interfaces} — three pillars,
- * each composed AROUND existing renderers (no new editor code):
- *   - Interfaces: the real App navigation tree → live canvas (getMetadataPreview)
- *     + inspector (getMetadataInspector), edits persisting via draft → publish.
- *   - Data: the package's objects → fields + record grid.
- *   - Automations: flows → FlowPreview (default OFF / review-then-enable).
+ * Routed as /studio/:packageId/metadata/* (the "All metadata" area, where
+ * objects, flows and permission sets open their designers full-screen) and
+ * /studio/:packageId/owd (the sharing overview). objectstack#36909 — the
+ * retired pillar addresses (`data`, `automations`, `access`, `interfaces`)
+ * never reach this surface: the route redirects them
+ * (`StudioPillarRedirect`), and any other segment draws a not-found state.
  *
  * Open-core boundary: the left AI copilot is NOT part of the open-source
  * surface — it is an injected slot (`aiSlot`) the cloud edition fills.
@@ -31,6 +31,8 @@ import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
 import { StudioChatDock, type StudioCopilotStatus, type StudioSurfaceLabel } from './StudioAiCopilot.js';
 import { StudioRightSlot } from './StudioRightSlot.js';
+import { StudioTitleRowProvider } from './studioTitleRow.js';
+import { useStudioAccentOnBody } from './studioAccent.js';
 import { AssistantTopBarButton } from '../../layout/AssistantTopBarButton.js';
 import { ChatDockControlProvider, type ChatDockControl } from '../../layout/chatDockControl.js';
 import {
@@ -47,6 +49,7 @@ import {
 } from '../../layout/chatDockState.js';
 import type { AppMarkApp } from '../../layout/AppMark.js';
 import {
+  STUDIO_ACCENT,
   STUDIO_HEADER,
   STUDIO_HEADER_ICON_BUTTON,
   STUDIO_HEADER_PACKAGE_COLUMN,
@@ -63,6 +66,8 @@ import { PACKAGE_LIST_TOAST_ID } from './PackageSwitcher.js';
 import { studioEntryFallbackPath, useStudioEntryPermissions } from './studioEntryPermissions.js';
 import { SETUP_PACKAGES_PATH } from '../metadata-admin/packageSource.js';
 import { StudioBackToApp, type StudioAppTarget } from './StudioBackToApp.js';
+import { StudioPackageMenu } from './StudioPackageMenu.js';
+import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { type NewFlowTrigger } from './AutomationsFlowRail.js';
 import {
   CreateTakenNotice,
@@ -73,7 +78,6 @@ import {
   type StudioSavedDraft,
 } from './StudioPillarKit.js';
 import { AutomationsPillar } from './AutomationsPillar.js';
-import { automationsPillarRedirect } from './automationsPillarRedirect.js';
 import { DataPillar, renderStudioGridList } from './DataPillar.js';
 import {
   cn,
@@ -100,13 +104,7 @@ import { useMetadataClient } from '../metadata-admin/useMetadata.js';
 import { fetchPendingDrafts, usePendingDrafts } from '../../preview/usePendingDrafts.js';
 import { emitMetadataRefresh, subscribeMetadataRefresh } from '../../assistant/assistantBus.js';
 import { STUDIO_CHANGES_PARAM, STUDIO_CHANGES_REVIEW } from './studioChangesLink.js';
-import {
-  RETIRED_INTERFACES_SEGMENT,
-  STUDIO_HOME_PILLAR,
-  isRetiredInterfacesLanding,
-  retiredInterfacesState,
-  retiredInterfacesTarget,
-} from './studioInterfacesRetired.js';
+import { STUDIO_HOME_PILLAR, isRetiredInterfacesLanding } from './studioInterfacesRetired.js';
 import { StudioInterfacesRetiredNotice } from './StudioInterfacesRetiredNotice.js';
 import {
   StudioSaveControls,
@@ -122,16 +120,14 @@ import {
 } from './metadataError.js';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
 import {
-  STUDIO_ORG_SCOPE_PILLAR,
   isOrgScopeDraft,
   isStudioOrgScope,
   studioOrgScopePath,
 } from './studioScope.js';
-import { STUDIO_METADATA_AREA, dataPillarRedirect, isStudioAllPackagesScope } from './metadataArea.js';
+import { STUDIO_METADATA_AREA, isStudioAllPackagesScope, settledAreaAddress } from './metadataArea.js';
 import { StudioMenu, StudioMenuDataProvider, StudioMenuProvider, StudioMenuTrigger } from './StudioMenu.js';
 import { StudioMetadataArea } from './StudioMetadataArea.js';
 import { StudioOwdOverviewPage } from './StudioOwdOverviewPage.js';
-import { AccessPillarLanding } from './accessPillarLanding.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import {
   type SurfaceTarget,
@@ -143,7 +139,7 @@ import { confirmUnsavedLeave, useRegisterUnsavedEdits } from '../../chrome/unsav
 import { CommandPalette, type StudioPaletteSurface } from '../../chrome/CommandPalette.js';
 import { CommandPaletteProvider, useCommandPaletteProviderMounted } from '../../context/CommandPaletteProvider.js';
 import { StudioPaletteGroups } from './StudioPaletteGroups.js';
-import { openStudioPaletteAddress, studioSamePageSearch } from './studioPaletteModel.js';
+import { openStudioPaletteAddress } from './studioPaletteModel.js';
 import { CreateItemDialog } from './CreateItemDialog.js';
 // objectui#11787 — the shared draft autosave, moved to its own module unchanged.
 import {
@@ -171,7 +167,7 @@ import {
   type DraftPublishOptions,
 } from '../../preview/DraftChangesPanel.js';
 import { toast } from 'sonner';
-import { STUDIO_OWD_SECTION, studioItemPath, studioPillarItemAddress, studioPillarPath } from './studioAddress.js';
+import { STUDIO_OWD_SECTION, studioItemPath, studioMetadataTypePath, studioPillarPath } from './studioAddress.js';
 
 /** The batch door's `backfillApplied` receipt, by reference to what the client returns (objectui#12929). */
 type PublishBackfillReceipt = NonNullable<
@@ -197,36 +193,8 @@ function formatBackfillReceipt(receipt: PublishBackfillReceipt, locale: string):
     .join(' · ');
 }
 
-// The pillar segments `/studio/<package>/<pillar>` serves. objectstack#36899
-// (ADR-0084, amended) — they are no longer a navigation: Studio's one
-// navigation is the left menu (`StudioMenu`), and these pages are where a
-// flow or a permission set opens until each becomes a full-screen item page.
-// objectstack#36904 — the Data pillar is retired: an object opens its designer
-// on its metadata address, and `/data` redirects (`dataPillarRedirect`).
-// objectstack#36502 — the Interfaces pillar is retired
-// (`studioInterfacesRetired.tsx`). The "All metadata" area
-// (`/studio/<package>/metadata/…`, `metadataArea.ts`) is not a pillar, so the
-// not-found check does not hold it.
-//
-// objectstack#36903 — the Automations pillar is retired too: a flow opens its
-// designer on its metadata address, and `/automations` redirects
-// (`automationsPillarRedirect`) before this page draws.
-const PILLARS: readonly string[] = ['access'];
 // objectstack#29988 — the pillar kit moved to its own module; re-exported for its pins.
 export { StudioHeldNotice, StudioReadOnlyLink, type StudioBaseCustomization };
-
-/**
- * Which pillar owns a surface type — the routing half of a live surface
- * request (see surfaceDeepLinkChannel). Only the types a pillar actually
- * RESOLVES are listed, mirroring the `resolveSurfaceDeepLink` call sites
- * below; an unlisted type is delivered in place rather than guessed at,
- * because navigating to the wrong pillar costs the author their position and
- * buys nothing.
- */
-const PILLAR_FOR_SURFACE_TYPE: Readonly<Record<string, string>> = {
-  permission: 'access',
-};
-
 
 // objectstack#29148 — the strip moved to its own module; re-exported for its pins.
 export { StudioRefusalStrip };
@@ -254,37 +222,22 @@ export interface StudioDesignSurfaceProps {
 }
 
 /**
- * objectstack#28572 (ADR-0146 D3) — a pillar URL of a base's paired
- * `<base>.custom` lands on the base's surface, which lists, edits and
- * publishes the pair's items: the pair has no surface of its own. The pillar
- * and the query (a `?surface=` deep link) are kept.
+ * objectstack#28572 (ADR-0146 D3) — a URL of a base's paired `<base>.custom`
+ * outside the area (its sharing overview, or a segment no page has) lands on
+ * the base's surface, which lists, edits and publishes the pair's items: the
+ * pair has no surface of its own. The segment and the query are kept.
  *
  * ⛔ Not the "All metadata" area (`area`): its list links an item of the pair
  * to the pair's own area (`?package=<pair>`, which the area re-roots onto
  * that package), so landing that URL on the base would send it straight back.
+ *
+ * objectstack#36909 — a retired pillar's address (`data`, `automations`,
+ * `access`, `interfaces`) is redirected by the route (`StudioPillarRedirect`)
+ * before this surface mounts, so none is handled here.
  */
 export function StudioDesignSurface(props: StudioDesignSurfaceProps): React.ReactElement {
   const params = useParams<{ packageId?: string; tab?: string }>();
   const location = useLocation();
-  // objectstack#36502 — an old Interfaces URL lands on the Studio home and
-  // says where interface editing went (`studioInterfacesRetired.tsx`).
-  if (!props.area && params.tab === RETIRED_INTERFACES_SEGMENT) {
-    const scope = customizationPairBaseOf(params.packageId ?? null) ?? params.packageId ?? 'com.example.showcase';
-    return <Navigate to={retiredInterfacesTarget(scope, location.search)} state={retiredInterfacesState()} replace />;
-  }
-  // objectstack#36903 — the retired Automations pillar (and the package-less
-  // scope's) lands on the flow list or the flow's designer, a pair's in its
-  // own area (`automationsPillarRedirect`).
-  if (!props.area && params.tab === STUDIO_ORG_SCOPE_PILLAR && params.packageId && !isStudioAllPackagesScope(params.packageId)) {
-    return <Navigate to={automationsPillarRedirect(params.packageId, location.search)} state={location.state} replace />;
-  }
-  // objectstack#36904 — the retired Data pillar (Studio's old home, and the
-  // old object address) lands on the object list or the object's designer, a
-  // pair's in its own area (`dataPillarRedirect`).
-  const segment = params.packageId ?? '';
-  if (!props.area && params.tab === STUDIO_HOME_PILLAR && segment && !isStudioOrgScope(segment) && !isStudioAllPackagesScope(segment)) {
-    return <Navigate to={dataPillarRedirect(segment, location.search)} state={location.state} replace />;
-  }
   const pairBase = props.area ? null : customizationPairBaseOf(params.packageId ?? null);
   if (pairBase !== null) {
     const tab = params.tab ?? STUDIO_HOME_PILLAR;
@@ -307,9 +260,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // of them can be handed a reserved segment as though it named a package.
   const packageId: string | null = isStudioOrgScope(scopeSegment) || allScope ? null : scopeSegment;
   const tab = area ?? params.tab ?? STUDIO_HOME_PILLAR;
-  // objectstack#26708 — a segment no pillar has is a not-found state, never
-  // a pillar it falls through to.
-  const pillarKnown = PILLARS.includes(tab);
   const locale = useMetadataLocale();
   // objectstack#36502 — a landing from an old Interfaces URL says once where
   // interface editing went. The landing's history state is read once and
@@ -488,7 +438,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // objectstack#26705 — a held edit lives only in the pillar's buffer, so a
   // departure drops it exactly as it drops a dirty pillar's edits: both are
   // unsaved work, and every guard below reads this one bit. objectstack#36511
-  // — so does an edit waiting for the top bar's Save.
+  // — so does an edit waiting for the page's Save.
   const unsavedPillarWork = pillarDirty || heldEdit !== null || saveBar.dirty;
   // objectstack#36900 — every departure this surface starts asks the shell's
   // unsaved-edits seam, not only this surface's own bit: the seam holds this
@@ -643,7 +593,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     return new Map([...publishRefusals].filter(([key]) => listed.has(key)));
   }, [feedCount, pendingEntries, publishRefusals]);
 
-  // The publish toast's way to the Access pillar; set once the router's
+  // The publish toast's way to the package's permission sets; set once the router's
   // navigate is in hand below.
   const openAccessRef = React.useRef<() => void>(() => {});
 
@@ -943,9 +893,25 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // Setup → Packages for a principal who may open it, the "All metadata" area
   // for a Studio-only author (the same choice as Studio's entry).
   const notFoundExit = studioEntryFallbackPath(useStudioEntryPermissions());
+  // objectstack#37139 — the package's 「⋯」 menu (`StudioPackageMenu`) is a
+  // manage_metadata holder's. A revert or an adoption changes what the package
+  // holds: the pillars re-read their baseline, the pending count re-reads (the
+  // nonce's effect above), and the other surfaces hear of it. Saved package
+  // info renames the bar's package name in place.
+  const canAuthorPackage = useCanAuthorMetadata();
+  const onPackageChanged = React.useCallback(() => {
+    setPublishNonce((n) => n + 1);
+    emitMetadataRefresh();
+  }, []);
+  const onPackageRenamed = React.useCallback(
+    (name: string) => setPkgEntry((prev) => (prev && prev.id === packageId ? { ...prev, name } : prev)),
+    [packageId],
+  );
   React.useEffect(() => {
+    // objectstack#36909 — the package's permission sets, where the retired
+    // Access pillar's bare address lands, without the hop through it.
     openAccessRef.current = () => {
-      if (confirmLeavePillar()) shellNavigate(studioPillarPath(scopeSegment, 'access', { segmentEncoding: 'verbatim' }));
+      if (confirmLeavePillar()) shellNavigate(settledAreaAddress(studioMetadataTypePath(scopeSegment, 'permission')));
     };
   });
   // objectui#11181 — `label` is the app's own `I18nLabel` (a plain string or an
@@ -1215,15 +1181,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
    * Host side of the live `?surface=` channel. Producers below the provider —
    * today the pending-changes sheet's security block, which names a draft the
    * publish door would refuse — hand us a surface identity and we put the
-   * author in front of it:
-   *
-   *  - ANOTHER pillar's surface still travels through the URL, because that
-   *    pillar is unmounted and its mount-time capture is the mechanism built
-   *    for exactly this. Vetoed (`false`) when the author declines to abandon
-   *    unsaved edits, so a request never outlives the navigation it needed.
-   *  - THIS pillar's surface is the case the capture cannot serve at all —
-   *    nothing remounts — so the channel carries it and the pillar applies it
-   *    once.
+   * author in front of it: the item's own address, vetoed (`false`) when the
+   * author declines to abandon unsaved edits, so a request never outlives the
+   * navigation it needed. A type with no designer page of its own moves
+   * nothing.
    *
    * Either way the sheet closes: a selection nobody can see is not navigation.
    */
@@ -1233,9 +1194,11 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       // objectstack#36904 — an object is its designer's own address, in the
       // package that holds the draft the sheet names (`draftScope`): on a
       // read-only base, the `.custom` pair, where an object the pair adds
-      // resolves and the base's address does not.
-      if (target.type === 'object' && draftScope !== null) {
-        const to = studioItemPath(draftScope, 'object', target.name);
+      // resolves and the base's address does not. objectstack#36909 — a
+      // permission set the same way: its matrix's address, in that package
+      // (it used to go through the retired Access pillar's address).
+      if ((target.type === 'object' || target.type === 'permission') && draftScope !== null) {
+        const to = studioItemPath(draftScope, target.type, target.name);
         if (to !== currentPathname) {
           if (!confirmLeavePillar()) return false;
           shellNavigate(to);
@@ -1254,47 +1217,18 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
         setChangesOpen(false);
         return;
       }
-      const pillar = PILLAR_FOR_SURFACE_TYPE[target.type];
-      // objectui#11553 — the package-less scope has one pillar; a surface
-      // owned by another is not in this scope, so nothing to navigate to.
-      const reachable = !allScope && (packageId !== null || pillar === STUDIO_ORG_SCOPE_PILLAR);
-      if (pillar && pillar !== tab && reachable) {
-        if (!confirmLeavePillar()) return false;
-        shellNavigate(studioPillarItemAddress(scopeSegment, pillar, target, { segmentEncoding: 'verbatim' }));
-      }
       setChangesOpen(false);
     },
-    [tab, allScope, packageId, draftScope, scopeSegment, confirmLeavePillar, shellNavigate, currentPathname],
+    [allScope, packageId, draftScope, confirmLeavePillar, shellNavigate, currentPathname],
   );
-  // objectstack#36899 — a menu entry that re-enters the open pillar on another
-  // `?surface=` (the default sharing overview, on the Access pillar) opens the
-  // pillar afresh, as arriving from any other page does: a pillar reads its
-  // deep link once, at mount (`useSurfaceDeepLink`). The shell's link guard
-  // lets a link to the page already shown through, so this asks first. The
-  // remount waits for the new query to be the router's: the router may apply
-  // a navigation in a later render than the click's own state updates, and a
-  // pillar remounted before it would capture the old deep link.
-  // objectstack#36900 — it waits for the query it was asked for, not for the
-  // next query change: the command palette closes itself (its `?palette=`
-  // goes) before the pick navigates, and that first change must not remount
-  // the pillar on the old deep link.
-  const [pillarEntry, setPillarEntry] = React.useState(0);
-  const reentryPending = React.useRef<string | null>(null);
+  // objectstack#36899 — a menu entry or a palette pick that is the page
+  // already shown, on another query, asks about unsaved work first: the
+  // shell's link guard lets a link to the page already shown through.
+  // objectstack#36909 — it used to remount the open pillar too, so the pillar
+  // read the new deep link at mount; no pillar draws a page any more, and the
+  // area's pages read their own query.
   const currentSearch = useLocation().search;
-  const reenterPillar = React.useCallback(
-    (search: string): boolean => {
-      if (!confirmLeavePillar()) return false;
-      reentryPending.current = search;
-      return true;
-    },
-    [confirmLeavePillar],
-  );
-  React.useLayoutEffect(() => {
-    const expected = reentryPending.current;
-    if (expected === null || !studioSamePageSearch(currentSearch, expected)) return;
-    reentryPending.current = null;
-    setPillarEntry((n) => n + 1);
-  }, [currentSearch]);
+  const reenterPillar = React.useCallback((_search: string): boolean => confirmLeavePillar(), [confirmLeavePillar]);
   // objectstack#26708 — a package that is not there has no menu.
   const showMenu = !pkgMissing;
 
@@ -1358,7 +1292,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       className={cn(
         // The border is on both states so the swap never shifts the bar.
         'inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[13px] font-medium',
-        // objectstack#36511 — beside the top bar's Save, Save is the primary action.
+        // objectstack#36511 — while the page holds unsaved edits, its Save is the primary action.
         publishing || (!publishReadOnly && !saveBar.dirty)
           ? 'border-transparent bg-primary text-primary-foreground disabled:opacity-50'
           : 'text-muted-foreground',
@@ -1371,14 +1305,53 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     </button>
   );
 
+  // objectstack#37455 — the top bar's page controls, placed by the open
+  // page's title row (`studioTitleRow.tsx`). objectstack#36511 — the page's
+  // Cancel and Save: drawn only while the open page holds unsaved edits,
+  // never in a package that is not there nor on the cross-package leg.
+  const titleRowSave =
+    !pkgMissing && !allScope && (saveBar.dirty || saveBar.saving) ? (
+      <StudioSaveControls coordinator={saveBar} locale={locale} />
+    ) : null;
+  // objectui#12725 — the title row's right-most icon shows or hides the right
+  // slot; `⌘.` switches what it shows. objectstack#34725 — with a copilot
+  // served, that icon is the console top bar's robot (the same component),
+  // and it opens the slot on the AI assistant. Without one, the panel icon
+  // stays for the properties.
+  const titleRowAssistant =
+    !slotHost || !slotHasContent ? null : copilotAvailable ? (
+      <ChatDockControlProvider value={slotRobotControl}>
+        <AssistantTopBarButton />
+      </ChatDockControlProvider>
+    ) : (
+      <button
+        type="button"
+        data-testid="studio-slot-toggle"
+        onClick={() => setSlotOpen(!slotOpen)}
+        aria-pressed={slotOpen}
+        aria-label={t(slotOpen ? 'engine.studio.slot.collapse' : 'engine.studio.slot.expand', locale)}
+        title={t(slotOpen ? 'engine.studio.slot.collapse' : 'engine.studio.slot.expand', locale)}
+        className={cn(STUDIO_HEADER_ICON_BUTTON, slotOpen && 'text-foreground')}
+      >
+        {slotOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+      </button>
+    );
+
+  // objectstack#37455 — and on what Studio draws in a portal on `body`
+  // (dialogs, menus, sheets, tooltips, toasts, the palette), while mounted.
+  useStudioAccentOnBody();
+
   const page = (
     <StudioMenuDataProvider segment={scopeSegment}>
     <SurfaceDeepLinkProvider onRequest={requestSurface}>
       <StudioSaveProvider value={saveBar.registry}>
+      <StudioTitleRowProvider save={titleRowSave} assistant={titleRowAssistant}>
       <StudioRightSlotContext.Provider value={slotHandle}>
       {/* objectstack#36899 — the left menu's provider is the frame: the app
           sidebar's, under Studio's own collapse cookie (`StudioMenu.tsx`). */}
-      <StudioMenuProvider className="h-screen min-h-0 overflow-hidden bg-background text-foreground">
+      {/* objectstack#37455 — Studio's graphite on its root: nothing Studio
+          draws takes the app's theme colour (decision 4 of #37424). */}
+      <StudioMenuProvider className={cn('h-screen min-h-0 overflow-hidden bg-background text-foreground', STUDIO_ACCENT)}>
         {/* The ADR-0080 `aiSlot` seam — a cloud edition may still inject its own
           * left copilot panel; the built-in copilot is the RIGHT dock below. */}
         {/* objectstack#32615 — not beside a package that is not there. */}
@@ -1392,7 +1365,8 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 package actions at the right. objectstack#36899 — the pillars
                 that sat between them are gone: the left menu is Studio's one
                 navigation, and its show / hide control leads the bar. Changes
-                and Publish stay at the right end, beside Cancel and Save. */}
+                and Publish stay at the right end; objectstack#37455 — Cancel
+                and Save moved to the page's item header. */}
             <div className={cn('flex min-w-0 items-center gap-1', STUDIO_HEADER_PACKAGE_COLUMN)}>
               {showMenu && <StudioMenuTrigger locale={locale} />}
               {/* objectstack#36501 — 「‹ Back to app」, the app's name and the
@@ -1412,6 +1386,23 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 locale={locale}
                 beforeNavigate={confirmLeavePillar}
                 navigate={shellNavigate}
+                // objectstack#37139 — the package's 「⋯」 menu: a current package
+                // (never `~org` or `~all`) that is there, and a manage_metadata holder.
+                menu={
+                  packageId !== null && !pkgMissing && canAuthorPackage ? (
+                    <StudioPackageMenu
+                      packageId={packageId}
+                      packageName={pkgEntry?.id === packageId ? pkgEntry.name : packageId}
+                      writable={pkgWritable}
+                      pendingCount={shownPendingCount}
+                      locale={locale}
+                      onChanged={onPackageChanged}
+                      onRenamed={onPackageRenamed}
+                      beforeNavigate={confirmLeavePillar}
+                      navigate={shellNavigate}
+                    />
+                  ) : null
+                }
               />
             </div>
 
@@ -1443,7 +1434,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               {/* objectstack#36511 — Changes and Publish are for drafts, which
                   the copilot and the editors still on drafts (the Interfaces
                   pillar, the Metadata area) leave: drawn only while one is
-                  pending, at the left of Cancel and Save. */}
+                  pending. */}
               {hasPending && (
                 <>
                 {/* objectui#12459 — the pending count is a pill, not "· N" text. */}
@@ -1503,40 +1494,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 )}
                 </>
               )}
-              {/* objectstack#36511 — the page's Cancel and Save, where Publish
-                  was: drawn only while the open page holds unsaved edits. */}
-              <StudioSaveControls coordinator={saveBar} locale={locale} />
+              {/* objectstack#37455 — the page's Cancel and Save moved to its
+                  item header, and the AI assistant to the end of its title
+                  row (`titleRowSave`, `titleRowAssistant` above). */}
               </>)}
-              {/* objectui#12725 — the top bar's right-most icon shows or hides
-                  the right slot; `⌘.` switches what it shows.
-                  objectstack#34725 — with a copilot served, that icon is the
-                  console top bar's robot (the same component, in the same
-                  place), and it opens the slot on the AI assistant. Without
-                  one, the panel icon stays for the properties. */}
-              {slotHost && slotHasContent && copilotAvailable && (
-                <>
-                  <span className="mx-0.5 h-5 w-px shrink-0 bg-border" aria-hidden="true" />
-                  <ChatDockControlProvider value={slotRobotControl}>
-                    <AssistantTopBarButton />
-                  </ChatDockControlProvider>
-                </>
-              )}
-              {slotHost && slotHasContent && !copilotAvailable && (
-                <>
-                  <span className="mx-0.5 h-5 w-px shrink-0 bg-border" aria-hidden="true" />
-                  <button
-                    type="button"
-                    data-testid="studio-slot-toggle"
-                    onClick={() => setSlotOpen(!slotOpen)}
-                    aria-pressed={slotOpen}
-                    aria-label={t(slotOpen ? 'engine.studio.slot.collapse' : 'engine.studio.slot.expand', locale)}
-                    title={t(slotOpen ? 'engine.studio.slot.collapse' : 'engine.studio.slot.expand', locale)}
-                    className={cn(STUDIO_HEADER_ICON_BUTTON, slotOpen && 'text-foreground')}
-                  >
-                    {slotOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
-                  </button>
-                </>
-              )}
             </div>
           </header>
 
@@ -1654,22 +1615,14 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 readOnly={readOnly}
                 onDirtyChange={setPillarDirty}
               />
-            ) : !pillarKnown ? (
+            ) : (
+              // objectstack#26708 — a segment no page has is a not-found
+              // state. objectstack#36909 — the retired pillars' segments never
+              // reach here: the route redirects them (`StudioPillarRedirect`).
               <StudioEmptyState
                 icon={FileQuestion}
                 testId="studio-pillar-not-found"
                 sentence={tFormat('engine.studio.notFound.pillar', locale, { pillar: tab })}
-              />
-            ) : (
-              // objectstack#36905 — the Access pillar draws no page: a set opens
-              // at its metadata address (a set the base's pair adds at the
-              // pair's), the sharing overview on its own route, and the bare
-              // pillar on the list of sets.
-              <AccessPillarLanding
-                key={`${packageId}${currentSearch}`}
-                packageId={packageId}
-                search={currentSearch}
-                state={landingState}
               />
             )}
             </StudioPendingDraftsContext.Provider>
@@ -1769,6 +1722,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       {/* objectstack#36900 — the command palette, in its `studio` scope, with this page's groups. */}
       {!paletteHosted && <CommandPalette scope="studio" surface={paletteSurface} />}
       </StudioRightSlotContext.Provider>
+      </StudioTitleRowProvider>
       </StudioSaveProvider>
     </SurfaceDeepLinkProvider>
     </StudioMenuDataProvider>
@@ -1781,7 +1735,8 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
 export { type NewFlowTrigger };
 
 // objectstack#36893 — the Automations pillar moved to its own module; re-exported for its pins.
-// objectstack#36905 — the Access pillar is gone: its addresses redirect (`accessPillarRedirect.ts`).
+// objectstack#36905 — the Access pillar is gone: its addresses redirect (`accessPillarRedirect.ts`, reached
+// through `StudioPillarRedirect`, objectstack#36909).
 export { AutomationsPillar };
 
 // objectstack#36893 — the Data pillar moved to its own module; re-exported for its pins.

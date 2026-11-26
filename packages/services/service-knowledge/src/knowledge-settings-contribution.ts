@@ -31,6 +31,13 @@ import {
   aiTestEmbedderActionHandler,
   type SettingsService,
 } from '@objectstack/service-settings';
+import {
+  KNOWLEDGE_INDEX_STATUS_ACTION,
+  KNOWLEDGE_REBUILD_ACTION,
+  knowledgeIndexStatusActionHandler,
+  knowledgeRebuildActionHandler,
+  type KnowledgeBuildActionsService,
+} from './knowledge-build-actions.js';
 
 /** The Setup bundle this contribution registers under. */
 export const KNOWLEDGE_SETUP_NAV_BUNDLE_ID = 'com.objectstack.service.knowledge.setup-nav';
@@ -92,8 +99,16 @@ export interface KnowledgeSettingsContribution {
  * service, and its Setup entry on the manifest service. A composition with no
  * settings service gets none of it, Setup entry included: the entry would open
  * a page the server does not serve.
+ *
+ * Given the knowledge service, the namespace also carries the administrator's
+ * rebuild entry, the `rebuild` and `index_status` actions
+ * (`knowledge-build-actions.ts`).
  */
-export function contributeKnowledgeSettings(ctx: PluginContext, version: string): KnowledgeSettingsContribution {
+export function contributeKnowledgeSettings(
+  ctx: PluginContext,
+  version: string,
+  service?: KnowledgeBuildActionsService,
+): KnowledgeSettingsContribution {
   const offered: KnowledgeSettingsContribution = { knowledge: false, embedder: false, nav: false };
   let settings: SettingsSlot | undefined;
   try {
@@ -106,6 +121,10 @@ export function contributeKnowledgeSettings(ctx: PluginContext, version: string)
 
   settings.registerManifest(knowledgeSettingsManifest);
   settings.registerAction('knowledge', 'test', knowledgeTestActionHandler);
+  if (service) {
+    settings.registerAction('knowledge', KNOWLEDGE_REBUILD_ACTION, knowledgeRebuildActionHandler(service));
+    settings.registerAction('knowledge', KNOWLEDGE_INDEX_STATUS_ACTION, knowledgeIndexStatusActionHandler(service));
+  }
   offered.knowledge = true;
 
   // The embedder section joins the `ai` namespace — the bundled one only,

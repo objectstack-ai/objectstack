@@ -34,8 +34,16 @@
  *   toolDecisions={hitl.decisions}
  * />
  * ```
+ *
+ * The decision rides the host's AUTHENTICATED fetch (`SchemaRendererProvider`'s
+ * `apiFetch`), the channel the renderers' own reads use: a session held by its
+ * bearer token alone carries no cookie, so `credentials: 'include'` on the bare
+ * global fetch was answered as anonymous, and a `401` never reached the host's
+ * session-ended check. A host that mounts no provider keeps the global fetch,
+ * cookies included.
  */
 import * as React from 'react';
+import { SchemaRendererContext } from '@object-ui/react';
 import type { ChatbotEnhancedMessage as ChatMessage, ToolDecisionState } from './ChatbotEnhanced';
 import type { ApproveOutcome, RejectOutcome } from './usePendingActions';
 import { hitlContinuationTag } from './hitlContinuation';
@@ -159,6 +167,8 @@ async function parseJson(response: Response): Promise<Record<string, unknown> | 
 export function useHitlInChat(options: UseHitlInChatOptions): UseHitlInChatReturn {
   const { messages, apiBase, headers, onDecided, continueConversation } = options;
   const base = normalizeBase(apiBase);
+  // Read directly, not via `useSchemaContext`, which throws with no provider.
+  const apiFetch = React.useContext(SchemaRendererContext)?.apiFetch;
 
   // Index toolCallId → { pendingActionId, toolName } from the latest
   // messages. Memoised because messages stream tick-by-tick and we don't
@@ -224,7 +234,8 @@ export function useHitlInChat(options: UseHitlInChatOptions): UseHitlInChatRetur
           approved ? 'approve' : 'reject'
         }`;
         const body = approved ? '{}' : JSON.stringify({ reason: reason ?? '' });
-        const response = await fetch(url, {
+        const doFetch = apiFetch ?? fetch;
+        const response = await doFetch(url, {
           method: 'POST',
           credentials: 'include',
           headers: buildHeaders(headers, true),
@@ -319,7 +330,7 @@ export function useHitlInChat(options: UseHitlInChatOptions): UseHitlInChatRetur
         }
       }
     },
-    [base, headers, idMap, onDecided, continueConversation, setDecision],
+    [base, headers, apiFetch, idMap, onDecided, continueConversation, setDecision],
   );
 
   return { decisions, decide, isDeciding };

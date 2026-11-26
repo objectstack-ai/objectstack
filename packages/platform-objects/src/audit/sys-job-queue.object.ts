@@ -133,7 +133,13 @@ export const SysJobQueue = ObjectSchema.create({
     }),
 
     status: Field.select(
-      ['pending', 'running', 'completed', 'failed', 'dlq'],
+      [
+        { label: 'pending', value: 'pending', color: 'yellow' },
+        'running',
+        { label: 'completed', value: 'completed', color: 'green' },
+        { label: 'failed', value: 'failed', color: 'red' },
+        'dlq',
+      ],
       {
         label: 'Status',
         required: true,

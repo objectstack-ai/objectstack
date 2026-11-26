@@ -25,6 +25,17 @@ const INVITATION_STATUS_LABELS: Record<InvitationStatus, string> = {
 };
 
 /**
+ * The badge colour each invitation status declares. A select option is
+ * coloured only when its author declares a colour (objectstack#36882), so the
+ * statuses that read as a state change carry one; the rest render neutral.
+ */
+const INVITATION_STATUS_COLORS: Partial<Record<InvitationStatus, string>> = {
+  pending: 'yellow',
+  rejected: 'red',
+  canceled: 'red',
+};
+
+/**
  * sys_invitation — System Invitation Object
  *
  * Organization invitation tokens for inviting users.
@@ -417,7 +428,11 @@ export const SysInvitation = ObjectSchema.create({
       label: 'Status',
       required: true,
       defaultValue: 'pending',
-      options: InvitationStatus.options.map((value) => ({ value, label: INVITATION_STATUS_LABELS[value] })),
+      options: InvitationStatus.options.map((value) => ({
+        value,
+        label: INVITATION_STATUS_LABELS[value],
+        ...(INVITATION_STATUS_COLORS[value] ? { color: INVITATION_STATUS_COLORS[value] } : {}),
+      })),
     }),
     
     inviter_id: Field.lookup('sys_user', {

@@ -12,20 +12,19 @@
  *
  * An outline lists at most {@link RECORD_CONTEXT_OUTLINE_MAX_ENTRIES} headings,
  * and its listing serialized stays within {@link RECORD_CONTEXT_BODY_MAX_CHARS},
- * whatever the body holds; a cut is stated. The cap bounds the listing, not which
- * sections exist: every heading's anchor still reads its section.
+ * whatever the body holds; a cut is stated. The cap bounds one answer, not which
+ * headings are listed: an outline past it comes in pages, the next one listed
+ * by calling the tool again with the `outlineFrom` the cut answer gave, so every
+ * heading is listed, with its anchor, on exactly one page however many the body
+ * holds (bar a heading too long to list by itself, which no page lists, stated).
+ * Every heading's anchor reads its section, listed on this page or not.
  *
- * Headings are read the way the field type writes them: Markdown ATX headings
- * (`#` to `######` at the start of a line, outside a fenced code block) for
- * `textarea` and `markdown`, and `<h1>` to `<h6>` elements for `html` and
- * `richtext`.
- *
- * An anchor is the heading's text, lowercased, every run of characters that is
- * not a letter or a digit made one `-`, with `-2`, `-3`, … added to a repeated
- * one. It is derived from the heading alone, so an edit that renames or
- * removes a heading leaves the old anchor unresolved — refused, never answered
- * with another section.
+ * Which lines and elements are headings, and the anchor each one is read by,
+ * are the spec's `headingsOf` (`@objectstack/spec/ai`, `record-body-anchor.ts`):
+ * a citation's `anchor` names the same heading a surface opens (ADR-0160 D9).
  */
+
+import { headingsOf, type BodyHeading } from '@objectstack/spec/ai';
 
 /**
  * The most characters of body text one answer carries (whole body, section, or
@@ -34,8 +33,9 @@
 export const RECORD_CONTEXT_BODY_MAX_CHARS = 8000;
 
 /**
- * The most headings one outline lists. A body with more is listed shallowest
- * level first and says how many it left out ({@link boundedOutline}).
+ * The most headings one outline page lists. A body with more is listed in
+ * pages, shallowest level first, each page saying how many it left out and
+ * where the next starts ({@link boundedOutline}).
  *
  * Chosen by measurement: an entry serializes to about 95 characters on average
  * (the 543 Markdown documents of this repository past the body bound that have
@@ -44,168 +44,15 @@ export const RECORD_CONTEXT_BODY_MAX_CHARS = 8000;
  */
 export const RECORD_CONTEXT_OUTLINE_MAX_ENTRIES = 80;
 
-/** One heading of a body. */
-export interface BodyHeading {
-  anchor: string;
-  heading: string;
-  level: number;
-  /** Where the heading starts in the body text. */
-  start: number;
-}
-
-// Every reader below is a forward scan: one pass over the text, no pattern
-// that can backtrack. A body is author-written, so its shape is not ours to
-// trust, and the outline is read before the body's length is judged.
-
-const isBlank = (c: string): boolean => c === ' ' || c === '\t';
-const isWordChar = (c: string): boolean => /^[A-Za-z0-9_]$/.test(c);
-const isSpace = (c: string): boolean => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\f' || c === '\v';
-
-/** Whether `line` opens or closes a fenced code block (``` or ~~~ after optional blanks). */
-function isFence(line: string): boolean {
-  let i = 0;
-  while (i < line.length && isBlank(line[i])) i++;
-  return line.startsWith('```', i) || line.startsWith('~~~', i);
-}
-
-/** An ATX heading's level and text, or `undefined` for any other line. */
-function markdownHeadingOf(line: string): { level: number; heading: string } | undefined {
-  let level = 0;
-  while (level < line.length && line[level] === '#') level++;
-  if (level < 1 || level > 6 || !isBlank(line[level] ?? '')) return undefined;
-  let start = level;
-  while (start < line.length && isBlank(line[start])) start++;
-  let end = line.length;
-  while (end > start && isBlank(line[end - 1])) end--;
-  while (end > start && line[end - 1] === '#') end--;
-  while (end > start && isBlank(line[end - 1])) end--;
-  const heading = line.slice(start, end).trim();
-  return heading ? { level, heading } : undefined;
-}
-
-/** `text` with every `<…>` tag removed; a `<` with no `>` after it is kept as text. */
-function stripTags(text: string): string {
-  let out = '';
-  let i = 0;
-  while (i < text.length) {
-    const open = text.indexOf('<', i);
-    if (open < 0) break;
-    const close = text.indexOf('>', open + 1);
-    if (close < 0) break;
-    out += text.slice(i, open);
-    i = close + 1;
-  }
-  return out + text.slice(i);
-}
-
-/**
- * The `<h1>`…`<h6>` elements of `html`, in order. Each search for a `>` or a
- * closing tag remembers where it landed, and every later search starts at or
- * after an earlier one, so the scan stays linear however many openers are
- * left unclosed.
- */
-function htmlHeadingsOf(html: string): Array<{ level: number; inner: string; start: number }> {
-  const lower = html.toLowerCase();
-  const out: Array<{ level: number; inner: string; start: number }> = [];
-  let gt = -2;
-  const nextGt = (from: number): number => {
-    if (gt === -1 || gt >= from) return gt;
-    gt = lower.indexOf('>', from);
-    return gt;
-  };
-  const closers = new Map<number, number>();
-  const nextCloser = (level: number, from: number): { at: number; end: number } | undefined => {
-    let at = closers.get(level) ?? -2;
-    if (at !== -1 && at < from) {
-      at = from;
-      for (;;) {
-        at = lower.indexOf(`</h${level}`, at);
-        if (at < 0) break;
-        let k = at + 4;
-        while (k < lower.length && isSpace(lower[k])) k++;
-        if (lower[k] === '>') break;
-        at = k;
-      }
-      closers.set(level, at < 0 ? -1 : at);
-    }
-    if (at < 0) return undefined;
-    let end = at + 4;
-    while (end < lower.length && isSpace(lower[end])) end++;
-    return { at, end: end + 1 };
-  };
-  let pos = 0;
-  for (;;) {
-    const open = lower.indexOf('<h', pos);
-    if (open < 0) break;
-    const level = Number(lower[open + 2]);
-    const after = lower[open + 3] ?? '';
-    if (!(level >= 1 && level <= 6) || isWordChar(after)) {
-      pos = open + 1;
-      continue;
-    }
-    const tagEnd = nextGt(open + 3);
-    if (tagEnd < 0) break;
-    const closer = nextCloser(level, tagEnd + 1);
-    if (!closer) {
-      pos = open + 1;
-      continue;
-    }
-    out.push({ level, inner: html.slice(tagEnd + 1, closer.at), start: open });
-    pos = closer.end;
-  }
-  return out;
-}
-
-/** `heading text` → `heading-text`; letters and digits of every script kept. */
-function slugOf(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
-function decodeEntities(text: string): string {
-  return text
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&');
-}
+// The headings and their anchors are the spec's (`@objectstack/spec/ai`,
+// `record-body-anchor.ts`), so this service and a surface that opens a record
+// at a cited anchor derive one anchor from one body (ADR-0160 D9).
+export { headingsOf };
+export type { BodyHeading };
 
 /** Whether a field type writes HTML (its headings are elements). */
 export function isHtmlBodyType(type: unknown): boolean {
   return type === 'html' || type === 'richtext';
-}
-
-/** The headings of `text`, in order, each with its anchor. */
-export function headingsOf(text: string, html: boolean): BodyHeading[] {
-  const raw: Array<{ heading: string; level: number; start: number }> = [];
-  if (html) {
-    for (const h of htmlHeadingsOf(text)) {
-      const heading = decodeEntities(stripTags(h.inner)).replace(/\s+/g, ' ').trim();
-      if (heading) raw.push({ heading, level: h.level, start: h.start });
-    }
-  } else {
-    let inFence = false;
-    let offset = 0;
-    for (const line of text.split('\n')) {
-      if (isFence(line)) inFence = !inFence;
-      else if (!inFence) {
-        const m = markdownHeadingOf(line.endsWith('\r') ? line.slice(0, -1) : line);
-        if (m) raw.push({ heading: m.heading, level: m.level, start: offset });
-      }
-      offset += line.length + 1;
-    }
-  }
-  const seen = new Map<string, number>();
-  return raw.map((h, i) => {
-    const base = slugOf(h.heading) || `section-${i + 1}`;
-    const n = (seen.get(base) ?? 0) + 1;
-    seen.set(base, n);
-    return { ...h, anchor: n === 1 ? base : `${base}-${n}` };
-  });
 }
 
 /** One section's text: from its heading to the next heading of the same or a higher level. */
@@ -224,32 +71,67 @@ export interface BodyOutlineEntry {
   level: number;
 }
 
+/** One page of an outline, and where the next page starts. */
+export interface BoundedOutline {
+  /** This page's headings, in body order. */
+  outline: BodyOutlineEntry[];
+  /** How many of the body's headings this page does not list (on earlier pages, later ones, or none). */
+  omitted: number;
+  /** Where the next page starts, as `outlineFrom`: present only when a heading remains that a later page lists. */
+  next?: number;
+  /** How many of the body's headings no page lists, each too long to list by itself: present only when some are. */
+  unlistable?: number;
+}
+
 /**
- * The outline of `headings`, held to {@link RECORD_CONTEXT_OUTLINE_MAX_ENTRIES}
- * entries and to {@link RECORD_CONTEXT_BODY_MAX_CHARS} serialized characters,
- * and how many headings it left out.
+ * One page of the outline of `headings`, held to
+ * {@link RECORD_CONTEXT_OUTLINE_MAX_ENTRIES} entries and to
+ * {@link RECORD_CONTEXT_BODY_MAX_CHARS} serialized characters.
  *
- * Headings are admitted shallowest level first, in body order within a level,
- * until the next would pass either bound; the admitted ones are listed in body
- * order. So a cut leaves out the deepest headings first, and a listed section's
- * text holds the headings under it. Every anchor is the one {@link headingsOf}
- * gave, so a listed anchor is the same whether or not the outline was cut.
+ * The pages run through every heading in one order: shallowest level first,
+ * in body order within a level. A page takes that order from position `from`
+ * (0, the first page, by default) until the next heading would pass either
+ * bound, and lists what it took in body order; `next` is the position the
+ * following page starts at. So the first page of a nested body is its top
+ * levels, and a cut leaves the deepest headings to later pages; a flat body's
+ * pages are runs of it in body order. Each heading is on exactly one page, so
+ * following `next` from the first page lists every heading. Every anchor is
+ * the one {@link headingsOf} gave, so a listed anchor is the same on whichever
+ * page and whether or not the outline was cut.
+ *
+ * The one exception: a heading whose entry alone passes the character bound
+ * fits no page, so no page lists it and the pages pass over it, counted in
+ * `unlistable`; one such heading never empties a page the others fit on.
  */
-export function boundedOutline(headings: readonly BodyHeading[]): { outline: BodyOutlineEntry[]; omitted: number } {
+export function boundedOutline(headings: readonly BodyHeading[], from = 0): BoundedOutline {
   const byLevel = headings.map((h, index) => ({ h, index })).sort((a, b) => a.h.level - b.h.level || a.index - b.index);
+  const entryOf = (h: BodyHeading): BodyOutlineEntry => ({ anchor: h.anchor, heading: h.heading, level: h.level });
+  // `[` and `]` around one entry.
+  const listable = (entry: BodyOutlineEntry) => JSON.stringify(entry).length + 2 <= RECORD_CONTEXT_BODY_MAX_CHARS;
   const admitted: Array<{ entry: BodyOutlineEntry; index: number }> = [];
+  let next: number | undefined;
   // `[` and `]`, then one `,` between entries.
   let chars = 2;
-  for (const { h, index } of byLevel) {
-    if (admitted.length >= RECORD_CONTEXT_OUTLINE_MAX_ENTRIES) break;
-    const entry = { anchor: h.anchor, heading: h.heading, level: h.level };
+  for (let at = from; at < byLevel.length; at++) {
+    const { h, index } = byLevel[at];
+    const entry = entryOf(h);
+    if (!listable(entry)) continue;
     const cost = JSON.stringify(entry).length + (admitted.length > 0 ? 1 : 0);
-    if (chars + cost > RECORD_CONTEXT_BODY_MAX_CHARS) break;
+    if (admitted.length >= RECORD_CONTEXT_OUTLINE_MAX_ENTRIES || chars + cost > RECORD_CONTEXT_BODY_MAX_CHARS) {
+      next = at;
+      break;
+    }
     chars += cost;
     admitted.push({ entry, index });
   }
+  const unlistable = headings.filter((h) => !listable(entryOf(h))).length;
   admitted.sort((a, b) => a.index - b.index);
-  return { outline: admitted.map((a) => a.entry), omitted: headings.length - admitted.length };
+  return {
+    outline: admitted.map((a) => a.entry),
+    omitted: headings.length - admitted.length,
+    ...(next !== undefined ? { next } : {}),
+    ...(unlistable > 0 ? { unlistable } : {}),
+  };
 }
 
 /** `text` held to the bound: the text, and whether it was cut. */

@@ -169,6 +169,7 @@ import {
   type OutboundAgentTextKey,
 } from './outboundAgentText.js';
 import { resolveApiBase } from './resolveApiBase.js';
+import { RECORD_SECTION_OPENED_STATE, RECORD_SECTION_PARAM } from '../../urlParams.js';
 import { AiUnavailable } from './AiUnavailable.js';
 import { recordWriteFormTarget } from '../../utils/recordFormAiDraft.js';
 import { useUpload } from '@object-ui/fields';
@@ -214,6 +215,30 @@ export function listLinkTarget(
   }
   const query = params.toString();
   return `/apps/${encodeURIComponent(app)}/${encodeURIComponent(target.objectName)}${query ? `?${query}` : ''}`;
+}
+
+/**
+ * cloud#1658, ADR-0160 D9 — the console address of a record the chat opens:
+ * `/apps/APP/OBJECT/record/ID`, plus `?section=ANCHOR` (`RECORD_SECTION_PARAM`)
+ * when a record citation names a section of the record's body. A link with no
+ * anchor (an `open_record` hand-off, a record link in an answer) opens the
+ * record as before.
+ */
+export function recordOpenTarget(
+  app: string,
+  target: { objectName: string; recordId: string; anchor?: string },
+): string {
+  const path = `/apps/${encodeURIComponent(app)}/${encodeURIComponent(target.objectName)}/record/${encodeURIComponent(target.recordId)}`;
+  if (!target.anchor) return path;
+  return `${path}?${new URLSearchParams({ [RECORD_SECTION_PARAM]: target.anchor }).toString()}`;
+}
+
+let sectionOpenings = 0;
+
+/** A history-state value no earlier chip click of this page load carried. */
+function nextSectionOpening(): string {
+  sectionOpenings += 1;
+  return `${Date.now().toString(36)}.${sectionOpenings}`;
 }
 
 function partString(part: HydratedUIMessagePart, key: string): string | undefined {
@@ -1917,11 +1942,19 @@ export function ChatPane({
   // owning package on click — one same-origin metadata read — instead of
   // burdening the agent with an id it may not know. `setup` is the fallback
   // shell for an object no package claims.
+  //
+  // ADR-0160 D9 — a record citation's chip passes the `anchor` of the body
+  // section it cites; it rides as `?section=` (`RECORD_SECTION_PARAM`), and
+  // the record page opens at that heading. The record opened is always the
+  // citation's own `object`/`id`, the pack's root record. Each click carries a
+  // fresh `RECORD_SECTION_OPENED_STATE`, so clicking the same chip again opens
+  // the section again.
   const openRecord = useCallback(
-    async (handoff: { objectName: string; recordId: string }) => {
+    async (handoff: { objectName: string; recordId: string; anchor?: string }) => {
       const app = await appOfObject(handoff.objectName);
       navigate(
-        `/apps/${encodeURIComponent(app)}/${encodeURIComponent(handoff.objectName)}/record/${encodeURIComponent(handoff.recordId)}`,
+        recordOpenTarget(app, handoff),
+        handoff.anchor ? { state: { [RECORD_SECTION_OPENED_STATE]: nextSectionOpening() } } : undefined,
       );
     },
     [navigate],

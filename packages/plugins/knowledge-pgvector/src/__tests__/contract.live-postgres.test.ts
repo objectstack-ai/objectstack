@@ -2,8 +2,8 @@
 
 // The `IKnowledgeAdapter` contract suite (ADR-0161 K8, rule 1) against a LIVE
 // PostgreSQL with pgvector: the same suite the reference adapter runs, each
-// case on a fresh adapter in a schema of its own. It does not build a second
-// generation beside the first yet (#37101), so `generations` is false.
+// case on a fresh adapter in a schema of its own, `generations` included: a
+// build under a new fingerprint fills a generation beside the active one.
 
 import { afterAll, describe } from 'vitest';
 import { runKnowledgeAdapterContract } from '@objectstack/service-knowledge/testing';
@@ -26,7 +26,8 @@ describe.skipIf(!PG_URL)('knowledge-pgvector on a LIVE PostgreSQL', () => {
       indexStatus: true,
       builds: true,
       refusesOtherFingerprint: true,
-      generations: false,
+      generations: true,
+      scope: true,
     },
   });
 });
