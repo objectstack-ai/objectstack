@@ -21,8 +21,10 @@
  *
  * The hash that once stood as the last rung is retired (objectstack#36882,
  * option A): a value no option colours — a category label on a schemaless /
- * inline-data calendar — is still handed on raw, and `resolveEventColor`
- * paints it the default event colour. No colour is derived from a value.
+ * inline-data calendar, or a palette family name stored as data — hands on
+ * nothing, and the event takes the default colour. Only a value that already
+ * is a Tailwind colour utility is still handed on raw. No colour is derived
+ * from a value.
  *
  * ---
  *
@@ -221,8 +223,32 @@ describe('objectui#7243 — calendar colorField ladder', () => {
     expect(resolveEventColor('open').inlineColor).toBeUndefined();
   });
 
-  it('last rung: a value no option colours is handed on raw and paints the default event colour', async () => {
-    expect(await colorsFor('category')).toEqual(['email']);
-    expect(resolveEventColor('email')).toEqual({ className: 'bg-blue-100 text-blue-900 border border-blue-200' });
+  it('no last rung: a value no option colours hands on nothing, so the event takes the default colour', async () => {
+    expect(await colorsFor('category')).toEqual([undefined]);
+    expect(resolveEventColor(undefined)).toEqual({ className: 'bg-blue-100 text-blue-900 border border-blue-200' });
+  });
+
+  // objectstack#36882: only a declared colour paints. A family name stored as
+  // a record value is data; the same name declared on an option is a colour.
+  it('an undeclared value that happens to be a palette family name paints nothing', async () => {
+    const rows = [{ ...ROWS[0], category: 'green' }];
+    expect(await colorsFor('category', rows)).toEqual([undefined]);
+  });
+
+  it('a palette family declared on the option reaches the event and paints that family tint', async () => {
+    const familySchema = {
+      ...OBJECT_SCHEMA,
+      fields: {
+        ...OBJECT_SCHEMA.fields,
+        status: { name: 'status', type: 'select', options: [{ value: 'open', label: 'Open', color: 'green' }] },
+      },
+    };
+    expect(await colorsFor('status', ROWS, familySchema)).toEqual(['green']);
+    expect(resolveEventColor('green')).toEqual({ className: 'bg-green-100 text-green-900 border border-green-200' });
+  });
+
+  it('a value that already is a Tailwind colour utility is still handed on as a colour', async () => {
+    const rows = [{ ...ROWS[0], category: 'bg-emerald-600 text-white' }];
+    expect(await colorsFor('category', rows)).toEqual(['bg-emerald-600 text-white']);
   });
 });

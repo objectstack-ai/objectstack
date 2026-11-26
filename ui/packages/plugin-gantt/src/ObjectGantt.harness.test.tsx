@@ -1685,6 +1685,28 @@ describe('ObjectGantt.colorFieldLadder-7243', () => {
       expect(await colorsFor('accent', rows)).toEqual([undefined]);
     });
 
+    it('rung 1, a declared palette family: the bar paints that family palette hex, not the CSS named colour', async () => {
+      // objectstack#36882: `color: 'blue'` on an option is the badge's blue
+      // (#3b82f6), never the browser's `blue` (#0000ff).
+      const familySchema = {
+        ...OBJECT_SCHEMA,
+        fields: {
+          ...OBJECT_SCHEMA.fields,
+          status: {
+            name: 'status',
+            type: 'select',
+            options: [
+              { value: 'open', label: 'Open', color: 'blue' },
+              { value: 'done', label: 'Done', color: 'green' },
+            ],
+          },
+        },
+      };
+      const rows = [ROWS[0], { ...ROWS[0], id: '2', status: 'done' }];
+      const tasks = await tasksFor({ colorField: 'status' }, rows, familySchema);
+      expect(tasks.map((t) => t.color)).toEqual(['#3b82f6', '#22c55e']);
+    });
+
     it('borderColorField takes rung 1 too — the alert stroke honours option colours', async () => {
       const tasks = await tasksFor({ borderColorField: 'status' });
       expect(tasks[0].borderColor).toBe('#7c3aed');

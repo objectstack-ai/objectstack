@@ -1525,8 +1525,16 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
       // the browser dropped the declaration and every bar rendered
       // identically — DECLARING the documented key was strictly worse than
       // omitting it, silently.
+      //
+      // A palette family name an author declares on an option (`color:
+      // 'blue'`) paints that family's palette hex, the same colour the badge
+      // shows, not the CSS named colour (`blue` is #0000ff). Only rung 1 can
+      // answer a family name (rung 2 accepts hex / rgb / hsl alone), so this
+      // maps a declaration and never a stored value; a hex or other literal
+      // passes through unchanged as the fallback.
       const colorValue = colorField ? record[colorField] : undefined;
-      const color = resolveColorFieldValue(colorValue);
+      const declaredColor = resolveColorFieldValue(colorValue);
+      const color = declaredColor ? getSemanticHex(declaredColor, declaredColor) : undefined;
       // Alert stroke: the option colour first (same rung 1 as the bar — an
       // authored option colour is an authored option colour whichever slot it
       // paints), then today's behaviour: semantic palette names map to their

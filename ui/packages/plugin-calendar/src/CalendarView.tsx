@@ -52,6 +52,16 @@ const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i
 const TAILWIND_TOKEN_RE = /(^|\s)(bg|text|from|to|via)-/
 
 /**
+ * Whether a raw value already is a Tailwind colour utility string (`bg-*`,
+ * `text-*`, …), the one shape `ObjectCalendar` hands on raw when no option
+ * colour answers: a utility string is itself a colour, while a palette family
+ * name stored as a record value is data, not a declaration (objectstack#36882).
+ */
+export function isTailwindColorToken(raw: unknown): raw is string {
+  return typeof raw === "string" && TAILWIND_TOKEN_RE.test(raw)
+}
+
+/**
  * Resolve a raw `event.color` value into a Tailwind class string.
  *
  * - `#aabbcc` and `#abc` are returned as-is (rendered via inline style).

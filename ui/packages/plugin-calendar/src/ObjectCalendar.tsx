@@ -25,7 +25,7 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import type { ObjectCalendarSchema, DataSource, CalendarConfig } from '@object-ui/types';
 import { errorCodeIs } from '@object-ui/types';
-import { CalendarView, type CalendarViewEvent } from './CalendarView';
+import { CalendarView, isTailwindColorToken, type CalendarViewEvent } from './CalendarView';
 import { getVisibleDateRange } from './visibleDays';
 import {
   anchorDateFromResult,
@@ -1106,13 +1106,16 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
       const startDate = record[startDateField];
       const endDate = endDateField ? record[endDateField] : null;
       const title = resolveTitle(record);
-      // A value no option colours is handed on RAW, so
-      // `CalendarView.resolveEventColor` still recognises a Tailwind utility
-      // string or a palette family name; a plain category label gets the
-      // default event colour there (objectstack#36882: no colour is derived
-      // from a value).
+      // Only a declared colour paints (objectstack#36882): the option colour
+      // or a colour literal (the shared ladder), else a value that already is
+      // a Tailwind colour utility. Any other value, a category label or a
+      // palette family name stored as data alike, hands on nothing, and
+      // `CalendarView` paints its default event colour. A family name an
+      // author DECLARES on an option arrives through rung 1 and paints that
+      // family's tint there.
       const colorRaw = colorField ? record[colorField] : undefined;
-      const color = resolveColorFieldValue(colorRaw) ?? colorRaw;
+      const color = resolveColorFieldValue(colorRaw)
+        ?? (isTailwindColorToken(colorRaw) ? colorRaw : undefined);
       const id = record.id || record._id || `event-${index}`;
 
       // NO VALUE in the declared start field means the record has no date —
