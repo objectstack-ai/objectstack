@@ -36,14 +36,25 @@ import { executeGetRecordContext } from './record-context-tools.js';
  *   dropped (ADR-0160 point 23). No pack is picked for a citation that named
  *   none, and no call is retried without the offending argument.
  * - **A failed call verifies nothing either, and is reported.** A refusal is
- *   a throw carrying an ADR-0112 `code` with a declared 4xx `status` — the
- *   only shape `get_record_context` refuses with. Any other throw (no `code`,
- *   no status, a 5xx: an outage, a bug) is a failure, not an answer: its
- *   citations are dropped all the same, so the result stays fail-closed, and
- *   the failure goes to `options.onError`, once per call, so the host can log
- *   or retry it instead of losing the citations silently. ADR-0112 names the
- *   status channel as the one structural signal between a refusal and a fault;
- *   a driver errno also arrives on `.code`, so the string alone cannot tell.
+ *   a throw carrying an ADR-0112 `code` with a declared 4xx status — the only
+ *   shape `get_record_context` refuses with. The declared status is read as
+ *   ADR-0112's reader reads it (`resolveThrownHttpError`'s `declaredStatus`
+ *   in `@objectstack/types`): `.status`, then `.statusCode`. Any other throw
+ *   (no `code`, no status, a 5xx, a thrown value that is not an object: an
+ *   outage, a bug) is a failure, not an answer: its citations are dropped all
+ *   the same, so the result stays fail-closed, and the failure goes to
+ *   `options.onError`, once per call, so the host can log or retry it.
+ *   ADR-0112 names the status channel as the one structural signal between a
+ *   refusal and a fault; a driver errno also arrives on `.code`, so the
+ *   string alone cannot tell.
+ *
+ *   That holds at this function's boundary only. The executor itself turns
+ *   some failures into a refusal so that it names nothing: a related object's
+ *   definition read, or a published-definition read, that throws arrives here
+ *   as `PERMISSION_DENIED` 403, and is dropped without a report (#37463).
+ *   The whole 4xx band is a refusal, so a door that declared a coded 408 or
+ *   429 would have a transient condition dropped without a report; no door on
+ *   the read path declares one today.
  * - **What a quote is matched against** — the strings of the data member, and
  *   no other:
  *   - a field entry's `value`, when it is a string, and its `display`, at the
@@ -83,7 +94,8 @@ import { executeGetRecordContext } from './record-context-tools.js';
  * learns nothing from its citations' fate that tells a hidden record from a
  * missing one. `onError` is for the host, never the caller: it is called for a
  * failure only, never for a refusal, so a refused read and a missing record
- * give the host the same answer too. A callback that throws is ignored.
+ * give the host the same answer too. A callback that throws, or returns a
+ * promise that rejects, is ignored.
  */
 export async function verifyRecordCitations(
   citations: unknown,
@@ -116,9 +128,19 @@ export async function verifyRecordCitations(
 /** Options of {@link verifyRecordCitations}. */
 export interface VerifyRecordCitationsOptions {
   /**
-   * Called once per verifying call that failed rather than refused (see the
-   * rule), with the thrown value and the call's arguments. Its citations are
-   * dropped whether or not it is given.
+   * Called with the thrown value and the call's arguments when a read made to
+   * verify a citation failed rather than refused (see the rule). Two reads
+   * report:
+   *
+   * - the verifying `get_record_context` call: its citations are dropped
+   *   whether or not this is given, and it reports at most once per call;
+   * - the read of the served definition behind an `html` or `richtext` body:
+   *   the call answered, and only the tag-removed reading of the body is
+   *   lost, so a citation whose quote is in a field or in the body as stored
+   *   still verifies.
+   *
+   * A callback that throws, or returns a promise that rejects, changes
+   * nothing.
    */
   onError?: (error: unknown, call: VerifyingCall) => void;
 }
@@ -133,12 +155,25 @@ export interface VerifyingCall {
 
 /**
  * Whether a throw is an ADR-0112 refusal: a non-empty string `code` and a
- * declared 4xx `status`. Anything else is a failure.
+ * declared 4xx status. Anything else is a failure.
  */
 function isRefusal(err: unknown): boolean {
   if (err == null || typeof err !== 'object') return false;
-  const { code, status } = err as { code?: unknown; status?: unknown };
-  return typeof code === 'string' && code.length > 0 && typeof status === 'number' && status >= 400 && status < 500;
+  const { code } = err as { code?: unknown };
+  const status = declaredStatusOf(err);
+  return typeof code === 'string' && code.length > 0 && status !== undefined && status >= 400 && status < 500;
+}
+
+/**
+ * The status a throw declares, read as ADR-0112's reader reads it:
+ * `.status`, then `.statusCode` (`resolveThrownHttpError`'s `declaredStatus`,
+ * `@objectstack/types`). Both spellings are produced in this repo.
+ */
+function declaredStatusOf(err: object): number | undefined {
+  const { status, statusCode } = err as { status?: unknown; statusCode?: unknown };
+  if (typeof status === 'number') return status;
+  if (typeof statusCode === 'number') return statusCode;
+  return undefined;
 }
 
 /** Hand a failure to the host; a callback that throws changes nothing. */
@@ -151,7 +186,11 @@ function report(onError: VerifyRecordCitationsOptions['onError'], err: unknown, 
     ...(c.anchor !== undefined ? { anchor: c.anchor } : {}),
   };
   try {
-    onError(err, call);
+    const returned: unknown = onError(err, call);
+    // An async callback's rejection would otherwise be an unhandled rejection.
+    if (returned != null && typeof (returned as { then?: unknown }).then === 'function') {
+      (returned as PromiseLike<unknown>).then(undefined, () => {});
+    }
   } catch {
     // The verifier never throws for a citation.
   }

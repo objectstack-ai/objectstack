@@ -209,6 +209,76 @@ describe('[ADR-0160 D9] a refusal and a failure', () => {
     expect((await run(fakeDoor(policyApp()), [cite('Fire cover')])).quotes).toEqual(['Fire cover']);
   });
 
+  it('reads the declared status as ADR-0112 does: a coded refusal declared with statusCode only is not reported', async () => {
+    const statusCodeOnly = Object.assign(new Error('denied'), { code: 'PERMISSION_DENIED', statusCode: 403 });
+    expect(await run(throwingDoor(statusCodeOnly), [cite('Fire cover')])).toEqual({ quotes: [], reported: [] });
+    // Control: the same code with a 5xx statusCode is a failure.
+    const fault = Object.assign(new Error('down'), { code: 'INTERNAL_ERROR', statusCode: 503 });
+    expect((await run(throwingDoor(fault), [cite('Fire cover')])).reported.map((r) => r.error)).toEqual([fault]);
+  });
+
+  it('reports a 4xx with no code, and a thrown value that is not an Error, as failures', async () => {
+    for (const err of [Object.assign(new Error('gone'), { status: 404 }), 'socket hang up', undefined]) {
+      const { quotes, reported } = await run(throwingDoor(err), [cite('Fire cover')]);
+      expect(quotes).toEqual([]);
+      expect(reported).toEqual([{ error: err, call: { object: 'policy', id: 'p1' } }]);
+    }
+  });
+
+  it('reports a failed read behind an html body once, and still verifies what the answer carries', async () => {
+    const app = policyApp();
+    const policy = app.objects.policy as { fields: Record<string, Record<string, unknown>> };
+    policy.fields.content = { ...policy.fields.content, type: 'html' };
+    app.records.policy[0].content = '<p>Covers <b>fire</b> damage.</p>';
+    // Control: through a door that answers, the tag-removed reading verifies.
+    expect((await run(fakeDoor(app), [cite('Covers fire damage.')])).quotes).toEqual(['Covers fire damage.']);
+
+    // The executor's own definition reads, counted on a door that answers.
+    const probe = fakeDoor(app);
+    let executorReads = 0;
+    const served = probe.servedObjectDefinitionOf.bind(probe);
+    probe.servedObjectDefinitionOf = async (object) => {
+      executorReads++;
+      return served(object);
+    };
+    await executeGetRecordContext({ objectName: 'policy', recordId: 'p1' }, probe);
+
+    // The same door, failing every definition read after the executor's.
+    const door = fakeDoor(app);
+    const outage = new Error('metadata store down');
+    let reads = 0;
+    const answer = door.servedObjectDefinitionOf.bind(door);
+    door.servedObjectDefinitionOf = async (object) => {
+      if (++reads > executorReads) throw outage;
+      return answer(object);
+    };
+    const { quotes, reported } = await run(door, [cite('Covers fire damage.'), cite('Fire cover'), cite('Covers <b>fire</b>')]);
+    expect(quotes).toEqual(['Fire cover', 'Covers <b>fire</b>']);
+    expect(reported).toEqual([{ error: outage, call: { object: 'policy', id: 'p1' } }]);
+  });
+
+  it('ignores an async callback whose promise rejects: no unhandled rejection', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      let called = 0;
+      await expect(
+        verifyRecordCitations([cite('Fire cover')], throwingDoor(new Error('down')), {
+          onError: async () => {
+            called++;
+            throw new Error('logger down');
+          },
+        }),
+      ).resolves.toEqual([]);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(called).toBe(1);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
   it('never throws when the callback throws, and drops the failed call without one', async () => {
     const door = throwingDoor(new Error('down'));
     await expect(
