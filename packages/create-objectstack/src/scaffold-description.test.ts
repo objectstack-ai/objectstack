@@ -30,9 +30,9 @@ const TSX = path.join(REPO_ROOT, 'node_modules', '.bin', 'tsx');
 const INDEX_TS = path.join(PKG_ROOT, 'src', 'index.ts');
 
 const TEMPLATE_DESCRIPTION_CONFIG =
-  'Minimal ObjectStack environment — a clean slate for building.';
+  'Companies and contacts, with tasks and notes from the platform in the menu.';
 const TEMPLATE_DESCRIPTION_MANIFEST =
-  'Minimal ObjectStack environment with a single object — a clean slate for building.';
+  'ObjectStack environment that starts with companies and contacts, with tasks and notes from the platform in the menu.';
 
 let tmp: string;
 let projectDir: string;
