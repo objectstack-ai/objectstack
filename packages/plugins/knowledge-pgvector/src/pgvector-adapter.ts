@@ -495,11 +495,8 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       const hits = await this.searchAttempt(query, opts);
       if (hits !== undefined) return hits;
       if (attempt >= SEARCH_ATTEMPTS) {
-        throw Object.assign(
-          new Error(
-            `knowledge-pgvector: the active generation of source '${opts.source.id}' changed ${SEARCH_ATTEMPTS} times during one search; retry it.`,
-          ),
-          { code: 'CONCURRENT_MODIFICATION', status: 409 },
+        throw new Error(
+          `knowledge-pgvector: the active generation of source '${opts.source.id}' changed ${SEARCH_ATTEMPTS} times during one search; retry it.`,
         );
       }
     }
