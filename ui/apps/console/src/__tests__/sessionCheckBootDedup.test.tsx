@@ -980,19 +980,25 @@ describe('a bearer-only session: the stored Bearer rides me/localization on all 
     expect(authorizationOf(localizationCalls()[0])).toBe(`Bearer ${BEARER}`);
   });
 
-  it('CONTROL: no stored token, the cookie session: one request, no Authorization, as before', async () => {
+  it('CONTROL: no stored token, the cookie session: no Authorization on any leg, as before', async () => {
     parse();
     await settle();
     await seedTenantLanguage('', 1_000);
+    // The seed took the parse-time request: one so far.
+    expect(localizationCalls()).toHaveLength(1);
     render(
       <LocalizationFetchProvider endpoint={ME}>
         <Value />
       </LocalizationFetchProvider>,
     );
     await settle();
-    expect(localizationCalls()).toHaveLength(1);
-    expect(localizationCalls()[0]![1]).toMatchObject({ credentials: 'include' });
-    expect(authorizationOf(localizationCalls()[0])).toBeNull();
+    // A signed-out answer is never handed to the provider, which asks itself,
+    // exactly as before this change.
+    expect(localizationCalls()).toHaveLength(2);
+    for (const call of localizationCalls()) {
+      expect(call[1]).toMatchObject({ credentials: 'include' });
+      expect(authorizationOf(call)).toBeNull();
+    }
     // The bearer-only server cannot see it: nothing of the user's is cached or shown.
     expect(readCachedLanguageSeed()).toBeNull();
     expect(screen.getByTestId('localization').textContent).toBe('-/-');
