@@ -339,7 +339,7 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 | `approvers` | Who may act (≥ 1 — see Approver Types above). Each approver may carry an optional **`group`** label (e.g. `{ type: 'position', value: 'crm_auditor', group: 'finance' }`) — with `behavior: 'per_group'`, approvers sharing a label form one group; unlabelled approvers each form their own |
 | `behavior` | `first_response` (first approver decides), `unanimous` (all must approve), `quorum` (`minApprovals` of N — M-of-N collective sign-off), or `per_group` (EACH approver `group` must reach `minApprovals` — one-from-each-group sign-off). In every mode a single rejection finalizes the node as `rejected`. Default `first_response` |
 | `minApprovals` | Approvals required — total for `quorum`, per group for `per_group`. Omitted ⇒ ALL resolvable approvers under `quorum`, `1` per group; clamped at runtime so a misconfiguration can never deadlock |
-| `lockRecord` | Lock the triggering record from edits while pending. Default `true` |
+| `lockRecord` | Lock the record while pending. Default `true` |
 | `approvalStatusField` | Business-object field to mirror `pending`/`approved`/`rejected`/`returned`/`recalled` onto (should be readonly) |
 | `onEmptyApprovers` | What an EMPTY resolved slate does: `admin_rescue` (default — request opens on the organization's administrators; never waves through, never kills the run), `fail` (node fails — treat an empty slate as a config bug), `auto_approve` (skip the request, continue down `approve` with `output.autoApproved = true` — opt-in because it silently waves the record through), `fallback` (request opens on the sibling `fallbackApprovers` instead — same shape as `approvers`, required by this policy and refused under any other; a fallback that itself resolves to nobody degrades to `admin_rescue`). Declare it explicitly on any node with an `expression` approver (linted) |
 | `excludeSubmitter` | `true` drops the run's submitter (`submitter_id`) from the resolved slate, whatever approver type produced them — segregation of duties; a slate it empties takes the `onEmptyApprovers` route, never a silent pass. `onEmptyApprovers: 'auto_approve'` is **refused** beside it (it would approve exactly the request this exists to stop): use `admin_rescue`, `fail` or `fallback`. Default `false` |
@@ -367,11 +367,12 @@ These are wired on the **graph**, not in node config:
 
 ### Approval Best Practices
 
-1. **Set `approvalStatusField`** to mirror status onto the row — views and
-   formulas can then filter on it without joining `sys_approval_request`.
+1. **Set `approvalStatusField`**: views and formulas filter on status
+   without joining `sys_approval_request`.
 2. **Keep `lockRecord: true`**, or approvers chase a moving target. It locks
-   the record and its `master_detail` child rows only: a `lookup` child drawn as
-   a body table stays editable (warning `approval-detail-editable-while-pending`).
+   the record and its `master_detail` child rows only: a `lookup` child shown
+   in the record's details (`relatedList: 'primary'`, or a parent field group)
+   stays editable (warning `approval-detail-editable-while-pending`).
 3. **Notify the submitter from downstream nodes** wired to the `approve` /
    `reject` edges. Opening already tells each resolved approver
    (`approval.requested`); ⛔ no `notify` node for the opening: it tells

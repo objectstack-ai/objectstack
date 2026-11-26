@@ -198,8 +198,8 @@ transaction.
 `object` is the child object to aggregate, `field` its field (ignored for
 `count`), `function` one of `count` / `sum` / `min` / `max` / `avg`. Optional:
 `filter` (below) and `relationshipField` (omitted: the child's `lookup` /
-`master_detail` referencing this parent). A child with neither, or a
-`relationshipField` that is no field of it, is refused at publish
+`master_detail` referencing this parent). Refused at publish when omitted and the
+child has neither, or naming no child field
 (`rollup/child-without-parent-reference`).
 
 Empty collections roll up to `0` for `count`/`sum`, `null` for `min`/`max`/`avg`.

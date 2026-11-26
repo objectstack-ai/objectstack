@@ -206,7 +206,7 @@
     },
     {
       "id": 12,
-      "prompt": "项目上要显示「已完成任务数」「任务总数」和「完成率」。`task` 现在没有指向项目的字段。",
+      "prompt": "项目上要显示「已完成任务数」「任务总数」和「完成率」。`task` 现在没有指向项目（`project`）的字段。",
       "expected_output": "Three fields on `project`: `completed_task_count` and `task_count` are `type: 'summary'` fields over the `task` child with `function: 'count'` (and `summaryOperations.object: 'task'`), the completed one carrying the qualifier in `filter: { status: 'completed' }` — keyed by a CHILD field and the option VALUE, never the label `已完成`; dropped, the field counts every task and shows a plausible wrong total. `completion_rate` is a `type: 'formula'` field over the two summaries, authored after them (it computes only once they do). If `project` rows already exist, says the recompute runs only on a child write, so the backfill is `os migrate summary-nulls --apply` — not editing a task to trigger it. `task` gets a field pointing back at `project` (`master_detail` or `lookup`, `reference: 'project'`): a roll-up whose child has none is refused at publish (`rollup/child-without-parent-reference`).",
       "files": [],
       "assertions": {
@@ -511,7 +511,8 @@
       "assertions": {
         "must_contain": [
           "type: 'lookup'",
-          "reference: 'contact'"
+          "reference: 'contact'",
+          "field/reference-on-non-reference-type"
         ],
         "must_not_contain": []
       }
