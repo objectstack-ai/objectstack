@@ -134,7 +134,7 @@ whether or not the stack lists it. Declare what the app uses
 | `settings` | the settings store | open | every boot |
 | `webhooks` | outbound webhooks | open | on `requires` |
 | `record-context` | get_record_context over MCP | open | on `requires` |
-| `knowledge` | knowledge search: the service and one vector store | open | on `requires` |
+| `knowledge` | knowledge search and its vector store | open | on `requires` |
 | `hierarchy-security` | hierarchy-relative permission scopes | enterprise | on `requires` |
 | `ai-seat` | the AI-seat tier | cloud | on `requires` |
 | `governance` | the governance tier | cloud | on `requires` |
