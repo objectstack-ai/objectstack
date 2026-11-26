@@ -1174,9 +1174,10 @@ export const LifecycleSchema = lazySchema(() => strictObject({
   }).optional().describe(
     'Seals the rows into signed, chained checkpoints (ADR-0154), so a change, insert or delete made outside ' +
     "the platform shows. Only `class: 'audit'` may declare it, and not beside a `retention` or `ttl` " +
-    "`onlyWhen`, a `ttl` on another field than `created_at`, or rotation `storage`. Until expiry amendments " +
-    'ship (ADR-0154 P4), the retention sweeper still deletes sealed rows, which then read as missing. A ' +
-    'deployment with no crypto provider seals nothing and reports that at error.',
+    "`onlyWhen`, a `ttl` on another field than `created_at`, or rotation `storage`. Sealed rows past their " +
+    '`retention`, `ttl` or `archive.keep` window leave only by whole checkpoints, after a signed expiry ' +
+    'amendment names them, so the verifier reads them as expired rather than missing; while no sealer is ' +
+    'running, the sweeper keeps them. A deployment with no crypto provider seals nothing and reports that at error.',
   ),
   reclaim: z.boolean().optional().describe('Run driver space reclamation (SQLite incremental_vacuum) after sweeping this object. Default true for non-record classes.'),
 }).superRefine((lc, ctx) => {

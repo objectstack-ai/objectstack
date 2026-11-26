@@ -52,8 +52,9 @@ const SECRET_OBJECT = 'sys_secret';
  *    checkpoint lists, or that only a checkpoint holding nothing lists, is
  *    `late` and unsealed: on the host it cannot be told from a forged insert.
  *    A window is sealed once a trusted `window` checkpoint of the object names
- *    it, or it ends at or before the object's highest trusted
- *    `sealed_through`.
+ *    it, it starts at or before the newest window such a checkpoint names
+ *    (so a chain a fault left behind reads unsealed), or it ends at or before
+ *    the object's highest trusted `sealed_through`.
  *
  * The report passes ({@link AuditVerifyReport.ok}) when no chain fault was
  * found and no row is `modified`, `missing` or `late` unsealed. Nothing here
@@ -1074,12 +1075,27 @@ class ObjectCheck extends ChainCheck<LedgerCheck> {
       .filter((c): c is { row: Row; head: CheckpointHead } => c.head !== undefined && this.check.inScope(c.head.chain))
       .sort((a, b) => judgingOrder(a.head, b.head));
     for (const { row, head } of ordered) await this.judgeCheckpoint(row, head, (body) => this.readLeaves(body, head, rows));
-    const sealedWindow = start + AUDIT_SEAL_WINDOW_MS <= this.watermark || this.sealedWindows.has(start);
+    const sealedWindow = start + AUDIT_SEAL_WINDOW_MS <= this.watermark
+      || this.sealedWindows.has(start)
+      || start <= this.newestSealedWindow();
     for (const [id, row] of rows) {
       const chain = chainKeyOf(chainValueOf(row, this.chainField));
       if (!this.check.inScope(chain) || this.held.has(id)) continue;
       if (sealedWindow || this.listedByFaulted.has(id)) this.unheld.set(id, { chain, windowStart: start });
     }
+  }
+
+  /**
+   * The highest `window_start` among the object's trusted `window` checkpoints
+   * (seat ruling 6885452378; ADR-0154 D3 as amended). The sealer pass is
+   * window-major, so a chain trails it only through a fault: a row of a window
+   * at or before it that no trusted checkpoint holds reads `late` and unsealed
+   * instead of going unjudged.
+   */
+  private newestSealedWindow(): number {
+    let newest = Number.NEGATIVE_INFINITY;
+    for (const start of this.sealedWindows) newest = Math.max(newest, start);
+    return newest;
   }
 
   /** The leaf input of each row `body` lists, as the stores hold it now, under the checkpoint's own seed. */

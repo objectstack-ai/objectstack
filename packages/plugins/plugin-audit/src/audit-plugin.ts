@@ -21,6 +21,7 @@ import type {
   ISharingService,
 } from '@objectstack/spec/contracts';
 import { AUDIT_CHECKPOINT_SIGNER_SERVICE, AUDIT_CHECKPOINT_SINK_SERVICE } from '@objectstack/spec/contracts';
+import type { AuditExpiryRequest, AuditExpiryRun } from './audit-seal/expiry.js';
 import { AuditSealer, type AuditSealerEngine } from './audit-seal/sealer.js';
 import { LocalCheckpointSigner } from './audit-seal/signer.js';
 import {
@@ -349,6 +350,8 @@ export class AuditPlugin implements Plugin {
   private datasetQueryWriter: DatasetQueryAuditWriter | null = null;
   /** [ADR-0154 D3] The sealer, started at `kernel:ready` and stopped by `destroy()`. */
   private sealer: AuditSealer | null = null;
+  /** [ADR-0154 D8] Takes the sealer's expiry back off the lifecycle service, on `destroy()`. */
+  private unregisterSealedExpiry: (() => void) | null = null;
 
   /**
    * [#31796] The credential-use writer, built in `init()` (the `audit` slot
@@ -920,6 +923,30 @@ export class AuditPlugin implements Plugin {
       logger: ctx.logger,
     });
     this.sealer.start();
+    this.registerSealedExpiry(this.sealer, ctx);
+  }
+
+  /**
+   * [ADR-0154 D8] Hand the sealer's expiry to the lifecycle service, which
+   * then expires each sealed object by whole checkpoints, each run's signed
+   * `expiry` amendment written first. Reached duck-typed, as every reap guard
+   * is (`ctx.getService('lifecycle')`). No lifecycle service ⇒ nothing sweeps,
+   * so nothing expires. A lifecycle service with no sealed expiry keeps a
+   * sealed object's rows past their policy and says so.
+   */
+  private registerSealedExpiry(sealer: AuditSealer, ctx: PluginContext): void {
+    type LifecycleLike = {
+      registerSealedExpiry?: (expiry: { plan(request: AuditExpiryRequest): Promise<AuditExpiryRun[]> }) => () => void;
+    };
+    let lifecycle: LifecycleLike | undefined;
+    try {
+      lifecycle = ctx.getService<LifecycleLike>('lifecycle');
+    } catch {
+      return;
+    }
+    if (!lifecycle || typeof lifecycle.registerSealedExpiry !== 'function') return;
+    // Called as a method: the service's registration reads its own state.
+    this.unregisterSealedExpiry = lifecycle.registerSealedExpiry({ plan: (request) => sealer.expire(request) });
   }
 
   /**
@@ -1143,6 +1170,8 @@ export class AuditPlugin implements Plugin {
     // before the process lets go, and never starts again.
     const sealer = this.sealer;
     this.sealer = null;
+    this.unregisterSealedExpiry?.();
+    this.unregisterSealedExpiry = null;
     await sealer?.stop();
     const writer = this.readAuditWriter;
     this.readAuditWriter = null;

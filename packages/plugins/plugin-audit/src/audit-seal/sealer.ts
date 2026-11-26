@@ -26,7 +26,9 @@ import {
   type SealedFieldTypes,
 } from './canonical.js';
 import { merkleRoot } from './merkle.js';
+import { auditExpiryCutoff, ObjectExpiry, type AuditExpiryRequest, type AuditExpiryRun } from './expiry.js';
 import {
+  AUDIT_AMENDMENT_OBJECT,
   AUDIT_CHECKPOINT_OBJECT,
   checkpointSeedContext,
   columnSaltsOf,
@@ -34,6 +36,7 @@ import {
   generateCheckpointSeed,
 } from './seed.js';
 import {
+  amendmentBodyFromRow,
   chainKeyOf,
   checkpointBodyFromRow,
   checkpointDigest,
@@ -43,6 +46,7 @@ import {
   SignedBodyError,
   type AuditCheckpointKind,
   type CheckpointSignedBody,
+  type ExpiryAmendmentBody,
 } from './signed-body.js';
 import { dropAuditSealSecret, writeAuditSealSecret, type SealStorageDriver, type SealStorageEngine } from './signer.js';
 import {
@@ -51,6 +55,7 @@ import {
   trySealPassLocks,
   type AuditSealPassLocks,
 } from './seal-lock.js';
+import { anchoredPublicKeyOf, SigningKeyTrust } from './verifier.js';
 
 /**
  * ADR-0154 D3 — the sealer: after a settle lag, one window at a time, under
@@ -306,6 +311,12 @@ export class AuditSealer {
   private loop: DispatchLoop | undefined;
   /** When each cause was last reported, by cause. */
   private readonly reported = new Map<string, number>();
+  /**
+   * D8: the expiry each sealed object last planned and found nothing to expire
+   * — its day-aligned cutoff, policy and value. Asked again with the same
+   * three, it reads nothing until the cutoff moves to the next day.
+   */
+  private readonly drainedAt = new Map<string, string>();
   private readonly now: () => number;
 
   constructor(private readonly options: AuditSealerOptions) {
@@ -523,6 +534,65 @@ export class AuditSealer {
   }
 
   /**
+   * ADR-0154 D8: plan one sweep's expiry of sealed object `request.object`
+   * (`expiry.ts`), the LifecycleService's `LifecycleSealedExpiry`. It holds the
+   * pass's locks while it plans and signs — `audit.sealer` and the audit seal
+   * lock on the object's database — so two replicas' sweeps never sign two
+   * expiries over one range, and a sealer pass never reads a chain head the
+   * expiry is moving. While another holds either, it answers no run: the rows
+   * wait for the next sweep. With no crypto provider or no signer it throws,
+   * and the sweep keeps every row.
+   */
+  async expire(request: AuditExpiryRequest): Promise<AuditExpiryRun[]> {
+    const plan = this.plans().find((p) => p.name === request.object);
+    if (!plan) return [];
+    const memo = `${auditExpiryCutoff(Date.parse(request.cutoff))}|${request.policy}|${request.policyValue}`;
+    if (this.drainedAt.get(plan.name) === memo) return [];
+    const seams = await this.resolveSeams();
+    if (!seams) throw new Error('a host seam the sealer needs is registered but could not be resolved (reported at error)');
+    const { signer } = seams;
+    const crypto = this.options.crypto;
+    if (!crypto || !signer) {
+      throw new Error(`this deployment has no ${crypto ? 'checkpoint signer' : 'crypto provider'}, so no expiry amendment can be signed`);
+    }
+    const lock = await this.acquireLock(seams.cluster);
+    if (!lock) return [];
+    try {
+      const session = await trySealPassLocks(this.options.engine, [plan.name]);
+      if (session.held) return [];
+      try {
+        const expiry = new ObjectExpiry({
+          engine: this.options.engine,
+          object: plan.name,
+          signer,
+          ...(seams.sink ? { sink: seams.sink } : {}),
+          trust: new SigningKeyTrust(anchoredPublicKeyOf(this.options.engine, crypto, signer)),
+          say: (cause, message) => this.warnOnce(cause, message),
+          warn: (message) => this.options.logger.warn(message),
+          now: this.now,
+        });
+        const runs = await expiry.plan(request);
+        // Only a plan that found nothing at all is remembered: a run the sweep then fails to finish resumes next sweep.
+        if (runs.length === 0 && expiry.drained) this.drainedAt.set(plan.name, memo);
+        else this.drainedAt.delete(plan.name);
+        return runs;
+      } finally {
+        for (const held of session.locks) await held.lock.release();
+      }
+    } finally {
+      await lock.release();
+    }
+  }
+
+  /** Say a standing state at `warn`, once per cause per {@link REPORT_REPEAT_MS} while it lasts. */
+  private warnOnce(cause: string, message: string): void {
+    const last = this.reported.get(cause);
+    if (last !== undefined && this.now() - last < REPORT_REPEAT_MS) return;
+    this.reported.set(cause, this.now());
+    this.options.logger.warn(message);
+  }
+
+  /**
    * D3 amended (E): another session holds the audit seal lock, so the pass was
    * skipped. Expected while an `os migrate audit-*` run lasts (or another
    * server's pass), so at `info`, once per {@link REPORT_REPEAT_MS} while it
@@ -593,6 +663,14 @@ class ObjectPass {
       limit: 1,
     });
     this.watermark = top ? Date.parse(canonicalDatetime(top.sealed_through, 'sealed_through')) : null;
+    if (this.watermark === null) {
+      // D8: every checkpoint expired. The windows the last expiry covered stay sealed: nothing is walked again below it.
+      const expiry = await this.lastExpiry({}, 'covered_to').catch((err: unknown) => {
+        if (err instanceof ChainFault) return undefined;
+        throw err;
+      });
+      if (expiry) this.watermark = Date.parse(expiry.covered_to);
+    }
     this.floor = this.watermark;
     // S4: each chain's cursor, from its `window` checkpoints at or past the floor. A chain the floor passed with
     // none there has the floor as its cursor; the latest `window` checkpoint is never below the floor.
@@ -843,9 +921,42 @@ class ObjectPass {
         throw new ChainFault(chainKey, err); // S4: a malformed chain head skips its chain
       }
       head = { sequence: body.sequence, digest: checkpointDigest(body) };
+    } else {
+      // D8: a chain whose every checkpoint expired goes on from its last expiry, linking to the digest it carries.
+      const expiry = await this.lastExpiry({ chain_key: chainKey }, 'last_sequence');
+      if (expiry) head = { sequence: expiry.last_sequence, digest: expiry.last_removed_digest };
     }
     this.heads.set(chainKey, head);
     return head;
+  }
+
+  /**
+   * D8: the stored `expiry` amendment of this object (narrowed by `where`) that
+   * is highest by `field`, or `undefined`. A malformed one is a chain-local
+   * fault of its chain (S4). It is read only where no checkpoint answers: a
+   * chain's head, and the floor of an object whose every checkpoint expired.
+   */
+  private async lastExpiry(where: Row, field: 'last_sequence' | 'covered_to'): Promise<ExpiryAmendmentBody | undefined> {
+    const driver = this.options.engine.getDriverForObject(AUDIT_AMENDMENT_OBJECT);
+    if (!driver) return undefined;
+    let rows: Row[];
+    try {
+      rows = await driver.find(AUDIT_AMENDMENT_OBJECT, {
+        where: { sealed_object: this.plan.name, kind: 'expiry', ...where },
+        orderBy: [{ field, order: 'desc' }],
+        limit: 1,
+      });
+    } catch (err) {
+      if (isMissingTableError(err, AUDIT_AMENDMENT_OBJECT)) return undefined;
+      throw err;
+    }
+    if (!rows[0]) return undefined;
+    try {
+      const body = amendmentBodyFromRow(rows[0]);
+      return body.kind === 'expiry' ? body : undefined;
+    } catch (err) {
+      throw new ChainFault(String(rows[0].chain_key), err);
+    }
   }
 
   private async writeChains(chains: Map<string, ChainRows>, start: number, kind: AuditCheckpointKind, watermark: number): Promise<void> {

@@ -76,6 +76,7 @@ import { SettingsServicePlugin, LocalCryptoProvider } from '@objectstack/service
 import { AnalyticsServicePlugin } from '@objectstack/service-analytics';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 import { MetadataPlugin } from '@objectstack/metadata';
+import { AuditPlugin } from '@objectstack/plugin-audit';
 // Node-only subpath (#4700). Optional packages supplied by the app under
 // verification — `@objectstack/organizations` above all — must be resolved from
 // THAT app, not from `packages/verify`'s own realpath inside this workspace.
@@ -198,6 +199,21 @@ let processCryptoProvider: LocalCryptoProvider | undefined;
 function harnessCryptoProvider(): LocalCryptoProvider {
   processCryptoProvider ??= new LocalCryptoProvider({ key: randomBytes(32) });
   return processCryptoProvider;
+}
+
+/**
+ * [ADR-0154 D2, D6; seat ruling 6884540128 item 4] Hand {@link harnessCryptoProvider}
+ * — the one provider settings and the engine get — to an `AuditPlugin` this
+ * boot mounts: a caller's `extraPlugins` entry, a stack `plugins` entry, or the
+ * provider `requires: ['audit']` constructs. Its sealer then seals, and expires
+ * sealed rows, under the boot's own key, as `objectstack serve` hands its host
+ * provider over. ⛔ Never a bare `new LocalCryptoProvider()`, which would read
+ * the host key or mint a key file (#21499 custody). Only an instance of the
+ * real class is handed anything, and only one composed with no provider of its
+ * own (`adoptHostCryptoProvider` decides that); anything else is untouched.
+ */
+function handHarnessCryptoToAuditPlugin(plugin: unknown, provider: LocalCryptoProvider): void {
+  if (plugin instanceof AuditPlugin) plugin.adoptHostCryptoProvider(() => provider, { armSealer: true });
 }
 
 /** This process's auth signing secret; created on the first boot, never persisted. */
@@ -1340,6 +1356,7 @@ async function bootClaimed(
   // Caller-supplied optional service pairs (see BootOptions.extraPlugins).
   // Before SecurityPlugin, mirroring the CLI's ordering for service pairs.
   for (const plugin of opts.extraPlugins ?? []) {
+    handHarnessCryptoToAuditPlugin(plugin, cryptoProvider);
     await kernel.use(plugin as any);
   }
 
@@ -1387,6 +1404,7 @@ async function bootClaimed(
       packageRoot: hostRoot,
     });
     for (const plugin of servedProviders) {
+      handHarnessCryptoToAuditPlugin(plugin, cryptoProvider);
       await kernel.use(plugin as any);
     }
   } catch (e) {
@@ -1419,6 +1437,7 @@ async function bootClaimed(
   // boot that went on without a plugin the app declares would pass green on a
   // composition production never runs, so here the boot stops, with the remedy.
   for (const { plugin, label } of appPlugins) {
+    handHarnessCryptoToAuditPlugin(plugin, cryptoProvider);
     try {
       await kernel.use(plugin as any);
     } catch (e) {
