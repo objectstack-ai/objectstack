@@ -27,7 +27,7 @@
  *
  * ## What is covered — and the published catalog, which deliberately is not
  *
- * The CEILINGS map below is an ENUMERATION, never a root glob: the pm-dispatch surface (SKILL.md, its references/, the per-lane job descriptions), the four other `.claude/skills/` playbook SKILL.md files, the dev-agent definition `.claude/agents/os-dev.md`, and both root instruction files — `AGENTS.md` and `CLAUDE.md`. Read a file's absence from the map as a fact to check, not an oversight to infer — `.claude/hooks/` and `.claude/settings.json` carry no ceiling.
+ * The CEILINGS map below is an ENUMERATION, never a root glob: the pm-dispatch surface (SKILL.md, its references/, the per-lane job descriptions), the four other `.claude/skills/` playbook SKILL.md files and the `checklist-test` references/, the dev-agent definition `.claude/agents/os-dev.md`, and both root instruction files — `AGENTS.md` and `CLAUDE.md`. Read a file's absence from the map as a fact to check, not an oversight to infer — `.claude/hooks/` and `.claude/settings.json` carry no ceiling.
  *
  * The **published** `skills/` catalog — the one that ships to customer projects — is deliberately OUTSIDE this map (#9923). It is read by customer projects, not by this repo's seats, it is a governed, human-merge-only surface, and it has its own gate with its own unit, `scripts/check-skills-token-ratchet.mjs`. Extending THIS map to it is a policy change that needs its own card and a maintainer's ruling, not a row added in passing; the self-test pins the boundary, because enforcement cannot — a published-root entry would run perfectly green.
  *
