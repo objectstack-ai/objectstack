@@ -1,5 +1,415 @@
 # @objectstack/service-messaging
 
+## 19.0.0-next.0
+
+### Minor Changes
+
+- 8e46424: Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  feat(messaging): Slack DM delivery — a `slack` channel, a per-person link store, approval requests by DM
+  
+  An organization can now receive notifications in Slack, as direct messages to each person who connected their own Slack user (ADR-0013 addendum of 2026-11-19, step 2 of #34730).
+  
+  - **The install.** An organization administrator (`setup.write` in their current organization) installs the organization's own Slack app with `PUT /api/v1/messaging/slack/account` `{ token }`. Slack proves the bot token (`auth.test`) before it is saved. The app's bot token needs the scopes `chat:write`, `im:write`, `users:read` and `users:read.email` (the methods called are `auth.test`, `users.lookupByEmail`, `conversations.open` and `chat.postMessage`); `auth.test` does not check scopes, so an app without `users:read.email` installs and every proposal then answers 502. The token is kept in `sys_channel_account.bot_token`, a `secret` field: encrypted at rest by the host's `ICryptoProvider`, masked on every read, never returned by any route, and read only by the server when it calls Slack. `GET` and `DELETE` on the same route read and remove the install.
+  - **A person's link.** `POST /api/v1/messaging/me/slack-link/proposal` proposes a link by the person's email (Slack `users.lookupByEmail`); it delivers nothing until the person confirms it with `POST /api/v1/messaging/me/slack-link/confirm`. A Slack link is proposed only for a verified email and names no one before it is confirmed. `GET` and `DELETE /api/v1/messaging/me/slack-link` read and remove it. An administrator lists links with `GET /api/v1/messaging/slack/links` and removes one with `DELETE /api/v1/messaging/slack/links/:id`; the person is told by inbox and e-mail (topic `messaging.slack_link_removed`) and may link again. A link goes when the person is deleted, banned, or leaves the organization. Links are `sys_channel_user_link` rows; every write names who acted, so the platform's write audit records each one.
+  - **The channel, only where connector-slack is composed.** `slack` is registered beside inbox, email, sms and push only on a composition where connector-slack's `slack` client service resolves at boot: `ConnectorSlackPlugin` now registers that service, which sends with a caller-held token. On such a composition, and only there, the `/automation` save doors accept `slack` on a `notify` node, and `GET /api/v1/messaging/preference-options` and `GET /api/v1/messaging/me/preferences` list `slack` as a channel. A `notify` node naming `slack` delivers only where connector-slack is composed, the organization installed Slack and the recipient confirmed a link. Without connector-slack, those doors answer as before: a `notify` node naming `slack` is refused 400, and neither preference door lists it. It sends `conversations.open` then `chat.postMessage` with the notification's title linked to its deep link, made absolute under `OS_AUTH_URL` / `OS_BASE_URL`. Preferences, digest and quiet hours apply as on every channel. A recipient with no confirmed link is skipped before any delivery row is written, so nothing is dead-lettered for them; a refused token stops delivery on that install until an administrator sets it again; a rate limit is retried.
+  - **Approval requests.** `approval.requested` also asks for `slack`, beside inbox and e-mail, only while the `slack` channel is registered and mounted (connector-slack composed).
+  - `MessagingChannel` gains an optional `reachableRecipients(ctx, { organizationId, recipients })`, consulted once per channel per emit after preferences. A channel without it reaches every recipient, as before.
+  - `PLATFORM_OBJECTS_BY_PACKAGE['service-messaging']` lists `sys_channel_account` and `sys_channel_user_link`, and the organization ownership inventory gives both a row.
+
+### Patch Changes
+
+- c9b3f7a: feat(account): a Notification Settings page where each person chooses their own notification topics, channels, digest and quiet hours
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The Account app has a new **Notification Settings** page, under Inbox and only when the messaging service runs. It shows one row per notification topic and one column per channel. Each cell shows whether that notification reaches you on that channel, and where the answer comes from: your own setting, your organization's default, the built-in default, or a mandatory topic. Mandatory topics are always delivered and cannot be switched off. A channel the deployment cannot send on yet says so in its column header. Above the matrix you can set your digest and your quiet hours.
+  
+  - **The read: `GET /api/v1/messaging/me/preferences`.** This new door answers the signed-in person's *effective* preferences. The server computes them with the same resolver `emit` uses to filter (`PreferenceResolver.effectiveFor`), so the page shows what is actually sent and computes nothing itself. The door takes no parameters and answers only about the caller: there is no `user` parameter, and any parameter is refused `VALIDATION_ERROR` / `400`. It keeps the posture of `GET /api/v1/messaging/preference-options`:
+    - an anonymous caller gets `401`;
+    - a held sign-in gets `403`;
+    - a source it cannot read is `500` / `INTERNAL_ERROR`, never a partial or "everything on" answer.
+  
+    The door reads only what the answer needs: the caller's own rows and the organization's default rows, each by equality on `user_id` within the caller's organization. A read that comes back with more rows than its cap is a fault (`500`), never a page.
+  
+    The organization's defaults appear only as `source: 'default'` on the caller's own cells. No other person's row, and no row id except the caller's own, is ever answered.
+  - **The writes: your own `sys_notification_preference` rows, through the data door, as you.** `member_default`, the baseline set every signed-in person resolves (external members excepted), now carries a grant of read, create and edit on the object, with no delete. Two row policies come with it:
+    - `sys_notification_preference_self` binds every principal that holds the grant. Its row scope is `user_id == current_user.id`, and its write check is the same expression, so the row as written must still be your own.
+    - `sys_notification_preference_org_admin` widens organization owners and administrators back to every row of their organization. Its write check is `topic != null`, which holds on every row being created because `topic` is required with a default. If `topic` ever becomes optional, an administrator's create is refused, never widened.
+  
+    An ordinary member or a delegated administrator lists only their own rows. Their create with `user_id` omitted, empty or naming another person is refused `403` / `PERMISSION_DENIED`, as is moving their own row to another person or to the organization default.
+  - **Owners and administrators are unchanged.** They still list every row, create and edit the organization default, create and edit another person's row, and delete in the Setup grid.
+  - **App-authored grants are narrowed too.** `sys_notification_preference_self` carries no `positions` domain, so it binds every principal that holds a grant on this object, including through an app's own permission set. A role other than organization owner or administrator that an app grants this object reads and writes only its own rows, unless the app declares its own widening policy for that role.
+  
+  There is no "reset to the organization's default" button, because that needs a delete, which members are not granted. Changing your digest or quiet hours saves your own general setting, and the page says so beside the control. From then on, that setting applies in place of the organization's defaults to every topic and channel you have not set yourself.
+- 01e6af6: Clause-②: no
+  Metadata-protocol: none
+  
+  feat(messaging): Setup lists the Slack page where connector-slack is composed
+  
+  - **Setup › Integrations › Slack.** Where connector-slack is composed, Setup now lists a Slack entry under Integrations. It opens the console's Slack page (`messaging:slack`), where an organization administrator installs or replaces the organization's Slack token, removes the install, and reviews or removes each member's Slack link. The entry asks `setup.write`, the capability every Slack administrator door asks. `MessagingServicePlugin` registers it in the same `kernel:ready` hook, and on the same condition, as the `slack` channel. Without connector-slack, Setup lists no Slack entry. The label is translated in every locale the platform ships. The bundle is exported as `SLACK_SETUP_UI_BUNDLE`, with `SLACK_SETUP_COMPONENT_REF`.
+  - **The Slack link removal topic, on every deployment.** `GET /api/v1/messaging/preference-options` and `GET /api/v1/messaging/me/preferences` list the topic `messaging.slack_link_removed` on every deployment, including one without connector-slack. It is emitted only where connector-slack is composed, when an administrator removes a person's Slack link or removes the organization's Slack install.
+- fd471d3: fix(messaging): a member's own "no digest" or "no quiet hours" now beats the organization's default
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A member who chooses no digest, or clears their quiet hours, now keeps that choice even when the organization's default sets a digest or quiet hours. The organization's default is a default, not a floor. Before this release the member still got the organization's digest and quiet hours.
+  
+  - **Three states per field.** A notification preference's `digest` and `quiet_hours` are each one of: not set (empty), explicitly off, or a value. The most specific preference that sets the field decides it. A preference that leaves a field empty decides nothing for that field, so it keeps following the next preference: the default for all users, then none. Explicit off is `none` for the digest and `{ "off": true }` for quiet hours. An organization default that is explicitly off is the same as no default. After an explicit "no quiet hours", the member's digest still lands at midnight in the time zone of the organization's quiet-hours window (the next preference that holds one), or UTC when none does.
+  - **`digest` has no default value any more.** A preference created without a digest stores it empty, so it follows the organization's default. On a database created by an earlier release, the `digest` column still carries the old database default `none`. The messaging service writes an explicit empty digest on every insert that leaves it out, so the database default never applies. A write that skips the platform's engine (raw SQL, a bulk load straight into the table) still stores `none` on such a database. That stored `none` now means "no digest".
+  - **Stored rows keep their meaning.** On the first start of this release, every stored `digest = 'none'` is rewritten to empty, in every organization, once. The pass is recorded in `sys_migration` (`messaging-preference-digest-none-unset`) and never runs again, so a `none` chosen after the upgrade is kept. A stored `none` never took effect before, so no one's digest changes at upgrade. If you picked "none" by hand in Setup > Notification Preferences to opt out, pick it again after upgrading.
+  - **The Notification Settings page offers the opt-out.** "No digest" is always offered and saves `none`. Clearing the quiet-hours window and saving stores `{ "off": true }`. The two notes saying these choices were not offered are gone, in all 11 languages.
+- 4a1919d: fix(messaging): the preference filter reads every preference row of a topic, not an unordered first 10,000
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When a notification is sent, the preference filter reads the organization's preference rows for the event's topic and for the `*` topic. Each was one read capped at 10,000 rows with no order, so in an organization holding more rows than that for one topic, an undefined subset was left out, and a recipient whose own opt-out, digest or quiet hours fell in it was notified as though the row did not exist. Each topic is now read to the end in pages of 1,000 rows ordered by `id`, each page starting after the last `id` of the one before, and only the recipients' rows and the organization's default are kept. A read that cannot move past a full page is refused rather than used, and the filter then delivers on every channel and logs a warning, as it already did for any failed preference read.
+  
+  No exported type, option or signature changes.
+- 99ece3c: fix(i18n): an approval step label and an approval notification's object label read as the metadata translators serve them
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  In a deployment whose `i18n.sourceLocale` differs from its `i18n.defaultLocale` (an app authored in English that defaults its users to Chinese), an English reader was shown the Chinese approval step name, and an English approval-notification recipient read the Chinese object name inside an English sentence. Both labels were read through `II18nService.t()`, which falls back to the `defaultLocale` row; `/meta` serves the authored text. Both now resolve the way the metadata route resolves a label: the reader's negotiated locale, the declared fallback chain, and the authored language (the declared `sourceLocale`, else `defaultLocale`).
+  
+  - **`@objectstack/spec`** adds `resolveFlowApprovalStepLabel(bundle, flowName, nodeId, literal?, opts?)` (`@objectstack/spec/system`), the one reading of `flows.<flow>.approvals.<node_id>.label`: the requested locale, then the declared fallback chain (skipped for the authored locale), then `literal`. It takes the flow's name and the node's id, so a reader holding only an approval request row needs no flow document.
+  - **`@objectstack/service-messaging`** accepts a new `NotificationTextKeys.params` value, `{ object: '<object API name>', fallback }` (`NotificationObjectLabelParam`): the label of that object in the recipient's language, resolved as `GET /meta/object/:name` serves it, by `translateObject` over the object's served definition and its packaged base, so a renamed packaged object is named by its rename. It renders the same way on the inline fan-out, the dispatcher (digests included) and the inbox reader. `fallback` is delivered when nothing resolves. The `{ key, fallback }` value is still accepted and still renders through `t()`, so stored deliveries and inbox rows render as before.
+  - **`@objectstack/plugin-approvals`** names a notification's object with that typed param, and reads the approval step label through `resolveFlowApprovalStepLabel`, so `t()` carries catalog sentences only.
+  
+  Upgrade `@objectstack/plugin-approvals` and `@objectstack/service-messaging` together: an older messaging service refuses the typed param at `emit()`.
+- 16a96ac: feat(rest): Change Owner endpoint — hand one record or a list of records to another owner, on objects that offer the action
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Two new doors under the data surface, both run as the caller:
+  
+  - `POST /api/v1/data/:object/:id/change-owner` with `{ ownerId | queue, notify? }` hands one record to a person or moves it to an ownership queue (ADR-0142), and answers the record's new owner.
+  - `POST /api/v1/data/:object/change-owner` with `{ ids, ownerId | queue, notify? }` does the same for up to 500 records, one update per record, and answers a per-row report that lists every record that did not move with its code and sentence.
+  
+  An object offers Change Owner when the platform gives it a reassignable owner and its `userActions.transfer` switch is on (on by default, off on a `controlled_by_parent` detail). Any other object is refused as a whole, `403 CHANGE_OWNER_DISABLED`, whoever asks — a holder of `modifyAllRecords` included. The switch gates this action only: a plain `owner_id` update still needs the transfer grant and nothing else, so imports and hooks are unaffected. On an object that offers it, each record moves through the ordinary write path, so the caller needs edit on the record and the transfer grant (`allowTransfer` or `modifyAllRecords`); without the grant the record keeps its owner and the answer is the data door's own `403 PERMISSION_DENIED`. `notify: true` sends the new owner one notification under the `record.owner_changed` topic, its title keyed so it renders in the new owner's own language (English when no entry renders).
+  
+  `@objectstack/core` exports `changeRecordOwner`, `changeRecordsOwner`, `changeOwnerOffReason`, `changeOwnerOffRefusal`, `CHANGE_OWNER_DISABLED`, `CHANGE_OWNER_NOTIFICATION_TOPIC`, `CHANGE_OWNER_NOTIFICATION_TEXT` and `assertAssignableUser` (the assigned-work hand-over's target check, now shared). That check now reads the target user the way the write path reads a user reference: a user the caller cannot read answers as one that does not exist (`404`, `reference_not_found`), on Change Owner and on the hand-over alike. `@objectstack/client` adds `data.changeOwner` and `data.changeOwnerMany`. `@objectstack/spec` registers `CHANGE_OWNER_DISABLED` in the error-code ledger, and the `userActions.transfer` liveness row is now `live`. `@objectstack/service-messaging` lists `record.owner_changed` among the platform's notification topics and carries the notice's title in every shipped locale (`messages.recordOwnerChangedTitle`, `messages.recordsOwnerChangedTitle`).
+- eb9f8ed: perf(service-messaging): the inbox feed's receipt window read is served by an index
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Console bell polls a user's `sys_notification_receipt` rows on the `inbox` channel every 10 seconds, newest first, top 20. The table had no key that leads on `user_id` and `channel` and continues with `created_at`, so each poll collected and sorted the user's whole receipt history. It now declares `(user_id, channel, created_at)` beside its two existing indexes.
+  
+  Measured on SQLite with 56,000 receipts: the read went from about 3 ms to 0.1 ms for a user with 5,000 inbox receipts, and from about 2 ms to 0.1 ms for a user with 3,000 older ones. The plan changes from sorting the user's whole range to searching the new index and stopping at the window.
+  
+  On existing databases the next boot creates the index. On PostgreSQL it is built concurrently, because the table already exists. On MySQL it is created where `user_id` and `channel` are already `varchar`, which holds for receipt tables created since those columns declared their bounds. On an older receipt table, the existing `(user_id, state)` index is already refused, so nothing changes there.
+  
+  The matching `(user_id, created_at)` index on `sys_inbox_message` is deferred: on existing MySQL tables `user_id` is stored as `TEXT`, which MySQL cannot index, and schema sync never rewrites a column type.
+- 00ae570: feat(plugin-audit): a reply in a comment thread notifies the thread's starter and the people who replied in it before
+  
+  Clause-②: yes (widening) — `@objectstack/plugin-audit` emits a new notification topic, `collab.reply` (inbox and e-mail), and loads three new `messages.*` keys (`repliedToYourComment`, `repliedInYourThread`, `repliedAnonymous`) in all eleven locales into the host i18n service; `@objectstack/service-messaging` offers `collab.reply` in its platform topic list; nothing removed or refused
+  Metadata-protocol: none
+  
+  Before, only an `@mention` notified anyone about a comment. Someone who started a thread, or replied in it, heard nothing when another person answered.
+  
+  - **Who is notified.** When a comment is written as a reply (`parent_id` set), the writer finds the thread: it follows `parent_id` up to the top-level comment (whose author is the starter), then reads every distinct author of a reply to that comment in one grouped query (`author_id … WHERE parent_id = ? GROUP BY author_id`). Each of them is notified, except the reply's author and anyone this reply mentions (they get the mention notification, not two).
+  - **Who is not.** Each participant passes the same recipient gate as a mention: they are notified only when they can read the record and the reply itself, judged with their own permissions. A starter who has since lost access to the record gets nothing. Editing a reply, or writing a top-level comment, notifies no participant.
+  - **What arrives.** A new topic, `collab.reply`, through the same `messaging.emit` ingress as `collab.mention`: an inbox notice per reply and person, and an e-mail with the comment preview and a link that opens the record. The title says who replied, in the recipient's language: "Bob replied to your comment" for the starter, "Bob replied in a comment thread you are in" for the others. The e-mail templates are the mention e-mail's, registered under `collab.reply` in every catalog locale.
+  - **E-mail rate.** At most one reply e-mail per person per 10-minute window, the mention e-mail's window under its own key. In one window a person can therefore get one mention e-mail and one reply e-mail. Inbox notices are not limited.
+  - **Preferences.** Nothing new to set. A `sys_notification_preference` row `(collab.reply, email, enabled: false)`, or `(*, email)`, mutes the reply e-mail and keeps the inbox notice, as for any topic.
+  - **The topic list offers it.** `@objectstack/service-messaging` lists `collab.reply` among the platform's fixed topics (`PLATFORM_NOTIFICATION_TOPICS`), so `GET /api/v1/messaging/preference-options` offers it in the preference and template topic pickers even in an organization that has not received a reply notice yet.
+  
+  Mention notifications are unchanged.
+- 70194ff: feat(audit): a record's activity stream shows each changed field's old → new values by default, with a new `fieldHistory` off switch on the object and the field, and a reader is served only the changes of fields they may read
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  A record's activity stream now shows `Field: old → new` for every changed field, on every object, unless the object or the field turns it off. Before, values showed only for a field that declared `trackHistory: true`. Every other change was named by its field label alone.
+  
+  - **New `enable.fieldHistory`, with no default.** Absent: values show. `false`: off for the object, and a change names its fields only. It has no default so that a parsed body never writes one. A built artifact or a stored definition therefore gets values when it is upgraded, with no rebuild.
+  - **`enable.trackHistory: false` alone no longer turns values off.** The flag keeps its meaning: with `true`, the default record page shows the compliance ledger's field changes to a reader the ledger serves, and the derived `history` API verb is served. To keep an object's activity free of values, write `enable: { fieldHistory: false }`. Every platform object that wrote `trackHistory: false` now also writes `fieldHistory: false`.
+  - **New field `fieldHistory`, with no default: the field's off switch.** Absent shows the values, `false` names the change without them, `true` shows them (a media or JSON type included). Under an object with `enable.fieldHistory: false`, values stay off whatever a field says.
+  - **Field `trackHistory: false` no longer means anything: it reads like absent, so the values show.** The field designer wrote it on every save while the key meant nothing, so a stored `false` cannot be told from a choice. `trackHistory: true` keeps one job: it opts a media or JSON field in. A credential field (`secret`, and `password` off better-auth objects) never shows values, because both sides are the same mask. A media or structured-JSON field (`image`, `file`, `avatar`, `video`, `audio`, `signature`, `composite`, `repeater`, `record`, `location`, `address`, `code`, `json`, `vector`) shows them only with an explicit `true` (`fieldHistory` or `trackHistory`).
+  - **The new field key is classified where every `FieldSchema` key is.** The SQL driver counts `fieldHistory` as a presentation key, so creating a column never reads it. The field-level-security scrub keeps it as written, because a boolean names no field.
+  - **Who reads a value:** the field-change code (`metadata.summary_message`) is now served to readers. It is narrowed change by change with the same field answer as `metadata.old` and `metadata.new`. A reference field's change is kept only for a reader served the referenced record's title. When a reader is not served some of a summary's changes, the summary is rebuilt from the changes they are served instead of being dropped whole. The full audit ledger is not widened.
+  - **A long value no longer fails the activity insert.** The stored summary is fitted to `sys_activity.summary`'s `maxLength` (500): each side is cut first, then trailing changes are left out. The code keeps every change, with each side capped at 1,000 characters.
+  
+  To keep an object's activity free of values, set `enable: { fieldHistory: false }` on it. For one field, set `fieldHistory: false` on that field; `trackHistory: false` does not turn values off.
+- 0fc430a: fix(messaging): the approval Slack DM links the Console page under its mount
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Slack channel made a notification's relative `actionUrl` absolute as the deployment origin plus the path, with no Console mount. A relative `actionUrl` is a Console route (the approval DM's is `/system/approvals?request=ID`), and a server serves the Console under its own mount (`AuthConfig.uiBasePath`, `/_console` by default), so on a default deployment the DM's one link opened a "not found" page.
+  
+  The DM link now goes under the mount the auth service composes (`getConsoleUrl`), read at send time: `https://host/_console/system/approvals?request=ID` on a default deployment, the custom mount where `uiBasePath` sets one, and no mount where it is `/`. Only the composer's path is used, less any base path it shares with the origin, so a deployment under a sub-path is not prefixed twice; the origin is still the channel's own (`getPublicOrigin`, else `OS_AUTH_URL` / `BETTER_AUTH_URL` / `OS_BASE_URL`). A composition with no auth service, or one whose auth service composes no Console pages, gets the link it got before. An absolute `actionUrl` is sent as it is.
+  
+  No export changes: `createSlackChannel` and its options are as they were. `MessagingServicePlugin` mounts the channel with the auth service's composer internally, so a composition that registers the plugin gets the mount with nothing to configure; a host that builds the channel itself with `createSlackChannel` keeps the link it got before.
+- 0ab9b15: fix(messaging): the one-time digest conversion rewrites only the rows that held `none` when it started
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The one-time conversion of the old default digest `none` to empty now reads the ids of every row holding `none` first, in pages, then records itself in `sys_migration`, then rewrites exactly those rows. It no longer reads the rows again while it runs. The deployment is already serving during that boot pass, so a `none` someone picks during the pass (a new preference, a member switching to "No digest", a node still on the earlier release in a rolling upgrade) is that person's own choice and is kept. If the conversion cannot record itself in `sys_migration`, it rewrites nothing and runs again on the next start.
+- 24ff03c: feat(service-messaging): inbox messages, notification preferences and templates carry a palette colour
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console draws an object's icon as a white glyph on a square of the object's palette colour, and an object that declares no `color` is drawn in the neutral `gray`. Until now no built-in object declared one, so every platform object read the same. Inbox messages, notification preferences and notification templates are now `pink` (messaging and notifications).
+  
+  Each colour is one of the palette names (`OBJECT_COLORS`), picked by business family, not by status: people and organisation `blue`, security and access `purple`, approvals and work routing `orange`, messaging and notifications `pink`, integrations `teal`, reference data and preferences `green`, audit `amber`. Objects nobody opens in the console (credential and token stores, queues, run logs, engine bookkeeping) keep no `color` and stay `gray`. Nothing about the objects' fields, data or API changes.
+- 66452df: feat(platform-objects,services,plugins): platform select options declare the colours they render with
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  The renderer now colours a select option only when its author declared a colour. Every platform-shipped option that took its colour from the renderer's value table now declares that colour itself, in the same palette family, so no platform badge turns neutral: `sys_notification.severity` and `inbox_message.severity` (info blue, warning yellow, critical red), and the status and state options of jobs, imports, emails, flow and sync runs, credentials, deliveries, receipts, uploads, files, invitations, signing and trusted keys, tasks, approval requests, metadata rows and audience-binding suggestions, and the `completed` activity type. Stored values and labels are unchanged.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [9abc732]
+- Updated dependencies [52a2398]
+- Updated dependencies [a73edb3]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [a98c077]
+- Updated dependencies [236c804]
+- Updated dependencies [d71fe59]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a5a5312]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6943af1]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [81eae2b]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [ec545de]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [24ff03c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [c8d4b90]
+- Updated dependencies [00aa574]
+- Updated dependencies [15e80d2]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [9c57bd2]
+- Updated dependencies [fbb62e1]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [088852b]
+- Updated dependencies [66452df]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [b3247dd]
+- Updated dependencies [372ce7c]
+- Updated dependencies [c059e60]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [bc2aaf1]
+- Updated dependencies [4e55e4e]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/types@19.0.0-next.0
+  - @objectstack/platform-objects@19.0.0-next.0
+  - @objectstack/core@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

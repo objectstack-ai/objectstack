@@ -24,6 +24,7 @@
 // what widened an unrelated test's partial mock into a suite failure under
 // the prior shape. A subpath import never pulls the barrel in.
 import { retiredFieldKeysFor } from '@object-ui/types/internal/retired-field-keys';
+import { FieldType as SpecFieldType, REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
 
 import type { FieldTypeId } from './field-types.js';
 
@@ -167,6 +168,50 @@ function stripRetiredFieldKeys(def: Record<string, unknown>): Record<string, unk
   return next;
 }
 
+/**
+ * Does a `reference` mean anything on a field of this type? On the four types
+ * whose value names a record (`REFERENCE_VALUE_TYPES`, read from the installed
+ * contract) and on a `summary`, whose `reference` names its child object to
+ * the platform's roll-up checks. On every other type the engine links nothing
+ * through it, and the publish gate refuses it
+ * (`field/reference-on-non-reference-type`).
+ */
+export function readsReference(type: unknown): boolean {
+  return typeof type === 'string' && (REFERENCE_VALUE_TYPES.has(type) || type === 'summary');
+}
+
+const SPEC_FIELD_TYPES: ReadonlySet<string> = new Set(SpecFieldType.options);
+
+/**
+ * Drop a `reference` from a field whose declared type reads none.
+ *
+ * A shipped build of the field inspector kept the key on a retype (a `lookup`
+ * retyped to `text` saved as text with the old target still on it), and the
+ * designer draws the Related Object picker only on `lookup` / `master_detail`
+ * / `tree`, so on such a field the key is neither shown nor clearable — while
+ * the publish gate refuses the object at every later publish, whatever the
+ * edit, naming a key the designer does not show. Stripping it here, the single
+ * read door for `draft.fields`, makes the next edit-and-save of such a draft
+ * come out publishable, as {@link stripRetiredFieldKeys} does for a retired
+ * key. Nothing is lost: on these types the key linked no record.
+ *
+ * Judged only on a type the spec declares: an undeclared or retired type
+ * string is left as it is (the parse refuses it first, and its `reference`
+ * may be what a migration needs).
+ */
+function stripStrayReference(def: Record<string, unknown>): Record<string, unknown> {
+  if (!(SPEC_REFERENCE_KEY in def)) return def;
+  const type = def.type;
+  if (typeof type !== 'string' || !SPEC_FIELD_TYPES.has(type) || readsReference(type)) return def;
+  const { [SPEC_REFERENCE_KEY]: _dropped, ...kept } = def;
+  return kept;
+}
+
+/** Both read-door strips, in order: a retired key first (it may recover a `reference`). */
+function normalizeReadDef(def: Record<string, unknown>): Record<string, unknown> {
+  return stripStrayReference(stripRetiredFieldKeys(def));
+}
+
 export interface FieldEntry {
   /** Canonical snake_case key. */
   name: string;
@@ -188,7 +233,7 @@ export function readFields(fieldsInput: unknown): FieldsView {
         const { name, ...rest } = raw ?? {};
         return {
           name: typeof name === 'string' && name ? name : `field_${i + 1}`,
-          def: stripRetiredFieldKeys(rest as Record<string, unknown>),
+          def: normalizeReadDef(rest as Record<string, unknown>),
         };
       }),
     };
@@ -197,7 +242,7 @@ export function readFields(fieldsInput: unknown): FieldsView {
     return {
       shape: 'record',
       entries: Object.entries(fieldsInput as Record<string, Record<string, unknown>>).map(
-        ([name, def]) => ({ name, def: stripRetiredFieldKeys({ ...(def ?? {}) }) }),
+        ([name, def]) => ({ name, def: normalizeReadDef({ ...(def ?? {}) }) }),
       ),
     };
   }

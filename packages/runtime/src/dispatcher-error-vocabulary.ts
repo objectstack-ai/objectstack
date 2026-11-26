@@ -1134,6 +1134,19 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             '\'reference_not_found\' is one of them. It reaches `ApiError.details.fields[].code`, never ' +
             '`error.code`, so no ledger row can be owed for it (ADR-0112 D6).',
     },
+    {
+        code: 'reference_out_of_scope',
+        file: 'packages/core/src/utils/import-coerce.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'import-coerce\'s `coerceError(meta, field, code: FieldErrorCode, …)` builds the per-cell ' +
+            '`FieldCoerceError` an import row reports. Its `code` parameter is typed `code: FieldErrorCode`, ' +
+            'so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'reference_out_of_scope\' is one of them. It reaches `ApiError.details.fields[].code`, never ' +
+            '`error.code`, so no ledger row can be owed for it (ADR-0112 D6).',
+    },
     // invalidQueryParam() — query-param.ts
     {
         code: 'invalid_boolean',
