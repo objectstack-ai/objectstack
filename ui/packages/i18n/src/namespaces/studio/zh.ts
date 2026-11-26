@@ -3963,6 +3963,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.bookPreview.tree': '解析后的目录树',
   'engine.bookPreview.audience.public': '公开',
   'engine.bookPreview.audience.permissionSet': '权限集：{name}',
+  'engine.bookPreview.audience.systemPermission': '系统权限：{name}',
   'engine.bookPreview.audience.org': '组织',
   'engine.bookPreview.slug': 'URL 标识：{slug}',
   'engine.bookPreview.noGroups': '尚无分组',

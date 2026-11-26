@@ -240,14 +240,19 @@ as a preference, not as a limitation. Tags are for membership that cuts across n
 | `slug` | `string` | — | Portal URL segment; defaults to the name without its prefix |
 | `icon` | `string` | — | Icon name |
 | `order` | `number` | — | Orders this book among the portal's books |
-| `audience` | `'org' \| 'public' \| { permissionSet }` | — | Who may read it; defaults to `'org'` |
+| `audience` | `'org' \| 'public' \| { permissionSet } \| { systemPermission }` | — | Who may read it; defaults to `'org'` |
 | `groups` | `BookGroup[]` | ✅ | The spine. Two levels total — groups, then entries |
 
 `audience` is a reference into the permission model rather than a vocabulary of its own:
 `'org'` (the default) inherits the package grant and admits any signed-in principal,
-`'public'` is anonymously readable and indexable, and `{ permissionSet: 'crm_admin' }`
-admits a signed-in principal holding that named set. A caller whose holdings cannot be
-resolved is denied — the gate fails closed.
+`'public'` is anonymously readable and indexable, `{ permissionSet: 'crm_admin' }`
+admits a signed-in principal holding that named set, and
+`{ systemPermission: 'crm.read_runbook' }` admits a signed-in principal holding that
+capability through any permission set — the same caller an app with
+`requiredPermissions: ['crm.read_runbook']` opens for. Use the capability form for the
+manual of an app gated on a capability several sets grant: naming one of those sets would
+shut out the holders of every other one. A caller whose holdings cannot be resolved is
+denied — the gate fails closed.
 
 <Callout type="info">
 The gate is a **capability** reference, never a distribution one: packages own permission
