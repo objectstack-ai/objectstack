@@ -90,6 +90,15 @@
  * lists that language; else the organization's `localization.locale`, then
  * the app's declared default, decide — the rungs the same ruling puts below
  * the browser's language, which only the server can read.
+ *
+ * ## The stored Bearer rides it (objectstack#37225)
+ *
+ * Under a session held by its bearer token alone, a cookie-only read was
+ * answered `{ authenticated: false }`: no currency, locale or zone of the
+ * user's. The read's init is `meLocalizationInit` (`languageSeed.ts`), which
+ * states the stored Bearer exactly as the seed and `index.html`'s parse-time
+ * request do, so the three still share one request; why the Bearer goes in the
+ * init rather than through `createAuthenticatedFetch` is written there.
  */
 import { useEffect, useState } from 'react';
 import {
@@ -100,7 +109,7 @@ import {
   type LocalizationValue,
 } from '@object-ui/i18n';
 import { getSessionOwnerChangeCount, useAuth } from '@object-ui/auth';
-import { startedPreferredLocale, takeSettledSeedAnswer } from './languageSeed';
+import { meLocalizationInit, startedPreferredLocale, takeSettledSeedAnswer } from './languageSeed';
 import { useDataInvalidation } from '@object-ui/react';
 import {
   HttpFetchError,
@@ -177,14 +186,9 @@ export function LocalizationFetchProvider({
           // before — including `Retry-After` — so the retry policy below is
           // untouched, and a shared 503 reaches BOTH callers rather than
           // resolving one of them empty.
-          const init: RequestInit = {
-            credentials: 'include',
-            headers: {
-              Accept: 'application/json',
-              ...(preference ? { 'Accept-Language': preference } : {}),
-            },
-            signal: reread?.signal,
-          };
+          // The seed's own init (the stored Bearer included), plus this read's
+          // signal, which is no part of the in-flight key.
+          const init: RequestInit = { ...meLocalizationInit(preference), signal: reread?.signal };
           // The boot read's first attempt takes the seed's answer to this very
           // request when it settled earlier in this page load
           // (objectstack#35455); a re-read never does.

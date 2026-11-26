@@ -63,6 +63,10 @@ import { STUDIO_RETURN_PARAM } from './views/studio-design/studioAddress.js';
  * |             | at it (a comment notice's link, #36410).       |              |
  * | `comment`   | With `comments`: the comment in that thread to | with         |
  * |             | scroll to (objectstack#36410).                 | `comments`   |
+ * | `section`   | On a record route: the body heading to open at | with the     |
+ * |             | and mark, by the anchor the body outline       | record link  |
+ * |             | issued (ADR-0160 D9; a cited passage opened    |              |
+ * |             | from the assistant). A stale one opens the top.|              |
  * | `from`      | Ancestor breadcrumb trail for a record route,  | push (with   |
  * |             | so drilling record→related-record keeps a      | the drill-in) |
  * |             | clickable path back (`Account → #p → Invoice`).|              |
@@ -165,6 +169,25 @@ export const RECORD_COMMENTS_PARAM = 'comments';
 export const RECORD_COMMENT_PARAM = 'comment';
 
 /**
+ * On a record route (ADR-0160 D9): the heading of the record's body to open
+ * at, scrolled to and marked — by the `anchor` the body outline issued, which
+ * the spec's `headingsOf` derives from the body on the server and here alike.
+ * Written by the assistant's citation chips (`onOpenRecord`'s `anchor`). An
+ * anchor that names no heading of the record opens it at its top; a
+ * `textarea` body, or a heading the field does not draw, opens at the field.
+ * Read by `RecordDetailView` (`recordSectionAnchor.ts`).
+ */
+export const RECORD_SECTION_PARAM = 'section';
+
+/**
+ * History-state value beside {@link RECORD_SECTION_PARAM}: a distinct value per
+ * chip click, so a second click of the same citation (the same URL) opens the
+ * section again. Not a URL parameter; an entry reached by a reload or a shared
+ * link carries none and opens the section once.
+ */
+export const RECORD_SECTION_OPENED_STATE = '__sectionOpened';
+
+/**
  * History-state flag beside {@link RECORD_COMMENTS_PARAM}: the record view
  * pushed this `?comments=` entry, so 「‹」 pops it. Not a URL parameter; an
  * entry reached by a reload or a shared link carries none, and 「‹」 replaces.
@@ -224,6 +247,7 @@ export const RESERVED_URL_PARAMS: readonly string[] = [
   RECORD_RELATED_ENLARGE_PARAM,
   RECORD_COMMENTS_PARAM,
   RECORD_COMMENT_PARAM,
+  RECORD_SECTION_PARAM,
   COMMAND_PALETTE_PARAM,
   KEYBOARD_SHORTCUTS_PARAM,
   RECORD_TRAIL_PARAM,

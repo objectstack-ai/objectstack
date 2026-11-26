@@ -58,6 +58,13 @@
  * its icon says a draft is there). Folded, the row's boxes fit the row, so
  * the ⋯ trigger stays inside the column, not under the right panel. Like
  * every rule here, it measures the header's own row, never the viewport.
+ *
+ * objectstack#37455 — the page's Cancel and Save and the AI assistant, which
+ * sat in the Studio top bar, end the actions slot: Cancel and Save after the
+ * pillar's own actions, then, behind a hairline, the assistant (the front
+ * end's page-header group, objectstack#36111). The surface hands them in
+ * (`studioTitleRow.tsx`); outside it, and in a header nested under the page's
+ * own, the slot holds the pillar's actions alone.
  */
 
 import * as React from 'react';
@@ -90,6 +97,7 @@ import {
   STUDIO_TAB_IDLE,
   STUDIO_TAB_ROW,
 } from './studio-tokens.js';
+import { StudioTitleRowDivider, useStudioTitleRowControls } from './studioTitleRow.js';
 
 /** The item's status, drawn by the header as one amber chip (objectui#12524). */
 export interface StudioItemStatus {
@@ -674,6 +682,10 @@ export function StudioItemHeader({
   );
   const ownMenu = typeof foldMenu === 'object' ? foldMenu : null;
   const hasFolded = folded && (!!apiName || !!chips || tools.length > 0);
+  // objectstack#37455 — the surface's Save and assistant, on the page's first title row.
+  const titleRowControls = useStudioTitleRowControls(titleRowRef);
+  const save = titleRowControls?.save ?? null;
+  const assistant = titleRowControls?.assistant ?? null;
   return (
     <div data-testid={testId} className={cn(STUDIO_ITEM_HEADER, !tabs && 'pb-3', className)}>
       <div ref={titleRowRef} className={STUDIO_ITEM_ROW}>
@@ -698,7 +710,7 @@ export function StudioItemHeader({
             {meta}
           </span>
         )}
-        {(actions || (ownMenu && hasFolded)) && (
+        {(actions || (ownMenu && hasFolded) || save || assistant) && (
           <div
             className="group/item-actions ml-auto flex shrink-0 items-center gap-2"
             data-fold={foldStage === 2 ? 'labels' : undefined}
@@ -724,6 +736,13 @@ export function StudioItemHeader({
                 </DropdownMenu>
               )}
             </StudioItemHeaderFoldContext.Provider>
+            {save}
+            {assistant && (
+              <>
+                {(actions || (ownMenu && hasFolded) || save) && <StudioTitleRowDivider />}
+                {assistant}
+              </>
+            )}
           </div>
         )}
       </div>

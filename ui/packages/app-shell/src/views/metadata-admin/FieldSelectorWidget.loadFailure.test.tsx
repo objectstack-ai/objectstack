@@ -58,9 +58,14 @@
  * arm by its disabled input, the completed arms by the combobox they render.
  */
 
+// The field picker's module graph reaches two dynamic imports (`celAuthoring.ts`);
+// their first load is paid at collection, never inside a clocked case (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { TokenStorage } from '@object-ui/auth';
 import { WIDGETS } from './widgets';
 import { t } from './i18n';
 
@@ -82,12 +87,14 @@ const FAILURE_TESTID = 'field-selector-load-failed';
  */
 const ADD_FIELDS = t('engine.form.addFields', 'en-US');
 
+// `headers`: the read goes through the console's authenticated fetch, which
+// reads a rotated session token off every answer (objectstack#37225).
 function okResponse(body: unknown): Response {
-  return { ok: true, status: 200, json: async () => body } as unknown as Response;
+  return { ok: true, status: 200, headers: new Headers(), json: async () => body } as unknown as Response;
 }
 
 function jsonErrorResponse(status: number, body: unknown): Response {
-  return { ok: false, status, json: async () => body } as unknown as Response;
+  return { ok: false, status, headers: new Headers(), json: async () => body } as unknown as Response;
 }
 
 /** A promise the test resolves by hand, so the loading arm is observable. */
@@ -119,6 +126,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  TokenStorage.clear();
 });
 
 describe('field-selector — a failed field fetch is not an empty field list (objectui#5227)', () => {
@@ -146,7 +154,7 @@ describe('field-selector — a failed field fetch is not an empty field list (ob
     // …and the loading flag cleared.
     expect(screen.queryByDisplayValue(LOADING_FIELDS)).not.toBeInTheDocument();
 
-    expect(fetchMock).toHaveBeenCalledWith(FIELDS_URL);
+    expect(fetchMock).toHaveBeenCalledWith(FIELDS_URL, expect.objectContaining({ credentials: 'include' }));
   });
 
   it('mouth 2: a NON-OK response with a parseable JSON body is a fault, not an empty catalog', async () => {
@@ -173,6 +181,7 @@ describe('field-selector — a failed field fetch is not an empty field list (ob
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 500,
+      headers: new Headers(),
       // A non-JSON body — the parse throws, and that must not be mistaken for
       // a refusal that said nothing to report.
       json: async () => {
@@ -277,5 +286,51 @@ describe('field-selector — a failed field fetch is not an empty field list (ob
     // …and still editable.
     screen.getByRole('button', { name: '×' }).click();
     expect(onChange).toHaveBeenCalledWith([]);
+  });
+});
+
+/**
+ * objectstack#37225 — the catalog read went out as a bare `fetch` with no init:
+ * the default `same-origin` credentials, the session cookie alone. A session
+ * held by its bearer token alone was answered `401` and the picker showed a
+ * failure for every object. Against a server that refuses any request without
+ * the bearer, the read now carries it beside the cookie; with no token stored
+ * (a cookie session) it goes out cookie-only, as before.
+ */
+describe('field-selector — the catalog read under a bearer-only session (objectstack#37225)', () => {
+  const TOKEN = 'stored-session-token';
+  const sent: Array<{ credentials: RequestCredentials | undefined; authorization: string | null }> = [];
+  const bearerOnlyServer = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const authorization = new Headers(init?.headers).get('Authorization');
+    sent.push({ credentials: init?.credentials, authorization });
+    return authorization === `Bearer ${TOKEN}`
+      ? okResponse({ fields: [{ name: 'name', label: 'Name', type: 'text' }] })
+      : jsonErrorResponse(401, { error: { message: 'Authentication is required to access this endpoint.' } });
+  });
+
+  afterEach(() => {
+    sent.length = 0;
+    bearerOnlyServer.mockClear();
+  });
+
+  it('loads the catalog, sending the stored bearer beside the cookie', async () => {
+    TokenStorage.set(TOKEN);
+    vi.stubGlobal('fetch', bearerOnlyServer);
+
+    renderWidget();
+
+    await waitFor(() => expect(screen.getByRole('combobox')).toBeEnabled());
+    expect(screen.queryByTestId(FAILURE_TESTID)).not.toBeInTheDocument();
+    expect(bearerOnlyServer.mock.calls.map(([url]) => url)).toEqual([FIELDS_URL]);
+    expect(sent).toEqual([{ credentials: 'include', authorization: `Bearer ${TOKEN}` }]);
+  });
+
+  it('CONTROL: with no token stored the read goes out cookie-only, and is refused as before', async () => {
+    vi.stubGlobal('fetch', bearerOnlyServer);
+
+    renderWidget();
+
+    await waitFor(() => expect(screen.getByTestId(FAILURE_TESTID)).toBeInTheDocument());
+    expect(sent).toEqual([{ credentials: 'include', authorization: null }]);
   });
 });
