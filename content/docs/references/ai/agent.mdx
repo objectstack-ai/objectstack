@@ -28,7 +28,7 @@ const result = AIModelConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>` | optional (default: `"openai"`) |  |
+| **provider** | `Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>` | optional |  |
 | **model** | `string` | optional | Model name (e.g. gpt-4, claude-3-opus). Optional: when absent, the agent runs on the host's default model for this environment, so an agent that only tunes sampling (e.g. `temperature`) need not name a model. |
 | **temperature** | `number` | optional (default: `0.7`) |  |
 | **maxTokens** | `number` | optional |  |
@@ -72,7 +72,7 @@ const result = AIModelConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>` | optional (default: `"openai"`) |  |
+| **provider** | `Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>` | optional |  |
 | **model** | `string` | optional | Model name (e.g. gpt-4, claude-3-opus). Optional: when absent, the agent runs on the host's default model for this environment, so an agent that only tunes sampling (e.g. `temperature`) need not name a model. |
 | **temperature** | `number` | optional (default: `0.7`) |  |
 | **maxTokens** | `number` | optional |  |
