@@ -72,6 +72,7 @@ const DECLARED_KEYS = [
   'visibleOn',
   'visibleWhen',
   'readonlyWhen',
+  'uiReadonlyWhen',
   'requiredWhen',
   'colSpan',
   'span',

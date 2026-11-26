@@ -49,7 +49,7 @@
 
 import type { ObjectActionLayout } from '@objectstack/spec/data';
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
-import { isDraftVersionConflict } from '../views/metadata-admin/DraftConflictDialog.js';
+import { isDraftVersionConflict } from '../views/metadata-admin/draftVersionGuard.js';
 import { authoredPublished, type AuthoredLayers } from '../views/metadata-admin/authoredObjectBuffer.js';
 import { saveObjectExtensionArrangement } from '../views/objectExtensionArrangementSave.js';
 import {

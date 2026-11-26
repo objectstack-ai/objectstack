@@ -202,6 +202,7 @@ const ru = {
     uploadInFlight: "Дождитесь завершения загрузки, прежде чем сохранять.",
     clearedOnHide: "Очищено то, что больше не применимо к текущим значениям: {{fields}}",
     visibleWhenFaulted: "Невозможно отправить: не удалось вычислить правило visibleWhen для {{fields}}. Правило нужно исправить, прежде чем эту форму можно будет отправить.",
+    uiReadonlyWhenFaulted: "Невозможно отправить: не удалось вычислить правило uiReadonlyWhen для {{fields}}. Правило нужно исправить, прежде чем эту форму можно будет отправить.",
     discardTitle: "Отменить изменения?",
     discardMessage: "Есть несохранённые изменения. Если закрыть форму сейчас, правки будут потеряны.",
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
@@ -1185,6 +1186,7 @@ const ru = {
     addColumn: "Добавить колонку",
     moveCard: "Переместить карточку",
     noCards: "Нет карточек",
+    notLoaded: "Не загружено карточек: {{count}}",
     columnCards: "Карточки в колонке {{column}}",
     laneCards: "Карточки: {{column}} - {{lane}}",
     dropBlocked: "Карточку из {{from}} нельзя переместить в {{to}}.",
@@ -2737,6 +2739,7 @@ const ru = {
       savedCleared: "Сохранённое значение очищено",
       deprecatedBadge: "Устарело",
       deprecatedBadgeReplacedBy: "Устарело → {{replacedBy}}",
+      selectValueRetired: "{{value}} (больше недоступно)",
       unsupportedSpecifierType: "Неподдерживаемый тип настройки: {{type}}",
       mapAddRow: "Добавить строку",
       mapRemoveRow: "Удалить {{key}}",

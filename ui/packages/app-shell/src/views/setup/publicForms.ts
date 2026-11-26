@@ -75,7 +75,7 @@ import {
   type RuntimePersistCtx,
   type SaveAndPublishOutcome,
 } from '../runtime-metadata-persistence.js';
-import { declaredOverrideOf, overrideDraftBody } from '../studio-design/StudioCustomizeControls.js';
+import { declaredOverrideOf, overrideDraftBody } from '../studio-design/customizeOverride.js';
 import { fetchListedPackageManifests } from '../studio-design/packages-io.js';
 
 type FormDoc = Record<string, any>;

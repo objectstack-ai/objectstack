@@ -28,7 +28,7 @@ import {
   RecordCitationsSchema,
 } from '@objectstack/spec/ai';
 import type { ChatbotEnhancedMessage as ChatMessage, ChatbotEnhancedToolInvocation as ChatToolInvocation, ChatSource, ChatBuildProgress, ChatBlueprintProgress } from './ChatbotEnhanced';
-import { detectPendingApproval, extractCharts, parseResultEnvelope, type AnyPart } from './toolResultParsers';
+import { chartsFromParts, detectPendingApproval, extractCharts, parseResultEnvelope, type AnyPart } from './toolResultParsers';
 
 // The parsers the eager `/core` entry shares live in `./toolResultParsers`, so
 // this module (and the spec schema it parses with) loads only with the chat.
@@ -37,9 +37,11 @@ export {
   detectPendingApproval,
   chartsFromParts,
   chartAnswerParts,
+  storedAnswerParts,
+  STORED_ANSWER_DATA_PARTS,
   VISUALIZE_DATA_TOOL,
 } from './toolResultParsers';
-export type { ChartAnswerPart } from './toolResultParsers';
+export type { ChartAnswerPart, StoredAnswerData, StoredAnswerPart } from './toolResultParsers';
 
 
 interface AnyUIMessage {
@@ -856,6 +858,22 @@ export function extractRecordCitations(parts: readonly AnyPart[]): RecordCitatio
   if (!part) return undefined;
   const parsed = RecordCitationsSchema.safeParse(part.data);
   return parsed.success && parsed.data.length > 0 ? parsed.data : undefined;
+}
+
+/**
+ * objectstack#37487 — the reading half of `STORED_ANSWER_DATA_PARTS`: every
+ * kept data part of a stored message, read back into the message fields the
+ * chat draws. A history or cache rebuild calls this once; a part added to the
+ * allow-list is read here, beside its write in `storedAnswerParts`. The citations list is taken
+ * as persisted (ruling Q1): parsed through the contract, never verified again.
+ */
+export function storedAnswerData(parts: readonly AnyPart[]): {
+  charts?: ChatMessage['charts'];
+  recordCitations?: RecordCitationParsed[];
+} {
+  const charts = chartsFromParts(parts);
+  const recordCitations = extractRecordCitations(parts);
+  return { ...(charts ? { charts } : {}), ...(recordCitations ? { recordCitations } : {}) };
 }
 
 /**
