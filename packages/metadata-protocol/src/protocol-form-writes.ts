@@ -16,13 +16,14 @@
  *    the write that removed them is undone.
  *
  * Each judges bodies through THE projection ({@link projectViewForms}), never
- * by re-reading `formViews` by hand.
+ * by re-reading `formViews` by hand; the old-shape row removal names a stored
+ * row's forms as the `form` read names them ({@link storedViewRowHoldings}).
  */
 
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { anonymousFormIntakeSlug, isAggregatedViewContainer, projectViewForms, publicFormSlug } from '@objectstack/spec/ui';
 import type { ProtocolHost } from './protocol-host.js';
-import { readEffectiveForms, type FormReadHost } from './protocol-form-reads.js';
+import { readEffectiveForms, storedViewRowHoldings, type FormReadHost, type StoredHolding } from './protocol-form-reads.js';
 
 /** The error code of the public address clash (ruled question 3): ledgered in `check:error-code-casing`. */
 export const FORM_ADDRESS_TAKEN = 'FORM_ADDRESS_TAKEN' as const;
@@ -204,30 +205,37 @@ export type AppliedOldShapeFormRowRemoval = OldShapeFormRowRemoval & { readonly 
  * without the member (its lists byte-equal). ⛔ Form content only: a `view`
  * row that carries a LIST at the name is left untouched.
  *
+ * A form write removes only the old-shape row that carries that same form:
+ * which forms a row carries, and under which names, is `holdingsOf`'s answer,
+ * the `form` read's own naming ({@link storedViewRowHoldings}); ⛔ never a
+ * second naming of the members here. A member of another name is never
+ * removed, whatever its key.
+ *
  * `rows` are the active stored `view` rows at that address, parsed
- * (`{ name, data }`); `expansionKeyOf` answers which `formViews` key (or the
- * nested `form`) of a container expands to `name`.
+ * (`{ name, data, packageId }`, `packageId` as the stored entry binds it).
  */
 export function oldShapeFormRowRemovals(
-    rows: ReadonlyArray<{ name: string; data: unknown }>,
+    rows: ReadonlyArray<{ name: string; data: unknown; packageId: string | undefined }>,
     name: string,
     packageId: string | null,
+    holdingsOf: (entry: { data: unknown; packageId: string | undefined }) => ReadonlyMap<string, StoredHolding>,
 ): OldShapeFormRowRemoval[] {
     const out: OldShapeFormRowRemoval[] = [];
+    const carries = (data: unknown, rowPackage: string | undefined): boolean =>
+        holdingsOf({ data, packageId: rowPackage }).get(name)?.kind === 'form';
     for (const row of rows) {
         const body = row.data;
         if (!body || typeof body !== 'object' || Array.isArray(body)) continue;
-        const projection = projectViewForms(body);
-        if (!projection.forms.some((form) => form.name === name)) continue;
+        if (!carries(body, row.packageId)) continue;
         if (!isAggregatedViewContainer(body)) {
             out.push({ kind: 'delete', row: { name: row.name, packageId } });
             continue;
         }
         const container = body as Record<string, unknown>;
         const next: Record<string, unknown> = { ...container };
-        // Drop exactly the member that expands to `name`: re-project after
-        // each candidate removal, so the projection decides which one it is.
-        const without = (patch: Record<string, unknown>) => projectViewForms({ ...container, ...patch }).forms.every((f) => f.name !== name);
+        // Drop exactly the member that carries the form: re-name after each
+        // candidate removal, so the read's naming decides which one it is.
+        const without = (patch: Record<string, unknown>) => !carries({ ...container, ...patch }, row.packageId);
         let removed = false;
         if (container.formViews && typeof container.formViews === 'object' && !Array.isArray(container.formViews)) {
             for (const key of Object.keys(container.formViews as object)) {
@@ -261,21 +269,22 @@ export function oldShapeFormRowRemovals(
  * transaction has committed, and for the undo of that write.
  */
 export async function applyOldShapeFormRowRemovals(
-    host: Pick<ProtocolHost, 'getOverlayRepo' | 'isArtifactBacked' | 'readActiveOverlayRows' | 'storedOverlayEntries'>,
+    host: Pick<ProtocolHost, 'expandStoredViewContainers' | 'getOverlayRepo' | 'isArtifactBacked' | 'readActiveOverlayRows' | 'storedOverlayEntries'>,
     args: { name: string; packageId: string | null; actor: string | null; source: string },
 ): Promise<AppliedOldShapeFormRowRemoval[]> {
     const rows = await host.readActiveOverlayRows({ type: 'view' });
-    const at: Array<{ name: string; data: unknown; hash: string | null; version: number | null }> = [];
+    const at: Array<{ name: string; data: unknown; packageId: string | undefined; hash: string | null; version: number | null }> = [];
     for (const row of rows) {
         if (((row?.package_id ?? null) || null) !== (args.packageId || null)) continue;
         const entry = host.storedOverlayEntries({ type: 'view' }, [row])[0];
         if (entry === undefined) continue;
         at.push({
-            name: entry.name, data: entry.data, hash: typeof row?.checksum === 'string' ? row.checksum : null,
+            name: entry.name, data: entry.data, packageId: entry.packageId,
+            hash: typeof row?.checksum === 'string' ? row.checksum : null,
             version: typeof row?.version === 'number' ? row.version : null,
         });
     }
-    const removals: AppliedOldShapeFormRowRemoval[] = oldShapeFormRowRemovals(at, args.name, args.packageId)
+    const removals: AppliedOldShapeFormRowRemoval[] = oldShapeFormRowRemovals(at, args.name, args.packageId, (entry) => storedViewRowHoldings(host, entry))
         .map((removal) => ({ ...removal, replacedVersion: at.find((row) => row.name === removal.row.name)?.version ?? null }));
     if (removals.length === 0) return removals;
     const repo = host.getOverlayRepo();

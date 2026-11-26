@@ -50,7 +50,7 @@ import { holdsServedOverlayCandidate, servedOverlayRowCandidates } from './proto
 import type { StoredOverlayEntry } from './protocol-stored-overlay-types.js';
 
 /** What one stored row holds at a form's name, as the `form` read reads it. */
-type StoredHolding =
+export type StoredHolding =
     | { readonly kind: 'form'; readonly item: Record<string, unknown> }
     | { readonly kind: 'closed'; readonly reason: 'list' | 'unreadable' };
 
@@ -111,6 +111,31 @@ async function storedEntries(host: FormReadHost, type: 'form' | 'view'): Promise
     }
 }
 
+/**
+ * [ADR-0159 D5] What one stored `view` row holds per name, under the names
+ * the read serves them as: an item row through the projection, a stored
+ * container as the items the runtime door expands it to (the same expansion
+ * the `view` list serves, {@link FormReadHost.expandStoredViewContainers}).
+ * So a member of a named container on another package's object is named
+ * `OBJECT.CONTAINER.KEY`, as the `view` list and the doors serve it.
+ *
+ * THE one naming of a stored row's forms: the `form` read
+ * ({@link storedFormPlaces}) and the `form` write's old-shape row removal
+ * (`oldShapeFormRowRemovals`) both ask it, so a `form` write removes only
+ * the old-shape row that carries that same form.
+ */
+export function storedViewRowHoldings(
+    host: Pick<FormReadHost, 'expandStoredViewContainers'>,
+    entry: { readonly data: unknown; readonly packageId: string | undefined },
+): Map<string, StoredHolding> {
+    if (!isAggregatedViewContainer(entry.data)) return viewHoldings(entry.data);
+    const holds = new Map<string, StoredHolding>();
+    for (const { item } of host.expandStoredViewContainers('view', [entry])) {
+        for (const [name, holding] of viewHoldings(item)) holds.set(name, holding);
+    }
+    return holds;
+}
+
 /** Every stored row of both types as a {@link StoredFormPlace}. */
 async function storedFormPlaces(host: FormReadHost): Promise<StoredFormPlace[]> {
     const places: StoredFormPlace[] = [];
@@ -123,20 +148,11 @@ async function storedFormPlaces(host: FormReadHost): Promise<StoredFormPlace[]> 
     const containers = views.filter((entry) => isAggregatedViewContainer(entry.data));
     for (const entry of views) {
         if (isAggregatedViewContainer(entry.data)) continue;
-        places.push({ type: 'view', packageId: entry.packageId, entry, grain: 'item', holds: viewHoldings(entry.data) });
-    }
-    // A stored container is read as the items the runtime door expands it to,
-    // the same expansion the `view` list serves, so a projected name is the
-    // served one.
-    const byContainer = new Map<StoredOverlayEntry, Map<string, StoredHolding>>();
-    for (const { item, container } of host.expandStoredViewContainers('view', containers)) {
-        const holds = byContainer.get(container) ?? new Map<string, StoredHolding>();
-        for (const [name, holding] of viewHoldings(item)) holds.set(name, holding);
-        byContainer.set(container, holds);
+        places.push({ type: 'view', packageId: entry.packageId, entry, grain: 'item', holds: storedViewRowHoldings(host, entry) });
     }
     for (const container of containers) {
         const projection = projectViewForms(container.data);
-        const holds = byContainer.get(container) ?? new Map<string, StoredHolding>();
+        const holds = storedViewRowHoldings(host, container);
         // A container the projection cannot read holds nothing it can name;
         // the doors close the links it names (rule 7), the read serves nothing new.
         if (projection.unreadable !== undefined && holds.size === 0) continue;
