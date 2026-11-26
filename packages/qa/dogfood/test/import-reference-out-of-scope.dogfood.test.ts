@@ -174,8 +174,8 @@ describe('[#36794] a scoped import lookup naming another parent\'s record answer
     const [row] = await importAs(token.admin, [{ name: 'TS-F1', project: 'Gemini', task_by_ref: 'Design review' }]);
     expect(row, JSON.stringify(row)).toMatchObject({
       ok: false, field: 'task_by_ref', code: 'reference_not_found',
-      error: 'Task by ref: "Design review" could not be looked up within Project = "Gemini": the lookup\'s target '
-        + 'cannot be filtered by that column, so the lookup field\'s dependsOn needs another one',
+      error: 'Task by ref: "Design review" could not be looked up within Project = "Gemini": the target field this '
+        + 'lookup\'s dependsOn filters by cannot be filtered on, so point that dependsOn entry at a stored field',
     });
     expect(row!.errors?.[0]).not.toHaveProperty('scope');
   });

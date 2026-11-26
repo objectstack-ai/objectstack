@@ -815,6 +815,7 @@ const ru = {
       referenceAmbiguous: "«{{value}}» соответствует нескольким записям — используйте уникальное значение или идентификатор записи",
       referenceOutOfScope: "«{{value}}» найдено, но не в {{scope}}",
       scopeEntry: "{{label}} «{{value}}»",
+      scopeSeparator: ", ",
       invalidBoolean: "«{{value}}» не является допустимым значением true/false",
       invalidNumber: "«{{value}}» не является допустимым числом",
       invalidDate: "«{{value}}» не является допустимой датой",

@@ -353,14 +353,48 @@ describe('[#36159] [#36794] a scoped miss whose value exists outside the row\'s 
     const summary = await run(p, [{ name: 'INV-1', project: 'Gemini', task: 'Design review' }]);
     expect(summary.results.map(refusal)).toEqual([{
       ok: false, code: 'reference_not_found', field: 'task',
-      error: 'task: "Design review" could not be looked up within Project = "Gemini": the lookup\'s target cannot be '
-        + 'filtered by that column, so the lookup field\'s dependsOn needs another one',
+      error: 'task: "Design review" could not be looked up within Project = "Gemini": the target field this lookup\'s '
+        + 'dependsOn filters by cannot be filtered on, so point that dependsOn entry at a stored field',
     }]);
     expect(summary.results.map(cellErrors)).toEqual([[{ field: 'task', code: 'reference_not_found', scope: undefined }]]);
     // No unscoped probe ran.
     const taskReads = findData.mock.calls.map(([c]) => c).filter((c) => c.object === 'xm_task');
     expect(taskReads.length).toBeGreaterThan(0);
     for (const c of taskReads) expect(c.query!.where).toHaveProperty('project');
+  });
+
+  it('a scoped lookup whose every read is refused for another reason (no read on the target): the plain sentence, no cause claimed', async () => {
+    const { p, findData } = protocol();
+    // The caller holds no read on xm_task: every read of it is refused, naming no field.
+    findData.mockImplementation(async (args: FindArgs) => {
+      if (args.object === 'xm_task') {
+        throw Object.assign(new Error('[Security] Access denied'), {
+          code: 'PERMISSION_DENIED', status: 403, details: { object: 'xm_task' },
+        });
+      }
+      return (ROWS[args.object] ?? []).filter((r) => matches(r, args.query!.where as Record<string, unknown>));
+    });
+    const summary = await run(p, [{ name: 'INV-1', project: 'Gemini', task: 'Design review' }]);
+    expect(summary.results.map(refusal)).toEqual([
+      { ok: false, code: 'reference_not_found', field: 'task', error: 'task: no record matches "Design review"' },
+    ]);
+    expect(summary.results.map(cellErrors)).toEqual([[{ field: 'task', code: 'reference_not_found', scope: undefined }]]);
+  });
+
+  it('an INVALID_FIELD refusal naming a field outside the scope is not the scope\'s: the plain sentence', async () => {
+    const { p, findData } = protocol();
+    findData.mockImplementation(async (args: FindArgs) => {
+      if (args.object === 'xm_task') {
+        throw Object.assign(new Error("ObjectQL.find('xm_task') filters on 'name', a virtual formula field"), {
+          code: 'INVALID_FIELD', status: 400, field: 'name', fields: ['name'],
+        });
+      }
+      return (ROWS[args.object] ?? []).filter((r) => matches(r, args.query!.where as Record<string, unknown>));
+    });
+    const summary = await run(p, [{ name: 'INV-1', project: 'Gemini', task: 'Design review' }]);
+    expect(summary.results.map(refusal)).toEqual([
+      { ok: false, code: 'reference_not_found', field: 'task', error: 'task: no record matches "Design review"' },
+    ]);
   });
 
   it('the unscoped probe is the importing caller\'s own read, and a record that caller cannot read stays unnamed', async () => {

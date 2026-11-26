@@ -370,10 +370,13 @@ that caller can read and whose name is unique. Without the master (or the `depen
 sibling) in the row, the same cell resolves.
 
 A `dependsOn` entry whose `param` names a target field the engine cannot filter by (a
-`formula`) cannot scope the lookup at all: every scoped read is refused, so the cell fails
-with `reference_not_found` and a sentence that says the lookup could not be made within the
-scope (`Task: "Design review" could not be looked up within Project = "Gemini": …`), never
-`reference_out_of_scope`. Point `param` at a stored field of the target.
+`formula`) cannot scope the lookup at all: the engine refuses every scoped read, so the cell
+fails with `reference_not_found` and a sentence that says the lookup could not be made within
+the scope and names the cause (`Task: "Design review" could not be looked up within Project =
+"Gemini": the target field this lookup's dependsOn filters by cannot be filtered on, …`),
+never `reference_out_of_scope`. Point `param` at a stored field of the target. A scoped
+lookup whose reads are refused for any other reason, such as no read access to the target,
+keeps the plain `no record matches` sentence.
 
 A pasted id is scoped too, so a row that means another master's detail cannot be linked
 in one import. Correct the master cell; or, when the cross-master link is intended, leave

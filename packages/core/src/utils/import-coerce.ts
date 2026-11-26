@@ -97,11 +97,12 @@ export interface RefMatch {
    */
   scopeDenied?: boolean;
   /**
-   * [#36794] The SCOPED lookup asked nothing: every candidate read failed, so
-   * the scope names a target field the engine cannot filter by (a formula, or
-   * any other field a `where` cannot name). The refusal stays
-   * `reference_not_found` and says the lookup could not be made within the
-   * row's scope, never that the value lives under another parent.
+   * [#36794] The SCOPED lookup asked nothing: no candidate read answered, and
+   * the engine's filter seam refused a read because the scope names a target
+   * field it cannot filter by (a formula), judged off that refusal's declared
+   * `code` and `fields`. Every other all-refused lookup is a plain miss. The
+   * refusal stays `reference_not_found` and says the lookup could not be made
+   * within the row's scope, never that the value lives under another parent.
    */
   scopeUnqueryable?: boolean;
 }
@@ -186,8 +187,9 @@ interface ScopedBy {
  * A scoped read the field-predicate guard refused (`RefMatch.scopeDenied`: the
  * scope names a target field the caller cannot read) is never probed: its miss
  * says nothing about where the value lives, so it stays `reference_not_found`.
- * A scoped lookup none of whose reads ran (`RefMatch.scopeUnqueryable`: the scope
- * names a target field the engine cannot filter by) is not probed either: it
+ * A scoped lookup none of whose reads answered because the engine's filter seam
+ * refused the scope (`RefMatch.scopeUnqueryable`: the scope names a target field
+ * the engine cannot filter by, such as a formula) is not probed either: it
  * stays `reference_not_found` with its own sentence, which says the lookup
  * could not be made within the row's scope.
  *

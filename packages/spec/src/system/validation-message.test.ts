@@ -327,7 +327,7 @@ describe('import_reference_scope_unqueryable — names the value and the scope i
   it('renders the English sentence', () => {
     const params = { value: 'Design review', scope: 'Project = "Gemini"' };
     expect(renderValidationMessage({ messageKey: 'import_reference_scope_unqueryable', label: 'Task', params }))
-      .toBe('Task: "Design review" could not be looked up within Project = "Gemini": the lookup\'s target cannot be '
-        + 'filtered by that column, so the lookup field\'s dependsOn needs another one');
+      .toBe('Task: "Design review" could not be looked up within Project = "Gemini": the target field this lookup\'s '
+        + 'dependsOn filters by cannot be filtered on, so point that dependsOn entry at a stored field');
   });
 });

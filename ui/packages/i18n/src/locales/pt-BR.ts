@@ -795,6 +795,7 @@ const pt = {
       referenceAmbiguous: "\"{{value}}\" corresponde a mais de um registro — use um valor único ou o id do registro",
       referenceOutOfScope: "\"{{value}}\" foi encontrado, mas não em {{scope}}",
       scopeEntry: "{{label}} \"{{value}}\"",
+      scopeSeparator: ", ",
       invalidBoolean: "\"{{value}}\" não é um valor verdadeiro/falso válido",
       invalidNumber: "\"{{value}}\" não é um número válido",
       invalidDate: "\"{{value}}\" não é uma data válida",

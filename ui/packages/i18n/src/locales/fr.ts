@@ -795,6 +795,7 @@ const fr = {
       referenceAmbiguous: "« {{value}} » correspond à plusieurs enregistrements — utilisez une valeur unique ou l'identifiant de l'enregistrement",
       referenceOutOfScope: "« {{value}} » existe, mais pas sous {{scope}}",
       scopeEntry: "{{label}} « {{value}} »",
+      scopeSeparator: ", ",
       invalidBoolean: "« {{value}} » n'est pas une valeur vrai/faux valide",
       invalidNumber: "« {{value}} » n'est pas un nombre valide",
       invalidDate: "« {{value}} » n'est pas une date valide",

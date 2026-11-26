@@ -1099,6 +1099,7 @@ const en = {
       referenceAmbiguous: '"{{value}}" matches more than one record — use a unique value or the record id',
       referenceOutOfScope: '"{{value}}" was found, but not under {{scope}}',
       scopeEntry: '{{label}} "{{value}}"',
+      scopeSeparator: ', ',
       invalidBoolean: '"{{value}}" is not a valid true/false value',
       invalidNumber: '"{{value}}" is not a valid number',
       invalidDate: '"{{value}}" is not a valid date',

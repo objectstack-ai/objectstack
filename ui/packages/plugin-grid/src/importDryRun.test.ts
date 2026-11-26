@@ -150,6 +150,7 @@ describe('formatDryRunError — reference_out_of_scope (objectstack#36794)', () 
     ({
       'grid.import.referenceOutOfScope': `"${vars?.value}" was found, but not under ${vars?.scope}`,
       'grid.import.scopeEntry': `${vars?.label} "${vars?.value}"`,
+      'grid.import.scopeSeparator': '; ',
       'grid.import.referenceNotFound': `No matching record for "${vars?.value}"`,
     } as Record<string, string>)[key] ?? key;
   const serverSentence = 'task: no record matches "Design review" (Project = "Gemini")';
@@ -172,7 +173,8 @@ describe('formatDryRunError — reference_out_of_scope (objectstack#36794)', () 
       labels, 'Design review', t,
     );
     // A column with no label is named by its api-name.
-    expect(message).toBe('"Design review" was found, but not under 项目 "Gemini", phase "P2"');
+    // Joined by the pack's own separator, never a hard-coded comma.
+    expect(message).toBe('"Design review" was found, but not under 项目 "Gemini"; phase "P2"');
   });
 
   it('is never rendered as "no matching record"', () => {

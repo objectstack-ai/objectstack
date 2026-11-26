@@ -176,6 +176,7 @@ export const IMPORT_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'grid.import.referenceAmbiguous': '"{{value}}" matches more than one record — use a unique value or the record id',
   'grid.import.referenceOutOfScope': '"{{value}}" was found, but not under {{scope}}',
   'grid.import.scopeEntry': '{{label}} "{{value}}"',
+  'grid.import.scopeSeparator': ', ',
   'grid.import.invalidBoolean': '"{{value}}" is not a valid true/false value',
   'grid.import.invalidNumber': '"{{value}}" is not a valid number',
   'grid.import.invalidDate': '"{{value}}" is not a valid date',
@@ -620,7 +621,7 @@ function formatDryRunError(
       // the server's own sentence (already in the caller's locale) is shown.
       const scope = (r.scope ?? [])
         .map((s) => t('grid.import.scopeEntry', { label: fieldLabelByName.get(s.field) ?? s.field, value: s.value }))
-        .join(', ');
+        .join(t('grid.import.scopeSeparator'));
       if (scope) return { fieldLabel, message: t('grid.import.referenceOutOfScope', { value: shown, scope }) };
       break;
     }

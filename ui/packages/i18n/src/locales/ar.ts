@@ -852,6 +852,7 @@ const ar = {
       referenceAmbiguous: "«{{value}}» يطابق أكثر من سجل — استخدم قيمة فريدة أو معرّف السجل",
       referenceOutOfScope: "تم العثور على «{{value}}»، لكن ليس ضمن {{scope}}",
       scopeEntry: "{{label}} «{{value}}»",
+      scopeSeparator: "، ",
       invalidBoolean: "«{{value}}» ليست قيمة صواب/خطأ صالحة",
       invalidNumber: "«{{value}}» ليست رقمًا صالحًا",
       invalidDate: "«{{value}}» ليست تاريخًا صالحًا",
