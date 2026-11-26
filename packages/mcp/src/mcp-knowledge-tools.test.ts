@@ -316,6 +316,30 @@ describe('[ADR-0161 K9] search_knowledge over the real definition — every tran
     }
   }
 
+  /**
+   * One JSON-RPC request over stdio, answered as the wire carries it: read off
+   * the transport, not through the SDK client, whose result parse re-orders
+   * an input schema's keys and would make a byte comparison read the client.
+   */
+  async function rawOverStdio(bridge: McpDataBridge, message: { jsonrpc: '2.0'; id: number; method: string; params?: object }) {
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    runtime.bridgeDataTools(bridge);
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await runtime.server.connect(serverSide);
+    const reply = new Promise<any>((resolve) => {
+      clientSide.onmessage = (m) => {
+        if ((m as { id?: number }).id === message.id) resolve(m);
+      };
+    });
+    await clientSide.start();
+    await clientSide.send(message);
+    try {
+      return await reply;
+    } finally {
+      await clientSide.close();
+    }
+  }
+
   async function callBoth(args: Record<string, unknown>) {
     const http = (await callTool(realBridge(), args)).result!;
     const stdio = (await overStdio(realBridge(), (c) => c.callTool({ name: SEARCH_KNOWLEDGE_TOOL_NAME, arguments: args }))) as {
@@ -330,7 +354,7 @@ describe('[ADR-0161 K9] search_knowledge over the real definition — every tran
 
   it('tools/list over HTTP and over stdio answer byte-identical definitions, carrying scope, granularity and groupBy', async () => {
     const http = knowledgeTool(await listTools(realBridge()));
-    const stdio = knowledgeTool((await overStdio(realBridge(), (c) => c.listTools())).tools as ListedTool[]);
+    const stdio = knowledgeTool((await rawOverStdio(realBridge(), { jsonrpc: '2.0', id: 1, method: 'tools/list' })).result.tools);
     expect(http).toBeDefined();
     expect(JSON.stringify(stdio)).toBe(JSON.stringify(http));
     const [definition] = getKnowledgeToolDefinitions();
