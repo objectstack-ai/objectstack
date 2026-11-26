@@ -9842,6 +9842,7 @@ export class SqlDriver implements IDataDriver {
       get fractionalNumericFields() { return driver.fractionalNumericFields; },
       isJsonField: (...a) => driver.isJsonField(...a),
       get isMysql() { return driver.isMysql; },
+      get isSqlite() { return driver.isSqlite; },
       get jsonFields() { return driver.jsonFields; },
       get knex() { return driver.knex; },
       legacyMysqlTimeColumns: (...a) => driver.legacyMysqlTimeColumns(...a),

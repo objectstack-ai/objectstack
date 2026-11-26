@@ -70,8 +70,7 @@ import { isComposedReadableIds, type FilterCondition } from '@objectstack/spec/d
 // (`sqliteDeclaredColumnDefaultSql`, the `dflt_value` the knex path writes).
 // ⛔ Never a copy of either in this file. See
 // {@link RemoteTransport.columnDeclarationSQL}.
-import { emitsDeclaredColumnDefault, sqliteDeclaredColumnDefaultSql } from '@objectstack/driver-sql';
-import { isNowDefaultToken } from '@objectstack/spec/data';
+import { declaresSqliteNowColumnDefault, emitsDeclaredColumnDefault, sqliteDeclaredColumnDefaultSql, sqliteNowBackfillSql } from '@objectstack/driver-sql';
 // [ADR-0155 D2, D4] The fixed-read leaf: where it compiles and the predicates of
 // its fixed inner read, shared with the local face's compiler
 // (`SqlDriver#fixedReadLeafSubquery`), and the refusal every evaluator answers.
@@ -157,18 +156,8 @@ function addsRowSensitiveColumn(fields: Record<string, any> | undefined, existin
   return Object.entries(fields ?? {}).some(
     ([name, field]) => !existingColumns.has(name)
       && ((field as any)?.type || 'string') !== 'formula'
-      && (declaresColumnNotNull(field) || declaresNowColumnDefault(field)),
+      && (declaresColumnNotNull(field) || declaresSqliteNowColumnDefault(field)),
   );
-}
-
-/**
- * [#37345] Whether the column DEFAULT the local face gives this field is the
- * `NOW()` expression: a `NOW()` token the shared renderer emits at all (a
- * multi-value column gets no DEFAULT).
- */
-function declaresNowColumnDefault(field: unknown): boolean {
-  return isNowDefaultToken((field as { defaultValue?: unknown } | null | undefined)?.defaultValue)
-    && sqliteDeclaredColumnDefaultSql(field) !== null;
 }
 
 /** [#37281] One row of the table, or none: whether it holds a row at all. */
@@ -2195,6 +2184,10 @@ export class RemoteTransport {
           await this.executeAddColumn(`ALTER TABLE "${tableName}" ADD COLUMN "${name}" ${this.columnDeclarationSQL(field, false, populated)}`);
           materialized.add(name);
         }
+        // [#37413] The rows of a populated table take the instant a withheld
+        // `NOW()` DEFAULT would have given them, in one statement.
+        const backfill = populated ? this.withheldNowBackfill(tableName, objectDef.fields, existingColumns) : null;
+        if (backfill !== null) await this.sendStatement(backfill);
       }
       // [#8413 · #17609] The retrofit leg — this table may already hold the
       // duplicates a missing UNIQUE admitted, so it is isolated and reported,
@@ -2345,6 +2338,9 @@ export class RemoteTransport {
           ddlStatements.push(`ALTER TABLE "${object}" ADD COLUMN "${name}" ${this.columnDeclarationSQL(field, false, populated.has(i))}`);
           materialized.add(name);
         }
+        // [#37413] In the same write batch, after this table's ADD COLUMNs.
+        const backfill = populated.has(i) ? this.withheldNowBackfill(object, objectDef.fields, existingColumns) : null;
+        if (backfill !== null) ddlStatements.push(backfill);
 
         planned.push(...this.buildDeclaredIndexDDL(object, objectDef, materialized));
       }
@@ -2650,9 +2646,10 @@ export class RemoteTransport {
    *
    * Everywhere else the constraint stays: on `CREATE TABLE`, on an `ADD COLUMN`
    * to an empty table (no row to hold a NULL), and for a field declaring a
-   * literal or `NOW()` `defaultValue` (`emitsDeclaredColumnDefault`, the
-   * local face's own predicate, imported), which the local face emits as the
-   * column DEFAULT the existing rows take. Imposing NOT NULL on a column that
+   * literal `defaultValue` (`emitsDeclaredColumnDefault`, the local face's
+   * own predicate, imported), which the local face emits as the column
+   * DEFAULT the existing rows take (a `NOW()` one, on a populated table, is
+   * the exception below). Imposing NOT NULL on a column that
    * already exists is not done here at all; that is `tighten_not_null`, and
    * belongs to the migration path. ⛔ Never drop the ` NOT NULL` for such a
    * field to let a statement through: the local face keeps it, so the faces
@@ -2676,23 +2673,35 @@ export class RemoteTransport {
    *
    * ⚠️ One exception, deliberate: a `NOW()` default on an `ADD COLUMN` to a
    * table that holds rows is NOT emitted. SQLite refuses a non-constant
-   * DEFAULT there (`Cannot add a column with non-constant default`), and the
-   * local face, which sends it, fails that object's whole sync on it — the
-   * defect #37413 records, with this face's `NOW()` half after it. ⛔ Never
-   * emit the `NOW()` expression on that statement: a nullable `NOW()` field
-   * added to a populated table is accepted on this face today, and the
-   * expression would break that sync on every hosted environment. Such a field
-   * keeps the answer it has always had here: nullable, added with no DEFAULT;
-   * `storage.notNull`, refused (`Cannot add a NOT NULL column with default
-   * value NULL`).
+   * DEFAULT there (`Cannot add a column with non-constant default`). [#37413]
+   * Both faces answer it alike, from `driver-sql`'s
+   * `declaresSqliteNowColumnDefault`: the column is added nullable with no
+   * DEFAULT (`storage.notNull` included — the NOT NULL waits with the DEFAULT),
+   * the sync fills the existing rows in one statement
+   * (`sqliteNowBackfillSql`, see {@link withheldNowBackfill}), and the shared
+   * differ reports `set_column_default` (plus `tighten_not_null` under
+   * `storage.notNull`). On this face those entries answer
+   * `needs-table-rebuild`; the local face's ceremony rebuild applies them.
    */
   private columnDeclarationSQL(field: any, tenantColumn: boolean = false, addedToPopulatedTable: boolean = false): string {
     const colType = this.mapFieldTypeToSQL(field);
+    const withholdsNowDefault = addedToPopulatedTable && declaresSqliteNowColumnDefault(field);
     const notNull = declaresColumnNotNull(field)
-      && !(addedToPopulatedTable && !emitsDeclaredColumnDefault(field));
+      && !(addedToPopulatedTable && (!emitsDeclaredColumnDefault(field) || withholdsNowDefault));
     const declared = notNull || tenantColumn ? `${colType} NOT NULL` : colType;
-    const columnDefault = addedToPopulatedTable && declaresNowColumnDefault(field) ? null : sqliteDeclaredColumnDefaultSql(field);
+    const columnDefault = withholdsNowDefault ? null : sqliteDeclaredColumnDefaultSql(field);
     return columnDefault === null ? declared : `${declared} DEFAULT ${columnDefault}`;
+  }
+
+  /**
+   * [#37413] The statement filling a populated table's existing rows in the
+   * columns this sync is adding without their `NOW()` DEFAULT
+   * ({@link columnDeclarationSQL}), from the local face's own
+   * `sqliteNowBackfillSql`; `null` when none is being added.
+   */
+  private withheldNowBackfill(table: string, fields: Record<string, any> | undefined, existingColumns: ReadonlySet<unknown>): string | null {
+    const added = Object.entries(fields ?? {}).filter(([name]) => !existingColumns.has(name));
+    return sqliteNowBackfillSql(table, added);
   }
 
   /**

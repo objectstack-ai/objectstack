@@ -38,6 +38,7 @@ import {
   FILE_REFERENCE_TYPES,
   MULTI_OPTION_TYPES,
   isMultiValueField,
+  isNowDefaultToken,
 } from '@objectstack/spec/data';
 import type { SchemaDiffEntry } from '@objectstack/spec/shared';
 import { SystemFieldName } from '@objectstack/spec/system';
@@ -1585,6 +1586,41 @@ export function diffManagedTable(args: {
           }
         }
       }
+    }
+
+    // ── absent NOW() column DEFAULT on SQLite (#37413) ──────────
+    // `createColumn` gives a scalar column whose field declares `NOW()` the
+    // expression DEFAULT (`sqliteNowColumnDefaultSql`) — except on an `ADD
+    // COLUMN` to a table that already holds a row, where SQLite refuses a
+    // non-constant DEFAULT: there the column is added with none and its rows
+    // are filled by the sync. The DEFAULT is then still owed, so later inserts
+    // that omit the field store NULL where a new database stores the instant.
+    // Reported so the ceremony's table rebuild, which re-emits every declared
+    // DEFAULT, imposes it. Only a column with NO DEFAULT is judged: whatever
+    // expression a column carries is left alone, as above. `safe`, as the
+    // literal arm's restatement is: the DEFAULT rewrites no stored row.
+    if (
+      dialect === 'sqlite'
+      && isNowDefaultToken(field.defaultValue)
+      && physicalDefaultLiteral(col.defaultValue).kind === 'none'
+      && !isMultiValueField({ type: String(field.type ?? ''), multiple: field.multiple === true })
+    ) {
+      out.push({
+        kind: 'default_mismatch',
+        remoteName: table,
+        table,
+        column: fieldName,
+        expected: 'DEFAULT NOW()',
+        actual: '(no column default)',
+        severity: 'warning',
+        category: 'safe',
+        op: { type: 'set_column_default', table, column: fieldName },
+        message:
+          `${table}.${fieldName}: the field declares the NOW() default, but the column carries no DEFAULT — every ` +
+          `insert that omits the field stores NULL here, where a new database stores the current instant. A column ` +
+          `added to a table that already held rows is added without it, because SQLite refuses a non-constant ` +
+          `DEFAULT there. Restating the default rebuilds the table and rewrites no stored value. ${SAFE_COLUMN_REMEDY}`,
+      });
     }
 
     // ── base type: a multi-value field over a stale textual column (#11535) ──
