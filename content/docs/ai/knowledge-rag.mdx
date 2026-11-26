@@ -220,6 +220,16 @@ Known residual: text made mostly of random hex or base64 — UUIDs, sha256 diges
 
 Vectors from two embedding models are not comparable, and neither are the passages of two splits. So every source's index is built under one **index fingerprint** — the embedding model and dimensions the adapter reports, the resolved split, and the content list — which the knowledge service computes and carries on every write and every search, and the adapter checks against the index it holds. Change any of them and the source's stored index is **refused** (`KNOWLEDGE_REBUILD_REQUIRED`, 409) until a complete reindex rebuilds it — which the next boot starts by itself, or `os knowledge rebuild` (below) does now; it never answers with vectors of the old model ranked against the new one. A search over several sources still answers from the others, and the `search_knowledge` tool names each refused source in `refused`. Changing `where` or `metadataFields` changes no vector: a complete reindex repairs it in place. The full rules are in [the protocol's fingerprint section](/docs/protocol/knowledge#36-the-index-fingerprint).
 
+### Generations: the new index is built beside the old one
+
+A store that keeps **generations** (pgvector and Turso) does not throw the old index away when the fingerprint changes. The rebuild fills a new generation beside it, and the switch happens only when the build is done:
+
+1. **The build writes into the new generation.** The complete reindex writes every document into it. Record changes that arrive while it runs (event sync) carry the new fingerprint, so they also land in the new generation only. Nothing is written into the old one under the new model.
+2. **Search during the build is refused, never answered from the old index.** A search of the source answers `KNOWLEDGE_REBUILD_REQUIRED` (409) and says the source *is being rebuilt*. A search over several sources still answers from the others, and `search_knowledge` names this one in `refused`.
+3. **At the end, the switch.** Once the walk is done, the purge runs once. Then the new generation becomes the active one, and the old one is deleted. pgvector deletes it in batches of 1,000 rows, so no long lock is held over a large source. If the deletion stops part-way, the source's next build finishes it, and the old rows are never searched meanwhile.
+4. **One builder per source.** pgvector takes a PostgreSQL advisory lock on the source when its build begins and holds it until the switch. A second build of the source, from another node or process, is refused `LOCK_CONFLICT` (409) and walks nothing.
+5. **A build that stops is resumed, not restarted.** The generation under construction is kept, with everything written into it so far. The next build under the same fingerprint takes it up, and skips every document it already holds unchanged, so only the rest is sent to the embedding provider. If the process stops, PostgreSQL frees the lock at once. If the build fails on a process that keeps running, the lock is freed after 15 minutes without progress. A build under yet another fingerprint abandons the unfinished generation and deletes it.
+
 ## The first build, and rebuilding a source
 
 Event sync keeps an index in step with rows as they are written; it never indexes the rows a source matched before it was mounted. So after every boot the knowledge service reads what each source's adapter holds and builds, once, in the background, every `object` source that needs it — the boot never waits for it:
@@ -258,6 +268,7 @@ new KnowledgePgvectorPlugin({ queryPrefix: '' /* e.g. BGE's query instruction */
 
 - It searches by an exact scan, so a 3072-wide model works; the organization filter and the metadata `filter` run in SQL before ranking.
 - An unchanged passage is not sent to the embedder again on a reindex.
+- When the embedding model, its dimensions or the split change, it builds the new index beside the old one under a builder lock, then switches to it ([generations](#generations-the-new-index-is-built-beside-the-old-one)).
 - Without the `vector` extension (or the right to create it), boot goes on: the plugin warns with the SQL a database owner runs, and its sources answer `SERVICE_UNAVAILABLE` until then.
 - It stores each passage's text, which is as sensitive as the record it came from and is in every backup.
 
