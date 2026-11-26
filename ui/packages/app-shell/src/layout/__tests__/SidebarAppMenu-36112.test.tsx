@@ -224,7 +224,7 @@ describe('the sidebar app menu only switches apps (objectstack#36112)', () => {
   it('offers no way home and no 「All apps」; a member gets no Studio entry', () => {
     apps = [CRM, SERVICE, SETUP];
     renderMenu('crm');
-    for (const text of ['Back to home', 'All apps', 'Edit app', 'View in Studio', 'Edit CRM in Studio', 'Open CRM in Studio']) {
+    for (const text of ['Back to home', 'All apps', 'Edit app', 'View in App Studio', 'Edit CRM in App Studio', 'Open CRM in App Studio']) {
       expect(menu().queryByText(text)).toBeNull();
     }
   });
@@ -497,7 +497,7 @@ describe('「Edit app」 in the app menu opens this app in Studio (objectstack#3
     expect(editInStudio()).toBeNull();
     const item = viewInStudio();
     expect(item).not.toBeNull();
-    expect(item).toHaveTextContent(/^View in Studio$/);
+    expect(item).toHaveTextContent(/^View in App Studio$/);
     expect(item!.querySelector('svg.lucide-eye')).not.toBeNull();
     expect(item).toHaveAttribute('href', '/studio/com.acme.crm/metadata/object/crm_lead');
   });
@@ -659,7 +659,7 @@ describe('the docs portal\'s head names no app and only switches apps (objectsta
     for (const id of ['sidebar-app-menu-design-layout', 'sidebar-app-menu-edit-app', 'sidebar-app-menu-view-in-studio']) {
       expect(portalMenu().queryByTestId(id), id).toBeNull();
     }
-    for (const text of ['Design layout', 'Edit app', 'View in Studio']) expect(portalMenu().queryByText(text)).toBeNull();
+    for (const text of ['Design layout', 'Edit app', 'View in App Studio']) expect(portalMenu().queryByText(text)).toBeNull();
   });
 
   it('control: a member gets the list and no 「Add app」', () => {
