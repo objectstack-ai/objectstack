@@ -1126,6 +1126,8 @@ export const FormFieldSchema = z.looseObject({
     .describe('Field-level visibility rule (CEL) — field shown only when TRUE'),
   readonlyWhen: FieldRulePredicateWireSchema.optional()
     .describe('Field-level read-only rule (CEL)'),
+  uiReadonlyWhen: FieldRulePredicateWireSchema.optional()
+    .describe('Field-level hand-lock rule (CEL) — read-only by hand when TRUE, writes through the API keep it'),
   requiredWhen: FieldRulePredicateWireSchema.optional()
     .describe('Field-level required rule (CEL)'),
   colSpan: z.number().optional().describe('Column span in grid layout (legacy — prefer span)'),

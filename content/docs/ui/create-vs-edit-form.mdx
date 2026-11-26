@@ -10,7 +10,7 @@ description: One flat, grouped field set gives both the create form and the edit
 
 ## Recommended solution
 
-**Author one field set on the object. Group it with `fieldGroups`, and mark the fields a create should not ask for with `showOnCreate: false`.** The Console's create and edit forms both come from that one set. They do not load an internal form view (`form`, `formViews.default` or `formViews.create`); an app that still declares one installs and runs, the form changes nothing, and `os validate` reports it as `form-view-internal-not-loaded`.
+**Author one field set on the object. Group it with `fieldGroups`, and mark the fields a create should not ask for with `showOnCreate: false`.** The Console's create and edit forms both come from that one set. They do not load an internal form view (`form`, `formViews.default` or `formViews.create`); an app that still declares one installs and runs, the form changes nothing on create or edit, and `os validate` reports it as `form-view-internal-not-loaded`. A default or create form that a form action opens by name (its `target` is the form's served name, written out) still loads where that action opens it, and is not reported.
 
 ### 1. Put the intent on the fields
 

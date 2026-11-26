@@ -36,7 +36,7 @@
 import type { DraftChange, MetadataClient } from '@object-ui/data-objectstack';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { isAgentDraftSurface } from '../studio-design/StudioDraftMark.js';
-import { isDraftVersionConflict, isPublishDraftMoved, type DraftSaveGuard } from './DraftConflictDialog.js';
+import { isDraftVersionConflict, isPublishDraftMoved, type DraftSaveGuard } from './draftVersionGuard.js';
 
 /** The item a Save wrote, at the address its draft save wrote it. */
 export interface DetailPublishTarget {

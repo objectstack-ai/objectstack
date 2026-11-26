@@ -22,7 +22,7 @@ import type { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.j
 import type { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { persistRuntimeMetadata, createRuntimeMetadata, saveAndPublishRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
 import type { RuntimeCreateApp, SaveAndPublishOutcome } from './runtime-metadata-persistence.js';
-import type { DraftVersionGuard } from './metadata-admin/DraftConflictDialog.js';
+import type { DraftVersionGuard } from './metadata-admin/draftVersionGuard.js';
 import { draftBarPackageOf } from '../preview/DraftPreviewBar.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { buildAddViewSpec, setDefaultViewPatches, buildViewConfigSaveBody } from './objectViewTabs.js';

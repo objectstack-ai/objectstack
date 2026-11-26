@@ -13,7 +13,7 @@
  */
 
 import { isInlineExcludedFieldType, hasInCellPanelEditWidget } from '@object-ui/fields';
-import { isExpressionComputedField } from '@object-ui/core';
+import { fieldStaticallyReadOnlyByHand, isExpressionComputedField, type FieldHandLockDef } from '@object-ui/core';
 
 /**
  * For a field governed by a blocking `state_machine` validation, the values
@@ -47,16 +47,17 @@ const NON_EDITABLE_FIELD_TYPES = new Set<string>([
 
 /**
  * Why a field is not edited in place (objectstack#35684), or `null` when it
- * is: `readonly` (declared so), `computed` (an expression, a formula, a
+ * is: `readonly` (declared so — `readonly` or the hand lock `uiReadonly`, the
+ * static half of `fieldReadOnlyByHand` in `@object-ui/core`), `computed` (an expression, a formula, a
  * summary, an auto number) or `notInline` (a file, or a type the fields
  * package keeps out of a cell). The reasons {@link isFieldInlineEditable}
  * answers `false` for, told apart so a cell can say which.
  */
 export function fieldInlineReadOnlyKind(
-  fieldDef: { type?: unknown; readonly?: unknown } | null | undefined,
+  fieldDef: ({ type?: unknown } & FieldHandLockDef) | null | undefined,
 ): 'readonly' | 'computed' | 'notInline' | null {
   if (!fieldDef) return null;
-  if (fieldDef.readonly === true) return 'readonly';
+  if (fieldStaticallyReadOnlyByHand(fieldDef)) return 'readonly';
   if (isExpressionComputedField(fieldDef)) return 'computed';
   if (typeof fieldDef.type !== 'string') return null;
   if (COMPUTED_FIELD_TYPES.has(fieldDef.type)) return 'computed';
@@ -81,7 +82,7 @@ export function fieldInlineReadOnlyKind(
  * grid's own `editable` flag still governs.
  */
 export function isFieldInlineEditable(
-  fieldDef: { type?: unknown; readonly?: unknown } | null | undefined,
+  fieldDef: ({ type?: unknown } & FieldHandLockDef) | null | undefined,
 ): boolean {
   return fieldInlineReadOnlyKind(fieldDef) === null;
 }

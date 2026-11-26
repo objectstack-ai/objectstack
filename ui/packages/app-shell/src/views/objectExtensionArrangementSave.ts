@@ -45,8 +45,8 @@
 
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import type { CustomArrangementKey, ObjectActionLayout } from '@objectstack/spec/data';
-import { draftReceiptVersion, isDraftVersionConflict } from './metadata-admin/DraftConflictDialog.js';
-import { OBJECT_EXTENSION_TYPE, objectExtensionBodyOf, type ObjectExtensionBody } from './studio-design/StudioCustomizeControls.js';
+import { draftReceiptVersion, isDraftVersionConflict } from './metadata-admin/draftVersionGuard.js';
+import { OBJECT_EXTENSION_TYPE, objectExtensionBodyOf, type ObjectExtensionBody } from './studio-design/customizeOverride.js';
 import type { EnsuredCustomizationPackage, ListedPackageManifest } from './studio-design/packages-io.js';
 
 /** The doors the write goes through; the defaults are the console's own (`consoleExtensionArrangementDoors`). */

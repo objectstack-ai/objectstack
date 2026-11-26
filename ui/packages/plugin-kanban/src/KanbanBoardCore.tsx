@@ -77,6 +77,12 @@ export interface KanbanBoardCoreProps {
    * from its host.
    */
   onLaneRowsChange?: KanbanBoardProps['onLaneRowsChange'];
+  /**
+   * Each lane's whole record count on a board its host hands one page to —
+   * see `KanbanBoardProps.laneCounts` (objectstack#37327). A PROP for the same
+   * reason: only `ObjectKanban`, which asks the grouped lane read, supplies it.
+   */
+  laneCounts?: KanbanBoardProps['laneCounts'];
   /** Half of the Quick Add pair. Only `KanbanRenderer` supplies it. */
   quickAdd?: boolean;
   /** The other half of the Quick Add pair. Only `KanbanRenderer` supplies it. */
@@ -130,6 +136,7 @@ export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
   canDropCard,
   dropBlockedReason,
   onLaneRowsChange,
+  laneCounts,
   quickAdd,
   onQuickAdd,
 }) => {
@@ -167,6 +174,7 @@ export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
         swimlaneTargetDef={swimlaneTargetDef}
         swimlaneField={schema.swimlaneField}
         countsAreWindowed={schema.countsAreWindowed}
+        laneCounts={laneCounts}
       />
     </Suspense>
   );

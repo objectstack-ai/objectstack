@@ -1802,6 +1802,46 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(issues.some(i => i.where.includes('requiredWhen') && /bare reference `status`/.test(i.message))).toBe(true);
     });
 
+    // [#36806] The console hand lock has no server judge (ADR-0137 D2): the
+    // console locks the field on a fault, so this pass is the only place an
+    // author hears about one. Judged as `readonlyWhen` is at the field site.
+    describe('`uiReadonlyWhen` is checked as `readonlyWhen` is (#36806)', () => {
+      const lint = (uiReadonlyWhen: string) =>
+        validateStackExpressions({
+          objects: [{
+            name: 'hlk_order',
+            fields: {
+              status: { type: 'select', options: [{ value: 'draft', label: 'Draft' }], uiReadonlyWhen },
+            },
+          }],
+        }).filter(i => i.where === "object 'hlk_order' · field 'status' uiReadonlyWhen");
+
+      it('accepts a predicate over the record\'s own columns', () => {
+        expect(lint("record.status != 'draft'")).toEqual([]);
+      });
+
+      it('refuses a bare field reference', () => {
+        const found = lint("status != 'draft'");
+        expect(found.map(i => i.severity)).toContain('error');
+        expect(found.some(i => /bare reference `status`/.test(i.message))).toBe(true);
+      });
+
+      it('refuses a predicate that does not parse', () => {
+        expect(lint('record.(').some(i => i.severity === 'error')).toBe(true);
+      });
+
+      it('refuses a field the object does not declare', () => {
+        expect(lint("record.stage == 'won'").some(i => i.severity === 'error' && /stage/.test(i.message))).toBe(true);
+      });
+
+      it('refuses a root the field level does not bind, naming the console\'s locked outcome', () => {
+        const found = lint("current_user.id == 'u1'");
+        expect(found.map(i => i.severity)).toEqual(['error']);
+        expect(found[0]!.message).toMatch(/`uiReadonlyWhen` reads `current_user`/);
+        expect(found[0]!.message).toMatch(/resolves a hand lock it cannot evaluate to LOCKED/);
+      });
+    });
+
     // `qty` carries `required` + `defaultValue` so it can never be null. That
     // is not decoration: it mirrors the real `showcase_invoice_line.quantity`,
     // and without it `record.qty >= 100` is a genuine #4811 finding — `>=` on a
@@ -4412,7 +4452,8 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
     const slots = [...fieldKeys![1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
     // [#25767] `conditionalRequired` left the list with its tombstone: the
     // schema no longer declares it, so the walk no longer reads it.
-    expect(slots).toEqual(['requiredWhen', 'readonlyWhen', 'visibleWhen', 'settledWhen']);
+    // [#36806] `uiReadonlyWhen`, the console hand lock, joined as the fifth.
+    expect(slots).toEqual(['requiredWhen', 'readonlyWhen', 'visibleWhen', 'settledWhen', 'uiReadonlyWhen']);
     expect(slots.filter((k) => !Object.keys(FieldSchema.shape).includes(k))).toEqual([]);
   });
 
