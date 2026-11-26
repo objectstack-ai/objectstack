@@ -272,7 +272,7 @@ async function mountQuiet() {
   const view = renderStudio();
   await screen.findByTestId('copilot-chat-body');
   await act(drain);
-  expect(screen.queryByTestId('studio-changes-count')).toBeNull();
+  expect(screen.queryByTestId('studio-menu-overview-pending')).toBeNull();
   return view;
 }
 
@@ -306,7 +306,7 @@ describe('the 变更 badge counts the copilot\'s drafts the moment they land (ob
       true,
     );
 
-    await waitFor(() => expect(screen.getByTestId('studio-changes-count')).toHaveTextContent('2'));
+    await waitFor(() => expect(screen.getByTestId('studio-menu-overview-pending')).toHaveTextContent('2'));
     expect(draftReads).toBeGreaterThan(readsBeforeLanding);
     // No reload: the same surface tree; no navigation: the same location.
     expect(view.container.lastElementChild).toBe(surfaceRoot);
@@ -327,7 +327,7 @@ describe('the 变更 badge counts the copilot\'s drafts the moment they land (ob
       ],
       true,
     );
-    await waitFor(() => expect(screen.getByTestId('studio-changes-count')).toHaveTextContent('1'));
+    await waitFor(() => expect(screen.getByTestId('studio-menu-overview-pending')).toHaveTextContent('1'));
   });
 
   it('announces each result once: later chunks and the turn\'s end send no second pulse for it', async () => {
@@ -352,7 +352,7 @@ describe('the 变更 badge counts the copilot\'s drafts the moment they land (ob
       play([USER_TURN, { ...landed, parts: [...landed.parts, { type: 'text', text: '已存为草稿，请在「变更」里发布。' }] }], false);
       await act(drain);
       expect(pulses).toBe(1);
-      await waitFor(() => expect(screen.getByTestId('studio-changes-count')).toHaveTextContent('2'));
+      await waitFor(() => expect(screen.getByTestId('studio-menu-overview-pending')).toHaveTextContent('2'));
     } finally {
       unsubscribe();
     }
@@ -363,7 +363,7 @@ describe('the 变更 badge counts the copilot\'s drafts the moment they land (ob
     serverDrafts = DRAFTED_ROWS;
     renderStudio();
     await screen.findByTestId('copilot-chat-body');
-    await waitFor(() => expect(screen.getByTestId('studio-changes-count')).toHaveTextContent('2'));
+    await waitFor(() => expect(screen.getByTestId('studio-menu-overview-pending')).toHaveTextContent('2'));
     let pulses = 0;
     const unsubscribe = subscribeMetadataRefresh(() => {
       pulses += 1;
@@ -375,7 +375,7 @@ describe('the 变更 badge counts the copilot\'s drafts the moment they land (ob
         [USER_TURN, { id: 'm-asst-5', role: 'assistant', parts: [toolPart('apply_edit', 'call_apply_edit_5', APPLY_EDIT_PUBLISHED)] }],
         true,
       );
-      await waitFor(() => expect(screen.queryByTestId('studio-changes-count')).toBeNull());
+      await waitFor(() => expect(screen.queryByTestId('studio-menu-overview-pending')).toBeNull());
       expect(pulses).toBe(1);
     } finally {
       unsubscribe();
@@ -408,7 +408,7 @@ describe('the 变更 badge counts the copilot\'s drafts the moment they land (ob
       // (The chat's own pending-drafts bar re-reads on the turn's idle edge, as
       // it always has; that read is its own, not an announcement.)
       expect(pulses).toBe(0);
-      expect(screen.queryByTestId('studio-changes-count')).toBeNull();
+      expect(screen.queryByTestId('studio-menu-overview-pending')).toBeNull();
     } finally {
       unsubscribe();
     }
@@ -433,7 +433,7 @@ describe('the 变更 badge counts the copilot\'s drafts the moment they land (ob
       await act(drain);
       expect(pulses).toBe(0);
       // The badge reads the ledger on its own mount, as it always has.
-      await waitFor(() => expect(screen.getByTestId('studio-changes-count')).toHaveTextContent('2'));
+      await waitFor(() => expect(screen.getByTestId('studio-menu-overview-pending')).toHaveTextContent('2'));
     } finally {
       unsubscribe();
     }

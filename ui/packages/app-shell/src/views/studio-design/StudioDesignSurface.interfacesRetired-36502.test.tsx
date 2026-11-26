@@ -214,7 +214,7 @@ const notice = () => screen.queryByTestId('studio-interfaces-retired');
 describe('an old Interfaces URL lands on the Studio home (objectstack#36502)', () => {
   it('the bare URL: Data pillar, the notice, and a link back to the app', async () => {
     renderAt(`/studio/${PKG}/interfaces`);
-    await screen.findByTestId('studio-shell-header');
+    await screen.findByTestId('studio-top-left');
     await waitFor(() => expect(where()).toBe(STUDIO_HOME));
 
     const strip = await screen.findByTestId('studio-interfaces-retired');
@@ -232,7 +232,7 @@ describe('an old Interfaces URL lands on the Studio home (objectstack#36502)', (
 
   it('a `?surface=` deep link lands on the same home, its retired parameter dropped', async () => {
     renderAt(`/studio/${PKG}/interfaces?surface=${encodeURIComponent('page:home')}`);
-    await screen.findByTestId('studio-shell-header');
+    await screen.findByTestId('studio-top-left');
     await waitFor(() => expect(where()).toBe(STUDIO_HOME));
     expect(await screen.findByTestId('studio-interfaces-retired')).toBeInTheDocument();
   });
@@ -243,7 +243,7 @@ describe('an old Interfaces URL lands on the Studio home (objectstack#36502)', (
     // that carries it is `studioInterfacesRetired.test`'s; the drawer opening
     // on an old link, with the real drawer mounted, is `copilotDoors-12894`'s.
     renderAt(`/studio/${PKG}/interfaces?surface=${encodeURIComponent('page:home')}&changes=review`);
-    await screen.findByTestId('studio-shell-header');
+    await screen.findByTestId('studio-top-left');
     expect(pathname()).toBe(HOME_PATH);
     expect(where()).not.toContain('surface=page');
     expect(await screen.findByTestId('studio-interfaces-retired')).toBeInTheDocument();
@@ -272,13 +272,13 @@ describe('an old Interfaces URL lands on the Studio home (objectstack#36502)', (
     expect(notice()).toBeNull();
     fireEvent.click(screen.getByTestId('back-to-data'));
     await waitFor(() => expect(pathname()).toBe(HOME_PATH));
-    await screen.findByTestId('studio-shell-header');
+    await screen.findByTestId('studio-top-left');
     expect(notice()).toBeNull();
   });
 
   it('the left menu links no Interfaces page', async () => {
     renderAt(`/studio/${PKG}/interfaces`);
-    await screen.findByTestId('studio-shell-header');
+    await screen.findByTestId('studio-top-left');
     const links = within(screen.getByTestId('studio-menu')).getAllByRole('link');
     expect(links.map((a) => a.getAttribute('href'))).not.toContain(`/studio/${PKG}/interfaces`);
     expect(links.map((a) => a.textContent)).not.toContain('Interfaces');
@@ -286,7 +286,7 @@ describe('an old Interfaces URL lands on the Studio home (objectstack#36502)', (
 
   it('CONTROL: an ordinary arrival on the Data pillar shows no notice', async () => {
     renderAt(`/studio/${PKG}/data`);
-    await screen.findByTestId('studio-shell-header');
+    await screen.findByTestId('studio-top-left');
     await waitFor(() => expect(where()).toBe(STUDIO_HOME));
     expect(notice()).toBeNull();
   });

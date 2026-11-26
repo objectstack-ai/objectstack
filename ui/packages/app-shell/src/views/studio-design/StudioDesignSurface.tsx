@@ -53,10 +53,7 @@ import {
 import type { AppMarkApp } from '../../layout/AppMark.js';
 import {
   STUDIO_ACCENT,
-  STUDIO_HEADER,
   STUDIO_HEADER_ICON_BUTTON,
-  STUDIO_HEADER_PACKAGE_COLUMN,
-  STUDIO_HEADER_WIDE_WORD,
   STUDIO_PILLARS_HOST,
 } from './studio-tokens.js';
 import {
@@ -68,14 +65,12 @@ import { StudioRefusalStrip } from './StudioRefusalStrip.js';
 import { PACKAGE_LIST_TOAST_ID } from './PackageSwitcher.js';
 import { studioEntryFallbackPath, useStudioEntryPermissions } from './studioEntryPermissions.js';
 import { SETUP_PACKAGES_PATH } from '../metadata-admin/packageSource.js';
-import { StudioBackToApp, type StudioAppTarget } from './StudioBackToApp.js';
+import { type StudioAppTarget } from './StudioBackToApp.js';
 import { StudioPackageMenu } from './StudioPackageMenu.js';
 import { StudioPackageOverviewPage } from './StudioPackageOverviewPage.js';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { type NewFlowTrigger } from './AutomationsFlowRail.js';
 import {
-  CreateTakenNotice,
-  findTakenIdentifier,
   type StudioBaseCustomization,
   StudioHeldNotice,
   StudioReadOnlyLink,
@@ -87,16 +82,8 @@ import {
   cn,
   useIsMobile,
   Button,
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
 } from '@object-ui/components';
 import {
-  Loader2,
-  Plus,
-  GitBranch,
-  Rocket,
   PanelRightClose,
   PanelRightOpen,
   FileQuestion,
@@ -137,14 +124,12 @@ import {
   type SurfaceTarget,
 } from './useSurfaceDeepLink.js';
 import { SurfaceDeepLinkProvider } from './surfaceDeepLinkChannel.js';
-import { buildAppSkeleton, type AppNavSeed } from './skeletons.js';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { confirmUnsavedLeave, useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { CommandPalette, type StudioPaletteSurface } from '../../chrome/CommandPalette.js';
 import { CommandPaletteProvider, useCommandPaletteProviderMounted } from '../../context/CommandPaletteProvider.js';
 import { StudioPaletteGroups } from './StudioPaletteGroups.js';
 import { openStudioPaletteAddress } from './studioPaletteModel.js';
-import { CreateItemDialog } from './CreateItemDialog.js';
 // objectui#11787 — the shared draft autosave, moved to its own module unchanged.
 import {
   ensureCustomizationPackage,
@@ -167,7 +152,6 @@ import {
 import {
   DraftChangesPanel,
   type DraftChangeEntry,
-  type DraftChangesPosture,
   type DraftPublishOptions,
 } from '../../preview/DraftChangesPanel.js';
 import { toast } from 'sonner';
@@ -176,10 +160,10 @@ import {
   STUDIO_OWD_SECTION,
   studioItemPath,
   studioMetadataTypePath,
-  studioPackagePath,
   studioPillarPath,
 } from './studioAddress.js';
-import { StudioTopLeft } from './StudioTopLeft.js';
+import { studioPackageOverviewPath } from './studioOverviewAddress.js';
+import { StudioMobileStrip, StudioTopLeft } from './StudioTopLeft.js';
 import { StudioTitleRowFallback } from './StudioTitleRowFallback.js';
 
 /** The batch door's `backfillApplied` receipt, by reference to what the client returns (objectui#12929). */
@@ -504,9 +488,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // (`publishSavedItem`), so it leaves no draft; Changes and Publish are for the
   // drafts other writers (the copilot) and the editors not yet converted leave.
   const [changesOpen, setChangesOpen] = React.useState(false);
-  // objectui#12517 — which trigger opened the sheet: Publish opens it to
-  // confirm (rows expanded, focus on Publish all), Changes opens it to review.
-  const [changesPosture, setChangesPosture] = React.useState<DraftChangesPosture>('review');
+  // objectui#12517 — the sheet opened to confirm from the top bar's Publish;
+  // objectstack#37456 — that Publish is gone (概览's Pending tab publishes), so
+  // every door left opens the sheet to review, the panel's own default.
   // objectui#12894 — the drawer's one way in from outside the top bar:
   // `?changes=review` (`studioChangesLink.ts`), written by the copilot's
   // applied card (查看变更并发布). Opened to review, then the param is dropped
@@ -517,7 +501,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   React.useEffect(() => {
     if (changesRequest === null) return;
     if (changesRequest === STUDIO_CHANGES_REVIEW) {
-      setChangesPosture('review');
       setChangesOpen(true);
     }
     setSearchParams(
@@ -877,7 +860,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     [listedPublishRefusals],
   );
   const shownPendingCount = behindSave ? Math.max(pendingCount ?? 0, 1) : pendingCount;
-  const hasPending = (shownPendingCount ?? 0) > 0;
   // objectui#12725 — the same ledger and number, for the pillars' item headers
   // (「草稿 · N 项未发布」): the rows the count above counts, so the package-less
   // scope offers its org-scope flow drafts only.
@@ -889,13 +871,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     }),
     [shownPendingCount, packageId, pendingEntries, behindSave],
   );
-  const publishReadOnlyReasonId = React.useId();
-  // The reason a disabled Publish gives, or `null` when it gives none.
-  // objectstack#36511 — Publish is drawn only while a draft is pending, so the
-  // one reason left is a read-only package.
-  const publishDisabledReason: { id: string; text: string; testId?: string } | null = publishReadOnly
-    ? { id: publishReadOnlyReasonId, text: t('engine.studio.pkg.readonlyHint', locale) }
-    : null;
 
   // Builder → running-app bridge: the builder edits the package (the design
   // surface), the app is its published front-end. The header's way back to it
@@ -938,87 +913,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // app has no running front-end to open. Read off the same list as
   // `packageApp`.
   const [publishedApps, setPublishedApps] = React.useState<readonly StudioAppTarget[]>([]);
-  // Create app (package has no app yet): create a draft `app` item — the
-  // published front-end's on-ramp. After the package publish, 「‹ Back to
-  // app」 names it.
-  const [appCreating, setAppCreating] = React.useState(false);
-  const [appBusy, setAppBusy] = React.useState(false);
-  const [appErr, setAppErr] = React.useState<string | null>(null);
-  const [appDraftPending, setAppDraftPending] = React.useState<string | null>(null);
-  // objectstack#26917 — a create refused because an app already holds the
-  // identifier (published or as a draft, in any package): the app's label, for
-  // the dialog's sentence. Create app is offered only to a package with no app,
-  // so the holder is never one this package can open instead.
-  const [appTaken, setAppTaken] = React.useState<{ name: string; label: string } | null>(null);
-  // Scaffold the new app's navigation from the package's objects (default on) —
-  // otherwise a fresh app has zero menu items and every object must be wired by
-  // hand in the app's design mode (objectui#2262).
-  const [appAddObjects, setAppAddObjects] = React.useState(true);
-
-  const loadPackageObjects = React.useCallback(async (): Promise<AppNavSeed[]> => {
-    // Published objects + pending DRAFT objects, merged — a fresh package's
-    // objects are usually still drafts (same merge the Data pillar rail does).
-    // Names only (objectui#11201): a seeded entry carries no label, so nothing
-    // here reads one. This used to hand `buildAppSkeleton` each object's label,
-    // and a draft's or unlabelled object's machine name in its place.
-    // The package-less scope creates no app (objectui#11553): nothing to seed.
-    if (packageId === null) return [];
-    const [list, draftHeaders] = await Promise.all([
-      shellClient.list('object', { packageId }) as Promise<Array<Record<string, unknown>>>,
-      shellClient.listDrafts({ packageId, type: 'object' }).catch(() => [] as Array<{ name?: string }>),
-    ]);
-    const items: AppNavSeed[] = (list || [])
-      .map((o) => ({ name: String(o.name ?? '') }))
-      .filter((o) => o.name);
-    const known = new Set(items.map((o) => o.name));
-    for (const d of draftHeaders) {
-      if (d.name && !known.has(d.name)) items.push({ name: d.name });
-    }
-    return items;
-  }, [shellClient, packageId]);
-
-  const doCreateApp = React.useCallback(
-    async (label: string, name: string) => {
-      // The package-less scope offers no Create app (objectui#11553).
-      if (packageId === null) return;
-      setAppBusy(true);
-      setAppErr(null);
-      setAppTaken(null);
-      try {
-        // A name an app already holds, published or as a draft, in any
-        // package, is refused here and nothing is written: over a published
-        // app the first-write pin below would write this skeleton as its
-        // pending draft (`findTakenIdentifier`).
-        const taken = await findTakenIdentifier(shellClient, 'app', name, locale);
-        if (taken) {
-          setAppTaken(taken);
-          return;
-        }
-        const navObjects = appAddObjects ? await loadPackageObjects().catch(() => []) : [];
-        // objectui#11773 — and the door refuses a draft row too (the
-        // first-write pin), for one that lands between the check above and
-        // this save.
-        await shellClient.save(
-          'app',
-          name,
-          buildAppSkeleton(name, label, navObjects),
-          { mode: 'draft', packageId, ifNoneMatch: '*', surface: 'studio' },
-        );
-        toast.success(tFormat('engine.studio.app.savedDraft', locale, { label }));
-        setAppDraftPending(label);
-        setAppCreating(false);
-        onDraftSaved();
-        // objectstack#36502 — the author stays on the pillar they were on: the
-        // app is designed in the running app once the package is published,
-        // which the header's pending chip says.
-      } catch (e) {
-        setAppErr(formatMetadataError(e));
-      } finally {
-        setAppBusy(false);
-      }
-    },
-    [appAddObjects, loadPackageObjects, shellClient, packageId, locale, onDraftSaved],
-  );
+  // objectstack#37456 — the top bar's 「create app」 button and its 「app waits
+  // for a publish」 label went with the bar, and have no new home (ADR-0084,
+  // amended 2026-11-26, `#amendment-2026-11-26-homes`, silent item 5).
 
   // objectui#5800, fixed in passing — the topbar's app detection used to
   // disagree with the Interfaces pillar's (published-only read, no draftNonce
@@ -1303,42 +1200,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // objectstack#37454 — the package's rename re-reads 概览's row too.
   const overviewRefresh = `${publishNonce}:${pkgEntry?.id === packageId ? pkgEntry.name : ''}`;
 
-  const publishButton = (
-    <button
-      type="button"
-      // Publish is review-then-confirm: open the pending-changes panel,
-      // whose footer button fires the actual atomic package publish —
-      // never straight from this header click (objectui#2261). It opens the
-      // panel in its confirm posture (objectui#12517).
-      onClick={() => {
-        setChangesPosture('confirm');
-        setChangesOpen(true);
-      }}
-      disabled={publishing || publishReadOnly}
-      aria-describedby={publishDisabledReason?.id}
-      // A disabled Publish's reason is its wrapper's (objectui#12303,
-      // objectstack#31495), never a `title` the disabled button cannot show.
-      title={publishReadOnly ? undefined : t('engine.studio.publishTitle', locale)}
-      // objectui#8219 — the primary style is for a publish the author
-      // CAN do. A disabled one (no draft, or a read-only package)
-      // drops to an outline, instead of staying the loudest element
-      // on the page dimmed only by `disabled:opacity-50`.
-      className={cn(
-        // The border is on both states so the swap never shifts the bar.
-        'inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[13px] font-medium',
-        // objectstack#36511 — while the page holds unsaved edits, its Save is the primary action.
-        publishing || (!publishReadOnly && !saveBar.dirty)
-          ? 'border-transparent bg-primary text-primary-foreground disabled:opacity-50'
-          : 'text-muted-foreground',
-        // The wrapper takes the hover: the disabled button lets it through.
-        publishDisabledReason && 'disabled:pointer-events-none',
-      )}
-    >
-      {publishing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Rocket className="h-3.5 w-3.5" />}
-      {t('engine.studio.publish', locale)}
-    </button>
-  );
-
   // objectstack#37455 — the top bar's page controls, placed by the open
   // page's title row (`studioTitleRow.tsx`). objectstack#36511 — the page's
   // Cancel and Save: drawn only while the open page holds unsaved edits,
@@ -1394,129 +1255,15 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
         ) : null}
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className={STUDIO_HEADER} data-testid="studio-shell-header">
-            {/* objectui#12459 — the way back to the app at the left, the
-                package actions at the right. objectstack#36899 — the pillars
-                that sat between them are gone: the left menu is Studio's one
-                navigation, and its show / hide control leads the bar. Changes
-                and Publish stay at the right end; objectstack#37455 — Cancel
-                and Save moved to the page's item header. */}
-            <div className={cn('flex min-w-0 items-center gap-1', STUDIO_HEADER_PACKAGE_COLUMN)}>
-              {/* objectstack#37456 — the menu's show / hide control moved to Studio's row (`StudioTopLeft`). */}
-              {/* objectstack#36501 — 「‹ Back to app」, the app's name and the
-                  Studio mark: Studio's one way out. objectstack#36899
-                  (decision 5) — it names the CURRENT package's app; with none,
-                  the package, or the scope on `~org` and `~all`. */}
-              <StudioBackToApp
-                packageId={packageId}
-                packageLabel={
-                  packageId !== null
-                    ? pkgEntry?.id === packageId
-                      ? pkgEntry.name
-                      : null
-                    : t(allScope ? 'engine.studio.menu.environment' : 'engine.studio.menu.orgFlows', locale)
-                }
-                apps={publishedApps}
-                locale={locale}
-                beforeNavigate={confirmLeavePillar}
-                navigate={shellNavigate}
-              />
-            </div>
-
-            {/* Package-level draft review + one atomic publish (replaces per-item Publish) */}
-            <div className="flex min-w-0 items-center justify-end gap-2">
-              {/* objectstack#26708 — nothing to create, review or publish in a
-                  package that is not there, nor on the cross-package leg. */}
-              {!pkgMissing && !allScope && (<>
-              {/* objectui#11553 — the package-less scope has no app to create. */}
-              {packageId === null || packageApp ? null : appDraftPending ? (
-                <span
-                  title={t('engine.studio.app.willOpenAfterPublish', locale)}
-                  className="rounded bg-amber-400/15 px-2 py-0.5 text-[11px] text-amber-600 dark:text-amber-300"
-                >
-                  {tFormat('engine.studio.app.pending', locale, { label: appDraftPending })}
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setAppCreating(true)}
-                  disabled={readOnly}
-                  title={readOnly ? t('engine.studio.pkg.readonlyHint', locale) : t('engine.studio.app.noneTitle', locale)}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  <span className={STUDIO_HEADER_WIDE_WORD}>{t('engine.studio.app.create', locale)}</span>
-                </button>
-              )}
-              {/* objectstack#36511 — Changes and Publish are for drafts, which
-                  the copilot and the editors still on drafts (the Interfaces
-                  pillar, the Metadata area) leave: drawn only while one is
-                  pending. */}
-              {hasPending && (
-                <>
-                {/* objectui#12459 — the pending count is a pill, not "· N" text. */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setChangesPosture('review');
-                    setChangesOpen(true);
-                  }}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] text-foreground hover:bg-muted"
-                >
-                  <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
-                  {t('engine.studio.changes', locale)}
-                  <span className="sr-only"> · </span>
-                  <span
-                    data-testid="studio-changes-count"
-                    className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground"
-                  >
-                    {shownPendingCount}
-                  </span>
-                </button>
-                {/* A disabled Publish says why, to the mouse, the keyboard and
-                    assistive tech alike — the record page's Archive pattern
-                    (`DeclaredActionsBar`, objectui#11811), for the reason it
-                    can be off: a read-only package (objectui#12303). A natively
-                    disabled button fires no hover or focus, so the wrapping span
-                    is the tooltip trigger and a tab stop, and the button and the
-                    span both point `aria-describedby` at an `sr-only` copy of
-                    the reason. objectstack#28562 — a read-only base with a
-                    customization package publishes that package's drafts, so it
-                    is not read-only here. */}
-                {publishDisabledReason ? (
-                  <TooltipProvider delayDuration={200}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span
-                          tabIndex={0}
-                          aria-describedby={publishDisabledReason.id}
-                          data-disabled-reason=""
-                          className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                          {publishButton}
-                          <span
-                            id={publishDisabledReason.id}
-                            className="sr-only"
-                            data-testid={publishDisabledReason.testId}
-                          >
-                            {publishDisabledReason.text}
-                          </span>
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>{publishDisabledReason.text}</TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                ) : (
-                  publishButton
-                )}
-                </>
-              )}
-              {/* objectstack#37455 — the page's Cancel and Save moved to its
-                  item header, and the AI assistant to the end of its title
-                  row (`titleRowSave`, `titleRowAssistant` above). */}
-              </>)}
-            </div>
-          </header>
+          {/* objectstack#37456 — Studio has no top bar (ADR-0084, amended
+              2026-11-26, `#amendment-2026-11-26-frame`). Its tenants live on:
+              the way back and the menu toggle in the left column's top rows
+              (`StudioTopLeft`), the ⋯ menu, Changes and Publish on 概览
+              Overview (its header and its Pending tab, objectstack#37454),
+              Save and Cancel in the item header and the assistant at the end
+              of the page's title row (objectstack#37455). Under 768 px the
+              menu is a drawer, opened from the strip below. */}
+          {showMenu && <StudioMobileStrip locale={locale} />}
 
           {retiredLanding && (
             <StudioInterfacesRetiredNotice
@@ -1568,7 +1315,19 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                   locale={locale}
                   beforeNavigate={confirmLeavePillar}
                   navigate={shellNavigate}
-                  packagePath={studioPackagePath}
+                  packagePath={studioPackageOverviewPath}
+                  // objectstack#37456 — `~org` has no 概览, so its Changes stays
+                  // in the left column (`StudioScopePendingRow`), on the same sheet.
+                  scopePending={
+                    packageId === null && !allScope && (shownPendingCount ?? 0) > 0
+                      ? {
+                          count: shownPendingCount ?? 0,
+                          onOpen: () => {
+                            setChangesOpen(true);
+                          },
+                        }
+                      : null
+                  }
                 />
               }
             />
@@ -1641,7 +1400,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 onHeldEditChange={setHeldEdit}
                 onSurfaceLabelChange={setSurfaceLabel}
                 onReviewChanges={() => {
-                  setChangesPosture('review');
                   setChangesOpen(true);
                 }}
               />
@@ -1749,50 +1507,13 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
           include={packageId === null ? isOrgScopeDraft : undefined}
           onPublish={publishReadOnly ? undefined : doPublish}
           publishing={publishing}
-          posture={changesPosture}
+          posture="review"
           renderEntryNote={renderPublishRefusal}
           // ADR-0146 D3 — reviewing the pair's drafts, the sheet names the
           // base they are saved for.
           customizationOf={pairId !== null ? baseLabel : undefined}
         />
 
-        <CreateItemDialog
-          open={appCreating}
-          onOpenChange={(open) => {
-            setAppCreating(open);
-            if (!open) setAppTaken(null);
-          }}
-          title={t('engine.studio.app.create', locale)}
-          labelFieldLabel={t('engine.studio.app.nameLabel', locale)}
-          labelPlaceholder={t('engine.studio.app.namePlaceholder', locale)}
-          idFieldLabel={t('engine.studio.app.idLabel', locale)}
-          idPlaceholder={t('engine.studio.app.idPlaceholder', locale)}
-          submitLabel={t('engine.studio.createDraft', locale)}
-          submittingLabel={t('engine.studio.creating', locale)}
-          busy={appBusy}
-          error={appErr}
-          locale={locale}
-          onSubmit={({ label, name }) => void doCreateApp(label, name)}
-          extra={
-            <>
-              {appTaken && (
-                <CreateTakenNotice
-                  scope="app"
-                  sentence={tFormat('engine.studio.app.createTaken', locale, { label: appTaken.label, name: appTaken.name })}
-                />
-              )}
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={appAddObjects}
-                  onChange={(e) => setAppAddObjects(e.target.checked)}
-                  className="h-3.5 w-3.5 accent-primary"
-                />
-                {t('engine.studio.app.scaffoldNav', locale)}
-              </label>
-            </>
-          }
-        />
       </StudioMenuProvider>
       {/* objectstack#36900 — the command palette, in its `studio` scope, with this page's groups. */}
       {!paletteHosted && <CommandPalette scope="studio" surface={paletteSurface} />}

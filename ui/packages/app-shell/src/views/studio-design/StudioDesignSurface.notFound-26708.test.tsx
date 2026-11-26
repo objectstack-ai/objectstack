@@ -194,12 +194,14 @@ describe('Studio: a package id no package has renders "package not found" (objec
 
     const notFound = await screen.findByTestId('studio-package-not-found');
     expect(notFound).toHaveTextContent(tFormat('engine.studio.notFound.package', 'en', { id: PHANTOM }));
-    const header = screen.getByTestId('studio-shell-header');
+    // objectstack#37456 — no top bar, and no left column (its rows live in the menu).
+    expect(screen.queryByTestId('studio-shell-header')).toBeNull();
     expect(screen.queryByTestId('studio-menu')).toBeNull();
-    expect(within(header).queryByTestId('studio-menu-toggle')).toBeNull();
-    expect(within(header).queryByRole('button', { name: new RegExp(t('engine.studio.publish', 'en')) })).toBeNull();
-    expect(within(header).queryByRole('button', { name: new RegExp(t('engine.studio.changes', 'en')) })).toBeNull();
-    expect(within(header).queryByTitle(t('engine.studio.app.noneTitle', 'en'))).toBeNull();
+    expect(screen.queryByTestId('studio-menu-toggle')).toBeNull();
+    expect(screen.queryByTestId('studio-mobile-strip')).toBeNull();
+    expect(screen.queryByRole('button', { name: new RegExp(t('engine.studio.publish', 'en')) })).toBeNull();
+    expect(screen.queryByRole('button', { name: new RegExp(t('engine.studio.changes', 'en')) })).toBeNull();
+    expect(screen.queryByTitle(t('engine.studio.app.noneTitle', 'en'))).toBeNull();
     // The one list read the builder already makes — no second request.
     expect(packageListReads(fetchMock)).toBe(1);
   });

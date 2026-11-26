@@ -64,38 +64,6 @@ export const STUDIO_ACCENT =
   '[--color-sidebar-primary:hsl(var(--sidebar-primary))] [--color-sidebar-ring:hsl(var(--sidebar-ring))] ' +
   '[--color-accent:hsl(var(--accent))] [--color-accent-foreground:hsl(var(--accent-foreground))]';
 
-/**
- * Shell header (objectui#12509). One 48 px row at every width, two columns:
- * the left menu's control and the way back to the app at the left, the
- * package actions at the right. The right column never drops below its
- * content (Create app, Changes, Publish, Cancel, Save), so on a tight row the
- * app's name truncates instead of anything sliding under the actions.
- * objectstack#36899 — the pillar switcher that sat in a middle column (and on
- * a second row below `sm`) is gone: the left menu is Studio's navigation.
- */
-export const STUDIO_HEADER =
-  '@container/studio-header grid h-12 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 border-b px-3';
-
-/**
- * objectui#12611 — the header's left column is a container: its width is the
- * grid track's, so what it holds folds to the room the column really has (the
- * actions beside it), never the viewport.
- * objectstack#36501 — it holds 「‹ Back to app」, the app's name and the
- * Studio mark, and the app's name is the piece that truncates.
- */
-export const STUDIO_HEADER_PACKAGE_COLUMN = '@container';
-
-/**
- * objectstack#34725 — Create app's word answers the top bar's OWN width, not
- * the viewport's: the right panel beside it is resizable (the console drawer's
- * 420 px, dragged up to the canvas's 520 px floor), so a 1163 px window can
- * leave the bar 520 px, and a viewport breakpoint pushed the bar's right end,
- * the AI assistant's robot, under the panel. Below 920 px of bar the word stays
- * in the accessible name and the tooltip. A literal class string: Tailwind
- * finds a class by scanning source.
- */
-export const STUDIO_HEADER_WIDE_WORD = 'sr-only @min-[920px]/studio-header:not-sr-only';
-
 /** Rail: 240 px, the sidebar surface, a right border. */
 export const STUDIO_RAIL_WIDTH = 'w-60';
 

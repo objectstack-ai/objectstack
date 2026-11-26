@@ -82,6 +82,7 @@ function clearCookies() {
 }
 
 interface Opts {
+  scopePending?: { count: number; onOpen: () => void } | null;
   packageId?: string | null;
   readOnly?: boolean;
   canCreate?: boolean;
@@ -106,6 +107,7 @@ function renderTopLeft(opts: Opts = {}) {
           beforeNavigate={beforeNavigate}
           navigate={navigate}
           packagePath={(id) => `/studio/${id}`}
+          scopePending={opts.scopePending ?? null}
         />
       </StudioMenuProvider>
     </MemoryRouter>,
@@ -241,6 +243,27 @@ describe('Studio top left — the collapsed rail (objectstack#37456)', () => {
     expect(within(rail).getByTestId('studio-pkg-switcher')).toBeInTheDocument();
     expect(screen.queryByTestId('studio-brand-name')).toBeNull();
     expect(screen.queryByTestId('studio-pkg-switcher-name')).toBeNull();
+  });
+});
+
+describe('Studio top left — the package-less scope keeps its Changes (objectstack#37456)', () => {
+  it('~org with drafts pending: a Changes row with the count under the package row, which opens the sheet', () => {
+    const onOpen = vi.fn();
+    renderTopLeft({ packageId: null, scopePending: { count: 2, onOpen } });
+    const top = screen.getByTestId('studio-top-left');
+    const changes = within(top).getByRole('button', { name: /^Changes · 2$/ });
+    expect(changes).toHaveAttribute('data-testid', 'studio-scope-changes');
+    expect(within(top).getByTestId('studio-package-row').compareDocumentPosition(changes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(changes);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    // The rail keeps it, as an icon that still names the count.
+    fireEvent.click(screen.getByTestId('studio-menu-toggle'));
+    expect(within(screen.getByTestId('studio-rail-head')).getByRole('button', { name: /^Changes · 2$/ })).toBeInTheDocument();
+  });
+
+  it('CONTROL: none passed (a package, or nothing pending): no Changes row', () => {
+    renderTopLeft({ packageId: null });
+    expect(screen.queryByTestId('studio-scope-changes')).toBeNull();
   });
 });
 

@@ -62,7 +62,6 @@ import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { studioBackTarget } from './StudioBackToApp';
 import { rememberAppReturnPage, resetAppReturnPageForTests } from '../../utils/appReturnPage';
 import { parsePackages } from './packages-io';
-import { STUDIO_HEADER_PACKAGE_COLUMN } from './studio-tokens';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -154,18 +153,20 @@ function renderAt(entry: string) {
   );
 }
 
-const header = () => screen.getByTestId('studio-shell-header');
-const backLink = () => within(header()).findByTestId('studio-back-to-app', undefined, { timeout: 8000 });
+// objectstack#37456 — the top bar is gone: the way back is the first control of
+// the left column's package row, and the package switcher beside it names the
+// open package. The button names where it leads in its accessible name.
+const row = () => screen.getByTestId('studio-package-row');
+const backLink = () => within(row()).findByTestId('studio-package-back', undefined, { timeout: 8000 });
+const leadsTo = (app: string) => `Leave Studio and go back to ${app}`;
 
-describe('「‹ Back to app」 returns to the app page the author came from (objectstack#36501)', () => {
+describe('the way back returns to the app page the author came from (objectstack#36501)', () => {
   it('names the app the author came from and returns to that page, query kept', async () => {
     rememberAppReturnPage({ path: `/apps/${OWN}/opportunity?view=open`, app: 'sales', label: 'Sales' });
     renderAt(`/studio/${OWN}/data?surface=object:opportunity`);
     const link = await backLink();
-    expect(link).toHaveAccessibleName('Back to app');
-    expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent('Sales');
-    expect(within(header()).getByTestId('studio-mark')).toHaveTextContent('Studio');
-    expect(within(header()).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Sales·Studio$/);
+    await waitFor(() => expect(link).toHaveAccessibleName(leadsTo('Sales')), { timeout: 8000 });
+    expect(within(row()).getAllByRole('button')[0]).toBe(link);
     fireEvent.click(link);
     expect(await screen.findByTestId('running-app')).toHaveTextContent(`/apps/${OWN}/opportunity?view=open`);
   });
@@ -174,47 +175,40 @@ describe('「‹ Back to app」 returns to the app page the author came from (ob
     rememberAppReturnPage({ path: '/apps/service/opportunity', app: 'service', label: 'Service desk' });
     renderAt(`/studio/${OWN}/data`);
     const link = await backLink();
-    // Read the name while the header is still on screen; the click leaves Studio.
-    await waitFor(() => expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent('Sales'), {
-      timeout: 8000,
-    });
+    // Read the name while the row is still on screen; the click leaves Studio.
+    await waitFor(() => expect(link).toHaveAccessibleName(leadsTo('Sales')), { timeout: 8000 });
     fireEvent.click(link);
     expect(await screen.findByTestId('running-app')).toHaveTextContent(new RegExp(`^/apps/${OWN.replace(/\./g, '\\.')}$`));
   });
 });
 
-describe('opened directly, 「‹ Back to app」 lands on the package app\'s first screen (objectstack#36501)', () => {
+describe('opened directly, the way back lands on the package app\'s first screen (objectstack#36501)', () => {
   it('names the published app and lands on its home, whatever is in focus', async () => {
     renderAt(`/studio/${OWN}/data?surface=object:opportunity`);
-    await waitFor(() => expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent('Sales'), {
-      timeout: 8000,
-    });
-    fireEvent.click(await backLink());
+    const link = await backLink();
+    await waitFor(() => expect(link).toHaveAccessibleName(leadsTo('Sales')), { timeout: 8000 });
+    fireEvent.click(link);
     expect(await screen.findByTestId('running-app')).toHaveTextContent(new RegExp(`^/apps/${OWN.replace(/\./g, '\\.')}$`));
   });
 
   it('with several published apps, the first, addressed by its name', async () => {
     srv.apps = [SERVICE_APP, SALES_APP];
     renderAt(`/studio/${OWN}/owd`);
-    await waitFor(() => expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent('Service desk'), {
-      timeout: 8000,
-    });
-    fireEvent.click(await backLink());
+    const link = await backLink();
+    await waitFor(() => expect(link).toHaveAccessibleName(leadsTo('Service desk')), { timeout: 8000 });
+    fireEvent.click(link);
     expect(await screen.findByTestId('running-app')).toHaveTextContent(/^\/apps\/service$/);
   });
 });
 
-describe('a package with no app: 「‹ Back to app」 names the package and goes to the default landing (objectstack#36501, objectstack#36748)', () => {
+describe('a package with no app: the switcher names the package and the way back goes to the default landing (objectstack#36501, objectstack#36748)', () => {
   it('no app at all: the package is named, and the link goes to the console landing', async () => {
     srv.apps = [];
     renderAt(`/studio/${OWN}/data`);
     const link = await backLink();
-    // Settled: the header has read the package's apps (it offers Create app).
-    await within(header()).findByRole('button', { name: /Create app/ }, { timeout: 8000 });
-    // objectstack#36748 — the name slot names the open package, by its label.
-    const name = await within(header()).findByTestId('studio-back-app-name', undefined, { timeout: 8000 });
-    expect(name).toHaveAttribute('data-names', 'package');
-    expect(within(header()).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Sales·Studio$/);
+    // objectstack#36748 — the open package is named, by its label (now the switcher's name).
+    await waitFor(() => expect(within(row()).getByTestId('studio-pkg-switcher-name')).toHaveTextContent('Sales'), { timeout: 8000 });
+    expect(link).toHaveAccessibleName('Leave Studio and go back to your apps');
     fireEvent.click(link);
     expect(await screen.findByTestId('elsewhere')).toHaveTextContent('/home');
   });
@@ -224,40 +218,24 @@ describe('a package with no app: 「‹ Back to app」 names the package and goe
     srv.appDrafts = [{ name: 'sales', label: 'Sales', type: 'app' }];
     renderAt(`/studio/${OWN}/data`);
     const link = await backLink();
-    // The draft app is resolved (the header's create-app slot reads it) ...
-    await waitFor(() => expect(within(header()).queryByRole('button', { name: /Create app/ })).toBeNull(), { timeout: 8000 });
-    // ... and still no app is named or opened: the slot names the package.
-    expect(await within(header()).findByTestId('studio-back-app-name')).toHaveAttribute('data-names', 'package');
+    await waitFor(() => expect(within(row()).getByTestId('studio-pkg-switcher-name')).toHaveTextContent('Sales'), { timeout: 8000 });
+    // No app is named or opened.
+    expect(link).toHaveAccessibleName('Leave Studio and go back to your apps');
     fireEvent.click(link);
     expect(await screen.findByTestId('elsewhere')).toHaveTextContent('/home');
   });
 });
 
-describe('the controls the back link replaced are gone (objectstack#36501)', () => {
-  it('no Studio-home button, no package switcher, no Open app', async () => {
+describe('the controls the back link replaced stay gone (objectstack#36501)', () => {
+  it('no Studio-home button and no Open app; the switcher is the package row\'s one other control', async () => {
     renderAt(`/studio/${OWN}/data`);
-    await waitFor(() => expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent('Sales'), {
-      timeout: 8000,
-    });
+    const link = await backLink();
+    await waitFor(() => expect(link).toHaveAccessibleName(leadsTo('Sales')), { timeout: 8000 });
     for (const id of ['studio-home', 'studio-pkg-chip', 'studio-open-app']) {
-      expect(within(header()).queryByTestId(id)).toBeNull();
+      expect(screen.queryByTestId(id)).toBeNull();
     }
-    expect(within(header()).queryByRole('button', { name: /Open app|Studio home/ })).toBeNull();
-    expect(within(header()).queryByTitle(/Switch \/ create package/)).toBeNull();
-  });
-});
-
-describe('on a narrow bar the app name gives way, nothing else (objectstack#36501, objectui#12611)', () => {
-  it('the column is the container; the name truncates; the link and the mark keep their width', async () => {
-    renderAt(`/studio/${OWN}/data`);
-    const name = await within(header()).findByTestId('studio-back-app-name', undefined, { timeout: 8000 });
-    const column = header().children[0] as HTMLElement;
-    expect(column).toHaveClass(STUDIO_HEADER_PACKAGE_COLUMN);
-    expect(column.contains(name)).toBe(true);
-    expect(name).toHaveClass('min-w-0', 'truncate');
-    expect(within(header()).getByTestId('studio-back-to-app')).toHaveClass('shrink-0');
-    expect(within(header()).getByTestId('studio-mark')).toHaveClass('shrink-0');
-    expect(within(header()).getByTestId('studio-back')).toHaveClass('min-w-0', 'whitespace-nowrap');
+    expect(screen.queryByRole('button', { name: /Open app|Studio home/ })).toBeNull();
+    expect(within(row()).getAllByRole('button').map((b) => b.dataset.testid)).toEqual(['studio-package-back', 'studio-pkg-switcher']);
   });
 });
 

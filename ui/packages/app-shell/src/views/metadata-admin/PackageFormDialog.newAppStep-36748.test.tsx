@@ -12,7 +12,7 @@
  *  2. One confirm creates the package AND its app: the package `POST`, the
  *     app's draft under the first-write pin, then that one app's publish
  *     (objectstack#36511: a human-created item is live at once). The author
- *     lands in the new package's Studio, whose header names the app, and
+ *     lands in the new package's Studio, whose way back names the app, and
  *     「‹ Back to app」 opens it.
  *  3. A taken app name refuses the whole confirm and writes nothing.
  *
@@ -240,7 +240,7 @@ describe('PackageFormDialog with a new-app step: offered as 「同时创建应�
 });
 
 describe('PackageFormDialog with a new-app step: one confirm creates the package and its app, and the app opens (objectstack#36748)', () => {
-  it('package, app draft, app publish — then the header names the app and 「‹ Back to app」 opens it', async () => {
+  it('package, app draft, app publish — then the way back names the app and opens it', async () => {
     renderDoor();
     const dialog = await openNewAppDialog();
     fireEvent.change(nameInput(dialog), { target: { value: 'Visits' } });
@@ -267,16 +267,16 @@ describe('PackageFormDialog with a new-app step: one confirm creates the package
     expect(toast.success).toHaveBeenCalledWith('Created package “Visits” and its app.');
     expect(toast.error).not.toHaveBeenCalled();
 
-    // The author lands in the new package's Studio; the header names the app.
-    const header = await screen.findByTestId('studio-shell-header', undefined, { timeout: 8000 });
+    // The author lands in the new package's Studio; the way back names the app
+    // (objectstack#37456: the package row's first control, beside the switcher).
+    const row = await screen.findByTestId('studio-package-row', undefined, { timeout: 8000 });
     await waitFor(
-      () => expect(within(header).getByTestId('studio-back-app-name')).toHaveAttribute('data-names', 'app'),
+      () => expect(within(row).getByTestId('studio-package-back')).toHaveAccessibleName('Leave Studio and go back to Visits'),
       { timeout: 8000 },
     );
-    expect(within(header).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Visits·Studio$/);
-    // The app is live: no Create app is offered, and the back link opens it.
-    expect(within(header).queryByRole('button', { name: /Create app/ })).toBeNull();
-    fireEvent.click(within(header).getByTestId('studio-back-to-app'));
+    expect(within(row).getByTestId('studio-pkg-switcher-name')).toHaveTextContent('Visits');
+    // The app is live, and the way back opens it.
+    fireEvent.click(within(row).getByTestId('studio-package-back'));
     expect(await screen.findByTestId('running-app')).toHaveTextContent(`/apps/${packageId}`);
   });
 
@@ -358,7 +358,7 @@ describe('CreatePackageDialog: 「同时创建应用」 is offered, ticked by de
 });
 
 describe('CreatePackageDialog: ticked creates the package and its app; unticked only the package (objectstack#37134)', () => {
-  it('ticked: package, app draft, app publish — then the Studio header names the app', async () => {
+  it('ticked: package, app draft, app publish — then Studio’s way back names the app', async () => {
     renderCreatePackage();
     const dialog = await openNewAppDialog();
     await nameAndWait(dialog, 'Visits');
@@ -379,13 +379,13 @@ describe('CreatePackageDialog: ticked creates the package and its app; unticked 
     expect(toast.error).not.toHaveBeenCalled();
 
     // Where the wrapper lands does not change (Studio on the new package),
-    // and with an app the header names it.
-    const header = await screen.findByTestId('studio-shell-header', undefined, { timeout: 8000 });
+    // and with an app the way back names it (objectstack#37456).
+    const row = await screen.findByTestId('studio-package-row', undefined, { timeout: 8000 });
     await waitFor(
-      () => expect(within(header).getByTestId('studio-back-app-name')).toHaveAttribute('data-names', 'app'),
+      () => expect(within(row).getByTestId('studio-package-back')).toHaveAccessibleName('Leave Studio and go back to Visits'),
       { timeout: 8000 },
     );
-    expect(within(header).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Visits·Studio$/);
+    expect(within(row).getByTestId('studio-pkg-switcher-name')).toHaveTextContent('Visits');
   });
 
   it('unticked: only the package is created, as before', async () => {
@@ -401,13 +401,10 @@ describe('CreatePackageDialog: ticked creates the package and its app; unticked 
     expect(srv.apps).toEqual([]);
     expect(srv.appDrafts).toEqual([]);
     // The same landing: Studio on the new package, which has no app to name.
-    const header = await screen.findByTestId('studio-shell-header', undefined, { timeout: 8000 });
+    const row = await screen.findByTestId('studio-package-row', undefined, { timeout: 8000 });
     const packageId = String((srv.writes[0].body?.manifest as Record<string, unknown>).id);
-    expect(await screen.findByTestId('studio-back-app-name', undefined, { timeout: 8000 })).toHaveAttribute(
-      'data-names',
-      'package',
-    );
-    expect(header).toBeInTheDocument();
+    await waitFor(() => expect(within(row).getByTestId('studio-pkg-switcher-name')).toHaveTextContent('Shared parts'), { timeout: 8000 });
+    expect(within(row).getByTestId('studio-package-back')).toHaveAccessibleName('Leave Studio and go back to your apps');
     expect(packageId).toMatch(/shared-parts$/);
   });
 

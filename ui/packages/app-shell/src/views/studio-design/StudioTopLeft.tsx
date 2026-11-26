@@ -24,7 +24,7 @@
 
 import * as React from 'react';
 import { cn, useSidebar } from '@object-ui/components';
-import { Blocks } from 'lucide-react';
+import { Blocks, GitBranch } from 'lucide-react';
 import { t } from '../metadata-admin/i18n.js';
 import { StudioMenuTrigger } from './StudioMenu.js';
 import { StudioBackButton, type StudioAppTarget } from './StudioBackToApp.js';
@@ -60,10 +60,66 @@ export interface StudioPackageRowProps
   extends Omit<StudioPackageSwitcherProps, 'compact'> {
   /** The open package's published apps, where the way back may lead. */
   apps: readonly StudioAppTarget[];
+  /**
+   * The package-less scope's pending drafts and the door to review and publish
+   * them, or `null`. Only `~org` passes one: a package's live on 概览's
+   * Pending tab, and `~org` has no 概览 (see {@link StudioScopePendingRow}).
+   */
+  scopePending?: StudioScopePending | null;
+}
+
+export interface StudioScopePending {
+  /** Drafts pending, above zero. */
+  count: number;
+  /** Opens the changes sheet, whose Publish publishes them. */
+  onOpen: () => void;
+}
+
+/**
+ * The package-less scope's Changes (objectstack#37456). The top bar's Changes
+ * and Publish moved to 概览's Pending tab (ADR-0084, amended 2026-11-26), and
+ * `~org` names no package, so it has no 概览: this row keeps its one door to
+ * the changes sheet, with the count, drawn while something is pending.
+ */
+export function StudioScopePendingRow({
+  pending,
+  locale,
+  compact = false,
+}: {
+  pending: StudioScopePending;
+  locale: string;
+  compact?: boolean;
+}): React.ReactElement {
+  const label = t('engine.studio.changes', locale);
+  return (
+    <button
+      type="button"
+      data-testid="studio-scope-changes"
+      onClick={pending.onOpen}
+      title={compact ? `${label} · ${pending.count}` : undefined}
+      className={cn(
+        'inline-flex h-8 items-center gap-1.5 rounded-md text-[13px] text-sidebar-foreground outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring',
+        compact ? 'w-8 justify-center' : 'w-full px-2',
+      )}
+    >
+      <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <span className={compact ? 'sr-only' : 'min-w-0 flex-1 truncate text-left'}>{label}</span>
+      <span className="sr-only"> · </span>
+      <span
+        data-testid="studio-changes-count"
+        className={cn(
+          'inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground',
+          compact && 'sr-only',
+        )}
+      >
+        {pending.count}
+      </span>
+    </button>
+  );
 }
 
 /** Row 2: the way back, then the package switcher. */
-export function StudioPackageRow({ apps, ...switcher }: StudioPackageRowProps): React.ReactElement {
+export function StudioPackageRow({ apps, scopePending: _scopePending, ...switcher }: StudioPackageRowProps): React.ReactElement {
   return (
     <div className="flex min-w-0 items-center gap-0.5" data-testid="studio-package-row">
       <StudioBackButton
@@ -76,6 +132,10 @@ export function StudioPackageRow({ apps, ...switcher }: StudioPackageRowProps): 
       <StudioPackageSwitcher {...switcher} />
     </div>
   );
+}
+
+function switcherProps({ apps: _apps, scopePending: _pending, ...rest }: StudioPackageRowProps): StudioPackageSwitcherProps {
+  return rest;
 }
 
 /**
@@ -96,7 +156,8 @@ export function StudioTopLeft(props: StudioPackageRowProps): React.ReactElement 
           beforeNavigate={props.beforeNavigate}
           navigate={props.navigate}
         />
-        <StudioPackageSwitcher {...props} compact />
+        <StudioPackageSwitcher {...switcherProps(props)} compact />
+        {props.scopePending && <StudioScopePendingRow pending={props.scopePending} locale={props.locale} compact />}
       </div>
     );
   }
@@ -105,6 +166,25 @@ export function StudioTopLeft(props: StudioPackageRowProps): React.ReactElement 
       <StudioBrandRow locale={props.locale} />
       <div aria-hidden="true" className="mx-1 h-px bg-sidebar-border" />
       <StudioPackageRow {...props} />
+      {props.scopePending && <StudioScopePendingRow pending={props.scopePending} locale={props.locale} />}
+    </div>
+  );
+}
+
+/**
+ * Under 768 px the left column is a drawer, and the rows above live inside it,
+ * so the control that opens it needs a place of its own: a strip at the top
+ * of the page with that control and Studio's name (ADR-0084, amended
+ * 2026-11-26, `#amendment-2026-11-26-frame`). Nothing is drawn from 768 px up.
+ */
+export function StudioMobileStrip({ locale }: { locale: string }): React.ReactElement | null {
+  const { isMobile } = useSidebar();
+  if (!isMobile) return null;
+  return (
+    <div className="flex h-11 shrink-0 items-center gap-2 border-b px-2" data-testid="studio-mobile-strip">
+      <StudioMenuTrigger locale={locale} />
+      <StudioBrandMark />
+      <span className="min-w-0 flex-1 truncate text-sm font-semibold">{t('engine.studio.mark', locale)}</span>
     </div>
   );
 }
