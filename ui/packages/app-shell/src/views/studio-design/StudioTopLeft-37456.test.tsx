@@ -141,7 +141,7 @@ describe('Studio top left — two rows (objectstack#37456)', () => {
   it('draws Studio’s row, then the package row with the way back first', () => {
     renderTopLeft();
     const brand = screen.getByTestId('studio-brand-row');
-    expect(within(brand).getByTestId('studio-brand-name')).toHaveTextContent('Studio');
+    expect(within(brand).getByTestId('studio-brand-name')).toHaveTextContent(/^App Studio$/);
     expect(within(brand).getByTestId('studio-menu-toggle')).toBeInTheDocument();
     const row = screen.getByTestId('studio-package-row');
     const buttons = within(row).getAllByRole('button');

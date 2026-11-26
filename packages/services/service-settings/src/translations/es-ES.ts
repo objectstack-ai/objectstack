@@ -568,7 +568,7 @@ export const esES: PlatformTranslationData = {
           },
         },
         turso_url: { label: 'URL de conexión',
-          help: 'Ejemplos: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:' },
+          help: 'Ejemplos: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:' },
         turso_auth_token: { label: 'Token de autenticación',
           help: 'Solo se requiere para URLs de Turso gestionado.' },
         chunk_target: { label: 'Tamaño objetivo de fragmento (caracteres)',

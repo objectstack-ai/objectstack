@@ -14,10 +14,10 @@ description: >
   objectstack-query); data lifecycle hooks (beforeInsert / afterUpdate)
   belong in objectstack-data — only kernel / service-level events live here.
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 18.x and @objectstack/core 18.x (Zod v4 schemas), Node 22+
+compatibility: Requires @objectstack/spec 19.x and @objectstack/core 19.x (Zod v4 schemas), Node 22+
 metadata:
   author: objectstack-ai
-  version: "18.6.0"
+  version: "19.0.0-next.0"
   domain: platform
   tags: project, defineStack, driver, hono, plugin, kernel, service, requires, capability, DI, lifecycle, cli, deploy, ops
 ---
@@ -300,7 +300,7 @@ token through the `CAPABILITY_PROVIDERS` registry in
 | Token | Provider package |
 |:--|:--|
 | `automation` | `@objectstack/service-automation` — flows, and any declarative `connectors:` entry |
-| `analytics`° `cache`° `storage`° `queue`° `job`° `messaging`° `realtime` `settings`° `sms`° `push` `record-context` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)); `record-context` serves `get_record_context`, **objectstack-ai** [context packs](../objectstack-ai/references/context-packs.md) |
+| `analytics`° `cache`° `storage`° `queue`° `job`° `messaging`° `realtime` `settings`° `sms`° `push` `record-context` `knowledge` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)); `record-context` serves `get_record_context`, **objectstack-ai** [context packs](../objectstack-ai/references/context-packs.md) |
 | `mailbox` | `@objectstack/service-mailbox` — inbound mail |
 | `marketplace` `package-registry`° | `@objectstack/service-package` |
 | `audit` `email`° `sharing`° `approvals` `webhooks` | `@objectstack/plugin-` + the token |

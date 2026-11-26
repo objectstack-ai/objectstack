@@ -359,6 +359,7 @@ describe('the package-less scope lists a package-less flow and opens it editable
     const row = within(screen.getByTestId('studio-package-row'));
     expect(row.getByTestId('studio-pkg-switcher-name')).toHaveTextContent('Organization flows');
     expect(row.getByTestId('studio-package-back')).toHaveAccessibleName('Leave Studio and go back to your apps');
+    expect(screen.getByTestId('studio-brand-name')).toHaveTextContent(/^App Studio$/);
     // No "New" flow here: authoring stays package-first.
     expect(screen.queryByTitle('New automation')).not.toBeInTheDocument();
   });

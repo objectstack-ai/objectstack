@@ -30,11 +30,14 @@ import {
   draftPinOf,
   publishedPinOf,
   isPublishConflictKeptEditing,
+  isPublishDraftMoved,
+  heldDraftVersionOf,
   isDraftVersionConflict,
   isDraftReadRefused,
   readDraftForSave,
   type DraftConflictChoice,
 } from './DraftConflictDialog';
+import { draftPublishDoor } from '../__tests__/draftPublishDoor-37440';
 
 interface SentPut {
   type: string;
@@ -716,5 +719,69 @@ describe('DraftVersionGuard — a reload that keeps a pending draft keeps the pu
     expect(guard.publishedFor('object', NAME, PKG)).toEqual({ ifMatch: v(1) });
     guard.forget();
     expect(guard.publishedFor('object', NAME, PKG)).toBeNull();
+  });
+});
+
+describe("DraftVersionGuard — the Save's publish is pinned to the draft it wrote (objectstack#37440, rule 10)", () => {
+  const PIN_PKG = 'com.acme.crm';
+  /** One buffer loaded over a live row, then its Save's guarded draft write. */
+  async function savedBuffer(...answers: DraftConflictChoice[]) {
+    const door = draftPublishDoor();
+    const live = door.seedLive('object', 'acme_task', PIN_PKG, { label: 'live' });
+    const queue = [...answers];
+    const ask = vi.fn(async () => queue.shift() ?? 'cancel');
+    const guard = new DraftVersionGuard({
+      client: () => door.client as never,
+      ask,
+      reload: vi.fn(),
+      notSaved: (c) => new Error(`not saved: ${c.type}/${c.name}`),
+    });
+    guard.recordRead('object', 'acme_task', PIN_PKG, { ifNoneMatch: '*' });
+    guard.recordPublished('object', 'acme_task', PIN_PKG, { ifMatch: live });
+    expect(await guard.save('object', 'acme_task', { label: 'mine' }, { mode: 'draft', packageId: PIN_PKG })).toBe('saved');
+    // The Save's own receipt, read right after its save, never a re-read.
+    const draftVersion = heldDraftVersionOf(guard)('object', 'acme_task', PIN_PKG);
+    expect(draftVersion).toEqual(expect.any(String));
+    const publish = () => guard.publish(door.client as never, 'object', 'acme_task', { packageId: PIN_PKG, draftVersion });
+    return { door, guard, ask, publish, draftVersion };
+  }
+
+  it("PIN: another writer's draft write before the publish is refused, nothing is asked, and the refusal is marked the draft's", async () => {
+    const { door, ask, publish } = await savedBuffer();
+    door.interleave('object', 'acme_task', PIN_PKG, { label: 'theirs' });
+    const err = await publish().catch((e: unknown) => e);
+    expect(isDraftVersionConflict(err)).toBe(true);
+    expect(isPublishDraftMoved(err)).toBe(true);
+    // Not a live change: the published-row dialog is not opened for it.
+    expect(ask).not.toHaveBeenCalled();
+    expect(door.liveOf('object', 'acme_task', PIN_PKG)).toEqual({ label: 'live' });
+    expect(door.draftOf('object', 'acme_task', PIN_PKG)).toEqual({ label: 'theirs' });
+  });
+
+  it('the published row moved and the draft did not: still asked as a live change (rule 8), never marked the draft\'s', async () => {
+    const { door, ask, publish } = await savedBuffer('cancel');
+    door.seedLive('object', 'acme_task', PIN_PKG, { label: 'published since' });
+    const err = await publish().catch((e: unknown) => e);
+    expect(ask).toHaveBeenCalledWith({ type: 'object', name: 'acme_task', layer: 'published' });
+    expect(isPublishDraftMoved(err)).toBe(false);
+    expect(isPublishConflictKeptEditing(err)).toBe(true);
+    expect(door.draftOf('object', 'acme_task', PIN_PKG)).toEqual({ label: 'mine' });
+  });
+
+  it("an overwrite after a live change keeps the draft pin: the buffer's own draft goes live over the moved row", async () => {
+    const { door, publish, draftVersion } = await savedBuffer('overwrite');
+    door.seedLive('object', 'acme_task', PIN_PKG, { label: 'published since' });
+    expect(await publish()).toBe('published');
+    expect(door.liveOf('object', 'acme_task', PIN_PKG)).toEqual({ label: 'mine' });
+    const sent = door.calls.filter(([c]) => c === 'publish').map(([, , , o]) => o.draftVersion);
+    expect(sent).toEqual([draftVersion, draftVersion]);
+  });
+
+  it('CONTROL: with no write in between, the same pinned publish takes the buffer live', async () => {
+    const { door, ask, publish } = await savedBuffer();
+    expect(await publish()).toBe('published');
+    expect(ask).not.toHaveBeenCalled();
+    expect(door.liveOf('object', 'acme_task', PIN_PKG)).toEqual({ label: 'mine' });
+    expect(door.draftOf('object', 'acme_task', PIN_PKG)).toBeUndefined();
   });
 });

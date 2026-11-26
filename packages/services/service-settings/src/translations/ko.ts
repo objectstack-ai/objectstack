@@ -539,7 +539,7 @@ export const ko: PlatformTranslationData = {
         },
         turso_url: {
           label: '연결 URL',
-          help: '예: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
+          help: '예: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
         },
         turso_auth_token: { label: '인증 토큰', help: '관리형 Turso URL에만 필요합니다.' },
         chunk_target: { label: '목표 청크 크기(자)', help: '지식 서비스가 문서를 나눌 때 구절 하나의 최대 문자 수입니다. 지식 소스 자체에 설정한 크기가 우선하며, 임베딩 모델의 입력 한도에 따라 더 작아질 수 있습니다.' },

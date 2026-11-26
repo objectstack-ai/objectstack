@@ -45,7 +45,7 @@
 
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import type { CustomArrangementKey, ObjectActionLayout } from '@objectstack/spec/data';
-import { isDraftVersionConflict } from './metadata-admin/draftVersionGuard.js';
+import { draftReceiptVersion, isDraftVersionConflict } from './metadata-admin/draftVersionGuard.js';
 import { OBJECT_EXTENSION_TYPE, objectExtensionBodyOf, type ObjectExtensionBody } from './studio-design/customizeOverride.js';
 import type { EnsuredCustomizationPackage, ListedPackageManifest } from './studio-design/packages-io.js';
 
@@ -57,7 +57,7 @@ export interface ExtensionArrangementDoors {
     get: (type: string, name: string, options: { packageId?: string }) => Promise<unknown>;
     layered: (type: string, name: string, options: { packageId?: string }) => Promise<unknown>;
     save: (type: string, name: string, body: unknown, options: Record<string, unknown>) => Promise<unknown>;
-    publish: (type: string, name: string, options: { packageId?: string }) => Promise<unknown>;
+    publish: (type: string, name: string, options: { packageId?: string; draftVersion?: string }) => Promise<unknown>;
     reset: (type: string, name: string, options: Record<string, unknown>) => Promise<unknown>;
   };
   /** Announces the object changed, so the console reads it again. */
@@ -151,21 +151,37 @@ export async function saveObjectExtensionArrangement(
     objectName,
     arrange({ extension, object: storedObjectOf(objectRead) }),
   );
+  let draftVersion: string | undefined;
   try {
-    await doors.client.save(OBJECT_EXTENSION_TYPE, objectName, body, { mode: 'draft', packageId: target, ifNoneMatch: '*' });
+    draftVersion = draftReceiptVersion(
+      await doors.client.save(OBJECT_EXTENSION_TYPE, objectName, body, { mode: 'draft', packageId: target, ifNoneMatch: '*' }),
+    );
   } catch (err) {
     if (isDraftVersionConflict(err)) throw Object.assign(new Error(texts.pendingDraft), { cause: err });
     throw err;
   }
+  // objectstack#37440 — the publish is pinned to the draft this save wrote
+  // (its receipt's version): a draft another writer changed in between is
+  // refused, and nothing is published on their behalf.
+  const pin = draftVersion ? { draftVersion } : {};
   try {
-    await doors.client.publish(OBJECT_EXTENSION_TYPE, objectName, { packageId: target });
+    await doors.client.publish(OBJECT_EXTENSION_TYPE, objectName, { packageId: target, ...pin });
   } catch (err) {
+    // The discard is pinned to the same draft: one that moved holds the
+    // other writer's change, is refused, and stays pending, said as such.
+    let moved = false;
     try {
-      await doors.client.reset(OBJECT_EXTENSION_TYPE, objectName, { state: 'draft', packageId: target });
+      await doors.client.reset(OBJECT_EXTENSION_TYPE, objectName, {
+        state: 'draft',
+        packageId: target,
+        ...(draftVersion ? { ifMatch: draftVersion } : {}),
+      });
     } catch (discardErr) {
-      console.error('[object-extension] a refused publish left the extension draft pending:', discardErr);
+      moved = !!draftVersion && isDraftVersionConflict(discardErr);
+      if (!moved) console.error('[object-extension] a refused publish left the extension draft pending:', discardErr);
     }
     doors.refreshed();
+    if (moved) throw Object.assign(new Error(texts.pendingDraft), { cause: err });
     throw err;
   }
   doors.refreshed();

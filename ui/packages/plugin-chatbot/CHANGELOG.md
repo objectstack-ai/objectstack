@@ -1,5 +1,573 @@
 # @object-ui/plugin-chatbot
 
+## 19.0.0-next.0
+
+### Patch Changes
+
+- c3fb37a: fix(plugin-chatbot): a file over the chat composer's size limit is named to the user with the limit, instead of only reaching `console.warn`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The two widenings are additive: the new key `chatbot.composer.fileTooLarge` in every locale pack `@object-ui/i18n` publishes through `./locales`, and the optional `files` field on the `onError` argument of `PromptInputProps`, exported as `AIElements` from `@object-ui/plugin-chatbot`.
+  
+  A file picked, pasted or dropped into the chat composer that is larger than `maxFileSize` (10 MB by default) used to vanish: it did not attach and nothing told the user why. `ChatbotEnhanced` now shows a notice above the composer naming every refused file and the limit, in the user's language (new pack key `chatbot.composer.fileTooLarge`, in all eleven locales). The notice closes with its close button or on the next send, and a later refusal replaces it.
+  
+  The vendored `PromptInput` now reports every over-size file of a pick through `onError` with `code: 'max_file_size'` and the refused files in the new optional `files` field. Before, it reported only a pick where every file was over the limit; a pick that mixed sizes attached the small files and dropped the large ones with no report. An `onError` handler that ignores `files` sees one more call, for a mixed pick, with the same `code`.
+- 16d3abc: fix(plugin-chatbot): the chat composer's accept list reads the HTML `accept` grammar, so a picked CSV, PDF or spreadsheet attaches, and a file of a refused type is named to the user
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The vendored `PromptInput` compared every `accept` token with the file's MIME type, so the extension tokens of `ChatbotEnhanced`'s default list (`.pdf`, `.csv`, `.xlsx`, …) never matched: a picked CSV or PDF did not attach, and the refusal reached only `console.warn`. A token is now read the way the file picker reads it: `.ext` matches the end of the file name, `type/*` matches the MIME prefix, any other token matches the MIME type exactly, all case-insensitive.
+  
+  A file that still fails is shown to the user: `ChatbotEnhanced` names it, with the accepted list, in the same notice above the composer that names an over-size file, in the user's language (the existing pack sentence `fields.file.typeNotAccepted`; no new key). When one pick refuses files for type and for size, the notice names both.
+  
+  `PromptInput` now reports every type-refused file of a pick through `onError` with `code: 'accept'` and the refused files in `files`. Before, it reported only a pick where every file was refused, without `files`; a pick that mixed types attached the matching files and dropped the rest with no report. An `onError` handler that ignores `files` sees one more call, for a mixed pick, with the same `code`.
+- 83a79e6: fix(app-shell, plugin-chatbot): the AI panel in an app has one title row, and its composer reads cleanly
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console's AI drawer title bar is one row: History, a 「···」 menu and a 「×」 Close. The menu holds the AI usage reading (with its upgrade or top-up entry when the pool runs low), Share, Expand / Restore side panel, and the Build Doctor. The Build Doctor is listed only for a user who may build (`manage_metadata`, the reading that already decides who gets the build composer). While the usage pool is running low or full, the 「···」 trigger carries a marker. The close button is the drawer 「×」, named Close, in both the side panel and the full window; closing still keeps the conversation for the next open. The phone sheet gets the same menu, without Expand.
+  
+  The pane row under the title keeps the agent label and the app chip, but no longer draws Share or the Build Doctor in the drawer. `ChatPane` gains `actionsInHost` for a host that offers them itself. The full-page chat and the Studio copilot are unchanged.
+  
+  In the composer:
+  
+  - the 「正在看」 chip sits on the input's top edge, inside its frame;
+  - the closed model picker shows the model's label alone, truncated, with the full label on its title (no provider, no `×N`). The list rows keep both;
+  - the 「↵ 发送 · Shift+↵ 换行」 hint stays on one line;
+  - the 「+」 attachment button and its menu item are named "Add attachment" (「添加附件」).
+  
+  An answer table's copy and download tools are named in the reader's language (「复制表格」, 「下载表格」 and their format variants) instead of streamdown's English defaults.
+  
+  New locale keys, in every pack: `console.ai.dock.close`, `console.ai.dock.more`, `chatbot.composer.addAttachment`, `chatbot.answer.copyTable`, `copyTableAsMarkdown`, `copyTableAsCsv`, `copyTableAsTsv`, `downloadTable`, `downloadTableAsCsv`, `downloadTableAsMarkdown`. The drawer no longer reads `console.ai.dock.collapse`.
+- 94fb8db: fix(plugin-chatbot): the AI approvals inbox is usable on a phone
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  At phone width the AI approvals inbox drew its desktop table, whose fixed columns are far wider than the screen: Approve, Reject and View sat off-screen in a sideways scroller, and the first thing a row said was the internal tool name. Below the `md` breakpoint each pending action is now a stacked card that leads with the action, shows the object, the tool name and the time as its second line, and keeps Approve, Reject and View inside the card on 44 px buttons that wrap. From `md` up the table is unchanged.
+  
+  The detail drawer takes the full width below `sm` (it was three quarters of the screen, and its Reject button ran past the right edge at 390 px), its decision buttons wrap instead of overflowing, and a long action or tool name in its title wraps instead of pushing the drawer sideways. From `sm` up it keeps its 560 px cap.
+  
+  No props, exports or locale keys change; the component needs nothing from its host for this.
+- c8e9bec: feat(spec, plugin-chatbot): an AI model entry may carry its tier name, and the closed model picker shows it alone
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  - **`AiModelsResponseSchema`** (`@objectstack/spec`): the model entry gains an optional `tierLabel`, a non-empty string naming the model's tier alone (for example `Fast`), in the language the response is served in. Nothing is removed or narrowed; the bare-string model entry stays, and an entry without `tierLabel` parses as before.
+  - **The closed model picker** (`@object-ui/plugin-chatbot`, so the full-page AI chat, the console chat dock and the Studio copilot): when the model in force carries a `tierLabel`, the closed picker reads that tier name only, instead of the longer `label` that may also name the model (`Fast · Claude Haiku 5.5`). The full `label` stays the picker's tooltip and the text of its row in the open list, where the choice is made. A model without one shows its `label`, as before. `ChatbotModelOption` gains the optional `tierLabel`, and `useAiModels` keeps a served `tierLabel` only when it is a non-empty string.
+  - The tier name is filled by the AI service that answers `GET /api/v1/ai/models` (cloud `service-ai`); until it does, the picker looks as it does today.
+- 3f568c1: fix(studio): Studio's Interfaces column is retired; its old links land on the Studio home and its Changes links open from the Data pillar
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack#36502. Menus, header actions, list views, dashboards, reports and record pages are designed in the running app. Studio keeps Data, Automations, Access and All metadata, and every view, dashboard, report and page stays readable and editable as metadata on its All-metadata item page. No metadata type, key or stored shape changes.
+  
+  - **Old links still open.** `/studio/<package>/interfaces`, with or without a `?surface=` deep link, lands on the package's Data pillar and says once, there, "Interface edits have moved into the app" (「界面的修改已经搬到应用里」) with a link back to the app. A `?changes=review` request travels with it.
+  - **`@objectstack/runtime`, `@objectstack/cli`.** The review link the MCP authoring tools and `os meta register --draft` print is `/studio/<package>/data?changes=review` (it was `/studio/<package>/interfaces?changes=review`, which still works through the redirect).
+  - **`@object-ui/i18n`.** Adds `engine.studio.interfacesRetired.sentence`, `.backToApp` and `.dismiss` (en, zh).
+  - **`@object-ui/plugin-chatbot`.** The `onDesignBuiltApp` doc example names the Data route.
+  - The console's "Edit in Studio" links for a dashboard, page, report or view open its All-metadata item page.
+  - **Customize moves with them.** On a read-only base, a view, dashboard, report or page is customized on its All-metadata item page, in the type's designer, into the base's pair (`<base>.custom`), with the override mark and "Restore package original" as before. It was the Interfaces column's header.
+- 23d61fa: fix(plugin-markdown): bold that ends in full-width punctuation renders bold before a CJK letter
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The markdown renderer the console's manual reader uses (`@object-ui/plugin-markdown`) left a `**bold**` run as literal asterisks when the run ended in full-width punctuation and a CJK letter followed it, as in `**解决耗时（小时）**会被清空`, `**每个项目一张报销单。**每个项目` or `**它跳过和拒绝什么：**已经`. CommonMark counts full-width punctuation as punctuation, so such a closer is not right-flanking; a Chinese or Japanese sentence puts no space there.
+  
+  The renderer now runs `remark-cjk-friendly` (its `parseOnly` entry, a new MIT dependency at `^2.3.4`) ahead of remark-gfm, the rule the chat surface already runs. It reads a CJK character beside a `**` run the way it reads the whitespace an English sentence would have there. ASCII emphasis, code spans, backslash escapes, GFM tables and GitHub-style alerts render as before, and the output still passes the same sanitize schema.
+  
+  `@object-ui/plugin-chatbot` changes a comment only: its CJK rule now names the renderer's copy, since neither package depends on the other and each imports the plugin itself. No props or exports change in either package; nothing to migrate.
+- 06c1f54: feat(console): a chat conversation can be pinned to one record — sent as `context.focus` on every turn, shown as a chip in the composer, kept across navigation — where the agent declares `capabilities.focus`
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  **Contract (`@objectstack/spec`).** `ToolExecutionContext` gains `focus?: { object: string; id: string }[]`, beside `surfaceContext`: the record(s) the conversation is pinned to, as the client reports them on every turn. Client-reported and advisory, never an access decision; a consumer re-reads the record as the caller. At most one entry in phase 1. The agent catalog row (`AiAgentCapabilitiesSchema`, `GET /api/v1/ai/agents`) gains an optional `capabilities.focus: boolean`: an agent that honours the focus says so, and an absent flag reads as false. Both are additions; nothing is removed or renamed, and every catalog row served before the flag still parses.
+  
+  **Console (`@object-ui/app-shell`, `@object-ui/plugin-chatbot`, `@object-ui/i18n`).** Where the agent the chat runs declares `capabilities.focus: true`:
+  
+  - The composer's page chip is drawn in the row above the input (where the drafts line sits) instead of on the input's top edge, and carries a pin when the page shows one record (a record page, or a record open in a list's drawer). Pinning makes every later turn send `context.focus: [{ object, id }]`, the first turn of a new conversation included, until the user removes it with the chip's remove control.
+  - The pinned record's chip replaces the page chip and names the record by its display name, read in the browser as the user; a record the user cannot read keeps its `object · id` pair.
+  - Opening another record while one is pinned asks once whether to ask about that one instead; a decline is remembered for the conversation.
+  - The focus belongs to the conversation: it never changes which conversation the drawer shows, and it is restored when that conversation is shown again in the same tab.
+  - `setChatFocus({ object, id })` (exported from `@object-ui/app-shell`) is the setter every entry point pins through.
+  
+  Where the agent does not declare the flag — every server today — nothing changes: no pin, no chip, no `focus` key in the request, and the page chip stays where it was. `AgentCapabilities` in `@object-ui/plugin-chatbot` gains `focus`, read from the catalog; unlike the build-era capabilities it has no name-based fallback for older servers. New locale keys `console.ai.focus.pin`, `.pinned`, `.remove`, `.switchPrompt`, `.switchAccept` and `.switchDecline`, in every pack.
+- 5f34d65: fix(plugin-chatbot): the agent list, the model picker, the pending-approvals inbox and in-chat approvals send through the host's authenticated fetch, so a session held by its sign-in token alone sees its agents and can approve
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `useAgents`, `useAiModels`, `usePendingActions` and `useHitlInChat` asked the AI service with the session cookie only. A session held by its sign-in (bearer) token alone on the console's own origin (for example, a session cookie the browser blocked as third-party) was refused there: no agents, no models, an empty approvals inbox, and an in-chat approval that failed. They now send through the host's authenticated fetch, the `apiFetch` a host hands `SchemaRendererProvider` (the console's sends the stored token), as the renderers' own reads already do. The session cookie is still sent, a cookie session behaves exactly as before, and in the console a refused request now reaches its session-ended check. A host that mounts no provider keeps the plain `fetch`, as before. Where a host points these requests at another origin (an AI service or server URL configured off the page's origin), the host's fetch still sends them without the token; that layout is not fixed here. The hooks' options are unchanged in shape; in the console, a stored token now takes precedence over an `Authorization` passed in `headers`, and the host's tenant and language headers ride these requests too.
+- 276174a: feat(chatbot): when an answer carries a verified record-citations part, the console draws it as chips, and a chip opens the record at the cited section
+  
+  Clause-②: yes (a new reserved URL parameter `section`)
+  Metadata-protocol: none
+  
+  When an assistant answer carries a `data-record-citations` part (ADR-0160 D9), the console draws it: the part, read through `@objectstack/spec/ai`'s `RecordCitationsSchema`, becomes one chip per citation beside the "How this was computed" block, each showing the quoted passage (`extractRecordCitations` in `@object-ui/plugin-chatbot`, `RecordCitations`). The chips draw the part as it arrives and verify nothing again on display. A part the schema refuses draws nothing. Nothing in this release emits the part yet, and a conversation reloaded from history does not redraw it yet: the chips appear on a live answer whose stream carries the part.
+  
+  A chip calls the chat's `onOpenRecord` with the citation's `object` and `id` (the context pack's root record, also when the passage came from a related-list row) and its `anchor`; `onOpenRecord`'s argument gains an optional `anchor`. The console's assistant (the `/ai` page and the dock) opens `/apps/APP/OBJECT/record/ID?section=ANCHOR`.
+  
+  `section` is a new reserved console URL parameter (`RECORD_SECTION_PARAM`, listed in `RESERVED_URL_PARAMS`). The record page reads it: the spec's `headingsOf` runs on each long-text field of the record (`markdown`, `html`, `richtext`, `textarea`), the first field whose outline issues the anchor is the body, and its heading is scrolled to and marked; opening another section moves the mark, and the same chip clicked again opens the section again. A `textarea` body, a heading the field does not draw, or a body that draws a different number of headings of that title than its outline lists, opens at the field; an anchor no heading issues any more opens the record at its top. A record detail row now carries `data-detail-field` with the field's name, which is how the page finds the field.
+  
+  The record-link grammar in answers is unchanged: a fragment or a query string is still refused.
+- ebe35f4: fix(chatbot): an answer's record-citation chips are drawn again after a reload or when a conversation is reopened, and a navigation on the cited record no longer scrolls back to the cited heading
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The history rebuild of the `/ai` page, the console's browser-side message cache and the `useObjectChat` store rebuild kept only an answer's charts, so a persisted `data-record-citations` part was not drawn again after a reload. All three now keep the data parts named by one allow-list, `STORED_ANSWER_DATA_PARTS` (charts and record citations), written by `storedAnswerParts` and read back by `storedAnswerData`. `@object-ui/plugin-chatbot` exports five new names: `storedAnswerParts`, `STORED_ANSWER_DATA_PARTS` and the types `StoredAnswerData` and `StoredAnswerPart` from the package root and from `@object-ui/plugin-chatbot/core`, and `storedAnswerData` from the package root. The citations list comes back as it was persisted: it is read through the same `RecordCitationsSchema` parse as a live part, so a list the schema refuses still draws nothing, and nothing is verified again.
+  
+  A record opened from a chip (`?section=ANCHOR`) scrolls to the cited heading once per click. A navigation that drops the history state, such as the command palette or a record form opened over the page and closed with Back, no longer counts as a new click, so the page stays where the reader scrolled it.
+- e8740c5: fix(plugin-chatbot): the AI quota notice offers an upgrade only when the refusal names one
+  
+  Clause-②: yes (widening) — one new published language-pack key, `chatbotQuota.limitTitle`, in every locale
+  Metadata-protocol: none
+  
+  - The composer's AI quota notice and the confirm card's blocked state now read the 429's `upgrade` / `topUp` flags. `upgrade: true` keeps the "Upgrade needed" title and the "Upgrade plan" action; `topUp: true` shows a neutral "AI limit reached" title and the "Buy a credit pack" action; a refusal with neither (a paid plan's five-hour limit, a developer organization) shows "AI limit reached", the server's sentence about when it frees up, and no action. Before, every refusal was titled "Upgrade needed" and offered "Upgrade plan" unless `topUp` was set, so a paying team at its five-hour limit was told to upgrade.
+  - New locale key `chatbotQuota.limitTitle` in every `@object-ui/i18n` locale.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [52a2398]
+- Updated dependencies [a0b4ecf]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [c3fb37a]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [8e46424]
+- Updated dependencies [8896822]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [dc53d4a]
+- Updated dependencies [0739dee]
+- Updated dependencies [ad15579]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [eed422e]
+- Updated dependencies [2df9691]
+- Updated dependencies [bfd6b6b]
+- Updated dependencies [55020c3]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [6f2bd4f]
+- Updated dependencies [99a0e4f]
+- Updated dependencies [9f352e8]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [fd471d3]
+- Updated dependencies [1b2cd80]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [7702f09]
+- Updated dependencies [05e0eb8]
+- Updated dependencies [b863d2b]
+- Updated dependencies [c890070]
+- Updated dependencies [e75a528]
+- Updated dependencies [5bd7257]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [58d00db]
+- Updated dependencies [3819afe]
+- Updated dependencies [61722e9]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [3d6dea2]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [285ad8d]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [6a35635]
+- Updated dependencies [9212119]
+- Updated dependencies [cda16d4]
+- Updated dependencies [9b3227f]
+- Updated dependencies [fe75349]
+- Updated dependencies [f4de1de]
+- Updated dependencies [dab4712]
+- Updated dependencies [141a826]
+- Updated dependencies [8145424]
+- Updated dependencies [53c9575]
+- Updated dependencies [83a79e6]
+- Updated dependencies [dda665f]
+- Updated dependencies [98b3f87]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [ccded86]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [e01b8be]
+- Updated dependencies [238661f]
+- Updated dependencies [d96c878]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [72d19c4]
+- Updated dependencies [b0c624a]
+- Updated dependencies [9b6db73]
+- Updated dependencies [1e018d6]
+- Updated dependencies [6d86b43]
+- Updated dependencies [bae933b]
+- Updated dependencies [a3a74f2]
+- Updated dependencies [f98f18c]
+- Updated dependencies [74d3d83]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [227a16a]
+- Updated dependencies [de25d58]
+- Updated dependencies [598a34d]
+- Updated dependencies [0585797]
+- Updated dependencies [811858c]
+- Updated dependencies [fac1e7d]
+- Updated dependencies [4609c48]
+- Updated dependencies [8500ee7]
+- Updated dependencies [a6607c7]
+- Updated dependencies [c00be39]
+- Updated dependencies [1c87956]
+- Updated dependencies [5345905]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [f909734]
+- Updated dependencies [cedc094]
+- Updated dependencies [c9b0a23]
+- Updated dependencies [f51578e]
+- Updated dependencies [6b360ab]
+- Updated dependencies [c7174c3]
+- Updated dependencies [78f7160]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [1d7015a]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [7de1bad]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [dea68e9]
+- Updated dependencies [b113178]
+- Updated dependencies [138faaa]
+- Updated dependencies [411fe24]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [48c732c]
+- Updated dependencies [52fb30c]
+- Updated dependencies [8807dcb]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [9ed18a5]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [c261a7c]
+- Updated dependencies [76cb366]
+- Updated dependencies [32409a9]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [9f6f306]
+- Updated dependencies [c757e07]
+- Updated dependencies [a5a5312]
+- Updated dependencies [c1b35c3]
+- Updated dependencies [9a98a46]
+- Updated dependencies [8c8ff0f]
+- Updated dependencies [27e414b]
+- Updated dependencies [eb53d63]
+- Updated dependencies [dda5e74]
+- Updated dependencies [f2a990b]
+- Updated dependencies [035a12c]
+- Updated dependencies [33d0169]
+- Updated dependencies [a23164e]
+- Updated dependencies [f3d0a9f]
+- Updated dependencies [8aed508]
+- Updated dependencies [a60740a]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [43580a3]
+- Updated dependencies [cc05e60]
+- Updated dependencies [dc10b3b]
+- Updated dependencies [dca608a]
+- Updated dependencies [baf2678]
+- Updated dependencies [13d1e95]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [3ae62ac]
+- Updated dependencies [6c7c6db]
+- Updated dependencies [eebb893]
+- Updated dependencies [493ad09]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [3543b51]
+- Updated dependencies [4ab2c82]
+- Updated dependencies [04f9861]
+- Updated dependencies [c30ce97]
+- Updated dependencies [e605773]
+- Updated dependencies [0628e08]
+- Updated dependencies [713545f]
+- Updated dependencies [cbd582f]
+- Updated dependencies [031325d]
+- Updated dependencies [1705ec9]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [a2dc858]
+- Updated dependencies [a6756a2]
+- Updated dependencies [b3bcfef]
+- Updated dependencies [aad35e6]
+- Updated dependencies [0b2118f]
+- Updated dependencies [ad65d82]
+- Updated dependencies [71e02ff]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [5e8e243]
+- Updated dependencies [4099ef2]
+- Updated dependencies [6a73185]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [740720c]
+- Updated dependencies [6e643cc]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [96b7975]
+- Updated dependencies [e8b494a]
+- Updated dependencies [bbc7e03]
+- Updated dependencies [27895d7]
+- Updated dependencies [543585d]
+- Updated dependencies [7e89bc6]
+- Updated dependencies [70194ff]
+- Updated dependencies [42e4096]
+- Updated dependencies [a10422d]
+- Updated dependencies [1a2a8a9]
+- Updated dependencies [f2ef7d8]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [ff60149]
+- Updated dependencies [ee651ce]
+- Updated dependencies [dad9b55]
+- Updated dependencies [d076975]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [8a741ab]
+- Updated dependencies [60e79ed]
+- Updated dependencies [3cf6a44]
+- Updated dependencies [5fecc22]
+- Updated dependencies [595844b]
+- Updated dependencies [6cfa758]
+- Updated dependencies [4f19091]
+- Updated dependencies [e377918]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [9c283a1]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [ad50d61]
+- Updated dependencies [f26469a]
+- Updated dependencies [7501d0c]
+- Updated dependencies [4ef1ea9]
+- Updated dependencies [41dd132]
+- Updated dependencies [45ef94e]
+- Updated dependencies [d7411fa]
+- Updated dependencies [c6075a7]
+- Updated dependencies [cd51dbb]
+- Updated dependencies [3f568c1]
+- Updated dependencies [573a376]
+- Updated dependencies [5c2d5cf]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [43916f3]
+- Updated dependencies [f590f3e]
+- Updated dependencies [9fa05c6]
+- Updated dependencies [ed0edb1]
+- Updated dependencies [a10987a]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [f77d078]
+- Updated dependencies [1948c5f]
+- Updated dependencies [0e83fe0]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [368deee]
+- Updated dependencies [8644ce7]
+- Updated dependencies [0d6589d]
+- Updated dependencies [c54aa57]
+- Updated dependencies [53257a5]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [e0050ba]
+- Updated dependencies [14f4d8f]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [183ed23]
+- Updated dependencies [08bf7d2]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [4d4ec16]
+- Updated dependencies [d763ee7]
+- Updated dependencies [8018e00]
+- Updated dependencies [844218f]
+- Updated dependencies [8cce05b]
+- Updated dependencies [0d727b7]
+- Updated dependencies [ff0d1f1]
+- Updated dependencies [021524c]
+- Updated dependencies [4f7d6f7]
+- Updated dependencies [b848b47]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [0819cab]
+- Updated dependencies [c8d4b90]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [8695703]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [49c6bf3]
+- Updated dependencies [4ed453d]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [00dd362]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [bac4864]
+- Updated dependencies [8c29b81]
+- Updated dependencies [a68b475]
+- Updated dependencies [c75453e]
+- Updated dependencies [1e96009]
+- Updated dependencies [4fb03eb]
+- Updated dependencies [ff04943]
+- Updated dependencies [ab91323]
+- Updated dependencies [fbb62e1]
+- Updated dependencies [5078f2f]
+- Updated dependencies [57445a6]
+- Updated dependencies [01967c3]
+- Updated dependencies [0212714]
+- Updated dependencies [5078f2f]
+- Updated dependencies [1f3e9f6]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [305fe60]
+- Updated dependencies [227e952]
+- Updated dependencies [e91149e]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [c0dd417]
+- Updated dependencies [0439a04]
+- Updated dependencies [517e415]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [6ddb97b]
+- Updated dependencies [2af9729]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [f339060]
+- Updated dependencies [40914bd]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [6161010]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [8316d3d]
+- Updated dependencies [da50177]
+- Updated dependencies [6cc6177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [5cf9941]
+- Updated dependencies [5f34d65]
+- Updated dependencies [8fe4eaf]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [84a27e7]
+- Updated dependencies [7939732]
+- Updated dependencies [c94191d]
+- Updated dependencies [dbc1765]
+- Updated dependencies [ebac615]
+- Updated dependencies [2d18ba8]
+- Updated dependencies [c2f8bff]
+- Updated dependencies [98b17fe]
+- Updated dependencies [68b2430]
+- Updated dependencies [bbb4ad3]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [276174a]
+- Updated dependencies [c385d3b]
+- Updated dependencies [2776e88]
+- Updated dependencies [061e342]
+- Updated dependencies [083e040]
+- Updated dependencies [da7c559]
+- Updated dependencies [e8740c5]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [3aa008d]
+- Updated dependencies [7d3b8d6]
+- Updated dependencies [15f8357]
+- Updated dependencies [378c955]
+- Updated dependencies [56fa31b]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [39e9a82]
+- Updated dependencies [9c5fb3e]
+- Updated dependencies [abb5449]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @object-ui/i18n@19.0.0-next.0
+  - @object-ui/types@19.0.0-next.0
+  - @object-ui/core@19.0.0-next.0
+  - @object-ui/components@19.0.0-next.0
+  - @object-ui/react@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

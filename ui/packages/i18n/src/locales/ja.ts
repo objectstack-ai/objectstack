@@ -2143,7 +2143,7 @@ const ja = {
   },
   console: {
     studio: {
-      title: "Studio",
+      title: "App Studio",
       accessRequired: "Studio を開くには Studio へのアクセス権限が必要です。管理者が「設定 → 権限セットの割り当て」で権限セットを使って付与できます。",
     },
     saveAdvisoryTitle: "保存しました — 編集チェックで {{count}} 件の推奨事項が見つかりました",
@@ -3732,11 +3732,11 @@ const ja = {
       tooltip: "このプラットフォームはプレビュー版です — 機能は変更される可能性があります。",
     },
     aiAssistant: "AI アシスタント",
-    designInStudio: "Studio でデザイン",
+    designInStudio: "App Studio でデザイン",
     designLayout: "レイアウトをデザイン",
     editApp: "アプリを編集",
-    openAppInStudio: "Studio で {{app}} を表示",
-    viewInStudio: "Studio で表示",
+    openAppInStudio: "App Studio で {{app}} を表示",
+    viewInStudio: "App Studio で表示",
   },
   home: {
     build: {
@@ -3876,8 +3876,8 @@ const ja = {
       backToAppHome: "アプリのメニューに戻る",
       appsAvailable: "{{count}} 個のアプリが利用可能",
       allApps: "すべてのアプリ",
-      editAppInStudio: "Studio で {{app}} を編集",
-      openAppInStudio: "Studio で {{app}} を表示",
+      editAppInStudio: "App Studio で {{app}} を編集",
+      openAppInStudio: "App Studio で {{app}} を表示",
       backToHome: "アプリのスタートページに戻る",
       settings: "システム設定",
       productHome: "{{product}} ホーム",

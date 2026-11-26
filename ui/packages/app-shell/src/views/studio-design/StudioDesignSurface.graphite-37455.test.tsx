@@ -19,6 +19,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
@@ -78,6 +81,7 @@ import '@objectstack/lint';
 import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { STUDIO_ACCENT, STUDIO_ACCENT_HSL } from './studio-tokens';
+import { useStudioAccentOnBody } from './studioAccent';
 import { COMMAND_PALETTE_TESTID } from '../../context/CommandPaletteProvider';
 
 const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
@@ -190,5 +194,121 @@ describe('a non-default app theme does not tint Studio (objectstack#37455)', () 
     for (const cls of ACCENT_CLASSES) expect(document.body).not.toHaveClass(cls);
     expect(document.body).not.toHaveAttribute('data-studio-accent');
     expect(document.documentElement.style.getPropertyValue('--primary')).toBe(primary);
+  });
+});
+
+/** A component that holds Studio's accent on body while it is mounted, as each surface does. */
+function AccentHolder(): null {
+  useStudioAccentOnBody();
+  return null;
+}
+
+// objectstack#37520 (N1) — the accent is counted: two surfaces mounted at once
+// (a route swap, StrictMode's second setup, a portalled second surface) hold
+// it together, and it leaves body only with the last. A plain add / remove
+// would strip it from under the surface still mounted.
+describe('the accent on body is counted across surfaces (objectstack#37520)', () => {
+  function Pair({ first, second }: { first: boolean; second: boolean }): React.ReactElement {
+    return (
+      <>
+        {first && <AccentHolder />}
+        {second && <AccentHolder />}
+      </>
+    );
+  }
+
+  it('two mounted, one unmounted: body keeps the accent; the last unmounted takes it off', () => {
+    const { rerender } = render(<Pair first second />);
+    expect(carriesAccent(document.body)).toBe(true);
+    expect(document.body).toHaveAttribute('data-studio-accent');
+
+    rerender(<Pair first={false} second />);
+    expect(carriesAccent(document.body)).toBe(true);
+    expect(document.body).toHaveAttribute('data-studio-accent');
+
+    rerender(<Pair first={false} second={false} />);
+    for (const cls of ACCENT_CLASSES) expect(document.body).not.toHaveClass(cls);
+    expect(document.body).not.toHaveAttribute('data-studio-accent');
+  });
+
+  it('CONTROL: one mounted and unmounted leaves body as it found it', () => {
+    const { unmount } = render(<AccentHolder />);
+    expect(carriesAccent(document.body)).toBe(true);
+    unmount();
+    for (const cls of ACCENT_CLASSES) expect(document.body).not.toHaveClass(cls);
+    expect(document.body).not.toHaveAttribute('data-studio-accent');
+  });
+});
+
+/**
+ * Tailwind's `dark:` variant as the app shell's stylesheet binds it: the
+ * selector a node must match for its `dark:` classes to apply.
+ */
+const HERE = dirname(fileURLToPath(import.meta.url));
+const DARK_VARIANT = (() => {
+  const css = readFileSync(resolve(HERE, '../../styles.css'), 'utf8');
+  const m = /@custom-variant dark \(&(:where\([^)]*\))\);/.exec(css);
+  if (!m) throw new Error('styles.css binds no `dark:` variant this pin can read');
+  return m[1];
+})();
+
+/**
+ * Whether `node` matches the variant: `:where(a, b)` matches when any of its
+ * selectors does. Read one by one, because the DOM under test does not match
+ * a descendant combinator inside `:where()` (measured: `.dark *` matches body,
+ * `:where(.dark, .dark *)` does not).
+ */
+function matchesDarkVariant(node: Element): boolean {
+  const list = /^:where\((.*)\)$/.exec(DARK_VARIANT)?.[1] ?? '';
+  return list.split(',').some((selector) => node.matches(selector.trim()));
+}
+
+/** The accent's dark declarations, as classes: `dark:[--primary:220_9%_83%]` and the rest. */
+const DARK_ACCENT_CLASSES = ACCENT_CLASSES.filter((cls) => cls.startsWith('dark:'));
+const darkClass = (token: string, hsl: string) => `dark:[${token}:${hsl.replace(/ /g, '_')}]`;
+
+// objectstack#37520 (N4) — dark mode, as far as the DOM can say it: jsdom
+// computes no Tailwind, so the dark values are not read here (the PR's Chromium
+// readings carry them, `studio-tokens.test.ts` holds the class string to the
+// constants). What is pinned is the scope: under the app's dark theme (the
+// `dark` class on the page root), the nodes that carry the accent, the
+// surface's root and body, both match the `dark:` variant, and both carry its
+// graphite declarations, so a portalled surface reads dark graphite too.
+describe('dark theme: the accent\'s dark declarations apply on the surface root and on body (objectstack#37520)', () => {
+  afterEach(() => {
+    document.documentElement.classList.remove('dark');
+  });
+
+  it('the dark variant binds to a `dark` class above the node', () => {
+    expect(DARK_VARIANT).toBe(':where(.dark, .dark *)');
+    expect(DARK_ACCENT_CLASSES.length).toBeGreaterThan(0);
+  });
+
+  it('under the dark theme, the surface root and body match the variant and carry dark graphite', async () => {
+    document.documentElement.classList.add('dark');
+    render(<BrandedApp studio />);
+    // objectstack#37456 — no top bar: the left column's top-left is the anchor inside the surface root.
+    const topLeft = await screen.findByTestId('studio-top-left');
+    const studioRoot = topLeft.closest(ACCENT_SCOPE) as Element;
+    expect(studioRoot).not.toBeNull();
+    expect(document.documentElement).toHaveClass('dark');
+    for (const node of [studioRoot, document.body]) {
+      expect(matchesDarkVariant(node)).toBe(true);
+      for (const cls of DARK_ACCENT_CLASSES) expect(node).toHaveClass(cls);
+      expect(node).toHaveClass(darkClass('--primary', STUDIO_ACCENT_HSL.dark));
+      expect(node).toHaveClass(darkClass('--ring', STUDIO_ACCENT_HSL.dark));
+    }
+  });
+
+  it('CONTROL: under the light theme neither matches the variant, so the dark declarations do not apply', async () => {
+    render(<BrandedApp studio />);
+    // objectstack#37456 — no top bar: the left column's top-left is the anchor inside the surface root.
+    const topLeft = await screen.findByTestId('studio-top-left');
+    const studioRoot = topLeft.closest(ACCENT_SCOPE) as Element;
+    expect(matchesDarkVariant(studioRoot)).toBe(false);
+    expect(matchesDarkVariant(document.body)).toBe(false);
+    // The accent still sits on both: only its light declarations apply.
+    expect(carriesAccent(studioRoot)).toBe(true);
+    expect(carriesAccent(document.body)).toBe(true);
   });
 });

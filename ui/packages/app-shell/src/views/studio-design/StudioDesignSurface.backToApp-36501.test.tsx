@@ -167,6 +167,9 @@ describe('the way back returns to the app page the author came from (objectstack
     const link = await backLink();
     await waitFor(() => expect(link).toHaveAccessibleName(leadsTo('Sales')), { timeout: 8000 });
     expect(within(row()).getAllByRole('button')[0]).toBe(link);
+    // The app is named beside it, and Studio's row carries the brand (objectstack#37566).
+    expect(within(row()).getByTestId('studio-pkg-switcher-name')).toHaveTextContent('Sales');
+    expect(screen.getByTestId('studio-brand-name')).toHaveTextContent(/^App Studio$/);
     fireEvent.click(link);
     expect(await screen.findByTestId('running-app')).toHaveTextContent(`/apps/${OWN}/opportunity?view=open`);
   });
@@ -209,6 +212,7 @@ describe('a package with no app: the switcher names the package and the way back
     // objectstack#36748 — the open package is named, by its label (now the switcher's name).
     await waitFor(() => expect(within(row()).getByTestId('studio-pkg-switcher-name')).toHaveTextContent('Sales'), { timeout: 8000 });
     expect(link).toHaveAccessibleName('Leave Studio and go back to your apps');
+    expect(screen.getByTestId('studio-brand-name')).toHaveTextContent(/^App Studio$/);
     fireEvent.click(link);
     expect(await screen.findByTestId('elsewhere')).toHaveTextContent('/home');
   });

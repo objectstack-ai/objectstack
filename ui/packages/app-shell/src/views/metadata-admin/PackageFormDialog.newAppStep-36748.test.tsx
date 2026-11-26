@@ -275,7 +275,9 @@ describe('PackageFormDialog with a new-app step: one confirm creates the package
       { timeout: 8000 },
     );
     expect(within(row).getByTestId('studio-pkg-switcher-name')).toHaveTextContent('Visits');
-    // The app is live, and the way back opens it.
+    expect(screen.getByTestId('studio-brand-name')).toHaveTextContent(/^App Studio$/);
+    // The app is live: no Create app is offered, and the way back opens it.
+    expect(screen.queryByRole('button', { name: /Create app/ })).toBeNull();
     fireEvent.click(within(row).getByTestId('studio-package-back'));
     expect(await screen.findByTestId('running-app')).toHaveTextContent(`/apps/${packageId}`);
   });
@@ -386,6 +388,7 @@ describe('CreatePackageDialog: ticked creates the package and its app; unticked 
       { timeout: 8000 },
     );
     expect(within(row).getByTestId('studio-pkg-switcher-name')).toHaveTextContent('Visits');
+    expect(screen.getByTestId('studio-brand-name')).toHaveTextContent(/^App Studio$/);
   });
 
   it('unticked: only the package is created, as before', async () => {

@@ -291,7 +291,7 @@ describe('the app bar\'s Edit app follows the owning package\'s posture (objectu
     mountAt(HOTCRM_ROUTE);
     await settle();
     // ADR-0146 D5 — the eye is named for the app: 「Open {app} in Studio」.
-    expect(screen.getByRole('link', { name: 'Open CRM in Studio' })).toHaveAttribute('href', HOTCRM_VIEW);
+    expect(screen.getByRole('link', { name: 'Open CRM in App Studio' })).toHaveAttribute('href', HOTCRM_VIEW);
   });
 
   it('CONTROL — the pencil for a writable package, deep-linked, and the switcher row to the same target', async () => {
@@ -387,7 +387,7 @@ describe('the read-only entry draws WITH its text, named for the app (objectstac
     const entry = screen.getByTestId('app-view-in-studio-button');
     const words = entry.querySelector('[data-slot="view-in-studio-text"]');
     expect(words).not.toBeNull();
-    expect(words).toHaveTextContent(/^Open CRM in Studio$/);
+    expect(words).toHaveTextContent(/^Open CRM in App Studio$/);
     expect(words).not.toHaveClass('sr-only');
     expect(entry.querySelector('svg')).not.toBeNull();
   });

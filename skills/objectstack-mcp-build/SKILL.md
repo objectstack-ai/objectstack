@@ -12,10 +12,10 @@ description: >
   use for metadata written in a project's files (the domain skills cover
   that) or to answer a question from the app's records (objectstack-ask).
 license: Apache-2.0
-compatibility: Requires an environment whose @objectstack/runtime 18.x serves the MCP draft door (none through 18.6.0 does), on a connection granted metadata:write
+compatibility: Requires an environment whose @objectstack/runtime 19.x serves the MCP draft door (none through 18.6.0 does), on a connection granted metadata:write
 metadata:
   author: objectstack-ai
-  version: "18.6.0"
+  version: "19.0.0-next.0"
   domain: process
   tags: mcp, build, draft, save_metadata_draft, verdict, studio, no-project, 草稿
 ---

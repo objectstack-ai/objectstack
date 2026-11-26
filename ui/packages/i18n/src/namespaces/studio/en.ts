@@ -3596,7 +3596,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.backToApp': 'Back to app',
   'engine.studio.backToAppTitle': 'Leave Studio and go back to {app}',
   'engine.studio.backToAppTitleNoApp': 'Leave Studio and go back to your apps',
-  'engine.studio.mark': 'Studio',
+  // The Studio brand (ADR-0084): App Studio; a Chinese interface reads 应用搭建.
+  'engine.studio.mark': 'App Studio',
   // objectstack#37456 — the package row of the top left (ADR-0084, amended
   // 2026-11-26): the way back, then the package switcher. Studio's row reads
   // `engine.studio.mark` for its name.

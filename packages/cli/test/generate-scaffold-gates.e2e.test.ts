@@ -510,7 +510,8 @@ describe('[#32153] a fresh `os init` project: the new generator variants pass ev
     const object = read('src', 'objects', 'ticket.object.ts');
     expect(object).toContain('export const ticket = ObjectSchema.create({');
     expect(object).toMatch(/name: Field\.text\(\{/);
-    expect(object).toContain("fieldGroups: [\n    { key: 'details', label: 'Details' },");
+    expect(object).toContain("fieldGroups: [\n    { key: 'details', label: 'Details', fields: ['name'] },");
+    expect(object).not.toMatch(/^ +group: '/m);
     expect(read('src', 'objects', 'index.ts')).toContain("export { ticket } from './ticket.object';");
   });
 

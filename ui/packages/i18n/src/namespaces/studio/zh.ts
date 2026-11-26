@@ -3178,7 +3178,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.backToApp': '返回应用',
   'engine.studio.backToAppTitle': '离开 Studio，回到 {app}',
   'engine.studio.backToAppTitleNoApp': '离开 Studio，回到你的应用',
-  'engine.studio.mark': 'Studio',
+  'engine.studio.mark': '应用搭建',
   // objectstack#37456 — the package row of the top left (ADR-0084, amended
   // 2026-11-26): the way back, then the package switcher. Studio's row reads
   // `engine.studio.mark` for its name.

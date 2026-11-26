@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-security",
-  "version": "18.6.0",
+  "version": "19.0.0-next.0",
   "license": "Apache-2.0",
   "description": "Security Plugin for ObjectStack — RBAC, RLS, and Field-Level Security Runtime",
   "type": "commonjs",

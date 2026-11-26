@@ -3481,7 +3481,9 @@ export const CreateDataRequestSchema = lazySchema(() => z.object({
  * and `severity` — both members taken from `ValidationAdvisoryEventSchema`
  * (`data/data-engine.zod.ts`), the event the engine reports the hit through,
  * so an event IS an issue and the write and its preview answer in one
- * vocabulary. Declared before the write answers that reference it: a schema
+ * vocabulary. An import's `reference_out_of_scope` cell error additionally
+ * names its `scope`: the row columns the lookup was resolved within (#36794).
+ * Declared before the write answers that reference it: a schema
  * built eagerly (`OS_EAGER_SCHEMAS=1`) would otherwise read it before it exists.
  */
 export const ValidateDataIssueSchema = lazySchema(() => z.object({
@@ -3493,6 +3495,15 @@ export const ValidateDataIssueSchema = lazySchema(() => z.object({
   ),
   severity: ValidationAdvisoryEventSchema.shape.severity.optional().describe(
     'The advisory rule\'s declared severity, `warning` or `info`. Present only on an advisory rule hit.',
+  ),
+  scope: z.array(z.object({
+    field: z.string().describe('API name of the row column that scoped the lookup.'),
+    value: z.string().describe('The cell the row gave that column, as the importer typed it.'),
+  })).optional().describe(
+    'The row columns a scoped lookup cell was resolved within, each with the cell the row gave it, in the '
+    + 'order the refusal names them. Present only on an import cell error whose `code` is '
+    + '`reference_out_of_scope`: the value matches a record, but none within these columns, so a client can '
+    + 'name the scoping column and its cell in its own text instead of parsing `message`.',
   ),
 }));
 
