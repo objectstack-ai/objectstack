@@ -34,10 +34,18 @@ function contextOf(services: Record<string, unknown> = {}) {
   const all = services;
   if (!(KNOWLEDGE_SERVICE in all)) all[KNOWLEDGE_SERVICE] = svc;
   if (!(EMBEDDER_SERVICE in all)) all[EMBEDDER_SERVICE] = new FakeEmbedder();
+  const hooks = new Map<string, Array<() => unknown>>();
+  /** Fire a hook as the kernel does: its handlers in registration order, each awaited. */
+  const fire = async (name: string): Promise<void> => {
+    for (const handler of hooks.get(name) ?? []) await handler();
+  };
   const ctx = {
     getService: (name: string) => {
       if (!(name in all) || all[name] === undefined) throw new Error(`no service ${name}`);
       return all[name];
+    },
+    hook: (name: string, handler: () => unknown) => {
+      hooks.set(name, [...(hooks.get(name) ?? []), handler]);
     },
     logger: {
       info: (m: string) => logs.push(['info', m]),
@@ -46,7 +54,7 @@ function contextOf(services: Record<string, unknown> = {}) {
       error: () => undefined,
     },
   } as unknown as PluginContext;
-  return { ctx, adapters, logs };
+  return { ctx, adapters, logs, fire };
 }
 
 const dirs: string[] = [];
@@ -242,38 +250,93 @@ describe('resolveSettingsStoreUrl', () => {
   });
 });
 
-/** A settings service answering saved `knowledge` values, as `SettingsService.get` resolves them. */
+/**
+ * A settings service answering saved `knowledge` values as `SettingsService.get`
+ * resolves them — and, as the real one does, only once its data engine is
+ * bound: until `bound` is set a saved value reads as the manifest default.
+ */
 function settingsOf(saved: Record<string, string | undefined>, failure?: Error) {
-  return {
+  const settings = {
+    bound: false,
+    reads: 0,
     get: async (namespace: string, key: string) => {
+      settings.reads += 1;
       if (failure) throw failure;
       if (namespace !== 'knowledge') throw Object.assign(new Error('unknown'), { code: 'SETTINGS_UNKNOWN_NAMESPACE' });
-      const value = saved[key];
+      const value = settings.bound ? saved[key] : undefined;
       return value === undefined ? { value: undefined, source: 'default' } : { value, source: 'global' };
     },
   };
+  return settings;
+}
+
+/**
+ * A boot as the kernel runs one: init(), start(), then the settings service's
+ * own `kernel:ready` bind, then `kernel:bootstrapped`.
+ */
+async function boot(
+  plugin: { init(ctx: PluginContext): Promise<void>; start(ctx: PluginContext): Promise<void> },
+  { ctx, fire }: { ctx: PluginContext; fire: (name: string) => Promise<void> },
+  settings?: { bound: boolean },
+): Promise<void> {
+  await plugin.init(ctx);
+  await plugin.start(ctx);
+  if (settings) settings.bound = true;
+  await fire('kernel:bootstrapped');
 }
 
 describe('KnowledgeTursoPlugin — the store URL from settings (urlFromSettings)', () => {
   it('opens the file a saved setting names inside the data directory', async () => {
     const root = tempDir();
     const file = join(dataDirectoryOf(root), 'saved.db');
-    const { ctx, adapters } = contextOf({ settings: settingsOf({ turso_url: `file:${file}` }) });
+    const settings = settingsOf({ turso_url: `file:${file}` });
+    const host = contextOf({ settings });
     const plugin = new KnowledgeTursoPlugin({ projectRoot: root, env: {}, urlFromSettings: true });
-    await plugin.start(ctx);
-    expect(await adapters.get('turso')!.healthCheck!()).toMatchObject({ ok: true });
+    await boot(plugin, host, settings);
+    expect(await host.adapters.get('turso')!.healthCheck!()).toMatchObject({ ok: true });
     expect(existsSync(file)).toBe(true);
     expect(existsSync(join(dataDirectoryOf(root), 'knowledge.db'))).toBe(false);
     await plugin.destroy();
   });
 
+  it('reads the settings at kernel:bootstrapped, never in init() or start(): mounted from start(), open once the boot completes', async () => {
+    const root = tempDir();
+    const file = join(dataDirectoryOf(root), 'saved.db');
+    const settings = settingsOf({ turso_url: `file:${file}` });
+    const { ctx, adapters, logs, fire } = contextOf({ settings });
+    const plugin = new KnowledgeTursoPlugin({ projectRoot: root, env: {}, urlFromSettings: true });
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    // The settings service has not bound its data engine yet: nothing is read,
+    // nothing is opened, and the adapter is mounted and says it is not ready.
+    expect(settings.reads).toBe(0);
+    expect(existsSync(dataDirectoryOf(root))).toBe(false);
+    const pending = adapters.get('turso')!;
+    expect(pending).toBeDefined();
+    const err = await pending
+      .search('x', { source: { id: 's', label: 's', adapter: 'turso', source: { kind: 'object', object: 'o', contentFields: ['b'] } } as never, topK: 1 })
+      .catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    expect(logs).toEqual([]);
+
+    settings.bound = true;
+    await fire('kernel:bootstrapped');
+    expect(settings.reads).toBeGreaterThan(0);
+    expect(await adapters.get('turso')!.healthCheck!()).toMatchObject({ ok: true });
+    expect(existsSync(file)).toBe(true);
+    expect(existsSync(join(dataDirectoryOf(root), 'knowledge.db'))).toBe(false);
+    expect(logs.filter(([level]) => level === 'warn')).toEqual([]);
+    await plugin.destroy();
+  });
+
   it('nothing saved, no knowledge namespace or no settings service: the default file', async () => {
-    for (const services of [{ settings: settingsOf({}) }, { settings: { get: async () => { throw Object.assign(new Error('x'), { code: 'SETTINGS_UNKNOWN_NAMESPACE' }); } } }, {}]) {
+    const unknown = { bound: false, get: async () => { throw Object.assign(new Error('x'), { code: 'SETTINGS_UNKNOWN_NAMESPACE' }); } };
+    for (const settings of [settingsOf({}), unknown, undefined]) {
       const root = tempDir();
-      const { ctx, adapters } = contextOf(services);
+      const host = contextOf(settings === undefined ? {} : { settings });
       const plugin = new KnowledgeTursoPlugin({ projectRoot: root, env: {}, urlFromSettings: true });
-      await plugin.start(ctx);
-      expect(await adapters.get('turso')!.healthCheck!()).toMatchObject({ ok: true });
+      await boot(plugin, host, settings);
+      expect(await host.adapters.get('turso')!.healthCheck!()).toMatchObject({ ok: true });
       expect(existsSync(join(dataDirectoryOf(root), 'knowledge.db'))).toBe(true);
       await plugin.destroy();
     }
@@ -289,30 +352,32 @@ describe('KnowledgeTursoPlugin — the store URL from settings (urlFromSettings)
       [`file:${join(dataDirectoryOf(root), 'k.db')}${String.fromCharCode(0)}x`, 'NUL byte'],
       [`file:${join(tempDir(), 'k.db')}`, 'outside the data directory'],
     ] as const) {
-      const { ctx, adapters, logs } = contextOf({ settings: settingsOf({ turso_url: url }) });
-      await new Fresh({ projectRoot: root, env: {}, urlFromSettings: true }).start(ctx);
-      expect(await adapters.get('turso')!.healthCheck!()).toMatchObject({ ok: false });
-      expect(logs.some(([level, m]) => level === 'warn' && m.includes(reason))).toBe(true);
+      const settings = settingsOf({ turso_url: url });
+      const host = contextOf({ settings });
+      await boot(new Fresh({ projectRoot: root, env: {}, urlFromSettings: true }), host, settings);
+      expect(await host.adapters.get('turso')!.healthCheck!()).toMatchObject({ ok: false });
+      expect(host.logs.some(([level, m]) => level === 'warn' && m.includes(reason))).toBe(true);
     }
     expect(createClient).not.toHaveBeenCalled();
   });
 
   it('a settings read that fails opens nothing: the store says why', async () => {
     const root = tempDir();
-    const { ctx, adapters, logs } = contextOf({ settings: settingsOf({}, new Error('database is locked')) });
-    await new KnowledgeTursoPlugin({ projectRoot: root, env: {}, urlFromSettings: true }).start(ctx);
-    expect(await adapters.get('turso')!.healthCheck!()).toMatchObject({ ok: false });
-    expect(logs.some(([level, m]) => level === 'warn' && m.includes('database is locked'))).toBe(true);
+    const settings = settingsOf({}, new Error('database is locked'));
+    const host = contextOf({ settings });
+    await boot(new KnowledgeTursoPlugin({ projectRoot: root, env: {}, urlFromSettings: true }), host, settings);
+    expect(await host.adapters.get('turso')!.healthCheck!()).toMatchObject({ ok: false });
+    expect(host.logs.some(([level, m]) => level === 'warn' && m.includes('database is locked'))).toBe(true);
     expect(existsSync(join(dataDirectoryOf(root), 'knowledge.db'))).toBe(false);
   });
 
   it('the plugin option `url` wins, and without urlFromSettings the settings are not read', async () => {
     const root = tempDir();
     const read = vi.fn(async () => ({ value: `file:${join(dataDirectoryOf(root), 'saved.db')}`, source: 'global' }));
-    const { ctx, adapters } = contextOf({ settings: { get: read } });
-    await new KnowledgeTursoPlugin({ url: ':memory:', env: {}, urlFromSettings: true, projectRoot: root }).start(ctx);
-    await new KnowledgeTursoPlugin({ projectRoot: root, env: {} }).start(ctx);
+    const host = contextOf({ settings: { get: read } });
+    await boot(new KnowledgeTursoPlugin({ url: ':memory:', env: {}, urlFromSettings: true, projectRoot: root }), host);
+    await boot(new KnowledgeTursoPlugin({ projectRoot: root, env: {} }), host);
     expect(read).not.toHaveBeenCalled();
-    expect(adapters.get('turso')).toBeDefined();
+    expect(host.adapters.get('turso')).toBeDefined();
   });
 });

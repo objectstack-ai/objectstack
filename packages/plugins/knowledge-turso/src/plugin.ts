@@ -59,8 +59,9 @@ export interface KnowledgeTursoPluginOptions {
    * Read the store's URL and auth token from the `knowledge` settings
    * (`turso_url`, `turso_auth_token`) when neither `url` nor `client` is
    * given. A URL read from there is held to the data directory
-   * ({@link resolveSettingsStoreUrl}). The runtime's `knowledge` capability
-   * mount sets it. @default false
+   * ({@link resolveSettingsStoreUrl}). They are read when the boot completes
+   * (`kernel:bootstrapped`), and the store opens then. The runtime's
+   * `knowledge` capability mount sets it. @default false
    */
   urlFromSettings?: boolean;
   /** The project directory the default file and the data directory are under. @default process.cwd() */
@@ -257,6 +258,14 @@ export function resolveSettingsStoreUrl(
   return target.url === undefined ? { reason: target.reason.replace('its `url` option', from) } : { url: target.url, from };
 }
 
+/**
+ * What a store whose URL is the operator's setting says between its start()
+ * and `kernel:bootstrapped`, when it opens: every call answers
+ * `SERVICE_UNAVAILABLE` with this.
+ */
+const SETTINGS_NOT_READ_YET =
+  'Its URL is read from the knowledge settings (`turso_url`) once the boot has completed; until then it opens no database.';
+
 /** A settings service as this plugin reads it: one key's resolved value and the layer it came from. */
 interface StoreSettingsReader {
   get(namespace: string, key: string): Promise<{ value?: unknown; source?: string } | undefined>;
@@ -310,6 +319,11 @@ async function readStoreSettings(
  * `KnowledgeTursoPlugin` — registers a {@link TursoKnowledgeAdapter} with the
  * host's `IKnowledgeService` during `start()`.
  *
+ * Under `urlFromSettings` the adapter registered in `start()` has no database
+ * yet: the saved `knowledge.turso_url` is read, and the database opened, at
+ * `kernel:bootstrapped`, the first moment the settings service answers a
+ * saved value. Until then its calls answer `SERVICE_UNAVAILABLE`.
+ *
  * It opens a libSQL database of its own — by default `knowledge.db` under the
  * project's `.objectstack/data/`, beside the platform's database and never
  * the platform's file — with WAL and a busy timeout on a file. When the
@@ -323,16 +337,13 @@ export class KnowledgeTursoPlugin implements Plugin {
   version = '0.1.0';
   type = 'standard' as const;
   /**
-   * Order-if-present (ADR-0116): start() registers with the knowledge service
-   * and, under `urlFromSettings`, reads the `knowledge` settings, which the
-   * settings service answers from the data engine. Literal ids: the boot-order
-   * gates read this array statically.
+   * Order-if-present (ADR-0116): start() registers with the knowledge service.
+   * No edge to the settings service: under `urlFromSettings` the settings are
+   * read at `kernel:bootstrapped`, and no ordering moves a read in start()
+   * past the settings service's bind (see init()). A literal id: the
+   * boot-order gates read this array statically.
    */
-  optionalDependencies = [
-    'com.objectstack.service.knowledge',
-    'com.objectstack.service.settings',
-    'com.objectstack.engine.objectql',
-  ];
+  optionalDependencies = ['com.objectstack.service.knowledge'];
 
   private readonly opts: KnowledgeTursoPluginOptions;
   private owned?: Client;
@@ -341,49 +352,100 @@ export class KnowledgeTursoPlugin implements Plugin {
     this.opts = opts;
   }
 
-  async init(_ctx: PluginContext): Promise<void> {
-    // No-op: registration happens in start() once IKnowledgeService is up.
+  async init(ctx: PluginContext): Promise<void> {
+    // The adapter registers in start(), once IKnowledgeService is up. A store
+    // whose URL is the operator's setting opens later still: the settings
+    // service answers a saved value only once its data engine is bound, in its
+    // own `kernel:ready` hook, so a read in init() or start() sees the default
+    // while a saved row sits unread (`pnpm check:settings-bind-window`). The
+    // hook is registered here, in init(), so it runs ahead of every
+    // `kernel:bootstrapped` handler a plugin registers in its start(): the
+    // knowledge service's own (its embedder, its reading of unmounted
+    // adapters, a first build) then find the store open.
+    if (!this.opensFromSettings()) return;
+    ctx.hook('kernel:bootstrapped', async () => {
+      await this.openFromSettings(ctx);
+    });
   }
 
   async start(ctx: PluginContext): Promise<void> {
-    let svc: IKnowledgeService | undefined;
-    try {
-      svc = ctx.getService<IKnowledgeService>(KNOWLEDGE_SERVICE);
-    } catch {
+    const svc = this.knowledgeService(ctx);
+    if (!svc) {
       ctx.logger.warn?.('KnowledgeTursoPlugin: IKnowledgeService not registered — install KnowledgeServicePlugin first.');
       return;
     }
-
-    let client: Client | undefined = this.opts.client;
-    let unavailable: string | undefined;
-    let requestTimeoutMs = this.opts.requestTimeoutMs;
-    if (!client) {
-      let target: ReturnType<typeof resolveStoreUrl> = { reason: '' };
-      let authToken = this.opts.authToken;
-      const given = this.opts.url?.trim();
-      if (this.opts.urlFromSettings && (given === undefined || given === '')) {
-        const saved = await readStoreSettings(ctx);
-        if ('reason' in saved) {
-          target = { reason: saved.reason };
-        } else if (saved.url !== undefined) {
-          target = resolveSettingsStoreUrl(saved.url, this.opts);
-          authToken = saved.authToken;
-        } else {
-          target = resolveStoreUrl(this.opts);
-        }
-      } else {
-        target = resolveStoreUrl(this.opts);
-      }
-      if (target.url === undefined) {
-        unavailable = target.reason;
-      } else {
-        requestTimeoutMs = requestBoundFor(target.url, requestTimeoutMs);
-        const opened = await openClient(target.url, { ...this.opts, authToken });
-        if ('client' in opened) client = this.owned = opened.client;
-        else unavailable = opened.reason;
-      }
+    if (this.opts.client) {
+      await this.register(ctx, svc, { client: this.opts.client, requestTimeoutMs: this.opts.requestTimeoutMs });
+      return;
     }
+    if (this.opensFromSettings()) {
+      // Mounted from here on, so a source naming it is never read as naming an
+      // unmounted adapter; it has no database until the boot completes.
+      svc.registerAdapter(this.opts.id ?? 'turso', this.adapterOver(ctx, { unavailable: SETTINGS_NOT_READ_YET }));
+      return;
+    }
+    await this.open(ctx, svc, resolveStoreUrl(this.opts), this.opts.authToken);
+  }
 
+  /** The store's URL is the operator's setting: `urlFromSettings`, and neither `client` nor `url` given. */
+  private opensFromSettings(): boolean {
+    const given = this.opts.url?.trim();
+    return this.opts.urlFromSettings === true && !this.opts.client && (given === undefined || given === '');
+  }
+
+  private knowledgeService(ctx: PluginContext): IKnowledgeService | undefined {
+    try {
+      return ctx.getService<IKnowledgeService>(KNOWLEDGE_SERVICE) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * At `kernel:bootstrapped`: read the saved `knowledge.turso_url` and
+   * `turso_auth_token`, open that database (or the default file when nothing
+   * is saved) and register the adapter over the one start() registered.
+   */
+  private async openFromSettings(ctx: PluginContext): Promise<void> {
+    const svc = this.knowledgeService(ctx);
+    if (!svc) return; // start() said so
+    const saved = await readStoreSettings(ctx);
+    if ('reason' in saved) {
+      await this.open(ctx, svc, { reason: saved.reason }, undefined);
+    } else if (saved.url !== undefined) {
+      await this.open(ctx, svc, resolveSettingsStoreUrl(saved.url, this.opts), saved.authToken);
+    } else {
+      await this.open(ctx, svc, resolveStoreUrl(this.opts), this.opts.authToken);
+    }
+  }
+
+  /** Open the database `target` names and register the adapter on it, or one that says why there is none. */
+  private async open(
+    ctx: PluginContext,
+    svc: IKnowledgeService,
+    target: ReturnType<typeof resolveStoreUrl>,
+    authToken: string | undefined,
+  ): Promise<void> {
+    if (target.url === undefined) {
+      await this.register(ctx, svc, { unavailable: target.reason });
+      return;
+    }
+    const opened = await openClient(target.url, { ...this.opts, authToken });
+    if ('client' in opened) {
+      this.owned = opened.client;
+      await this.register(ctx, svc, {
+        client: opened.client,
+        requestTimeoutMs: requestBoundFor(target.url, this.opts.requestTimeoutMs),
+      });
+    } else {
+      await this.register(ctx, svc, { unavailable: opened.reason });
+    }
+  }
+
+  private adapterOver(
+    ctx: PluginContext,
+    store: { client?: Client; unavailable?: string; requestTimeoutMs?: number },
+  ): TursoKnowledgeAdapter {
     // Read at each call, never cached: the kernel's embedder may register
     // after this plugin starts, or be replaced (ADR-0161 K8, item 6).
     const embedder = (): IEmbedder | undefined => {
@@ -394,14 +456,22 @@ export class KnowledgeTursoPlugin implements Plugin {
         return undefined;
       }
     };
-
-    const adapter = new TursoKnowledgeAdapter({
+    return new TursoKnowledgeAdapter({
       id: this.opts.id,
-      ...(client ? { client } : { unavailable }),
+      ...(store.client ? { client: store.client } : { unavailable: store.unavailable }),
       embedder,
       queryPrefix: this.opts.queryPrefix,
-      ...(requestTimeoutMs === undefined ? {} : { requestTimeoutMs }),
+      ...(store.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: store.requestTimeoutMs }),
     });
+  }
+
+  /** Register the adapter over `store` and say whether it is ready. */
+  private async register(
+    ctx: PluginContext,
+    svc: IKnowledgeService,
+    store: { client?: Client; unavailable?: string; requestTimeoutMs?: number },
+  ): Promise<void> {
+    const adapter = this.adapterOver(ctx, store);
     svc.registerAdapter(adapter.id, adapter);
 
     const health = await adapter.healthCheck();

@@ -192,7 +192,7 @@ export const CAPABILITY_ROWS: Readonly<Record<string, string>> = Object.freeze({
   settings: 'the settings store',
   webhooks: 'outbound webhooks',
   'record-context': 'get_record_context over MCP',
-  knowledge: 'knowledge search: the service and one vector store',
+  knowledge: 'knowledge search and its vector store',
   'hierarchy-security': 'hierarchy-relative permission scopes',
   'ai-seat': 'the AI-seat tier',
   governance: 'the governance tier',
