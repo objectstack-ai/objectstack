@@ -885,7 +885,8 @@ export function storeRowWriteKey(
  * platform's own record is refused, never written, at all three restore
  * doors: the metadata service's `rollback`, and the protocol's
  * `rollbackMetaItem` and the restore limb of `revertCommit`
- * (`refusePlatformRecordRestore`). Two undo writes of the metadata protocol
+ * (`refusePlatformRecordRestore`), and so is a restore of a version the
+ * platform registered into a package's row. Two undo writes of the metadata protocol
  * put a row back as the same operation found it, byte for byte: the undo of a
  * refused batch publish's landed promotions (`undoLandedPromotions`) and the
  * undo of a batch row the registry refused (`undoBatchRowWrite`); the mark

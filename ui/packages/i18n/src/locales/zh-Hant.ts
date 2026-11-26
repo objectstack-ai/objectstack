@@ -5681,6 +5681,8 @@ const zhHant = {
     completed: '流程「{{flow}}」已完成',
     alreadySubmitted: '上一步已提交成功，流程已進入當前步驟。',
     noLongerWaiting: '這一步可能已經處理完成。請關閉對話方塊，確認記錄後再重試。',
+    invalidScreenInput: '這一步有些值未被接受。請檢查後重試。',
+    fieldNotAccepted: '{{field}}：此值不被接受',
   },
   appManagement: {
     title: '應用',

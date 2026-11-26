@@ -4,9 +4,11 @@
  * objectstack#36908 (epic #36890 decision 9) — bare `/studio` draws no page.
  * It opens the package the author was last in, still named by the package
  * list; otherwise the package list: Setup → Packages for a principal who may
- * open it, the "All metadata" area across packages for one who may only enter
- * Studio. The retired `/studio?new=package` bookmark lands on Setup's New
- * Package for the first, and on that same "All metadata" area for the second.
+ * open it, the package-less scope (`~org`) for one who may only enter Studio
+ * (objectstack#37565: the "All metadata" area across packages it landed on
+ * before is Setup's environment directory now, which such a principal may not
+ * open). The retired `/studio?new=package` bookmark lands on Setup's New
+ * Package for the first, and on that same scope for the second.
  *
  * The recent store and the list read are stubbed at their modules: what is
  * measured is where the entry SENDS the author, read off the router's
@@ -32,7 +34,8 @@ import { StudioEntryRedirect } from './StudioEntryRedirect';
 import { newPackageDoorPath, studioEntryFallbackPath, studioNewPackageEntryPath } from './studioEntryPermissions';
 
 const SETUP_PACKAGES = '/apps/setup/component/developer/packages?face=admin';
-const ALL_METADATA = '/studio/~all/metadata';
+/** objectstack#37565 — the package-less scope's flows, `studioOrgScopePath()`. */
+const ORG_SCOPE = '/studio/~org/metadata/flow?source=runtime';
 const ADMIN = ['studio.access', 'setup.access', 'manage_platform_settings'];
 /** May enter Studio and author metadata; holds neither capability Setup → Packages is shown under. */
 const STUDIO_ONLY = ['studio.access', 'manage_metadata'];
@@ -115,16 +118,16 @@ describe("Studio's entry: the package list (objectstack#36908)", () => {
     expect(read).not.toHaveBeenCalled();
   });
 
-  it('a principal who may enter Studio but not Setup → Packages lands on the "All metadata" area', async () => {
+  it('a principal who may enter Studio but not Setup → Packages lands on the package-less scope', async () => {
     renderEntry('/studio', ['studio.access', 'setup.access']);
-    expect(await screen.findByTestId('where')).toHaveTextContent(ALL_METADATA);
+    expect(await screen.findByTestId('where')).toHaveTextContent(ORG_SCOPE);
   });
 
   it('the fallback reads the two capabilities Setup → Packages is shown under, and holds nothing for no answer', () => {
     expect(studioEntryFallbackPath(ADMIN)).toBe(SETUP_PACKAGES);
-    expect(studioEntryFallbackPath(['studio.access', 'manage_platform_settings'])).toBe(ALL_METADATA);
-    expect(studioEntryFallbackPath(['studio.access', 'setup.access'])).toBe(ALL_METADATA);
-    expect(studioEntryFallbackPath(undefined)).toBe(ALL_METADATA);
+    expect(studioEntryFallbackPath(['studio.access', 'manage_platform_settings'])).toBe(ORG_SCOPE);
+    expect(studioEntryFallbackPath(['studio.access', 'setup.access'])).toBe(ORG_SCOPE);
+    expect(studioEntryFallbackPath(undefined)).toBe(ORG_SCOPE);
   });
 });
 
@@ -136,24 +139,24 @@ describe('the retired `/studio?new=package` bookmark (objectstack#36908)', () =>
     expect(await screen.findByTestId('where')).toHaveTextContent(`${SETUP_PACKAGES}&new=package`);
   });
 
-  it('a principal who may enter Studio but not Setup → Packages is never sent to Setup: the "All metadata" area', async () => {
+  it('a principal who may enter Studio but not Setup → Packages is never sent to Setup: the package-less scope', async () => {
     recent.items = [pkg('com.acme.crm')];
     listed.read = async () => new Set(['com.acme.crm']);
     renderEntry('/studio?new=package', STUDIO_ONLY);
     const where = await screen.findByTestId('where');
-    expect(where).toHaveTextContent(new RegExp(`^${ALL_METADATA}$`));
+    expect(where.textContent).toBe(ORG_SCOPE);
     expect(where.textContent).not.toContain('/apps/setup');
   });
 
   it('the forward reads the same two capabilities as the fallback, and holds nothing for no answer', () => {
     expect(studioNewPackageEntryPath(ADMIN)).toBe(`${SETUP_PACKAGES}&new=package`);
-    expect(studioNewPackageEntryPath(['studio.access', 'manage_platform_settings'])).toBe(ALL_METADATA);
-    expect(studioNewPackageEntryPath(['studio.access', 'setup.access'])).toBe(ALL_METADATA);
-    expect(studioNewPackageEntryPath(undefined)).toBe(ALL_METADATA);
+    expect(studioNewPackageEntryPath(['studio.access', 'manage_platform_settings'])).toBe(ORG_SCOPE);
+    expect(studioNewPackageEntryPath(['studio.access', 'setup.access'])).toBe(ORG_SCOPE);
+    expect(studioNewPackageEntryPath(undefined)).toBe(ORG_SCOPE);
   });
 
   it('the console doors outside Studio (Home, /ai, 「Add app」) make the same choice from the session\'s own answer', () => {
     expect(newPackageDoorPath(true)).toBe(`${SETUP_PACKAGES}&new=package`);
-    expect(newPackageDoorPath(false)).toBe(ALL_METADATA);
+    expect(newPackageDoorPath(false)).toBe(ORG_SCOPE);
   });
 });

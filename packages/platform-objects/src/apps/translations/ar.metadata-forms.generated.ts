@@ -3156,6 +3156,10 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "الأدوات",
         helpText: "أسماء الأدوات (تدعم حرف البدل: action_*)"
       },
+      context: {
+        label: "حزمة السياق",
+        helpText: "حزمة السياق التي تعمل منها هذه المهارة (اسمها). تتطلب get_record_context في الأدوات. عبر MCP تأخذ المطالبة عندئذٍ معرّف سجل اختياريًا"
+      },
       triggerConditions: {
         label: "شروط التشغيل",
         helpText: "شروط برمجية (مثل objectName == \"case\")"

@@ -220,6 +220,19 @@ describe('BookPreview reads the designer locale (objectui#10862)', () => {
       inLang(lang, <BookPreview type="book" name="" draft={{ name: 'crm_guide', audience: 'public' }} locale={LOCALE[lang]} />);
       expectSites(lang, [{ key: 'engine.bookPreview.audience.public' }]);
     });
+
+    // ADR-0046 §6.7 — a capability-gated book is not shown as readable by the org.
+    it(`${lang}: a capability-gated book`, () => {
+      inLang(lang, (
+        <BookPreview
+          type="book"
+          name=""
+          draft={{ name: 'setup_manual', audience: { systemPermission: 'setup.access' } }}
+          locale={LOCALE[lang]}
+        />
+      ));
+      expectSites(lang, [{ key: 'engine.bookPreview.audience.systemPermission', vars: { name: 'setup.access' } }]);
+    });
   }
 });
 

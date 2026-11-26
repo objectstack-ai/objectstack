@@ -3156,6 +3156,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "工具",
         helpText: "工具名（支援萬用字元：action_*）"
       },
+      context: {
+        label: "上下文包",
+        helpText: "此技能使用的上下文包（填名稱）。工具中須包含 get_record_context。透過 MCP 呼叫時，提示詞可額外接收一個可選的記錄 ID"
+      },
       triggerConditions: {
         label: "觸發條件",
         helpText: "程式化條件（如 objectName == \"case\"）"

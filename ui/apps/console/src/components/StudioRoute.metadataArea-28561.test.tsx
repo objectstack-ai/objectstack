@@ -12,7 +12,9 @@
  *  - The cross-package leg (`/studio/~all/metadata/*`) is the same builder
  *    route with `~all` as its segment (objectstack#36899): the surface draws
  *    the area alone, with no package, beside the left menu every Studio page
- *    has. Every other `~all` URL lands on it, so none reaches a pillar.
+ *    has. Every other `~all` URL lands on Setup's environment directory, the
+ *    leg's root's page since it left Studio (objectstack#37565), so none
+ *    reaches a pillar.
  *  - The entry gate decides first, as for every Studio URL, the left menu's
  *    targets included.
  *
@@ -114,6 +116,7 @@ function renderStudio(url: string) {
       <Routes>
         {studioRoutes}
         <Route path="/home" element={<div data-testid="home-launcher">home</div>} />
+        <Route path="/apps/setup/component/security/access-directory/*" element={<div data-testid="setup-directory" />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -166,14 +169,29 @@ describe('/studio — the "All metadata" area\'s routes (objectstack#28561)', ()
     expect(location()).toBe('/studio/~all/metadata/permission?scope=environment');
   });
 
+  // objectstack#37565 — rewritten on purpose: these landed on the leg's root, which is Setup's
+  // environment directory now (ADR-0084, amended 2026-11-26), for whoever may open Setup. Still never a pillar.
   it.each(['/studio/~all', '/studio/~all/data', '/studio/~all/flow/f1'])(
-    '%s lands on the cross-package area, never on a pillar',
+    '%s lands on Setup\'s environment directory, in one hop, never on a pillar',
+    async (url) => {
+      permissionsFetch = answer([STUDIO_ENTRY_CAPABILITY, 'setup.access']);
+      renderStudio(url);
+      expect(await screen.findByTestId('setup-directory')).toBeInTheDocument();
+      expect(location()).toBe('/apps/setup/component/security/access-directory');
+      expect(screen.queryByTestId('studio-pillar-builder')).toBeNull();
+      expect(seen).toEqual([url, '/apps/setup/component/security/access-directory']);
+    },
+  );
+
+  // objectstack#37565 — one who may not open Setup keeps the leg's root, where the directory still is for them.
+  it.each(['/studio/~all', '/studio/~all/data'])(
+    '%s, without Setup\'s entry capability, lands on the leg\'s root in one hop',
     async (url) => {
       renderStudio(url);
-      const surface = await screen.findByTestId('studio-pillar-builder');
+      expect(await screen.findByTestId('studio-pillar-builder')).toHaveAttribute('data-package', '~all');
       expect(location()).toBe('/studio/~all/metadata');
-      expect(surface).toHaveAttribute('data-area', 'metadata');
-      expect(surface).toHaveAttribute('data-package', '~all');
+      expect(screen.queryByTestId('setup-directory')).toBeNull();
+      expect(seen).toEqual([url, '/studio/~all/metadata']);
     },
   );
 

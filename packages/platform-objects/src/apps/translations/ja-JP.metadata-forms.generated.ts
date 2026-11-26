@@ -3156,6 +3156,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ツール",
         helpText: "ツール名（ワイルドカード対応: action_*）"
       },
+      context: {
+        label: "コンテキストパック",
+        helpText: "このスキルが参照するコンテキストパック（名前）。ツールに get_record_context が必要です。MCP 経由では、プロンプトが任意のレコード ID を受け取ります"
+      },
       triggerConditions: {
         label: "トリガー条件",
         helpText: "プログラム条件（例: objectName == \"case\"）"

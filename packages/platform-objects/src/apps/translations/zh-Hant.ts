@@ -79,6 +79,7 @@ export const zhHant: TranslationData = {
         // the same case as the entry above; see `en.ts` (#31123).
         nav_scim_credentials: { label: 'SCIM 憑證' },
         nav_api_keys: { label: 'API 金鑰' },
+        nav_access_directory: { label: '職位與權限' },
 
         // 核准中心 = the Approvals Inbox component (#7234) — the surface with
         // decision actions. The three below are the engine's raw tables; the

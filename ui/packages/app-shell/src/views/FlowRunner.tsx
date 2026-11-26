@@ -270,15 +270,30 @@
  * message. Submit stays where it was, and no resume request is made. Editing a
  * field retires its own message; the next Submit checks again.
  *
- * What this does NOT cover, on purpose: a refusal that comes back from the
- * ENGINE. A retryable one (`INVALID_SCREEN_INPUT`, the declared field
- * contract, checked before the suspension is consumed) keeps the screen, the
- * values and Submit, with the sentence in the banner above — the envelope
- * names no field in a structured slot, so placing it at a field would mean
- * parsing prose. A terminal one (a `refused` end, or a node failing after the
- * resume consumed the suspension) withdraws Submit as the sections above say:
- * the run is over, and only a new run, or an operator's
- * `restore-suspension`, can accept input again.
+ * A value of spaces is no answer either (objectstack#37526): the check trims,
+ * as the engine's does, so a required text field holding only whitespace is
+ * refused here with the same message an empty one gets, instead of reaching
+ * the engine.
+ *
+ * ## A refusal from the ENGINE is placed at its fields too (objectstack#37526)
+ *
+ * A retryable one (`INVALID_SCREEN_INPUT`, the declared field contract,
+ * checked before the suspension is consumed) keeps the screen, the values and
+ * Submit. Its findings arrive in `error.details.fields`, one `{ field, code }`
+ * per violated field, and each field on screen it names is marked the way the
+ * client's own refusal marks it, in the display language and by the label
+ * shown: `required` as `validation.required`, a bound as `validation.min` /
+ * `max`, anything else as `flowRunner.fieldNotAccepted`; focus moves to the
+ * first. The banner and the toast read `flowRunner.invalidScreenInput`. The
+ * engine's sentence is never shown: it names the screen's declared fields by
+ * their API names, and it stays in the server log and the API body for the
+ * callers it is written for. A server that serves no findings still gets the
+ * catalog's sentence, with no field marked.
+ *
+ * A terminal refusal (a `refused` end, or a node failing after the resume
+ * consumed the suspension) withdraws Submit as the sections above say: the
+ * run is over, and only a new run, or an operator's `restore-suspension`, can
+ * accept input again.
  *
  * ## A result screen is acknowledged, never cancelled (objectstack#26902)
  *
@@ -401,7 +416,7 @@ import {
   type ScreenFieldSpec,
   type ScreenSpec,
 } from './ScreenView.js';
-import { flowSuccessCopy, interpretFlowResponse } from '../utils/flowResponse.js';
+import { flowSuccessCopy, interpretFlowResponse, type ScreenInputFinding } from '../utils/flowResponse.js';
 import { announceFlowDroppedFields } from '../utils/flowLaunch.js';
 import { activeFlowsBundle, flowsLocaleChain, flowsResolveOptions, type FlowsTranslation } from '@object-ui/i18n';
 
@@ -546,6 +561,49 @@ export interface ScreenFlowState extends Pick<AutomationResult, 'flowLabel'> {
 interface ResumeError {
   message: string;
   retryable: boolean;
+}
+
+/**
+ * A value the `required` check counts as no answer: absent, `null`, or a string
+ * that is empty once trimmed (objectstack#37526). The engine's own check trims
+ * (`isPresent`, service-automation `screen-input-contract.ts`), so a value of
+ * spaces must be refused here, at the field, rather than reach it. An unchecked
+ * `false` stays an answer.
+ */
+export function isUnanswered(value: unknown): boolean {
+  return value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+}
+
+/**
+ * The message each on-screen field an engine screen refusal names is drawn with
+ * (objectstack#37526), keyed by field name, in the display language and by the
+ * field's shown label: `required` reads as the client's own required message,
+ * a bound as the client's bound message when the field declares that bound,
+ * anything else as `flowRunner.fieldNotAccepted`. A finding naming no field on
+ * screen is not placed; the banner covers it.
+ */
+export function screenInputFieldErrors(
+  findings: readonly ScreenInputFinding[],
+  onScreen: readonly ScreenFieldSpec[],
+  t: TranslateFn,
+): Record<string, string> {
+  const byName = new Map(onScreen.map((f) => [f.name, f]));
+  const out: Record<string, string> = {};
+  for (const { field, code } of findings) {
+    const f = byName.get(field);
+    if (!f || field in out) continue;
+    const label = f.label || f.name;
+    if (code === 'required') {
+      out[field] = t('validation.required', { field: label, defaultValue: '{{field}} is required' });
+    } else if (code === 'min_value' && typeof f.min === 'number') {
+      out[field] = t('validation.min', { field: label, min: f.min, defaultValue: '{{field}} must be at least {{min}}' });
+    } else if (code === 'max_value' && typeof f.max === 'number') {
+      out[field] = t('validation.max', { field: label, max: f.max, defaultValue: '{{field}} must be at most {{max}}' });
+    } else {
+      out[field] = t('flowRunner.fieldNotAccepted', { field: label, defaultValue: "{{field}}: this value isn't accepted" });
+    }
+  }
+  return out;
 }
 
 /**
@@ -743,6 +801,24 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
     return false;
   };
 
+  // A `400 INVALID_SCREEN_INPUT` (objectstack#37526 — see the header): mark
+  // each on-screen field the engine names, move focus to the first of them,
+  // and answer the banner's sentence.
+  const placeScreenInputRefusal = (findings: readonly ScreenInputFinding[]): string => {
+    const onScreen = visibleScreenFields(shown, values);
+    const placed = screenInputFieldErrors(findings, onScreen, t as TranslateFn);
+    setFieldErrors(placed);
+    const first = onScreen.find((f) => f.name in placed);
+    if (first) {
+      const el = document.getElementById(screenFieldControlId(first.name));
+      el?.focus({ preventScroll: true });
+      el?.scrollIntoView?.({ block: 'center' });
+    }
+    return t('flowRunner.invalidScreenInput', {
+      defaultValue: "Some values on this step weren't accepted. Check them and try again.",
+    });
+  };
+
   const resumeWith = async (inputs: Record<string, unknown>, savedRecord: boolean): Promise<void> => {
     setReconciled(null);
     let res: Response;
@@ -773,11 +849,16 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
       // engine refusal of fields the run's screen does not declare, may mean
       // the run has already left it (objectstack#36831 — see the header).
       if (outcome.retryable && await reconcileWithRun()) return;
+      // The engine refused THIS screen's values (objectstack#37526 — see the
+      // header): each finding goes under its field, in this language, by the
+      // label shown, and the banner is the catalog's sentence, never the
+      // engine's, which names the screen's declared fields.
+      const message = outcome.screenInput ? placeScreenInputRefusal(outcome.screenInput) : outcome.error;
       // Two carriers on purpose (`c40f3b8ca`): the toast is the console's
       // viewport-fixed failure idiom; the inline Alert stays in the dialog,
       // above the scrolling body, with the values that caused it.
-      toast.error(outcome.error);
-      setResumeError({ message: outcome.error, retryable: outcome.retryable });
+      toast.error(message);
+      setResumeError({ message, retryable: outcome.retryable });
       return;
     }
     setResumeError(null);
@@ -845,9 +926,7 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
     // `visibleWhen: createOpportunity == true`, so leaving the checkbox
     // unticked blocked Submit on an input that was not on screen, and the run
     // sat paused with no resume request ever issued.
-    const missing = visibleScreenFields(shown, values).filter(
-      (f) => f.required && (values[f.name] === undefined || values[f.name] === '' || values[f.name] === null),
-    );
+    const missing = visibleScreenFields(shown, values).filter((f) => f.required && isUnanswered(values[f.name]));
     // Refused at each field, as the record form refuses it, with no toast and
     // no request (objectstack#26882 — see the header). The names come from
     // `shown`, so the message reads the field's label in the user's language.

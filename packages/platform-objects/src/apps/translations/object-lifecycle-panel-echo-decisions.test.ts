@@ -1341,9 +1341,11 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // section labels and seven row labels, authored in all three locales.
       // 839 since #36806: the field form offers the `uiReadonly` and
       // `uiReadonlyWhen` rows (the hand lock), authored in every locale.
-      // 840 since #37086: the `form` type's own label (ADR-0159 card ②),
+      // 840 since #37141: the skill form's `context` row (ADR-0160 D8) — one
+      // row label, authored in all three locales.
+      // 841 since #37086: the `form` type's own label (ADR-0159 card ②),
       // authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(840);
+      expect(translated.length, `${locale} positive control`).toBe(841);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

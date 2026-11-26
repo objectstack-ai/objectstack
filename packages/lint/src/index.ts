@@ -1068,6 +1068,8 @@ export type {
 export {
   validateAiToolReferences,
   AI_SKILL_TOOL_UNRESOLVED,
+  AI_SKILL_CONTEXT_UNKNOWN,
+  AI_SKILL_CONTEXT_OMITTED,
 } from './validate-ai-tool-references.js';
 export type {
   AiToolRefFinding,

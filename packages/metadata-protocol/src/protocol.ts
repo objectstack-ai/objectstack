@@ -10683,6 +10683,14 @@ export class ObjectStackProtocolImplementation implements
      * real orphan object, and whether an adoption refuses, renames or leaves
      * the prefix unjudged is the maintainer's question (#28776's ruling). A
      * draft is judged by both owner judges when it is promoted.
+     *
+     * ## [#37604] The platform's own record is no orphan
+     *
+     * A package-less row whose body carries the platform's mark is the record
+     * the platform registers at every boot (`isPlatformRecordRow`,
+     * `@objectstack/metadata`), kept beside a package's item of the name in a
+     * slot of its own. It is left as it is stored, as an artifact-backed
+     * overlay is: rebound, it would become the target's item, mark and all.
      */
     async reassignOrphanedMetadata(request: {
         targetPackageId: string;

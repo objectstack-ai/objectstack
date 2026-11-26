@@ -316,14 +316,17 @@ describe('⌘K on the builder (objectstack#36900)', () => {
     expect(current()).toHaveAttribute('data-testid', 'studio-menu-entry-type:flow');
   });
 
+  // objectstack#37565 — the leg's root redirects to Setup now, and the menu has no environment entry:
+  // the leg's cross-package list is a page it still draws, and its menu is the environment's.
   it('on the cross-package leg, Ctrl+K opens the palette again, with the environment menu', async () => {
     servePackages();
-    renderAt('/studio/~all/metadata');
+    renderAt('/studio/~all/metadata/flow?package=all');
     await areaPage();
 
     fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
     await waitFor(() => expect(overlay()).not.toBeNull());
-    await waitFor(() => expect(paletteItem('studio-entry environment')).not.toBeNull());
+    await waitFor(() => expect(paletteItem('studio-entry orgFlows')).not.toBeNull());
+    expect(paletteItem('studio-entry environment')).toBeNull();
     expect(paletteItem('studio-entry diagnostics')).toBeNull();
   });
 

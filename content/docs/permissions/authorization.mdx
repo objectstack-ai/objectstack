@@ -267,11 +267,12 @@ only what it owns:
   **live** (config); the sets a position distributes are its definition's
   `permissionSets`. It owns environment-authored sets and assignments — not
   package sets. The set **definition** has one authoritative store, the
-  metadata layer (ADR-0094 D1, ADR-0131 D3): Studio's **All metadata** area
-  lists the catalog (`/studio/~all/metadata/permission?scope=environment`;
-  Setup carries no metadata catalog, and its old
-  `/apps/setup/metadata/permission` address redirects there), and a create or
-  edit there is a metadata save (`PUT /api/v1/meta/permission/:name`) into the
+  metadata layer (ADR-0094 D1, ADR-0131 D3): Setup → Access control →
+  **Positions and Permissions** lists the catalog
+  (`/apps/setup/component/security/access-directory/permission?scope=environment`;
+  the old environment-scope lists in Studio and Setup, the addresses ending in
+  `?scope=environment`, redirect there for anyone who can open Setup), a set opens in
+  Studio's editor, and a create or edit there is a metadata save (`PUT /api/v1/meta/permission/:name`) into the
   environment's definition ledger (`sys_metadata`), served from the registry
   beside the packages' sets. No row mirrors it: the `sys_permission_set`
   object is no longer registered, so no data route serves one. The save

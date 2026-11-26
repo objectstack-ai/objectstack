@@ -80,6 +80,8 @@ import {
   setupMetadataRest,
   setupMetadataStudioPath,
 } from '../views/studio-design/setupMetadataRedirect.js';
+import { usePermissions } from '@object-ui/permissions';
+import { holdsSetupAccess } from '../views/setup/accessDirectoryRef.js';
 import { NO_RECORD_DRAWERS_OPENING, NO_RECORD_PAGE_DRAWERS_OPEN, RecordDrawerOpeningProvider, RecordPageDrawerOpenProvider, useRecordFormOpensOverDrawers, type RecordDrawersOpening, type RecordPageDrawersOpen } from '../views/recordDrawerStack.js';
 import { SkeletonGrid } from '../skeletons/index.js';
 
@@ -279,13 +281,15 @@ function DraftReviewNavigator({ appName }: { appName: string | undefined }) {
   const { reviewSeq, reviewTarget } = useAssistant();
   const navigate = useNavigate();
   const lastSeq = useRef(reviewSeq);
+  // objectstack#37565 — the environment directory is Setup's page only for whoever may open Setup.
+  const setupAccess = holdsSetupAccess(usePermissions().systemPermissions);
   useEffect(() => {
     if (reviewSeq === lastSeq.current || !reviewTarget || !appName) return;
     lastSeq.current = reviewSeq;
     const { type, name } = reviewTarget;
     const item = `${encodeURIComponent(type)}/${encodeURIComponent(name)}`;
-    navigate(setupMetadataStudioPath(item, 'review=1') ?? `/apps/${appName}/metadata/${item}?review=1`);
-  }, [reviewSeq, reviewTarget, appName, navigate]);
+    navigate(setupMetadataStudioPath(item, 'review=1', '', setupAccess) ?? `/apps/${appName}/metadata/${item}?review=1`);
+  }, [reviewSeq, reviewTarget, appName, navigate, setupAccess]);
   return null;
 }
 
@@ -2193,7 +2197,9 @@ function looksLikeRecordId(segment: string | undefined): boolean {
 function SetupMetadataRoute({ children }: { children?: ReactNode }) {
   const location = useLocation();
   const rest = setupMetadataRest(location.pathname) ?? '';
-  const target = setupMetadataStudioPath(rest, location.search, location.hash);
+  // objectstack#37565 — the environment directory is Setup's page only for whoever may open Setup.
+  const setupAccess = holdsSetupAccess(usePermissions().systemPermissions);
+  const target = setupMetadataStudioPath(rest, location.search, location.hash, setupAccess);
   if (target === null) return <>{children ?? <RouteNotFound />}</>;
   return <Navigate to={target} replace />;
 }
@@ -2236,7 +2242,9 @@ function LegacyMetadataRedirect({ mode }: { mode: 'directory' | 'resource' }) {
     ? (location.pathname.match(/\/component\/metadata\/resource(\/.*)?$/)?.[1] ?? '').replace(/^\/+/, '')
     : '';
   const rest = type ? [encodeURIComponent(type), tail].filter(Boolean).join('/') : '';
-  const target = setupMetadataStudioPath(rest, mode === 'directory' ? location.search : sp.toString(), location.hash);
+  // objectstack#37565 — the environment directory is Setup's page only for whoever may open Setup.
+  const setupAccess = holdsSetupAccess(usePermissions().systemPermissions);
+  const target = setupMetadataStudioPath(rest, mode === 'directory' ? location.search : sp.toString(), location.hash, setupAccess);
   if (target === null) {
     return <Navigate to={`${appBase}/metadata/${rest}${location.hash}`} replace />;
   }
