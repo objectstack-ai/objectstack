@@ -320,12 +320,15 @@ export function studioMenuCurrentKey(input: { segment: string; pathname: string;
   return section === STUDIO_OVERVIEW_SECTION ? STUDIO_MENU_OVERVIEW_KEY : null;
 }
 
-/**
- * Whether `entry` matches a menu search, by its label or its type's machine
- * name. 概览 Overview's row, which lists no type, matches by its label.
- */
-export function studioMenuEntryMatches(entry: Pick<StudioMenuEntry, 'type'>, label: string, query: string): boolean {
+/** Whether `entry` matches a menu search, by its label or its type's machine name. */
+export function studioMenuEntryMatches(entry: StudioMenuEntry, label: string, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
   return label.toLowerCase().includes(q) || (entry.type ?? '').toLowerCase().includes(q);
+}
+
+/** Whether 概览 Overview's row, which lists no type, matches a menu search: by its label alone. */
+export function studioMenuOverviewMatches(label: string, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  return !q || label.toLowerCase().includes(q);
 }

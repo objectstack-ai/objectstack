@@ -22,13 +22,14 @@ import {
   STUDIO_MENU_ADVANCED_COOKIE,
   STUDIO_MENU_ALWAYS_TYPES,
   STUDIO_MENU_GROUPS,
+  STUDIO_MENU_OVERVIEW_KEY,
   buildStudioMenu,
   readStudioMenuAdvancedCookie,
-  STUDIO_MENU_OVERVIEW_KEY,
   studioMenuAllTypesEntry,
   studioMenuCurrentKey,
-  studioMenuOverviewEntry,
   studioMenuEntryMatches,
+  studioMenuOverviewEntry,
+  studioMenuOverviewMatches,
   studioMenuScope,
   studioMenuTiers,
 } from './studioMenuModel';
@@ -380,6 +381,13 @@ describe('概览 Overview: the package\'s own page, the menu\'s first row (objec
       (e) => e.key,
     );
     expect(keys).not.toContain(STUDIO_MENU_OVERVIEW_KEY);
+  });
+
+  it('a search matches it by its name alone; an empty search lists it', () => {
+    expect(studioMenuOverviewMatches('概览', '')).toBe(true);
+    expect(studioMenuOverviewMatches('Overview', 'VIEW')).toBe(true);
+    expect(studioMenuOverviewMatches('概览', '概')).toBe(true);
+    expect(studioMenuOverviewMatches('Overview', 'flow')).toBe(false);
   });
 
   it('its page, on either tab, is the current entry; CONTROL: the OWD overview stays its own', () => {
