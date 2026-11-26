@@ -17,7 +17,7 @@ export const entry: SemanticMigration = {
   surface:
     'A write of a metadata item that names no package (PUT /api/v1/meta/TYPE/NAME in publish mode and with '
     + '?mode=draft, DELETE /api/v1/meta/TYPE/NAME, its draft discard with ?state=draft, and the in-process save '
-    + 'and delete of a metadata item with no packageId), for a name every installed package holding it has '
+    + 'and delete of a metadata item with no packageId), for a name held only by installed packages that are '
     + 'disabled, of a type the registry reads by package, while a package-less row or a package-less draft is '
     + 'stored for that name',
   replacement:
