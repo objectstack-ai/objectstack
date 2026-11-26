@@ -189,6 +189,20 @@ describe('validateTranslationReferences — orphan keys', () => {
     expect(findings).toEqual([]);
   });
 
+  it('[ADR-0159 card ②] a `form` item\'s named section is a `_sections` anchor of the object it binds to', () => {
+    // `translateForm` reads a form item's section headings at
+    // `objects.<object>._sections.<name>`, as it reads a form view's.
+    const stackWithForm = (sectionKey: string) => ({
+      ...leadStack([{ 'zh-CN': { objects: { crm_lead: { label: '线索', _sections: { [sectionKey]: { label: '反馈', fields: { name: { label: '称呼' } } } } } } } }]),
+      forms: [{ name: 'crm_lead.feedback', object: 'crm_lead', type: 'simple', sections: [{ name: 'feedback', fields: [{ field: 'name' }] }] }],
+    });
+    expect(validateTranslationReferences(stackWithForm('feedback'))).toEqual([]);
+    // CONTROL: the same stack keyed to a section nothing declares is still reported.
+    expect(validateTranslationReferences(stackWithForm('feedbacks')).map((f) => f.path)).toEqual([
+      'translations[0]["zh-CN"].objects.crm_lead._sections.feedbacks',
+    ]);
+  });
+
   it('flags an unresolved view / action / section by name', () => {
     const findings = validateTranslationReferences(
       leadStack([

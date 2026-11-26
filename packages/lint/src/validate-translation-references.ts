@@ -717,6 +717,35 @@ function emptyFacts(): ObjectFacts {
  * of anchors is now a list of call sites, not four copies of a loop that can
  * drift apart one at a time.
  */
+/**
+ * Register the `_sections` names one form-ish container declares, under the
+ * object it binds to.
+ *
+ * Form sections carry an OPTIONAL `name` that exists purely for the
+ * `_sections` lookup (`ui/view.zod.ts`: "Stable section identifier for i18n
+ * lookup"). A section without one cannot be translated at all, so it
+ * contributes nothing here. A form view's container and a `form` item
+ * (ADR-0159) both feed it: `translateForm` reads a form item's section
+ * headings at `objects.<object>._sections.<name>`, as a form view's are read.
+ */
+function addFormSections(container: AnyRec, binding: string | undefined, factsFor: (objectName: string) => ObjectFacts): void {
+  if (!binding) return;
+  for (const section of recordsOf(container.sections)) {
+    const sectionName = strName(section.name);
+    if (!sectionName) continue;
+    const facts = factsFor(binding);
+    facts.sections.add(sectionName);
+    // A section's entry objects are the `_sections.<name>.fields` keys; a
+    // bare field-name entry authors no copy, so it addresses nothing.
+    let entries = facts.sectionEntries.get(sectionName);
+    if (!entries) facts.sectionEntries.set(sectionName, (entries = new Set()));
+    for (const entry of recordsOf(section.fields)) {
+      const field = strName(entry.field);
+      if (field) entries.add(field);
+    }
+  }
+}
+
 function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => ObjectFacts): void {
   const recordObject = viewObjectName(view);
   const bindingOf = (container: AnyRec): string | undefined =>
@@ -729,31 +758,8 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
     if (objectName && name) factsFor(objectName).forms.add(name);
   };
 
-  /**
-   * Register the `_sections` names one form-ish container declares.
-   *
-   * Form sections carry an OPTIONAL `name` that exists purely for the
-   * `_sections` lookup (`ui/view.zod.ts`: "Stable section identifier for i18n
-   * lookup"). A section without one cannot be translated at all, so it
-   * contributes nothing here.
-   */
-  const addSections = (container: AnyRec, binding: string | undefined) => {
-    if (!binding) return;
-    for (const section of recordsOf(container.sections)) {
-      const sectionName = strName(section.name);
-      if (!sectionName) continue;
-      const facts = factsFor(binding);
-      facts.sections.add(sectionName);
-      // A section's entry objects are the `_sections.<name>.fields` keys; a
-      // bare field-name entry authors no copy, so it addresses nothing.
-      let entries = facts.sectionEntries.get(sectionName);
-      if (!entries) facts.sectionEntries.set(sectionName, (entries = new Set()));
-      for (const entry of recordsOf(section.fields)) {
-        const field = strName(entry.field);
-        if (field) entries.add(field);
-      }
-    }
-  };
+  const addSections = (container: AnyRec, binding: string | undefined) =>
+    addFormSections(container, binding, factsFor);
 
   const listBinding = isRec(view.list) ? bindingOf(view.list) : undefined;
   if (isRec(view.list)) addView(listBinding, defaultListViewKey(listBinding, view));
@@ -1462,6 +1468,13 @@ function buildUniverse(stack: AnyRec): Universe {
   // where precedence has to be decided, and they are decided where they live.)
   for (const view of [...recordsOf(stack.views), ...artifactProvidedRecords(stack, 'views')]) {
     collectViewRecord(view, factsFor);
+  }
+  // [ADR-0159 card ②] A `form` item's named sections are `_sections` facts of
+  // the object it binds to (its one `object`), the same anchor a form view's
+  // sections are. Its own label, title and panel live in the `forms` family,
+  // keyed by its name, so it contributes no `_views` fact.
+  for (const form of [...recordsOf(stack.forms), ...artifactProvidedRecords(stack, 'forms')]) {
+    addFormSections(form, strName(form.object), factsFor);
   }
 
   // ── Pages: `record:details` sections are the other `_sections` anchor, and
