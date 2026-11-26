@@ -1828,7 +1828,10 @@ export class MetadataManager implements IMetadataService {
    *
    * Uncached: it walks the loaders as {@link list} does, then once more for
    * the rows. A row loader that cannot be read is reported as {@link list}
-   * reports a loader, and makes the answer `degraded`.
+   * reports a loader, and makes the answer `degraded`. [#37130 N2] So does a
+   * loader of stored rows (`datasource:`) that offers no
+   * {@link MetadataLoader.loadRowBindings}, named in `errors`: its items
+   * answer `registration`, which is not their rows' binding.
    */
   async listPackageBindings(type: string): Promise<{ items: MetadataPackageBinding[]; degraded: boolean; errors: string[] }> {
     const canonical = canonicalMetadataServiceType(type);
@@ -1837,7 +1840,17 @@ export class MetadataManager implements IMetadataService {
     const rowColumns = new Map<string, string | null>();
     let degraded = listDegraded;
     for (const loader of this.loaders.values()) {
-      if (typeof loader.loadRowBindings !== 'function') continue;
+      if (typeof loader.loadRowBindings !== 'function') {
+        // [#37130 N2] A loader of stored rows that reads no package column
+        // leaves every item it holds answering its registration's binding:
+        // the answer is partial as a row loader that could not be read leaves
+        // it, so a consumer that gates on the binding treats it as unknown.
+        if (loader.contract.protocol === 'datasource:') {
+          degraded = true;
+          errors.push(`${loader.contract.name}: a loader of stored rows that reads no package column (no loadRowBindings): the items it holds answer their registration's binding, not their rows'`);
+        }
+        continue;
+      }
       try {
         for (const entry of await loader.loadRowBindings(canonical)) {
           if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;

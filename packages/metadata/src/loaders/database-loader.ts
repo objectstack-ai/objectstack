@@ -1334,6 +1334,14 @@ export class DatabaseLoader implements MetadataLoader {
     if (!read) return;
     const rows = await this._find(this.tableName, { where: this.baseFilter(type, name) });
     const row = rows.find((candidate) => String(candidate.id) === read.id);
+    // [#37130 N7] The handed-out body answers the column as the row holds it now:
+    // another node's boot pass may have bound it since this node read it empty,
+    // and then nothing is written here. ⛔ Never the column as read, which this
+    // node would otherwise answer until it restarted.
+    if (row && storedRowColumnPackageId(row) !== this.readRowColumns.get(item)) {
+      this.recordRowColumn(item, storedRowColumnPackageId(row));
+      this.invalidate(type, name);
+    }
     if (!row || row.package_id === read.packageId || storedRowPackageId(row) !== read.packageId) return;
     // [#32488 item 3, R8-A] The loader's own rows only, as `migrateDatabaseLoaderRowPackages`
     // binds them: another writer's row whose body carries a copied stamp is bound to nothing.
