@@ -28,6 +28,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { GridCellSelectionProvider } from '../../../context/gridCellSelection';
 import '@testing-library/jest-dom';
 import React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
@@ -56,11 +57,15 @@ afterEach(() => {
   cleanup();
 });
 
-/** `masked` undefined ⇒ the key is ABSENT from the column, not `false`. */
+/**
+ * `masked` undefined ⇒ the key is ABSENT from the column, not `false`. An
+ * editable table is mounted select-first with a per-cell save, the one way it
+ * edits (objectstack#35827).
+ */
 function renderTable(masked: boolean | undefined, extra: Record<string, unknown> = {}) {
   const DataTable = ComponentRegistry.get('data-table') as any;
   if (!DataTable) throw new Error('data-table not registered');
-  return render(
+  const table = (
     <DataTable
       schema={{
         type: 'data-table',
@@ -73,10 +78,12 @@ function renderTable(masked: boolean | undefined, extra: Record<string, unknown>
         pagination: false,
         searchable: false,
         exportable: true,
+        ...(extra.editable ? { onRowSave: () => Promise.resolve() } : {}),
         ...extra,
       }}
-    />,
+    />
   );
+  return render(extra.editable ? <GridCellSelectionProvider value={{}}>{table}</GridCellSelectionProvider> : table);
 }
 
 /** The body cell under the header `label`. */
@@ -173,41 +180,36 @@ describe('data-table — a masked column never enters edit mode (objectui#10583)
       el.value.includes(RAW),
     );
 
-  it('single-click mode — click and Enter open no editor; the click reaches the row like a read-only cell', () => {
-    const onRowClick = vi.fn();
-    renderTable(true, { editable: true, singleClickEdit: true, onRowClick });
+  const catcher = () => document.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]')!;
+
+  it('double-click, Enter and typing open no editor on a masked cell; the ordinary cell still edits', () => {
+    renderTable(true, { editable: true });
     const masked = cellUnder('Key');
     expect(masked.textContent, 'CONTROL: the producer drew the mask').toContain(MASK);
     expect(masked.className, 'no edit cursor on a masked cell').not.toContain('cursor-text');
 
     fireEvent.click(masked);
-    fireEvent.keyDown(masked, { key: 'Enter' });
-    expect(masked.querySelector('input, textarea'), 'no editor in the masked cell').toBeNull();
+    fireEvent.doubleClick(masked);
+    fireEvent.keyDown(catcher(), { key: 'Enter' });
+    fireEvent.change(catcher(), { target: { value: 'x' } });
+    expect(document.querySelector('td[data-editing-cell]'), 'no editor in the masked cell').toBeNull();
     expect(rawInAnEditor(), 'no editor holds the raw value').toBe(false);
     expect(document.body.innerHTML).not.toContain(RAW);
-    expect(onRowClick, 'the click is not swallowed by an edit that never opens').toHaveBeenCalledTimes(1);
 
     // CONTROL — the ordinary column in the SAME table does open its editor.
     fireEvent.click(cellUnder('Name'));
-    expect(cellUnder('Name').querySelector('input'), 'CONTROL: the ordinary cell edits').not.toBeNull();
-  });
-
-  it('double-click mode — double-click and Enter open no editor; the ordinary cell still edits', () => {
-    renderTable(true, { editable: true });
-    const masked = cellUnder('Key');
-    fireEvent.doubleClick(masked);
-    fireEvent.keyDown(masked, { key: 'Enter' });
-    expect(masked.querySelector('input, textarea')).toBeNull();
-    expect(rawInAnEditor()).toBe(false);
-    expect(document.body.innerHTML).not.toContain(RAW);
-
     fireEvent.doubleClick(cellUnder('Name'));
-    expect(cellUnder('Name').querySelector('input'), 'CONTROL: the ordinary cell edits').not.toBeNull();
+    expect(document.querySelector('td[data-editing-cell] input'), 'CONTROL: the ordinary cell edits').not.toBeNull();
   });
+
+  // The "single-click mode" case pinned the staged arm's click-to-edit and its
+  // click reaching the row; that arm is retired (objectstack#35827), and a
+  // click now only selects a cell.
 
   it('CONTROL — the same column with the flag ABSENT edits exactly as before', () => {
-    renderTable(undefined, { editable: true, singleClickEdit: true });
+    renderTable(undefined, { editable: true });
     fireEvent.click(cellUnder('Key'));
+    fireEvent.doubleClick(cellUnder('Key'));
     expect(rawInAnEditor(), 'without the flag the editor is seeded with the stored value').toBe(true);
   });
 });

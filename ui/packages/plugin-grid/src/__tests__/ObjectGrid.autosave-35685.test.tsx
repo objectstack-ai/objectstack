@@ -19,8 +19,8 @@
  *      answer carried.
  *   3. A 409 the user keeps as theirs ("Overwrite anyway") re-reads nothing
  *      either; "Reload latest" does read again.
- *   4. Control: without `cellSelection` the save bar's row save still
- *      re-reads the grid.
+ *   4. (Retired with the staged model, objectstack#35827: the save bar's row
+ *      save that re-read the grid without `cellSelection`.)
  *   5. Undo (slice S2): the save toast's Undo button and Ctrl+Z / Cmd+Z on a
  *      cell take a save back as a NEW guarded update of the prior value,
  *      newest first, each once, guarded by the version the grid's own write
@@ -120,7 +120,7 @@ function makeDataSource() {
   } as any;
 }
 
-function renderGrid(dataSource: any, cellSelection: boolean) {
+function renderGrid(dataSource: any, cellSelection: true) {
   const schema: any = {
     type: 'object-grid',
     objectName: OBJECT,
@@ -313,33 +313,6 @@ describe('ObjectGrid autosave — a 409 kept as mine re-reads nothing either (ob
   });
 });
 
-describe('ObjectGrid autosave — control: without cellSelection the row save re-reads', () => {
-  it('stages, saves from the bar, and reads the grid again', async () => {
-    const ds = makeDataSource();
-    const { container } = renderGrid(ds, false);
-    await screen.findByText('beta');
-    const reads = ds.find.mock.calls.length;
-    const cell = dataCell(container, 0, 'alpha');
-    fireEvent.click(cell);
-    const input = await waitFor(() => {
-      const el = cell.querySelector('input') as HTMLInputElement;
-      expect(el).toBeTruthy();
-      return el;
-    });
-    fireEvent.change(input, { target: { value: 'alpha one' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-    expect(ds.update).not.toHaveBeenCalled();
-    const saveAll = await waitFor(() => {
-      const btn = Array.from(container.querySelectorAll('button')).find((b) => /Save All/.test(b.textContent || ''));
-      expect(btn).toBeTruthy();
-      return btn as HTMLButtonElement;
-    });
-    fireEvent.click(saveAll);
-    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(ds.find.mock.calls.length).toBeGreaterThan(reads));
-  });
-});
-
 /** The Undo button of the `n`th success toast (0-based), as the grid handed it to the toast. */
 function undoOfToast(n: number): { label: string; onClick: () => void } | undefined {
   return (toasts.success.mock.calls[n]?.[1] as { action?: { label: string; onClick: () => void } } | undefined)?.action;
@@ -520,28 +493,9 @@ describe('ObjectGrid autosave — Undo takes a save back as a new guarded update
     expect(screen.getByText('11')).toBeInTheDocument();
   });
 
-  it('control: without cellSelection the save toast carries no Undo', async () => {
-    const ds = makeDataSource();
-    const { container } = renderGrid(ds, false);
-    await screen.findByText('beta');
-    const cell = dataCell(container, 0, 'alpha');
-    fireEvent.click(cell);
-    const input = await waitFor(() => {
-      const el = cell.querySelector('input') as HTMLInputElement;
-      expect(el).toBeTruthy();
-      return el;
-    });
-    fireEvent.change(input, { target: { value: 'alpha one' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-    const saveAll = await waitFor(() => {
-      const btn = Array.from(container.querySelectorAll('button')).find((b) => /Save All/.test(b.textContent || ''));
-      expect(btn).toBeTruthy();
-      return btn as HTMLButtonElement;
-    });
-    fireEvent.click(saveAll);
-    await waitFor(() => expect(toasts.success).toHaveBeenCalledTimes(1));
-    expect(undoOfToast(0)).toBeUndefined();
-  });
+  // The staged control (no Undo on a save from the "Save All" bar) is gone
+  // with the bar (objectstack#35827): every save of an editable grid is a
+  // per-cell save, and each carries Undo.
 });
 
 describe("ObjectGrid — a grid without cellSelection re-reads on the host list's own write (objectstack#35685)", () => {

@@ -150,7 +150,7 @@ function renderGrid(c: Case = {}) {
     <ActionProvider>
       <SchemaRendererProvider dataSource={dataSource} apiFetch={apiFetch}>
         <ObjectGrid
-          cellSelection={false}
+         
           schema={schema}
           dataSource={dataSource}
           {...(kebab ? { onEdit: () => {}, onDelete: () => {} } : {})}
@@ -160,9 +160,14 @@ function renderGrid(c: Case = {}) {
   );
 }
 
-/** Wait for the rows, then for every explain answer to land. */
+/**
+ * Wait for the rows, select a cell (a select-first grid asks the record
+ * verdicts when a cell is first selected, objectstack#35684 / #35827), then
+ * wait for every explain answer to land.
+ */
 async function settle() {
   await waitFor(() => expect(screen.getByText(OTHER_ROW.name)).toBeInTheDocument());
+  fireEvent.click(cellOf(OWN_ROW.name));
   await waitFor(() => expect(server.calls.length).toBeGreaterThan(0));
   await act(async () => {
     await Promise.allSettled(server.responses);
@@ -177,19 +182,25 @@ const cellOf = (label: string) =>
 /** Click the row's Name cell and report whether an in-cell editor opened. */
 async function clickOpensEditor(label: string): Promise<boolean> {
   const td = cellOf(label);
+  // Select-first (objectstack#35827): a click selects, a double-click edits.
   fireEvent.click(td);
+  fireEvent.doubleClick(td);
   await new Promise((r) => setTimeout(r, 50));
-  const opened = td.querySelector('input') != null;
+  const opened = td.hasAttribute('data-editing-cell') && td.querySelector('input') != null;
   if (opened) fireEvent.keyDown(td.querySelector('input')!, { key: 'Escape' });
   return opened;
 }
 
-/** Press Enter on the row's Name cell and report whether an editor opened. */
+/** Select the row's Name cell, press Enter, and report whether an editor opened. */
 async function enterOpensEditor(label: string): Promise<boolean> {
   const td = cellOf(label);
-  fireEvent.keyDown(td, { key: 'Enter' });
+  fireEvent.click(td);
+  const catcher = td.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]');
+  fireEvent.keyDown(catcher ?? td, { key: 'Enter' });
   await new Promise((r) => setTimeout(r, 50));
-  return td.querySelector('input') != null;
+  const opened = td.hasAttribute('data-editing-cell') && td.querySelector('input') != null;
+  if (opened) fireEvent.keyDown(td.querySelector('input')!, { key: 'Escape' });
+  return opened;
 }
 
 /** Whether the row's kebab offers the built-in Edit entry. */
@@ -218,14 +229,15 @@ describe('ObjectGrid inline cells read the record-grained `update` verdict (obje
     await settle();
     expect(await clickOpensEditor(OTHER_ROW.name)).toBe(false);
     expect(await enterOpensEditor(OTHER_ROW.name)).toBe(false);
-    // …and reads as read-only: no edit cursor on its cells.
-    expect(cellOf(OTHER_ROW.name)).not.toHaveClass('cursor-text');
+    // …and reads as read-only: the selected cell says so.
+    fireEvent.click(cellOf(OTHER_ROW.name));
+    expect(cellOf(OTHER_ROW.name)).toHaveAttribute('aria-readonly', 'true');
   });
 
   it('CONTROL: an allowed row of the same grid stays editable', async () => {
     renderGrid();
     await settle();
-    expect(cellOf(OWN_ROW.name)).toHaveClass('cursor-text');
+    expect(cellOf(OWN_ROW.name)).not.toHaveAttribute('aria-readonly');
     expect(await clickOpensEditor(OWN_ROW.name)).toBe(true);
   });
 
@@ -263,6 +275,7 @@ describe('fail OPEN — no answer keeps the object-level behaviour (objectstack#
     server.network = false;
     renderGrid();
     await waitFor(() => expect(screen.getByText(OTHER_ROW.name)).toBeInTheDocument());
+    fireEvent.click(cellOf(OWN_ROW.name));
     await waitFor(() => expect(server.calls.length).toBeGreaterThan(0));
     expect(await clickOpensEditor(OTHER_ROW.name)).toBe(true);
   });
@@ -274,40 +287,16 @@ describe('fail OPEN — no answer keeps the object-level behaviour (objectstack#
     expect(await clickOpensEditor(OTHER_ROW.name)).toBe(true);
   });
 
-  it('CONTROL: before the answer lands, the row is editable — never over-hidden', async () => {
-    server.hold();
-    renderGrid();
-    await waitFor(() => expect(screen.getByText(OTHER_ROW.name)).toBeInTheDocument());
-    await waitFor(() => expect(server.calls.length).toBeGreaterThan(0));
-    expect(await clickOpensEditor(OTHER_ROW.name)).toBe(true);
-    server.release();
-    await act(async () => {
-      await Promise.allSettled(server.responses);
-    });
-    expect(await clickOpensEditor(OTHER_ROW.name)).toBe(false);
-  });
+  // "before the answer lands, the row is editable" pinned the staged arm.
+  // Select-first, an edit waits for the row's verdict instead of opening an
+  // editor the answer may refuse (objectstack#35795), pinned in
+  // ObjectGrid.cellSelection-35684 ("a slow record verdict holds the editor
+  // the same way"); every editable grid is select-first (objectstack#35827).
 });
 
-/**
- * [objectstack#34208] A list asks the record verdicts only once its row actions
- * are reached for — but the inline cells read `update` while they render, so an
- * inline-editable grid still asks `update` when its rows arrive. `delete` is
- * read only by the row menus, and waits for them.
- */
-describe('[objectstack#34208] an inline-editable grid asks `update` on first render, `delete` on first use', () => {
-  it('the first paint asks `update` for the page and nothing else; opening a kebab then asks `delete` once', async () => {
-    renderGrid();
-    await settle();
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
-    expect(server.calls.map((call) => call.operation)).toEqual(['update']);
-    expect([...(server.calls[0].recordIds ?? [])].sort()).toEqual([OTHER_ROW.id, OWN_ROW.id].sort());
-
-    expect(await kebabOffersEdit(OWN_ROW.name)).toBe(true);
-    await act(async () => {
-      await Promise.allSettled(server.responses);
-    });
-    expect(server.calls.map((call) => call.operation)).toEqual(['update', 'delete']);
-  });
-});
+// [objectstack#34208] pinned that an inline-editable grid asked `update` on
+// first paint, because the staged cells read it while they rendered. Every
+// editable grid is select-first now (objectstack#35827), and its cells ask
+// when one is first selected (objectstack#35684): ObjectGrid.cellSelection-35684
+// and `settle()` above. `delete` waiting for the row menus is
+// rowRecordCrudVerdict.test.tsx's.

@@ -75,7 +75,7 @@ function renderTable(extra: Record<string, unknown> = {}, selection: React.Compo
     ],
     data: ROWS,
     editable: true,
-    singleClickEdit: true,
+    onRowSave: () => Promise.resolve(),
     searchable: false,
     pagination: false,
     onCellChange,

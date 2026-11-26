@@ -7,8 +7,8 @@
  */
 
 /**
- * objectui#12322 — an estimate typed while a row save or Save All is on the
- * wire is still pending when the save lands.
+ * objectui#12322 — an estimate typed while a save is on the wire is not lost
+ * when the save lands.
  *
  * `ObjectGrid`'s default saves await `dataSource.update` over the network, and
  * every cell stays editable meanwhile. `data-table` used to settle a save by
@@ -16,7 +16,9 @@
  * pressed, so an edit staged during the round trip vanished with no signal.
  * The table's own pins are in `@object-ui/components`
  * (`data-table-save-settles-current-12322.test.tsx`); these run the console's
- * path end to end.
+ * path end to end. The staged row save and Save All are retired
+ * (objectstack#35827): each commit is its own save, so the edit made during
+ * the round trip is a second save of its own record.
  *
  * ## What is real here
  *
@@ -140,8 +142,7 @@ function renderGrid(server: ReturnType<typeof makeServer>) {
   return render(
     <ActionProvider>
       <SchemaRendererProvider dataSource={server.dataSource}>
-        {/* Row Edit/Delete handlers: the per-row save button exists. */}
-        <ObjectGrid cellSelection={false} schema={schema} dataSource={server.dataSource} onEdit={() => {}} onDelete={() => {}} />
+        <ObjectGrid schema={schema} dataSource={server.dataSource} onEdit={() => {}} onDelete={() => {}} />
       </SchemaRendererProvider>
     </ActionProvider>,
   );
@@ -149,7 +150,7 @@ function renderGrid(server: ReturnType<typeof makeServer>) {
 
 const rowOf = (title: string) => screen.getByText(title).closest('tr') as HTMLElement;
 
-/** Stage a new Estimate on the row titled `title`, the way a user types it. */
+/** Type a new Estimate on the row titled `title` and commit it: select-first, the commit is the save. */
 async function editEstimate(title: string, from: string, to: string) {
   const td = await waitFor(() => {
     const cell = Array.from(rowOf(title).querySelectorAll('td')).find(
@@ -159,11 +160,11 @@ async function editEstimate(title: string, from: string, to: string) {
     return cell as HTMLElement;
   });
   fireEvent.click(td);
-  const input = await waitFor(() => {
-    const el = td.querySelector('input') as HTMLInputElement | null;
-    if (!el) throw new Error('editor not open');
-    return el;
-  });
+  fireEvent.doubleClick(td);
+  // The editor mounts on the cell's overlay layer (objectstack#35688).
+  await waitFor(() => expect(td.querySelector('[data-slot="cell-editor-overlay"] input')).toBeTruthy());
+  await act(async () => {});
+  const input = td.querySelector('[data-slot="cell-editor-overlay"] input') as HTMLInputElement;
   fireEvent.change(input, { target: { value: to } });
   fireEvent.keyDown(input, { key: 'Enter' });
   await waitFor(() => expect(within(rowOf(title)).getByText(to)).toBeInTheDocument());
@@ -173,10 +174,7 @@ const estimates = (server: ReturnType<typeof makeServer>) =>
   Object.fromEntries(Object.entries(server.store).map(([id, r]) => [id, r.estimate_hours]));
 
 describe('ObjectGrid keeps an inline edit made while a save is on the wire (objectui#12322)', () => {
-  it.each([
-    ['a row save', (title: string) => fireEvent.click(within(rowOf(title)).getByTitle('Save row'))],
-    ['Save All', () => fireEvent.click(screen.getByRole('button', { name: /Save All/ }))],
-  ] as const)('%s held open: an estimate staged on another row is still pending after the save lands', async (_label, save) => {
+  it('a save held open: an estimate committed on another row meanwhile is written too, and drawn when both land', async () => {
     const server = makeServer([
       { id: 'a', title: 'Alpha', estimate_hours: 10 },
       { id: 'b', title: 'Bravo', estimate_hours: 20 },
@@ -185,22 +183,17 @@ describe('ObjectGrid keeps an inline edit made while a save is on the wire (obje
     await waitFor(() => expect(within(rowOf('Alpha')).getByText('10')).toBeInTheDocument());
 
     await editEstimate('Alpha', '10', '11');
-    save('Alpha');
     await waitFor(() => expect(server.patches).toEqual([{ id: 'a', body: { estimate_hours: 11 } }]));
 
-    // The write is on the wire; Bravo's cell is still editable.
+    // The write is on the wire; Bravo's cell is still editable, and its
+    // commit is its own save.
     await editEstimate('Bravo', '20', '21');
-    expect(screen.getByText(/2 rows modified/)).toBeInTheDocument();
+    await waitFor(() => expect(server.patches).toHaveLength(2));
+    expect(server.patches[1]).toEqual({ id: 'b', body: { estimate_hours: 21 } });
 
     await server.release();
-    await waitFor(() => expect(estimates(server)).toEqual({ a: 11, b: 20 }));
-    await waitFor(() => expect(screen.getByText(/1 row modified/)).toBeInTheDocument());
-    expect(within(rowOf('Bravo')).getByText('21')).toBeInTheDocument();
-
-    // And the next Save All writes it.
-    fireEvent.click(screen.getByRole('button', { name: /Save All/ }));
     await waitFor(() => expect(estimates(server)).toEqual({ a: 11, b: 21 }));
-    expect(server.patches[1]).toEqual({ id: 'b', body: { estimate_hours: 21 } });
-    await waitFor(() => expect(screen.queryByText(/row modified/)).toBeNull());
+    expect(within(rowOf('Alpha')).getByText('11')).toBeInTheDocument();
+    expect(within(rowOf('Bravo')).getByText('21')).toBeInTheDocument();
   });
 });

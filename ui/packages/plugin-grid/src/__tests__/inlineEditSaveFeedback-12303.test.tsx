@@ -17,14 +17,16 @@
  * default saves now raise the console's shared success toast (the `toast`
  * `@object-ui/components` re-exports from `sonner`, the one the form, kanban
  * and view surfaces raise), naming how many rows the server ACCEPTED: a row
- * that failed is not counted, and a batch where nothing landed says nothing.
+ * that failed is not counted, and a save that did not land says nothing.
+ * Since the staged model was retired (objectstack#35827) each committed cell
+ * is its own save of one row.
  *
  * The real `ObjectGrid` and `data-table` over an in-memory data source whose
  * `update` persists, and can refuse named rows. Only that `toast` export is
  * replaced, so the toast call itself is read.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup, within } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
@@ -108,7 +110,7 @@ async function loaded(dataSource: ReturnType<typeof makeDataSource>) {
     <ActionProvider>
       {/* Row Edit/Delete handlers: the per-row save button exists. */}
       <ObjectGrid
-        cellSelection={false}
+       
         schema={schema}
         // The in-memory double implements the three members the default saves read.
         dataSource={dataSource as unknown as GridProps['dataSource']}
@@ -122,86 +124,67 @@ async function loaded(dataSource: ReturnType<typeof makeDataSource>) {
 
 const rowOf = (title: string) => screen.getByText(title).closest('tr') as HTMLElement;
 
-/** Stage a new Estimate on the row titled `title`, the way a user types it. */
-async function editEstimate(title: string, from: string, to: string) {
+/**
+ * Type a new Estimate on the row titled `title` and commit it with Enter, the
+ * select-first way (a click selects, a double-click edits): the commit is the
+ * cell's save.
+ */
+async function commitEstimate(title: string, from: string, to: string) {
   const td = await waitFor(() => {
     const cell = Array.from(rowOf(title).querySelectorAll('td')).find((c) => c.textContent?.trim() === from);
     if (!cell) throw new Error(`no ${from} cell on ${title}`);
     return cell as HTMLElement;
   });
   fireEvent.click(td);
-  const input = await waitFor(() => {
-    const el = td.querySelector('input') as HTMLInputElement | null;
-    if (!el) throw new Error('editor not open');
-    return el;
-  });
+  fireEvent.doubleClick(td);
+  // The editor mounts on the cell's overlay layer (objectstack#35688).
+  await waitFor(() => expect(td.querySelector('[data-slot="cell-editor-overlay"] input')).toBeTruthy());
+  await act(async () => {});
+  const input = td.querySelector('[data-slot="cell-editor-overlay"] input') as HTMLInputElement;
   fireEvent.change(input, { target: { value: to } });
   fireEvent.keyDown(input, { key: 'Enter' });
-  await waitFor(() => expect(within(rowOf(title)).getByText(to)).toBeInTheDocument());
+  await act(async () => {});
 }
 
-const clickSaveAll = () => fireEvent.click(screen.getByRole('button', { name: /Save All/ }));
+/** The text of each success toast raised so far. */
+const successTexts = () => toasts.success.mock.calls.map((call: unknown[]) => call[0]);
 
 describe('ObjectGrid default saves — the write is said (objectui#12303)', () => {
-  it('"Save All" over two rows that both land raises one success toast naming two rows', async () => {
+  it('a committed cell that lands raises one success toast saying one row was saved', async () => {
     const ds = makeDataSource();
     await loaded(ds);
-    await editEstimate('Ingest pipeline', '60', '61');
-    await editEstimate('Warehouse schema', '33', '31');
-    clickSaveAll();
+    await commitEstimate('Ingest pipeline', '60', '61');
 
     await waitFor(() => expect(toasts.success).toHaveBeenCalledTimes(1));
-    expect(toasts.success).toHaveBeenCalledWith('2 rows saved');
+    expect(successTexts()).toEqual(['1 row saved']);
+    expect(ds.store.t1.estimate_hours).toBe(61);
+  });
+
+  it('a commit on each of two rows: each save is said once, as one row', async () => {
+    const ds = makeDataSource();
+    await loaded(ds);
+    await commitEstimate('Ingest pipeline', '60', '61');
+    await waitFor(() => expect(toasts.success).toHaveBeenCalledTimes(1));
+    await commitEstimate('Warehouse schema', '33', '31');
+
+    await waitFor(() => expect(toasts.success).toHaveBeenCalledTimes(2));
+    expect(successTexts()).toEqual(['1 row saved', '1 row saved']);
     expect(ds.store.t1.estimate_hours).toBe(61);
     expect(ds.store.t2.estimate_hours).toBe(31);
-    await waitFor(() => expect(screen.queryByText(/row modified|rows modified/)).toBeNull());
   });
 
-  it('the card’s case: "Save All (1)" says one row was saved', async () => {
-    const ds = makeDataSource();
-    await loaded(ds);
-    await editEstimate('Ingest pipeline', '60', '61');
-    expect(screen.getByRole('button', { name: /Save All \(1\)/ })).toBeInTheDocument();
-    clickSaveAll();
-
-    await waitFor(() => expect(toasts.success).toHaveBeenCalledWith('1 row saved'));
-    expect(toasts.success).toHaveBeenCalledTimes(1);
-  });
-
-  it('the per-row save says one row was saved', async () => {
-    const ds = makeDataSource();
-    await loaded(ds);
-    await editEstimate('Ingest pipeline', '60', '61');
-    fireEvent.click(within(rowOf('Ingest pipeline')).getByTitle('Save row'));
-
-    await waitFor(() => expect(toasts.success).toHaveBeenCalledWith('1 row saved'));
-    expect(ds.store.t1.estimate_hours).toBe(61);
-  });
-
-  it('a batch where one row is refused counts only the row that landed, and the table still flags the other', async () => {
+  it('CONTROL — a save the server refuses raises no success toast, and the cell says why', async () => {
     const ds = makeDataSource(new Set(['t1']));
     await loaded(ds);
-    await editEstimate('Ingest pipeline', '60', '61');
-    await editEstimate('Warehouse schema', '33', '31');
-    clickSaveAll();
+    await commitEstimate('Ingest pipeline', '60', '61');
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('estimate_hours is locked on t1'));
-    expect(toasts.success).toHaveBeenCalledTimes(1);
-    expect(toasts.success).toHaveBeenCalledWith('1 row saved');
-    expect(ds.store.t2.estimate_hours).toBe(31);
+    expect(ds.update).toHaveBeenCalledTimes(1);
     expect(ds.store.t1.estimate_hours).toBe(60);
-    expect(screen.getByRole('button', { name: /Save All \(1\)/ })).toBeInTheDocument();
-  });
-
-  it('CONTROL — a batch where nothing lands raises no success toast', async () => {
-    const ds = makeDataSource(new Set(['t1', 't2']));
-    await loaded(ds);
-    await editEstimate('Ingest pipeline', '60', '61');
-    await editEstimate('Warehouse schema', '33', '31');
-    clickSaveAll();
-
-    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
-    expect(ds.update).toHaveBeenCalledTimes(2);
     expect(toasts.success).not.toHaveBeenCalled();
   });
+
+  // The "Save All" pins (one toast naming two rows, "Save All (1)", a batch
+  // counting only the rows that landed) went with the staged model
+  // (objectstack#35827).
 });
