@@ -92,3 +92,23 @@ describe('object grid: a quantity with its unit (objectstack#35490)', () => {
     expect(read.params.$select).toEqual(expect.arrayContaining(['unit_code', 'organization_id']));
   });
 });
+
+describe('object grid with no SchemaRendererProvider: the known degraded shape (objectstack#35490)', () => {
+  it('reads no unit rows, so a standard unit keeps its label at the field width and an org unit shows its code, with no error', async () => {
+    const { ds, calls } = source();
+    render(
+      <LocalizationProvider value={{ locale: 'en-US' }}>
+        <ActionProvider>
+          <ObjectGrid schema={{ type: 'object-grid', objectName: 'line', columns: [{ field: 'name' }, { field: 'qty' }, { field: 'weight' }] } as never} dataSource={ds as never} />
+        </ActionProvider>
+      </LocalizationProvider>,
+    );
+    await waitFor(() => expect(screen.getByText('L1')).toBeInTheDocument());
+    const rows = rowTexts();
+    expect(rows[0]).toContain('4 BOX_12');
+    expect(rows[0]).toContain('1.25 kg');
+    expect(rows[1]).toContain('1.5 g');
+    expect(calls.some((c) => c.object === 'sys_unit' || c.object === 'sys_standard_unit_setting')).toBe(false);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+});
