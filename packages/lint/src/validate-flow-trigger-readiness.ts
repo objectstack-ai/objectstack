@@ -750,7 +750,7 @@ function graphHolder(flow: AnyRec, path: readonly (string | number)[]): AnyRec |
 }
 
 /**
- * [#36964] `flow-condition-option-label` past the start condition (1-iii):
+ * [#36964] `flow-condition-option-label` past the start condition (1-iv):
  *
  *  - a query FILTER's operand — every node in {@link FILTER_NODE_TYPES}, at any
  *    region depth, against its own literal `objectName`, and a time-relative
@@ -762,7 +762,10 @@ function graphHolder(flow: AnyRec, path: readonly (string | number)[]): AnyRec |
  *    row a single-row `get_record` step bound to its `outputVariable`
  *    (`deal.F`). A variable bound by anything else as well — another step, a
  *    declared variable, a node id, a screen field — is not judged: which value
- *    it holds when the condition runs is the run's.
+ *    it holds when the condition runs is the run's. Likewise a `record` /
+ *    `previous` root the flow itself binds (a step's `outputVariable`, a loop's
+ *    `iteratorVariable`, an assignment target): after that binding `record.F`
+ *    is another row's field, so the root is not read as the trigger record.
  */
 function optionLabelsBeyondStart(
   flow: AnyRec,
@@ -856,7 +859,9 @@ function optionLabelsBeyondStart(
   const readers: Array<{ objectName: string; reads: FieldReads }> = [];
   if (triggerObject) {
     const shadowed = new Set([...collectFlowVariableNames(flow, graphs), ...screenNames]);
-    readers.push({ objectName: triggerObject, reads: { ...TRIGGER_RECORD_READS, shadowed } });
+    // A trigger root the flow rebinds names another row from then on: drop it.
+    const roots = TRIGGER_RECORD_READS.roots.filter((root) => !shadowed.has(root));
+    readers.push({ objectName: triggerObject, reads: { roots, bare: TRIGGER_RECORD_READS.bare, shadowed } });
   }
   for (const [variable, objectName] of rowVariables) {
     if (objectName === null || boundElsewhere.has(variable) || screenNames.has(variable)) continue;

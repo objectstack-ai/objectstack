@@ -353,6 +353,132 @@ describe('flow-condition-option-label past the start condition (#36964)', () => 
     expect(bare({ variables: [{ name: 'stage', type: 'text' }] })).not.toContain(FLOW_CONDITION_OPTION_LABEL);
   });
 
+  it('reads $not, $nin and $and, and says which way an excluding operand cuts', () => {
+    const run = (filter: unknown) => labelHits(validateFlowTriggerReadiness(manual([crud('get_record', filter)])));
+    // `$not` over `$ne` excludes twice over: the filter still matches no record.
+    const notNe = run({ $not: { stage: { $ne: 'Closed Lost' } } });
+    expect(notNe.map((f) => f.path)).toEqual(['flows[0].nodes[1].config.filter.$not.stage.$ne']);
+    expect(notNe[0].message).toContain('matches no record');
+    const nin = run({ stage: { $nin: ['open', 'Closed Lost'] } });
+    expect(nin.map((f) => f.path)).toEqual(['flows[0].nodes[1].config.filter.stage.$nin[1]']);
+    expect(nin[0].message).toContain('excludes no record');
+    const and = run({ $and: [{ name: 'x' }, { stage: 'Closed Lost' }] });
+    expect(and.map((f) => f.path)).toEqual(['flows[0].nodes[1].config.filter.$and[1].stage']);
+    expect(and[0].message).toContain('matches no record');
+  });
+
+  it('reads an edge inside a loop body and a decision branch inside a parallel branch', () => {
+    const inLoop = branching(undefined);
+    inLoop.flows[0].nodes.push({
+      id: 'each',
+      type: 'loop',
+      label: 'Each',
+      config: {
+        collection: { dialect: 'cel', source: '[1]' },
+        iteratorVariable: 'i',
+        body: {
+          nodes: [
+            { id: 'a', type: 'assignment', label: 'A', config: { assignments: { n: 1 } } },
+            { id: 'b', type: 'assignment', label: 'B', config: { assignments: { m: 1 } } },
+          ],
+          edges: [{ id: 'inner', source: 'a', target: 'b', condition: "deal.stage == 'Closed Lost'" }],
+        },
+      },
+    });
+    expect(labelHits(validateFlowTriggerReadiness(inLoop)).map((f) => f.path)).toEqual([
+      'flows[0].nodes[5].config.body.edges[0].condition',
+    ]);
+
+    const inBranch = branching(undefined);
+    inBranch.flows[0].nodes.push({
+      id: 'fan',
+      type: 'parallel',
+      label: 'Fan',
+      config: {
+        branches: [
+          {
+            name: 'left',
+            nodes: [{ id: 'pick', type: 'decision', label: 'Pick', config: { conditions: [{ label: 'lost', expression: "deal.stage == 'Closed Lost'" }] } }],
+            edges: [],
+          },
+        ],
+      },
+    });
+    expect(labelHits(validateFlowTriggerReadiness(inBranch)).map((f) => f.path)).toEqual([
+      'flows[0].nodes[5].config.branches[0].nodes[0].config.conditions[0].expression',
+    ]);
+  });
+
+  it("reads a time-relative flow's trigger record, and previous.F on a record-change flow", () => {
+    const sweep = stack(flow('remind', { objectName: 'deal', timeRelative: SWEEP }, [{ id: 'tell', type: 'end', label: 'Tell', config: {} }]));
+    sweep.flows[0].edges[0].condition = "record.stage == 'Closed Lost'";
+    expect(labelHits(validateFlowTriggerReadiness(sweep)).map((f) => f.path)).toEqual(['flows[0].edges[0].condition']);
+
+    const onUpdate = stack(
+      flow('lost', { triggerType: 'record-after-update', objectName: 'deal' }, [{ id: 'tell', type: 'end', label: 'Tell', config: {} }]),
+    );
+    onUpdate.flows[0].edges[0].condition = "previous.stage != 'Closed Lost'";
+    expect(labelHits(validateFlowTriggerReadiness(onUpdate)).map((f) => f.path)).toEqual(['flows[0].edges[0].condition']);
+  });
+
+  /** A second object whose `stage` stores the words the deal's `stage` uses as labels. */
+  const LEAD = {
+    name: 'lead',
+    label: 'Lead',
+    fields: { stage: { type: 'select', label: 'Stage', options: ['Open', 'Closed Lost'] } },
+  };
+
+  it('is silent when the flow rebinds `record` to another row (get_record, loop iterator, assignment)', () => {
+    const rebinding = (binder: AnyRec) => {
+      const f = flow('lost', { triggerType: 'record-after-update', objectName: 'deal' }, [
+        binder,
+        { id: 'tell', type: 'end', label: 'Tell', config: {} },
+      ]);
+      f.edges[1].condition = "record.stage == 'Closed Lost'";
+      return { objects: [DEAL, LEAD], flows: [f] };
+    };
+    const binders: AnyRec[] = [
+      { id: 'load', type: 'get_record', label: 'Load', config: { objectName: 'lead', filter: { id: 'l1' }, outputVariable: 'record' } },
+      { id: 'set', type: 'assignment', label: 'Set', config: { assignments: { record: { dialect: 'cel', source: 'lead_row' } } } },
+      { id: 'each', type: 'loop', label: 'Each', config: { collection: { dialect: 'cel', source: 'leads' }, iteratorVariable: 'record', body: { nodes: [], edges: [] } } },
+    ];
+    for (const binder of binders) {
+      expect(rulesOf(validateFlowTriggerReadiness(rebinding(binder))), binder.type).not.toContain(FLOW_CONDITION_OPTION_LABEL);
+    }
+    // Control: the same flow with a binder that does not touch `record` is reported.
+    const control = rebinding({ id: 'set', type: 'assignment', label: 'Set', config: { assignments: { other: 1 } } });
+    expect(rulesOf(validateFlowTriggerReadiness(control))).toContain(FLOW_CONDITION_OPTION_LABEL);
+  });
+
+  it('drops a variable two get_record steps bind to different objects, and one a node id or a screen field shadows', () => {
+    const twoObjects = branching("deal.stage == 'Closed Lost'");
+    twoObjects.objects = [DEAL, LEAD];
+    twoObjects.flows[0].nodes.push({ id: 'load2', type: 'get_record', label: 'Load 2', config: { objectName: 'lead', filter: { id: 'l1' }, outputVariable: 'deal' } });
+    expect(rulesOf(validateFlowTriggerReadiness(twoObjects))).not.toContain(FLOW_CONDITION_OPTION_LABEL);
+
+    const nodeId = branching("deal.stage == 'Closed Lost'");
+    nodeId.flows[0].nodes.push({ id: 'deal', type: 'end', label: 'Deal end', config: {} });
+    expect(rulesOf(validateFlowTriggerReadiness(nodeId))).not.toContain(FLOW_CONDITION_OPTION_LABEL);
+
+    const screenField = branching("deal.stage == 'Closed Lost'");
+    screenField.flows[0].nodes.push({ id: 'ask', type: 'screen', label: 'Ask', config: { fields: [{ name: 'deal', label: 'Deal', type: 'text' }] } });
+    expect(rulesOf(validateFlowTriggerReadiness(screenField))).not.toContain(FLOW_CONDITION_OPTION_LABEL);
+
+    // The bare read of the trigger field, shadowed by a node id and by a screen field.
+    const bare = (node: AnyRec) => {
+      const s = stack(
+        flow('lost', { triggerType: 'record-after-update', objectName: 'deal' }, [node, { id: 'tell', type: 'end', label: 'Tell', config: {} }]),
+      );
+      s.flows[0].edges[1].condition = "stage == 'Closed Lost'";
+      return rulesOf(validateFlowTriggerReadiness(s));
+    };
+    expect(bare({ id: 'stage', type: 'assignment', label: 'S', config: { assignments: { n: 1 } } })).not.toContain(FLOW_CONDITION_OPTION_LABEL);
+    expect(bare({ id: 'ask', type: 'screen', label: 'Ask', config: { fields: [{ name: 'stage', label: 'Stage', type: 'text' }] } })).not.toContain(
+      FLOW_CONDITION_OPTION_LABEL,
+    );
+    expect(bare({ id: 'other', type: 'assignment', label: 'O', config: { assignments: { n: 1 } } })).toContain(FLOW_CONDITION_OPTION_LABEL);
+  });
+
   it('os validate reports it, and the runtime publish gate refuses the flow write', () => {
     const s = branching("deal.stage == 'Closed Lost'");
     expect(rulesOf(runAuthoringRules('validate', { normalized: s } as never))).toContain(FLOW_CONDITION_OPTION_LABEL);
