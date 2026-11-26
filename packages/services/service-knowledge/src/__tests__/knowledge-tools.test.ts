@@ -437,11 +437,11 @@ describe('search_knowledge — scope, granularity and groupBy over the knowledge
         return row[k] === v;
       });
     const engine = {
-      find: vi.fn(async (object: string, q: { where?: Record<string, unknown>; fields?: string[]; context?: { isSystem?: boolean } }, o?: { context?: { isSystem?: boolean } }) => {
-        const rows = (tables[object] ?? []).filter((r) => matches(r, q.where));
-        const project = (r: Row) => (q.fields ? Object.fromEntries(q.fields.filter((f) => f in r).map((f) => [f, r[f]])) : { ...r });
-        if ((q.context ?? o?.context)?.isSystem) return rows.map(project);
-        return rows.filter((r) => readable.includes(r.id)).map(project);
+      find: vi.fn(async (object: string, q: { where?: Record<string, unknown>; fields?: string[]; limit?: number; context?: { isSystem?: boolean } }, o?: { context?: { isSystem?: boolean } }) => {
+        const system = (q.context ?? o?.context)?.isSystem === true;
+        const rows = (tables[object] ?? []).filter((r) => matches(r, q.where) && (system || readable.includes(r.id)));
+        const page = typeof q.limit === 'number' ? rows.slice(0, q.limit) : rows;
+        return page.map((r) => (q.fields ? Object.fromEntries(q.fields.filter((f) => f in r).map((f) => [f, r[f]])) : { ...r }));
       }),
     } as unknown as IDataEngine;
     const service = new KnowledgeService({ dataEngine: engine, logger: { warn: () => undefined, debug: () => undefined } });

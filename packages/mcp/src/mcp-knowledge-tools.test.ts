@@ -288,9 +288,11 @@ describe('[ADR-0161 K9] search_knowledge over the real definition — every tran
         return row[k] === v;
       });
     const engine = {
-      find: async (_object: string, q: { where?: Record<string, unknown>; fields?: string[] }) =>
-        CLAUSES.filter((r) => matches(r, q.where))
-          .map((r) => (q.fields ? Object.fromEntries(q.fields.filter((f) => f in r).map((f) => [f, r[f]])) : { ...r })),
+      find: async (_object: string, q: { where?: Record<string, unknown>; fields?: string[]; limit?: number }) => {
+        const rows = CLAUSES.filter((r) => matches(r, q.where));
+        const page = typeof q.limit === 'number' ? rows.slice(0, q.limit) : rows;
+        return page.map((r) => (q.fields ? Object.fromEntries(q.fields.filter((f) => f in r).map((f) => [f, r[f]])) : { ...r }));
+      },
     } as unknown as IDataEngine;
     const service = new KnowledgeService({ dataEngine: engine, logger: { warn: () => undefined, debug: () => undefined } });
     service.registerAdapter('memory', adapter);
