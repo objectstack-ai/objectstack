@@ -395,8 +395,10 @@ export class QuickJSScriptRunner implements ScriptRunner {
               try {
                 var __refusalParams;
                 try { __refusalParams = (e && e.params !== undefined) ? JSON.parse(JSON.stringify(e.params)) : undefined; } catch (_) { __refusalParams = undefined; }
+                var __refusalReasons, __hasReasons = false;
+                try { __hasReasons = !!e && e.reasons !== undefined; __refusalReasons = __hasReasons ? JSON.parse(JSON.stringify(e.reasons)) : undefined; } catch (_) { __refusalReasons = null; }
                 globalThis.__errorInfo = (e && (e.code || e.fields || e.status || e.userMessage || e['${SANDBOX_FAULT_PROP}']))
-                  ? JSON.stringify({ code: e.code, fields: e.fields, status: e.status, userMessage: e.userMessage, sandboxFault: e['${SANDBOX_FAULT_PROP}'] === true, reason: typeof e.reason === 'string' ? e.reason : undefined, params: __refusalParams })
+                  ? JSON.stringify({ code: e.code, fields: e.fields, status: e.status, userMessage: e.userMessage, sandboxFault: e['${SANDBOX_FAULT_PROP}'] === true, reason: typeof e.reason === 'string' ? e.reason : undefined, params: __refusalParams, hasReasons: __hasReasons || undefined, reasons: __hasReasons ? (__refusalReasons === undefined ? null : __refusalReasons) : undefined })
                   : undefined;
               } catch (_) { globalThis.__errorInfo = undefined; }
               try {
@@ -2540,6 +2542,15 @@ export class SandboxError extends Error {
    * body's own throw declared it — the sandbox never invents one.
    */
   readonly userMessage?: string;
+  /**
+   * [#36877, ruling 7178348458 term 3] The sentences of a declared refusal
+   * thrown as a `reasons` list, each rendered in the caller's locale, in the
+   * order thrown — the wire's `details.refusals` (`declaredRefusalLines` in
+   * `@objectstack/types` reads it). Set only by the refusal catalogue
+   * (`hook-refusal-catalogue.ts`), never read off the VM: a body cannot hand
+   * the wire a list the catalogue did not render.
+   */
+  readonly refusals?: ReadonlyArray<{ reason: string; message: string }>;
   constructor(message: string, innerMessage?: string, info?: SandboxErrorInfo) {
     super(message);
     this.name = 'SandboxError';
@@ -2548,6 +2559,7 @@ export class SandboxError extends Error {
     if (info?.fields) this.fields = info.fields;
     if (typeof info?.status === 'number') this.status = info.status;
     if (info?.userMessage) this.userMessage = info.userMessage;
+    if (Array.isArray(info?.refusals)) this.refusals = info.refusals;
   }
 }
 
@@ -2559,6 +2571,8 @@ export interface SandboxErrorInfo {
   status?: number;
   /** [commit 79c46da90] See {@link SandboxError.userMessage}. */
   userMessage?: string;
+  /** [#36877] See {@link SandboxError.refusals}. Never read off the VM's `__errorInfo` channel. */
+  refusals?: ReadonlyArray<{ reason: string; message: string }>;
   /**
    * [#4431] The error that crossed `__error` was the SANDBOX's own fault — an
    * unavailable `ctx.api`, a marshalling failure — not
@@ -2656,6 +2670,77 @@ export function isRunnerOwnFault(err: unknown): boolean {
 export interface SandboxRefusalAddress {
   reason?: string;
   params?: Record<string, unknown>;
+  /**
+   * [#36877, ruling 7178348458 term 1] The ordered list of declared sentences
+   * the throw named instead of one `reason`: `{ code, reasons: [{ reason,
+   * params? }, …] }`. Present only when the list is readable; `listProblem`
+   * says why it is not.
+   */
+  reasons?: SandboxRefusalLine[];
+  /** [#36877] Why the throw's `reasons` cannot be answered — the run-time fault's subject. */
+  listProblem?: 'both' | 'empty' | 'malformed';
+}
+
+/** [#36877] One sentence of a thrown `reasons` list: a reason and the params its holes name. */
+export interface SandboxRefusalLine {
+  reason: string;
+  params?: Record<string, unknown>;
+}
+
+/**
+ * [#36877] The refusal address read off a throw's `reason`, `params` and
+ * `reasons` — the ONE reading both run paths make (the body path from the
+ * VM's `__errorInfo` channel, the in-process path off the thrown value), so
+ * the two cannot read a throw differently (ruling 7178348458 term 4).
+ *
+ *  - `reason` only as a non-empty string, `params` only as a non-array object
+ *    (unchanged since #33214);
+ *  - `reasons`, when the throw carries the key at all: a non-empty list whose
+ *    every element is `{ reason: non-empty string, params?: non-array object }`;
+ *    anything else is a `listProblem` (`malformed`, `empty`), and a list
+ *    beside a single `reason` is `both` — each the loud fault, never a list
+ *    quietly shortened.
+ *
+ * `hasReasons` says the key was present (a value JSON could not carry arrives
+ * as `null`, which is `malformed`).
+ */
+export function refusalAddressFrom(raw: {
+  reason?: unknown;
+  params?: unknown;
+  reasons?: unknown;
+  hasReasons?: boolean;
+}): SandboxRefusalAddress | undefined {
+  const address: SandboxRefusalAddress = {};
+  if (typeof raw.reason === 'string' && raw.reason.length > 0) address.reason = raw.reason;
+  if (isPlainParams(raw.params)) address.params = raw.params;
+  if (raw.hasReasons) {
+    const list = raw.reasons;
+    if (address.reason !== undefined) address.listProblem = 'both';
+    else if (!Array.isArray(list)) address.listProblem = 'malformed';
+    else if (list.length === 0) address.listProblem = 'empty';
+    else {
+      const lines: SandboxRefusalLine[] = [];
+      for (const item of list as unknown[]) {
+        const line = item as { reason?: unknown; params?: unknown } | null;
+        if (line === null || typeof line !== 'object' || Array.isArray(line)
+          || typeof line.reason !== 'string' || line.reason.length === 0
+          || (line.params !== undefined && !isPlainParams(line.params))) {
+          address.listProblem = 'malformed';
+          break;
+        }
+        lines.push(line.params !== undefined ? { reason: line.reason, params: line.params as Record<string, unknown> } : { reason: line.reason });
+      }
+      if (address.listProblem === undefined) address.reasons = lines;
+    }
+  }
+  return address.reason !== undefined || address.params !== undefined || address.reasons !== undefined
+    || address.listProblem !== undefined
+    ? address
+    : undefined;
+}
+
+function isPlainParams(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /** [#33214] The errors this runner built from a body throw that named a refusal address. */
@@ -2677,18 +2762,19 @@ function readRefusalAddress(vm: QuickJSContext): SandboxRefusalAddress | undefin
     return undefined;
   }
   if (typeof raw !== 'string' || !raw) return undefined;
-  let parsed: { reason?: unknown; params?: unknown };
+  let parsed: { reason?: unknown; params?: unknown; reasons?: unknown; hasReasons?: unknown };
   try {
     parsed = JSON.parse(raw);
   } catch {
     return undefined;
   }
-  const address: SandboxRefusalAddress = {};
-  if (typeof parsed?.reason === 'string' && parsed.reason.length > 0) address.reason = parsed.reason;
-  if (parsed?.params !== null && typeof parsed?.params === 'object' && !Array.isArray(parsed.params)) {
-    address.params = parsed.params as Record<string, unknown>;
-  }
-  return address.reason !== undefined || address.params !== undefined ? address : undefined;
+  if (parsed === null || typeof parsed !== 'object') return undefined;
+  return refusalAddressFrom({
+    reason: parsed.reason,
+    params: parsed.params,
+    reasons: parsed.reasons,
+    hasReasons: parsed.hasReasons === true,
+  });
 }
 
 /** [#26170] Read the `__errorFromHost` channel the wrapper's reject handler writes. */
