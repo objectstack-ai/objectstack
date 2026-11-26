@@ -55,7 +55,8 @@ export const entry: SemanticMigration = {
     + 'set\'s reads by adding `viewAllFields: true` to its entry through the metadata API. No command lists '
     + 'the affected stored sets yet. The error direction is fewer fields seen, never a field opened.',
   acceptanceCriteria:
-    'One-step check, for every permission set in source and every one stored in a deployment: the set is '
+    'Before or after moving a deployment to protocol 19, the one-step check, for every permission set in '
+    + 'source and every one stored in the deployment: the set is '
     + 'affected when one of its `objects` entries, the `*` entry included, has `viewAllRecords: true` or '
     + '`modifyAllRecords: true` and no `viewAllFields`. For each such entry whose holders should still read '
     + 'every field of the object, add `viewAllFields: true`; nothing else is needed for the read. Sets in '
