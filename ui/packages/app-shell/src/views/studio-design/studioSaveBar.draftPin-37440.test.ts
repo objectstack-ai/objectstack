@@ -35,6 +35,7 @@ describe('publishSavedItem, unpinned door: the publish names the draft the Save 
     expect(door.liveOf(ITEM.type, ITEM.name, PKG)).toBeUndefined();
     expect(door.draftOf(ITEM.type, ITEM.name, PKG)).toEqual({ label: 'theirs' });
     expect(door.calls.some(([c]) => c === 'reset')).toBe(false);
+    expect(door.calls.find(([c]) => c === 'publish')?.[3]).toEqual({ packageId: PKG, draftVersion });
   });
 
   it('a refusal for another reason takes back only the draft this Save wrote, pinned to its receipt', async () => {
@@ -52,7 +53,6 @@ describe('publishSavedItem, unpinned door: the publish names the draft the Save 
     const draftVersion = await savedDraft(door, { label: 'mine' });
     expect(await publishSavedItem(door.client, { ...ITEM, draftVersion }, false)).toEqual({ ok: true });
     expect(door.liveOf(ITEM.type, ITEM.name, PKG)).toEqual({ label: 'mine' });
-    expect(door.calls.find(([c]) => c === 'publish')?.[3]).toEqual({ packageId: PKG, draftVersion });
   });
 });
 

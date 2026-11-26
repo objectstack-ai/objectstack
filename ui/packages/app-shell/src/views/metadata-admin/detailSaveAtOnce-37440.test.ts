@@ -41,6 +41,7 @@ describe("the item page's Save publishes only the draft it wrote (objectstack#37
     expect(door.liveOf(TARGET.type, TARGET.name, PKG)).toBeUndefined();
     expect(door.draftOf(TARGET.type, TARGET.name, PKG)).toEqual({ label: 'theirs' });
     expect(door.calls.some(([c]) => c === 'reset')).toBe(false);
+    expect(door.calls.find(([c]) => c === 'publish')?.[3]).toEqual({ packageId: PKG, draftVersion });
   });
 
   it("PIN (guarded): the same, with nothing asked — the refusal is the draft's, not a live change", async () => {
@@ -63,7 +64,6 @@ describe("the item page's Save publishes only the draft it wrote (objectstack#37
       const pinned = guarded ? guardOver(door).guard.publish : undefined;
       expect(await publishDetailSave(door.client, { ...TARGET, draftVersion }, false, pinned)).toEqual({ kind: 'published' });
       expect(door.liveOf(TARGET.type, TARGET.name, PKG)).toEqual({ label: 'mine' });
-      expect(door.calls.find(([c]) => c === 'publish')?.[3]).toEqual({ packageId: PKG, draftVersion });
     }
   });
 });
