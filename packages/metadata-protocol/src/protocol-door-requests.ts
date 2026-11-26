@@ -94,6 +94,20 @@ type PublishMetaItemRequest = {
     member?: string;
     /** [#32656] The locales the findings' user sentences are composed in (`PublishMetaItemRequestSchema.userTextLocales`). */
     userTextLocales?: readonly (string | undefined)[];
+    /**
+     * [#36601] The caller's pin on the active row this promotion replaces
+     * (`PublishMetaItemRequestSchema.parentVersion`): a token, `null` for "no
+     * active row here", absent for unpinned.
+     */
+    parentVersion?: string | null;
+    /**
+     * [#36350] The caller's pin on the draft this promotion reads
+     * (`PublishMetaItemRequestSchema.draftVersion`): a token, absent for
+     * unpinned. Declared here, not only on the promotion's own parameter, so a
+     * typed in-process caller can state it and an edit that picks members
+     * instead of spreading the request cannot drop it unseen.
+     */
+    draftVersion?: string;
 };
 
 /** The request of {@link ObjectStackProtocolImplementation.rollbackMetaItem}. */

@@ -14,7 +14,7 @@
 - 定级见 `filing-gate.md`(两步、查表);派发次序 = 维护者点名的 area 或子专题,级只决定插队。
   子专题(临时 `pm:epic`)只由维护者开,其下的卡按内容打 area;见席位自开者记轮次记录。
 - sweep 加推导 `pm:queue`/`pm:blocked` 无审计评论卡(豁免照 H74 行),照未定级首触补审计并报数。
-- 每轮扫 `pm:dispatched` 卡与非信箱 open PR,进展=head 提交/非分诊评论/其席改标,非 `updated_at`。
+- 每轮扫 `pm:dispatched` 卡与非信箱 open PR,进展=head 提交/非分诊评论,非 `updated_at`。
 - 进展逾 3h 即敲认领席 `Request: progress`,下轮读答复,无答列轮次记录;两轮无答视为掉线。
 - 掉线或下班席的项归在线兄弟席(`seat-lifecycle.md`),下轮敲兄弟席一次;⛔ 分诊永不释放。
 - 专题看板:每 3h(UTC 0、3…21 时)照 `scripts/pm/topic-board/README.md` 重建两仓数据并刷新。

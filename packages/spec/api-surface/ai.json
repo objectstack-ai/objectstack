@@ -58,6 +58,7 @@
     "BlueprintViewSchema (const)",
     "BlueprintWidgetCondition (type)",
     "BlueprintWidgetConditionSchema (const)",
+    "BodyHeading (interface)",
     "BuildProgressFrame (type)",
     "BuildProgressFrameSchema (const)",
     "BuildProgressPhase (type)",
@@ -214,6 +215,14 @@
     "QueryDatasetInputSchema (const)",
     "QueryDatasetOutput (type)",
     "QueryDatasetOutputSchema (const)",
+    "RECORD_CITATIONS_MAX (const)",
+    "RECORD_CITATIONS_PART_TYPE (const)",
+    "RecordCitation (type)",
+    "RecordCitationParsed (type)",
+    "RecordCitationSchema (const)",
+    "RecordCitations (type)",
+    "RecordCitationsParsed (type)",
+    "RecordCitationsSchema (const)",
     "RecordContextBody (type)",
     "RecordContextBodyParsed (type)",
     "RecordContextBodySchema (const)",
@@ -289,8 +298,10 @@
     "deriveAiFaceName (function)",
     "getDatasetToolJsonSchemas (function)",
     "getRecordContextToolJsonSchemas (function)",
+    "headingsOf (function)",
     "scopesToAgentPermissionSets (function)",
     "skillForm (const)",
+    "stripBodyTags (function)",
     "toolForm (const)"
   ]
 }

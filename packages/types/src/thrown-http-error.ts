@@ -196,7 +196,8 @@ export interface ThrownHttpError {
   /**
    * Structured context: spec-validation `issues[]`, record-validation
    * `fields[]`, a package-scoped refusal's `candidates[]` (#32250,
-   * {@link packageScopedRefusalCandidates}). Absent rather than `{}` when the
+   * {@link packageScopedRefusalCandidates}), a declared refusal list's
+   * `refusals[]` (#36877, {@link declaredRefusalLines}). Absent rather than `{}` when the
    * throw carried none, so an empty object never reads as "there is context
    * here".
    */
@@ -275,6 +276,46 @@ function isPackageScopedRefusalHolder(candidate: unknown): candidate is PackageS
   }
 }
 
+/** [#36877] One sentence of a declared refusal thrown as a list: the reason and its rendered sentence. */
+export interface DeclaredRefusalLine {
+  readonly reason: string;
+  readonly message: string;
+}
+
+/**
+ * [#36877, ruling 7178348458 term 3] The sentences of a declared refusal
+ * thrown as a `reasons` list, as every door answers them in
+ * `details.refusals` — or `undefined` for any other thrown value.
+ *
+ * The runtime's refusal catalogue (`hook-refusal-catalogue.ts` in
+ * `@objectstack/runtime`) renders each listed reason in the caller's locale
+ * and sets them on the refusal it throws as `refusals`, beside the
+ * `userMessage` that joins them. Recognised by SHAPE — a non-empty list whose
+ * every element is `{ reason: string, message: string }`, on an error that
+ * also carries a declared `userMessage` ({@link declaredUserMessage}) —
+ * because this package depends on nothing but `@objectstack/spec` and cannot
+ * name the runtime's class (the {@link packageScopedRefusalCandidates}
+ * precedent). A list with any element of another shape is answered as no
+ * list. Read here, by {@link resolveThrownHttpError} and by the `/data`
+ * classification's `userMessage` rider, so no door carries a second
+ * recogniser. Each element is copied to exactly those two members.
+ */
+export function declaredRefusalLines(error: unknown): readonly DeclaredRefusalLine[] | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  if (declaredUserMessage(error) === undefined) return undefined;
+  const list: unknown = (error as { refusals?: unknown }).refusals;
+  if (!Array.isArray(list) || list.length === 0) return undefined;
+  const lines: DeclaredRefusalLine[] = [];
+  for (const item of list as unknown[]) {
+    const line = item as { reason?: unknown; message?: unknown } | null;
+    if (line === null || typeof line !== 'object' || typeof line.reason !== 'string' || typeof line.message !== 'string') {
+      return undefined;
+    }
+    lines.push({ reason: line.reason, message: line.message });
+  }
+  return lines;
+}
+
 /**
  * Resolve a thrown error into the status, code, message and structured context
  * an HTTP boundary should answer with.
@@ -289,7 +330,7 @@ function isPackageScopedRefusalHolder(candidate: unknown): candidate is PackageS
  * | declaredCode | `VALIDATION_FAILED` if it is one → any non-empty string `.code` → the derived code if it is an unevaluable hook condition → absent |
  * | message | `.message` when it is a string → `String(error)` |
  * | userMessage | a non-empty string `.userMessage` → absent (see {@link declaredUserMessage}) |
- * | details | a non-string `.code`, `.issues`, a validation failure's `fields`, a package-scoped refusal's `candidates` → absent |
+ * | details | a non-string `.code`, `.issues`, a validation failure's `fields`, a package-scoped refusal's `candidates`, a declared refusal list's `refusals` ({@link declaredRefusalLines}) → absent |
  *
  * Both status spellings are read because both are produced in this repo:
  * `plugin-approvals`' lifecycle hooks and `metadata-protocol` throw
@@ -351,6 +392,8 @@ export function resolveThrownHttpError(error: unknown, fallbackStatus = 500): Th
   // [#32250] A package-scoped refusal's holders, so every door that answers
   // from this resolver names them (ADR-0150 D5).
   const candidates = packageScopedRefusalCandidates(e);
+  // [#36877] A declared refusal thrown as a list carries its sentences.
+  const refusals = declaredRefusalLines(e);
   const details: Record<string, unknown> = {
     // A truthy NON-string `code` (a driver errno, say) is context and stays
     // context — promoting it would put a number in the field callers branch on,
@@ -359,6 +402,7 @@ export function resolveThrownHttpError(error: unknown, fallbackStatus = 500): Th
     ...(issues ? { issues } : {}),
     ...(validation ? { fields: validation.fields } : {}),
     ...(candidates ? { candidates } : {}),
+    ...(refusals ? { refusals } : {}),
   };
 
   const userMessage = declaredUserMessage(error);

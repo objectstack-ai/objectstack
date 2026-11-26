@@ -110,8 +110,9 @@ export function studioAppEditSegment({
 }
 
 /**
- * The app segment that a new report opens in (decision 13), or `null` when
- * there is none. A new report has no menu entry yet, so this is
+ * The app segment that a new report opens in (decision 13), or a new
+ * dashboard (objectstack#36907, in the app's design mode), or `null` when
+ * there is none. A new item has no menu entry yet, so this is
  * {@link studioAppEditSegment} without the menu half of rule 1.
  */
 export function studioAppCreateSegment({
@@ -141,6 +142,15 @@ export function studioCreateLandsInApp(areaPackageId: string | null | undefined,
 /** The item's page in the app at `segment`: `/apps/<app>/dashboard/<name>` or `/apps/<app>/report/<name>`. */
 export function appItemPath(segment: string, type: StudioAppEditType, name: string): string {
   return `/apps/${encodeURIComponent(segment)}/${type}/${encodeURIComponent(name)}`;
+}
+
+/**
+ * The app's root, `/apps/<app>`, where a new dashboard is made
+ * (objectstack#36907): the app opens its landing, with the design mode
+ * entered by the arrival the address never carries (`designModeAddDashboardArrival`).
+ */
+export function appHomePath(segment: string): string {
+  return `/apps/${encodeURIComponent(segment)}`;
 }
 
 /** The app's new-report page, `/apps/<app>/reports/new` (decision 13). */

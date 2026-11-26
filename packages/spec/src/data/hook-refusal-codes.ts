@@ -42,9 +42,11 @@ const CODE_LITERAL = String.raw`(?<quote>['"\x60])(?<code>[A-Z][A-Z0-9]*(?:_[A-Z
 
 /**
  * The spelling of a declared refusal reason (#33214): snake_case, a machine
- * name like every other key an author declares under a code. A reason never
- * reaches the wire — the code does — so it is spelled as a data value, not as
- * an error code, and the literal reading can tell the two apart.
+ * name like every other key an author declares under a code. A client
+ * branches on the code, not on a reason: a reason reaches the wire only as the
+ * label of a rendered line (`details.refusals[].reason`, #36877), beside the
+ * sentence it picked. So it is spelled as a data value, not as an error code,
+ * and the literal reading can tell the two apart.
  */
 export const HOOK_REFUSAL_REASON_PATTERN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
 
@@ -65,6 +67,17 @@ const REASON_ASSIGNMENT = new RegExp(
   String.raw`(?<![\w$.])(?<binding>[A-Za-z_$][\w$]*)\s*\.\s*reason\s*=(?!=)\s*` + REASON_LITERAL,
   'g',
 );
+
+/**
+ * [#36877] `reasons: [` — the opening of the list a `throw`'s object literal
+ * carries (`{ code, reasons: [{ reason, params? }, …] }`); the reasons inside
+ * the bracket are the listed ones. Read only as a direct member of the thrown
+ * object literal ({@link listedSpans}).
+ */
+const REASONS_LIST_PROPERTY = /(?<![\w$.])reasons\s*:\s*\[/g;
+
+/** [#36877] `e.reasons = [` — the list assigned onto a name the body later throws. */
+const REASONS_LIST_ASSIGNMENT = /(?<![\w$.])(?<binding>[A-Za-z_$][\w$]*)\s*\.\s*reasons\s*=(?!=)\s*\[/g;
 
 /** `code: 'X'` — the property in an object literal a `throw` builds. */
 const CODE_PROPERTY = new RegExp(String.raw`(?<![\w$.])code\s*:\s*` + CODE_LITERAL, 'g');
@@ -162,6 +175,70 @@ function skipString(source: string, open: number): number {
   return source.length;
 }
 
+/**
+ * [#36877] The index just past the bracket that closes the one opened at
+ * `open` (a `[` in a masked source), or the source's end when none closes it.
+ */
+function closeOfBracket(masked: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < masked.length; i++) {
+    const ch = masked[i];
+    if (ch === '"' || ch === "'" || ch === '`') {
+      i = skipString(masked, i);
+      continue;
+    }
+    if (ch === '(' || ch === '[' || ch === '{') depth++;
+    else if (ch === ')' || ch === ']' || ch === '}') {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return masked.length;
+}
+
+/**
+ * [#36877] The brackets still open at `at` in `text` (a masked source or a
+ * `throw` statement of one), outermost first, strings skipped.
+ */
+function openBracketsAt(text: string, at: number): string[] {
+  const open: string[] = [];
+  for (let i = 0; i < at && i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'" || ch === '`') {
+      i = skipString(text, i);
+      continue;
+    }
+    if (ch === '(' || ch === '[' || ch === '{') open.push(ch);
+    else if (ch === ')' || ch === ']' || ch === '}') open.pop();
+  }
+  return open;
+}
+
+/**
+ * [#36877] The `[from, to)` spans of every `reasons: [ … ]` list in a `throw`
+ * statement that is a DIRECT member of the thrown object literal — the one key
+ * the run-time address reads (`e.reasons`). The member's enclosing brackets
+ * hold exactly one `{`, innermost, and no `[`: `throw { code, reasons: [ … ] }`
+ * and `throw Object.assign(new Error(), { code, reasons: [ … ] })` qualify;
+ * `throw { code, params: { reasons: [ … ] } }` does not, because the run never
+ * answers that nested key as a list.
+ */
+function listedSpans(statement: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  for (const m of statement.matchAll(REASONS_LIST_PROPERTY)) {
+    const at = m.index ?? 0;
+    const enclosing = openBracketsAt(statement, at);
+    const direct =
+      enclosing[enclosing.length - 1] === '{' &&
+      enclosing.filter((ch) => ch === '{').length === 1 &&
+      !enclosing.includes('[');
+    if (!direct) continue;
+    const open = at + m[0].length - 1;
+    spans.push([open, closeOfBracket(statement, open)]);
+  }
+  return spans;
+}
+
 /** The identifier a `throw` statement throws, when it throws a bare name. */
 function thrownBinding(statement: string): string | undefined {
   const m = /^\s*([A-Za-z_$][\w$]*)\s*$/.exec(statement);
@@ -198,27 +275,48 @@ export function hookRefusalCodesThrownIn(source: string): string[] {
 }
 
 /**
+ * One `(code, reason)` pair a source throws literally. `listed` marks a reason
+ * read from a `reasons` list (#36877): a listed reason is judged under every
+ * declared code, also one that declares no `reasons` (where it is undeclared),
+ * because the list is new and nothing that saves today throws one.
+ */
+export interface HookRefusalThrownReason {
+  code: string;
+  reason: string;
+  listed?: true;
+}
+
+/**
  * The `(code, reason)` pairs a hook's source throws LITERALLY (#33214), in
  * first-seen order — the reason half of {@link hookRefusalCodesThrownIn}, read
  * the same two ways:
  *
  *  - a `reason: 'x'` property inside a `throw` statement that also names
- *    exactly one code literally: `throw { code: 'X', reason: 'x' }`;
+ *    exactly one code literally: `throw { code: 'X', reason: 'x' }` — and,
+ *    marked `listed` (#36877, ruling 7178348458 term 2), each one inside its
+ *    `reasons` list: `throw { code: 'X', reasons: [{ reason: 'x' }, …] }`;
  *  - `e.reason = 'x'` on a name some `throw` statement throws bare, paired
- *    with that name's literal `e.code = 'X'`.
+ *    with that name's literal `e.code = 'X'` — and, marked `listed`, each
+ *    `reason: 'x'` inside `e.reasons = [ … ]` on such a name.
  *
- * A reason with no literal code beside it, or one that arrives any other way,
- * is left to the run-time refusal.
+ * A reason with no literal code beside it, or one that arrives any other way
+ * (a list built in a variable, a computed reason), is left to the run-time
+ * refusal.
  */
-export function hookRefusalReasonsThrownIn(source: string): Array<{ code: string; reason: string }> {
-  const found: Array<[string, string]> = [];
+export function hookRefusalReasonsThrownIn(source: string): HookRefusalThrownReason[] {
+  const found: HookRefusalThrownReason[] = [];
   const thrownNames = new Set<string>();
   const masked = maskedSource(source);
   for (const statement of throwStatements(masked)) {
     const codes = new Set([...statement.matchAll(CODE_PROPERTY)].map((m) => m.groups!.code));
     if (codes.size === 1) {
       const [only] = codes;
-      for (const m of statement.matchAll(REASON_PROPERTY)) found.push([only!, m.groups!.reason]);
+      const spans = listedSpans(statement);
+      for (const m of statement.matchAll(REASON_PROPERTY)) {
+        const at = m.index ?? 0;
+        const listed = spans.some(([from, to]) => at > from && at < to);
+        found.push(listed ? { code: only!, reason: m.groups!.reason, listed: true } : { code: only!, reason: m.groups!.reason });
+      }
     }
     const binding = thrownBinding(statement);
     if (binding) thrownNames.add(binding);
@@ -229,16 +327,38 @@ export function hookRefusalReasonsThrownIn(source: string): Array<{ code: string
   }
   for (const m of masked.matchAll(REASON_ASSIGNMENT)) {
     const bound = codeOf.get(m.groups!.binding);
-    if (bound !== undefined) found.push([bound, m.groups!.reason]);
+    if (bound !== undefined) found.push({ code: bound, reason: m.groups!.reason });
   }
-  const pairs: Array<{ code: string; reason: string }> = [];
+  for (const m of masked.matchAll(REASONS_LIST_ASSIGNMENT)) {
+    const bound = codeOf.get(m.groups!.binding);
+    if (bound === undefined) continue;
+    const open = (m.index ?? 0) + m[0].length - 1;
+    const list = masked.slice(open, closeOfBracket(masked, open));
+    for (const r of list.matchAll(REASON_PROPERTY)) found.push({ code: bound, reason: r.groups!.reason, listed: true });
+  }
+  const pairs: HookRefusalThrownReason[] = [];
   const seen = new Set<string>();
-  for (const [code, reason] of found) {
-    if (seen.has(`${code}.${reason}`)) continue;
-    seen.add(`${code}.${reason}`);
-    pairs.push({ code, reason });
+  for (const pair of found) {
+    const key = `${pair.code}.${pair.reason}.${pair.listed === true}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pairs.push(pair);
   }
   return pairs;
+}
+
+/**
+ * [#36877] Whether a literal pair names a reason the code's catalogue entry
+ * does not declare, as both save checks (a hook's, an action's) judge it: a
+ * single `reason` is read only under a code that declares `reasons` (as before
+ * the list existed); a listed one under every code.
+ */
+export function isUndeclaredThrownReason(
+  pair: HookRefusalThrownReason,
+  reasons: Record<string, unknown> | undefined,
+): boolean {
+  if (!reasons) return pair.listed === true;
+  return !Object.prototype.hasOwnProperty.call(reasons, pair.reason);
 }
 
 /** The declared codes, as the sentence lists them. */
@@ -404,6 +524,49 @@ function undeclaredRefusalReasonAtRun(
     `${subject} '${name}' threw code '${code}' with reason '${reason}', and \`refusals.${code}.reasons\` declares `
     + `no such reason (declared: ${reasonList(declared)}). A reason picks one of the code's declared sentences: `
     + 'throw one of the declared reasons, or declare this one with the message the user reads.'
+  );
+}
+
+/**
+ * [#36877, ruling 7178348458 terms 1 and 2] What is wrong with a `reasons`
+ * list a body threw beside a declared code, so the throw cannot be answered:
+ *
+ *  - `both`: the throw carries a single `reason` AND a `reasons` list;
+ *  - `empty`: the list names no reason;
+ *  - `malformed`: `reasons` is not a list, or an element is not
+ *    `{ reason: 'snake_case', params?: { … } }`.
+ */
+export type RefusalListProblem = 'both' | 'empty' | 'malformed';
+
+/**
+ * The run-time fault for a declared code a hook threw with a `reasons` list
+ * the catalogue cannot answer ({@link RefusalListProblem}). Fault text, like
+ * {@link undeclaredHookRefusalAtRun}.
+ */
+export function unreadableHookRefusalListAtRun(hookName: string, code: string, problem: RefusalListProblem): string {
+  return unreadableRefusalListAtRun('hook', hookName, code, problem);
+}
+
+/** [#36877] The action twin of {@link unreadableHookRefusalListAtRun}. */
+export function unreadableActionRefusalListAtRun(actionName: string, code: string, problem: RefusalListProblem): string {
+  return unreadableRefusalListAtRun('action', actionName, code, problem);
+}
+
+function unreadableRefusalListAtRun(
+  subject: RefusalSubject,
+  name: string,
+  code: string,
+  problem: RefusalListProblem,
+): string {
+  const what = problem === 'both'
+    ? 'with both a `reason` and a `reasons` list'
+    : problem === 'empty'
+      ? 'with a `reasons` list that names no reason'
+      : 'with a `reasons` value that is not a list of `{ reason, params? }`';
+  return (
+    `${subject} '${name}' threw code '${code}' ${what}, so the refusal cannot be answered. A throw names one `
+    + `declared sentence (\`{ code, reason, params }\`) or an ordered list of them (\`{ code, reasons: [{ reason, `
+    + 'params }, …] }`), each reason one the code declares under `reasons`, never both.'
   );
 }
 
