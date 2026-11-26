@@ -138,7 +138,7 @@ export const fr: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'Atelier de métadonnées pour les développeurs, les analystes et les intégrateurs',
       navigation: {
         group_overview: { label: 'Aperçu' },

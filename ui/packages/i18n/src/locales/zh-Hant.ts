@@ -2274,7 +2274,7 @@ const zhHant = {
   },
   console: {
     studio: {
-      title: 'Studio',
+      title: '應用搭建',
       accessRequired: '你需要 Studio 訪問權限才能開啟 Studio。管理員可以在“設定 → 權限集分配”中通過權限集授予。',
     },
     saveAdvisoryTitle: '已儲存 — 編輯檢查提出了 {{count}} 條建議',

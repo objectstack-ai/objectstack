@@ -124,7 +124,7 @@ export const esES: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'Banco de trabajo de metadatos para desarrolladores, analistas e implementadores',
       navigation: {
         group_overview: { label: 'Resumen' },

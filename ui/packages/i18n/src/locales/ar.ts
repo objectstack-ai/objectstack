@@ -2374,7 +2374,7 @@ const ar = {
   },
   console: {
     studio: {
-      title: "Studio",
+      title: "App Studio",
       accessRequired: "تحتاج إلى صلاحية الوصول إلى Studio لفتح Studio. يمكن للمسؤول منحها بمجموعة أذونات في الإعداد → إسناد مجموعات الأذونات.",
     },
     saveAdvisoryTitle: "تم الحفظ — أنتج فحص التأليف {{count}} ملاحظة إرشادية",

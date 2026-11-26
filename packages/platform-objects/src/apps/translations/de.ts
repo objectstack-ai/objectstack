@@ -138,7 +138,7 @@ export const de: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'Metadaten-Werkbank für Entwickler, Analysten und Implementierer',
       navigation: {
         group_overview: { label: 'Übersicht' },

@@ -2262,7 +2262,7 @@ const ru = {
   },
   console: {
     studio: {
-      title: "Studio",
+      title: "App Studio",
       accessRequired: "Чтобы открыть Studio, нужен доступ к Studio. Администратор может выдать его набором разрешений в разделе «Настройка → Назначение наборов разрешений».",
     },
     saveAdvisoryTitle: "Сохранено — проверка авторинга выдала рекомендаций: {{count}}",

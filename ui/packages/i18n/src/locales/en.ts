@@ -2646,9 +2646,10 @@ const en = {
   console: {
     // The fixed crumb `AppHeader`'s `studio` variant draws on the Studio front
     // door (objectui#11863), as `organizations.title` is the `orgs` variant's.
-    // A product name, which every pack writes as is.
+    // A product name (ADR-0084): App Studio, which a Chinese pack writes as
+    // 应用搭建 and every other pack writes as is.
     studio: {
-      title: 'Studio',
+      title: 'App Studio',
       // What a principal without `studio.access` reads at the Studio URL they
       // opened (objectui#12035), in place of the silent redirect home.
       accessRequired: 'You need Studio access to open Studio. An administrator can grant it with a permission set in Setup → Permission Set Assignment.',
