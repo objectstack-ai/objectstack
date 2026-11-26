@@ -240,7 +240,9 @@ describe('#5417 — a RETRYABLE refusal still offers the retry', () => {
     const { onClose } = setup(authFetch);
     await fillAndSubmit();
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('discount must be a number'));
+    // The catalog's sentence, never the engine's (objectstack#37526).
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent("Some values on this step weren't accepted."));
+    expect(screen.getByRole('alert')).not.toHaveTextContent('discount must be a number');
     expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled();
     expect(onClose).not.toHaveBeenCalled();
   });
@@ -505,7 +507,7 @@ describe('objectstack#36831 — a step the run already left is never submitted a
     expect(toastError).not.toHaveBeenCalled();
   });
 
-  it('a refusal from the screen the run still waits on keeps its sentence and Next — a real retry', async () => {
+  it('a refusal from the screen the run still waits on keeps a refusal banner and Next — a real retry', async () => {
     const BAD_INPUT = 'Invalid screen input: Valid For (Days) must be at least 1 — declared fields: \'quoteName\', \'expirationDays\', \'discount\'';
     const authFetch = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
       if (url.endsWith('/screen')) return jsonResponse({ success: true, data: { runId: RUN, screen: QUOTE_DETAILS } });
@@ -518,7 +520,10 @@ describe('objectstack#36831 — a step the run already left is never submitted a
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Next' }));
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(BAD_INPUT));
+    // The refusal banner is the catalog's sentence, never the engine's, which
+    // names the screen's API field names (objectstack#37526).
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent("Some values on this step weren't accepted."));
+    expect(screen.getByRole('alert')).not.toHaveTextContent('declared fields');
     expect(screen.getByText('Quote Details')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
     expect(screen.queryByText(ALREADY_SUBMITTED)).toBeNull();

@@ -5619,6 +5619,8 @@ const de = {
     completed: 'Flow „{{flow}}“ abgeschlossen',
     alreadySubmitted: 'Ihre vorherige Eingabe wurde übernommen. Der Flow ist zu diesem Schritt weitergegangen.',
     noLongerWaiting: 'Dieser Schritt wurde möglicherweise bereits verarbeitet. Schließen Sie diesen Dialog und prüfen Sie den Datensatz, bevor Sie es erneut versuchen.',
+    invalidScreenInput: 'Einige Werte in diesem Schritt wurden nicht akzeptiert. Prüfen Sie sie und versuchen Sie es erneut.',
+    fieldNotAccepted: '{{field}}: Dieser Wert wird nicht akzeptiert',
   },
   appManagement: {
     title: "Anwendungen",
