@@ -36,8 +36,9 @@ import { isDict } from '../shared.js';
  * conversion can restore it):
  * - Modify All's EDIT vote. `viewAllFields` votes read only, so a field
  *   another set locks (`editable: false`) is no longer editable by a Modify All
- *   holder; an explicit `editable: true` row in the set that should edit it
- *   is the grant.
+ *   holder, and neither is a field the set's OWN field row names without
+ *   `editable: true` (an omitted `editable` is false); an explicit
+ *   `editable: true` row in the set that should edit it is the grant.
  * - Modify All overriding the set's OWN `readable: false` rows. Beside
  *   `viewAllFields` an own row binds (specific beats general inside one set),
  *   so after the rewrite such a row hides its field from the set's holders,
