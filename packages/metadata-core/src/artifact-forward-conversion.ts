@@ -449,6 +449,24 @@ export function resolveInstalledSpecVersion(): string | null {
  *   automation engine's flow rehydration seam refuses it by id for the same
  *   reason (`CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION` in
  *   `packages/services/service-automation/src/engine.ts`); this door does too.
+ * - `permission-view-all-fields-beside-record-bypass` (protocol 19, the
+ *   field-axis split's step 3, ruling of record 6912661484; stored reading by
+ *   ruling of record 7177446075, option A): writes `viewAllFields: true` beside
+ *   `viewAllRecords: true` / `modifyAllRecords: true` on a permission set's
+ *   `objects` entry (`'*'` included), so a source written while those bits
+ *   voted on every field keeps its reads. Both shapes are legal and mean
+ *   different things from 19 — View All without `viewAllFields` IS "every
+ *   record, no field vote", by the contract on `ObjectPermissionSchema` — so
+ *   the rewrite is a reinterpretation, judged exactly as the flow entry above:
+ *   a declared `^18.0.0` floor is a dependency range, not an age, and an app
+ *   built against the 19 contract inside that window would be handed a field
+ *   bypass its author never wrote, re-opening fields another set hides. The
+ *   entry is sound at one seam only, `os migrate meta --from 18`, where the
+ *   operator asserts the source's age and reviews the diff. Stored rows refuse
+ *   it too (`applyConversionsToStoredItem`, `@objectstack/spec`): a stored set
+ *   is read with the 19 meaning. Refusing it costs fields, never opens one: an
+ *   artifact built before 19 whose View All set does not carry the bit reads
+ *   fewer fields until it is rebuilt from a migrated source.
  */
 const DEFAULT_FLIPS_NOT_REPLAYED_HERE: readonly string[] = [
   // `app-hidden-to-unpublished` stood here until #25767 retired it with the
@@ -456,6 +474,9 @@ const DEFAULT_FLIPS_NOT_REPLAYED_HERE: readonly string[] = [
   // nothing for this door to refuse. The reasoning in the docblock above is kept
   // because it is the reasoning the NEXT default flip is judged by.
   'flow-decision-mode-inclusive-explicit',
+  // The next one, judged by it: a View All / Modify All set takes the 19
+  // meaning at this door, never a field bypass it did not write.
+  'permission-view-all-fields-beside-record-bypass',
 ];
 
 /**
