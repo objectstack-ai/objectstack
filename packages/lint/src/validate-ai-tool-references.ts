@@ -319,6 +319,30 @@ function skillContextResolver(
 }
 
 /**
+ * The verdict and fix for a `context` the rule REFUSED: a pack another package
+ * of the artifact ships, held only outside the skill's package closure, or held
+ * by two holders the rule cannot pick between. One line each (#22161); the
+ * rule's own refusal sentence (`packageScopedRefusalMessage`) is the long form.
+ */
+function contextRefusalFinding(
+  context: string,
+  refusal: Extract<PackageScopedResolution<true>, { status: 'refused' }>,
+): { message: string; hint: string } {
+  const holders = refusal.candidates
+    .map((c) => (c.kind === 'package' ? `"${c.packageId}"` : c.kind === 'environment' ? 'the stack' : c.kind))
+    .join(', ');
+  const outside = refusal.reason === 'outside-closure';
+  return {
+    message:
+      `\`context\` pack "${context}" is held ${outside ? 'only outside this package\'s dependency closure' : 'by more than one holder in reach'} ` +
+      `(${holders}): the MCP prompt takes no record and ${GET_RECORD_CONTEXT_TOOL_NAME} is refused.`,
+    hint: outside
+      ? 'Declare a dependency on the package that ships the pack (ADR-0141), or name a pack the stack defines'
+      : 'Keep one pack of that name in reach of this package, or name another pack',
+  };
+}
+
+/**
  * [ADR-0160 D8; D1 "Advisory reports", point 1's third condition] A skill's
  * context-pack reference, judged against the stack's own packs
  * (`stack.aiContexts`). Two verdicts, each a `warning`:
@@ -372,15 +396,15 @@ export function validateAiSkillContext(stack: AnyRec): AiToolRefFinding[] {
         rule: AI_SKILL_CONTEXT_UNKNOWN,
         where: `skill "${skillName}" · context`,
         path: `skills[${si}].context`,
-        message:
-          resolution.status === 'refused'
-            ? `\`context\` pack "${context}" resolves to no pack: ${resolution.message} ` +
-              `Until it does, the MCP prompt takes no record and ${GET_RECORD_CONTEXT_TOOL_NAME} is refused.`
-            : `\`context\` pack "${context}" is not in this stack's \`aiContexts\` nor in any package this artifact ` +
-              `carries: unless a dependency outside the artifact ships it, the MCP prompt takes no record and ` +
-              `${GET_RECORD_CONTEXT_TOOL_NAME} is refused.` +
-              suggestName(context, packNames),
-        hint: 'Name a pack the stack defines under `aiContexts` or one a declared dependency ships (check the spelling), or remove `context`',
+        ...(resolution.status === 'refused'
+          ? contextRefusalFinding(context, resolution)
+          : {
+              message:
+                `\`context\` pack "${context}" is not in this stack's \`aiContexts\`: unless a dependency ships it, ` +
+                `the MCP prompt takes no record and ${GET_RECORD_CONTEXT_TOOL_NAME} is refused.` +
+                suggestName(context, packNames),
+              hint: 'Name a pack the stack defines under `aiContexts` or one a dependency package ships (check the spelling), or remove `context`',
+            }),
       });
       continue;
     }
