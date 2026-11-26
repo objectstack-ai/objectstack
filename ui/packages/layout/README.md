@@ -46,7 +46,10 @@ The `responsive-grid` and `navigation-renderer` keys are retired too (objectui#1
 A breakpoint grid is the `grid` node with a breakpoint `columns` object
 (`{ "type": "grid", "columns": { "xs": 1, "md": 2 }, "gap": 4 }`), and navigation is
 application metadata: the app's `navigation` items, drawn by the shell.
-`ResponsiveGrid` and `NavigationRenderer` stay exports for JSX composition.
+`ResponsiveGrid` and `NavigationRenderer` stay exports for JSX composition, and so does
+`NavigationGroupSection` (props `NavigationGroupSectionProps`): the collapsible sidebar group
+`NavigationRenderer` draws every `group` entry with, for a host that draws its own menu and wants
+the same group header (Studio's left menu is one).
 
 ## Components
 
