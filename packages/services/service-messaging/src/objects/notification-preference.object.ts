@@ -198,7 +198,7 @@ export const NotificationPreference = ObjectSchema.create({
         // insert). `preference-resolver.ts` `parseDigest` reads the states;
         // `preference-digest-unset.ts` keeps an omitted digest empty on a
         // database whose column still carries the old physical DEFAULT.
-        digest: Field.select(['none', 'daily', 'weekly'], {
+        digest: Field.select([{ label: 'none', value: 'none', color: 'gray' }, 'daily', 'weekly'], {
             label: 'Digest',
             required: false,
             description:

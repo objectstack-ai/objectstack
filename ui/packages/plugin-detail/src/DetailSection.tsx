@@ -952,6 +952,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
           } : undefined}
           role={copyOffered ? 'button' : undefined}
           tabIndex={copyOffered ? 0 : undefined}
+          data-detail-field={field.name}
         >
           <span className="text-[15px] text-muted-foreground shrink-0">{fieldLabelText}</span>
           <span className="text-[15px] text-foreground text-right break-words min-w-0 leading-snug">{displayValue}</span>
@@ -978,6 +979,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
           listFace && 'border-b border-border/50 py-1.5 last:border-b-0',
         )}
         data-detail-field-row={frameless ? '' : undefined}
+        // The field this row draws: how a page finds a field's place, e.g. to
+        // open a record at a cited section of its body (ADR-0160 D9).
+        data-detail-field={field.name}
       >
         {/* The label as authored, in the header highlights' style: no case
             transform, which only Latin text takes, so a translated label and

@@ -31,6 +31,8 @@ import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
 import { StudioChatDock, type StudioCopilotStatus, type StudioSurfaceLabel } from './StudioAiCopilot.js';
 import { StudioRightSlot } from './StudioRightSlot.js';
+import { StudioTitleRowProvider } from './studioTitleRow.js';
+import { useStudioAccentOnBody } from './studioAccent.js';
 import { AssistantTopBarButton } from '../../layout/AssistantTopBarButton.js';
 import { ChatDockControlProvider, type ChatDockControl } from '../../layout/chatDockControl.js';
 import {
@@ -47,6 +49,7 @@ import {
 } from '../../layout/chatDockState.js';
 import type { AppMarkApp } from '../../layout/AppMark.js';
 import {
+  STUDIO_ACCENT,
   STUDIO_HEADER,
   STUDIO_HEADER_ICON_BUTTON,
   STUDIO_HEADER_PACKAGE_COLUMN,
@@ -435,7 +438,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // objectstack#26705 — a held edit lives only in the pillar's buffer, so a
   // departure drops it exactly as it drops a dirty pillar's edits: both are
   // unsaved work, and every guard below reads this one bit. objectstack#36511
-  // — so does an edit waiting for the top bar's Save.
+  // — so does an edit waiting for the page's Save.
   const unsavedPillarWork = pillarDirty || heldEdit !== null || saveBar.dirty;
   // objectstack#36900 — every departure this surface starts asks the shell's
   // unsaved-edits seam, not only this surface's own bit: the seam holds this
@@ -1289,7 +1292,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       className={cn(
         // The border is on both states so the swap never shifts the bar.
         'inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[13px] font-medium',
-        // objectstack#36511 — beside the top bar's Save, Save is the primary action.
+        // objectstack#36511 — while the page holds unsaved edits, its Save is the primary action.
         publishing || (!publishReadOnly && !saveBar.dirty)
           ? 'border-transparent bg-primary text-primary-foreground disabled:opacity-50'
           : 'text-muted-foreground',
@@ -1302,14 +1305,53 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     </button>
   );
 
+  // objectstack#37455 — the top bar's page controls, placed by the open
+  // page's title row (`studioTitleRow.tsx`). objectstack#36511 — the page's
+  // Cancel and Save: drawn only while the open page holds unsaved edits,
+  // never in a package that is not there nor on the cross-package leg.
+  const titleRowSave =
+    !pkgMissing && !allScope && (saveBar.dirty || saveBar.saving) ? (
+      <StudioSaveControls coordinator={saveBar} locale={locale} />
+    ) : null;
+  // objectui#12725 — the title row's right-most icon shows or hides the right
+  // slot; `⌘.` switches what it shows. objectstack#34725 — with a copilot
+  // served, that icon is the console top bar's robot (the same component),
+  // and it opens the slot on the AI assistant. Without one, the panel icon
+  // stays for the properties.
+  const titleRowAssistant =
+    !slotHost || !slotHasContent ? null : copilotAvailable ? (
+      <ChatDockControlProvider value={slotRobotControl}>
+        <AssistantTopBarButton />
+      </ChatDockControlProvider>
+    ) : (
+      <button
+        type="button"
+        data-testid="studio-slot-toggle"
+        onClick={() => setSlotOpen(!slotOpen)}
+        aria-pressed={slotOpen}
+        aria-label={t(slotOpen ? 'engine.studio.slot.collapse' : 'engine.studio.slot.expand', locale)}
+        title={t(slotOpen ? 'engine.studio.slot.collapse' : 'engine.studio.slot.expand', locale)}
+        className={cn(STUDIO_HEADER_ICON_BUTTON, slotOpen && 'text-foreground')}
+      >
+        {slotOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+      </button>
+    );
+
+  // objectstack#37455 — and on what Studio draws in a portal on `body`
+  // (dialogs, menus, sheets, tooltips, toasts, the palette), while mounted.
+  useStudioAccentOnBody();
+
   const page = (
     <StudioMenuDataProvider segment={scopeSegment}>
     <SurfaceDeepLinkProvider onRequest={requestSurface}>
       <StudioSaveProvider value={saveBar.registry}>
+      <StudioTitleRowProvider save={titleRowSave} assistant={titleRowAssistant}>
       <StudioRightSlotContext.Provider value={slotHandle}>
       {/* objectstack#36899 — the left menu's provider is the frame: the app
           sidebar's, under Studio's own collapse cookie (`StudioMenu.tsx`). */}
-      <StudioMenuProvider className="h-screen min-h-0 overflow-hidden bg-background text-foreground">
+      {/* objectstack#37455 — Studio's graphite on its root: nothing Studio
+          draws takes the app's theme colour (decision 4 of #37424). */}
+      <StudioMenuProvider className={cn('h-screen min-h-0 overflow-hidden bg-background text-foreground', STUDIO_ACCENT)}>
         {/* The ADR-0080 `aiSlot` seam — a cloud edition may still inject its own
           * left copilot panel; the built-in copilot is the RIGHT dock below. */}
         {/* objectstack#32615 — not beside a package that is not there. */}
@@ -1323,7 +1365,8 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 package actions at the right. objectstack#36899 — the pillars
                 that sat between them are gone: the left menu is Studio's one
                 navigation, and its show / hide control leads the bar. Changes
-                and Publish stay at the right end, beside Cancel and Save. */}
+                and Publish stay at the right end; objectstack#37455 — Cancel
+                and Save moved to the page's item header. */}
             <div className={cn('flex min-w-0 items-center gap-1', STUDIO_HEADER_PACKAGE_COLUMN)}>
               {showMenu && <StudioMenuTrigger locale={locale} />}
               {/* objectstack#36501 — 「‹ Back to app」, the app's name and the
@@ -1391,7 +1434,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               {/* objectstack#36511 — Changes and Publish are for drafts, which
                   the copilot and the editors still on drafts (the Interfaces
                   pillar, the Metadata area) leave: drawn only while one is
-                  pending, at the left of Cancel and Save. */}
+                  pending. */}
               {hasPending && (
                 <>
                 {/* objectui#12459 — the pending count is a pill, not "· N" text. */}
@@ -1451,40 +1494,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 )}
                 </>
               )}
-              {/* objectstack#36511 — the page's Cancel and Save, where Publish
-                  was: drawn only while the open page holds unsaved edits. */}
-              <StudioSaveControls coordinator={saveBar} locale={locale} />
+              {/* objectstack#37455 — the page's Cancel and Save moved to its
+                  item header, and the AI assistant to the end of its title
+                  row (`titleRowSave`, `titleRowAssistant` above). */}
               </>)}
-              {/* objectui#12725 — the top bar's right-most icon shows or hides
-                  the right slot; `⌘.` switches what it shows.
-                  objectstack#34725 — with a copilot served, that icon is the
-                  console top bar's robot (the same component, in the same
-                  place), and it opens the slot on the AI assistant. Without
-                  one, the panel icon stays for the properties. */}
-              {slotHost && slotHasContent && copilotAvailable && (
-                <>
-                  <span className="mx-0.5 h-5 w-px shrink-0 bg-border" aria-hidden="true" />
-                  <ChatDockControlProvider value={slotRobotControl}>
-                    <AssistantTopBarButton />
-                  </ChatDockControlProvider>
-                </>
-              )}
-              {slotHost && slotHasContent && !copilotAvailable && (
-                <>
-                  <span className="mx-0.5 h-5 w-px shrink-0 bg-border" aria-hidden="true" />
-                  <button
-                    type="button"
-                    data-testid="studio-slot-toggle"
-                    onClick={() => setSlotOpen(!slotOpen)}
-                    aria-pressed={slotOpen}
-                    aria-label={t(slotOpen ? 'engine.studio.slot.collapse' : 'engine.studio.slot.expand', locale)}
-                    title={t(slotOpen ? 'engine.studio.slot.collapse' : 'engine.studio.slot.expand', locale)}
-                    className={cn(STUDIO_HEADER_ICON_BUTTON, slotOpen && 'text-foreground')}
-                  >
-                    {slotOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
-                  </button>
-                </>
-              )}
             </div>
           </header>
 
@@ -1709,6 +1722,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       {/* objectstack#36900 — the command palette, in its `studio` scope, with this page's groups. */}
       {!paletteHosted && <CommandPalette scope="studio" surface={paletteSurface} />}
       </StudioRightSlotContext.Provider>
+      </StudioTitleRowProvider>
       </StudioSaveProvider>
     </SurfaceDeepLinkProvider>
     </StudioMenuDataProvider>

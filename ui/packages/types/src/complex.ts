@@ -84,7 +84,9 @@ export interface KanbanCard {
      * two colours on one screen (objectui#5183): prefer
      * `getBadgeHexAppearance(color)` from `@object-ui/fields` and use its
      * `className` — passing its `colorStyle` too — and fall back to
-     * `getBadgeColorClasses(color, value)` only when it returns `undefined`.
+     * `getBadgeColorClasses(color)` only when it returns `undefined`; that
+     * answers the declared family, or the neutral badge when the option
+     * declares no colour (no colour is derived from the value).
      */
     colorClass?: string;
     /**

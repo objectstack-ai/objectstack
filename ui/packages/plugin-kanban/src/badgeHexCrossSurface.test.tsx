@@ -55,7 +55,9 @@ const OPTIONS = [
   { value: 'forest', label: 'Forest', color: FOREST },
 ];
 
-const PRIORITY_FIELD = { name: 'priority', type: 'select', label: 'Priority', options: OPTIONS };
+const PRIORITY_FIELD: { name: string; type: string; label: string; options: Array<Record<string, unknown>> } = {
+  name: 'priority', type: 'select', label: 'Priority', options: OPTIONS,
+};
 
 const ROWS = [
   { id: 'c1', name: 'Card one', status: 'open', priority: 'emerald' },
@@ -83,7 +85,10 @@ function makeDataSource() {
   } as any;
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  PRIORITY_FIELD.options = OPTIONS;
+  cleanup();
+});
 
 const BADGE_VARS = ['--os-badge-bg', '--os-badge-fg', '--os-badge-border'] as const;
 
@@ -155,5 +160,28 @@ describe('objectui#5183 — kanban card badges agree with the grid cell', () => 
     expect(emerald?.['--os-badge-bg']).toBeTruthy();
     expect(forest?.['--os-badge-bg']).toBeTruthy();
     expect(emerald!['--os-badge-bg']).not.toBe(forest!['--os-badge-bg']);
+  });
+});
+
+/** Any palette-family utility, light or `dark:`. */
+const FAMILY_CLASS = /(^|\s)(dark:)?(bg|text|border)-(gray|red|orange|yellow|green|blue|indigo|purple|pink)-\d/;
+
+describe('objectstack#36882 — an option with no declared colour renders neutral on the card', () => {
+  it('undeclared is neutral (light and dark), a declared family keeps its classes', async () => {
+    PRIORITY_FIELD.options = [
+      { value: 'emerald', label: 'Emerald' },
+      { value: 'forest', label: 'Forest', color: 'green' },
+    ];
+    const { container } = await renderBoard();
+    const badge = (label: string) =>
+      Array.from(container.querySelectorAll<HTMLElement>('[class*="rounded-full"]')).find(
+        (el) => el.textContent?.trim() === label,
+      )!;
+    await waitFor(() => expect(badge('Emerald')).toBeTruthy());
+
+    expect(badge('Emerald').className).toContain('bg-muted text-muted-foreground border-border');
+    expect(badge('Emerald').className).not.toMatch(FAMILY_CLASS);
+    expect(badge('Forest').className).toContain('bg-green-50');
+    expect(badge('Forest').className).toContain('dark:bg-green-950/40');
   });
 });

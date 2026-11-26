@@ -124,7 +124,7 @@ export const SysTrustedKey = ObjectSchema.create({
 
     status: Field.select(
       [
-        { label: 'Active', value: 'active' },
+        { label: 'Active', value: 'active', color: 'green' },
         { label: 'Revoked', value: 'revoked' },
       ],
       {

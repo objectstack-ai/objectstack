@@ -85,7 +85,6 @@ import {
   toInclusiveEndDay,
 } from '@object-ui/core';
 import {
-  getSemanticColorName,
   getSemanticHex,
   humanizeLabel,
   formatDate,
@@ -1513,49 +1512,47 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
       // plugin-timeline and plugin-calendar via `createFieldColorResolver`:
       //   1. the field's own option `color` for this record's value —
       //      the colour the author actually declared;
-      //   2. the value itself when it already IS a colour literal;
-      //   3. the semantic-token derivation, which also maps a palette NAME
-      //      ('red') to that palette's hex — what the key's contract has always
-      //      promised ("hex or semantic name").
-      // Only when `colorField` is absent or its value is empty do we fall back
-      // to the record's status / state / priority so the chart reflects the
-      // same colour story as list/kanban; if neither exists GanttView paints
-      // the platform default blue.
+      //   2. the value itself when it already IS a colour literal.
+      // Nothing else: no colour is derived from a value, by a lookup table, a
+      // hash or the record's status / state / priority (objectstack#36882,
+      // ruled option A). With neither rung answering, `color` stays undefined
+      // and GanttView paints its default bar colour. Declaring `colorField`
+      // asks the chart to read the colours declared on that field's options,
+      // not to invent them.
       //
-      // ⛔ The raw value must never reach `color` again. That was this card's
-      // defect: `backgroundColor: "open"` is not a colour, so the browser
-      // dropped the declaration and every bar rendered identically — DECLARING
-      // the documented key was strictly worse than omitting it, silently.
+      // ⛔ The raw value must never reach `color` again. That was
+      // objectui#7243's defect: `backgroundColor: "open"` is not a colour, so
+      // the browser dropped the declaration and every bar rendered
+      // identically — DECLARING the documented key was strictly worse than
+      // omitting it, silently.
+      //
+      // A palette family name an author declares on an option (`color:
+      // 'blue'`) paints that family's palette hex, the same colour the badge
+      // shows, not the CSS named colour (`blue` is #0000ff). Only rung 1 can
+      // answer a family name (rung 2 accepts hex / rgb / hsl alone), so this
+      // maps a declaration and never a stored value; a hex or other literal
+      // passes through unchanged as the fallback.
       const colorValue = colorField ? record[colorField] : undefined;
-      let color = resolveColorFieldValue(colorValue);
-      if (!color && colorValue != null && colorValue !== '') {
-        // Rung 3 for the declared field's own value. `getSemanticColorName`
-        // always answers for a non-empty value (semantic map, else its stable
-        // hash), so a declared `colorField` always paints something real.
-        color = getSemanticHex(getSemanticColorName(String(colorValue), colorValue));
-      }
-      if (!color) {
-        const fallbackVal =
-          record.status ?? record.state ?? record.priority ?? record.severity;
-        if (fallbackVal != null && fallbackVal !== '') {
-          const name = getSemanticColorName(undefined, fallbackVal);
-          if (name) color = getSemanticHex(name);
-        }
-      }
+      const declaredColor = resolveColorFieldValue(colorValue);
+      const color = declaredColor ? getSemanticHex(declaredColor, declaredColor) : undefined;
       // Alert stroke: the option colour first (same rung 1 as the bar — an
       // authored option colour is an authored option colour whichever slot it
-      // paints), then today's behaviour: semantic palette names map to their
-      // hex, anything else (hex, css color) passes through untouched.
+      // paints), then the value itself, which `borderColorField`'s contract
+      // makes the stroke colour ("any CSS color or semantic palette name",
+      // typically a server-computed alert field). Either way a palette family
+      // name paints its palette hex — `color: 'blue'` on an option strokes
+      // #3b82f6, as the bar fills, never the CSS named colour #0000ff — and
+      // anything else (hex, css color) passes through untouched.
       //
       // Deliberately NO rung 3 here. The stroke is opt-in and exceptional —
       // deriving one for every record would draw an alert on records that have
       // none, which is a repaint, not a fix.
       const borderColorRaw = borderColorField ? record[borderColorField] : undefined;
-      const borderColor =
+      const strokeColor =
         borderColorRaw != null && borderColorRaw !== ''
-          ? resolveBorderColorFieldValue(borderColorRaw)
-            ?? getSemanticHex(String(borderColorRaw), String(borderColorRaw))
+          ? resolveBorderColorFieldValue(borderColorRaw) ?? String(borderColorRaw)
           : undefined;
+      const borderColor = strokeColor ? getSemanticHex(strokeColor, strokeColor) : undefined;
 
       return {
         id: record.id || record._id || `task-${index}`,

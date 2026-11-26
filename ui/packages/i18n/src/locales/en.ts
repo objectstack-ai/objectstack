@@ -5653,6 +5653,9 @@ const en = {
       metrics: 'Metrics',
       noAddedFilter: 'No filter added to the dataset definition',
     },
+    recordCitations: {
+      title: 'Cited from records',
+    },
     tool: {
       aggregate_data: 'Aggregate the data',
       get_record: 'Read the record',

@@ -6,11 +6,13 @@
  * (`@objectstack/service-ai`) backend.
  *
  * The hook hits `GET {apiBase}/agents` (the canonical endpoint exposed by
- * `buildAgentRoutes`) and returns a normalized list. It is intentionally
- * dependency-free (uses `fetch`) so the chatbot package can stay light.
+ * `buildAgentRoutes`) and returns a normalized list. It asks through the host's
+ * `apiFetch`, else the global `fetch` (see {@link useAgents}), and imports no
+ * HTTP client, so the chatbot package can stay light.
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useContext, useEffect, useRef, useState, useCallback } from 'react';
+import { SchemaRendererContext, type ApiFetch } from '@object-ui/react';
 import { resolveAgentParam, isBuildAgent } from './agentAliases';
 
 /**
@@ -241,6 +243,7 @@ function fetchAgentsCached(
   apiBase: string,
   headers: Record<string, string> | undefined,
   force: boolean,
+  doFetch: ApiFetch,
 ): Promise<AgentDescriptor[]> {
   if (force) {
     agentsCache.delete(apiBase);
@@ -255,7 +258,7 @@ function fetchAgentsCached(
   if (inFlight && !force) return inFlight;
 
   const url = `${apiBase.replace(/\/$/, '')}/agents`;
-  const promise = fetch(url, {
+  const promise = doFetch(url, {
     method: 'GET',
     headers: { Accept: 'application/json', ...(headers ?? {}) },
     credentials: 'include',
@@ -334,6 +337,13 @@ export function __resetAgentsCatalog(): void {
 /**
  * Fetches the active agent catalog from the backend.
  *
+ * Every request rides the host's AUTHENTICATED fetch (`SchemaRendererProvider`'s
+ * `apiFetch`), the channel the renderers' own reads use: a session held by its
+ * bearer token alone carries no cookie, so `credentials: 'include'` on the bare
+ * global fetch read as anonymous, and a `401` never reached the host's
+ * session-ended check. A host that mounts no provider keeps the global fetch,
+ * cookies included.
+ *
  * The request leaves after the first frame has painted (objectui#12980), not
  * in the mounting commit — see {@link afterCatalogFrame}.
  *
@@ -352,6 +362,12 @@ export function useAgents(options: UseAgentsOptions = {}): UseAgentsReturn {
   // triggering a refetch on every render.
   const headersRef = useRef(headers);
   headersRef.current = headers;
+  // The host's authenticated fetch, or the global one with no provider: read
+  // directly (not `useSchemaContext`, which throws with no provider). Held in a
+  // ref like the headers: the catalog is one answer per `apiBase`.
+  const apiFetch = useContext(SchemaRendererContext)?.apiFetch;
+  const fetchRef = useRef<ApiFetch>(apiFetch ?? fetch);
+  fetchRef.current = apiFetch ?? fetch;
 
   useEffect(() => {
     if (!enabled || !apiBase) return;
@@ -362,7 +378,7 @@ export function useAgents(options: UseAgentsOptions = {}): UseAgentsReturn {
       setIsLoading(true);
       setError(undefined);
 
-      fetchAgentsCached(apiBase, headersRef.current, reloadToken > 0)
+      fetchAgentsCached(apiBase, headersRef.current, reloadToken > 0, fetchRef.current)
         .then((normalized) => {
           if (cancelled) return;
           setAgents(normalized.length > 0 ? normalized : fallback);

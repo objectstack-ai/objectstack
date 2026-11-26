@@ -2657,7 +2657,7 @@ export const CalendarConfigSchema = lazySchema(() => strictObject({
   startDateField: z.string().describe('Field providing the event start date/time'),
   endDateField: z.string().optional().describe('Field providing the event end date/time (defaults to a single-day event)'),
   titleField: z.string().optional().describe('Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain)'),
-  colorField: z.string().optional().describe('Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value'),
+  colorField: z.string().optional().describe('Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()) or a Tailwind color utility class (bg-…, text-…), else the default event color: a value that is no color is never turned into one'),
   /**
    * [#17054] The fifth binding, and the one this schema was missing while two
    * other faces of this same package already published it as a member: the
@@ -2787,7 +2787,7 @@ export const GanttConfigSchema = lazySchema(() => strictObject({
   titleField: z.string().describe('Field displayed as the task title'),
   progressField: z.string().optional().describe('Field providing the task completion percentage'),
   dependenciesField: z.string().optional().describe("Field listing the task's predecessor (dependency) record ids"),
-  colorField: z.string().optional().describe('Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else a semantic color token derived from the value'),
+  colorField: z.string().optional().describe('Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the default bar color: a value that is no color is never turned into one'),
   // Two-level hierarchy: a parent task id (summary bar) and a row type.
   parentField: z.string().optional().describe('Field holding the parent task id (builds the summary → step tree)'),
   typeField: z.string().optional().describe('Field whose value maps to task/summary/milestone'),

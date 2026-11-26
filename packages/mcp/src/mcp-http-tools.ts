@@ -66,7 +66,7 @@ import { SystemFieldName } from '@objectstack/spec/system';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
-import { actionsDoorAnswerOf, earnedAnswerOf, isEngineDuplicateRecordEnvelope, isSandboxCrash, isServerFault, logServerFault, mapDataError, resolveQueryReadLimits, resolveThrownHttpError, sandboxBusinessMessage, serverFaultProvenance, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { actionsDoorAnswerOf, declaredRefusalLines, declaredUserMessage, earnedAnswerOf, isEngineDuplicateRecordEnvelope, isSandboxCrash, isServerFault, logServerFault, mapDataError, resolveQueryReadLimits, resolveThrownHttpError, sandboxBusinessMessage, serverFaultProvenance, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -1384,9 +1384,83 @@ function errorResultFromThrown(err: unknown, request: string, objectName?: strin
   // is the one arm whose `details` are the run's artefacts; `satisfies` keeps
   // the spelling checked against the registered vocabulary.
   const relay = answer.code === ('FLOW_FAILED' satisfies ErrorCode) ? flowFailureRelaySentence(details, answer.userMessage) : undefined;
-  return relay === undefined
+  const flowed = relay === undefined
     ? result
     : { ...result, content: [...result.content, { type: 'text' as const, text: `${FLOW_FAILURE_RELAY_LEAD}${relay}` }] };
+  // [#37416] A declared refusal thrown as a `reasons` list names each line.
+  return withRefusalReasonsRelay(flowed, err, envelope);
+}
+
+/**
+ * [#37416] The lead of the plain text a refusal thrown as a declared `reasons`
+ * list carries beside its envelope ({@link withRefusalReasonsRelay}). Exported
+ * for the pin; not on the package entry.
+ */
+export const REFUSAL_REASONS_RELAY_LEAD =
+  'Tell the user every line below, whole and in this order, rather than a userMessage the door may have cut:\n';
+
+/**
+ * [#37416] A refusal thrown as a declared `reasons` list (#36877, ruling
+ * 7178348458 term 3) names every line to the agent, whole, in order, with the
+ * refusal's closing line last — as a second text block, the
+ * {@link flowFailureRelaySentence} pattern: `content[0]` stays the door's
+ * envelope byte for byte, and the lines ride beside it as plain text.
+ *
+ * ## Why
+ *
+ * The runtime's refusal catalogue renders each listed reason in the caller's
+ * locale and answers them as `userMessage`, the lines joined by a line break
+ * with the code's own `message` closing them. The `/data` door bounds that
+ * `userMessage` at 500 characters (#5423), and the record data tools serve the
+ * door's value, so on a long list an agent read a cut sentence with its
+ * closing line lost. The doors carry the lines structured as
+ * `details.refusals`, unbounded; the closing line is on no list.
+ *
+ * ## How it is read
+ *
+ * - The lines through `declaredRefusalLines` (`@objectstack/types`), the one
+ *   recogniser every door reads `details.refusals` with: a non-empty list of
+ *   `{ reason, message }` on an error that also carries a declared
+ *   `userMessage`. ⛔ Never a second reading of the shape here. A thrown value
+ *   it does not recognise — a single-reason refusal among them — gets no block,
+ *   so it reads exactly as before.
+ * - The closing line from the thrown value's own declared `userMessage`
+ *   (`declaredUserMessage`, unbounded: the bound is the `/data` door's, applied
+ *   when it builds its answer), the part after the listed lines. When that
+ *   text does not begin with the listed lines, no closing line is invented and
+ *   the block carries the lines alone.
+ *
+ * ## When it is withheld
+ *
+ * - A `PERMISSION_DENIED` answer gets no block, as it gets no `details` (the
+ *   ruling on #7450, {@link errorResultFromThrown}).
+ * - An answer that serves no `userMessage`, or a fault (5xx), gets none: the
+ *   door decided that the marked sentence does not reach this caller, and the
+ *   lines are that sentence.
+ */
+function withRefusalReasonsRelay<R extends { content: Array<{ type: 'text'; text: string }> }>(
+  result: R,
+  err: unknown,
+  served: { code?: string; status?: number; userMessage?: string },
+): R {
+  if (served.code === StandardErrorCode.enum.PERMISSION_DENIED) return result;
+  if (served.userMessage === undefined) return result;
+  if (served.status !== undefined && isServerFault(served.status)) return result;
+  const text = refusalReasonsRelayText(err);
+  return text === undefined
+    ? result
+    : { ...result, content: [...result.content, { type: 'text' as const, text: `${REFUSAL_REASONS_RELAY_LEAD}${text}` }] };
+}
+
+/** [#37416] The listed lines, then the closing line when the declared `userMessage` carries it after them. */
+function refusalReasonsRelayText(err: unknown): string | undefined {
+  const lines = declaredRefusalLines(err);
+  if (lines === undefined) return undefined;
+  const listed = lines.map((line) => line.message);
+  const joined = listed.join('\n');
+  const whole = declaredUserMessage(err);
+  const closing = whole !== undefined && whole.startsWith(`${joined}\n`) ? whole.slice(joined.length + 1) : '';
+  return [...listed, ...(closing.trim() !== '' ? [closing] : [])].join('\n');
 }
 
 /**
@@ -1678,7 +1752,8 @@ function dataDoorErrorResult(
   beside?: NotRecordedMembers,
 ) {
   const envelope = dataDoorRefusalEnvelope(err, objectName);
-  if (envelope) return codedErrorResult({ ...envelope }, beside);
+  // [#37416] The door may cut `userMessage` at 500; a listed refusal's lines ride whole beside it.
+  if (envelope) return withRefusalReasonsRelay(codedErrorResult({ ...envelope }, beside), err, envelope);
   const door = dataDoorAnswerOf(err, objectName);
   if (isServerFault(door.status)) {
     logServerFault({

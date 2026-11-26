@@ -279,7 +279,9 @@
 
       The request is the seed's byte for byte: the same URL (the server origin
       through the same Vite HTML env substitution as the scripts above),
-      `credentials: 'include'`, the same `Accept`, and the same
+      `credentials: 'include'`, the same `Accept`, the stored Bearer from the
+      same `localStorage` key when there is one (objectstack#37225: a session
+      held by its bearer alone is otherwise answered as anonymous), and the same
       `Accept-Language`: the browser's language in the app's own spelling when
       discovery `locale.supported` lists it, else none (ruling 6915665005,
       objectstack#34392). "Lists it" is the platform's one locale ladder,
@@ -353,6 +355,11 @@
           const preferred = browser ? resolveAmong(browser, supported) : undefined;
           const headers = { Accept: 'application/json' };
           if (preferred) headers['Accept-Language'] = preferred;
+          let token = '';
+          try {
+            token = localStorage.getItem('auth-session-token') || '';
+          } catch (_) { /* storage blocked: no Bearer, as in the seed */ }
+          if (token) headers.Authorization = 'Bearer ' + token;
           slot.init = { credentials: 'include', headers: headers };
           slot.response = fetch(slot.url, slot.init);
           // The seed reads a failure as its own request's; it is never unhandled.

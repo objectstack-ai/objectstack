@@ -291,8 +291,7 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
       先删活成员即红 ⇒ 退役先落,skills 卡 `Blocked-by:` 退役卡;值兼在标记示例与穷举段 ⇒
       skills 卡拆前后两张(合一则 `Blocked-by:` 成环)。值走 `enumWithRetiredValues` 则绑定 stale,退役
       PR 照处方改指。顶层键墓碑仍算声明,删它欠维护者的 `NOT_AUTHORED` 行 ⇒ `needs_decision`。
-      `_index.md`(`check:skill-refs`)随退役 PR 重生成;未标记块与不红表行无门禁,grep 后排退役后。
-      例外:改名替代者是顶层键或所绑活成员 ⇒ 其枚举行随退役 PR,上限照 `lanes/skills.md`。
+      `_index.md`(`check:skill-refs`)随退役 PR 重生成;未标记块与不红表行无门禁,grep 后排退役后。例外:改名替代者是顶层键或所绑活成员 ⇒ 其枚举行随退役 PR,上限照 `domains/skills.md`。
 - [ ] **Docs** —— `content/docs/**` 的散文、表格与代码块 —— **除了
       `content/docs/releases/`,代码 PR 永不碰它**(AGENTS.md Documentation
       Guardrails)。`content/docs/**` 的其余部分:先 grep 键名,再读周边文件 —— 被删的键
