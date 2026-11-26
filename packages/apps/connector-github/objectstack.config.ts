@@ -20,7 +20,7 @@ export default defineStack({
     type: 'app',
     name: 'GitHub',
     description: "Search and read GitHub issues from flows, through GitHub's remote MCP server.",
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
   },
 
   // `automation` materializes the `connectors:` entry at boot and runs the

@@ -86,7 +86,7 @@ export default defineStack({
     type: 'app',
     name: 'SQL performance baseline fixture',
     description: 'Fixture for the SQL performance baseline: three parent levels over one high-volume child.',
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
   },
 
   objects: [

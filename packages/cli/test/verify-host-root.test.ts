@@ -54,7 +54,7 @@ const STACK = {
     version: '1.0.0',
     name: 'Verify Host Root',
     type: 'app',
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
   },
   objects: [
     {

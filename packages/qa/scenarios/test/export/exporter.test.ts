@@ -500,7 +500,7 @@ export default defineStack({
     type: 'app',
     name: 'Travel Expense',
     // Protocol compatibility range.
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
   },
 
   requires: ['automation', 'triggers'],
