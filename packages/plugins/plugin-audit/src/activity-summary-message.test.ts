@@ -417,6 +417,11 @@ describe('composeActivitySummary — a fired milestone (#37524)', () => {
     expect(composeActivitySummary(WON, tenant)).toBeUndefined();
     const untouched = readerSummaryLocale(milestoneI18n(), 'zh-CN', (n) => MILESTONE_DEFS[n] ?? null, packaged)!;
     expect(composeActivitySummary(WON, untouched)).toBe('赢单：Acme（赢单）');
+    // An empty served summary is no rewording: the resolver's one predicate
+    // reads it as nothing to protect, so the catalog still applies.
+    const blank = { biz_deal: { ...MILESTONE_DEFS.biz_deal, activityMilestones: [{ field: 'stage', value: 'won', summary: '' }] } };
+    const emptied = readerSummaryLocale(milestoneI18n(), 'zh-CN', (n) => (blank as any)[n] ?? null, packaged)!;
+    expect(composeActivitySummary(WON, emptied)).toBe('赢单：Acme（赢单）');
   });
 
   it('reads the stored code back, and refuses a malformed one', () => {

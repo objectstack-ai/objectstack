@@ -929,10 +929,11 @@ function displayFieldValue(
   optionLabelFor?: (optionValue: string) => string | undefined,
 ): string {
   const shown = summaryValueOf(field, value, titlesFor);
-  // A milestone's sentence is the author's, in the author's language, and is
-  // never re-composed per reader (#7290): an English yes/no word interpolated
-  // into it would be the very mixed-language sentence the field-change wording
-  // removes, so a boolean token keeps rendering its stored value here.
+  // A milestone's sentence is composed in the author's language at write time;
+  // a reader's translation, when its locale carries one, is re-rendered from the
+  // `_milestones` key on the feed (`activity-summary-message.ts`). An English
+  // yes/no word interpolated here would be the very mixed-language sentence the
+  // field-change wording removes, so a boolean token keeps its stored value.
   if (shown.boolean !== undefined) return String(value);
   return shown.option !== undefined ? (optionLabelFor?.(shown.option) ?? shown.text) : shown.text;
 }
@@ -1378,9 +1379,9 @@ function planMilestoneTokenReads(
  * is locale-INDEPENDENT: `usr_1` → `张伟` is the record's own datum, the same
  * string in every locale, so it could be added to an untranslated sentence
  * without giving that sentence a locale. An option label is locale-DEPENDENT
- * rendering, and a milestone template is an author-written sentence with NO
- * bundle key of its own — #7290 ruled translating templates a contract decision
- * and left it. So the author's own option label is the only rendering
+ * rendering, and the stored row is the author's template in the author's
+ * language (a reader's translation, when one exists, is rendered on the feed from
+ * `_milestones`, not here). So the author's own option label is the only rendering
  * guaranteed to agree with the sentence around it: template and option label are
  * both authored metadata, in one language, by one author. Reading the bundle
  * here would GUARANTEE a split sentence (`Deal moved to 已赢单`) in exactly the

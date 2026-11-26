@@ -82,6 +82,7 @@
 import {
   resolveBundleLocale,
   resolveObjectMilestoneSummary,
+  scalarOverridesPackagedBase,
   translateObject,
   type ResolveOptions,
   type TranslationBundle,
@@ -489,12 +490,11 @@ export function readerSummaryLocale(
         if (!translation.value) return undefined;
         // ADR-0029 D9.2a: a tenant's rewording of a packaged milestone is
         // authored data and keeps its words, judged as a validation message
-        // is — the served milestone against the packaged one of the same pair.
+        // is — the served milestone against the packaged one of the same pair,
+        // through the resolver's one predicate (never a copy of it).
         const served = milestoneOn(getObjectDef(objectName), field, value);
         const packaged = milestoneOn(getPackagedObjectBase?.(objectName), field, value);
-        if (served && packaged && typeof served.summary === 'string' && served.summary !== packaged.summary) {
-          return undefined;
-        }
+        if (scalarOverridesPackagedBase(packaged, 'summary', served?.summary)) return undefined;
         return resolveObjectMilestoneSummary(translation.value.bundle, objectName, field, value, translation.value.options);
       } catch {
         // A misbehaving i18n service must not fail the read: the stored text stands.

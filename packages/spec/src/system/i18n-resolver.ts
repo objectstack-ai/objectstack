@@ -4984,10 +4984,17 @@ function builtinSystemFieldLabel(
  * rewrite is judged by one comparison on both readers and the two keep
  * answering one sentence. The key is the only thing it adds: the three edges
  * above hold for it unchanged.
+ *
+ * ## `summary` — an activity milestone's, judged on the feed reader
+ *
+ * The audit plugin's feed translates a packaged milestone's `summary` only
+ * while the served milestone's still equals the packaged one of the same
+ * `field` + `value` pair (ADR-0029 D9.2a), asking through this export with the
+ * packaged MILESTONE as `base`, as the evaluator asks with the packaged rule.
  */
 export function scalarOverridesPackagedBase(
   base: unknown,
-  key: 'label' | 'pluralLabel' | 'description' | 'message',
+  key: 'label' | 'pluralLabel' | 'description' | 'message' | 'summary',
   value: unknown,
 ): boolean {
   return valueOverridesPackagedBase(base, key, value);
