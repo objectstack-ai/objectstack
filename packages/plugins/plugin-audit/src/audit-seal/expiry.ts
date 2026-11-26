@@ -8,6 +8,7 @@ import { AUDIT_AMENDMENT_OBJECT, AUDIT_CHECKPOINT_OBJECT } from './seed.js';
 import {
   amendmentBodyFromRow,
   amendmentRow,
+  chainKeyOf,
   checkpointBodyFromRow,
   checkpointDigest,
   signedBodyBytes,
@@ -46,11 +47,12 @@ import type { SigningKeyTrust } from './verifier.js';
  *  - **The cutoff is aligned down to a UTC day.** A chain then gains at most
  *    one expiry amendment a day in step with the clock, where an hourly sweep
  *    would sign one an hour, forever: amendments are never removed. It keeps
- *    rows at most one day past their policy, on top of D8's own bound.
+ *    a row up to one day past its policy, on top of D8's own bound.
  *  - **At most {@link AUDIT_EXPIRY_MAX_ROWS_PER_SWEEP} rows a sweep**, the
- *    Archiver's own bound (500 rows × 20 batches): the backlog drains across
- *    sweeps, and a run cut there continues in the next amendment, which starts
- *    at the sequence directly after it.
+ *    Archiver's own bound (500 rows × 20 batches), across all of the object's
+ *    chains: the backlog drains across sweeps, so a backlog keeps rows longer
+ *    than the day above, and a run cut there continues in the next amendment,
+ *    which starts at the sequence directly after it.
  */
 
 type Row = Record<string, unknown>;
@@ -79,6 +81,40 @@ export interface AuditExpiryRequest {
   readonly policy: string;
   readonly policyValue: string;
   readonly cutoff: string;
+  /** Tenant-scoped windows: an organization's chain expires under its own (see {@link windowOf}). */
+  readonly tenants?: ReadonlyArray<{ readonly tenantId: string; readonly policyValue: string; readonly cutoff: string }>;
+}
+
+/** The window one chain expires under: its day-aligned cutoff and the policy value its amendment signs. */
+interface ChainWindow {
+  readonly cutoffMs: number;
+  readonly policyValue: string;
+}
+
+const cutoffOf = (cutoff: string): number => {
+  const ms = auditExpiryCutoff(Date.parse(cutoff));
+  if (!Number.isFinite(ms)) throw new Error(`the expiry cutoff '${cutoff}' is not an instant`);
+  return ms;
+};
+
+/**
+ * The window chain `key` expires under. An organization's chain (`org:<id>`)
+ * takes its organization's tenant-scoped window where one is set, else the
+ * global one. Any other chain — the deployment chain, of no one organization —
+ * takes the longest of the global window and every tenant window, so no chain
+ * expires under a window shorter than one configured for its rows.
+ */
+export function windowOf(request: AuditExpiryRequest, key: string): ChainWindow {
+  const global: ChainWindow = { cutoffMs: cutoffOf(request.cutoff), policyValue: request.policyValue };
+  const tenants = request.tenants ?? [];
+  if (tenants.length === 0) return global;
+  const windowOfTenant = (t: (typeof tenants)[number]): ChainWindow => ({ cutoffMs: cutoffOf(t.cutoff), policyValue: t.policyValue });
+  if (key.startsWith('org:')) {
+    const own = tenants.find((t) => chainKeyOf(t.tenantId) === key);
+    return own ? windowOfTenant(own) : global;
+  }
+  // The longest window is the earliest cutoff.
+  return tenants.map(windowOfTenant).reduce((longest, t) => (t.cutoffMs < longest.cutoffMs ? t : longest), global);
 }
 
 /** One chain's planned expiry (`LifecycleSealedExpiryRun`, `@objectstack/objectql`). */
@@ -132,8 +168,9 @@ export class ObjectExpiry {
 
   /** The runs of this sweep, each chain's amendment stored before it is answered. */
   async plan(request: AuditExpiryRequest): Promise<AuditExpiryRun[]> {
-    const cutoffMs = auditExpiryCutoff(Date.parse(request.cutoff));
-    if (!Number.isFinite(cutoffMs)) throw new Error(`the expiry cutoff '${request.cutoff}' is not an instant`);
+    // A chain is found by a checkpoint that ended by the LATEST cutoff any chain may use; its own window decides.
+    let cutoffMs = cutoffOf(request.cutoff);
+    for (const t of request.tenants ?? []) cutoffMs = Math.max(cutoffMs, cutoffOf(t.cutoff));
     const runs: AuditExpiryRun[] = [];
     let budget = AUDIT_EXPIRY_MAX_ROWS_PER_SWEEP;
     // Chains in `chain_key` order, each found by one checkpoint of an expired window: a keyset walk, one row a step.
@@ -152,7 +189,7 @@ export class ObjectExpiry {
       if (!candidate) break;
       const key = String(candidate.chain_key);
       after = key;
-      const run = await this.chainRun(key, cutoffMs, budget, request);
+      const run = await this.chainRun(key, windowOf(request, key), budget, request);
       if (!run) continue;
       runs.push(run.run);
       budget -= run.run.rowIds.length;
@@ -206,10 +243,11 @@ export class ObjectExpiry {
 
   private async chainRun(
     key: string,
-    cutoffMs: number,
+    window: ChainWindow,
     budget: number,
     request: AuditExpiryRequest,
   ): Promise<{ run: AuditExpiryRun; cut: boolean } | null> {
+    const { cutoffMs } = window;
     const [firstRow] = await this.find(this.checkpoints, AUDIT_CHECKPOINT_OBJECT, {
       where: { sealed_object: this.object, chain_key: key },
       orderBy: [{ field: 'sequence', order: 'asc' }],
@@ -220,17 +258,33 @@ export class ObjectExpiry {
     if (!first) return null;
     const latest = await this.latestExpiry(key);
 
-    // A sweep that stopped after the amendment was stored: its range is finished first.
+    // A sweep that stopped after the amendment was stored: its range is finished first. Each checkpoint left in
+    // it is admitted as in a fresh run, and they must run consecutively to the amendment's last sequence, whose
+    // digest it carries: a row that is not the platform's own deletes nothing, and neither does its range.
     if (latest && latest.last_sequence >= first.sequence) {
+      if (first.sequence < latest.first_sequence) return this.refuseResume(key, latest, first.sequence);
       const taken: Taken[] = [];
+      let next = first.sequence;
       for (const stored of await this.find(this.checkpoints, AUDIT_CHECKPOINT_OBJECT, {
         where: { sealed_object: this.object, chain_key: key, sequence: { $lte: latest.last_sequence } },
+        // Ascending, so complete() removes the newest checkpoint last (see runOf).
+        orderBy: [{ field: 'sequence', order: 'asc' }],
       })) {
         const body = this.parse(key, stored);
         if (!body) return null;
+        const admitted =
+          body.sequence === next &&
+          (await this.options.trust.signature(body.signing_key_id, signedBodyBytes(body), stored.signature)) === 'ok';
+        if (!admitted) return this.refuseResume(key, latest, body.sequence);
         taken.push({ stored, body });
+        next += 1;
       }
-      return taken.length === 0 ? null : { run: this.runOf(key, taken), cut: false };
+      if (taken.length === 0) return null;
+      const last = taken[taken.length - 1].body;
+      if (last.sequence !== latest.last_sequence || checkpointDigest(last) !== latest.last_removed_digest) {
+        return this.refuseResume(key, latest, last.sequence);
+      }
+      return { run: this.runOf(key, taken), cut: false };
     }
 
     const expected = latest ? latest.last_sequence + 1 : 0;
@@ -279,12 +333,24 @@ export class ObjectExpiry {
       if (page.length < PAGE_SIZE) break;
     }
     if (taken.length === 0) return null;
-    await this.writeExpiry(taken, request);
+    await this.writeExpiry(taken, request.policy, window.policyValue);
     return { run: this.runOf(key, taken), cut };
   }
 
+  /** A stored expiry's unfinished range holds a checkpoint that is not admitted: it is not resumed, and that is said once. */
+  private refuseResume(key: string, latest: ExpiryAmendmentBody, sequence: number): null {
+    this.options.say(
+      `expiry:resume:${this.object}:${key}`,
+      `AuditSealer: '${this.object}' chain '${key}' is NOT expired further: the range its expiry ` +
+        `${latest.first_sequence}–${latest.last_sequence} still holds, at checkpoint ${sequence}, one that does not ` +
+        'verify under a trusted signing key or does not follow the one before it. Nothing in that range is deleted; ' +
+        'os audit verify reports the checkpoint.',
+    );
+    return null;
+  }
+
   /** Sign and store the chain's `expiry` amendment over `taken` (D8), then hand it to the sink. */
-  private async writeExpiry(taken: readonly Taken[], request: AuditExpiryRequest): Promise<void> {
+  private async writeExpiry(taken: readonly Taken[], policy: string, policyValue: string): Promise<void> {
     const first = taken[0].body;
     const last = taken[taken.length - 1].body;
     let from = first.window_start;
@@ -305,8 +371,8 @@ export class ObjectExpiry {
       covered_from: from,
       covered_to: to,
       last_removed_digest: checkpointDigest(last),
-      policy: request.policy,
-      policy_value: request.policyValue,
+      policy,
+      policy_value: policyValue,
     });
     const { signer } = this.options;
     // The S1 loop: a signature whose key id differs from the one its bytes name is never stored.

@@ -646,7 +646,7 @@ describe('AuditPlugin — hands its sealer\'s expiry to the lifecycle service (A
       registered,
       unregistered: () => unregistered,
       service: {
-        registerSealedExpiry(expiry: { plan(request: unknown): Promise<unknown> }) {
+        registerExpiryPrefix(expiry: { plan(request: unknown): Promise<unknown> }) {
           registered.push(expiry);
           return () => void (unregistered += 1);
         },

@@ -1176,8 +1176,10 @@ export const LifecycleSchema = lazySchema(() => strictObject({
     "the platform shows. Only `class: 'audit'` may declare it, and not beside a `retention` or `ttl` " +
     "`onlyWhen`, a `ttl` on another field than `created_at`, or rotation `storage`. Sealed rows past their " +
     '`retention`, `ttl` or `archive.keep` window leave only by whole checkpoints, after a signed expiry ' +
-    'amendment names them, so the verifier reads them as expired rather than missing; while no sealer is ' +
-    'running, the sweeper keeps them. A deployment with no crypto provider seals nothing and reports that at error.',
+    'amendment names them, so the verifier reads them as expired rather than missing; a tenant-scoped ' +
+    "retention window applies to that organization's chain, and the window is counted to the start of a UTC " +
+    'day, so a row can stay up to a day longer. While no sealer is running, the sweeper keeps them. A ' +
+    'deployment with no crypto provider seals nothing and reports that at error.',
   ),
   reclaim: z.boolean().optional().describe('Run driver space reclamation (SQLite incremental_vacuum) after sweeping this object. Default true for non-record classes.'),
 }).superRefine((lc, ctx) => {

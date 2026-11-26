@@ -351,7 +351,7 @@ export class AuditPlugin implements Plugin {
   /** [ADR-0154 D3] The sealer, started at `kernel:ready` and stopped by `destroy()`. */
   private sealer: AuditSealer | null = null;
   /** [ADR-0154 D8] Takes the sealer's expiry back off the lifecycle service, on `destroy()`. */
-  private unregisterSealedExpiry: (() => void) | null = null;
+  private unregisterExpiryPrefix: (() => void) | null = null;
 
   /**
    * [#31796] The credential-use writer, built in `init()` (the `audit` slot
@@ -925,7 +925,7 @@ export class AuditPlugin implements Plugin {
     this.sealer.start();
     // With no crypto provider nothing is sealed and no expiry can be signed: the
     // lifecycle service then keeps the sealed rows and says so (ADR-0154 D8).
-    if (crypto) this.registerSealedExpiry(this.sealer, ctx);
+    if (crypto) this.registerExpiryPrefix(this.sealer, ctx);
   }
 
   /**
@@ -936,9 +936,9 @@ export class AuditPlugin implements Plugin {
    * so nothing expires. A lifecycle service with no sealed expiry keeps a
    * sealed object's rows past their policy and says so.
    */
-  private registerSealedExpiry(sealer: AuditSealer, ctx: PluginContext): void {
+  private registerExpiryPrefix(sealer: AuditSealer, ctx: PluginContext): void {
     type LifecycleLike = {
-      registerSealedExpiry?: (expiry: { plan(request: AuditExpiryRequest): Promise<AuditExpiryRun[]> }) => () => void;
+      registerExpiryPrefix?: (expiry: { plan(request: AuditExpiryRequest): Promise<AuditExpiryRun[]> }) => () => void;
     };
     let lifecycle: LifecycleLike | undefined;
     try {
@@ -946,9 +946,9 @@ export class AuditPlugin implements Plugin {
     } catch {
       return;
     }
-    if (!lifecycle || typeof lifecycle.registerSealedExpiry !== 'function') return;
+    if (!lifecycle || typeof lifecycle.registerExpiryPrefix !== 'function') return;
     // Called as a method: the service's registration reads its own state.
-    this.unregisterSealedExpiry = lifecycle.registerSealedExpiry({ plan: (request) => sealer.expire(request) });
+    this.unregisterExpiryPrefix = lifecycle.registerExpiryPrefix({ plan: (request) => sealer.expire(request) });
   }
 
   /**
@@ -1172,8 +1172,8 @@ export class AuditPlugin implements Plugin {
     // before the process lets go, and never starts again.
     const sealer = this.sealer;
     this.sealer = null;
-    this.unregisterSealedExpiry?.();
-    this.unregisterSealedExpiry = null;
+    this.unregisterExpiryPrefix?.();
+    this.unregisterExpiryPrefix = null;
     await sealer?.stop();
     const writer = this.readAuditWriter;
     this.readAuditWriter = null;

@@ -535,6 +535,16 @@ export interface LifecycleSealedExpiryRequest {
   readonly policyValue: string;
   /** Rows of windows that ended at or before this instant may expire (ISO-8601, UTC). */
   readonly cutoff: string;
+  /**
+   * The tenant-scoped windows of this policy (`retention_overrides` at tenant
+   * scope), each through the same floors: an organization's chain expires
+   * under its own organization's window, in place of {@link policyValue} and
+   * {@link cutoff}. A chain of no one organization (the deployment chain)
+   * expires under the longest of all of them and the global one, so no chain
+   * ever expires under a window shorter than one configured for its rows.
+   * Absent when no tenant overrides the window.
+   */
+  readonly tenants?: ReadonlyArray<{ readonly tenantId: string; readonly policyValue: string; readonly cutoff: string }>;
 }
 
 /** One chain's expiry, planned and signed: the rows the sweep deletes, then {@link complete}. */
@@ -910,9 +920,9 @@ export class LifecycleService {
    * Until one is registered, a sealed object's expiring rows are KEPT: the
    * sweep never deletes a sealed row by its own cutoff (see {@link sweepSealed}).
    */
-  registerSealedExpiry(expiry: LifecycleSealedExpiry): () => void {
+  registerExpiryPrefix(expiry: LifecycleSealedExpiry): () => void {
     if (!expiry || typeof expiry.plan !== 'function') {
-      throw new Error('[lifecycle] registerSealedExpiry requires an object with a plan(request) method');
+      throw new Error('[lifecycle] registerExpiryPrefix requires an object with a plan(request) method');
     }
     this.sealedExpiry = expiry;
     this.sealedSaid.clear();
@@ -1663,8 +1673,10 @@ export class LifecycleService {
    *
    * A settings override of the window applies as on any object, through the
    * same floors, and the value applied is the one the amendment signs. A
-   * tenant-scoped override does not: a sealed chain's expiry is signed with one
-   * policy value per sweep, so it is said once and the global window stands.
+   * tenant-scoped override applies to its organization's chain, on the
+   * partition {@link tenantWindowsFor} decides for every reap: it travels as
+   * {@link LifecycleSealedExpiryRequest.tenants}, and each chain's amendment
+   * signs the window it expired under.
    */
   private async reapSealed(
     engine: LifecycleEngineLike,
@@ -1684,23 +1696,26 @@ export class LifecycleService {
     if (lc.retention) legs.push({ policy: 'retention.maxAge', kind: 'retention', key: 'maxAge', declared: lc.retention.maxAge });
     const outcomes: Array<number | undefined> = [];
     for (const leg of legs) {
-      const tenants = (this.governance.tenantOverrides.get(object) ?? []).filter((t) => typeof t[leg.key] === 'string');
-      if (tenants.length > 0) {
-        this.saySealedOnce(
-          `tenant-override:${object}:${leg.key}`,
-          `[lifecycle] ${object} declares lifecycle.seal, so its tenant-scoped ${leg.key} override(s) ` +
-            `(${tenants.map((t) => t.tenantId).join(', ')}) do not apply: a sealed chain expires by whole checkpoints ` +
-            `under one signed policy value, and the global ${leg.policy} window stands for every organization.`,
-        );
-      }
       const override = ov[leg.key];
       const windowMs = this.effectiveWindowMs(override, parseLifecycleDuration(leg.declared), object, leg.kind, 'global', report);
+      const policyValue = appliedLiteral(override, leg.declared, windowMs);
+      // [#21918] The tenants that get a window of their own, as `reap()` decides them; each through the floors,
+      // its fallback the resolved global window.
+      const partition = this.tenantWindowsFor(obj, leg.key);
+      const tenants = (partition?.windows ?? []).map((t) => {
+        const tMs = this.effectiveWindowMs(t[leg.key], windowMs, object, leg.kind, `tenant:${t.tenantId}`, report);
+        return {
+          tenantId: t.tenantId,
+          policyValue: appliedLiteral(t[leg.key], policyValue, tMs),
+          cutoff: new Date(this.now() - tMs).toISOString(),
+        };
+      });
       outcomes.push(
         await this.sweepSealed(
           engine,
           obj,
           lc,
-          { policy: leg.policy, policyValue: appliedLiteral(override, leg.declared, windowMs), cutoffMs: this.now() - windowMs },
+          { policy: leg.policy, policyValue, cutoffMs: this.now() - windowMs, ...(tenants.length > 0 ? { tenants } : {}) },
           report,
           null,
         ),
@@ -1725,7 +1740,12 @@ export class LifecycleService {
     engine: LifecycleEngineLike,
     obj: LifecycleObjectLike,
     lc: Lifecycle,
-    leg: { policy: LifecycleSealedExpiryRequest['policy']; policyValue: string; cutoffMs: number },
+    leg: {
+      policy: LifecycleSealedExpiryRequest['policy'];
+      policyValue: string;
+      cutoffMs: number;
+      tenants?: LifecycleSealedExpiryRequest['tenants'];
+    },
     report: LifecycleSweepReport,
     stores: readonly ArchiveCapableDriver[] | null,
   ): Promise<number> {
@@ -1745,7 +1765,23 @@ export class LifecycleService {
       );
       return 0;
     }
-    const runs = await expiry.plan({ object, policy: leg.policy, policyValue: leg.policyValue, cutoff });
+    // Asked before the plan, so no amendment is signed over rows a store could not then delete.
+    if (stores?.some((store) => typeof store.bulkDelete !== 'function')) {
+      report.skipped.push({ object, reason: 'seal-delete-unsupported' });
+      this.saySealedOnce(
+        `bulk-delete:${object}`,
+        `[lifecycle] ${object} declares lifecycle.seal and archives, but a store it lives on has no bulkDelete, so ` +
+          `its rows past ${leg.policy} ${leg.policyValue} are KEPT: a sealed row leaves only by id, from both stores.`,
+      );
+      return 0;
+    }
+    const runs = await expiry.plan({
+      object,
+      policy: leg.policy,
+      policyValue: leg.policyValue,
+      cutoff,
+      ...(leg.tenants ? { tenants: leg.tenants } : {}),
+    });
     let deleted = 0;
     for (const run of runs) {
       // [#4747] Leg boundary: a run not yet begun is the next sweep's; its amendment is already signed and it resumes.

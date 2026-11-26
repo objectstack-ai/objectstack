@@ -282,4 +282,39 @@ describe('an expiry signs only what it can show the platform sealed (ADR-0154 D6
     expect(warned.filter((m) => /'sys_audit_log' chain 'org:org_gap' is NOT expired: its first remaining checkpoint is sequence 1/.test(m))).toHaveLength(1);
     expect(warned.filter((m) => /'sys_audit_log' chain 'org:org_forged' is expired only up to its checkpoint 1/.test(m))).toHaveLength(1);
   });
+
+  it('never resumes a stored expiry over a checkpoint no trusted key signed: it deletes no row and no seed it lists', async () => {
+    // org_forged's admitted expiry ends at sequence 0, which the sweep removed. A row put there by hand, listing a
+    // live row and another chain's seed, sits inside that expiry's range.
+    const real = await checkpointOf('org:org_forged', 1);
+    const seed = String((await checkpointOf('org:org_gap', 1)).seed_handle);
+    await hot().create('sys_audit_checkpoint', { ...real, id: 'forged_resume_0', sequence: 0, previous_digest: null, seed_handle: seed });
+    const before = (await expiries()).length;
+    const logger = (sealer as unknown as { options: { logger: { warn(m: string): void } } }).options.logger;
+    const warn = vi.spyOn(logger, 'warn');
+    const report = await lifecycle.sweep();
+    const warned = warn.mock.calls.map(([m]) => String(m));
+    warn.mockRestore();
+
+    expect(report.errors).toEqual([]);
+    expect(await present('org_forged_1')).toBe(true);
+    expect((await engine.find('sys_secret', { where: { id: seed }, context: SYS })) as Row[]).toHaveLength(1);
+    expect(((await engine.find('sys_audit_checkpoint', { where: { id: 'forged_resume_0' }, context: SYS })) as Row[])).toHaveLength(1);
+    expect((await expiries()).length).toBe(before);
+    expect(warned.filter((m) => /'sys_audit_log' chain 'org:org_forged' is NOT expired further: the range its expiry 0–0/.test(m))).toHaveLength(1);
+  });
+
+  it('a chain head never follows an expiry amendment no trusted key signed', async () => {
+    // org_ok expired whole: its head is its expiry. A newer amendment row put there by hand names a later sequence.
+    const [stored] = (await expiries()).filter((row) => (amendmentBodyFromRow(row) as ExpiryAmendmentBody).tenant_id === 'org_ok');
+    const admitted = amendmentBodyFromRow(stored) as ExpiryAmendmentBody;
+    await hot().create('sys_audit_amendment', {
+      ...stored, id: 'forged_head', last_sequence: admitted.last_sequence + 5, first_sequence: admitted.last_sequence + 1,
+      last_removed_digest: 'f'.repeat(64), signature: Buffer.alloc(64).toString('base64'),
+    });
+    await hot().create(LOG, entry('org_ok_next', Math.floor(now / H) * H - 3 * H + 60_000, 'org_ok'));
+    expect(await sealer.runPass()).toBeGreaterThan(0);
+    const next = checkpointBodyFromRow(await checkpointOf('org:org_ok', admitted.last_sequence + 1));
+    expect(next).toMatchObject({ row_ids: ['org_ok_next'], previous_digest: admitted.last_removed_digest });
+  });
 });

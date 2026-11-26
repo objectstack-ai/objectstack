@@ -138,7 +138,7 @@ describe('LifecycleService — a sealed object expires only through the sealed e
       { chain: 'org:a', rowIds: ['e1', 'e2'] },
       { chain: 'org:b', rowIds: ['e3'] },
     ]);
-    svc.registerSealedExpiry(expiry);
+    svc.registerExpiryPrefix(expiry);
 
     const report = await svc.sweep();
 
@@ -153,11 +153,31 @@ describe('LifecycleService — a sealed object expires only through the sealed e
     expect(report.skipped).toEqual([]);
   });
 
+  it('an archive store with no bulkDelete: the expiry is never planned, so no amendment is signed, and the rows are kept', async () => {
+    const hot = store('default', []);
+    const cold = store('archive', [{ id: 'e1' }]);
+    delete (cold.driver as { bulkDelete?: unknown }).bulkDelete;
+    const { engine } = engineOver([ARCHIVING], { hot, cold });
+    const { warns, logger } = recordingLogger();
+    const svc = service(engine, logger);
+    const { expiry, completed } = expiryOf([{ chain: 'org:a', rowIds: ['e1'] }]);
+    svc.registerExpiryPrefix(expiry);
+
+    const report = await svc.sweep();
+    await svc.sweep();
+
+    expect(expiry.plan).not.toHaveBeenCalled();
+    expect(completed).toEqual([]);
+    expect(cold.remaining()).toEqual(['e1']);
+    expect(report.skipped).toContainEqual({ object: 'sys_audit_log', reason: 'seal-delete-unsupported' });
+    expect(warns.filter((w) => /a store it lives on has no bulkDelete/.test(w))).toHaveLength(1);
+  });
+
   it('a retained sealed object: plans `retention.maxAge`, deletes each row through the engine, never by the cutoff', async () => {
     const { engine, deletes } = engineOver([RETAINED], { rows: [{ id: 'r1' }, { id: 'r2' }, { id: 'r3' }] });
     const svc = service(engine);
     const { expiry, completed, requests } = expiryOf([{ chain: 'deployment', rowIds: ['r1', 'r2'] }]);
-    svc.registerSealedExpiry(expiry);
+    svc.registerExpiryPrefix(expiry);
 
     const report = await svc.sweep();
 
@@ -172,7 +192,7 @@ describe('LifecycleService — a sealed object expires only through the sealed e
     const { engine } = engineOver([TTL], { rows: [] });
     const svc = service(engine);
     const { expiry, requests } = expiryOf([]);
-    svc.registerSealedExpiry(expiry);
+    svc.registerExpiryPrefix(expiry);
 
     const report = await svc.sweep();
 
@@ -188,7 +208,7 @@ describe('LifecycleService — a sealed object expires only through the sealed e
       { chain: 'org:a', rowIds: ['r1', 'r2'] },
       { chain: 'org:b', rowIds: ['r3'] },
     ]);
-    svc.registerSealedExpiry(expiry);
+    svc.registerExpiryPrefix(expiry);
 
     const report = await svc.sweep();
 
@@ -197,10 +217,45 @@ describe('LifecycleService — a sealed object expires only through the sealed e
     expect(report.swept).toEqual([{ object: 'app_ledger', class: 'audit', policy: 'expiry', cutoff: isoCutoff('30d'), deleted: 1 }]);
   });
 
+  it('a tenant-scoped window travels to the sealed expiry for its organization, through the floors, and is not dropped', async () => {
+    const { engine } = engineOver([RETAINED], { rows: [] });
+    const find = engine.find;
+    engine.find = async (object: string, q: any) =>
+      object === 'sys_organization' ? [{ id: 'org_long' }, { id: 'org_short' }] : find(object, q);
+    const tenantValues: Record<string, unknown> = {
+      org_long: { app_ledger: { maxAge: '400d' } },
+      org_short: { app_ledger: { maxAge: '10d' } },
+    };
+    const settings = {
+      async get(_ns: string, key: string, ctx?: Record<string, unknown>) {
+        const tenantId = ctx?.tenantId as string | undefined;
+        if (key === 'retention_overrides' && tenantId && tenantValues[tenantId]) return { value: tenantValues[tenantId], source: 'tenant' };
+        return { value: undefined, source: 'default' };
+      },
+    };
+    const { warns, logger } = recordingLogger();
+    const svc = new LifecycleService({
+      getEngine: () => engine, logger, now: () => FIXED_NOW, initialDelayMs: 1, sweepIntervalMs: 10,
+      getSettings: () => settings as never, referenceAudit: { enabled: false },
+    } as never);
+    const { expiry, requests } = expiryOf([]);
+    svc.registerExpiryPrefix(expiry);
+
+    await svc.sweep();
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ object: 'app_ledger', policy: 'retention.maxAge', policyValue: '30d', cutoff: isoCutoff('30d') });
+    expect([...(requests[0].tenants ?? [])].sort((a, b) => a.tenantId.localeCompare(b.tenantId))).toEqual([
+      { tenantId: 'org_long', policyValue: '400d', cutoff: isoCutoff('400d') },
+      { tenantId: 'org_short', policyValue: '10d', cutoff: isoCutoff('10d') },
+    ]);
+    expect(warns.join('\n')).not.toMatch(/do not apply/);
+  });
+
   it('a plan that fails deletes nothing and reports the object', async () => {
     const { engine, deletes } = engineOver([RETAINED], { rows: [{ id: 'r1' }] });
     const svc = service(engine);
-    svc.registerSealedExpiry({ plan: async () => { throw new Error('no expiry amendment can be signed'); } });
+    svc.registerExpiryPrefix({ plan: async () => { throw new Error('no expiry amendment can be signed'); } });
 
     const report = await svc.sweep();
 
@@ -214,8 +269,8 @@ describe('LifecycleService — a sealed object expires only through the sealed e
     const svc = service(engine);
     const first = expiryOf([]);
     const second = expiryOf([]);
-    const unregisterFirst = svc.registerSealedExpiry(first.expiry);
-    const unregisterSecond = svc.registerSealedExpiry(second.expiry);
+    const unregisterFirst = svc.registerExpiryPrefix(first.expiry);
+    const unregisterSecond = svc.registerExpiryPrefix(second.expiry);
     unregisterFirst();
 
     await svc.sweep();
@@ -230,7 +285,7 @@ describe('LifecycleService — a sealed object expires only through the sealed e
 
   it('refuses a registration with no plan method', () => {
     const svc = service(engineOver([]).engine);
-    expect(() => svc.registerSealedExpiry({} as never)).toThrow(/requires an object with a plan\(request\) method/);
+    expect(() => svc.registerExpiryPrefix({} as never)).toThrow(/requires an object with a plan\(request\) method/);
   });
 
   it('an object without `seal` keeps the row-cutoff path, and never asks the sealed expiry', async () => {
@@ -238,7 +293,7 @@ describe('LifecycleService — a sealed object expires only through the sealed e
     const { engine, finds } = engineOver([plain], { rows: [] });
     const svc = service(engine);
     const { expiry, requests } = expiryOf([]);
-    svc.registerSealedExpiry(expiry);
+    svc.registerExpiryPrefix(expiry);
 
     const report = await svc.sweep();
 

@@ -2378,6 +2378,16 @@ crypto provider `os serve` seals with is available.
 ten minutes after it ends, and it can seal a row between the command's decision
 and its write; that row then reads `modified`.
 
+**The audit seal lock.** An `--apply` run holds the audit seal lock from before
+its first write to after its last, archive runs included, on the database of
+each object it covers that declares `lifecycle.seal`. `sys_audit_log` declares
+it, so this is every run that covers the audit log. On Postgres and MySQL the
+run waits up to ten minutes for a sealer pass in flight, then refuses having
+changed nothing: run it again once that pass has finished. On SQLite and Turso,
+which offer no session lock, the run stops before writing and names
+`--sealer-stopped`: stop every server that seals the database, then run it again
+with the flag. A dry run takes no lock and needs no flag.
+
 #### `os migrate organization-ownership`
 
 The v18 ownership ceremony (ADR-0131 D10), and the upgrade path of a database
