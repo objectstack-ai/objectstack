@@ -702,7 +702,9 @@ export function PackageOwdOverviewPanel({
         if (held) recordPublished('object', s.row.name, packageId, held.published);
         const live = await publishSavedItem(
           client,
-          { type: 'object', name: s.row.name, packageId },
+          // objectstack#37440 — and to the draft this save wrote (`token`, its
+          // receipt): a draft another writer changed in between is not published.
+          { type: 'object', name: s.row.name, packageId, ...(token ? { draftVersion: token } : {}) },
           basis.hadDraft,
           publishPinned,
         );
