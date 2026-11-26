@@ -341,6 +341,17 @@ monotonic `version` so `rotateKey()` can re-wrap under a new key; the audit trai
 records the rotation. ObjectStack bundles no cloud provider implementation — see
 [Outside this contract](#outside-this-contract).
 
+### Retired keys and options
+
+When a release removes a key or a select option from a manifest, rows already
+stored for it are kept, unused, and never deleted by the platform; an encrypted
+key's `sys_secret` row stays too. A stored value that is no longer an option
+shows in Setup as "no longer available" until an admin picks a current one. No
+settings door writes a removed key (`400 UNKNOWN_KEY`), so remove its rows by
+hand: delete the key's row (namespace and key) from `sys_platform_setting` for a
+`global`-scope manifest, or from `sys_setting` otherwise, and for an encrypted
+key also the `sys_secret` row whose id that row holds in `value_enc`.
+
 ## HTTP Surface
 
 `registerSettingsRoutes()` mounts the resolver under `/api/settings`
