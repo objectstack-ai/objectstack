@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Studio 对象列表（改版）</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#18181B;text-decoration:none}a:hover{color:#18181B;text-decoration:underline}
+button{font:inherit}
+</style>
+</helmet>
+<div style="display: flex; flex-direction: column; min-height: 900px; background: #FFFFFF; color: #1C1917; font-family: Inter, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif; font-size: 14px">
+
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+
+    <nav aria-label="Studio 菜单" style="position: relative; flex: 1 1 248px; max-width: 100%; box-sizing: border-box; background: #F7F7F5; border-right: 1px solid #E7E5E4; padding: 12px 10px; display: flex; flex-direction: column; gap: 2px">
+      <div style="display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 2px 0 4px">
+        <span aria-hidden="true" style="flex: 0 0 auto; width: 28px; height: 28px; border-radius: 8px; background: {{accent}}; color: #FFFFFF; display: flex; align-items: center; justify-content: center">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM16.5 13v7M13 16.5h7"></path></svg>
+        </span>
+        <span style="flex: 1; min-width: 0; font-weight: 700; font-size: 15px; color: #1C1917; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{brandName}}</span>
+        <button aria-label="折叠菜单" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border: 0; background: transparent; border-radius: 8px; color: #57534E; cursor: pointer">
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4zM10 4v16"></path></svg>
+        </button>
+      </div>
+      <div style="display: flex; align-items: center; gap: 4px; height: 40px; padding: 0 2px 0 0; margin-top: 2px; border-top: 1px solid #ECEAE6">
+        <a href="#" title="返回应用：销售" aria-label="返回应用：销售" style="flex: 0 0 auto; width: 30px; height: 34px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: #44403C">
+          <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
+        </a>
+        <button aria-haspopup="listbox" aria-expanded="{{menuOpenStr}}" aria-label="切换软件包：当前 销售（只读）" style="{{switchStyle}}">
+          <span style="flex: 0 0 auto; width: 20px; height: 20px; border-radius: 5px; background: {{appColor}}; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600">销</span>
+          <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">销售</span>
+          <span title="只读应用：你的修改会存到它的定制包" style="flex: 0 0 auto; display: flex; color: #6B6762">
+            <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3"></path></svg>
+          </span>
+          <span style="flex: 1"></span>
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#57534E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 9l4-4 4 4M8 15l4 4 4-4"></path></svg>
+        </button>
+      </div>
+      <div style="height: 8px"></div>
+      <sc-if value="{{menuOpen}}" hint-placeholder-val="{{ false }}">
+        <div role="listbox" aria-label="切换软件包" style="position: absolute; top: 98px; left: 10px; width: 300px; z-index: 10; background: #FFFFFF; border: 1px solid #E7E5E4; border-radius: 12px; box-shadow: 0 12px 32px rgba(28, 25, 23, 0.14); padding: 6px; display: flex; flex-direction: column; gap: 2px">
+          <label style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; margin-bottom: 4px; border-bottom: 1px solid #F1F0EE; color: #6B6762">
+            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4"></path></svg>
+            <input placeholder="搜索软件包" aria-label="搜索软件包" style="border: 0; outline: 0; background: transparent; font: inherit; color: #1C1917; flex: 1; min-width: 0">
+          </label>
+          <sc-for list="{{pkgs}}" as="p" hint-placeholder-count="4">
+            <button role="option" aria-selected="{{p.selected}}" style="{{p.style}}">
+              <span style="{{p.tileStyle}}">{{p.letter}}</span>
+              <span style="display: flex; flex-direction: column; flex: 1; min-width: 0; text-align: left">
+                <span style="font-weight: 500; color: #1C1917">{{p.name}}</span>
+                <span style="font-size: 12px; color: #6B6762">{{p.sub}}</span>
+              </span>
+              <span style="{{p.checkStyle}}">
+                <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg>
+              </span>
+            </button>
+          </sc-for>
+          <div style="height: 1px; background: #F1F0EE; margin: 4px 6px"></div>
+          <button style="display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: #1C1917; font-size: 14px; font-weight: 500; cursor: pointer">
+            <span style="width: 26px; height: 26px; border-radius: 7px; border: 1px dashed #A8A29E; display: flex; align-items: center; justify-content: center; color: #44403C">
+              <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>
+            </span>
+            新建软件包
+          </button>
+        </div>
+      </sc-if>
+      <label style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px; background: #FFFFFF; border: 1px solid #E7E5E4; border-radius: 8px; color: #6B6762; margin-bottom: 8px">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4"></path></svg>
+        <input placeholder="搜索菜单" aria-label="搜索菜单" style="border: 0; outline: 0; background: transparent; font: inherit; color: #1C1917; flex: 1; min-width: 0">
+        <span style="font-size: 11px; color: #6B6762; border: 1px solid #E7E5E4; border-radius: 4px; padding: 0 4px">⌘K</span>
+      </label>
+      <a href="#" style="{{ovRowStyle}}">
+        <span aria-hidden="true" style="{{ovBarStyle}}"></span>
+        <span style="{{ovIconStyle}}">
+          <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5L12 3l9 4.5v9L12 21l-9-4.5zM3 7.5l9 4.5 9-4.5M12 12v9"></path></svg>
+        </span>
+        <span style="flex: 1">概览</span>
+        <span title="有 3 个未发布的改动" style="font-size: 11px; font-weight: 600; color: #92400E; background: #FEF3C7; padding: 1px 7px; border-radius: 999px">3</span>
+      </a>
+      <sc-for list="{{groups}}" as="g" hint-placeholder-count="5">
+        <div style="display: flex; flex-direction: column; gap: 2px; margin-top: 10px">
+          <button aria-expanded="true" style="display: flex; align-items: center; height: 30px; padding: 0 8px 0 10px; border: 0; background: transparent; border-radius: 6px; font-size: 13px; font-weight: 500; color: #6B6762; cursor: pointer">
+            <span style="flex: 1; text-align: left">{{g.label}}</span>
+            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+          </button>
+          <sc-for list="{{g.items}}" as="it" hint-placeholder-count="2">
+            <a href="#" style="{{it.rowStyle}}">
+              <span aria-hidden="true" style="{{it.barStyle}}"></span>
+              <span style="{{it.iconBoxStyle}}">
+                <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="{{it.icon}}"></path></svg>
+              </span>
+              <span style="flex: 1">{{it.label}}</span>
+              <span style="{{it.countStyle}}">{{it.count}}</span>
+            </a>
+          </sc-for>
+        </div>
+      </sc-for>
+      <div style="height: 1px; background: #E7E5E4; margin: 12px 4px 4px"></div>
+      <button style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px; border: 0; background: transparent; color: #44403C; border-radius: 8px; text-align: left; cursor: pointer">
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+        高级
+      </button>
+    </nav>
+
+    <main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+      <sc-if value="{{isOverview}}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; align-items: center; gap: 12px; padding: 16px 24px 0; flex-wrap: wrap">
+          <span style="width: 40px; height: 40px; border-radius: 10px; background: {{appColor}}; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 17px">销</span>
+          <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0">
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+              <h1 style="margin: 0; font-size: 20px; font-weight: 600">销售</h1>
+              <span title="系统自带的应用不能直接修改，你的修改会单独保存" style="display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: #44403C; background: #F1F1EF; padding: 2px 8px; border-radius: 999px">
+                <svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3"></path></svg>
+                系统自带
+              </span>
+              <span style="font-size: 12px; font-weight: 500; color: #166534; background: #DCFCE7; padding: 2px 8px; border-radius: 999px">使用中</span>
+            </div>
+            <div style="font-size: 13px; color: #57534E">客户、商机、合同和订单的全流程管理</div>
+          </div>
+          <div style="flex: 1"></div>
+          <button style="display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; border: 1px solid #D6D3D1; border-radius: 8px; background: #FFFFFF; color: #1C1917; font-weight: 500; cursor: pointer">
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>
+            导出
+          </button>
+          <button aria-label="更多操作：编辑信息、复制一份、停用、删除" title="编辑信息 · 复制一份 · 停用 · 删除" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border: 1px solid #D6D3D1; border-radius: 8px; background: #FFFFFF; color: #1C1917; cursor: pointer">
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h.01M12 12h.01M19 12h.01"></path></svg>
+          </button>        </div>
+        <div role="tablist" aria-label="概览" style="display: flex; gap: 24px; padding: 0 24px; margin-top: 14px; border-bottom: 1px solid #E7E5E4">
+          <sc-for list="{{ovTabs}}" as="t" hint-placeholder-count="4">
+            <button role="tab" aria-selected="{{t.selected}}" style="{{t.style}}">{{t.label}}</button>
+          </sc-for>
+        </div>
+        <div style="padding: 20px 24px 32px; max-width: 880px; box-sizing: border-box">
+          <div style="display: flex; flex-direction: column; gap: 16px">
+            <section style="border: 1px solid #E7E5E4; border-radius: 12px; padding: 16px 18px">
+              <h2 style="margin: 0 0 10px; font-size: 15px; font-weight: 600">基本信息</h2>
+              <sc-for list="{{infoRows}}" as="i" hint-placeholder-count="7">
+                <div style="display: flex; gap: 12px; padding: 8px 0; border-top: 1px solid #F5F5F4; font-size: 14px">
+                  <span style="flex: 0 0 96px; color: #57534E">{{i.k}}</span>
+                  <span style="{{i.vStyle}}">{{i.v}}</span>
+                </div>
+              </sc-for>
+              <details style="margin-top: 8px; border-top: 1px solid #F5F5F4; padding-top: 8px">
+                <summary style="cursor: pointer; font-size: 13px; color: #57534E">技术信息</summary>
+                <div style="display: flex; flex-direction: column; gap: 6px; padding: 8px 0 0; font-size: 13px">
+                  <div style="display: flex; gap: 12px"><span style="flex: 0 0 96px; color: #6B6762">软件包 ID</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; color: #44403C">com.example.crm</span></div>
+                  <div style="display: flex; gap: 12px"><span style="flex: 0 0 96px; color: #6B6762">命名空间</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; color: #44403C">crm</span></div>
+                  <div style="display: flex; gap: 12px"><span style="flex: 0 0 96px; color: #6B6762">类型</span><span style="color: #44403C">代码包（随部署发布）</span></div>
+                </div>
+              </details>
+            </section>
+          </div>
+        </div>
+      </sc-if>
+      <sc-if value="{{isList}}" hint-placeholder-val="{{ true }}">
+
+      <div style="display: flex; align-items: center; gap: 10px; padding: 14px 24px 10px; flex-wrap: wrap">
+        <div style="width: 30px; height: 30px; border-radius: 8px; background: #F1F1EF; color: #44403C; display: flex; align-items: center; justify-content: center">
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18v14H3zM3 10h18M9 10v9"></path></svg>
+        </div>
+        <h1 style="margin: 0; font-size: 18px; font-weight: 600">对象</h1>
+        <div style="flex: 1"></div>
+        <button title="新建的对象会存到「销售」的定制包" style="display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; border: 0; border-radius: 8px; background: {{accent}}; color: #FFFFFF; font-weight: 500; cursor: pointer">
+          <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>
+          新建对象
+        </button>
+        <button aria-label="更多：刷新、类型动作" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border: 0; background: transparent; border-radius: 8px; color: #44403C; cursor: pointer">
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5h.01M12 12h.01M12 19h.01"></path></svg>
+        </button>
+        <button aria-label="帮助" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border: 0; background: transparent; border-radius: 8px; color: #57534E; cursor: pointer">
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01"></path></svg>
+        </button>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 8px; padding: 0 24px 12px; flex-wrap: wrap; border-bottom: 1px solid #E7E5E4">
+        <button aria-haspopup="listbox" aria-label="按来源筛选：全部来源" style="display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px 0 12px; border: 1px solid #E7E5E4; background: #FFFFFF; border-radius: 8px; color: #1C1917; font-size: 13px; font-weight: 500; cursor: pointer">
+          全部来源
+          <span style="font-size: 12px; font-weight: 400; color: #6B6762; font-variant-numeric: tabular-nums">{{total}}</span>
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#57534E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+        </button>
+        <label style="display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; width: 240px; max-width: 100%; box-sizing: border-box; border: 1px solid #E7E5E4; border-radius: 8px; color: #6B6762; font-size: 13px">
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4"></path></svg>
+          <input placeholder="搜索名称或描述" aria-label="搜索名称或描述" style="border: 0; outline: 0; background: transparent; font: inherit; color: #1C1917; flex: 1; min-width: 0">
+        </label>
+        <div style="flex: 1"></div>
+      </div>
+
+      <div style="overflow-x: auto">
+        <table style="width: 100%; min-width: 720px; border-collapse: collapse">
+          <thead>
+            <tr style="height: 40px; color: #57534E; font-size: 13px; font-weight: 500; text-align: left">
+              <th style="padding: 0 24px; font-weight: 500; border-bottom: 1px solid #E7E5E4; width: 260px"><button style="display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; padding: 0; font: inherit; color: #1C1917; cursor: pointer">名称 <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"></path></svg></button></th>
+              <th style="padding: 0 16px; font-weight: 500; border-bottom: 1px solid #E7E5E4; text-align: right; width: 80px">字段</th>
+              <th style="padding: 0 16px; font-weight: 500; border-bottom: 1px solid #E7E5E4">描述</th>
+              <sc-if value="{{withCustom}}" hint-placeholder-val="{{ false }}">
+                <th style="padding: 0 16px; font-weight: 500; border-bottom: 1px solid #E7E5E4; width: 120px">修改时间</th>
+                <th style="padding: 0 24px 0 16px; font-weight: 500; border-bottom: 1px solid #E7E5E4; width: 96px">来源</th>
+              </sc-if>
+            </tr>
+          </thead>
+          <tbody>
+            <sc-for list="{{rows}}" as="r" hint-placeholder-count="11">
+              <tr style="height: 56px">
+                <td style="padding: 6px 24px; border-bottom: 1px solid #F1F0EE">
+                  <div style="display: flex; align-items: center; gap: 10px">
+                    <span aria-hidden="true" style="{{r.tileStyle}}">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="{{r.icon}}"></path></svg>
+                    </span>
+                    <div style="min-width: 0">
+                      <a href="#" style="display: block; font-weight: 500; color: {{accent}}">{{r.label}}</a>
+                      <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #6B6762; margin-top: 2px">{{r.name}}</div>
+                    </div>
+                  </div>
+                </td>
+                <td style="padding: 0 16px; border-bottom: 1px solid #F1F0EE; text-align: right; font-variant-numeric: tabular-nums">{{r.fields}}</td>
+                <td style="padding: 0 16px; border-bottom: 1px solid #F1F0EE; color: #44403C; max-width: 520px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.desc}}</td>
+                <sc-if value="{{withCustom}}" hint-placeholder-val="{{ false }}">
+                  <td style="padding: 0 16px; border-bottom: 1px solid #F1F0EE; color: #57534E; font-size: 13px">{{r.changed}}</td>
+                  <td style="padding: 0 24px 0 16px; border-bottom: 1px solid #F1F0EE">
+                    <span style="{{r.badgeStyle}}">{{r.source}}</span>
+                  </td>
+                </sc-if>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+      <div style="padding: 12px 24px; color: #57534E; font-size: 13px">{{total}} 条记录</div>
+      </sc-if>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#18181B","options":["#18181B","#047857","#4F46E5"]},"appColor":{"editor":"color","default":"#C2410C"},"brandName":{"editor":"enum","default":"App Studio","options":["App Studio","Object Studio","ObjectStack Studio","应用搭建"]},"withCustom":{"editor":"boolean","default":false},"menuOpen":{"editor":"boolean","default":false},"page":{"editor":"enum","default":"list","options":["list","overview"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#18181B';
+    const appColor = this.props.appColor ?? '#C2410C';
+    const page = this.props.page ?? 'list';
+    const isOverview = page === 'overview';
+    const ovRowStyle = 'position: relative; display: flex; align-items: center; gap: 10px; height: 42px; padding: 0 10px; border-radius: 10px; font-size: 15px; text-decoration: none; ' +
+      (isOverview ? 'background: color-mix(in srgb, ' + accent + ' 10%, white); color: ' + accent + '; font-weight: 600;' : 'color: #1C1917;');
+    const ovBarStyle = isOverview ? 'position: absolute; left: 3px; top: 10px; bottom: 10px; width: 3px; border-radius: 3px; background: ' + accent + ';' : 'display: none;';
+    const ovIconStyle = 'width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; color: ' + (isOverview ? accent : '#57534E') + ';';
+    const ovTabs = ['信息', '待发布 3', '发布历史'].map((label, i) => ({
+      label, selected: i === 0 ? 'true' : 'false',
+      style: 'height: 40px; padding: 0; border: 0; background: transparent; font: inherit; font-size: 14px; cursor: pointer; margin-bottom: -1px; ' +
+        (i === 0 ? 'color: #1C1917; font-weight: 600; border-bottom: 2px solid ' + accent + ';' : 'color: #57534E; border-bottom: 2px solid transparent;')
+    }));
+    const mono = "font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #44403C;";
+    const infoRows = [
+      ['名称', '销售', ''], ['描述', '客户、商机、合同和订单的全流程管理', ''],
+      ['来源', '系统自带。不能直接修改，你的修改会单独保存，不影响原应用', ''],
+      ['版本', '2.4.0', ''], ['打开应用', '销售', 'color: ' + accent + '; text-decoration: underline;']
+    ].map(([k, v, s]) => ({ k, v, vStyle: 'flex: 1; min-width: 0; color: #1C1917; ' + s }));
+    const contentTiles = [['对象', 11], ['数据集', 1], ['页面', 5], ['仪表盘', 4], ['报表', 7], ['流程', 24], ['权限集', 13], ['岗位', 3]].map(([label, n]) => ({ label, n }));
+    const chBadge = { '修改': 'background: #FEF3C7; color: #92400E;', '新建': 'background: #DCFCE7; color: #166534;' };
+    const changes = [
+      ['客户', '对象', '修改', '10 分钟前'], ['赢单分析', '报表', '新建', '1 小时前'], ['商机审批', '流程', '修改', '昨天']
+    ].map(([name, type, kind, when]) => ({ name, type, kind, when, badgeStyle: 'font-size: 12px; font-weight: 500; padding: 1px 8px; border-radius: 999px; ' + chBadge[kind] }));
+    const releases = [
+      ['发布了 2 项修改：客户字段、销售看板', '张伟', '11月24日'],
+      ['发布了 1 项修改：商机阶段', '李娜', '11月20日'],
+      ['系统更新到 2.4.0', '系统', '11月18日']
+    ].map(([what, who, when]) => ({ what, who, when }));
+    const withCustom = this.props.withCustom ?? false;
+    const accentSoft = 'color-mix(in srgb, ' + accent + ' 8%, white)';
+    const accentLine = 'color-mix(in srgb, ' + accent + ' 30%, white)';
+    const I = {
+      db: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
+      layers: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5',
+      zap: 'M13 3L5 14h6l-1 7 8-11h-6z',
+      shield: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z',
+      spark: 'M12 3v5M12 16v5M3 12h5M16 12h5M7 7l2 2M15 15l2 2M17 7l-2 2M9 15l-2 2',
+      object: 'M3 5h18v14H3zM3 10h18M9 10v9',
+      app: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+      page: 'M6 3h9l5 5v13H6zM14 3v6h6',
+      dash: 'M4 14a8 8 0 1 1 16 0M12 14l4-4M4 19h16',
+      report: 'M5 20V11M12 20V4M19 20v-7',
+      flow: 'M4 5h6v4H4zM14 15h6v4h-6zM7 9v3a3 3 0 0 0 3 3h4',
+      agent: 'M12 3v3M7 7h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2zM9.5 13h.01M14.5 13h.01',
+      tool: 'M14.5 6.5a4 4 0 0 0-5 5L4 17l3 3 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-3-3z',
+      skill: 'M12 3l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.4 6.8 19.2l1-5.9-4.3-4.1 5.9-.8z'
+    };
+    const item = (label, count, icon, active) => ({
+      label, count, icon,
+      rowStyle: 'position: relative; display: flex; align-items: center; gap: 10px; height: 42px; padding: 0 10px; border-radius: 10px; font-size: 15px; text-decoration: none; ' +
+        (active ? 'background: color-mix(in srgb, ' + accent + ' 10%, white); color: ' + accent + '; font-weight: 600;' : 'color: #1C1917;'),
+      barStyle: active
+        ? 'position: absolute; left: 3px; top: 10px; bottom: 10px; width: 3px; border-radius: 3px; background: ' + accent + ';'
+        : 'display: none;',
+      iconBoxStyle: 'width: 26px; height: 26px; border-radius: 7px; display: flex; align-items: center; justify-content: center; ' +
+        (active ? 'background: transparent; color: ' + accent + ';' : 'background: transparent; color: #57534E;'),
+      countStyle: 'font-size: 12px; font-variant-numeric: tabular-nums; ' + (active ? 'color: ' + accent + ';' : 'color: #6B6762;')
+    });
+    const total = withCustom ? 12 : 11;
+    const groups = [
+      { label: '数据', icon: I.db, items: [item('对象', total, I.object, page === 'list'), item('数据集', 1, 'M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5')] },
+      { label: '界面', icon: I.layers, items: [item('应用', 1, I.app), item('页面', 5, I.page), item('仪表盘', 4, I.dash), item('报表', 7, I.report)] },
+      { label: '自动化', icon: I.zap, items: [item('流程', 24, I.flow)] },
+      { label: '访问', icon: I.shield, items: [item('权限集', 13, I.shield), item('岗位', 3, 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1M16 3.5a4 4 0 0 1 0 7.5M22 21v-1a6 6 0 0 0-4-5.6')] },
+      { label: 'AI', icon: I.spark, items: [item('AI 智能体', 0, I.agent), item('AI 工具', 0, I.tool), item('AI 技能', 5, I.skill)] }
+    ];
+    const badge = {
+      '系统自带': 'background: #F1F1EF; color: #44403C;',
+      '已修改': 'background: #FEF3C7; color: #92400E;',
+      '新建': 'background: #DCFCE7; color: #166534;'
+    };
+    const base = [
+      ['crm_account', '客户', 41, '与我们有业务往来的公司和组织'],
+      ['crm_contact', '联系人', 29, '客户与商机的关键人物联系人'],
+      ['crm_contract', '合同', 34, '与客户签署的法律合同'],
+      ['crm_event', '活动', 24, '与客户的会议、通话及其他已安排的互动'],
+      ['crm_event_attendee', '活动参与者', 18, '受邀参加或实际出席活动的人员'],
+      ['crm_forecast', '销售预测', 26, '按销售负责人定期记录的管道快照，用于收入预测'],
+      ['crm_lead', '线索', 46, '尚未确认资格的线索'],
+      ['crm_opportunity', '商机', 50, '销售流程中的商机与交易'],
+      ['crm_sales_order', '订单', 34, '客户本次订购的内容、订单行与合计，以及发货进度'],
+      ['crm_sales_order_line', '订单行', 19, '订单上的一行'],
+      ['crm_task', '任务', 32, '活动与待办事项']
+    ];
+    let rows = base.map(([name, label, fields, desc]) => ({ name, label, fields, desc, source: '系统自带', changed: '—' }));
+    if (withCustom) {
+      rows[0] = { ...rows[0], source: '已修改', changed: '今天 10:24', fields: 43 };
+      rows.splice(2, 0, { name: 'crm_competitor', label: '竞争对手', fields: 8, desc: '（示例）管理员在 Studio 里新建的对象', source: '新建', changed: '昨天 16:02' });
+    }
+    const PAL = { blue: '#2563EB', green: '#16A34A', pink: '#DB2777', orange: '#EA580C', purple: '#7C3AED', teal: '#0D9488', slate: '#475569', red: '#DC2626' };
+    const P = {
+      building: 'M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16M16 9h2a2 2 0 0 1 2 2v10M3 21h18M8 7h4M8 11h4M8 15h4',
+      user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0',
+      users: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1M16 3.5a4 4 0 0 1 0 7.5M22 21v-1a6 6 0 0 0-4-5.6',
+      file: 'M6 3h9l5 5v13H6zM14 3v6h6M9 13h6M9 17h6',
+      calendar: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
+      chart: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
+      funnel: 'M3 4h18l-7 8v6l-4 2v-8z',
+      trend: 'M3 17l6-6 4 4 8-8M15 7h6v6',
+      cart: 'M3 4h2l2.4 11h10.2L20 7H6.2M9 20h.01M17 20h.01',
+      list: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+      check: 'M4 4h16v16H4zM8 12l3 3 5-6',
+      shield: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'
+    };
+    const LOOK = {
+      crm_account: ['blue', P.building], crm_contact: ['blue', P.user], crm_contract: ['slate', P.file],
+      crm_event: ['pink', P.calendar], crm_event_attendee: ['pink', P.users], crm_forecast: ['purple', P.chart],
+      crm_lead: ['green', P.funnel], crm_opportunity: ['green', P.trend], crm_sales_order: ['orange', P.cart],
+      crm_sales_order_line: ['orange', P.list], crm_task: ['teal', P.check], crm_competitor: ['red', P.shield]
+    };
+    rows = rows.map((r) => ({ ...r,
+      icon: (LOOK[r.name] || ['slate', P.file])[1],
+      tileStyle: 'flex: 0 0 auto; width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; ' +
+        'background: color-mix(in srgb, ' + PAL[(LOOK[r.name] || ['slate'])[0]] + ' 13%, white); color: ' + PAL[(LOOK[r.name] || ['slate'])[0]] + ';',
+      badgeStyle:'display: inline-block; font-size: 12px; font-weight: 500; padding: 2px 8px; border-radius: 999px; ' + badge[r.source] }));
+    const customCount = rows.filter((r) => r.source !== '系统自带').length;
+    const segments = [
+      ['全部', total, true],
+      ['定制和新建', customCount, false],
+      ['代码包', total - customCount, false]
+    ].map(([label, count, sel]) => ({
+      label, count, selected: sel ? 'true' : 'false',
+      style: 'display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border: 0; border-radius: 7px; font-size: 13px; cursor: pointer; ' +
+        (sel ? 'background: #FFFFFF; color: #1C1917; font-weight: 600; box-shadow: 0 1px 2px rgba(28,25,23,0.12);' : 'background: transparent; color: #57534E;'),
+      countStyle: 'font-size: 12px; font-variant-numeric: tabular-nums; color: #6B6762; font-weight: 400;'
+    }));
+    const menuOpen = this.props.menuOpen ?? false;
+    const switchStyle = 'flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 8px 0 6px; border: 0; border-radius: 8px; font: inherit; font-size: 14px; font-weight: 500; color: #292524; cursor: pointer; ' +
+      (menuOpen ? 'background: #ECEBE8;' : 'background: transparent;');
+    const pkgs = [
+      ['销', '销售', '系统自带', '#C2410C', true],
+      ['人', '人事', '自建 · 有应用', '#0D9488', false],
+      ['报', '费用报销', '自建 · 有应用', '#7C3AED', false],
+      ['公', '公司通用', '自建 · 无应用', '#57534E', false]
+    ].map(([letter, name, sub, color, cur]) => ({
+      letter, name, sub, selected: cur ? 'true' : 'false',
+      style: 'display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 10px; border: 0; border-radius: 8px; cursor: pointer; font: inherit; ' + (cur ? 'background: #F5F5F4;' : 'background: transparent;'),
+      tileStyle: 'flex: 0 0 auto; width: 26px; height: 26px; border-radius: 7px; background: ' + color + '; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600;',
+      checkStyle: 'display: flex; color: ' + accent + '; ' + (cur ? '' : 'visibility: hidden;')
+    }));
+    const appBtnStyle = 'width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 8px; color: #44403C; cursor: pointer; ' +
+      (menuOpen ? 'background: #ECEBE8;' : 'background: transparent;');
+    const sep = (label) => ({ sep: true, item: false, label });
+    const mi = (label, opts) => {
+      const o = opts || {};
+      const color = o.disabled ? '#A8A29E' : (o.danger ? '#B91C1C' : '#1C1917');
+      return {
+        sep: false, item: true, label, note: o.note || '',
+        disabledStr: o.disabled ? 'true' : 'false',
+        style: 'display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: ' + (o.hover ? '#F5F5F4' : 'transparent') + '; color: ' + color + '; font-size: 14px; cursor: ' + (o.disabled ? 'not-allowed' : 'pointer') + ';',
+        noteStyle: o.isNew
+          ? 'font-size: 11px; font-weight: 500; color: ' + accent + '; background: ' + accentSoft + '; border: 1px solid ' + accentLine + '; padding: 0 6px; border-radius: 999px;'
+          : 'font-size: 12px; color: #78716C;'
+      };
+    };
+    const menuItems = [
+      sep('其他软件包'),
+      mi('切换到其他软件包…', { hover: true, note: '新增', isNew: true }),
+      mi('新建软件包…', { note: '新增', isNew: true })
+    ];
+    return { accent, appColor, accentSoft, accentLine, withCustom, groups, rows, total, viewLabel: '全部对象', segments, brandName: this.props.brandName ?? 'App Studio', menuOpen, menuOpenStr: menuOpen ? 'true' : 'false', appBtnStyle, menuItems, switchStyle, pkgs,
+      isOverview, isList: !isOverview, ovRowStyle, ovBarStyle, ovIconStyle, ovTabs, infoRows, contentTiles, changes, releases };
+  }
+}
+</script>
+</body>
+</html>
