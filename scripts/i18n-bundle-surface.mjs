@@ -46,11 +46,11 @@
  * packages/spec/src/system/metadata-form-registry.ts: "the FormView produced
  * by defineMetadataForm({ schemaId }) in the corresponding *.metadata-form.ts".
  * Measured on this tree when this module landed: 17 files in the repo carried
- * the suffix (then `.metadata-form.ts`), all of them under packages/spec/src, and the
+ * the suffix (then `.form.ts`), all of them under packages/spec/src, and the
  * registry had exactly 17 entries with a form — the convention and the
  * population coincide, with nothing left over on either side.
  *
- * The suffix was `.metadata-form.ts` until ADR-0159 (#37086) gave that spelling to the
+ * The suffix was `.form.ts` until ADR-0159 (#37086) gave that spelling to the
  * `form` metadata type: an app's `lead.form.ts` is a `form` item, not a
  * Studio module, so the Studio modules moved to the name of their helper
  * (`defineMetadataForm`) and of their translation family (`metadataForms`).
