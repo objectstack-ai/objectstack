@@ -146,6 +146,8 @@ describe('the open scenario library (docs/qa/scenarios)', () => {
       // A Chinese title is Chinese: at least one CJK ideograph, not the English one copied over.
       expect(card.title.zh, card.id).toMatch(/[\u4e00-\u9fff]/);
       expect(card.title.zh, card.id).not.toBe(card.title.en);
+      // The exporter writes title.en as the manifest displayName, which package.zod caps at 128.
+      expect(card.title.en.length, card.id).toBeLessThanOrEqual(128);
     }
   });
 

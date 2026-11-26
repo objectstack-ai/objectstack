@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-record-context",
-  "version": "18.6.0",
+  "version": "19.0.0-next.0",
   "license": "Apache-2.0",
   "description": "Record context service for ObjectStack — the context-pack (ai_context) render service and the get_record_context tool executor, reading one record AS THE CALLER (ADR-0160).",
   "type": "module",
@@ -27,7 +27,8 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
-    "@objectstack/spec": "workspace:*"
+    "@objectstack/spec": "workspace:*",
+    "@objectstack/types": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

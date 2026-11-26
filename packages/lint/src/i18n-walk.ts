@@ -85,6 +85,8 @@
  *     ^ a bulk param spells its hint `help`; an ACTION param spells the same
  *       idea `helpText` (`ui/bulk-action.zod.ts`'s known divergence)
  *   objects.<name>._validations.<rule>.message
+ *   objects.<name>._milestones.<field>.<value>.summary   (an `activityMilestones`
+ *                                                entry's summary template)
  *   objects.<name>._relatedLists.<list>.label   (an object-form `relatedLists`
  *                                                entry that authors a `label`)
  *   objects.<name>._actions.<action>.label
@@ -1003,6 +1005,28 @@ function pushValidationMessages(
 }
 
 /**
+ * Emit `objects.<object>._milestones.<field>.<value>.summary` for each
+ * `activityMilestones` entry (ADR-0052 §5b.2), seeded with its authored
+ * template, `{field}` tokens and all. Only the first entry of a `field` +
+ * `value` pair is emitted: the writer fires the first match, so a later
+ * entry's template is never rendered.
+ */
+function pushMilestoneSummaries(out: ExpectedEntry[], objectName: string, milestones: unknown): void {
+  if (!Array.isArray(milestones)) return;
+  const seen = new Set<string>();
+  for (const m of milestones) {
+    if (!m || typeof m !== 'object') continue;
+    const field = (m as any).field;
+    const value = (m as any).value;
+    if (typeof field !== 'string' || field.length === 0 || typeof value !== 'string' || value.length === 0) continue;
+    const pair = `${field}\u0000${value}`;
+    if (seen.has(pair)) continue;
+    seen.add(pair);
+    pushEntry(out, ['objects', objectName, '_milestones', field, value, 'summary'], (m as any).summary, 'object', { objectName });
+  }
+}
+
+/**
  * Emit `objects.<object>._relatedLists.<list>.label` for every object-form
  * `relatedLists` entry of an object that authors a `label` (the record page's
  * tab title and table heading for that list, which wins over the child FK's
@@ -1652,6 +1676,12 @@ export function collectExpectedEntries(
 
     // Custom validation-rule rejection messages (`_validations.<rule>.message`).
     pushValidationMessages(out, objectName, obj.validations, 0);
+
+    // Activity-milestone summary templates (`_milestones.<field>.<value>.summary`,
+    // #37524): keyed by the watched field and the value the milestone fires on,
+    // the address `resolveObjectMilestoneSummary` reads. The first milestone
+    // declared for a pair is the one that fires, so a later duplicate gets no key.
+    pushMilestoneSummaries(out, objectName, obj.activityMilestones);
 
     // Record-page related-list titles (`_relatedLists.<list>.label`): the
     // `label` an object-form `relatedLists` entry authors on this parent,

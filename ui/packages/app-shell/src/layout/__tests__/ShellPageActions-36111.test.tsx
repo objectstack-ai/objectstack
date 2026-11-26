@@ -209,7 +209,7 @@ describe('the group carries no 「Edit app」 and no 「Open APP in Studio」 (o
     expect(within(group).queryByTestId('shell-page-actions-view-app')).toBeNull();
     expect(within(group).queryByRole('button', { name: 'Edit app' })).toBeNull();
     expect(within(group).queryByRole('link', { name: 'Edit app' })).toBeNull();
-    expect(within(group).queryByRole('link', { name: 'Open Cloud in Studio' })).toBeNull();
+    expect(within(group).queryByRole('link', { name: 'Open Cloud in App Studio' })).toBeNull();
     expect(within(group).getByTestId('shell-page-actions-help')).toBeInTheDocument();
   }
 

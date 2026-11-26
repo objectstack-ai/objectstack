@@ -1151,6 +1151,7 @@ const fr = {
     addColumn: "Ajouter une colonne",
     moveCard: "Déplacer la carte",
     noCards: "Aucune carte",
+    notLoaded: "Cartes non chargées : {{count}}",
     columnCards: "Cartes de la colonne {{column}}",
     laneCards: "Cartes de {{column}} - {{lane}}",
     dropBlocked: "Une carte de {{from}} ne peut pas être déplacée vers {{to}}.",
@@ -2198,7 +2199,7 @@ const fr = {
   },
   console: {
     studio: {
-      title: "Studio",
+      title: "App Studio",
       accessRequired: "Vous avez besoin de l'accès à Studio pour ouvrir Studio. Un administrateur peut vous l'accorder avec un ensemble d'autorisations dans Configuration → Attribution des ensembles d’autorisations.",
     },
     saveAdvisoryTitle: "Enregistré — le contrôle de création a signalé {{count}} recommandation(s)",
@@ -3807,11 +3808,11 @@ const fr = {
       tooltip: "Cette plateforme est en avant-première — les fonctionnalités peuvent changer.",
     },
     aiAssistant: "Assistant IA",
-    designInStudio: "Concevoir dans Studio",
+    designInStudio: "Concevoir dans App Studio",
     designLayout: "Concevoir la mise en page",
     editApp: "Modifier l'application",
-    openAppInStudio: "Voir {{app}} dans Studio",
-    viewInStudio: "Voir dans Studio",
+    openAppInStudio: "Voir {{app}} dans App Studio",
+    viewInStudio: "Voir dans App Studio",
   },
   home: {
     build: {
@@ -3953,8 +3954,8 @@ const fr = {
       backToAppHome: "Retour au menu de l'application",
       appsAvailable: "{{count}} applications disponibles",
       allApps: "Toutes les applications",
-      editAppInStudio: "Modifier {{app}} dans Studio",
-      openAppInStudio: "Voir {{app}} dans Studio",
+      editAppInStudio: "Modifier {{app}} dans App Studio",
+      openAppInStudio: "Voir {{app}} dans App Studio",
       backToHome: "Retour à la page de démarrage de l'app",
       settings: "Paramètres",
       productHome: "Accueil {{product}}",

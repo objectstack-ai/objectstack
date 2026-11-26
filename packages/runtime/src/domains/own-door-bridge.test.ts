@@ -40,6 +40,11 @@ import { describe, it, expect, vi } from 'vitest';
 import '@objectstack/metadata';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext, KernelResolver } from '../http-dispatcher.js';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
+import { handleOwnDoorBridgeRequest } from './own-door-bridge.js';
+import { PERSONAL_VIEWS_BRIDGE } from './personal-views.js';
+import { ATTACHMENTS_BRIDGE } from './attachments.js';
+import { PRINT_BRIDGE } from './print.js';
 
 const ORIGIN = 'http://tenant.example';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -412,13 +417,112 @@ describe('[#37273] the print door\'s 501 follows the request\'s language', () =>
     });
 
     it('a bridge that names no noun key keeps its English sentence under zh-CN: never half translated', async () => {
-        const { dispatcher } = makeDispatcher({});
+        // [#37352] Every shipped bridge names its noun key now, so the control is
+        // a shipped bridge with the key taken off, handed to the bridge directly.
+        const deps = {
+            routeNotFound: vi.fn(),
+            getRequestKernelService: async () => undefined,
+            error: (message: string, status: number) => ({ status, body: { error: { code: 'NOT_IMPLEMENTED', message } } }),
+        } as any;
         const request = new Request(`${ORIGIN}/api/v1/personal-views/pv_1`, { method: 'DELETE', headers: { ...JSON_HEADERS, 'accept-language': 'zh-CN' } });
-        const result = await dispatcher.dispatch('DELETE', '/personal-views/pv_1', {}, {}, ctx(request));
+        const result = await handleOwnDoorBridgeRequest(
+            deps,
+            { ...PERSONAL_VIEWS_BRIDGE, nounKey: undefined },
+            { method: 'DELETE', path: '/personal-views/pv_1', body: {}, query: {} },
+            ctx(request),
+        );
         expect(envelope(result)).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
         expect(result.response?.body?.error?.message).toBe(
             'The personal view delete door is not available: no personal-views service is registered on this kernel. '
             + '@objectstack/plugin-auth (AuthPlugin) registers it.',
         );
+    });
+});
+
+// [#37352] The personal-view and attachment doors sit on the same bridge as the
+// print door and now name their noun keys, so one failure mode answers in one
+// language whichever of the three doors was hit. The English stays byte for
+// byte, the code and status are unchanged, and no `userMessage` is added.
+describe('[#37352] the personal-view and attachment doors\' 501s follow the request\'s language', () => {
+    const PV = { slot: 'personal-views', member: 'handlePersonalViewDoor', producer: '@objectstack/plugin-auth (AuthPlugin)' };
+    const AT = { slot: 'file-attachments', member: 'handleAttachmentDoor', producer: '@objectstack/service-storage (StorageServicePlugin)' };
+    const DOORS = [
+        {
+            name: 'personal-view delete',
+            ...PV,
+            requests: [['DELETE', '/personal-views/pv_1']] as Array<[string, string, unknown?]>,
+            unregistered: {
+                en: 'The personal view delete door is not available: no personal-views service is registered on this kernel. @objectstack/plugin-auth (AuthPlugin) registers it.',
+                'zh-CN': '个人视图删除接口不可用：此内核上未注册 personal-views 服务。该服务由 @objectstack/plugin-auth (AuthPlugin) 注册。',
+                'ja-JP': '個人ビュー削除エンドポイントは利用できません。このカーネルには personal-views サービスが登録されていません。このサービスは @objectstack/plugin-auth (AuthPlugin) が登録します。',
+                'es-ES': 'El punto de acceso para eliminar vistas personales no está disponible: no hay ningún servicio personal-views registrado en este kernel. Lo registra @objectstack/plugin-auth (AuthPlugin).',
+            },
+            memberMissing: {
+                en: 'The personal view delete door is not available: the registered personal-views service does not implement handlePersonalViewDoor.',
+                'zh-CN': '个人视图删除接口不可用：已注册的 personal-views 服务未实现 handlePersonalViewDoor。',
+                'ja-JP': '個人ビュー削除エンドポイントは利用できません。登録されている personal-views サービスは handlePersonalViewDoor を実装していません。',
+                'es-ES': 'El punto de acceso para eliminar vistas personales no está disponible: el servicio personal-views registrado no implementa handlePersonalViewDoor.',
+            },
+        },
+        {
+            name: 'attachment removal and rename',
+            ...AT,
+            requests: [['DELETE', '/attachments/att_1'], ['PATCH', '/attachments/att_1', { file_name: 'renamed.pdf' }]] as Array<[string, string, unknown?]>,
+            unregistered: {
+                en: 'The attachment removal and rename doors is not available: no file-attachments service is registered on this kernel. @objectstack/service-storage (StorageServicePlugin) registers it.',
+                'zh-CN': '附件删除和重命名接口不可用：此内核上未注册 file-attachments 服务。该服务由 @objectstack/service-storage (StorageServicePlugin) 注册。',
+                'ja-JP': '添付ファイルの削除・名前変更エンドポイントは利用できません。このカーネルには file-attachments サービスが登録されていません。このサービスは @objectstack/service-storage (StorageServicePlugin) が登録します。',
+                'es-ES': 'El punto de acceso para eliminar y renombrar adjuntos no está disponible: no hay ningún servicio file-attachments registrado en este kernel. Lo registra @objectstack/service-storage (StorageServicePlugin).',
+            },
+            memberMissing: {
+                en: 'The attachment removal and rename doors is not available: the registered file-attachments service does not implement handleAttachmentDoor.',
+                'zh-CN': '附件删除和重命名接口不可用：已注册的 file-attachments 服务未实现 handleAttachmentDoor。',
+                'ja-JP': '添付ファイルの削除・名前変更エンドポイントは利用できません。登録されている file-attachments サービスは handleAttachmentDoor を実装していません。',
+                'es-ES': 'El punto de acceso para eliminar y renombrar adjuntos no está disponible: el servicio file-attachments registrado no implementa handleAttachmentDoor.',
+            },
+        },
+    ];
+    const HEADERS: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', Array<Record<string, string>>> = {
+        en: [{ 'accept-language': 'en-US,en;q=0.9' }, {}],
+        'zh-CN': [{ 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8' }],
+        'ja-JP': [{ 'accept-language': 'ja-JP,ja;q=0.9' }],
+        'es-ES': [{ 'accept-language': 'es-ES,es;q=0.9' }],
+    };
+
+    async function answer(services: Record<string, unknown>, [method, path, body]: [string, string, unknown?], headers: Record<string, string>) {
+        const { dispatcher } = makeDispatcher(services);
+        const request = new Request(`${ORIGIN}/api/v1${path}`, {
+            method,
+            headers: { ...JSON_HEADERS, ...headers },
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        });
+        return dispatcher.dispatch(method, path, body ?? {}, {}, ctx(request));
+    }
+
+    for (const door of DOORS) {
+        for (const site of [
+            { name: `no ${door.slot} service on the kernel`, services: {} as Record<string, unknown>, sentences: door.unregistered },
+            { name: `a ${door.slot} service without ${door.member}`, services: { [door.slot]: { somethingElse: vi.fn() } }, sentences: door.memberMissing },
+        ]) {
+            it(`${door.name} — ${site.name}: 501 NOT_IMPLEMENTED in en (and with no header), zh-CN, ja-JP and es-ES`, async () => {
+                for (const request of door.requests) {
+                    for (const [locale, list] of Object.entries(HEADERS) as Array<[keyof typeof HEADERS, Array<Record<string, string>>]>) {
+                        for (const headers of list) {
+                            const label = `${request[0]} ${request[1]} ${JSON.stringify(headers)}`;
+                            const result = await answer(site.services, request, headers);
+                            expect(envelope(result), label).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
+                            expect(result.response?.body?.error?.message, label).toBe(site.sentences[locale]);
+                            expect(result.response?.body?.error?.userMessage, label).toBeUndefined();
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    it('the English the catalog keys carry is each bridge\'s noun, byte for byte', () => {
+        expect(BUILTIN_OPERATION_MESSAGES.en[PERSONAL_VIEWS_BRIDGE.nounKey!]).toBe(PERSONAL_VIEWS_BRIDGE.noun);
+        expect(BUILTIN_OPERATION_MESSAGES.en[ATTACHMENTS_BRIDGE.nounKey!]).toBe(ATTACHMENTS_BRIDGE.noun);
+        expect(BUILTIN_OPERATION_MESSAGES.en[PRINT_BRIDGE.nounKey!]).toBe(PRINT_BRIDGE.noun);
     });
 });

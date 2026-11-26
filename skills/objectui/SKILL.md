@@ -2,10 +2,10 @@
 name: objectui
 description: Universal Server-Driven UI (SDUI) engine for building JSON-driven React interfaces with Shadcn design quality. Use for schema-driven page building, plugin development, expression bindings, data integration, testing, auth/permissions, i18n, mobile responsiveness and project setup with the `@object-ui/*` packages. Triggers on ObjectUI, SchemaRenderer, JSON UI schemas, SDUI, metadata-driven UIs, `@object-ui/*`. Do NOT use for server-side ObjectStack concerns (data modelling, API endpoints, automation, formulas, agents) — those belong to the `objectstack-*` skills.
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 18.x; each @object-ui/* package declares its exact @objectstack/spec range in its own manifest.
+compatibility: Requires @objectstack/spec 19.x; each @object-ui/* package declares its exact @objectstack/spec range in its own manifest.
 metadata:
   author: objectstack-ai
-  version: "18.6.0"
+  version: "19.0.0-next.0"
   domain: ui
   tags: sdui, schema-renderer, json-ui, react, shadcn, tailwind, plugin, expression
 user-invocable: false

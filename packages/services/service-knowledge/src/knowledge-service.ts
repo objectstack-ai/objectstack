@@ -190,12 +190,28 @@ export class KnowledgeService implements IKnowledgeService {
 
   getAdapter(id: string): IKnowledgeAdapter {
     const adapter = this.adapters.get(id);
-    if (!adapter) {
-      throw new Error(
-        `[knowledge] unknown adapter '${id}'. Registered: [${[...this.adapters.keys()].join(', ')}]`,
+    if (!adapter) throw unmountedAdapterError(id, this.listAdapters());
+    return adapter;
+  }
+
+  /**
+   * Say once, at `error`, which registered sources name an adapter nothing
+   * registered — the boot's reading, taken by the plugin at
+   * `kernel:bootstrapped`, once every plugin has started and registered its
+   * store. Indexing and searching such a source answer the same refusal
+   * ({@link getAdapter}); the boot itself goes on. Answers the sources named.
+   */
+  reportUnmountedAdapters(): string[] {
+    const mounted = this.listAdapters();
+    const unmounted = this.listSources().filter((source) => !this.adapters.has(source.adapter));
+    for (const source of unmounted) {
+      this.options.logger?.error?.(
+        `[knowledge] source '${source.id}' names adapter '${source.adapter}', which is not mounted ` +
+          `(mounted: ${mounted.length === 0 ? 'none' : mounted.join(', ')}). Indexing and searching it answer ` +
+          `${UNMOUNTED_ADAPTER_CODE} until its adapter is one of those, or the '${source.adapter}' store is mounted.`,
       );
     }
-    return adapter;
+    return unmounted.map((source) => source.id);
   }
 
   listAdapters(): string[] {
@@ -1545,9 +1561,11 @@ export class KnowledgeService implements IKnowledgeService {
     for (const { source, organizationIds, fingerprint, scope } of sources) {
       const adapter = this.adapters.get(source.adapter);
       if (!adapter) {
-        this.options.logger?.warn?.(
-          `[knowledge] source '${source.id}' references unknown adapter '${source.adapter}'; skipping.`,
-        );
+        // Refused like an adapter that cannot serve: the caller is told which
+        // source was not searched and why; the boot said so at `error`
+        // (`reportUnmountedAdapters`), so no line per search.
+        const coded = codedRefusalOf(unmountedAdapterError(source.adapter, this.listAdapters()));
+        if (coded !== undefined) refused.push({ sourceId: source.id, ...coded });
         continue;
       }
       try {
@@ -2174,6 +2192,23 @@ interface SearchTarget {
 }
 
 /** An ADR-0112 coded refusal's code, status and message, or `undefined` for any other thrown value. */
+/** The code an index or search of a source whose adapter is not mounted answers. */
+const UNMOUNTED_ADAPTER_CODE = 'SERVICE_UNAVAILABLE';
+
+/**
+ * The refusal of a source whose adapter is not mounted: ADR-0112
+ * `SERVICE_UNAVAILABLE` (503), naming the adapter and the ones that are.
+ */
+function unmountedAdapterError(id: string, mounted: readonly string[]): Error {
+  return Object.assign(
+    new Error(
+      `[knowledge] adapter '${id}' is not mounted (mounted: ${mounted.length === 0 ? 'none' : mounted.join(', ')}). ` +
+        `Name one of those as the source's adapter, or mount the '${id}' store.`,
+    ),
+    { code: UNMOUNTED_ADAPTER_CODE, status: 503 },
+  );
+}
+
 function codedRefusalOf(err: unknown): Omit<KnowledgeSearchRefusal, 'sourceId'> | undefined {
   if (err === null || typeof err !== 'object') return undefined;
   const { code, status } = err as { code?: unknown; status?: unknown };

@@ -883,6 +883,7 @@
     "resolveMetadataTypeDescription": "src/system/i18n-resolver.ts#resolveMetadataTypeDescription (function)",
     "resolveMetadataTypeLabel": "src/system/i18n-resolver.ts#resolveMetadataTypeLabel (function)",
     "resolveObjectFieldLabels": "src/system/i18n-resolver.ts#resolveObjectFieldLabels (function)",
+    "resolveObjectMilestoneSummary": "src/system/i18n-resolver.ts#resolveObjectMilestoneSummary (function)",
     "resolveSettingsActionConfirm": "src/system/i18n-resolver.ts#resolveSettingsActionConfirm (function)",
     "resolveSettingsActionLabel": "src/system/i18n-resolver.ts#resolveSettingsActionLabel (function)",
     "resolveSettingsActionSuccess": "src/system/i18n-resolver.ts#resolveSettingsActionSuccess (function)",

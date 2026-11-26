@@ -218,8 +218,10 @@ let securityPlugin: SecurityPlugin;
 let sharing: SharingService | undefined;
 let seq = 0;
 
-/** Every write verdict the sharing service was asked, in order. */
+/** Every write verdict the sharing service was asked, in order: per row, or per id of a set-form call. */
 const verdictCalls: { verb: 'edit' | 'delete'; object: string; recordId: string }[] = [];
+/** [#35934] Every set-form call (`checkEditMany` / `checkDeleteMany`) the sharing service was asked. */
+const setFormCalls: { verb: 'edit' | 'delete'; object: string; count: number }[] = [];
 /** The `where` each update of a deal reached the driver side of the middleware chain with, while `captureWhere` is on. */
 const capturedWheres: unknown[] = [];
 let captureWhere = false;
@@ -355,6 +357,19 @@ beforeAll(async () => {
   service.checkDelete = (object: string, recordId: string, context: unknown) => {
     verdictCalls.push({ verb: 'delete', object, recordId });
     return checkDelete(object, recordId, context);
+  };
+  // [#35934] The set form, recorded per id the same way, and per call.
+  const checkEditMany = service.checkEditMany.bind(service);
+  const checkDeleteMany = service.checkDeleteMany.bind(service);
+  service.checkEditMany = (object: string, recordIds: string[], context: unknown) => {
+    setFormCalls.push({ verb: 'edit', object, count: recordIds.length });
+    for (const recordId of recordIds) verdictCalls.push({ verb: 'edit', object, recordId });
+    return checkEditMany(object, recordIds, context);
+  };
+  service.checkDeleteMany = (object: string, recordIds: string[], context: unknown) => {
+    setFormCalls.push({ verb: 'delete', object, count: recordIds.length });
+    for (const recordId of recordIds) verdictCalls.push({ verb: 'delete', object, recordId });
+    return checkDeleteMany(object, recordIds, context);
   };
   engine.registerMiddleware(buildSharingMiddleware(sharing, ctx.logger) as never, { object: '*' });
   // Registered last, so it runs after this plugin's and the sharing
@@ -725,6 +740,19 @@ describe('[#35802] a predicate write composes the platform ownership floor per r
     expect(rows.filter((r) => r.name === 'written').map((r) => r.id).sort()).toEqual(ids);
   });
 
+  it('[#35934] those 60 candidates are asked in ONE set-form call, not one verdict per row', async () => {
+    const batch = `bulk_set_${++seq}`;
+    const ids = Array.from({ length: 60 }, (_, i) => `${batch}_${String(i).padStart(2, '0')}`);
+    await engine.insert(DEAL, ids.map((id) => ({
+      id, name: 'as seeded', batch, stage: 'open', region: 'emea', organization_id: ORG, owner_id: BOB, created_by: CAROL,
+    })), SYS);
+    const fromSet = setFormCalls.length;
+    const from = verdictCalls.length;
+    await predicateWrite(DEAL, 'update', batch, memberOf(BOB, REP_SET.name));
+    expect(setFormCalls.slice(fromSet)).toEqual([{ verb: 'edit', object: DEAL, count: 60 }]);
+    expect(verdictCalls.slice(from).filter((c) => c.object === DEAL)).toHaveLength(60);
+  });
+
   it('the tenant wall (Layer 0) is composed back around the relieved Layer 1', async () => {
     const { batch, ids } = await seedDeals();
     capturedWheres.length = 0;
@@ -900,6 +928,52 @@ describe('[#35917] beside an authored widener, the by-id write keeps the floor a
   });
 });
 
+describe('[#35934] a sharing service without the set form keeps the per-row path, with the same answers', () => {
+  // The set form is optional on `ISharingService`: plugin-security
+  // feature-detects `checkEditMany` / `checkDeleteMany` and asks
+  // `checkEdit` / `checkDelete` once per row where they are absent. Each case
+  // runs the #35802 comparison twice, with and without the set form, and
+  // holds both to the same rows written and the same rows asked about.
+  async function withoutSetForm<T>(run: () => Promise<T>): Promise<T> {
+    const service = sharing as any;
+    const kept = { checkEditMany: service.checkEditMany, checkDeleteMany: service.checkDeleteMany };
+    service.checkEditMany = undefined;
+    service.checkDeleteMany = undefined;
+    try {
+      return await run();
+    } finally {
+      Object.assign(service, kept);
+    }
+  }
+
+  const CASES: [string, object, readonly Role[], readonly Role[]][] = [
+    ['ALICE, the owner-creator', memberOf(ALICE, REP_SET.name), ['r1', 'r2'], ['r1', 'r2']],
+    ['BOB, the non-creator owner', memberOf(BOB, REP_SET.name), ['r3', 'r4'], ['r3', 'r4']],
+    ['CAROL, the creator who owns nothing', memberOf(CAROL, REP_SET.name), [], []],
+    ['the Modify All manager', memberOf(MANAGER, MANAGER_SET.name), ['r1', 'r2', 'r3', 'r4'], ['r1', 'r2', 'r3', 'r4']],
+    ['DAVE, the edit-share target', memberOf(DAVE, REP_SET.name), ['r2', 'r3'], []],
+    ['BOB on behalf of CAROL (delegated)', onBehalfOf(memberOf(BOB, REP_SET.name), CAROL), [], []],
+    ['ALICE on behalf of ERIN (delegated)', onBehalfOf(memberOf(ALICE, REP_SET.name), ERIN), ['r1', 'r3'], ['r1', 'r3']],
+  ];
+  for (const [name, caller, updates, deletes] of CASES) {
+    for (const verb of ['update', 'delete'] as const) {
+      it(`${name}, ${verb}: the same rows, asked about row by row`, async () => {
+        const expected = verb === 'update' ? updates : deletes;
+        const fromSet = setFormCalls.length;
+        const askedWithSet = await expectPredicateMatchesById(verb, caller, expected);
+        const usedSet = setFormCalls.length > fromSet;
+
+        const fromSetAgain = setFormCalls.length;
+        const askedPerRow = await withoutSetForm(() => expectPredicateMatchesById(verb, caller, expected));
+        expect(setFormCalls.length, 'no set-form call where the service serves none').toBe(fromSetAgain);
+        expect(askedPerRow, 'the per-row path asks about the rows the set form asked about').toEqual(askedWithSet);
+        // A predicate write that asks anything at all asks it as one set where it can.
+        expect(usedSet).toBe(askedWithSet.length > 0);
+      });
+    }
+  }
+});
+
 describe('[#35802] predicateWriteFloorDropIds: the by-id floor decision, asked per row', () => {
   // A double of the by-id decision that answers like a write authority with an
   // `edit` share on every row: the floor is replaced for an update, never for
@@ -943,6 +1017,60 @@ describe('[#35802] predicateWriteFloorDropIds: the by-id floor decision, asked p
     expect(asked).toEqual(ids.map(String));
     expect(dropped).toEqual(ids.filter((i) => i % 2 === 0));
     expect(peak).toBe(25);
+  });
+});
+
+describe('[#35934] predicateWriteFloorDropIds through the set form: one call, normalised, fail-closed', () => {
+  // A host whose floor test is the plugin's own (the platform floor binds an
+  // ordinary member) and whose kernel `sharing` service is a double.
+  const hostWith = (sharingDouble: Record<string, unknown>, errors: unknown[] = []) => ({
+    collectRLSPolicies: (...a: unknown[]) => (securityPlugin as any).collectRLSPolicies(...a),
+    logger: { error: (...a: unknown[]) => errors.push(a), warn: () => undefined },
+    resolveKernelService: (name: string) => (name === 'sharing' ? sharingDouble : undefined),
+    resolvePermissionSetsForContext: async () => [MEMBER_DEFAULT, REP_SET],
+    resolveWriteScopeForSharing: async () => 'own',
+    resolvePreImageFloorDrop: async () => {
+      throw new Error('the per-row decision is not asked where the set form is served');
+    },
+  });
+  const caller = memberOf(ALICE, REP_SET.name);
+  const sets = [MEMBER_DEFAULT, REP_SET];
+
+  it('asks the verb it is handed once, with every id as a string, and drops exactly the allowed rows', async () => {
+    const asked: unknown[] = [];
+    const host = hostWith({
+      checkEditMany: async (object: string, ids: string[], ctx: any) => {
+        asked.push(['edit', object, ids, ctx.__writeScope]);
+        return ids.map((id) => (id === '2' ? 'deny' : id === '3' ? 'abstain' : 'allow'));
+      },
+      checkDeleteMany: async (object: string, ids: string[]) => {
+        asked.push(['delete', object, ids]);
+        return ids.map(() => 'deny');
+      },
+    });
+    expect(await predicateWriteFloorDropIds.call(host as never, 'update', DEAL, [1, 2, 3, 4n], caller, sets, false)).toEqual([1, 4n]);
+    expect(await predicateWriteFloorDropIds.call(host as never, 'delete', DEAL, ['a'], caller, sets, false)).toEqual([]);
+    expect(asked).toEqual([['edit', DEAL, ['1', '2', '3', '4'], 'own'], ['delete', DEAL, ['a']]]);
+  });
+
+  it('an answer that is not a verdict is no allow, and a probe that throws or answers the wrong length denies every row, logged once', async () => {
+    const strange = hostWith({ checkEditMany: async (_o: string, ids: string[]) => ids.map(() => true) });
+    expect(await predicateWriteFloorDropIds.call(strange as never, 'update', DEAL, ['a', 'b'], caller, sets, false)).toEqual([]);
+    for (const answer of [async () => { throw new Error('sharing store down'); }, async () => ['allow']]) {
+      const errors: unknown[] = [];
+      const host = hostWith({ checkEditMany: answer }, errors);
+      expect(await predicateWriteFloorDropIds.call(host as never, 'update', DEAL, ['a', 'b'], caller, sets, false)).toEqual([]);
+      expect(errors).toHaveLength(1);
+    }
+  });
+
+  it('a delegated write asks nothing, and a write the floor does not bind asks nothing', async () => {
+    let asked = 0;
+    const host = hostWith({ checkEditMany: async (_o: string, ids: string[]) => { asked += 1; return ids.map(() => 'allow'); } });
+    expect(await predicateWriteFloorDropIds.call(host as never, 'update', DEAL, ['a'], caller, sets, true)).toEqual([]);
+    const admin = { ...caller, positions: ['org_admin'] };
+    expect(await predicateWriteFloorDropIds.call(host as never, 'update', DEAL, ['a'], admin, sets, false)).toEqual([]);
+    expect(asked).toBe(0);
   });
 });
 

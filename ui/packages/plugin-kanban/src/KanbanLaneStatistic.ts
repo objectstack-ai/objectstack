@@ -68,6 +68,16 @@ import { laneKeyOf } from './kanbanReferenceLanes';
  * to which it hands one page of rows: the figures cover every record of each
  * lane, not that page. A host that hands cards without its query (rows handed
  * in whole) gets a `sum` added up over them and no other figure.
+ *
+ * objectstack#37327 — the same read answers that board's other lane figures,
+ * which a page cannot: each lane's record count ({@link LANE_COUNT_ALIAS}),
+ * which its header and a foot `count` write, and the `SUM` of the view's
+ * `summarizeField`, which its header total writes. Over a lookup lane field
+ * its group keys are the lanes, so a lane whose records all sit past the page
+ * is drawn too. The read
+ * is asked on that board whether or not the view draws a statistic; it is
+ * still one grouped aggregate per board. A count the read cannot give (no
+ * door, a refusal, a partial answer) is the page's, marked `+`.
  */
 
 /**
@@ -125,17 +135,69 @@ export interface LaneStatisticQueryInput {
 }
 
 /**
+ * The column a host-handed board's lane read answers each lane's record count
+ * under: `COUNT(*)` (objectstack#37327).
+ */
+export const LANE_COUNT_ALIAS = 'count';
+
+/**
+ * The lane read of a board its host hands ONE PAGE of its query to
+ * (objectstack#37327): the view's statistic when it draws one, beside each
+ * lane's record count and, for the header total, the `SUM` of the view's
+ * `summarizeField`. Still ONE grouped aggregate per board: the count and the
+ * total ride the read the statistic already asks, never a query per lane.
+ */
+export interface LaneReadQueryInput {
+  laneField: string;
+  /** The view's lane statistic, when the board draws one. */
+  statistic?: { type: KanbanLaneAggregate; field: string };
+  /** Ask each lane's record count, under {@link LANE_COUNT_ALIAS}. */
+  laneCount?: boolean;
+  /** Ask each lane's `SUM` of this field, under `laneStatisticAlias('sum', totalField)`. */
+  totalField?: string;
+  /** The board's own filter, in the ObjectQL AST the lane queries send as `$filter`. */
+  filter: unknown;
+  /** The host's search term and fields, as the lane queries send them. */
+  search?: string;
+  searchFields?: readonly string[];
+}
+
+/**
  * The lane read for the board's query, or `null` when it cannot be asked as
  * the same question: a filter that does not lower to a condition (dropped, it
  * would total the unfiltered lanes), or an alias that would land on the lane
  * field's own column.
  */
 export function compileLaneStatisticQuery(input: LaneStatisticQueryInput): LaneStatisticQuery | null {
-  const { laneField, type, field, filter, search, searchFields } = input;
-  if (!laneField || !field) return null;
-  const alias = laneStatisticAlias(type, field);
-  const weight = laneWeightAlias(field);
-  if (alias === laneField || (type === 'avg' && weight === laneField)) return null;
+  const { type, field, ...rest } = input;
+  if (!field) return null;
+  return compileLaneReadQuery({ ...rest, statistic: { type, field } });
+}
+
+/**
+ * The general lane read ({@link LaneReadQueryInput}), or `null` when it asks
+ * nothing or cannot be asked as the same question (see
+ * {@link compileLaneStatisticQuery}). The statistic's aggregation comes first,
+ * so a read that asks only the statistic is the one #36520 compiled.
+ */
+export function compileLaneReadQuery(input: LaneReadQueryInput): LaneStatisticQuery | null {
+  const { laneField, statistic, laneCount, totalField, filter, search, searchFields } = input;
+  if (!laneField) return null;
+  const aggregations: Array<{ function: 'count' | KanbanLaneAggregate; field?: string; alias: string }> = [];
+  const asked = new Set<string>();
+  const ask = (node: { function: 'count' | KanbanLaneAggregate; field?: string; alias: string }) => {
+    if (asked.has(node.alias)) return;
+    asked.add(node.alias);
+    aggregations.push(node);
+  };
+  if (statistic) {
+    if (!statistic.field) return null;
+    ask({ function: statistic.type, field: statistic.field, alias: laneStatisticAlias(statistic.type, statistic.field) });
+    if (statistic.type === 'avg') ask({ function: 'count', field: statistic.field, alias: laneWeightAlias(statistic.field) });
+  }
+  if (laneCount) ask({ function: 'count', alias: LANE_COUNT_ALIAS });
+  if (totalField) ask({ function: 'sum', field: totalField, alias: laneStatisticAlias('sum', totalField) });
+  if (aggregations.length === 0 || asked.has(laneField)) return null;
 
   let where: Record<string, unknown> | undefined;
   if (filter !== undefined && filter !== null) {
@@ -161,10 +223,7 @@ export function compileLaneStatisticQuery(input: LaneStatisticQueryInput): LaneS
       ? { search: term, ...(searchFields && searchFields.length > 0 ? { searchFields: [...searchFields] } : {}) }
       : {}),
     groupBy: [laneField],
-    aggregations: [
-      { function: type, field, alias },
-      ...(type === 'avg' ? [{ function: 'count' as const, field, alias: weight }] : []),
-    ],
+    aggregations,
   } as LaneStatisticQuery;
 }
 
@@ -178,6 +237,12 @@ export interface LaneFigureReading {
   foldCase: boolean;
   /** The trailing lane's id (`KANBAN_UNCOLUMNED_ID`). */
   uncolumnedId: string;
+  /**
+   * The column to read in place of `laneStatisticAlias(type, field)`: a lane's
+   * record count reads {@link LANE_COUNT_ALIAS}, folded as a `sum`
+   * (objectstack#37327).
+   */
+  alias?: string;
 }
 
 /** A number from an aggregate cell; a numeric string (a SQL `NUMERIC`) reads as its number. */
@@ -188,6 +253,20 @@ function numberOf(raw: unknown): number | null {
     return Number.isFinite(value) ? value : null;
   }
   return null;
+}
+
+/**
+ * A sum as the page path prints it (objectstack#37327): no binary residue. The
+ * page path (`sumLaneField`) rounds to the widest input's decimals, so `0.1 +
+ * 0.2` reads `0.3`; a lane read's `SUM` over a float column, or a fold of
+ * several groups' sums, arrives with the residue already in it
+ * (`0.30000000000000004`) and no inputs to measure. Fifteen significant digits
+ * is what a double holds exactly, so rounding there drops the residue. A
+ * non-integer sum of more than fifteen significant digits (ten trillion and
+ * up with two decimals) loses its last digit, which the page path kept.
+ */
+export function withoutBinaryResidue(value: number): number {
+  return Number.isInteger(value) ? value : Number(value.toPrecision(15));
 }
 
 /** One group's contribution to its lane. */
@@ -205,7 +284,7 @@ function foldParts(parts: readonly Part[], type: KanbanLaneAggregate): LaneFigur
       if (value === null) return null;
       total += value;
     }
-    return total;
+    return withoutBinaryResidue(total);
   }
   if (type === 'avg') {
     let weighted = 0;
@@ -241,7 +320,7 @@ function foldParts(parts: readonly Part[], type: KanbanLaneAggregate): LaneFigur
  */
 export function readLaneFigures(rows: unknown, reading: LaneFigureReading): Record<string, LaneFigure> {
   const { laneField, type, field, laneIds, foldCase, uncolumnedId } = reading;
-  const alias = laneStatisticAlias(type, field);
+  const alias = reading.alias ?? laneStatisticAlias(type, field);
   const weight = laneWeightAlias(field);
   const byKey = new Map<string, string>();
   for (const id of laneIds ?? []) byKey.set(foldCase ? id.toLowerCase() : id, id);
@@ -303,4 +382,44 @@ export function laneFigureOf(
   if (Object.prototype.hasOwnProperty.call(figures, laneId)) return figures[laneId];
   if (holdsRecords) return null;
   return type === 'sum' ? 0 : null;
+}
+
+/** The reading of a lane read's answer, less the statistic it reads. */
+export type LaneReading = Omit<LaneFigureReading, 'type' | 'field' | 'alias'>;
+
+/**
+ * Every lane's record count from a lane read that asked it
+ * ({@link LANE_COUNT_ALIAS}, objectstack#37327), or `null` when the answer is
+ * partial or a count is not a number: no lane then has a whole count.
+ */
+export function readLaneCounts(answer: unknown, reading: LaneReading): Record<string, number> | null {
+  const figures = readLaneStatistic(answer, { ...reading, type: 'sum', field: '', alias: LANE_COUNT_ALIAS });
+  if (!figures) return null;
+  const counts: Record<string, number> = Object.create(null);
+  for (const lane of Object.keys(figures)) {
+    const value = figures[lane];
+    if (typeof value !== 'number') return null;
+    counts[lane] = value;
+  }
+  return counts;
+}
+
+/**
+ * The lanes a lane read's answer names, in its order, for a board whose lanes
+ * come from the data (objectstack#37327): one per non-empty key, as
+ * `lanesFromRecords` keys a loaded record. `null` for a partial answer, which
+ * does not name every lane.
+ */
+export function readLaneKeys(answer: unknown, laneField: string): string[] | null {
+  if (!Array.isArray(answer) || (answer as { hasMore?: unknown }).hasMore === true) return null;
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  for (const row of answer) {
+    if (!row || typeof row !== 'object') continue;
+    const key = laneKeyOf((row as Record<string, unknown>)[laneField]);
+    if (key === '' || seen.has(key)) continue;
+    seen.add(key);
+    keys.push(key);
+  }
+  return keys;
 }

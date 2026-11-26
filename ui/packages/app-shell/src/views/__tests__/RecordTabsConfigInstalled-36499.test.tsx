@@ -57,7 +57,7 @@ vi.mock('../../hooks/useStudioDesignGate', async (importOriginal) => ({
   useStudioEntryGate: (path: string | null) => (session.view && path ? { path, posture: 'view' } : null),
 }));
 
-vi.mock('../studio-design/StudioCustomizeControls', async (importOriginal) => ({
+vi.mock('../studio-design/customizeOverride', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useCustomizeDoorWalled: () => session.walled,
 }));

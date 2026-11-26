@@ -1,5 +1,343 @@
 # @objectstack/client
 
+## 19.0.0-next.0
+
+### Minor Changes
+
+- 61722e9: feat: Change Owner cascade — a relationship declares `transferBehavior: 'cascade'`, and the Change Owner dialog offers it as a tick
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #36713
+  
+  A Change Owner can now move related records along with the record, relationship by relationship.
+  
+  - **The declaration.** A `lookup` or `master_detail` field takes `transferBehavior: 'none' | 'cascade'`, beside `deleteBehavior` (omitted means `'none'`). `'cascade'` on the child's reference field to a parent says: when the parent's owner changes, the child records that point at it and are owned by the parent's previous owner may move to the new owner too. No other child records move; there is no filter key.
+  - **Refused where it could never act.** The key is refused on any other field type, `'cascade'` is refused on a reference to a `sys_` object and on a multi-value reference (`multiple: true`), and `'cascade'` is refused on a field of an object that does not offer Change Owner itself: one that is not structurally eligible (no reassignable owner), a `controlled_by_parent` detail (its access already follows its master), or one whose `userActions.transfer` is off. Each refusal names the field and the fix.
+  - **The request.** `POST /api/v1/data/:object/:id/change-owner` and `POST /api/v1/data/:object/change-owner` take an optional `cascade: [{ object, field }]` naming the relationships to move along (`data.changeOwner` / `data.changeOwnerMany` in `@objectstack/client`). A relationship that does not declare `'cascade'`, or whose child does not offer Change Owner, is refused `400 VALIDATION_ERROR` before anything is written; so is a cascade with a queue target. Each cascaded record is updated as the caller, so it needs the caller's own transfer grant on the child object. Each relationship's outcome in the answer's `cascade[]` lists every record the caller's write refused, with its id, code and sentence: a related record whose `owner_id` is locked on it (read-only, or under a `readonlyWhen` that holds) is refused `FIELD_NOT_ACCESSIBLE` and keeps its owner, as the record itself would be, while the record's own move stands. One call moves at most 500 related records; the records past that limit are counted in `remaining`, still with the previous owner, not listed. When a relationship's records could not be read, its outcome carries `readFailure` and none of them moved.
+  - **The candidates.** `GET /api/v1/data/:object/change-owner/cascades` (`data.changeOwnerCascades`) lists the relationships declared to an object whose child offers Change Owner. A child whose declared API exposure does not serve `update` is left out, and so is a child of a disabled package.
+  - **The Studio.** The field form and the object form's field rows offer `transferBehavior` beside `deleteBehavior`, on `lookup` and `master_detail` fields; the row's label and help text ship in the metadata-forms locale packs of `@objectstack/platform-objects`.
+  - **The dialog.** For a person target, the Change Owner dialog lists those relationships on which the explain engine allows the caller the `transfer` operation, one tick each, sends the ticked ones, and draws each relationship's outcome, every record it did not move included.
+  
+  A plain `owner_id` update is unchanged: the declaration is read only by the Change Owner action.
+- bfd1049: fix(core, console): a banned user's hand-over follows each object's Change Owner switch, and the ban dialog says why a record stays
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  An object's Change Owner switch (`userActions.transfer`) now also decides whether the offboarding hand-over (`POST /api/v1/security/users/USER_ID/assigned-work/transfer`) moves the object's `owner_id`, and how the count (`GET /api/v1/security/users/USER_ID/assigned-work`) reports it. The hand-over reads the same resolution the Change Owner action refuses by (`resolveUserActionTransfer`), so the two never disagree:
+  
+  - An object that turns the switch off keeps its records' owners where they are. Before, the hand-over moved them.
+  - A `controlled_by_parent` detail that leaves the switch out keeps its owner (the default is off there), as before. A detail that sets `userActions.transfer: true` now has its owner handed over like any other object. Before, every detail's owner was skipped.
+  - The object's own user fields (an approver, an assignee) are handed over whatever the switch says.
+  
+  A kept owner is still counted. Before, a detail's owner was left out of the count; now its row answers `transferable: false` with `reason: 'transfer_off'`. A multi-valued user field answers `reason: 'multi_valued'`. `reason` is a new optional member of each `objects[]` row in `security.assignedWork.count`'s answer (`UserAssignedWorkSummary` in `@objectstack/client`, `UserAssignedWorkHoldReason` in `@objectstack/core`). It is present exactly when `transferable` is false.
+  
+  The ban dialog words each kept row by its reason. A kept owner reads "Not handed over: this object keeps the owner of each record (Change Owner is off for it)." (zh: 不会交接：该对象的记录负责人保持不变（该对象已关闭“更改负责人”）。). A multi-valued row keeps its own sentence ("Lists several people, so it cannot be handed over here."), and a kept owner never shows it. The new `console.assignedWork.ownerKept` key is in all eleven UI locales.
+  
+  To keep the old hand-over of an object you switched off, set `userActions.transfer` back on for it. Before this change the switch gated only the Change Owner action; it now gates that action and the hand-over, and nothing else: a plain `owner_id` write (an import, a hook, a `PATCH`) still needs only the transfer grant.
+
+### Patch Changes
+
+- f5b2eea: feat(client): `meta.getItem` reads a pending draft with `state: 'draft'`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `meta.getItem(type, name, { packageId, state: 'draft' })` sends `?state=draft` beside `?package=`, on the unscoped client and on the environment-scoped twin. It is the strict draft read the REST door already serves: the answer is the draft row, and its `item._diagnostics` carries the publish verdict (what publishing that draft would refuse). `'active'` is the default said out loud and sends nothing, so a call without the member is the request it always was. A caller the door does not admit to drafts is answered with the published item, so compare the answer's `version` with the draft's before reading it as the draft.
+- 16a96ac: feat(rest): Change Owner endpoint — hand one record or a list of records to another owner, on objects that offer the action
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Two new doors under the data surface, both run as the caller:
+  
+  - `POST /api/v1/data/:object/:id/change-owner` with `{ ownerId | queue, notify? }` hands one record to a person or moves it to an ownership queue (ADR-0142), and answers the record's new owner.
+  - `POST /api/v1/data/:object/change-owner` with `{ ids, ownerId | queue, notify? }` does the same for up to 500 records, one update per record, and answers a per-row report that lists every record that did not move with its code and sentence.
+  
+  An object offers Change Owner when the platform gives it a reassignable owner and its `userActions.transfer` switch is on (on by default, off on a `controlled_by_parent` detail). Any other object is refused as a whole, `403 CHANGE_OWNER_DISABLED`, whoever asks — a holder of `modifyAllRecords` included. The switch gates this action only: a plain `owner_id` update still needs the transfer grant and nothing else, so imports and hooks are unaffected. On an object that offers it, each record moves through the ordinary write path, so the caller needs edit on the record and the transfer grant (`allowTransfer` or `modifyAllRecords`); without the grant the record keeps its owner and the answer is the data door's own `403 PERMISSION_DENIED`. `notify: true` sends the new owner one notification under the `record.owner_changed` topic, its title keyed so it renders in the new owner's own language (English when no entry renders).
+  
+  `@objectstack/core` exports `changeRecordOwner`, `changeRecordsOwner`, `changeOwnerOffReason`, `changeOwnerOffRefusal`, `CHANGE_OWNER_DISABLED`, `CHANGE_OWNER_NOTIFICATION_TOPIC`, `CHANGE_OWNER_NOTIFICATION_TEXT` and `assertAssignableUser` (the assigned-work hand-over's target check, now shared). That check now reads the target user the way the write path reads a user reference: a user the caller cannot read answers as one that does not exist (`404`, `reference_not_found`), on Change Owner and on the hand-over alike. `@objectstack/client` adds `data.changeOwner` and `data.changeOwnerMany`. `@objectstack/spec` registers `CHANGE_OWNER_DISABLED` in the error-code ledger, and the `userActions.transfer` liveness row is now `live`. `@objectstack/service-messaging` lists `record.owner_changed` among the platform's notification topics and carries the notice's title in every shipped locale (`messages.recordOwnerChangedTitle`, `messages.recordsOwnerChangedTitle`).
+- dab4712: feat(console): the 「All documentation」 page has the console's top bar, groups its books by app, and searches every article
+  
+  Clause-②: yes (widening) — @objectstack/client `meta.getItems` takes an optional `include` (`'content' | 'grants'`, sent as `?include=`) and exports its options type `MetaItemsListOptions`; @object-ui/i18n adds nine help.* keys (two of them plural, with their per-locale forms); nothing removed
+  Metadata-protocol: none
+  
+  - **The console's top bar on every portal page.** `/docs`, a book (`/docs/<book>`) and an article (`/docs/<book>/<article>`) are drawn in Home's frame, whose bar reads 「<product> / Documentation」 (the crumb links to the portal's index) and carries the search, the inbox, the assistant and the avatar menu, so the reader can go back to any app. The portal's own 「Documentation / <title>」 strip is gone.
+  - **Books grouped by app.** The page lists each app's books under the app's name, as the launcher names it: a book goes under the first app whose navigation links to it (a module's navigation contributions included), else under its package's app; books no app carries are listed last under 「Other documentation」. No card shows a package id; a package's docs with no authored book are named by their app. A platform package's books (`com.objectstack.*`, such as Setup's) are listed only under an app in the member's list that carries them, never under 「Other documentation」, so they are not listed for a member whose app list has no such app. This is what the page lists, not who may read a doc: the server's audience gate decides that, as before.
+  - **The subtitle and the counts read the session language** (「9 篇」, not 「9 articles」).
+  - **「Search all documentation」.** A search field on the page searches every listed article's title, summary and body, and lists the matches with the words marked in context; each opens the article in its own book. The bodies are asked once, the first time the reader searches (`GET /meta/doc?include=content`, through the same audience gate as the list). The query stays in the URL (`?q=`).
+  - **A hand-typed article URL whose book does not hold the article** (`/docs/<book A>/<article of book B>`) now opens the article in its own book; with no book that holds it, the article draws no previous/next pager instead of showing both ends at once. Inside an app, an article whose book is in no package now keeps its 「← Back to <app>」 link.
+  
+  `@objectstack/client`: `client.meta.getItems(type, { include })` and the environment-scoped `meta.getItems` send `?include=`; leaving it out sends nothing, as before. `@object-ui/app-shell`: `AppHeader` takes a `docs` variant and `DefaultHomeLayout` a `variant` prop for it.
+- d9be915: fix(client): `client.approvals.reject` requires the decision and its `comment`
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key or authored value changes. What moves is the parameter type of one SDK method: the decision argument and its comment member become required, matching the approvals route, which now refuses a reject without a reason. No stored row changes, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** for TypeScript callers of `client.approvals.reject(requestId)` or `client.approvals.reject(requestId, { actorId })`: the decision argument and its `comment` are now required, so those calls no longer compile. At runtime the approvals route refuses a reject without a non-blank reason with `400 VALIDATION_ERROR`. It ships `patch` because it is a non-protocol breaking change (AGENTS.md Post-Task Checklist step 3). `client.approvals.approve` is unchanged; its comment stays optional.
+  
+  Fix for a caller: pass the reason, `client.approvals.reject(requestId, { comment: 'Over budget.' })`.
+- 40e22f1: fix(approvals, list): a list cell no longer opens an editor before it knows the record's approval lock, and the list reads the locks of a page in one request
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **What a list user sees.** On a list that edits in place, a double-click, Enter, F2 or a typed key on a cell whose record's approval lock or edit permission is still being read no longer opens an editor that the server would then refuse on save. The cell says "Checking whether this record can be edited…", and when the answer arrives the same edit goes ahead by itself (with the typed key), or the cell says why it does not: the record is locked while it is in approval, or the reader has no permission to edit it. Selecting another cell in the meantime drops the wait. Moving the selection with the arrow keys no longer sends a lock request per row: the first cell selected on a page asks the locks of every row on it at once.
+  
+  **New route.** `POST /api/v1/approvals/records/:object/locks` with the body `{ "recordIds": ["<id>", ...] }` (at least one id, at most `APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS`, 200) answers `{ success: true, data: { records: [{ recordId, locked }] } }`, one entry per id in order. `locked` is what `GET /api/v1/approvals/records/:object/:recordId/lock` answers for that id, and `null` where that route answers 404: a record the caller cannot read and one that does not exist answer alike. Any other body (a key other than `recordIds`, an empty list, a non-string or blank id, more ids than the cap) and any query parameter are refused whole with `400 VALIDATION_ERROR`, never trimmed. A deployment whose approvals service does not implement the read answers `501`.
+  
+  **Contract and SDK.** `IApprovalService` gains the optional member `getRecordLocks(object, recordIds, context)`, entry `i` answering `recordIds[i]` exactly as `getRecordLock` does; the approvals plugin implements it in two reads whatever the page size (the caller's read of the ids, then one pending-request lookup judged by the record-lock hook's own judgement). `@objectstack/spec/contracts` exports `APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS`. `@objectstack/client` gains `client.approvals.getRecordLocks(object, recordIds)`.
+  
+  **Components.** `GridCellFacts` (the select-first table's per-cell facts) gains the optional `checking: { text, settled }`: while present, an edit asked on the cell shows `text` and is asked again when `settled` settles; a toggle, paste or clear shows `text` and writes nothing. A host that sets no `checking` sees no change.
+- c261a7c: feat(automation): `POST /api/v1/automation/_record-starts` answers which flows a proposed update of one record would start
+  
+  Clause-②: yes (widening) — one new public read: the route `POST /api/v1/automation/_record-starts` (`automation.listRecordUpdateStarts` in the API contract and in `@objectstack/client`); `@objectstack/spec/api` adds `RecordUpdateStartsRequestSchema`, `RecordUpdateStartSchema`, `RecordUpdateStartsResponseSchema` and their types; `@objectstack/spec/contracts` adds `RecordUpdateStartsInput` and the optional `IAutomationService.listRecordUpdateStarts`; `@objectstack/spec/automation` adds `recordChangeTriggerHookEvents` and `recordChangeTriggerFiresOnUpdate`; `_record-starts` joins the `/automation` domain's reserved position literals. Nothing existing is removed or re-typed.
+  Metadata-protocol: added — the three new `@objectstack/spec/api` schemas enter the `api` authorable-surface shard (10 keys: `RecordUpdateStart:name/label/startsApproval`, `RecordUpdateStartsRequest:object/recordId/changes`, `RecordUpdateStartsResponse:success/data/error/meta`); no flow or other metadata key is added
+  Skills-docs: none — no skill under `skills/**` teaches the console's stage confirms; `content/docs/automation/flows.mdx` gains the read in this change.
+  
+  The console's stage confirms now name the flows a move would start (objectstack#35928, ruling record 7073655354). They ask the server:
+  
+  - **Request** `{ object, recordId, changes }`; **response** `{ success, data: { flows: [{ name, label, startsApproval }] } }`.
+  - **Who is answered:** a signed-in caller who can read the record. The record is read as the caller through the `/data` door's own `get`, so a record they cannot read answers `404 RECORD_NOT_FOUND` exactly as an absent one, and the engine is never asked. Anonymous `401`; a malformed body `400 VALIDATION_FAILED`; a `changes` key that is not a declared field of the object `400 VALIDATION_FAILED` on that key, the engine never asked; a read that answers no record `404 RECORD_NOT_FOUND`; any query parameter `400 VALIDATION_ERROR`; an engine without the read `501`.
+  - **Which flows:** enabled `record_change` flows of the object, armed on their trigger, whose `triggerType` binds an update, and whose start condition holds for the record read with `changes` applied (`previous` is the record read). The condition goes through the engine's one start-condition gate, the one every run passes; the token grammar `@objectstack/trigger-record-change` binds hooks by moved into the spec (`recordChangeTriggerHookEvents`) so the preview reads the same rule, with no second copy. A condition that cannot be evaluated against the record is not listed. Hooks are never listed.
+  - **Per flow:** `name`, the authored `label` (a client translates it by name) and `startsApproval`, true for a flow holding an `approval` node (ADR-0019). No description, condition or nodes.
+- fd462c5: feat(plugin-approvals): the record lock reads say whether a row is held by its own approval or by its master's
+  
+  Clause-②: yes (widening: both lock doors' published entry gains a field)
+  Metadata-protocol: none
+  
+  Both approval lock reads (`IApprovalService.getRecordLock` and `getRecordLocks`, and their REST doors `GET /api/v1/approvals/records/:object/:recordId/lock` and `POST /api/v1/approvals/records/:object/locks`) now answer a locked record with `lockSource`, which approval holds it:
+  
+  - `'record'`: a pending request on the record itself, from a node whose `lockRecord` is not `false`. Deleting the record still goes through and cancels the request.
+  - `'master'`: the record is a `master_detail` line of a record so held. The server refuses the line's insert, update and delete with `409 RECORD_LOCKED`.
+  
+  When both hold (a line with a pending request of its own, under a held master), the answer is `'master'`, because that is the delete the server refuses. An unlocked record still answers `{ locked: false }`, with no `lockSource`, and `null` (`404 RECORD_NOT_FOUND` at the single door, `locked: null` in the batch door) still means unreadable or missing, never told apart. No request id, node, approvers or `pending` flag is served. A list can now hide Delete on a line whose master is under approval instead of offering a delete the server refuses.
+  
+  The `IApprovalService` return types gain the optional `lockSource?: 'record' | 'master'`, so an implementation may omit it on a locked answer and still satisfies the contract; the REST doors then serve `{ locked: true }` without a kind.
+  
+  Which rows count as readable is unchanged at both doors. The two doors keep different readability anchors on purpose: the single door counts any returned row, the batch door only the row whose id is the asked id; aligning them would narrow a published answer (seat ruling 7152650156 on #37151). So an id the database matches only under another spelling (a different letter case, `07` for a numeric `7`) answers `null` in the batch door. The single-record door counts the row it finds as readable and judges it, as before: a line of a held master answers `'master'`, because that check reads the row found, but a record's own request is looked up by the id as asked, so a record held by its own request may answer `{ locked: false }` under another spelling. A client asking with the ids the server gave it gets the same answer from both doors.
+  
+  `@objectstack/client`: `client.approvals.getRecordLock` and `getRecordLocks` type the answer with the optional `lockSource?: 'record' | 'master'`.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [52a2398]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [81eae2b]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [ec545de]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/core@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

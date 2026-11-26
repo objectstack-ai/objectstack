@@ -1122,6 +1122,7 @@ const de = {
     addColumn: "Spalte hinzufügen",
     moveCard: "Karte verschieben",
     noCards: "Keine Karten",
+    notLoaded: "Nicht geladene Karten: {{count}}",
     columnCards: "Karten in Spalte {{column}}",
     laneCards: "Karten in {{column}} - {{lane}}",
     dropBlocked: "Eine Karte aus {{from}} kann nicht nach {{to}} verschoben werden.",
@@ -2142,7 +2143,7 @@ const de = {
   },
   console: {
     studio: {
-      title: "Studio",
+      title: "App Studio",
       accessRequired: "Sie benötigen Studio-Zugriff, um Studio zu öffnen. Ein Administrator kann ihn unter Einrichtung → Berechtigungssatz-Zuweisung mit einem Berechtigungssatz erteilen.",
     },
     saveAdvisoryTitle: "Gespeichert — die Autorenprüfung ergab {{count}} Hinweis(e)",
@@ -3729,11 +3730,11 @@ const de = {
       tooltip: "Diese Plattform befindet sich in der Vorschau — Funktionen können sich ändern.",
     },
     aiAssistant: "KI-Assistent",
-    designInStudio: "Im Studio gestalten",
+    designInStudio: "Im App Studio gestalten",
     designLayout: "Layout gestalten",
     editApp: "App bearbeiten",
-    openAppInStudio: "{{app}} im Studio ansehen",
-    viewInStudio: "Im Studio ansehen",
+    openAppInStudio: "{{app}} im App Studio ansehen",
+    viewInStudio: "Im App Studio ansehen",
   },
   home: {
     build: {
@@ -3873,8 +3874,8 @@ const de = {
       backToAppHome: "Zurück zum App-Menü",
       appsAvailable: "{{count}} Apps verfügbar",
       allApps: "Alle Apps",
-      editAppInStudio: "{{app}} im Studio bearbeiten",
-      openAppInStudio: "{{app}} im Studio ansehen",
+      editAppInStudio: "{{app}} im App Studio bearbeiten",
+      openAppInStudio: "{{app}} im App Studio ansehen",
       backToHome: "Zurück zur Startseite der App",
       settings: "Einstellungen",
       productHome: "{{product}} Startseite",

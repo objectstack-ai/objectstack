@@ -1122,6 +1122,7 @@ const ko = {
     addColumn: "열 추가",
     moveCard: "카드 이동",
     noCards: "카드 없음",
+    notLoaded: "로드되지 않은 카드: {{count}}",
     columnCards: "{{column}} 열의 카드",
     laneCards: "{{column}} - {{lane}}의 카드",
     dropBlocked: "{{from}}의 카드는 {{to}}에 놓을 수 없습니다.",
@@ -2142,7 +2143,7 @@ const ko = {
   },
   console: {
     studio: {
-      title: "Studio",
+      title: "App Studio",
       accessRequired: "Studio를 열려면 Studio 접근 권한이 필요합니다. 관리자가 '설정 → 권한 집합 할당'에서 권한 세트로 부여할 수 있습니다.",
     },
     saveAdvisoryTitle: "저장되었습니다 — 작성 검사에서 {{count}}건의 권장 사항이 발견되었습니다",
@@ -3729,11 +3730,11 @@ const ko = {
       tooltip: "이 플랫폼은 미리보기 단계입니다 — 기능이 변경될 수 있습니다.",
     },
     aiAssistant: "AI 어시스턴트",
-    designInStudio: "Studio에서 디자인",
+    designInStudio: "App Studio에서 디자인",
     designLayout: "레이아웃 디자인",
     editApp: "앱 편집",
-    openAppInStudio: "Studio에서 {{app}} 보기",
-    viewInStudio: "Studio에서 보기",
+    openAppInStudio: "App Studio에서 {{app}} 보기",
+    viewInStudio: "App Studio에서 보기",
   },
   home: {
     build: {
@@ -3872,8 +3873,8 @@ const ko = {
       backToAppHome: "앱 메뉴로 돌아가기",
       appsAvailable: "사용 가능한 앱 {{count}}개",
       allApps: "모든 앱",
-      editAppInStudio: "Studio에서 {{app}} 편집",
-      openAppInStudio: "Studio에서 {{app}} 보기",
+      editAppInStudio: "App Studio에서 {{app}} 편집",
+      openAppInStudio: "App Studio에서 {{app}} 보기",
       backToHome: "앱 시작 페이지로 돌아가기",
       settings: "시스템 설정",
       productHome: "{{product}} 홈",

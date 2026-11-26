@@ -79,6 +79,11 @@ export const PLATFORM_CAPABILITY_TOKENS: readonly string[] = Object.freeze([
   // Requested, never always-on: whether an app exposes a read tool is the
   // app's own declaration, not a side effect of shipping packs.
   'record-context',
+  // Knowledge (ADR-0161): the `knowledge` service and one vector store, chosen
+  // by the platform database — pgvector on PostgreSQL, otherwise a libSQL file
+  // of its own. Requested, never always-on: without the token no knowledge
+  // service, no store and no Knowledge settings page.
+  'knowledge',
   // Enterprise / cloud-runtime capabilities (no open-edition provider:
   // `hierarchy-security` ships in @objectstack/security-enterprise via
   // `plugins[]`; `ai-seat` / `governance` / `audit-compliance` /
@@ -233,6 +238,7 @@ export const PLATFORM_CAPABILITY_PROVIDERS: Readonly<Record<string, PlatformCapa
     settings: { package: '@objectstack/service-settings', edition: 'open' },
     webhooks: { package: '@objectstack/plugin-webhooks', edition: 'open' },
     'record-context': { package: '@objectstack/service-record-context', edition: 'open' },
+    knowledge: { package: '@objectstack/service-knowledge', edition: 'open' },
     // ── Enterprise / cloud-runtime capabilities ────────────────────────────
     'hierarchy-security': {
       package: '@objectstack/security-enterprise',

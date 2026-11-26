@@ -88,6 +88,14 @@ export const STUDIO_OWD_SECTION = 'owd';
 export const STUDIO_OWD_OBJECT_PARAM = 'object';
 
 /**
+ * objectstack#37454 (ADR-0084, amended 2026-11-26, 概览 Overview) — the route
+ * segment of a package's own page, 概览 Overview (`/studio/<package>/overview`):
+ * the menu's first entry. Not a metadata address: a package is not an item,
+ * and there is no `package` metadata type.
+ */
+export const STUDIO_OVERVIEW_SECTION = 'overview';
+
+/**
  * The retired pillars' route segments. objectstack#36909 — no pillar draws a
  * page any more: each address only redirects (`studioPillarRedirectModel.ts`).
  */

@@ -179,9 +179,11 @@ import {
   lintUniqueDeclarations,
   lintUnscopedDeclaredIndexes,
   lintLegacyOrganizationComposites,
-  lintSummaryRollups,
   lintInlineEditBulk,
+  lintFieldReferenceShapes,
+  summaryRollupFindings,
 } from './data-model-rules.js';
+import { objectExtensionsByTarget, objectsAsServed } from './object-graph.js';
 
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { UserTextParams } from './finding-user-text.js';
@@ -2594,15 +2596,69 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     source: 'packages/lint/src/data-model-rules.ts',
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['object'],
-    run: (stack) =>
-      lintSummaryRollups(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
+    // [#35143] The relation arm (`rollup/child-without-parent-reference`)
+    // asks whether the child has a foreign key back to the parent, and an
+    // object extension may add it, so it reads the child's fields as served:
+    // on the CLI the stack's own extensions folded in; at the `object` door
+    // the registry's served objects arriving as `context.objects`, pending
+    // `object_extension` drafts included (`storedObjectExtensions` is stated
+    // on `object_extension` writes only, so it is empty here). The aggregand
+    // arms keep reading the declared child field.
+    run: (stack, ctx) => {
+      const served = new Map<string, { name: string; def: unknown }[]>();
+      for (const obj of objectsAsServed(stack, ctx.storedObjectExtensions ?? []).objects) {
+        if (typeof obj.name !== 'string' || served.has(obj.name)) continue;
+        const fields = Array.isArray(obj.fields)
+          ? (obj.fields as AnyRec[]).filter((f) => typeof f?.name === 'string').map((f) => ({ name: f.name as string, def: f }))
+          : Object.entries((obj.fields ?? {}) as AnyRec).map(([name, def]) => ({ name, def }));
+        served.set(obj.name, fields);
+      }
+      return summaryRollupFindings(
+        Array.isArray(stack.objects) ? (stack.objects as unknown[]) : [],
+        (child) => served.get(child),
+      ).map((f) => ({
         severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
         rule: f.rule,
         where: f.where,
         path: f.path,
         message: f.message,
         hint: f.fix ?? '',
-      })),
+      }));
+    },
+  },
+  // [#35143] Two field shapes that parse and publish and then do not do what
+  // the key or the name says (`lintFieldReferenceShapes`): `reference` on a
+  // type that reads none (error — the engine links nothing, and the record
+  // page's inline editor turns the field into a record picker that writes a
+  // record id into it), and a `lookup` / `master_detail` named like a count or
+  // a total (warning — a relationship stores one record's id, never a number).
+  // GATING on all three commands; on the runtime publish gate's `object` and
+  // `object_extension` writes, where the written entry's own fields are the
+  // whole input, so nothing the snapshot lacks can make it fire. The
+  // differential charges a write only with a finding it creates.
+  {
+    name: 'lintFieldReferenceShapes',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/data-model-rules.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object', 'object_extension'],
+    run: (stack) => {
+      const extensions = [...objectExtensionsByTarget(stack).entries()].flatMap(([target, list]) =>
+        list.map((ext) => ({ target, path: ext.path, fields: ext.fields })),
+      );
+      return lintFieldReferenceShapes(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : [], extensions).map(
+        (f) => ({
+          severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
+          rule: f.rule,
+          where: f.where,
+          path: f.path,
+          message: f.message,
+          hint: f.fix ?? '',
+        }),
+      );
+    },
   },
   // Two visible fields of one object served under one label
   // (`field-label-duplicate`): the platform's `owner_id` and an author's

@@ -131,7 +131,7 @@ export const zhCN: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: '应用搭建',
       description: '面向开发者、分析师与实施者的元数据工作台',
       navigation: {
         group_overview: { label: '总览' },

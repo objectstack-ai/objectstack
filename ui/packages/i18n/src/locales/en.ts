@@ -1425,6 +1425,7 @@ const en = {
     addColumn: 'Add column',
     moveCard: 'Move card',
     noCards: 'No cards',
+    notLoaded: 'Cards not loaded: {{count}}',
     columnCards: '{{column}} cards',
     laneCards: '{{column}} - {{lane}} cards',
     dropBlocked: 'A card in {{from}} cannot be moved to {{to}}.',
@@ -2646,9 +2647,10 @@ const en = {
   console: {
     // The fixed crumb `AppHeader`'s `studio` variant draws on the Studio front
     // door (objectui#11863), as `organizations.title` is the `orgs` variant's.
-    // A product name, which every pack writes as is.
+    // A product name (ADR-0084): App Studio, which a Chinese pack writes as
+    // 应用搭建 and every other pack writes as is.
     studio: {
-      title: 'Studio',
+      title: 'App Studio',
       // What a principal without `studio.access` reads at the Studio URL they
       // opened (objectui#12035), in place of the silent redirect home.
       accessRequired: 'You need Studio access to open Studio. An administrator can grant it with a permission set in Setup → Permission Set Assignment.',
@@ -4472,11 +4474,11 @@ const en = {
   },
   topbar: {
     aiAssistant: 'AI Assistant',
-    designInStudio: 'Design in Studio',
+    designInStudio: 'Design in App Studio',
     designLayout: 'Design layout',
     editApp: 'Edit app',
-    openAppInStudio: 'Open {{app}} in Studio',
-    viewInStudio: 'View in Studio',
+    openAppInStudio: 'Open {{app}} in App Studio',
+    viewInStudio: 'View in App Studio',
     openAssistant: 'Open {{name}} assistant',
     offline: 'Offline',
     usersOnline: 'Users currently online',
@@ -4636,8 +4638,8 @@ const en = {
       backToAppHome: 'Back to the app menu',
       appsAvailable: '{{count}} apps available',
       allApps: 'All apps',
-      editAppInStudio: 'Edit {{app}} in Studio',
-      openAppInStudio: 'Open {{app}} in Studio',
+      editAppInStudio: 'Edit {{app}} in App Studio',
+      openAppInStudio: 'Open {{app}} in App Studio',
       backToHome: 'Back to app start page',
       settings: 'Settings',
       productHome: '{{product}} home',
