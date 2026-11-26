@@ -14,9 +14,13 @@ import {
  * node ran: its progress while it runs, its result once it ended.
  *
  * Calls the `knowledge` settings namespace's `index_status` action, which
- * admits an administrator only. A build record lives on the node that ran
- * the build: behind a load balancer, the node that answers may not be the one
- * building; the index state it reads is the store's own.
+ * admits an administrator only. A build record lives in memory on the node
+ * that ran the build: behind a load balancer, the node that answers may not
+ * be the one building, and a restarted node remembers none. The answer
+ * carries no node identity, so the command says which node a record is from
+ * only as "the node that answered", and when that node holds none it says
+ * that a build run on another node (or before a restart) is not shown here.
+ * The index state it prints is the store's own, the same on every node.
  */
 export default class KnowledgeStatus extends Command {
   static override description =
@@ -53,7 +57,12 @@ export default class KnowledgeStatus extends Command {
       this.log(`${source.id}  (${source.label ?? source.id}; adapter ${source.adapter ?? '?'}, ${source.kind ?? '?'} source)`);
       const index = source.index;
       this.log(`  index: ${index?.state ?? 'unknown'}${index?.due ? ' — a build is due' : ''}${index?.detail ? ` — ${index.detail}` : ''}`);
-      this.log(`  last build on this node: ${source.build ? describeBuild(source.build) : 'none'}`);
+      this.log(
+        source.build
+          ? `  last build on the node that answered: ${describeBuild(source.build)}`
+          : '  last build on the node that answered: none recorded there (a build run on another node, or before ' +
+              'this node restarted, is not shown; the index state above is the store\'s, the same on every node)',
+      );
       const note = source.build?.message;
       if (note) this.log(`    ${note}`);
     }
