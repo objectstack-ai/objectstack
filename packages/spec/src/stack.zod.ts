@@ -3636,8 +3636,11 @@ function collectPackageBodyDuplicateEntryErrors(
  * (`collectBundleHooks` collects by identity), but a built artifact carries two
  * equal hook entries, and the table's `hooks` line records that every entry's
  * handler is bound and runs — so a hook reached twice is counted twice and
- * refused. Two distinct entries count however alike they are, as in a single
- * stack.
+ * refused. `jobs` are counted the same way, per place reached
+ * ({@link composedJobDeclarations}): the job binder schedules every copy an
+ * artifact carries by its name, so a job reached twice is two enabled jobs of
+ * the name and neither runs. Two distinct entries count however alike they
+ * are, as in a single stack.
  */
 function collectComposedResidualDuplicateEntryErrors(
   stacks: readonly ObjectStackDefinition[],
@@ -3814,20 +3817,21 @@ interface ComposedJobDeclaration extends PackageCollectionEntry {
  * - Any other input's jobs reach the artifact's top level and no body: the
  *   residual's. With no body anywhere (a flat composition) that is every job.
  *
- * One entry OBJECT reached through two inputs is one declaration, counted once,
- * as at {@link collectComposedResidualDuplicateEntryErrors}.
+ * A job is counted once per place it is reached, the same job OBJECT reached
+ * through two inputs included (a built stack shared by two compositions, or
+ * passed twice): the boot binds every copy an artifact carries — the binder
+ * reads the bodies' jobs with no dedupe between them, and the top level's
+ * twice when it lists one twice — so two places are two jobs of the name, as
+ * `hooks` are counted at {@link collectComposedResidualDuplicateEntryErrors}.
+ * Only a nested input's flattened copies of its own bodies' jobs are not
+ * counted again, matched as above.
  */
 function composedJobDeclarations(
   stacks: readonly ObjectStackDefinition[],
   preserve: boolean,
 ): ComposedJobDeclaration[] {
   const declarations: ComposedJobDeclaration[] = [];
-  const seen = new Set<unknown>();
   const declare = (entry: unknown, origin: string, holder: string): void => {
-    if (entry !== null && typeof entry === 'object') {
-      if (seen.has(entry)) return;
-      seen.add(entry);
-    }
     declarations.push({ entry, origin, holder });
   };
   for (const [i, stack] of stacks.entries()) {

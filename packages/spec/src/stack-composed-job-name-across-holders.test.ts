@@ -168,6 +168,42 @@ describe('a residual job sharing an enabled name with a package body\'s job', ()
   });
 });
 
+describe('one job OBJECT reached through two places is two jobs of the name, as the binder binds both', () => {
+  // A flat composition concatenates by reference, so a built stack shared by two compositions puts the
+  // same job object in both. The binder binds each copy an artifact carries, so it is counted per place.
+  const base = () => defineStack({ jobs: [job('Shared')] });
+
+  it('one job object in two package bodies: refused, naming both bodies', () => {
+    const shared = base();
+    const a = composeStacks([shared, defineStack({ manifest: sales, objects: [line] })]);
+    const b = composeStacks([shared, defineStack({ manifest: billing })]);
+    const r = refusalOf(() => composeStacks([a, b], { manifest: 'preserve' }));
+    expectOneIssue(r);
+    expect(r.issues![0]).toBe(
+      "Job 'crm_nightly' is declared enabled twice across the packages of one composed artifact: " +
+        `'com.example.sales' (stack #0) jobs[0] and 'com.example.billing' (stack #1) jobs[0]. ${CONSEQUENCE} ${REMEDY_TWO}`,
+    );
+  });
+
+  it('one job object in a package body and the residual: refused, naming the body and the residual', () => {
+    const shared = base();
+    const a = composeStacks([shared, defineStack({ manifest: sales, objects: [line] })]);
+    const r = refusalOf(() => composeStacks([a, shared], { manifest: 'preserve' }));
+    expectOneIssue(r);
+    expect(r.issues![0]).toBe(
+      "Job 'crm_nightly' is declared enabled twice across the packages of one composed artifact: " +
+        `'com.example.sales' (stack #0) jobs[0] and stack #1 jobs[0] ${RESIDUAL}. ${CONSEQUENCE} ${REMEDY_TWO}`,
+    );
+  });
+
+  it('one job object twice in one holder (the same built stack passed twice): refused as that package\'s pair', () => {
+    const shared = base();
+    const r = refusalOf(() => composeStacks([defineStack({ manifest: sales, objects: [line] }), shared, shared]));
+    expectOneIssue(r);
+    expect(r.issues![0]).toMatch(/^Job 'crm_nightly' is declared twice in `jobs`: stack #1 jobs\[0\] and stack #2 jobs\[0\]\. /);
+  });
+});
+
 describe('CONTROLS: what the binder schedules without a refusal still composes', () => {
   it('a body\'s job alone: its flattened copy is not read as a residual twin', () => {
     const composed = composeStacks(
