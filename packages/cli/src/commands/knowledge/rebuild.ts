@@ -25,14 +25,18 @@ import {
  * Behind a load balancer. The build record lives in memory on the node that
  * runs the build, so a progress read can land on a node that holds no record
  * of this build. Such a poll is not a failure: the command falls back to the
- * index state, which the store reports and which is the same on every node.
- * The index state was read once before the rebuild started; when it was not
- * `current` then (never built, a new fingerprint, a changed recipe),
+ * index state, which the store reports and which is the same on every node
+ * when the adapter's store is shared between nodes.
+ * The index state was read once before the rebuild started; when a build was
+ * due then (`due: true`: never built, a new fingerprint, a changed recipe),
  * `current` now means a complete build has recorded itself (the adapter
  * records it only at a build's end), and the command exits 0, saying the
- * counts were not read. When the index was already `current`, or its state
- * was not read, it cannot tell a running build from a finished one, and the
- * command keeps polling until a read reaches the building node.
+ * counts were not read. When no build was due (the index `current`,
+ * `unreadable`, or a state that never turns `current`), or the state was not
+ * read, it cannot tell a running build from a finished one, and the command
+ * keeps polling until a read reaches the building node. The same holds on
+ * the `memory` adapter, whose index lives in each process and is not shared
+ * between nodes: there the index state is never read as this build's end.
  *
  * Exits 0 when the build finished (its record says `done`, or the index
  * turned `current`), 1 when its record says it did not run or did not
@@ -81,15 +85,16 @@ export default class KnowledgeRebuild extends Command {
     const target = resolveKnowledgeTarget(flags);
 
     // The index state before the build: the only baseline against which the
-    // store's state can say a build completed (due before, current after).
-    let indexBefore: KnowledgeSourceView['index'];
+    // store's state can say a build completed (due before, current after),
+    // and the adapter, which says whether that state is shared between nodes.
+    let sourceBefore: KnowledgeSourceView | undefined;
     if (flags.wait) {
       const before = await runKnowledgeAction(target, 'index_status', { source: args.source });
       if (!before.ok) {
         this.error(before.message, { exit: 1 });
         return;
       }
-      indexBefore = firstSource(before.details)?.index;
+      sourceBefore = firstSource(before.details);
     }
 
     const started = await runKnowledgeAction(target, 'rebuild', { source: args.source });
@@ -106,7 +111,15 @@ export default class KnowledgeRebuild extends Command {
       return;
     }
     const startedAt = startedBuild?.startedAt;
-    const indexWasCurrent = indexBefore?.state === undefined || indexBefore.state === 'current';
+    // The index state can say this build completed only when a build was due
+    // before it (never built, a new fingerprint, a changed recipe, no recipe
+    // hash on an adapter that records one: all turn `current` at a build's
+    // end) and when every node reads one shared store. Any other baseline
+    // (`current`, `unreadable`, unread, a state that never turns `current`)
+    // and the `memory` adapter, whose index is per process, leave the
+    // building node's record as the only answer.
+    const perProcessIndex = sourceBefore?.adapter === MEMORY_ADAPTER;
+    const indexCanTell = sourceBefore?.index?.due === true && !perProcessIndex;
 
     let lastLine = '';
     let unseenSeconds = 0;
@@ -139,7 +152,7 @@ export default class KnowledgeRebuild extends Command {
       // Another node answered (behind a load balancer): no record of this
       // build there. Never a failure on its own; the store's index state is.
       const index = entry?.index;
-      if (!indexWasCurrent && index?.state === 'current') {
+      if (indexCanTell && index?.state === 'current') {
         this.log(
           'The index is current: a complete build has recorded itself in the store. The node that answered holds no ' +
             'record of this build, so its counts are not shown (os knowledge status shows them when it reaches the node that ran it).',
@@ -148,9 +161,11 @@ export default class KnowledgeRebuild extends Command {
       }
       const line =
         `answered by a node that is not running this build; the store's index state: ${index?.state ?? 'unknown'}` +
-        (!indexWasCurrent
+        (indexCanTell
           ? ' (waiting for it to turn current)'
-          : ' (it was current, or unread, before this rebuild, so it cannot show when this build ends; waiting for a read that reaches the node running it)');
+          : perProcessIndex
+            ? " (the memory adapter keeps its index per process, so another node's state says nothing of this build; waiting for a read that reaches the node running it)"
+            : ' (a build was not due before this rebuild, or the state was not read, so it cannot show when this build ends; waiting for a read that reaches the node running it)');
       if (line !== lastLine) {
         this.log(line);
         lastLine = line;
@@ -168,6 +183,9 @@ export default class KnowledgeRebuild extends Command {
     }
   }
 }
+
+/** The adapter whose index lives in one process's memory: its state is not shared between nodes. */
+const MEMORY_ADAPTER = 'memory';
 
 /** The one source of an `index_status` answer for a single source. */
 function firstSource(details: Record<string, unknown>): KnowledgeSourceView | undefined {

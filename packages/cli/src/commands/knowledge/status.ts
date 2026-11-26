@@ -20,7 +20,8 @@ import {
  * carries no node identity, so the command says which node a record is from
  * only as "the node that answered", and when that node holds none it says
  * that a build run on another node (or before a restart) is not shown here.
- * The index state it prints is the store's own, the same on every node.
+ * The index state it prints is the store's own: the same on every node when
+ * the adapter's store is shared, and per node on the `memory` adapter.
  */
 export default class KnowledgeStatus extends Command {
   static override description =
@@ -61,7 +62,8 @@ export default class KnowledgeStatus extends Command {
         source.build
           ? `  last build on the node that answered: ${describeBuild(source.build)}`
           : '  last build on the node that answered: none recorded there (a build run on another node, or before ' +
-              'this node restarted, is not shown; the index state above is the store\'s, the same on every node)',
+              'this node restarted, is not shown; the index state above is the store\'s, the same on every node only when ' +
+              'the adapter\'s store is shared between nodes, not on the memory adapter)',
       );
       const note = source.build?.message;
       if (note) this.log(`    ${note}`);

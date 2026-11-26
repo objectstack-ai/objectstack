@@ -15,8 +15,9 @@
  * Behind a load balancer a progress read can land on a node that holds no
  * record of the build (the record lives in memory on the node running it):
  * `nodeWithoutRecord` answers such a poll. The command then reads the
- * store's index state, the same on every node, and never exits 1 for the
- * poll alone.
+ * store's index state (the same on every node for a shared store; never
+ * read as the build's end on the per-process `memory` adapter), and never
+ * exits 1 for the poll alone.
  *
  * The oclif `Config` is loaded at module scope, as in
  * `commands/datasource/envelope-unwrap.test.ts` (whose header says why).
@@ -102,10 +103,11 @@ const running = (discovered: number) => ({
 });
 const CURRENT = { state: 'current', due: false, detail: 'current.' };
 const NEVER_BUILT = { state: 'nothing', due: true, detail: 'never built.' };
-const statusOf = (build: unknown, index: unknown = CURRENT) => ok({
+const UNREADABLE = { state: 'unreadable', due: false, detail: 'reading the adapter failed: connection reset.' };
+const statusOf = (build: unknown, index: unknown = CURRENT, adapter = 'pgvector') => ok({
   ok: true,
   message: '1 source(s)',
-  details: { sources: [{ id: 'kb', label: 'KB', adapter: 'pgvector', kind: 'object', index, build }] },
+  details: { sources: [{ id: 'kb', label: 'KB', adapter, kind: 'object', index, build }] },
 });
 /** A poll answered by a node that is not running this build: no record there. */
 const nodeWithoutRecord = (index: unknown) => statusOf(null, index);
@@ -212,7 +214,37 @@ describe('os knowledge rebuild', () => {
       // Only the recorded failure, read on the node that ran the build, exits 1.
       expect(run.failure).toMatchObject({ message: 'the adapter upsert failed: quota', exit: 1 });
       expect(run.requests).toHaveLength(5);
-      expect(run.logs.join('\n')).toContain('it was current, or unread, before this rebuild');
+      expect(run.logs.join('\n')).toContain('a build was not due before this rebuild');
+    });
+
+    it('does not read an unreadable baseline as a due build: a current index elsewhere is no exit 0', async () => {
+      // A transient adapter error on the baseline read answers `unreadable`
+      // (due: false). The index then reads `current` on another node because a
+      // same-fingerprint rebuild never leaves it; that is not this build's end.
+      const run = await drive(KnowledgeRebuild, ['kb', '--interval', '2', '--timeout', '4', ...target], [
+        nodeWithoutRecord(UNREADABLE),
+        ok({ ok: true, details: { source: 'kb', build: running(0) } }),
+        nodeWithoutRecord(CURRENT),
+        nodeWithoutRecord(CURRENT),
+      ]);
+      expect(run.failure?.exit).toBe(1);
+      expect(run.failure?.message).toContain('Stopped following after 4s');
+      expect(run.logs.join('\n')).not.toContain('The index is current');
+    });
+
+    it('never reads the per-process memory adapter\'s index as this build\'s end; waits for the building node', async () => {
+      const run = await drive(KnowledgeRebuild, ['kb', ...target], [
+        statusOf(null, NEVER_BUILT, 'memory'),
+        ok({ ok: true, details: { source: 'kb', build: running(0) } }),
+        statusOf(null, CURRENT, 'memory'),
+        statusOf(done, CURRENT, 'memory'),
+      ]);
+      expect(run.failure).toBeUndefined();
+      expect(run.requests).toHaveLength(4);
+      const text = run.logs.join('\n');
+      expect(text).not.toContain('The index is current');
+      expect(text).toContain('the memory adapter keeps its index per process');
+      expect(text).toContain('done (operator, ended 2026-11-26T05:01:00.000Z)');
     });
 
     it('exits 1 after --timeout seconds of polls that reach no record, and says the build may still run', async () => {
@@ -272,6 +304,7 @@ describe('os knowledge status', () => {
     expect(text).toContain('index: nothing — a build is due — never built.');
     expect(text).toContain('last build on the node that answered: none recorded there');
     expect(text).toContain('a build run on another node');
+    expect(text).toContain('not on the memory adapter');
   });
 
   it('exits 1 with the server refusal text', async () => {

@@ -4031,7 +4031,9 @@ record lives in memory on the node that ran it, so behind a load balancer the
 node that answers may not be the one building, and a restarted node remembers
 none. When the answering node holds no record, the command says so: a build
 run on another node, or before a restart, is not shown. The index state is read
-from the store and is the same on every node. Exits `1` with the server's
+from the store, and is the same on every node when the adapter's store is
+shared between nodes (`pgvector`); the `memory` adapter keeps its index in each
+process, so there each node answers for its own. Exits `1` with the server's
 refusal text when the action is refused.
 
 #### `os knowledge rebuild`
@@ -4051,11 +4053,14 @@ build's progress until it ends.
 Behind a load balancer a progress read can land on a node that is not running
 the build and holds no record of it. That read is not a failure: the command
 falls back to the index state, which the store reports and which is the same on
-every node. When the index was not `current` before the rebuild (never built, a
-new fingerprint, a changed recipe), it turning `current` means a complete build
-recorded itself, and the command exits `0` without the build's counts. When the
-index was already `current`, its state cannot show when the build ends, and the
-command keeps polling until a read reaches the node running the build.
+every node when the adapter's store is shared between nodes. When a build was
+due before the rebuild (never built, a new fingerprint, a changed recipe), the
+index turning `current` means a complete build recorded itself, and the command
+exits `0` without the build's counts. When no build was due (the index already
+`current`, or unreadable), the state cannot show when the build ends, and the
+command keeps polling until a read reaches the node running the build. On the
+`memory` adapter, whose index lives in each process, the index state is never
+read as the build's end: only the building node's record answers.
 
 It exits `0` when the build finished (its record says done, or the index turned
 `current`), and `1` when the server refused the rebuild (an unknown or `file`
