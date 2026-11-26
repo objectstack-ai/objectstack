@@ -11,6 +11,7 @@ import type { SettingsCopyLocale } from './settings-copy-locale.js';
 import { CURRENCY_LOCK_COPY, currencyLockCopy } from './localization-currency-lock.js';
 import { NOT_OFFERED_COPY, notOfferedCopy } from './localization-locale-options.js';
 import { SETTINGS_ACTION_COPY, settingsActionCopy } from './settings-action-copy.js';
+import { AI_MODEL_RULE_COPY, aiModelRuleCopy } from './manifests/ai-models.js';
 
 /** The key each platform table tag is served by. */
 const KEY_OF_TAG: Record<PlatformLocaleTag, SettingsCopyLocale> = {
@@ -30,6 +31,11 @@ const SAMPLE_ARGS: Record<string, unknown[]> = {
   resetCleared: [3],
   resetStillPinned: [2],
   noHandler: ['probe', 'branding'],
+  defaultModelWithoutProvider: ['o3'],
+  defaultModelNotListed: ['o3', 'OpenAI', 'gpt-4o, gpt-4o-mini'],
+  structuredProviderOff: ['Anthropic'],
+  structuredModelWithoutProvider: ['o3'],
+  structuredModelNotListed: ['o3', 'OpenAI', 'gpt-4o, gpt-4o-mini'],
 };
 
 /** An entry's sentences, functions called with sample arguments. */
@@ -46,6 +52,7 @@ const TABLES = [
   { name: 'currency lock', table: CURRENCY_LOCK_COPY as Record<string, unknown>, lookup: currencyLockCopy as (l?: string) => unknown },
   { name: 'no longer offered', table: NOT_OFFERED_COPY, lookup: notOfferedCopy },
   { name: 'built-in action answers', table: SETTINGS_ACTION_COPY, lookup: settingsActionCopy },
+  { name: 'ai model rule', table: AI_MODEL_RULE_COPY, lookup: aiModelRuleCopy },
 ];
 
 /** Separators that are legitimately the same in English and another language. */

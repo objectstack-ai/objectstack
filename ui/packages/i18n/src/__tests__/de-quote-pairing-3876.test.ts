@@ -493,11 +493,14 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 133 once objectstack-ai/objectstack#36999 added `console.ai.focus.switchPrompt`,
     // the offer to ask about the record in view instead („{{target}}“) — one
     // interpolated span.
-    // 127 once objectstack-ai/objectstack#37682 retired the build chat's keys:
+    // 135 once objectstack-ai/objectstack#36794 added `grid.import.referenceOutOfScope`
+    // („{{value}}“) and `grid.import.scopeEntry` („{{value}}“), the Import
+    // Wizard's line for a lookup value under another parent — two interpolated spans.
+    // 129 once objectstack-ai/objectstack#37682 retired the build chat's keys:
     // `console.ai.empty.editApp.title`, `chatbot.plan.iterateOrNew.question` and
     // `.extend`, `chatbot.plan.suggestedFieldLegend`, `chatbot.build.nextStepQuote`
     // and `chatbot.build.draftPosture` — six spans fewer.
-    expect(okSpans, 'correctly paired spans').toBe(127);
+    expect(okSpans, 'correctly paired spans').toBe(129);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -640,9 +643,11 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 132 / 132 / 0 after objectstack-ai/objectstack#36739 removed the
     // checklist's `organizationName.todo` and `timezone.todo`, two pairs fewer.
     // 133 / 133 / 0 after objectstack-ai/objectstack#36999 added `console.ai.focus.switchPrompt`.
-    // 127 / 127 / 0 after objectstack-ai/objectstack#37682 retired six build-chat
+    // 135 / 135 / 0 after objectstack-ai/objectstack#36794 added `grid.import.referenceOutOfScope`
+    // and `grid.import.scopeEntry`.
+    // 129 / 129 / 0 after objectstack-ai/objectstack#37682 retired six build-chat
     // keys, one matched pair each.
-    expect({ open, close, rdq }).toEqual({ open: 127, close: 127, rdq: 0 });
+    expect({ open, close, rdq }).toEqual({ open: 129, close: 129, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

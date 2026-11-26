@@ -443,7 +443,8 @@ const DASHBOARD_FILTER_FIELD_NOT_INCLUDED_EXPLANATION: RuleExplanation = {
  * What an unprovisioned anchor is — the cause half of every read-side anchor
  * id (`dashboard-filter-field-unprovisioned`, `react-chart-field-unprovisioned`,
  * `sort-field-unprovisioned`, `searchable-field-unprovisioned`,
- * `page-field-unprovisioned`, `flow-template-field-unprovisioned`).
+ * `page-field-unprovisioned`, `flow-template-field-unprovisioned`,
+ * `ai-context-field-unprovisioned`).
  * The rule files share its verdict clause, `unprovisionedAnchorVerdict()`, or
  * its long form, `unprovisionedAnchorCause()`.
  */
@@ -458,7 +459,8 @@ const UNPROVISIONED_ANCHOR_CAUSE =
  * the converted anchor ids (`unprovisionedAnchorFix()`) names without the how:
  * `sort-field-unprovisioned`, `searchable-field-unprovisioned`,
  * `react-chart-field-unprovisioned`, `dashboard-filter-field-unprovisioned`,
- * `page-field-unprovisioned`, `flow-template-field-unprovisioned` and the hook,
+ * `page-field-unprovisioned`, `flow-template-field-unprovisioned`,
+ * `ai-context-field-unprovisioned` and the hook,
  * action and flow-node write-anchor ids write it out.
  */
 const UNPROVISIONED_ANCHOR_REMEDY =
@@ -5992,8 +5994,37 @@ const AI_CONTEXT_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
   rule: 'ai-context-field-unknown',
   covers: 'why each field a context pack lists must exist on its object',
   paragraphs: [
-    'A pack lists the root\'s `fields`, each related list\'s `fields`, and a `body.field`. A name the object ' +
-      'does not define is left out of every answer: the assistant reads less about the record than the pack says.',
+    'A pack lists the root\'s `fields`, each related list\'s `fields`, and a `body.field`; a related list\'s ' +
+      '`where` and `orderBy` name fields too. A name the object does not define is left out of every answer: ' +
+      'the assistant reads less about the record than the pack says. In a `where` or `orderBy` the whole list ' +
+      'is left out, since a filter or an order is never read with one of its fields removed.',
+    'Defined means declared in the object\'s `fields` or injected by the platform: the system columns it ' +
+      'adds without the author declaring them (`owner_id`, `created_at`, `created_by` and the rest) are ' +
+      'fields of the published definition `get_record_context` reads, so a pack naming one is not reported. ' +
+      'A column the platform does not inject on that object is still unknown: for example `owner_id` ' +
+      'under `ownership: \'org\'`, or any of them under `systemFields: false`. On an ' +
+      '`external` object an injected column resolves but has no storage; that is ' +
+      '`ai-context-field-unprovisioned`.',
+    AI_CONTEXT_PACK_SILENCE,
+  ],
+};
+
+const AI_CONTEXT_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
+  rule: 'ai-context-field-unprovisioned',
+  covers: 'why a context pack reads nothing of an external anchor',
+  paragraphs: [
+    UNPROVISIONED_ANCHOR_CAUSE,
+    'A context pack naming such an anchor reads a column that holds nothing, at the cost the message ' +
+      'names for its position: in the root\'s or a related list\'s `fields` the answer carries it empty on ' +
+      'every record; as `body.field` the answer carries no body; in a related list\'s `where`, or as the ' +
+      'reference field that links the list to its root, the condition can never match a real value (on ' +
+      'SQLite it degrades to constant-false) and the list reads no rows; in its `orderBy` the order finds ' +
+      'no column, so the list is read in an arbitrary order and its row cap keeps an arbitrary slice.',
+    'Only a name that resolved BECAUSE it is injected is judged: an author-declared column of the same ' +
+      'name is one the author vouches for. A name the object does not define at all is ' +
+      '`ai-context-field-unknown`. A warning, because the rule cannot see the remote table, only that the ' +
+      'platform provisions no storage.',
+    UNPROVISIONED_ANCHOR_REMEDY,
     AI_CONTEXT_PACK_SILENCE,
   ],
 };
@@ -7095,6 +7126,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION.rule]: PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION,
   [AI_CONTEXT_OBJECT_UNKNOWN_EXPLANATION.rule]: AI_CONTEXT_OBJECT_UNKNOWN_EXPLANATION,
   [AI_CONTEXT_FIELD_UNKNOWN_EXPLANATION.rule]: AI_CONTEXT_FIELD_UNKNOWN_EXPLANATION,
+  [AI_CONTEXT_FIELD_UNPROVISIONED_EXPLANATION.rule]: AI_CONTEXT_FIELD_UNPROVISIONED_EXPLANATION,
   [AI_CONTEXT_RELATED_LINK_UNKNOWN_EXPLANATION.rule]: AI_CONTEXT_RELATED_LINK_UNKNOWN_EXPLANATION,
   [AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION.rule]: AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION,
   [AI_CONTEXT_SORT_FIELD_UNSORTABLE_EXPLANATION.rule]: AI_CONTEXT_SORT_FIELD_UNSORTABLE_EXPLANATION,
