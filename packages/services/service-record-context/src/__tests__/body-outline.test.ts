@@ -151,12 +151,83 @@ describe('[ADR-0160 D3] the outline is bounded whatever the body holds', () => {
 
   it('a heading too long to list within the bound is left out, never carried past it', () => {
     const headings = md([`# ${'x'.repeat(RECORD_CONTEXT_BODY_MAX_CHARS)}`]);
-    expect(boundedOutline(headings)).toEqual({ outline: [], omitted: 1 });
+    expect(boundedOutline(headings)).toEqual({ outline: [], omitted: 1, unlistable: 1 });
   });
 
   it('a listed anchor is the one the reader gave, cut or not', () => {
     const headings = md(Array.from({ length: 100 }, () => '## Notes'));
     const { outline } = boundedOutline(headings);
     expect(outline.map((h) => h.anchor)).toEqual(['notes', ...Array.from({ length: 79 }, (_, i) => `notes-${i + 2}`)]);
+  });
+});
+
+describe('[ADR-0160 D3] the outline comes in pages that list every heading', () => {
+  const md = (lines: string[]) => headingsOf(lines.join('\nbody text\n'), false);
+  /** Every page from the first, following `next`, each held to both bounds. */
+  const pagesOf = (headings: ReturnType<typeof md>) => {
+    const pages: Array<ReturnType<typeof boundedOutline>['outline']> = [];
+    let from: number | undefined = 0;
+    while (from !== undefined) {
+      const page = boundedOutline(headings, from);
+      expect(page.outline.length).toBeGreaterThan(0);
+      expect(page.outline.length).toBeLessThanOrEqual(RECORD_CONTEXT_OUTLINE_MAX_ENTRIES);
+      expect(JSON.stringify(page.outline).length).toBeLessThanOrEqual(RECORD_CONTEXT_BODY_MAX_CHARS);
+      expect(page.omitted).toBe(headings.length - page.outline.length);
+      pages.push(page.outline);
+      from = page.next;
+    }
+    return pages;
+  };
+
+  it('a flat body\'s pages are runs of it in body order, and together list every heading once', () => {
+    const headings = md(Array.from({ length: 300 }, (_, i) => `## Clause ${i + 1}`));
+    const pages = pagesOf(headings);
+    expect(pages.map((p) => p.length)).toEqual([80, 80, 80, 60]);
+    expect(pages.flat().map((h) => h.anchor)).toEqual(headings.map((h) => h.anchor));
+    expect(boundedOutline(headings, 80).next).toBe(160);
+    expect(boundedOutline(headings, 240)).not.toHaveProperty('next');
+  });
+
+  it('a nested body\'s first page is its top levels, and later pages list the deeper headings left out', () => {
+    const lines: string[] = [];
+    for (let a = 1; a <= 10; a++) {
+      lines.push(`# Part ${a}`);
+      for (let b = 1; b <= 20; b++) lines.push(`## Part ${a} clause ${b}`);
+    }
+    const headings = md(lines);
+    const pages = pagesOf(headings);
+    expect(pages[0].filter((h) => h.level === 1)).toHaveLength(10);
+    expect(pages.slice(1).flat().every((h) => h.level === 2)).toBe(true);
+    const listed = pages.flat().map((h) => h.anchor);
+    expect(new Set(listed).size).toBe(headings.length);
+    expect([...listed].sort()).toEqual(headings.map((h) => h.anchor).sort());
+    // Each page lists its headings in body order.
+    for (const page of pages) {
+      const at = page.map((h) => headings.findIndex((x) => x.anchor === h.anchor));
+      expect(at).toEqual([...at].sort((x, y) => x - y));
+    }
+  });
+
+  it('a page is held to the character bound before the entry cap, and the next page starts where it stopped', () => {
+    const headings = md(Array.from({ length: 40 }, (_, i) => `# ${'Long heading '.repeat(25)}${i}`));
+    const first = boundedOutline(headings);
+    expect(first.next).toBe(first.outline.length);
+    expect(pagesOf(headings).flat().map((h) => h.anchor)).toEqual(headings.map((h) => h.anchor));
+  });
+
+  it('a heading too long to list by itself is on no page, counted, and never empties a page the others fit on', () => {
+    // The shallowest heading, first in the order the pages run in, is the one too long to list.
+    const headings = md([`# ${'x'.repeat(RECORD_CONTEXT_BODY_MAX_CHARS)}`, ...Array.from({ length: 100 }, (_, i) => `## Clause ${i + 1}`)]);
+    const first = boundedOutline(headings);
+    expect(first.outline).toHaveLength(RECORD_CONTEXT_OUTLINE_MAX_ENTRIES);
+    expect(first.outline[0]).toEqual({ anchor: 'clause-1', heading: 'Clause 1', level: 2 });
+    expect(first).toMatchObject({ omitted: 101 - RECORD_CONTEXT_OUTLINE_MAX_ENTRIES, next: 81, unlistable: 1 });
+    const last = boundedOutline(headings, 81);
+    expect(last.outline.map((h) => h.anchor)).toEqual(headings.slice(81).map((h) => h.anchor));
+    expect(last).not.toHaveProperty('next');
+    expect(last.unlistable).toBe(1);
+  });
+});
+    expect(boundedOutline(headings, 1)).toEqual({ outline: [], omitted: 2 });
   });
 });

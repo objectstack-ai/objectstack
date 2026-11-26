@@ -18,6 +18,7 @@ import {
   getRecordContextToolDefinitions,
   recordContextReadSet,
 } from '../index.js';
+import { headingsOf } from '../body-outline.js';
 import { sentencesFor } from '../sentences.js';
 import { fakeDoor, policyApp, type FakeApp } from './fake-door.js';
 
@@ -55,7 +56,7 @@ describe('get_record_context — the service constants (ADR-0160 D3: pinned by t
     expect(rest).toEqual([]);
     expect(definition.name).toBe(GET_RECORD_CONTEXT_TOOL_NAME);
     expect(Object.keys((definition.parameters as { properties: object }).properties)).toEqual(
-      expect.arrayContaining(['objectName', 'recordId', 'context', 'anchor']),
+      expect.arrayContaining(['objectName', 'recordId', 'context', 'anchor', 'outlineFrom']),
     );
     expect(definition.outputSchema).toBeDefined();
   });
@@ -839,6 +840,137 @@ describe('get_record_context — the outline bound (ADR-0160 D3: every cut is st
     expect(out.data.body?.text).toHaveLength(RECORD_CONTEXT_BODY_MAX_CHARS);
     expect(out.data.body?.truncated).toBe(true);
     expect(out.notes.map((n) => n.kind)).toEqual(['body_truncated']);
+  });
+});
+
+describe('get_record_context — the outline in pages (ADR-0160 D3: every section reachable, every answer bounded)', () => {
+  const HEADINGS = 300;
+  /** A long body of `n` short headings at one level, each over a short clause. */
+  const flat = (n = HEADINGS) => Array.from({ length: n }, (_, i) => `## Clause ${i + 1}\nThe insurer pays clause ${i + 1}.\n`).join('');
+  /** One top heading over `n` second-level ones: a nested cut whose top section passes the body bound. */
+  const nested = (n = HEADINGS) => `# Terms\n${flat(n)}`;
+  const withBody = (content: string, overrides: Partial<FakeApp> = {}) => {
+    const app = policyApp(overrides);
+    app.records.policy[0].content = content;
+    return app;
+  };
+  /** The answer's one JSON, held to the bounds a single answer keeps. */
+  const assertBounded = (out: Awaited<ReturnType<typeof run>>) => {
+    expect(GetRecordContextOutputSchema.safeParse(out).success).toBe(true);
+    const body = out.data.body!;
+    if (body.outline) {
+      expect(body.outline.length).toBeLessThanOrEqual(RECORD_CONTEXT_OUTLINE_MAX_ENTRIES);
+      expect(JSON.stringify(body.outline).length).toBeLessThanOrEqual(RECORD_CONTEXT_BODY_MAX_CHARS);
+    }
+    if (body.text !== undefined) expect(body.text.length).toBeLessThanOrEqual(RECORD_CONTEXT_BODY_MAX_CHARS);
+  };
+  /** Every page, from the first, by the `outlineNext` each answer gave. */
+  const walk = async (app: FakeApp) => {
+    const pages: Array<Awaited<ReturnType<typeof run>>> = [];
+    let from: number | undefined;
+    do {
+      const out = await run(app, from === undefined ? CALL : { ...CALL, outlineFrom: from });
+      assertBounded(out);
+      pages.push(out);
+      from = out.data.body?.outlineNext;
+    } while (from !== undefined && pages.length <= HEADINGS);
+    return pages;
+  };
+
+  it('a body of 300 headings at one level: every section is read by an anchor the tool issued, each answer within the bounds', async () => {
+    const content = flat();
+    expect(content.length).toBeGreaterThan(RECORD_CONTEXT_BODY_MAX_CHARS);
+    const app = withBody(content);
+    const pages = await walk(app);
+    expect(pages.length).toBeGreaterThan(1);
+    const issued = pages.flatMap((p) => p.data.body?.outline ?? []).map((h) => h.anchor);
+    expect(issued).toHaveLength(HEADINGS);
+    expect(new Set(issued).size).toBe(HEADINGS);
+    for (const [i, anchor] of issued.entries()) {
+      const section = await run(app, { ...CALL, anchor });
+      assertBounded(section);
+      expect(section.data.body?.text).toBe(`## Clause ${i + 1}\nThe insurer pays clause ${i + 1}.\n`);
+    }
+  });
+
+  it('a nested body whose top section passes the bound: the deeper headings are listed on later pages, each read by its anchor', async () => {
+    const app = withBody(nested());
+    const pages = await walk(app);
+    expect(pages[0].data.body?.outline?.[0]).toEqual({ anchor: 'terms', heading: 'Terms', level: 1 });
+    const issued = pages.flatMap((p) => p.data.body?.outline ?? []).map((h) => h.anchor);
+    expect(issued).toHaveLength(HEADINGS + 1);
+    // The top section is cut at the bound, so its clauses past the cut are reached by their own anchors only.
+    const top = await run(app, { ...CALL, anchor: 'terms' });
+    expect(top.data.body?.truncated).toBe(true);
+    expect(top.data.body?.text).not.toContain(`Clause ${HEADINGS}\n`);
+    const last = await run(app, { ...CALL, anchor: `clause-${HEADINGS}` });
+    expect(last.data.body?.text).toBe(`## Clause ${HEADINGS}\nThe insurer pays clause ${HEADINGS}.\n`);
+  });
+
+  it('the cut note is true for a flat cut and for a nested cut, in en and zh-Hans: it names the page to list next, not the headings under a section', async () => {
+    for (const content of [flat(), nested()]) {
+      const total = headingsOf(content, false).length;
+      for (const locales of [undefined, ['zh-CN']]) {
+        const out = await run(withBody(content, locales ? { locales } : {}));
+        const listed = out.data.body?.outline?.length ?? 0;
+        expect(out.data.body?.outlineNext).toBe(listed);
+        const notes = out.notes.filter((n) => n.kind === 'outline_truncated');
+        expect(notes).toHaveLength(1);
+        const text = notes[0].text;
+        for (const n of [listed, total, total - listed]) expect(text).toContain(String(n));
+        expect(text).toContain(`outlineFrom ${listed}`);
+        expect(text).not.toContain('insurer');
+        // The sentence the flat cut made false: nothing it leaves out is under a listed section there.
+        expect(text).not.toMatch(/includes the headings under it|它下面的标题包含在该章节的文本中/);
+        if (locales) expect(text).toMatch(/大纲/);
+      }
+    }
+  });
+
+  it('the last page states that no later page lists more, and gives no outlineNext', async () => {
+    const app = withBody(flat());
+    const pages = await walk(app);
+    const last = pages[pages.length - 1];
+    expect(last.data.body).not.toHaveProperty('outlineNext');
+    const cut = last.notes.find((n) => n.kind === 'outline_truncated');
+    expect(cut?.text).toContain(String(HEADINGS - (last.data.body?.outline?.length ?? 0)));
+    expect(cut?.text).not.toContain('outlineFrom');
+  });
+
+  it('outlineFrom 0 is the first page', async () => {
+    const app = withBody(flat());
+    expect(await run(app, { ...CALL, outlineFrom: 0 })).toEqual(await run(app));
+  });
+
+  it('an outline page that does not start where outlineFrom says is ONE answer: past the end, a body carried whole, no body in the pack, or a body the caller cannot see', async () => {
+    const past = await refusalOf(run(withBody(flat()), { ...CALL, outlineFrom: HEADINGS }));
+    const whole = await refusalOf(run(policyApp(), { ...CALL, outlineFrom: HEADINGS }));
+    const noBody = await refusalOf(
+      run(policyApp({ packs: [{ name: 'policy_document', label: 'Policy document', object: 'policy', fields: ['title'] }] }), {
+        ...CALL,
+        outlineFrom: HEADINGS,
+      }),
+    );
+    const hiddenBody = await refusalOf(run(policyApp({ hiddenFields: { policy: ['content'] } }), { ...CALL, outlineFrom: HEADINGS }));
+    expect(past).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+    expect(past.message).toContain(String(HEADINGS));
+    expect(whole).toEqual(past);
+    expect(noBody).toEqual(past);
+    expect(hiddenBody).toEqual(past);
+  });
+
+  it('a call naming both anchor and outlineFrom is refused before anything is read', async () => {
+    const app = withBody(flat());
+    const door = fakeDoor(app);
+    const refused = await refusalOf(executeGetRecordContext({ ...CALL, anchor: 'clause-1', outlineFrom: 80 }, door));
+    expect(refused).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(door.reads).toEqual([]);
+  });
+
+  it('a negative or fractional outlineFrom is refused at parse', async () => {
+    for (const outlineFrom of [-1, 1.5, '80']) {
+      expect(await refusalOf(run(withBody(flat()), { ...CALL, outlineFrom }))).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    }
   });
 });
 

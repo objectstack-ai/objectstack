@@ -648,8 +648,9 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
     // The cap bounds one answer, not which sections exist: a section call
     // resolves its anchor against every heading, listed on a page or not.
     const paged = args.anchor === undefined && text.length > RECORD_CONTEXT_BODY_MAX_CHARS;
-    if (from > 0 && !(paged && from < headings.length)) throw outlineFromUnresolved();
     const listed = paged ? boundedOutline(headings, from) : undefined;
+    // A page past the last listed heading, or of a body that is no outline.
+    if (from > 0 && !(listed && listed.outline.length > 0)) throw outlineFromUnresolved();
     if (args.anchor !== undefined) {
       const section = sectionOf(text, headings, args.anchor);
       if (section === undefined) throw anchorUnresolved();
@@ -664,12 +665,11 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
       if (listed.omitted > 0) {
         notes.push({
           kind: 'outline_truncated',
-          text: say.outlineTruncated(bodyField, from, listed.outline.length, headings.length, listed.next),
+          text: say.outlineTruncated(bodyField, listed.outline.length, headings.length, listed.next, listed.unlistable ?? 0),
         });
       }
     } else {
-      // No headings, or the page's first heading too long to list within the
-      // bound by itself.
+      // No headings, or none short enough to list within the bound.
       const bounded = boundedText(text);
       body = { ...base, text: bounded.text, truncated: true };
       notes.push({ kind: 'body_truncated', text: say.bodyTruncated(bodyField) });

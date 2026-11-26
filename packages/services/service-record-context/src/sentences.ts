@@ -68,13 +68,16 @@ const WRITTEN = {
       `The text of ${field} was cut at the length this tool returns; what follows the cut is not given.`,
     relatedTruncated: (object: string, cap: number) =>
       `The related list on ${object} has more rows than the ${cap} given; the rest are not given.`,
-    outlineTruncated: (field: string, from: number, listed: number, total: number, next: number | undefined) =>
-      `This page of the outline of ${field} lists headings ${from + 1} to ${from + listed} of its ${total}, counted `
-      + `shallowest levels first and then in body order; the other ${total - listed} are not listed on this page. `
+    outlineTruncated: (field: string, listed: number, total: number, next: number | undefined, unlistable: number) =>
+      `This page of the outline of ${field} lists ${listed} of its ${total} headings; the pages run shallowest levels `
+      + `first, then in body order, and the other ${total - listed} are not listed on this page. `
       + (next === undefined
-        ? 'No headings remain after this page.'
+        ? 'No later page lists more.'
         : `To list the next page, call get_record_context again with the same arguments and outlineFrom ${next}. `
-          + 'Each heading\'s anchor is given on the page that lists it.'),
+          + 'Each heading\'s anchor is given on the page that lists it.')
+      + (unlistable > 0
+        ? ` ${unlistable} of the headings are too long for any page to list, so their anchors are not given.`
+        : ''),
     // Refusals.
     noPackNamed: (context: string, object: string) =>
       `No context pack named '${context}' reads object '${object}', so nothing was read. Omit 'context' to use the `
@@ -117,12 +120,13 @@ const WRITTEN = {
     bodyTruncated: (field: string) => `${field} 的文本在本工具返回的长度处被截断，截断之后的内容没有给出。`,
     relatedTruncated: (object: string, cap: number) =>
       `${object} 上的相关列表超过已给出的 ${cap} 行，其余的行没有给出。`,
-    outlineTruncated: (field: string, from: number, listed: number, total: number, next: number | undefined) =>
-      `${field} 的大纲本页列出了全部 ${total} 个标题中的第 ${from + 1} 到第 ${from + listed} 个（先按层级从高到低、再按正文顺序计数），`
+    outlineTruncated: (field: string, listed: number, total: number, next: number | undefined, unlistable: number) =>
+      `${field} 的大纲本页列出了全部 ${total} 个标题中的 ${listed} 个；各页先按层级从高到低、再按正文顺序排列，`
       + `其余 ${total - listed} 个没有在本页列出。`
       + (next === undefined
-        ? '本页之后没有剩下的标题。'
-        : `要列出下一页，请用相同的参数加上 outlineFrom ${next} 再调用一次 get_record_context。每个标题的 anchor 在列出它的那一页给出。`),
+        ? '之后没有再列出标题的页。'
+        : `要列出下一页，请用相同的参数加上 outlineFrom ${next} 再调用一次 get_record_context。每个标题的 anchor 在列出它的那一页给出。`)
+      + (unlistable > 0 ? `其中有 ${unlistable} 个标题太长，任何一页都无法列出，因此没有给出它们的 anchor。` : ''),
     noPackNamed: (context: string, object: string) =>
       `没有名为 '${context}' 的资料包读取对象 '${object}'，因此没有读取任何内容。省略 'context' 以使用该对象唯一的资料包，或用 get_record 读取记录。`,
     noPack: (object: string) => `对象 '${object}' 没有资料包，因此没有读取任何内容。请用 get_record 读取记录。`,
