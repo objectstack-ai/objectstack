@@ -869,7 +869,7 @@ async function settledSheet(sheet: HTMLElement) {
 }
 
 describe('Setup → Packages: a read-only base’s customizations in its detail (objectstack#36908)', () => {
-  it('a code package’s detail draws what this deployment changed on it, arrangements counted (objectstack#36833)', async () => {
+  it('a code package’s detail draws what this deployment changed on it, its arrangement named apart (objectstack#37236)', async () => {
     await serve({ packages: [CODE] });
     renderAt(ADMIN_URL);
     fireEvent.click(await screen.findByTestId('pkg-row-com.acme.code'));
@@ -877,7 +877,7 @@ describe('Setup → Packages: a read-only base’s customizations in its detail 
 
     const section = within(sheet).getByTestId('pkg-detail-customizations');
     await waitFor(() =>
-      expect(within(section).getByTestId('pkg-detail-customizations-summary')).toHaveTextContent('1 customized, 0 switched off'),
+      expect(within(section).getByTestId('pkg-detail-customizations-summary')).toHaveTextContent('0 customized, 1 rearranged, 0 switched off'),
     );
     expect(within(section).getByTestId('pkg-detail-customize')).toHaveAttribute('href', '/studio/com.acme.code/data');
   });

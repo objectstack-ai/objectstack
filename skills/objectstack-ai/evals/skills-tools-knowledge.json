@@ -24,7 +24,7 @@
     {
       "id": 3,
       "prompt": "Index our `kb_article` records (title and body) so the assistant can answer from them with RAG. Only published articles, and we want to filter by `category` at search time. We run RAGFlow.",
-      "expected_output": "Emits a `KnowledgeSourceSchema.parse({...})` record with `adapter: 'ragflow'` and `source: { kind: 'object', object: 'kb_article', contentFields: ['title', 'body'], metadataFields: ['category'], where: { published: true } }`, `refresh: { onRecordChange: true }`, registered at boot through `KnowledgeServicePlugin({ sources })`. Chunking / top-K / rerankers are adapter config, not platform metadata.",
+      "expected_output": "Emits a `KnowledgeSourceSchema.parse({...})` record with `adapter: 'ragflow'` and `source: { kind: 'object', object: 'kb_article', contentFields: ['title', 'body'], metadataFields: ['category'], where: { published: true } }`, `refresh: { onRecordChange: true }`, registered at boot through `KnowledgeServicePlugin({ sources })`. Top-K and rerankers are not source metadata, and no `split` key is written: the RAGFlow adapter receives whole documents, so `split` would have no effect.",
       "files": [],
       "assertions": {
         "must_contain": ["KnowledgeSourceSchema", "contentFields", "metadataFields", "where", "KnowledgeServicePlugin"],
@@ -79,6 +79,16 @@
       "assertions": {
         "must_contain": ["elicitation", "declined", "cancelled", "timed_out", "service_account"],
         "must_not_contain": ["recordId, confirm: true"]
+      }
+    },
+    {
+      "id": 9,
+      "prompt": "Index our `policy_doc` records (`title`, `body`) for the assistant with the in-memory adapter. Each body is a long Markdown handbook with headings; answers should cite one section, at most 600 characters, and neighbouring passages should overlap by 100 characters.",
+      "expected_output": "Emits a `KnowledgeSourceSchema.parse({...})` record with `adapter: 'memory'` (the adapter that takes the service's passages) and `source: { kind: 'object', object: 'policy_doc', contentFields: ['title', 'body'], split: { strategy: 'markdown', maxChars: 600 } }`: one section per heading, each passage embedded with its heading path, 600 characters at most unless the embedder's input limit is lower. Declines the overlap: passages never overlap, and the `knowledge.chunk_overlap` setting is retired (a write naming it is refused `400 UNKNOWN_KEY`), so it writes no overlap key and no `chunkSize`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["split", "strategy", "markdown", "maxChars"],
+        "must_not_contain": ["chunkSize", "chunkOverlap", "overlap: 100"]
       }
     }
   ]

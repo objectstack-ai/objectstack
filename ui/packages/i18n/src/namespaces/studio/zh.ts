@@ -1839,6 +1839,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.packages.customizations.failed': '无法读取定制',
   'engine.packages.customizations.none': '本环境还没有改动',
   'engine.packages.customizations.customized': '已定制 {count} 项',
+  'engine.packages.customizations.arranged': '调整排列 {count} 处',
   'engine.packages.customizations.separator': '，',
   'engine.packages.customizations.switchedOff': '已停用 {count} 项',
   'engine.packages.customizations.tab.all': '全部',

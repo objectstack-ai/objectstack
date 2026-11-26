@@ -24,6 +24,11 @@
  * blank app" form there, as for an empty catalog. So the unchanged-chip cases
  * serve `build`; a catalog of `ask` or of another agent alone is pinned below.
  *
+ * objectstack#37227 — the first bullet above no longer holds: the maintainer
+ * ruled "Build an app" (to bare `/studio`) off the home page, with "Build with
+ * AI". Where the catalog serves the build agent the chip row now draws no build
+ * chip of either form; "New in Studio" is unchanged where it does not.
+ *
  * The catalog stand-in moves the way the real `useAgents` does: an empty first
  * frame before the request leaves, then loading, then the answer. `t` echoes
  * the key, so a hardcoded string fails here; that every key exists in all ten
@@ -33,7 +38,7 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const navigateMock = vi.fn();
@@ -44,6 +49,8 @@ const state = vi.hoisted(() => ({
   agents: [] as Array<{ name: string }>,
   /** Holds the catalog in flight. */
   catalogPending: false,
+  /** Set once the stand-in has drawn the catalog's answer (objectstack#37227). */
+  answered: false,
   /**
    * Whether the session holds the Setup → Packages pair (`setup.access` +
    * `manage_platform_settings`). `'unreported'` stubs nothing: the real
@@ -94,6 +101,7 @@ vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => {
         if (phase === 'idle') setPhase('loading');
         else if (phase === 'loading' && !state.catalogPending) setPhase('answered');
       }, [phase]);
+      if (phase === 'answered') state.answered = true;
       return { agents: phase === 'answered' ? state.agents : [], isLoading: phase === 'loading' };
     },
     // A custom agent: AI is on, and no ask or build CTA joins the row.
@@ -186,35 +194,45 @@ beforeEach(() => {
   state.canAuthorMetadata = true;
   state.agents = [];
   state.catalogPending = false;
+  state.answered = false;
   state.setupPair = true;
 });
+
+/**
+ * An absence read before the catalog answers would pass on a page that has
+ * not yet drawn the chip at all, so the cases that pin one wait for the answer.
+ */
+async function catalogAnswered(): Promise<void> {
+  await waitFor(() => expect(state.answered).toBe(true));
+}
 
 afterEach(() => {
   cleanup();
 });
 
-describe('with the build agent in the catalog, the build chip is unchanged (objectstack#26614)', () => {
+describe('with the build agent in the catalog, no build chip is drawn (objectstack#37227)', () => {
   beforeEach(() => {
     state.agents = [{ name: 'build' }, { name: 'custom_helper' }];
   });
 
-  it('"Build an app" opens Studio', async () => {
-    const user = userEvent.setup();
+  it('neither "Build an app" nor "Build with AI"; the template chip stays', async () => {
     render(<HomePage />);
-    const build = await screen.findByTestId('home-build-app');
-    expect(build).toBeEnabled();
-    expect(build).toHaveTextContent('«home.build.title»');
+    expect(await screen.findByTestId('home-start-template')).toBeEnabled();
+    await catalogAnswered();
+    expect(screen.queryByTestId('home-build-app')).toBeNull();
+    expect(screen.queryByTestId('home-build-with-ai')).toBeNull();
     expect(screen.queryByTestId('home-build-in-studio')).toBeNull();
-    await user.click(build);
-    expect(navigateMock).toHaveBeenCalledWith('/studio');
   });
 
-  it('a session that may not author still gets it dimmed, with its reason', async () => {
+  it('a session that may not author gets none either; the template chip keeps the reason', async () => {
     state.canAuthorMetadata = false;
     render(<HomePage />);
-    const build = await screen.findByTestId('home-build-app');
-    expect(build).toBeDisabled();
-    expect(build).toHaveAttribute('aria-describedby', screen.getByTestId('home-authoring-gate-reason').id);
+    await catalogAnswered();
+    const template = await screen.findByTestId('home-start-template');
+    expect(template).toBeDisabled();
+    expect(template).toHaveAttribute('aria-describedby', screen.getByTestId('home-authoring-gate-reason').id);
+    expect(screen.queryByTestId('home-build-app')).toBeNull();
+    expect(screen.queryByTestId('home-build-in-studio')).toBeNull();
   });
 });
 
@@ -311,15 +329,13 @@ describe('without the build agent in the catalog, the chip takes its Studio form
     expect(screen.queryByTestId('home-build-app')).toBeNull();
   });
 
-  it('regression: the build agent\'s legacy id keeps "Build an app", to /studio', async () => {
+  it('regression: the build agent\'s legacy id still counts as the build agent, so no Studio form either', async () => {
     state.agents = [{ name: 'metadata_assistant' }, { name: 'data_chat' }];
-    const user = userEvent.setup();
     render(<HomePage />);
-    const build = await screen.findByTestId('home-build-app');
-    expect(build).toHaveTextContent('«home.build.title»');
+    expect(await screen.findByTestId('home-start-template')).toBeEnabled();
+    await catalogAnswered();
     expect(screen.queryByTestId('home-build-in-studio')).toBeNull();
-    await user.click(build);
-    expect(navigateMock).toHaveBeenCalledWith('/studio');
+    expect(screen.queryByTestId('home-build-app')).toBeNull();
   });
 });
 

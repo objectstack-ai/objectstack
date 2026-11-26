@@ -124,6 +124,8 @@ describe('HomePage — the desktop no-apps empty state (objectstack#36732)', () 
     expect(empty).toHaveTextContent('«home.noAppsTitle»');
     expect(empty).toHaveTextContent('«home.noAppsAddDescription»');
     expect(screen.queryByTestId('home-no-apps-build-with-ai')).not.toBeInTheDocument();
+    // objectstack#37227 — no 「Build with AI」 by label either, and no bare /studio door.
+    expect(empty).not.toHaveTextContent('«home.buildWithAI»');
     expect(empty.querySelector('a[href="/studio"]')).toBeNull();
     const doors = Array.from(empty.querySelectorAll('a[data-testid^="home-no-apps-"]'));
     expect(doors.map((a) => a.getAttribute('data-testid'))).toEqual([
