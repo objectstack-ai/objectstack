@@ -13,7 +13,6 @@
 import { describe, expect, it } from 'vitest';
 import { MANIFEST_ID_PATTERN } from '@objectstack/spec/kernel';
 import {
-  STUDIO_ORG_SCOPE_PILLAR,
   STUDIO_ORG_SCOPE_SEGMENT,
   isOrgScopeDraft,
   isPackageLessDraft,
@@ -47,8 +46,6 @@ describe('the reserved segment cannot name a package (objectui#11553)', () => {
 describe('studioOrgScopePath (objectstack#36903: the scope\'s leg of the area)', () => {
   it('lands on the scope’s flow list, filtered to the items of no package', () => {
     expect(studioOrgScopePath()).toBe(`/studio/${STUDIO_ORG_SCOPE_SEGMENT}/metadata/flow?source=runtime`);
-    // The retired pillar segment only redirects now.
-    expect(STUDIO_ORG_SCOPE_PILLAR).toBe('automations');
   });
 
   it('opens a flow full-screen on its address, round-tripping its name', () => {

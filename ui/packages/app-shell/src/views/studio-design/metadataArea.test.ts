@@ -12,17 +12,16 @@
 import { describe, it, expect } from 'vitest';
 import {
   AREA_DESIGNER_PAGE_TYPES,
-  AREA_PILLAR_FOR_TYPE,
   STUDIO_ALL_PACKAGES_SEGMENT,
   areaDesignerItemOf,
   areaItemAsksGenericPage,
   areaItemOpensDesignerPage,
   orgScopeFlowOf,
   areaItemOpensFormEditor,
-  areaItemPillarPath,
   areaLocationRedirect,
   dataPillarRedirect,
   isStudioAllPackagesScope,
+  settledAreaAddress,
   studioMetadataAreaPath,
 } from './metadataArea';
 import { STUDIO_ORG_SCOPE_SEGMENT } from './studioScope';
@@ -108,33 +107,28 @@ describe('areaLocationRedirect — the query names the leg', () => {
   });
 });
 
-describe('areaItemPillarPath — a pillar type opens its pillar', () => {
-  const search = (q = '') => new URLSearchParams(q);
-  const open = (type: string, q = '', packageId: string | null = PKG) =>
-    areaItemPillarPath({ packageId, type, name: 'n_1', search: search(q) });
-
-  it('no type opens a pillar any more', () => {
-    // objectstack#36905, objectstack#36904, objectstack#36903 — the permission
-    // set, the object and the flow open their designer page instead
-    // (`areaItemOpensDesignerPage`).
-    expect(AREA_PILLAR_FOR_TYPE).toEqual({});
-    for (const type of ['object', 'flow', 'permission']) expect(open(type), type).toBeNull();
+describe('settledAreaAddress — an area address where the area would put it (objectstack#36909)', () => {
+  it('adds what the area would add, and nothing to an address already there', () => {
+    expect(settledAreaAddress(`/studio/${PKG}/metadata/object`)).toBe(`/studio/${PKG}/metadata/object?package=${PKG}`);
+    expect(settledAreaAddress(`/studio/${PKG}/metadata/object?package=${PKG}`)).toBe(`/studio/${PKG}/metadata/object?package=${PKG}`);
+    expect(settledAreaAddress(`/studio/${PKG}/metadata/flow/f?package=com.example.hr`)).toBe(
+      '/studio/com.example.hr/metadata/flow/f?package=com.example.hr',
+    );
+    expect(settledAreaAddress(`/studio/${PKG}/metadata/object?scope=environment`)).toBe('/studio/~all/metadata/object?scope=environment');
+    expect(settledAreaAddress('/studio/~org/metadata/object')).toBe('/studio/~org/metadata/flow?source=runtime');
   });
 
-  it('every other type opens the generic item page', () => {
-    // objectstack#36502 — page, dashboard, report and view lost their pillar with Interfaces.
-    // objectstack#36905, objectstack#36904, objectstack#36903 — the designer types open their designer page instead.
-    for (const type of ['flow', 'permission', 'object', 'translation', 'email_template', 'agent', 'position', 'sharing_rule', 'app', 'page', 'dashboard', 'report', 'view']) {
-      expect(open(type), type).toBeNull();
+  it('leaves every address outside the area as it is', () => {
+    for (const address of [`/studio/${PKG}/owd`, `/studio/${PKG}/data`, '/studio', `/apps/crm/metadata/object`, '/studio/%E0%A4%A/metadata']) {
+      expect(settledAreaAddress(address), address).toBe(address);
     }
   });
 
-  it('the cross-package leg, the environment scope and `?review=1` open the generic page', () => {
-    expect(open('object', '', null)).toBeNull();
-    expect(open('object', '?scope=environment')).toBeNull();
-    expect(open('object', '?review=1')).toBeNull();
-    // objectstack#36903 — no type opens a pillar, with or without them.
-    expect(open('object', '?review=0')).toBeNull();
+  it('is idempotent', () => {
+    for (const address of [`/studio/${PKG}/metadata/object`, '/studio/~all/metadata/flow', '/studio/~org/metadata/flow/a']) {
+      const once = settledAreaAddress(address);
+      expect(settledAreaAddress(once), address).toBe(once);
+    }
   });
 });
 

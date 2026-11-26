@@ -4003,6 +4003,62 @@ the grant, use the environment's console: **Account → Connect an AI Assistant*
 | `-s, --server <url>` | `OS_CLOUD_URL` | Control-plane URL. Default `https://cloud.objectos.ai`, or the URL recorded by `os cloud login` |
 | `-t, --token <key>` | `OS_CLOUD_API_KEY` | Bearer token, used only to find the environment; `$OS_TOKEN` and `~/.objectstack/cloud.json` are the fallbacks |
 
+### Knowledge
+
+The administrator's view of the server's [knowledge sources](/docs/ai/knowledge-rag#the-first-build-and-rebuilding-a-source):
+what each source's index holds, and one complete rebuild of a source. Both
+commands call the `knowledge` settings actions (`POST /api/settings/knowledge/rebuild`
+and `/index_status`), which answer only an account with
+`manage_platform_settings`; any other caller is refused with `403` and is told
+nothing about the sources.
+
+| Command | Description |
+|---------|-------------|
+| `os knowledge status` | Each source's index state (built, never built, due a rebuild) and the last build the answering node ran |
+| `os knowledge rebuild` | Start one complete build of a source on the server and follow its progress |
+
+#### `os knowledge status`
+
+```bash
+os knowledge status                    # every source
+os knowledge status support_articles   # one source
+```
+
+Prints, per source, its adapter and kind, its index state against what the
+server expects (and whether a build is due), and the last build the node that
+answered ran: its progress while it runs, its counts once it ended. A build's
+record lives on the node that ran it, so behind a load balancer the node that
+answers may not be the one building; the index state is read from the store and
+is the same on every node. Exits `1` with the server's refusal text when the
+action is refused.
+
+#### `os knowledge rebuild`
+
+```bash
+os knowledge rebuild support_articles            # start and follow to the end
+os knowledge rebuild support_articles --no-wait  # start, and return at once
+```
+
+**A build costs money:** every row the source's `where` matches is read, and the
+content fields of each one the index does not already hold unchanged are sent to
+the embedding provider, which bills for them. The build runs on the server in
+the background; the command reads `index_status` every `--interval` seconds and
+prints the build's progress until it ends. It exits `0` when the build finished,
+and `1` when the server refused the rebuild (an unknown or `file` source, a
+build already running on that node), when the build did not run or did not
+finish, or when the progress was answered by another node than the one
+building (the build continues there). `--no-wait` exits `0` once the build has
+started and reports no outcome: the build can still end without running
+(another node holds the source's lock) or fail, which only `os knowledge status`
+then shows.
+
+| Flag | Commands | Env equivalent | Purpose |
+|---|---|---|---|
+| `-u, --url <url>` | both | `OS_CLOUD_URL` | Server URL (default `http://localhost:3000`) |
+| `-t, --token <token>` | both | `OS_TOKEN` | Bearer token of an administrator |
+| `--no-wait` | `rebuild` | — | Return once the build has started; its outcome is not reported |
+| `--interval <s>` | `rebuild` | — | Seconds between two progress reads (default `2`) |
+
 ### Skills
 
 The published skills catalog (`@objectstack/skills`, see [AI Skills](/docs/ai/skills))
@@ -4402,7 +4458,7 @@ export default defineStack({
     name: 'My App',
     description: 'My ObjectStack application',
     // Protocol major this app is authored against (ADR-0087 load-time check).
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
   },
 
   objects: Object.values(objects),

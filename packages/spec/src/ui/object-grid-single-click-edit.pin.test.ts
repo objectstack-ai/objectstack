@@ -37,7 +37,7 @@ function issues(result: z.ZodSafeParseResult<unknown>): { code: string; path: st
 }
 
 const PRESCRIPTION =
-  /^`object-grid` property `singleClickEdit` was removed in @objectstack\/spec 18\.7\.0 \(ADR-0049\) — a grid that renders editable now selects a cell.*Delete the key; `editable`.*Run `os migrate meta --from 17`/s;
+  /^`object-grid` property `singleClickEdit` was removed in @objectstack\/spec 19\.0\.0 \(ADR-0049\) — a grid that renders editable now selects a cell.*Delete the key; `editable`.*Run `os migrate meta --from 17`/s;
 
 describe('§1 `singleClickEdit` is retired to a tombstone', () => {
   for (const value of [true, false]) {

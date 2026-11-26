@@ -67,6 +67,7 @@ import '@objectstack/lint';
 // `lazy()` detail entry: its first load is paid here too, not in a test's clock.
 import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -146,7 +147,7 @@ describe('StudioDesignSurface — entry reads each question once (objectui#11797
       <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data`]}>
         <Routes>
           <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-          <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+          <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
         </Routes>
       </MemoryRouter>,
     );

@@ -129,6 +129,8 @@ function makeAdapter() {
 function makeMetadataClient(draftItem: unknown = null) {
   return {
     get: vi.fn().mockResolvedValue(draftItem),
+    // The draft bar's read (objectstack#36350: its envelope carries the version Publish pins).
+    getDraft: vi.fn().mockResolvedValue(draftItem),
     save: vi.fn().mockResolvedValue(undefined),
     publish: vi.fn().mockResolvedValue(undefined),
     reset: vi.fn().mockResolvedValue(undefined),

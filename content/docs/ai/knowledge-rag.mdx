@@ -218,7 +218,35 @@ Known residual: text made mostly of random hex or base64 — UUIDs, sha256 diges
 
 ## When the model or the split changes: rebuild
 
-Vectors from two embedding models are not comparable, and neither are the passages of two splits. So every source's index is built under one **index fingerprint** — the embedding model and dimensions the adapter reports, the resolved split, and the content list — which the knowledge service computes and carries on every write and every search, and the adapter checks against the index it holds. Change any of them and the source's stored index is **refused** (`KNOWLEDGE_REBUILD_REQUIRED`, 409) until a complete reindex rebuilds it; it never answers with vectors of the old model ranked against the new one. A search over several sources still answers from the others, and the `search_knowledge` tool names each refused source in `refused`. Changing `where` or `metadataFields` changes no vector: a complete reindex repairs it in place. The full rules are in [the protocol's fingerprint section](/docs/protocol/knowledge#36-the-index-fingerprint).
+Vectors from two embedding models are not comparable, and neither are the passages of two splits. So every source's index is built under one **index fingerprint** — the embedding model and dimensions the adapter reports, the resolved split, and the content list — which the knowledge service computes and carries on every write and every search, and the adapter checks against the index it holds. Change any of them and the source's stored index is **refused** (`KNOWLEDGE_REBUILD_REQUIRED`, 409) until a complete reindex rebuilds it — which the next boot starts by itself, or `os knowledge rebuild` (below) does now; it never answers with vectors of the old model ranked against the new one. A search over several sources still answers from the others, and the `search_knowledge` tool names each refused source in `refused`. Changing `where` or `metadataFields` changes no vector: a complete reindex repairs it in place. The full rules are in [the protocol's fingerprint section](/docs/protocol/knowledge#36-the-index-fingerprint).
+
+## The first build, and rebuilding a source
+
+Event sync keeps an index in step with rows as they are written; it never indexes the rows a source matched before it was mounted. So after every boot the knowledge service reads what each source's adapter holds and builds, once, in the background, every `object` source that needs it — the boot never waits for it:
+
+| What the adapter holds | At boot |
+|:--|:--|
+| nothing for the source (or, for an adapter without an index status, no document) | built |
+| an index under another fingerprint (embedding model, dimensions or split) | built anew, beside the old index where the store keeps generations |
+| the same fingerprint, but the source's `where`, `metadataFields`, title rule or withheld fields changed | rebuilt in place; unchanged documents are skipped |
+| the same fingerprint and recipe | left alone |
+
+A source with `refresh.onRecordChange: false` is left to its external indexer, and an adapter that reports neither an index status nor its documents is never built automatically: the boot log says so, and you rebuild it by hand. With several server nodes sharing a cluster lock driver (`OS_CLUSTER_DRIVER=redis`, [Cluster](/docs/kernel/cluster)), only one builds a source: the build runs under the `cluster` service's lock, and a node that finds the source built when it gets the lock builds nothing. `KnowledgeServicePlugin({ buildAtBoot: false })` turns the boot builds off.
+
+<Callout type="warn">
+**A build costs money.** A complete build reads every row the source's `where` matches and sends the listed content fields of each one the index does not already hold unchanged to your embedding provider, which bills for them. The first build of a large source, or a rebuild after you change the embedding model or the split, sends all of it. The boot log line that starts a build says so.
+
+The default `memory` adapter holds nothing after a restart, so with it **every boot is a first build**: each boot sends the whole source to the embedding provider again, on every node, because each process keeps its own index. Use a persistent adapter (pgvector, Turso, RAGFlow) for a source you do not want re-embedded on each restart. And "only one node builds a source" holds only with a shared cluster lock driver: the default `memory` cluster driver's lock is a per-process mutex, so with it every node builds the source itself.
+</Callout>
+
+To rebuild a source yourself, as an administrator (an account with `manage_platform_settings`):
+
+```bash
+os knowledge status                    # each source: built, never built or due a rebuild, and the last build
+os knowledge rebuild support_articles  # start a complete build and follow its progress
+```
+
+`os knowledge rebuild` starts the build on the server and prints its progress — rows read, documents written, unchanged, purged, and those that cannot be indexed — until it ends; `--no-wait` returns once it has started. Both commands call the `knowledge` settings actions `rebuild` and `index_status` (`POST /api/settings/knowledge/rebuild` with `{ "source": "ID" }`). The server logs each build's start, its progress every ten seconds, and its result. A build's progress lives on the node that runs it: behind a load balancer, read it from that node.
 
 ## Self-hosted vector store: PostgreSQL + pgvector
 

@@ -53,7 +53,7 @@ const MANIFEST = {
   version: '1.0.0',
   type: 'app' as const,
   namespace: 'probe',
-  engines: { protocol: '^18' },
+  engines: { protocol: '^19' },
 };
 
 const PROBE_OBJECT = {

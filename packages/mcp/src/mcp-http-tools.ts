@@ -1753,7 +1753,10 @@ function sentFieldHead(name: string): string {
 /**
  * The field names a `where` the caller sent addresses, in order: each
  * condition key, through the logical operators. Other `$` keys are operators,
- * never names.
+ * never names. Nor is the search companion key (`SEARCH_COMPANION_FIELD`): it
+ * is the engine's own column, present only where search provisions it and in
+ * no schema's field list, so a `where` refused for another reason never names
+ * it as not recorded.
  */
 function whereFieldNames(where: unknown, into: string[]): string[] {
   if (Array.isArray(where)) {
@@ -1766,6 +1769,7 @@ function whereFieldNames(where: unknown, into: string[]): string[] {
       if (WHERE_LOGICAL_OPERATORS.has(key)) whereFieldNames(value, into);
       continue;
     }
+    if (key === SEARCH_COMPANION_FIELD) continue;
     into.push(key);
   }
   return into;
@@ -2673,6 +2677,16 @@ const WITHHELD_FIELDS_DESCRIPTION =
  */
 const OBJECT_QUERY_SOURCE_DESCRIPTION =
   'Quote the answer\'s source.line as the source of any figure you give from it.';
+
+/**
+ * [#35138] The one line `query_records`, `aggregate_records` and `get_record`
+ * describe the `notRecorded` / `ifNotRecorded` members with
+ * ({@link NotRecordedMembers}): read up front, so a refusal that carries them
+ * is never read as an empty answer. It names nothing; the members do.
+ */
+const NOT_RECORDED_DESCRIPTION =
+  'A refusal that carries notRecorded means what it names is not recorded in this app: '
+  + 'follow its ifNotRecorded, and never report 0 or empty for it.';
 
 /**
  * [#35138] The caller's locale ladder for a sentence the tools compose into a
@@ -4118,6 +4132,7 @@ export function registerObjectTools(
           'matched, so do not sum, count or rank the rows as if whole: read on with offset, or use aggregate_records ' +
           'where offered. ' +
           OBJECT_QUERY_SOURCE_DESCRIPTION + ' ' +
+          NOT_RECORDED_DESCRIPTION + ' ' +
           'A filter value "{current_user_id}" stands for you, e.g. approvals waiting on you: objectName ' +
           '"sys_approval_request", where {"status":"pending","pending_approvers":{"$contains":"{current_user_id}"}}. ' +
           // [ruling B] A person field holds a user id; names repeat, so email.
@@ -4274,6 +4289,7 @@ export function registerObjectTools(
             'totals and breakdowns. An amount whose records each carry their own currency is answered only grouped by ' +
             'its currency code field. Name a lookup group by its <key>__label, never by the id. ' +
             OBJECT_QUERY_SOURCE_DESCRIPTION + ' ' +
+            NOT_RECORDED_DESCRIPTION + ' ' +
             // [aggregate order and cut] A ranking question ("the top five
             // customers by revenue") is answered by the database: ordered,
             // cut, and the number of groups before the cut stated.
@@ -4488,6 +4504,8 @@ export function registerObjectTools(
           `To read it with the records that point at it, pass related: up to ${GET_RECORD_MAX_RELATED_LISTS} child ` +
           `objects, e.g. [{"object":"crm_opportunity"}], each list at most ${relatedMaxRows} rows; the answer is then ` +
           '{ record, related: [...] }. ' +
+          // [#35138] get_record sends no field names, so its notRecorded only ever names an object.
+          NOT_RECORDED_DESCRIPTION + ' ' +
           WITHHELD_FIELDS_DESCRIPTION,
         inputSchema: strictToolInput(
           { surface: 'this get_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
