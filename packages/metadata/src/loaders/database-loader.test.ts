@@ -4280,7 +4280,7 @@ describe('[#37013] a platform-registered skill and a package\'s same-named skill
       const platformVersion = Number(history.find((row) => String(row.metadata).includes('platform v1'))!.version);
       const before = JSON.stringify(await rowOf(PKG));
 
-      const refused = await manager.rollback('skill', NAME, platformVersion, address).catch((error) => error);
+      const refused: any = await manager.rollback('skill', NAME, platformVersion, address).catch((error) => error);
 
       expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
       expect(String(refused.message)).toContain('the platform registered');
