@@ -29,6 +29,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, renderHook, screen } from '@testing-library/react';
 import { RECORD_CITATIONS_PART_TYPE } from '@objectstack/spec/ai';
 import { ChatbotEnhanced } from '../ChatbotEnhanced';
+import { toRuntimeMessages } from '../chatMessageAdapter';
 import { STORED_ANSWER_DATA_PARTS, uiMessageToChatMessage } from '../mapMessages';
 import { useObjectChat, type UseObjectChatOptions } from '../useObjectChat';
 
@@ -92,7 +93,7 @@ describe('restored citations survive the API-mode store (objectstack#37487)', ()
     const messages = restore(CITATIONS);
     expect(messages[1].content).toBe(TEXT);
     expect(messages[1].recordCitations).toEqual(LIVE.recordCitations);
-    render(<ChatbotEnhanced messages={messages} />);
+    render(<ChatbotEnhanced messages={toRuntimeMessages(messages)} />);
     expect(chipQuotes()).toEqual(live);
   });
 
@@ -100,7 +101,7 @@ describe('restored citations survive the API-mode store (objectstack#37487)', ()
     const messages = restore([{ ...CITATIONS[0], section: 'scope' }]);
     expect(messages[1].content).toBe(TEXT);
     expect(messages[1].recordCitations).toBeUndefined();
-    render(<ChatbotEnhanced messages={messages} />);
+    render(<ChatbotEnhanced messages={toRuntimeMessages(messages)} />);
     expect(chipQuotes()).toEqual([]);
   });
 });
