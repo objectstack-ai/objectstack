@@ -65,7 +65,7 @@ import { useObjectTranslation } from '@object-ui/i18n';
 import { isRecordPageBuiltinTab, readRelatedListsArrangement, relatedListEntryName } from '@objectstack/spec/data';
 import { useDesignMode, useDesignModeActive, useDesignModeChange } from '../layout/designMode.js';
 import { useStudioDesignGate, useStudioEntryGate } from '../hooks/useStudioDesignGate.js';
-import { useCustomizeDoorWalled } from './studio-design/StudioCustomizeControls.js';
+import { useCustomizeDoorWalled } from './studio-design/customizeOverride.js';
 import { relatedListEntryNames, type DerivedRelatedList } from '../utils/deriveRelatedLists.js';
 import { studioItemPath } from './studio-design/studioAddress.js';
 import { entryDetails } from './studio-design/relatedListVocabulary.js';

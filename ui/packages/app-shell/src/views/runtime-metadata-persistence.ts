@@ -49,7 +49,7 @@ import {
 } from './metadata-admin/DraftConflictDialog.js';
 import { ensureCustomizationPackage, fetchListedPackageManifests } from './studio-design/packages-io.js';
 import { listedCustomizationPairOf, listedPackageVersion, type ListedPackageManifest } from './studio-design/packages-io.js';
-import { overrideDraftBody } from './studio-design/StudioCustomizeControls.js';
+import { overrideDraftBody } from './studio-design/customizeOverride.js';
 
 /** The runtime-editable artifact types ADR-0034 unifies. `page` (a record
  *  `PageSchema`) joins the original three (#1541): a record page is edited in
