@@ -87,7 +87,7 @@ describe('ObjectLogger — an error record carries the cause chain', () => {
 });
 
 describe('a cause is redacted like the error', () => {
-    it('withholds the named fields of a non-Error object cause, under the logger\'s own redact list', () => {
+    it('under the logger\'s own redact list', () => {
         const chunks: string[] = [];
         vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: unknown) => {
             chunks.push(String(chunk));
@@ -131,7 +131,7 @@ describe('parity — the logger and the fault log render one shape', () => {
         ['a deep chain', deep],
         ['a string cause', () => new Error('w', { cause: 'socket hang up' })],
         ['an object cause', () => new Error('w', { cause: { code: 'ECONNRESET' } })],
-        ['an object cause with withheld fields', () => new Error('w', { cause: { code: 'E1', password: 'p', apiKey: 'k' } })],
+        ['a cause redacted like the error', () => new Error('w', { cause: { code: 'E1', password: 'p', apiKey: 'k' } })],
         ['an object cause that cannot be serialized', () => {
             const loop: Record<string, unknown> = { code: 'E2' };
             loop.self = loop;

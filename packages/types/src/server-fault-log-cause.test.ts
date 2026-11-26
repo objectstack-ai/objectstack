@@ -139,7 +139,7 @@ describe('faultCauseChain — bounded both ways', () => {
 });
 
 describe('a cause is redacted like the error', () => {
-    it('withholds the named fields of a non-Error object cause and keeps the rest', () => {
+    it('an object cause', () => {
         const chain = faultCauseChain(withCause('w', { code: 'ECONNRESET', password: 'hunter2', apiKey: 'sk-live-1', nested: { authToken: 't-1' } }));
         expect(chain).toHaveLength(1);
         expect(JSON.parse(chain[0].message)).toEqual({
@@ -151,7 +151,7 @@ describe('a cause is redacted like the error', () => {
         for (const value of ['hunter2', 'sk-live-1', 't-1']) expect(chain[0].message).not.toContain(value);
     });
 
-    it('the console fallback line carries the withheld form', () => {
+    it('on the console fallback line', () => {
         const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
         try {
             logServerFault({ status: 500, error: withCause(OUTER, { password: 'hunter2' }) });
