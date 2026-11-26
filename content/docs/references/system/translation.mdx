@@ -370,7 +370,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated metadata-type display label (overrides registry label) |
 | **description** | `string` | optional | Translated metadata-type description |
 | **sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section.name |
-| **fields** | `Record<string, { label?: string; helpText?: string; placeholder?: string }>` | optional | Field translations keyed by field path (dot-notation for nested fields) |
+| **fields** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field translations keyed by field path (dot-notation for nested fields) |
 
 ### Nested Shape: `PlatformTranslationData.settingsCommon`
 
@@ -839,7 +839,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated metadata-type display label (overrides registry label) |
 | **description** | `string` | optional | Translated metadata-type description |
 | **sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section.name |
-| **fields** | `Record<string, { label?: string; helpText?: string; placeholder?: string }>` | optional | Field translations keyed by field path (dot-notation for nested fields) |
+| **fields** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field translations keyed by field path (dot-notation for nested fields) |
 
 ### Nested Shape: `TranslationData.settingsCommon`
 
@@ -1074,7 +1074,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated metadata-type display label (overrides registry label) |
 | **description** | `string` | optional | Translated metadata-type description |
 | **sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section.name |
-| **fields** | `Record<string, { label?: string; helpText?: string; placeholder?: string }>` | optional | Field translations keyed by field path (dot-notation for nested fields) |
+| **fields** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field translations keyed by field path (dot-notation for nested fields) |
 
 ### Nested Shape: `TranslationItem.settingsCommon`
 
