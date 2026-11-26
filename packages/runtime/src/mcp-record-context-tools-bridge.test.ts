@@ -27,7 +27,7 @@
  * is read as a shipped one is.
  */
 
-import { afterAll, beforeAll, describe, it, expect, vi } from 'vitest';
+import { afterAll, beforeAll, describe, it, expect, vi, type Mock } from 'vitest';
 // Paid during collection, not inside a clocked case: the dispatcher reaches
 // `standalone-stack.ts`, whose function body `import()`s it (`scripts/check-test-source-alias.mjs`).
 import '@objectstack/metadata';
@@ -404,6 +404,8 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
     let rpc: (method: string, params?: unknown) => Promise<any>;
     /** The real `security` service both doors resolve. */
     let securityService: any;
+    /** [#37666] The stdio door's plugin-context logger: the door writes its 5xx fault lines here. */
+    let stdioLogger: { info: Mock; warn: Mock; error: Mock; debug: Mock };
     /** The execution context the stdio door handed the engine, per object read. */
     const stdioReads: Array<{ object: string; context: any }> = [];
 
@@ -619,7 +621,7 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
             getServices: vi.fn(() => stdioServices),
             hook: vi.fn(),
             trigger: vi.fn(async () => {}),
-            logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+            logger: (stdioLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
             getKernel: vi.fn(() => ({})),
         };
         const plugin = new MCPServerPlugin({ autoStart: true });
@@ -783,18 +785,31 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
             if (object === 'rc_revision') throw new Error(OUTAGE);
             return (real as any)(object, ...rest);
         });
-        // The doors' fault log (`logServerFault`, `@objectstack/types`) writes to the console here.
+        // The doors' fault log (`logServerFault`, `@objectstack/types`): the /mcp door's runtime here
+        // has no logger, so its lines take the console fallback; the stdio door's plugin hands the
+        // runtime its context logger, so its lines go there (#37666).
         const errorLines = vi.spyOn(console, 'error').mockImplementation(() => {});
         const warnLines = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        stdioLogger.error.mockClear();
+        stdioLogger.warn.mockClear();
         try {
             const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
             await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
             // An outage is a fault, never a declared capability absence: each door logs it at error,
             // with the outage as its cause, on every call, the second included.
             expect(warnLines.mock.calls.filter(([line]) => String(line).includes('capability absence'))).toEqual([]);
-            const faults = errorLines.mock.calls.filter(([line]) =>
-                typeof line === 'string' && line.startsWith('[5xx] 500') && line.includes('get_record_context rc_policy'));
-            expect(faults).toHaveLength(4);
+            expect(stdioLogger.warn.mock.calls.filter(([line]) => String(line).includes('capability absence'))).toEqual([]);
+            const isFault = ([line]: unknown[]) =>
+                typeof line === 'string' && line.startsWith('[5xx] 500') && line.includes('get_record_context rc_policy');
+            const faults = errorLines.mock.calls.filter(isFault);
+            expect(faults).toHaveLength(2);
+            const stdioFaults = stdioLogger.error.mock.calls.filter(isFault);
+            expect(stdioFaults).toHaveLength(2);
+            for (const [, err, meta] of stdioFaults) {
+                expect(meta).toMatchObject({ status: 500, code: 'INTERNAL_ERROR' });
+                // The logger renders the cause chain itself; the original rides on `cause`.
+                expect(((err as Error).cause as Error | undefined)?.message).toBe(OUTAGE);
+            }
             for (const [, meta] of faults) {
                 expect(meta).toMatchObject({ status: 500, code: 'INTERNAL_ERROR' });
                 // The original reaches the line through the fault log's own `cause` rendering,
@@ -861,17 +876,22 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
             return (real as any)(object, ...rest);
         });
         const errorLines = vi.spyOn(console, 'error').mockImplementation(() => {});
+        stdioLogger.error.mockClear();
         try {
             const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
             expect(unavailable.mock.calls.filter(([object]) => object === 'rc_revision').length).toBeGreaterThanOrEqual(2);
             expect(answer.isError).toBe(true);
             expect(answer.payload.error).toMatchObject({ code: 'ERR_DATASOURCE_UNAVAILABLE', status: 503, message: SENTENCE });
-            // Each door still logs the fault it answered, under the door's own code.
-            const faults = errorLines.mock.calls.filter(([line]) =>
-                typeof line === 'string' && line.startsWith('[5xx]') && line.includes('get_record_context rc_policy'));
+            // Each door still logs the fault it answered, under the door's own code: the /mcp door on
+            // the console fallback, the stdio door on its plugin-context logger (#37666).
+            const isFault = ([line]: unknown[]) =>
+                typeof line === 'string' && line.startsWith('[5xx]') && line.includes('get_record_context rc_policy');
+            const faults = [...errorLines.mock.calls.filter(isFault), ...stdioLogger.error.mock.calls.filter(isFault)];
             expect(faults).toHaveLength(2);
+            expect(errorLines.mock.calls.filter(isFault)).toHaveLength(1);
             for (const [line] of faults) expect(String(line)).toMatch(/^\[5xx\] 503\b/);
             expect(JSON.stringify(errorLines.mock.calls.map(([, meta]) => meta))).not.toContain('INTERNAL_ERROR');
+            expect(JSON.stringify(stdioLogger.error.mock.calls.map(([, , meta]) => meta))).not.toContain('INTERNAL_ERROR');
         } finally {
             unavailable.mockRestore();
             errorLines.mockRestore();
