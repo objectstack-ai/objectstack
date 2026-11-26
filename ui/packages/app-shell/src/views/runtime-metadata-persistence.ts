@@ -46,7 +46,7 @@ import {
   isDraftVersionConflict,
   type DraftSaveOutcome,
   type DraftVersionGuard,
-} from './metadata-admin/DraftConflictDialog.js';
+} from './metadata-admin/draftVersionGuard.js';
 import { ensureCustomizationPackage, fetchListedPackageManifests } from './studio-design/packages-io.js';
 import { listedCustomizationPairOf, listedPackageVersion, type ListedPackageManifest } from './studio-design/packages-io.js';
 import { overrideDraftBody } from './studio-design/customizeOverride.js';

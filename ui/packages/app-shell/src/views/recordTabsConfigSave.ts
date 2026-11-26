@@ -33,7 +33,7 @@
 
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
-import { isDraftVersionConflict } from './metadata-admin/DraftConflictDialog.js';
+import { isDraftVersionConflict } from './metadata-admin/draftVersionGuard.js';
 import {
   ensureCustomizationPackage,
   fetchListedPackageManifests,
