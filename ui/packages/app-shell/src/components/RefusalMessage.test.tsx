@@ -118,3 +118,53 @@ describe('RefusalMessage — one sentence first, the rest behind More (objectui#
     expect(screen.queryByTestId('refusal-detail')).toBeNull();
   });
 });
+
+/**
+ * A refusal that names several reasons lists every one (objectstack#36877,
+ * ruling term 6). The server answers each reason's sentence on
+ * `error.details.refusals` and joins them, with the refusal's own closing
+ * sentence last, into the text; the `/data` door cuts that text at 500
+ * characters and leaves the list whole. The sentences below are the
+ * `/actions` door's answer pinned on the server side for an expense
+ * submission that refuses two expenses.
+ */
+describe('RefusalMessage — a refusal with several reasons lists every line (objectstack#37403)', () => {
+  const LINES = [
+    { reason: 'on_report', message: 'Expense Taxi 12 is already on an expense report.' },
+    { reason: 'approved', message: 'Expense Hotel 7 is already approved.' },
+  ];
+  const CLOSING = 'Nothing was submitted.';
+  const TEXT = `${LINES[0].message}\n${LINES[1].message}\n${CLOSING}`;
+  const items = () => screen.getAllByTestId('refusal-line').map((li) => li.textContent);
+
+  it('shows every reason in order, then the closing sentence, in one list with no More', () => {
+    render(<RefusalMessage text={TEXT} lines={LINES} />);
+
+    expect(screen.getAllByTestId('refusal-lines')).toHaveLength(1);
+    expect(items()).toEqual([LINES[0].message, LINES[1].message, CLOSING]);
+    expect(screen.queryByTestId('refusal-more')).toBeNull();
+    expect(screen.queryByTestId('refusal-lead')).toBeNull();
+  });
+
+  it('a text cut inside the reasons still shows every reason from the list, and no closing sentence', () => {
+    const cut = `${LINES[0].message}\n${LINES[1].message.slice(0, 12)}…`;
+    render(<RefusalMessage text={cut} lines={LINES} />);
+
+    expect(items()).toEqual([LINES[0].message, LINES[1].message]);
+    expect(screen.queryByText(/Nothing was submitted/)).toBeNull();
+    expect(screen.queryByTestId('refusal-more')).toBeNull();
+  });
+
+  it('CONTROL: a single-sentence refusal with no list renders as text alone, as before', () => {
+    const { container } = render(<RefusalMessage text={CLOSING} />);
+    expect(container.innerHTML).toBe(CLOSING);
+    expect(screen.queryByTestId('refusal-lines')).toBeNull();
+  });
+
+  it('CONTROL: an empty list is no list — the text keeps its lead and More', () => {
+    render(<RefusalMessage text={TEXT} lines={[]} />);
+    expect(screen.queryByTestId('refusal-lines')).toBeNull();
+    expect(screen.getByTestId('refusal-lead')).toHaveTextContent(LINES[0].message);
+    expect(screen.getByTestId('refusal-more')).toBeInTheDocument();
+  });
+});

@@ -231,6 +231,21 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     covers: ['data/field.zod.ts:FieldSchema.settledWhen'],
   },
   {
+    // #36806 — the console hand lock's predicate. A row of its own rather than
+    // a fourth `cel-field-rule` cover, for the three reasons that row cannot
+    // speak for it: its evaluator is the console's hand-lock verdict, not the
+    // server rule-validator; a fault LOCKS the field (`fail-closed`), where
+    // that row is `fail-soft-log`; and no server reads it at all. The server
+    // lock is `readonlyWhen`, classified by `cel-field-rule`.
+    id: 'cel-field-ui-readonly-when',
+    summary: "a field's console hand lock (Field.uiReadonlyWhen) — UI only, fails closed",
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',
+    enforcement:
+      'console (ui/) fieldReadOnlyByHand (core/evaluator/handLock.ts) → resolveFieldRuleState → evalFieldPredicate (core/evaluator/fieldRules.ts) → @objectstack/formula celEngine (interpret), evaluated per existing record with the row bound as `record` (plus `previous` and the host predicate scope), by the hosts that let a person edit a stored record: the edit dialog (which also refuses submit while the predicate faults), the record page (inline edit, highlight chip, save bar, stage path), grid cells and the line-item grid\'s stored rows, kanban drag and calendar drag. A create is not judged. A predicate that faults answers LOCKED (UI_READONLY_WHEN_FAULTED = true), because nothing behind it judges the write. UI only: no server evaluates it, and an API or automation write is not refused by it; the server lock is `readonlyWhen`. Judged at authoring by lint\'s field-rule pass (`validate-expressions.ts`) as `readonlyWhen` is',
+    covers: ['data/field.zod.ts:FieldSchema.uiReadonlyWhen'],
+    proof: 'ui/packages/core/src/evaluator/__tests__/handLock-36806.test.ts',
+  },
+  {
     // Split out of `cel-field-rule` by #15500. Both keys used to be spelled
     // `data/field.zod.ts:visibleWhen` and were therefore ONE ratchet key, so
     // this per-OPTION predicate was classified by the row describing the

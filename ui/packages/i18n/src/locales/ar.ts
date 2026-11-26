@@ -209,6 +209,7 @@ const ar = {
     uploadInFlight: "انتظر حتى ينتهي الرفع قبل الحفظ.",
     clearedOnHide: "تم مسح ما لم يعد ينطبق على القيم الحالية: {{fields}}",
     visibleWhenFaulted: "تعذّر الإرسال: تعذّر تقييم قاعدة visibleWhen لـ {{fields}}. يجب إصلاح القاعدة قبل أن يصبح إرسال هذا النموذج ممكنًا.",
+    uiReadonlyWhenFaulted: "تعذّر الإرسال: تعذّر تقييم قاعدة uiReadonlyWhen لـ {{fields}}. يجب إصلاح القاعدة قبل أن يصبح إرسال هذا النموذج ممكنًا.",
     discardTitle: "تجاهل التغييرات؟",
     discardMessage: "لديك تغييرات غير محفوظة. إذا أغلقت هذا النموذج الآن، ستفقد تعديلاتك.",
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
@@ -2875,6 +2876,7 @@ const ar = {
       savedCleared: "تم مسح القيمة المحفوظة",
       deprecatedBadge: "مهمل",
       deprecatedBadgeReplacedBy: "مهمل ← {{replacedBy}}",
+      selectValueRetired: "{{value}} (لم يعد متاحًا)",
       unsupportedSpecifierType: "نوع إعداد غير مدعوم: {{type}}",
       mapAddRow: "إضافة صف",
       mapRemoveRow: "إزالة {{key}}",
