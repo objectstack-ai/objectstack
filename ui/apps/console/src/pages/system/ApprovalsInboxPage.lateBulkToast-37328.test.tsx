@@ -20,6 +20,7 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, within, fireEvent, act } from '@testing-library/react';
+import { useEffect } from 'react';
 import { MemoryRouter, Routes, Route, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom';
 
 const APP = 'com.objectstack.account';
@@ -115,11 +116,12 @@ const router: { navigate?: NavigateFunction; locations: Array<{ pathname: string
   locations: [],
 };
 function RouterProbe() {
-  router.navigate = useNavigate();
+  const navigate = useNavigate();
   const loc = useLocation();
-  if (router.locations[router.locations.length - 1]?.key !== loc.key) {
+  useEffect(() => {
+    router.navigate = navigate;
     router.locations.push({ pathname: loc.pathname, key: loc.key, state: loc.state });
-  }
+  }, [navigate, loc]);
   return null;
 }
 
@@ -164,8 +166,8 @@ async function startHeldBulkApprove() {
 }
 
 /** The settled run's toast options. */
-function failureToast(): Record<string, any> {
-  const [title, options] = toasts.error.mock.calls[0] as [string, Record<string, any>];
+function failureToast(): { action: { label: string; onClick: () => void } } {
+  const [title, options] = toasts.error.mock.calls[0] as [string, { action: { label: string; onClick: () => void } }];
   expect(title).toBe('1 succeeded, 5 failed');
   expect(options.action.label).toBe('Show all (5)');
   return options;

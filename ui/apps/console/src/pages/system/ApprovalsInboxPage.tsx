@@ -1150,9 +1150,10 @@ function ApprovalsQueue() {
   const mounted = useRef(false);
   useEffect(() => {
     mounted.current = true;
+    const raised = bulkFailureToasts.current;
     return () => {
       mounted.current = false;
-      for (const id of bulkFailureToasts.current) toast.dismiss(id);
+      for (const id of raised) toast.dismiss(id);
     };
   }, []);
   // A run that settled after the inbox unmounted handed its failed rows back
