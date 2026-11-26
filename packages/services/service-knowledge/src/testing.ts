@@ -52,23 +52,32 @@
  * Every optional member is DECLARED by the caller in `implements`, and the
  * suite asserts the declaration against the adapter: a member an adapter lacks
  * runs the case that pins the service's behaviour without it, never nothing.
- * `organizationIds` is a search option, not a method, so its declaration is
- * asserted by behaviour: the cases it turns on fail for an adapter that
- * ignores the option.
+ * `organizationIds` and `scope` are search options, not methods, so their
+ * declarations are asserted by behaviour: the cases they turn on fail for an
+ * adapter that ignores the option.
+ *
+ * The record scope (ADR-0161 K8, item 17) is covered on the adapter alone,
+ * for each term kind — filtered before ranking, so `topK` is filled from
+ * in-scope documents; an empty list ranks nothing; without the member every
+ * document is ranked — and through a real `KnowledgeService`, by the record a
+ * source indexes and by a parent object reached through a listed lookup, and
+ * over the adapter with the member stripped from its search: no out-of-scope
+ * hit is answered, and the service logs once.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type {
   IDataEngine,
   IKnowledgeAdapter,
   AdapterContext,
   AdapterIndexExpectation,
+  AdapterScopeTerm,
   AdapterSearchOptions,
 } from '@objectstack/spec/contracts';
 import type { KnowledgeDocument, KnowledgeSource, ObjectKnowledgeSource } from '@objectstack/spec/ai';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { TenancyPosture } from '@objectstack/spec/security';
-import { KnowledgeService } from './knowledge-service.js';
+import { KnowledgeService, type KnowledgeLogger } from './knowledge-service.js';
 import { resolveSplit, splitDocument } from './split/index.js';
 
 /** Input of {@link runKnowledgeAdapterContract}. */
@@ -108,6 +117,12 @@ export interface KnowledgeAdapterContractOptions {
      * Asserted by behaviour; needs `builds` and `refusesOtherFingerprint`.
      */
     generations: boolean;
+    /**
+     * The adapter's search honours `AdapterSearchOptions.scope` (ADR-0161 K8,
+     * item 17): it ranks only the documents some term holds for, filtering
+     * before it ranks, and returns each document's `metadata` on its hits.
+     */
+    scope: boolean;
   };
 }
 
@@ -270,6 +285,12 @@ interface ServiceSetup {
    * (`embedding.maxInputTokens`); omitted, the adapter's own report is used.
    */
   maxInputTokens?: number;
+  /** Registered object definitions the engine double answers from `getSchema`, by object name; absent → none. */
+  schemas?: Record<string, unknown>;
+  /** Strips `scope` from every search the service hands the adapter: an adapter that ignores the member. */
+  stripScope?: boolean;
+  /** The service's logger; absent → none. */
+  logger?: KnowledgeLogger;
 }
 
 /**
@@ -310,6 +331,10 @@ async function serviceOver(
     },
     search: (query, searchOpts) => {
       searched.push(searchOpts);
+      if (setup.stripScope === true) {
+        const { scope: _ignored, ...rest } = searchOpts;
+        return adapter.search(query, rest);
+      }
       return adapter.search(query, searchOpts);
     },
     delete: (ids, ctx) => {
@@ -347,9 +372,12 @@ async function serviceOver(
       : {}),
   };
   const posture = setup.posture;
+  const engine = rowsEngine(rows, setup.wall);
+  const schemas = setup.schemas;
   const svc = new KnowledgeService({
-    dataEngine: rowsEngine(rows, setup.wall),
+    dataEngine: schemas === undefined ? engine : Object.assign(engine, { getSchema: (name: string) => schemas[name] }),
     ...(posture === undefined ? {} : { resolveTenancyPosture: async () => posture() }),
+    ...(setup.logger === undefined ? {} : { logger: setup.logger }),
   });
   svc.registerAdapter('under_test', counting);
   svc.registerSource(source);
@@ -388,6 +416,39 @@ function wallOf(posture: TenancyPosture): (row: Row, context: ExecutionContext) 
   if (posture === 'group') return (row, ctx) => (ctx.accessible_org_ids ?? []).includes(String(row.organization_id));
   return () => true;
 }
+
+/**
+ * Twenty clauses of four policies (ADR-0161 K8, item 17): clause `cNN` belongs
+ * to policy `p${NN % 4}` through the lookup `policy`. The clauses `c03` and
+ * `c07` hold the query once in each of three paragraphs among other words;
+ * every other clause is the query alone, so each of those outranks them.
+ */
+const clauseRows = (): Row[] =>
+  Array.from({ length: 20 }, (_, i) => ({
+    id: `c${String(i).padStart(2, '0')}`,
+    body:
+      i === 3 || i === 7
+        ? 'Harbour crane north quay shift.\n\nHarbour crane south berth shift.\n\nHarbour crane night watch shift.'
+        : 'Harbour crane.\n\nHarbour crane.\n\nHarbour crane.',
+    status: 'published',
+    policy: `p${i % 4}`,
+  }));
+const SCOPE_QUERY = 'harbour crane';
+/** The clauses' registered definition: `policy` is a lookup to `policy`, the parent a scope may name. */
+const CLAUSE_SCHEMA = {
+  name: 'article',
+  fields: {
+    body: { type: 'textarea' },
+    status: { type: 'text' },
+    policy: { type: 'lookup', reference: 'policy' },
+  },
+};
+/** An `article` source that lists the `policy` lookup and cuts each paragraph into its own passage. */
+const clauseSource = (id: string): KnowledgeSource =>
+  objectSource(id, {
+    metadataFields: ['status', 'policy'],
+    split: { strategy: 'recursive', maxChars: 40, minChars: 0 },
+  } as Partial<ObjectKnowledgeSource>);
 
 const rowsOf = (n: number): Row[] =>
   Array.from({ length: n }, (_, i) => ({ id: `r${i}`, body: `body number ${i} zebra${i}`, status: 'published' }));
@@ -553,6 +614,169 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           expect(hits.map((x) => x.documentId)).toEqual([`${source.id}:ra`]);
         });
       }
+    });
+
+    if (opts.implements.scope) {
+      describe('scope (ADR-0161 K8, item 17)', () => {
+        /**
+         * `c1` outranks every other document. `c2` belongs to policy `p1`, `c3`
+         * to `p1` through a list, `c4` to the policy stored as the number 7,
+         * and `c5` to none.
+         */
+        async function seeded(): Promise<{ adapter: IKnowledgeAdapter; a: KnowledgeSource }> {
+          const adapter: IKnowledgeAdapter = await make();
+          const a = objectSource('scope', { metadataFields: ['status', 'policy'] });
+          const withPolicy = (n: string, content: string, policy?: unknown, organizationId?: string): KnowledgeDocument => ({
+            ...doc(a, n, content, undefined, organizationId),
+            metadata: policy === undefined ? { status: 'published' } : { status: 'published', policy },
+          });
+          await adapter.upsert(
+            [
+              withPolicy('c1', 'harbour crane harbour crane', 'p2'),
+              withPolicy('c2', 'harbour crane north quay', 'p1'),
+              withPolicy('c3', 'harbour crane south berth', ['p3', 'p1']),
+              withPolicy('c4', 'harbour crane night watch', 7),
+              withPolicy('c5', 'harbour crane east dock'),
+            ],
+            ctxOf(a),
+          );
+          return { adapter, a };
+        }
+        const search = (adapter: IKnowledgeAdapter, a: KnowledgeSource, topK: number, scope?: AdapterScopeTerm[]) =>
+          adapter.search(SCOPE_QUERY, { source: a, topK, ...(scope === undefined ? {} : { scope }) });
+        const records = (hits: Array<{ sourceRecordId?: string }>): string[] =>
+          hits.map((h) => String(h.sourceRecordId)).sort();
+
+        it('a record term: ranks only those records, filtering before it ranks', async () => {
+          const { adapter, a } = await seeded();
+          // topK 1: a filter applied after ranking would keep c1's better hit and drop it, answering nothing.
+          expect(records(await search(adapter, a, 1, [{ kind: 'record', ids: ['c2'] }]))).toEqual(['c2']);
+          expect(records(await search(adapter, a, 5, [{ kind: 'record', ids: ['c2', 'c4'] }]))).toEqual(['c2', 'c4']);
+        });
+
+        it("a metadata term: ranks only the documents whose field holds an id — a list when any element does — and returns each one's metadata", async () => {
+          const { adapter, a } = await seeded();
+          const term: AdapterScopeTerm = { kind: 'metadata', field: 'policy', ids: ['p1'] };
+          const hits = await search(adapter, a, 5, [term]);
+          expect(records(hits)).toEqual(['c2', 'c3']);
+          // The service checks every hit on its metadata, so the hit carries the document's.
+          for (const hit of hits) expect(hit.metadata?.policy).toEqual(hit.sourceRecordId === 'c2' ? 'p1' : ['p3', 'p1']);
+          const top = await search(adapter, a, 1, [term]);
+          expect(top).toHaveLength(1);
+          expect(['c2', 'c3']).toContain(top[0].sourceRecordId);
+          // A document that carries no value for the field is in no metadata scope.
+          const any = await search(adapter, a, 5, [{ kind: 'metadata', field: 'policy', ids: ['p1', 'p2', 'p3', '7'] }]);
+          expect(records(any)).toEqual(['c1', 'c2', 'c3', 'c4']);
+        });
+
+        it('compares as strings: a value stored as the number 7 matches the id "7"', async () => {
+          const { adapter, a } = await seeded();
+          expect(records(await search(adapter, a, 5, [{ kind: 'metadata', field: 'policy', ids: ['7'] }]))).toEqual(['c4']);
+        });
+
+        it('several terms are a union: a document is in scope when any one holds', async () => {
+          const { adapter, a } = await seeded();
+          const hits = await search(adapter, a, 5, [
+            { kind: 'record', ids: ['c1'] },
+            { kind: 'metadata', field: 'policy', ids: ['p1'] },
+          ]);
+          expect(records(hits)).toEqual(['c1', 'c2', 'c3']);
+        });
+
+        it('an empty list ranks nothing, and so does a term with no ids — never read as "no filter"', async () => {
+          const { adapter, a } = await seeded();
+          expect(await search(adapter, a, 5, [])).toEqual([]);
+          expect(await search(adapter, a, 5, [{ kind: 'record', ids: [] }])).toEqual([]);
+          expect(await search(adapter, a, 5, [{ kind: 'metadata', field: 'policy', ids: [] }])).toEqual([]);
+        });
+
+        it('without the member every document is ranked, as before', async () => {
+          const { adapter, a } = await seeded();
+          expect(records(await search(adapter, a, 5))).toEqual(['c1', 'c2', 'c3', 'c4', 'c5']);
+        });
+
+        if (opts.implements.organizationIds) {
+          it('organizationIds and scope both apply: a document is ranked only when it passes each', async () => {
+            const { adapter, a } = await seeded();
+            await adapter.upsert(
+              [{ ...doc(a, 'c6', 'harbour crane west pier', undefined, 'org_a'), metadata: { status: 'published', policy: 'p1' } }],
+              ctxOf(a),
+            );
+            const hits = await adapter.search(SCOPE_QUERY, {
+              source: a,
+              topK: 5,
+              organizationIds: ['org_a'],
+              scope: [{ kind: 'metadata', field: 'policy', ids: ['p1'] }],
+            });
+            expect(records(hits)).toEqual(['c6']);
+          });
+        }
+      });
+    }
+
+    describe('the record scope through KnowledgeService.search (ADR-0161 K8, item 17)', () => {
+      /** A person reading every row, under no tenancy posture: no organization filter. */
+      const READER = CALLER_A;
+      // The system identity gets one round of `topK` (no refill after the
+      // permission filter), so a full page there is the adapter's filter
+      // before ranking, not the refill's reach.
+
+      it('an own-object scope: every hit is one of the scoped records, and topK is filled from their passages', async () => {
+        const source = clauseSource('scope_record');
+        const h = await serviceOver(make, clauseRows(), source, { schemas: { article: CLAUSE_SCHEMA } });
+        expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 20 });
+        const scoped = new Set(['c03', 'c07']);
+        const hits = await h.svc.search(SCOPE_QUERY, {
+          topK: 5,
+          scope: [{ object: 'article', ids: ['c03', 'c07'] }],
+          executionContext: SYSTEM,
+        });
+        expect(lastOf(h.searched)?.scope).toEqual([{ kind: 'record', ids: ['c03', 'c07'] }]);
+        for (const hit of hits) expect(scoped.has(String(hit.sourceRecordId))).toBe(true);
+        if (opts.implements.scope) {
+          // Filtered before ranking: the eighteen better clauses take no place.
+          const passages = h.received
+            .filter((d) => scoped.has(String(d.sourceRecordId)))
+            .reduce((n, d) => n + (d.chunks?.length ?? 1), 0);
+          expect(hits).toHaveLength(Math.min(5, passages));
+        }
+      });
+
+      it('a parent scope: only the clauses whose listed lookup holds one of the policy ids', async () => {
+        const source = clauseSource('scope_parent');
+        const h = await serviceOver(make, clauseRows(), source, { schemas: { article: CLAUSE_SCHEMA } });
+        await h.svc.reindexSource(source.id);
+        const hits = await h.svc.search(SCOPE_QUERY, {
+          topK: 5,
+          scope: [{ object: 'policy', ids: ['p1'] }],
+          executionContext: SYSTEM,
+        });
+        expect(lastOf(h.searched)?.scope).toEqual([{ kind: 'metadata', field: 'policy', ids: ['p1'] }]);
+        const ofP1 = new Set(clauseRows().filter((r) => r.policy === 'p1').map((r) => String(r.id)));
+        for (const hit of hits) expect(ofP1.has(String(hit.sourceRecordId))).toBe(true);
+        if (opts.implements.scope) {
+          expect(hits).toHaveLength(5);
+          for (const hit of hits) expect(hit.metadata?.policy).toBe('p1');
+        }
+      });
+
+      it('over the adapter with the member stripped: no out-of-scope hit is answered, and the service logs once', async () => {
+        const warn = vi.fn();
+        const source = clauseSource('scope_ignored');
+        const h = await serviceOver(make, clauseRows(), source, {
+          schemas: { article: CLAUSE_SCHEMA },
+          stripScope: true,
+          logger: { warn, debug: () => undefined, info: () => undefined, error: () => undefined },
+        });
+        await h.svc.reindexSource(source.id);
+        for (const ids of [['c03', 'c07'], ['c07']]) {
+          const hits = await h.svc.search(SCOPE_QUERY, { topK: 5, scope: [{ object: 'article', ids }], executionContext: READER });
+          for (const hit of hits) expect(ids).toContain(hit.sourceRecordId);
+        }
+        const reports = warn.mock.calls.map(([message]) => String(message)).filter((m) => m.includes("outside the search's scope"));
+        expect(reports).toHaveLength(1);
+        expect(reports[0]).toContain("adapter 'under_test'");
+      });
     });
 
     if (opts.implements.listDocuments) {

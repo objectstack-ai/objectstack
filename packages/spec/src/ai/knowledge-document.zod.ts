@@ -157,7 +157,13 @@ export const KnowledgeHitSchema = lazySchema(() => z.object({
   snippet: z.string(),
   /** Optional title surfaced from the document. */
   title: z.string().optional(),
-  /** Free-form metadata propagated from the document. */
+  /**
+   * Free-form metadata propagated from the document. An adapter returns the
+   * document's `metadata` on each hit, as stored: the knowledge service checks
+   * a scoped search's hits against it (`AdapterSearchOptions.scope`, ADR-0161
+   * K8, item 17) and drops a hit that does not carry the value a scope term
+   * names.
+   */
   metadata: z.record(z.string(), z.unknown()).default({}).optional(),
   /**
    * The `docHash` the adapter stores for the hit's document, returned as
