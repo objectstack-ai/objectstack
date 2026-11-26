@@ -1068,3 +1068,84 @@ describe('[ADR-0159 D5, ADR-0067 D2 and D3] the undo of a `form` publish puts ba
     await openOnBothDoors(b);
   });
 });
+
+describe('[ADR-0067 D2] a package publish refused part-way on an engine that can roll back leaves nothing of the batch served', () => {
+  const engines: ObjectQL[] = [];
+  beforeAll(() => {
+    // The overlay read cache ON, at its shipped default bound: the rows a
+    // refused batch read while it was open must not outlive its rollback.
+    vi.stubEnv('OS_METADATA_OVERLAY_CACHE_TTL_MS', '30000');
+  });
+  afterAll(async () => {
+    vi.unstubAllEnvs();
+    for (const engine of engines) await engine.destroy().catch(() => {});
+  });
+  const SECOND = `${OBJECT}.second`;
+  const NEW_SLUG = 'renamed-37086-rb';
+  /**
+   * An engine that CAN roll back. The base ships the form in an old-shape
+   * container, open on {@link SLUG}; the pair stores its own old-shape row of
+   * the name with the form switched off.
+   */
+  const pairOverTheBase = async (): Promise<Booted> => {
+    const b = await boot({ views: [container(true)] });
+    engines.push(b.engine);
+    await b.install(PAIR);
+    await b.saveInto('view', PAIR, viewItem(false, overrides));
+    await closedOnBothDoors(b);
+    return b;
+  };
+  /** What the store and the meta doors answer for the name, compared before and after the publish. */
+  const standing = async (b: Booted) => ({
+    view: await rawRows(b, 'view', NAME, PAIR),
+    form: await rawRows(b, 'form', NAME, PAIR),
+    metaView: await b.meta('view', NAME),
+    metaForm: await b.meta('form', NAME),
+  });
+
+  const THIRD = `${OBJECT}.third`;
+  /** A `form` draft in the pair: `name` open on `slug`. */
+  const draft = (b: Booted, name: string, slug: string) => b.protocol.saveMetaItem({
+    type: 'form', name, packageId: PAIR, mode: 'draft',
+    item: name === NAME ? formItem(true, overrides, slug) : { ...formItem(true, {}, slug), name },
+  });
+  const variants = [
+    {
+      // The first form opens a new link; the second, saved on the same link
+      // while it was free, is refused once the first holds it.
+      intent: 'a new public link', slug: NEW_SLUG,
+      others: [SECOND],
+      refused: [[NAME, 'BATCH_ABORTED'], [SECOND, 'FORM_ADDRESS_TAKEN']],
+    },
+    {
+      // The first form re-opens the address the pair's switched-off row holds;
+      // the batch is refused later, at a third form, once the second holds
+      // the link they were both saved on.
+      intent: 'the address the pair\'s switched-off row holds', slug: SLUG,
+      others: [SECOND, THIRD],
+      refused: [[NAME, 'BATCH_ABORTED'], [SECOND, 'BATCH_ABORTED'], [THIRD, 'FORM_ADDRESS_TAKEN']],
+    },
+  ] as const;
+
+  for (const { intent, slug, others, refused } of variants) {
+    it(`refused part-way, a batch whose first form opens ${intent} leaves both doors at 404 there and the meta reads unchanged`, async () => {
+      const b = await pairOverTheBase();
+      await draft(b, NAME, slug);
+      for (const name of others) await draft(b, name, NEW_SLUG);
+      const before = await standing(b);
+      const answer: any = await b.protocol.publishPackageDrafts({ packageId: PAIR });
+      expect(answer.success).toBe(false);
+      expect(answer.failed.map((f: any) => [f.name, f.code])).toEqual(refused);
+      await closedOnBothDoors(b, slug);
+      expect(await standing(b)).toEqual(before);
+    });
+
+    it(`CONTROL: the first form published alone opens ${intent} on both doors`, async () => {
+      const b = await pairOverTheBase();
+      await draft(b, NAME, slug);
+      const answer: any = await b.protocol.publishPackageDrafts({ packageId: PAIR });
+      expect(answer.success, JSON.stringify(answer.failed)).toBe(true);
+      await openOnBothDoors(b, slug);
+    });
+  }
+});
