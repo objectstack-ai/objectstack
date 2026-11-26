@@ -15,7 +15,15 @@ vi.mock('../../assistant/assistantBus', async (importOriginal) => ({
   emitMetadataRefresh,
 }));
 
-import { readStoredMenu, saveAppMenu, type AppMenuSaveDoors, type AppMenuSaveTexts } from '../designModeMenuSave';
+import {
+  menuTranslationName,
+  readStoredMenu,
+  saveAppMenu,
+  writeAppMenu,
+  type AppMenuSaveDoors,
+  type AppMenuSaveTexts,
+} from '../designModeMenuSave';
+import { draftPublishDoor } from '../../views/__tests__/draftPublishDoor-37440';
 
 const TEXTS: AppMenuSaveTexts = {
   notListed: 'not listed',
@@ -179,5 +187,67 @@ describe('the publish is pinned to the published row the save read (objectstack#
     const found = doors({ writable: false, created: false, layers: { 'com.acme.crm': { code: APP, effective: APP, overlayVersion: 'base-1' } } });
     await saveAppMenu(INPUT, TEXTS, found.d);
     expect(publishOf(found.calls)).toEqual(['publish', 'app', 'crm', { packageId: 'com.acme.crm.custom' }]);
+  });
+});
+
+describe('the menu Save publishes only the drafts it wrote (objectstack#37440)', () => {
+  const PKG = 'com.acme.crm';
+  const BODY = { ...APP, navigation: NAV };
+  const TRANSLATION = menuTranslationName('crm', 'zh-CN');
+  function doorDoors() {
+    const door = draftPublishDoor();
+    const liveVersion = door.seedLive('app', 'crm', PKG, APP);
+    const d: Pick<AppMenuSaveDoors, 'client'> = { client: { ...door.client, layered: async () => NOT_FOUND } };
+    const prepared = { appName: 'crm', target: PKG, body: BODY, publishPin: { ifMatch: liveVersion } };
+    return { door, d, prepared, liveVersion };
+  }
+
+  it("PIN (menu): another writer's draft write before the publish is refused, published by nobody, and kept", async () => {
+    const { door, d, prepared } = doorDoors();
+    door.interleave('app', 'crm', PKG, { ...APP, label: 'theirs' });
+    await expect(writeAppMenu(prepared, TEXTS, d)).rejects.toThrow(TEXTS.pendingDraft);
+    expect(door.liveOf('app', 'crm', PKG)).toEqual(APP);
+    expect(door.draftOf('app', 'crm', PKG)).toEqual({ ...APP, label: 'theirs' });
+    expect(door.calls.find(([c]) => c === 'publish')?.[3]).toMatchObject({ ifMatch: prepared.publishPin.ifMatch, draftVersion: expect.any(String) });
+  });
+
+  it('the published row moved instead: still said as a live change, and the draft this save wrote is taken back', async () => {
+    const { door, d, prepared } = doorDoors();
+    door.seedLive('app', 'crm', PKG, { ...APP, label: 'published since' });
+    await expect(writeAppMenu(prepared, TEXTS, d)).rejects.toThrow(TEXTS.publishedMoved);
+    expect(door.liveOf('app', 'crm', PKG)).toEqual({ ...APP, label: 'published since' });
+    expect(door.draftOf('app', 'crm', PKG)).toBeUndefined();
+  });
+
+  it('CONTROL (menu): with no write in between, the same pinned publish takes the menu live', async () => {
+    const { door, d, prepared } = doorDoors();
+    await writeAppMenu(prepared, TEXTS, d);
+    expect(door.liveOf('app', 'crm', PKG)).toEqual(BODY);
+    expect(door.draftOf('app', 'crm', PKG)).toBeUndefined();
+  });
+
+  const translated = (prepared: ReturnType<typeof doorDoors>['prepared']) => ({
+    ...prepared,
+    writesMenu: false,
+    translation: { name: TRANSLATION, locale: 'zh-CN', labels: { leads: '线索' } },
+  });
+
+  it("PIN (translation): another writer's draft write before its publish is refused, published by nobody, and kept", async () => {
+    const { door, d, prepared } = doorDoors();
+    door.interleave('translation', TRANSLATION, PKG, { name: TRANSLATION, label: 'theirs' });
+    await expect(writeAppMenu(translated(prepared), TEXTS, d)).rejects.toThrow(TEXTS.pendingDraft);
+    expect(door.liveOf('translation', TRANSLATION, PKG)).toBeUndefined();
+    expect(door.draftOf('translation', TRANSLATION, PKG)).toEqual({ name: TRANSLATION, label: 'theirs' });
+  });
+
+  it('CONTROL (translation): with no write in between, the labels go live', async () => {
+    const { door, d, prepared } = doorDoors();
+    await writeAppMenu(translated(prepared), TEXTS, d);
+    expect(door.liveOf('translation', TRANSLATION, PKG)).toMatchObject({
+      name: TRANSLATION,
+      locale: 'zh-CN',
+      apps: { crm: { navigation: { leads: { label: '线索' } } } },
+    });
+    expect(door.draftOf('translation', TRANSLATION, PKG)).toBeUndefined();
   });
 });
