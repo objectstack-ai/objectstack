@@ -12,8 +12,8 @@
 
 import { describe, expect, it } from 'vitest';
 import { RECORD_CITATIONS_MAX } from '@objectstack/spec/ai';
-import { executeGetRecordContext, verifyRecordCitations } from '../index.js';
-import { fakeDoor, policyApp, type FakeApp } from './fake-door.js';
+import { executeGetRecordContext, verifyRecordCitations, type VerifyingCall } from '../index.js';
+import { fakeDoor, policyApp, type FakeApp, type FakeDoor } from './fake-door.js';
 
 const ROOT = { object: 'policy', id: 'p1' };
 
@@ -85,6 +85,11 @@ describe('[ADR-0160 D9] what a quote is matched against', () => {
         'Covers <b>fire</b>',
       ]);
     }
+    // Removing a tag joins the text on either side: the tag-removed reading is
+    // not only stricter than matching as stored.
+    const joined = htmlApp('html');
+    joined.records.policy[0].content = '<p>Fire</p><p>cover</p>';
+    expect(await surviving(joined, [cite('Firecover')])).toEqual(['Firecover']);
     expect(await surviving(htmlApp('markdown'), [cite('Covers fire damage.'), cite('Covers <b>fire</b>')])).toEqual([
       'Covers <b>fire</b>',
     ]);
@@ -147,6 +152,73 @@ describe('[ADR-0160 D9] a caller with no read access', () => {
       verifyRecordCitations([cite(quote)], fakeDoor(policyApp({ unexposedObjects: ['policy'] }))),
     ]);
     for (const outcome of outcomes) expect(outcome).toEqual([]);
+  });
+});
+
+describe('[ADR-0160 D9] a refusal and a failure', () => {
+  /** A door whose root read guard throws `err` instead of answering. */
+  const throwingDoor = (err: unknown): FakeDoor => {
+    const door = fakeDoor(policyApp());
+    door.readGuard = async () => {
+      throw err;
+    };
+    return door;
+  };
+  const coded = (code: string, status: number) => Object.assign(new Error(code), { code, status });
+
+  /** The surviving quotes and every failure the host was handed. */
+  async function run(door: FakeDoor, citations: unknown[]) {
+    const reported: Array<{ error: unknown; call: VerifyingCall }> = [];
+    const verified = await verifyRecordCitations(citations, door, { onError: (error, call) => reported.push({ error, call }) });
+    return { quotes: verified.map((c) => c.quote), reported };
+  }
+
+  it('drops the citations of a call that fails without a code and reports the failure, once per call', async () => {
+    // Control: the same citations verify through a door that answers.
+    expect((await run(fakeDoor(policyApp()), [cite('Fire cover'), cite('Acme')])).quotes).toEqual(['Fire cover', 'Acme']);
+
+    const outage = new Error('connection reset');
+    const { quotes, reported } = await run(throwingDoor(outage), [cite('Fire cover'), cite('Acme'), cite('Arson.', { anchor: 'exclusions' })]);
+    expect(quotes).toEqual([]);
+    expect(reported).toEqual([
+      { error: outage, call: { object: 'policy', id: 'p1' } },
+      { error: outage, call: { object: 'policy', id: 'p1', anchor: 'exclusions' } },
+    ]);
+  });
+
+  it('reports a driver code with no status, and a coded 5xx, as failures', async () => {
+    for (const err of [Object.assign(new Error('reset'), { code: 'ECONNRESET' }), coded('INTERNAL_ERROR', 500)]) {
+      const { quotes, reported } = await run(throwingDoor(err), [cite('Fire cover')]);
+      expect(quotes).toEqual([]);
+      expect(reported.map((r) => r.error)).toEqual([err]);
+    }
+  });
+
+  it('drops the citations of a coded 4xx refusal and reports nothing', async () => {
+    for (const err of [coded('PERMISSION_DENIED', 403), coded('RECORD_NOT_FOUND', 404), coded('VALIDATION_ERROR', 400)]) {
+      expect(await run(throwingDoor(err), [cite('Fire cover')])).toEqual({ quotes: [], reported: [] });
+    }
+  });
+
+  it('gives the host the same answer for a refused read and a missing record', async () => {
+    const refused = await run(fakeDoor(policyApp({ unreadableRows: ['p1'] })), [cite('Fire cover')]);
+    const missing = await run(fakeDoor(policyApp()), [{ object: 'policy', id: 'p404', quote: 'Fire cover' }]);
+    expect(refused).toEqual({ quotes: [], reported: [] });
+    expect(missing).toEqual(refused);
+    // Control: the readable record verifies the quote.
+    expect((await run(fakeDoor(policyApp()), [cite('Fire cover')])).quotes).toEqual(['Fire cover']);
+  });
+
+  it('never throws when the callback throws, and drops the failed call without one', async () => {
+    const door = throwingDoor(new Error('down'));
+    await expect(
+      verifyRecordCitations([cite('Fire cover')], door, {
+        onError: () => {
+          throw new Error('logger down');
+        },
+      }),
+    ).resolves.toEqual([]);
+    await expect(verifyRecordCitations([cite('Fire cover')], throwingDoor(new Error('down')))).resolves.toEqual([]);
   });
 });
 
