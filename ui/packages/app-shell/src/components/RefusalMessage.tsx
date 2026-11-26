@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Check, ChevronDown, Copy } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
+import type { ActionRefusalLine } from '@object-ui/types';
 import { splitRefusal } from '../utils/refusalLead.js';
 
 /**
@@ -16,8 +17,21 @@ import { splitRefusal } from '../utils/refusalLead.js';
  * rest of the server's text one click away, selectable and copyable as sent.
  * See {@link splitRefusal} for how the sentence is found. A message that is a
  * single sentence renders as it always did, with no disclosure.
+ *
+ * A refusal that names several reasons (objectstack#36877) is the exception:
+ * every reason is shown, as one list, with no "More" — see
+ * {@link refusalListItems} for where each line comes from.
  */
-export function RefusalMessage({ text, className }: { text: string; className?: string }) {
+export function RefusalMessage({
+  text,
+  lines,
+  className,
+}: {
+  text: string;
+  /** The refusal's reasons as the server listed them (`error.details.refusals`). */
+  lines?: readonly ActionRefusalLine[];
+  className?: string;
+}) {
   const { t } = useObjectTranslation();
   const { lead, full } = splitRefusal(text);
   const [open, setOpen] = useState(false);
@@ -28,6 +42,17 @@ export function RefusalMessage({ text, className }: { text: string; className?: 
     const id = setTimeout(() => setCopied(false), 1500);
     return () => clearTimeout(id);
   }, [copied]);
+
+  const items = refusalListItems(text, lines);
+  if (items !== null) {
+    return (
+      <ul data-testid="refusal-lines" className={cn('min-w-0 list-disc space-y-0.5 pl-5', className)}>
+        {items.map((item, i) => (
+          <li key={i} data-testid="refusal-line">{item}</li>
+        ))}
+      </ul>
+    );
+  }
 
   // Nothing to disclose: the text alone, with no wrapper, so the caller's box
   // reads exactly as it did before this component existed.
@@ -77,4 +102,27 @@ export function RefusalMessage({ text, className }: { text: string; className?: 
       </CollapsibleContent>
     </Collapsible>
   );
+}
+
+/**
+ * The lines of a refusal that names several reasons (objectstack#36877,
+ * ruling term 6), in order: each listed reason's sentence, then the refusal's
+ * own closing sentence. `null` when the server sent no list, so the message
+ * renders as a single refusal does.
+ *
+ * The reasons come from the list the server sent, never from splitting the
+ * text: the `/data` door cuts `userMessage` at 500 characters and leaves the
+ * list whole, so a long refusal's text can stop partway through its reasons.
+ * The closing sentence is on no list — the server sends it only as the last
+ * line of the text, after the reasons joined by line breaks — so it is read
+ * from there, and only when the text still starts with exactly those
+ * reasons. A text cut inside the reasons carries no closing sentence, and
+ * the reasons alone are shown.
+ */
+function refusalListItems(text: string, lines?: readonly ActionRefusalLine[]): string[] | null {
+  if (!lines || lines.length === 0) return null;
+  const reasons = lines.map((line) => line.message);
+  const head = `${reasons.join('\n')}\n`;
+  const closing = text.startsWith(head) ? text.slice(head.length).trim() : '';
+  return closing ? [...reasons, closing] : reasons;
 }
