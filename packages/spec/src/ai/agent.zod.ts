@@ -34,7 +34,7 @@ export const AIModelConfigSchema = lazySchema(() => strictObject({
     top_p: 'topP', nucleus: 'topP',
   },
 }, {
-  provider: z.enum(['openai', 'azure_openai', 'anthropic', 'local']).default('openai'),
+  provider: z.enum(['openai', 'azure_openai', 'anthropic', 'local']).optional(),
   model: z.string().optional().describe(
     'Model name (e.g. gpt-4, claude-3-opus). Optional: when absent, the agent runs on the '
     + 'host\'s default model for this environment, so an agent that only tunes sampling '
