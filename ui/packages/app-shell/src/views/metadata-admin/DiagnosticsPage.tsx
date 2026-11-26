@@ -34,6 +34,7 @@ import {
 import { useMetadataAreaHost } from './metadataAreaHost.js';
 import { t, tFormat, translateMetadataType, useMetadataLocale } from './i18n.js';
 import { diagnosticsHeaderTone, type DiagnosticsHeaderTone } from './diagnostics-tone.js';
+import { StudioTitleRowAssistant } from '../studio-design/studioTitleRow.js';
 
 type Severity = 'error' | 'warning';
 
@@ -173,6 +174,8 @@ export function MetadataDiagnosticsPage() {
             <RefreshCw className="h-3.5 w-3.5 mr-1" />
             {t('engine.diagnostics.refresh', locale)}
           </Button>
+          {/* objectstack#37455 — under Studio, the AI assistant ends the title row. */}
+          <StudioTitleRowAssistant />
         </div>
         <p className="text-sm text-muted-foreground mt-2 max-w-3xl">
           {t('engine.diagnostics.description', locale)}
