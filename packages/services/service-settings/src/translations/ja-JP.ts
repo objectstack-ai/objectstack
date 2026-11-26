@@ -510,6 +510,7 @@ export const jaJP: PlatformTranslationData = {
           help: 'メタデータだけでなくレンダリングされたプロンプトをトレース行に含めます。' },
         embedder_provider: {
           label: 'プロバイダー',
+          help: 'サーバー起動時に読み込まれます。Embedder の設定を保存した変更は、次回の再起動後に反映されます。',
           options: {
             none: '無効（埋め込みなし）',
             openai: 'OpenAI',

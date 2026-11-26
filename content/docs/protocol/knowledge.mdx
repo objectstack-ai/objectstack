@@ -336,7 +336,9 @@ K8): an adapter that lacks one keeps working, and the service does what it
 did before that member existed. `AdapterSearchOptions.organizationIds` is the
 caller's organizations; an adapter that reads it ranks only those
 organizations' documents, filtering before it ranks — see
-[Organization scope](#organization-scope). `listDocuments` lists the documents the
+[Organization scope](#organization-scope). `AdapterSearchOptions.scope` holds a
+search to chosen records the same way — see [Record scope](#record-scope).
+`listDocuments` lists the documents the
 adapter holds for a source, a page of at most `limit` entries at a time, each
 with the `docHash` it was stored with; `nextCursor` is absent once the
 listing is complete. A document written while a listing runs may be missing
@@ -356,6 +358,7 @@ runKnowledgeAdapterContract({
   implements: {
     listDocuments: true, chunks: true, organizationIds: true,
     indexStatus: true, builds: true, refusesOtherFingerprint: true, generations: true,
+    scope: true,
   },
 });
 ```
@@ -548,8 +551,9 @@ an exact scan.
   no SQL. A caller reads one sentence; the driver's text and the SQL go only
   to the operator — the health check, the boot warning and the log.
 - **Search.** An exact scan by cosine distance, so any width works —
-  including a 3072-wide model. The organization filter and the metadata
-  `filter` (equality per key) run in the same `WHERE`, before ranking.
+  including a 3072-wide model. The organization filter, the
+  [record scope](#record-scope) and the metadata `filter` (equality per key)
+  run in the same `WHERE`, before ranking.
   `queryPrefix` is put before every query before it is embedded, for a model
   that embeds questions and passages differently.
 - **Re-embedding.** A passage whose text is unchanged (its `chunk_hash`) is
@@ -686,6 +690,63 @@ wall, a filtered search does not rank them until a complete reindex writes
 them again. The organization is part of `docHash`, so the reindex does not
 skip them. Under `single` nothing changes: a document without an organization
 hashes as before, and the reindex skips it as before.
+
+### Record scope
+
+A search can be held to chosen records (ADR-0161 K8, item 17): "only inside
+this policy". `KnowledgeSearchOptions.scope` is a list of `{ object, ids }`
+entries.
+
+```ts
+const hits = await knowledge.search('notice period', {
+  topK: 5,
+  scope: [{ object: 'policy', ids: [policyId] }],
+  executionContext: ctx,
+});
+```
+
+- **The object a source indexes.** An entry naming it holds that source to
+  those records.
+- **A parent object.** An entry naming another object reaches a source that
+  lists, in its `metadataFields`, a `lookup` or `master_detail` field pointing
+  at that object. The source is then held to the documents whose stored value
+  of that field is one of the ids (any one of them, for a lookup declared
+  `multiple`). A `user` field is not a parent link. A source that lists no such
+  field is not reached by the entry, and neither is one that lists two or more
+  of them (logged once at `warn`, naming the fields). A parent two hops away
+  (policy → chapter → clause) is not reached.
+- **Several entries** are a union. A source no entry reaches is not searched,
+  and a `file` / `http` source answers nothing under a scope.
+- **Empty.** `scope: []`, or an entry whose `ids` is empty, answers no hits; it
+  never means "no scope". Without `scope`, nothing changes.
+- **Bounds.** At most 10 entries, each with at most 500 ids; `object` and every
+  id a non-empty string, and no other key on an entry. Past them the call is
+  refused before any adapter is asked, with `code: 'VALIDATION_ERROR'`,
+  `status: 400` and a message naming the bound.
+
+The service turns the entries into terms for each source and hands them to the
+adapter as `AdapterSearchOptions.scope`: `{ kind: 'record', ids }`, judged on
+the document's `sourceRecordId`, or `{ kind: 'metadata', field, ids }`, judged
+on its stored `metadata[field]`, values compared as strings. An adapter that
+reads the member filters before it ranks, so `topK` is filled from in-scope
+documents; `organizationIds`, `scope` and the opaque `filter` all apply.
+Whatever the adapter does, the service checks every hit after it answers and
+drops a hit no term holds for, a hit without the value included, so an adapter
+returns the document's `metadata` on its hits. An adapter written before the
+member keeps working: out-of-scope documents then take ranking places, its
+scoped searches may answer fewer than `topK`, and the service logs that once
+for the adapter. The contract suite pins both halves: each term kind on the
+adapter alone, and the service's check over the adapter with the member
+stripped.
+
+The scope is judged on the index copy and only narrows. Every hit is still
+re-read as the caller, so a caller who cannot read a scoped record gets
+nothing from it. Source admission already requires each `metadataFields`
+member to be queryable by the caller, and the parent record is never read. A
+document indexed before its source listed the lookup is in no parent scope
+until a complete reindex writes it again. How many hits the scope removed is
+logged, never returned, and an entry that reaches no source answers the same
+empty result a source withheld from the caller gives.
 
 ### Source admission: exposure and field-level rules
 
@@ -918,7 +979,7 @@ up.
 | Audit + metrics | ⏳ Phase 2 |  |
 | `knowledge-llamaindex` | ⏳ Phase 2 |  |
 | `knowledge-dify` | ⏳ Phase 3 / community |  |
-| `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan, organization and metadata filter in SQL, index fingerprint (§4.1) |
+| `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan, organization, record scope and metadata filter in SQL, index fingerprint (§4.1) |
 | `knowledge-turso` | ✅ | A libSQL file of its own; exact scan, organization and metadata filter in SQL, a generation built beside the active one (§4.2) |
 
 ### 7.1 Non-goals for Phase 1
