@@ -1054,6 +1054,89 @@ describe('[ADR-0159 D5, ADR-0067 D2 and D3] the undo of a `form` publish puts ba
     });
   }
 
+  /** The pair's own old-shape row of the form, switched off: an item of the name, or a container `intake` that expands to it. */
+  const OLD_SHAPE_KINDS = [
+    { kind: 'an item-shaped row', row: NAME, canRollBack: true, item: () => viewItem(false, overrides) },
+    {
+      kind: 'a re-saved container', row: 'intake', canRollBack: false,
+      item: () => ({
+        name: 'intake', object: OBJECT,
+        list: { type: 'grid', columns: ['name', 'email'], data: { provider: 'object', object: OBJECT } },
+        formViews: { contact: { ...body(false), data: { provider: 'object', object: OBJECT } } },
+      }),
+    },
+  ] as const;
+  /** The pair over the base's open container, its own old-shape row of `kind` stored, and the form switched off published from a package draft. */
+  const publishedOverTheOldShape = async (shape: (typeof OLD_SHAPE_KINDS)[number]) => {
+    const b = await boot({ views: [container(true)] }, { canRollBack: shape.canRollBack });
+    engines.push(b.engine);
+    expect(engineCanRollBackOf(b)).toBe(shape.canRollBack);
+    await b.install(PAIR);
+    await b.saveBeforeTheGate('view', PAIR, shape.item(), shape.row);
+    await closedOnBothDoors(b);
+    const before = await rawRows(b, 'view', shape.row, PAIR);
+    expect(before.length).toBe(1);
+    await b.protocol.saveMetaItem({ type: 'form', name: NAME, packageId: PAIR, mode: 'draft', item: formItem(false, overrides) });
+    const published: any = await b.protocol.publishPackageDrafts({ packageId: PAIR });
+    expect(published.success, JSON.stringify(published.failed)).toBe(true);
+    expect((await rawRows(b, 'view', shape.row, PAIR)).map((r) => r.metadata)).not.toEqual(before.map((r) => r.metadata));
+    await closedOnBothDoors(b);
+    return { b, before, published };
+  };
+  /** Runs `fn` while the store refuses to restore any `view` version. */
+  const withViewRestoreRefused = async <T,>(b: Booted, fn: () => Promise<T>): Promise<T> => {
+    const realRepo = b.protocol.getOverlayRepo.bind(b.protocol);
+    b.protocol.getOverlayRepo = (...a: any[]) => {
+      const repo = realRepo(...a);
+      return new Proxy(repo, {
+        get(target, prop, receiver) {
+          if (prop === 'restoreVersion') {
+            return async (ref: any, ...rest: any[]) => {
+              if (ref?.type === 'view') throw new Error('the store refused the view restore');
+              return target.restoreVersion(ref, ...rest);
+            };
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    };
+    try {
+      return await fn();
+    } finally {
+      b.protocol.getOverlayRepo = realRepo;
+    }
+  };
+
+  for (const shape of OLD_SHAPE_KINDS) {
+    it(`a commit revert that cannot put back ${shape.kind} its \`form\` publish edited keeps the form as published and lists it in failed[] (ablate: the form item waits for the edited view rows)`, async () => {
+      const { b, published } = await publishedOverTheOldShape(shape);
+      const formAfterPublish = await rawRows(b, 'form', NAME, PAIR);
+      const viewAfterPublish = await rawRows(b, 'view', shape.row, PAIR);
+      expect(formAfterPublish.length).toBe(1);
+      const reverted: any = await withViewRestoreRefused(b, () => b.protocol.revertCommit({ commitId: published.commitId, packageId: PAIR }));
+      expect(reverted.success).toBe(false);
+      expect(reverted.failed.map((f: any) => [f.type, f.name])).toEqual([['view', shape.row], ['form', NAME]]);
+      expect(reverted.reverted).toEqual([]);
+      expect(await rawRows(b, 'form', NAME, PAIR)).toEqual(formAfterPublish);
+      expect(await rawRows(b, 'view', shape.row, PAIR)).toEqual(viewAfterPublish);
+      await closedOnBothDoors(b);
+    });
+
+    it(`CONTROL: the same revert with the store restoring puts back ${shape.kind} and removes the form`, async () => {
+      const { b, before, published } = await publishedOverTheOldShape(shape);
+      const reverted: any = await b.protocol.revertCommit({ commitId: published.commitId, packageId: PAIR });
+      expect(reverted.failed).toEqual([]);
+      expect(reverted.reverted).toEqual([
+        { type: 'view', name: shape.row, action: 'restored' },
+        { type: 'form', name: NAME, action: 'removed' },
+      ]);
+      expect(await rawRows(b, 'form', NAME, PAIR)).toEqual([]);
+      expect((await rawRows(b, 'view', shape.row, PAIR)).map((r) => r.metadata)).toEqual(before.map((r) => r.metadata));
+      await closedOnBothDoors(b);
+    });
+  }
+
   it('CONTROL: the revert of a `form` publish that removed no old-shape row removes the form and restores nothing else', async () => {
     const b = await boot({ views: [container(true)] }, { canRollBack: false });
     engines.push(b.engine);
