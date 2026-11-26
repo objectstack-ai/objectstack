@@ -15,6 +15,7 @@ import {
   ACCESS_DIRECTORY_REF,
   accessDirectoryLocation,
   accessDirectoryPath,
+  holdsAccessDirectoryCapability,
   studioAddressAfterSetupMove,
   studioAllLegSetupRedirect,
 } from './accessDirectory.js';
@@ -26,6 +27,14 @@ describe('the Setup page (objectstack#37565)', () => {
     expect(ACCESS_DIRECTORY_REF).toBe('security:access-directory');
     expect(ACCESS_DIRECTORY_PATH).toBe(SETUP);
     expect(ACCESS_DIRECTORY_CAPABILITY).toBe('studio.access');
+  });
+
+  it('parity with the Studio gate: the capability, in a reported set', () => {
+    expect(holdsAccessDirectoryCapability(['studio.access'])).toBe(true);
+    expect(holdsAccessDirectoryCapability(['studio.access', 'setup.access'])).toBe(true);
+    expect(holdsAccessDirectoryCapability([])).toBe(false);
+    expect(holdsAccessDirectoryCapability(['setup.access'])).toBe(false);
+    expect(holdsAccessDirectoryCapability(undefined)).toBe(false);
   });
 
   it('addresses the directory, and a type\'s list in the environment scope', () => {

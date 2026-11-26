@@ -35,10 +35,13 @@ vi.mock('../metadata-admin/index.js', () => ({
   MetadataResourceListPage: () => <PageStub page="list" />,
 }));
 
-const held = vi.hoisted(() => ({ capabilities: new Set<string>(['studio.access']) }));
+const held = vi.hoisted(() => ({ capabilities: ['studio.access'] as string[] | undefined }));
 vi.mock('@object-ui/permissions', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  usePermissions: () => ({ hasCapabilities: (caps: string[]) => caps.every((c) => held.capabilities.has(c)) }),
+  usePermissions: () => ({
+    systemPermissions: held.capabilities,
+    hasCapabilities: (caps: string[]) => !held.capabilities || caps.every((c) => held.capabilities!.includes(c)),
+  }),
 }));
 
 import { AccessDirectoryPage } from './AccessDirectoryPage';
@@ -70,12 +73,19 @@ async function page() {
 
 afterEach(() => {
   cleanup();
-  held.capabilities = new Set(['studio.access']);
+  held.capabilities = ['studio.access'];
 });
 
 describe('the gate: Studio\'s entry capability (objectstack#37565)', () => {
   it('without studio.access the page reads nothing and names the capability', () => {
-    held.capabilities = new Set(['setup.access', 'manage_platform_settings']);
+    held.capabilities = ['setup.access', 'manage_platform_settings'];
+    mount(SETUP);
+    expect(screen.getByTestId('access-directory-not-allowed')).toHaveTextContent('studio.access');
+    expect(screen.queryByTestId('area-page')).toBeNull();
+  });
+
+  it('parity with the Studio gate: an answer that reports no capability set is refused too', () => {
+    held.capabilities = undefined;
     mount(SETUP);
     expect(screen.getByTestId('access-directory-not-allowed')).toHaveTextContent('studio.access');
     expect(screen.queryByTestId('area-page')).toBeNull();

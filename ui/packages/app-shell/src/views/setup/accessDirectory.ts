@@ -23,13 +23,23 @@ import {
   studioMetadataAreaAddress,
   studioMetadataAreaRoot,
 } from '../studio-design/studioAddress.js';
-import { ACCESS_DIRECTORY_PATH } from './accessDirectoryRef.js';
+import { ACCESS_DIRECTORY_CAPABILITY, ACCESS_DIRECTORY_PATH } from './accessDirectoryRef.js';
 
 export { ACCESS_DIRECTORY_CAPABILITY, ACCESS_DIRECTORY_PATH, ACCESS_DIRECTORY_REF } from './accessDirectoryRef.js';
 
 function withQuery(path: string, params: URLSearchParams): string {
   const query = params.toString();
   return query ? `${path}?${query}` : path;
+}
+
+/**
+ * Whether a capability set admits the Setup page: the same reading of
+ * {@link ACCESS_DIRECTORY_CAPABILITY} Studio's entry gate makes
+ * (`holdsStudioAccess` in the console), so the page is never wider than the
+ * Studio gate it replaces (objectstack#37565).
+ */
+export function holdsAccessDirectoryCapability(systemPermissions: readonly string[] | undefined): boolean {
+  return Array.isArray(systemPermissions) && systemPermissions.includes(ACCESS_DIRECTORY_CAPABILITY);
 }
 
 /** Whether a type is one the directory lists. */

@@ -10,9 +10,10 @@
  * the same host shape (`packageId: null`, the leg's), rooted at this page, so
  * the reads, the activation switches and every server refusal are theirs.
  *
- * Gated by {@link ACCESS_DIRECTORY_CAPABILITY} (`hasCapabilities`, which fails
- * open on an unreported answer: the metadata reads still refuse a caller the
- * server does not admit). Without it the page reads nothing.
+ * Gated by {@link ACCESS_DIRECTORY_CAPABILITY}, read exactly as Studio's entry
+ * gate reads it (`holdsAccessDirectoryCapability`): opening the directory from
+ * Setup must not widen who sees it (objectstack#37565). Without it the page
+ * reads nothing.
  */
 
 import * as React from 'react';
@@ -21,7 +22,12 @@ import { Alert, AlertDescription } from '@object-ui/components';
 import { usePermissions } from '@object-ui/permissions';
 import { MetadataAreaHostContext, type MetadataAreaHost } from '../metadata-admin/metadataAreaHost.js';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
-import { ACCESS_DIRECTORY_CAPABILITY, ACCESS_DIRECTORY_PATH, accessDirectoryLocation } from './accessDirectory.js';
+import {
+  ACCESS_DIRECTORY_CAPABILITY,
+  ACCESS_DIRECTORY_PATH,
+  accessDirectoryLocation,
+  holdsAccessDirectoryCapability,
+} from './accessDirectory.js';
 
 const MetadataDirectoryPage = React.lazy(() =>
   import('../metadata-admin/index.js').then((m) => ({ default: m.MetadataDirectoryPage })),
@@ -44,8 +50,8 @@ function Loading({ locale }: { locale: string }): React.ReactElement {
 export function AccessDirectoryPage(): React.ReactElement {
   const { pathname, search } = useLocation();
   const locale = useMetadataLocale();
-  const { hasCapabilities } = usePermissions();
-  const allowed = hasCapabilities([ACCESS_DIRECTORY_CAPABILITY]);
+  const { systemPermissions } = usePermissions();
+  const allowed = holdsAccessDirectoryCapability(systemPermissions);
 
   if (!allowed) {
     return (
