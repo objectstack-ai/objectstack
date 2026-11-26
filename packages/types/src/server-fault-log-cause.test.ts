@@ -17,12 +17,15 @@ import { describe, it, expect, vi } from 'vitest';
 import { logServerFault, faultCauseChain, FAULT_CAUSE_DEPTH_LIMIT, SERVER_FAULT_LOG_PREFIX } from './server-fault-log.js';
 import { sendServerFault } from './response-envelope.js';
 
+/** `new Error(message, { cause })` without the ES2022 lib this package does not compile against. */
+const withCause = (message: string, cause: unknown): Error => Object.assign(new Error(message), { cause });
+
 const ROOT = 'SQLITE_IOERR: disk I/O error reading policy_revision.version';
 const MID = 'driver read failed for policy_revision';
 const OUTER = 'The related records of policy could not be read.';
 
 /** wrapper → mid → root, the shape a door wraps a driver error in. */
-const wrapped = () => new Error(OUTER, { cause: new Error(MID, { cause: new Error(ROOT) }) });
+const wrapped = () => withCause(OUTER, withCause(MID, new Error(ROOT)));
 
 const faultLines = (spy: { mock: { calls: unknown[][] } }) =>
     spy.mock.calls.filter((c) => String(c[0]).startsWith(SERVER_FAULT_LOG_PREFIX));
@@ -77,7 +80,7 @@ describe('logServerFault — the console fallback prints the cause chain', () =>
 describe('faultCauseChain — bounded both ways', () => {
     it('stops a cycle at its first repeat, and says so', () => {
         const a = new Error('a');
-        const b = new Error('b', { cause: a });
+        const b = withCause('b', a);
         (a as { cause?: unknown }).cause = b;
         const chain = faultCauseChain(a);
         expect(chain.map((l) => l.message)).toEqual([
@@ -94,7 +97,7 @@ describe('faultCauseChain — bounded both ways', () => {
 
     it(`stops a deep chain after ${FAULT_CAUSE_DEPTH_LIMIT} links, and says so`, () => {
         let error = new Error('link 0');
-        for (let i = 1; i <= 20; i += 1) error = new Error(`link ${i}`, { cause: error });
+        for (let i = 1; i <= 20; i += 1) error = withCause(`link ${i}`, error);
         const chain = faultCauseChain(error);
         expect(chain).toHaveLength(FAULT_CAUSE_DEPTH_LIMIT + 1);
         expect(chain.slice(0, FAULT_CAUSE_DEPTH_LIMIT).map((l) => l.message)).toEqual(
@@ -104,8 +107,8 @@ describe('faultCauseChain — bounded both ways', () => {
     });
 
     it('prints a non-Error cause as its text, and ends the chain there', () => {
-        expect(faultCauseChain(new Error('w', { cause: 'socket hang up' }))).toEqual([{ message: 'socket hang up' }]);
-        expect(faultCauseChain(new Error('w', { cause: { code: 'ECONNRESET' } }))).toEqual([{ message: '{"code":"ECONNRESET"}' }]);
+        expect(faultCauseChain(withCause('w', 'socket hang up'))).toEqual([{ message: 'socket hang up' }]);
+        expect(faultCauseChain(withCause('w', { code: 'ECONNRESET' }))).toEqual([{ message: '{"code":"ECONNRESET"}' }]);
     });
 
     it('a throwing cause getter ends the chain rather than costing the line', () => {
@@ -125,7 +128,7 @@ describe('logServerFault — an injected logger renders the chain itself', () =>
         expect(logger.error).toHaveBeenCalledTimes(1);
         const [, err, meta] = logger.error.mock.calls[0];
         expect(err).toBe(thrown);
-        expect((err as Error).cause).toBeInstanceOf(Error);
+        expect((err as { cause?: unknown }).cause).toBeInstanceOf(Error);
         expect(meta).not.toHaveProperty('causes');
     });
 });
