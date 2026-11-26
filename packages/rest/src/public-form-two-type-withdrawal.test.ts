@@ -74,6 +74,24 @@ const INQUIRY = {
   },
 };
 
+/** An object the pair itself ships ({@link pairShipsNote}), and the pair's form of it. */
+const NOTE_OBJECT = 'ftt_note';
+const NOTE_FORM = `${NOTE_OBJECT}.contact`;
+const NOTE_SLUG = 'note-37086';
+const NOTE = { name: NOTE_OBJECT, label: 'Note', fields: INQUIRY.fields };
+const noteForm = (open: boolean | null) => ({ name: NOTE_FORM, object: NOTE_OBJECT, label: 'Note', ...body(open, NOTE_SLUG) });
+/** A stored container `intake` on `object`: a list, and `formViews.contact` switched off on `slug`. */
+const intakeContainer = (object: string, slug = SLUG) => ({
+  name: 'intake', object,
+  list: { type: 'grid', columns: ['name', 'email'], data: { provider: 'object', object } },
+  formViews: { contact: { ...body(false, slug), data: { provider: 'object', object } } },
+});
+/** The base's container whose `formViews['intake.contact']` is served as `OBJECT.intake.contact`. */
+const intakeMemberContainer = (open: boolean | null) => ({
+  object: OBJECT,
+  formViews: { 'intake.contact': { ...body(open), data: { provider: 'object', object: OBJECT } } },
+});
+
 function mockServer() {
   const noop = () => {};
   return { get: noop, post: noop, put: noop, delete: noop, patch: noop, use: noop, listen: async () => {}, close: async () => {} };
@@ -200,6 +218,16 @@ async function boot(ships: { forms?: unknown[]; views?: unknown[]; objects?: unk
 }
 
 type Booted = Awaited<ReturnType<typeof boot>>;
+
+/**
+ * Registers {@link NOTE} as an object the pair ships: a container the pair
+ * stores on it is on its own package's object, so its members are served as
+ * `OBJECT.KEY`, the names a `form` item can take.
+ */
+async function pairShipsNote(b: Booted) {
+  b.engine.registry.registerObject(NOTE as any, PAIR);
+  await b.engine.syncSchemas();
+}
 const answered = (a: Answer) => [a.status, a.body?.code];
 
 /** Both doors refuse with `404 FORM_NOT_FOUND`, and nothing was written. */
@@ -798,20 +826,55 @@ describe('[ADR-0159 D5] a `form` save, reset and delete: the old-shape row of th
     await openOnBothDoors(b);
   });
 
-  it('a stored container is re-saved without the member, its lists byte-equal', async () => {
-    const b = await booted({ forms: [formItem(true)] });
+  it('a stored container is re-saved without the member the `form` write names, its lists byte-equal', async () => {
+    const b = await booted({});
     await b.install(PAIR);
-    const stored = { name: 'intake', object: OBJECT, list: { type: 'grid', columns: ['name', 'email'], data: { provider: 'object', object: OBJECT } }, formViews: { contact: { ...body(false), data: { provider: 'object', object: OBJECT } } } };
-    await b.saveBeforeTheGate('view', PAIR, stored, 'intake');
+    await pairShipsNote(b);
+    await b.saveBeforeTheGate('view', PAIR, intakeContainer(NOTE_OBJECT, NOTE_SLUG), 'intake');
     const [before] = await rawRows(b, 'view', 'intake', PAIR);
     expect(JSON.parse(before.metadata).formViews?.contact).toBeDefined();
-    await b.saveInto('form', PAIR, formItem(false, overrides));
+    await b.saveInto('form', PAIR, noteForm(false), NOTE_FORM);
     const [after] = await rawRows(b, 'view', 'intake', PAIR);
     expect(after).toBeDefined();
     const was = JSON.parse(before.metadata);
     const now = JSON.parse(after.metadata);
     expect(now.formViews).toBeUndefined();
     expect(JSON.stringify(now.list)).toBe(JSON.stringify(was.list));
+  });
+
+  it('a `form` write removes only the old-shape row that carries that form: a stored container whose member is served under another name stays as it was across the save, the publish and the reset, and the address stays closed (ablate: the `form` read\'s naming in the old-shape row removal)', async () => {
+    const b = await booted({ views: [intakeMemberContainer(true)] });
+    await b.install(PAIR);
+    // Stored before the gate: on the base's object the pair's `formViews.contact`
+    // is served as `OBJECT.intake.contact`, switched off over the base's form of
+    // that name.
+    await b.seedRow('view', 'intake', PAIR, intakeContainer(OBJECT));
+    await closedOnBothDoors(b);
+    const before = await rawRows(b, 'view', 'intake', PAIR);
+    expect(before.length).toBe(1);
+    // A form of another name, the one the member's key spells under the object alone.
+    await b.protocol.saveMetaItem({ type: 'form', name: NAME, packageId: PAIR, mode: 'draft', item: formItem(false, {}, OTHER_SLUG) });
+    expect(await rawRows(b, 'view', 'intake', PAIR)).toEqual(before);
+    await b.protocol.publishMetaItem({ type: 'form', name: NAME, packageId: PAIR });
+    expect(await rawRows(b, 'view', 'intake', PAIR)).toEqual(before);
+    await closedOnBothDoors(b);
+    await closedOnBothDoors(b, OTHER_SLUG);
+    const reset: any = await b.protocol.deleteMetaItem({ type: 'form', name: NAME, packageId: PAIR });
+    expect(reset.success).toBe(true);
+    expect(await rawRows(b, 'view', 'intake', PAIR)).toEqual(before);
+    await closedOnBothDoors(b);
+  });
+
+  it('CONTROL: the `form` write of the name a stored container\'s member is served under re-saves the container without it, and the form is served as written', async () => {
+    const b = await booted({});
+    await b.install(PAIR);
+    await pairShipsNote(b);
+    await b.seedRow('view', 'intake', PAIR, intakeContainer(NOTE_OBJECT, NOTE_SLUG));
+    await closedOnBothDoors(b, NOTE_SLUG);
+    await b.saveInto('form', PAIR, noteForm(true), NOTE_FORM);
+    const [after] = await rawRows(b, 'view', 'intake', PAIR);
+    expect(JSON.parse(after.metadata).formViews).toBeUndefined();
+    await openOnBothDoors(b, NOTE_SLUG);
   });
 
   it('a `form` write that fails leaves both rows as they were', async () => {
@@ -1054,16 +1117,20 @@ describe('[ADR-0159 D5, ADR-0067 D2 and D3] the undo of a `form` publish puts ba
     });
   }
 
-  /** The pair's own old-shape row of the form, switched off: an item of the name, or a container `intake` that expands to it. */
+  /**
+   * The pair's own old-shape row of a form, switched off, and the pair's `form`
+   * of that name: an item of the name over the base's open container, or a
+   * container `intake` on the pair's own object whose member is served under
+   * the form's name.
+   */
   const OLD_SHAPE_KINDS = [
-    { kind: 'an item-shaped row', row: NAME, canRollBack: true, item: () => viewItem(false, overrides) },
     {
-      kind: 'a re-saved container', row: 'intake', canRollBack: false,
-      item: () => ({
-        name: 'intake', object: OBJECT,
-        list: { type: 'grid', columns: ['name', 'email'], data: { provider: 'object', object: OBJECT } },
-        formViews: { contact: { ...body(false), data: { provider: 'object', object: OBJECT } } },
-      }),
+      kind: 'an item-shaped row', row: NAME, form: NAME, slug: SLUG, canRollBack: true, ownObject: false,
+      item: () => viewItem(false, overrides), formBody: () => formItem(false, overrides),
+    },
+    {
+      kind: 'a re-saved container', row: 'intake', form: NOTE_FORM, slug: NOTE_SLUG, canRollBack: false, ownObject: true,
+      item: () => intakeContainer(NOTE_OBJECT, NOTE_SLUG), formBody: () => noteForm(false),
     },
   ] as const;
   /** The pair over the base's open container, its own old-shape row of `kind` stored, and the form switched off published from a package draft. */
@@ -1072,15 +1139,16 @@ describe('[ADR-0159 D5, ADR-0067 D2 and D3] the undo of a `form` publish puts ba
     engines.push(b.engine);
     expect(engineCanRollBackOf(b)).toBe(shape.canRollBack);
     await b.install(PAIR);
+    if (shape.ownObject) await pairShipsNote(b);
     await b.saveBeforeTheGate('view', PAIR, shape.item(), shape.row);
-    await closedOnBothDoors(b);
+    await closedOnBothDoors(b, shape.slug);
     const before = await rawRows(b, 'view', shape.row, PAIR);
     expect(before.length).toBe(1);
-    await b.protocol.saveMetaItem({ type: 'form', name: NAME, packageId: PAIR, mode: 'draft', item: formItem(false, overrides) });
+    await b.protocol.saveMetaItem({ type: 'form', name: shape.form, packageId: PAIR, mode: 'draft', item: shape.formBody() });
     const published: any = await b.protocol.publishPackageDrafts({ packageId: PAIR });
     expect(published.success, JSON.stringify(published.failed)).toBe(true);
     expect((await rawRows(b, 'view', shape.row, PAIR)).map((r) => r.metadata)).not.toEqual(before.map((r) => r.metadata));
-    await closedOnBothDoors(b);
+    await closedOnBothDoors(b, shape.slug);
     return { b, before, published };
   };
   /** Runs `fn` while the store refuses to restore any `view` version. */
@@ -1111,16 +1179,16 @@ describe('[ADR-0159 D5, ADR-0067 D2 and D3] the undo of a `form` publish puts ba
   for (const shape of OLD_SHAPE_KINDS) {
     it(`a commit revert that cannot put back ${shape.kind} its \`form\` publish edited keeps the form as published and lists it in failed[] (ablate: the form item waits for the edited view rows)`, async () => {
       const { b, published } = await publishedOverTheOldShape(shape);
-      const formAfterPublish = await rawRows(b, 'form', NAME, PAIR);
+      const formAfterPublish = await rawRows(b, 'form', shape.form, PAIR);
       const viewAfterPublish = await rawRows(b, 'view', shape.row, PAIR);
       expect(formAfterPublish.length).toBe(1);
       const reverted: any = await withViewRestoreRefused(b, () => b.protocol.revertCommit({ commitId: published.commitId, packageId: PAIR }));
       expect(reverted.success).toBe(false);
-      expect(reverted.failed.map((f: any) => [f.type, f.name])).toEqual([['view', shape.row], ['form', NAME]]);
+      expect(reverted.failed.map((f: any) => [f.type, f.name])).toEqual([['view', shape.row], ['form', shape.form]]);
       expect(reverted.reverted).toEqual([]);
-      expect(await rawRows(b, 'form', NAME, PAIR)).toEqual(formAfterPublish);
+      expect(await rawRows(b, 'form', shape.form, PAIR)).toEqual(formAfterPublish);
       expect(await rawRows(b, 'view', shape.row, PAIR)).toEqual(viewAfterPublish);
-      await closedOnBothDoors(b);
+      await closedOnBothDoors(b, shape.slug);
     });
 
     it(`CONTROL: the same revert with the store restoring puts back ${shape.kind} and removes the form`, async () => {
@@ -1129,11 +1197,11 @@ describe('[ADR-0159 D5, ADR-0067 D2 and D3] the undo of a `form` publish puts ba
       expect(reverted.failed).toEqual([]);
       expect(reverted.reverted).toEqual([
         { type: 'view', name: shape.row, action: 'restored' },
-        { type: 'form', name: NAME, action: 'removed' },
+        { type: 'form', name: shape.form, action: 'removed' },
       ]);
-      expect(await rawRows(b, 'form', NAME, PAIR)).toEqual([]);
+      expect(await rawRows(b, 'form', shape.form, PAIR)).toEqual([]);
       expect((await rawRows(b, 'view', shape.row, PAIR)).map((r) => r.metadata)).toEqual(before.map((r) => r.metadata));
-      await closedOnBothDoors(b);
+      await closedOnBothDoors(b, shape.slug);
     });
   }
 
