@@ -69,6 +69,7 @@ import { historySlotOf, refusePackageSelectorOutsideSlottedTypes } from './proto
 import { captureStoredExpressionChange, fillStoredExpressionChange, type StoredExpressionFillCapture } from './protocol-stored-expression-fill.js';
 import { OBJECT_REGISTRY_REFUSED, reportObjectRegistryRefusal } from './protocol-registry-hydration.js';
 import { OBJECT_EXTENSION_TYPE, registrableObjectExtension } from './protocol-object-extension-item.js';
+import { retireOverlayCacheOnRollback } from './meta-overlay-cache.js';
 
 /**
  * [#32396] A promotion a package publish wrote: what {@link undoLandedPromotions}
@@ -1486,7 +1487,7 @@ export class ProtocolHistoryAndPublishFacet {
                     });
                     return promoted;
                 };
-                return typeof host.engine?.transaction === 'function' ? host.engine.transaction(run) : run();
+                return typeof host.engine?.transaction === 'function' ? retireOverlayCacheOnRollback(host.engine, () => host.engine.transaction!(run)) : run();
             };
             const result = await promoteFormAware(() => repo.promoteDraft(ref, {
                 deriveActiveBody: (draftBody) => stampHtmlPageRequires(singularType, draftBody, sduiManifest),
@@ -2266,7 +2267,7 @@ export class ProtocolHistoryAndPublishFacet {
             ? this.engine.transaction.bind(this.engine)
             : undefined;
         const inTxn: <T>(cb: () => Promise<T>) => Promise<T> =
-            engineTx ? (cb) => engineTx(() => cb()) : (cb) => cb();
+            engineTx ? (cb) => retireOverlayCacheOnRollback(this.engine, () => engineTx(() => cb())) : (cb) => cb();
         /** The promotion request for one draft: Phase 0 judges it, Phase 1 writes it. */
         const promotionRequest = (d: (typeof ordered)[number]) => ({
             registryQuestion: PROMOTION_REGISTRY_QUESTION['package-publish'],

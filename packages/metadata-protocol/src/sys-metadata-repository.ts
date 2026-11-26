@@ -102,6 +102,7 @@ import type { MetadataAuthoringClient, MetadataAuthoringSurface } from '@objects
 // [#24395] The draft save's per-key provenance — the diff, the keep rule and
 // the stored form, one module the strict draft read reads it back through.
 import { draftChangedPaths, mergeDraftChanges, storedDraftChanges, type DraftChangeStamp } from './draft-changes.js';
+import { retireOverlayCacheOnRollback } from './meta-overlay-cache.js';
 
 /**
  * Canonicalise a driver-materialised timestamp into the ISO-8601 string the
@@ -886,7 +887,8 @@ export class SysMetadataRepository implements MetadataRepository {
    */
   private async withTxn<T>(cb: (ctx: any) => Promise<T>): Promise<T> {
     if (typeof this.engine.transaction === 'function') {
-      return this.engine.transaction(cb);
+      // ADR-0067 D2: a rollback retires the overlay rows read inside it.
+      return retireOverlayCacheOnRollback(this.engine, () => this.engine.transaction!(cb));
     }
     return cb(undefined);
   }

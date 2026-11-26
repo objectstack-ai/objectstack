@@ -69,6 +69,7 @@ import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import type { ProtocolHost } from './protocol-host.js';
 import { packagelessHolderRefusal, packagelessRowHeldBaseAddress } from './protocol-save.js';
 import { isPlatformOrigin } from '@objectstack/metadata';
+import { retireOverlayCacheOnRollback } from './meta-overlay-cache.js';
 
 /**
  * [#33308] The row slot a `sys_metadata` row is: its bound package, or `null`
@@ -913,7 +914,7 @@ export class ProtocolDiffDeleteLoadFacet {
                         });
                         return removed;
                     };
-                    return typeof host.engine?.transaction === 'function' ? host.engine.transaction(run) : run();
+                    return typeof host.engine?.transaction === 'function' ? retireOverlayCacheOnRollback(host.engine, () => host.engine.transaction!(run)) : run();
                 };
                 const result = await deleteFormAware(() => repo.delete(ref, {
                     parentVersion,

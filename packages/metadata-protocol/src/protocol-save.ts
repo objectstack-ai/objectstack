@@ -97,6 +97,7 @@ import { installedManifestsOfEngine } from './installed-manifests.js';
 import { packageScopedRefusalOf } from './protocol-meta-item-reads.js';
 import { pairsOf } from '@objectstack/metadata-core';
 import { BatchRowHealError, canJudgeBatchObjects, isBatchObjectType, readActiveBatchRow, settleBatchObjectRows, undoBatchRowWrite, undoOutcomeForLog, type WrittenBatchRow } from './batch-object-registration.js';
+import { retireOverlayCacheOnRollback } from './meta-overlay-cache.js';
 
 export class ProtocolSaveFacet {
     /**
@@ -2320,7 +2321,7 @@ export class ProtocolSaveFacet {
                 });
                 return written;
             };
-            return typeof host.engine?.transaction === 'function' ? host.engine.transaction(run) : run();
+            return typeof host.engine?.transaction === 'function' ? retireOverlayCacheOnRollback(host.engine, () => host.engine.transaction!(run)) : run();
         };
         try {
             const result = await putFormAware(() => repo.put(ref, request.item, {
