@@ -195,3 +195,37 @@ describe('referenceNameVisible in the field inspector', () => {
     expect(screen.getByRole('checkbox', { name: '不可读时显示名称' })).toBeTruthy();
   });
 });
+
+// The publish gate refuses `reference` on a type that reads none
+// (`field/reference-on-non-reference-type`), and the Related Object picker is
+// drawn only on lookup / master_detail / tree, so a retype to such a type
+// removes the target, as it removes `referenceNameVisible` above.
+describe('a retype removes reference on a type that reads none', () => {
+  it('a retype from lookup to text removes reference, so the save is not refused', async () => {
+    const { saved } = renderField(LOOKUP);
+
+    await retypeTo('Text');
+
+    expect(saved().type).toBe('text');
+    expect(has(saved(), 'reference')).toBe(false);
+    expect(rejections(saved())).toEqual([]);
+  });
+
+  it('a retype from lookup to master_detail keeps reference (it reads it too)', async () => {
+    const { saved } = renderField(LOOKUP);
+
+    await retypeTo('Master-Detail');
+
+    expect(saved().type).toBe('master_detail');
+    expect(saved().reference).toBe('vendor');
+  });
+
+  it('a stored text field that still carries reference saves without it on the next edit', async () => {
+    const { saved } = renderField({ type: 'text', label: 'Vendor', reference: 'vendor' });
+
+    await retypeTo('Number');
+
+    expect(saved().type).toBe('number');
+    expect(has(saved(), 'reference')).toBe(false);
+  });
+});

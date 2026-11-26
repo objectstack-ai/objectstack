@@ -24,8 +24,10 @@ import {
   groupArrangement,
   groupMembership,
   diffFields,
+  readsReference,
   type FieldsView,
 } from './object-fields-io';
+import { REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
 
 /* ─────────────── readGroups ─────────────── */
 
@@ -586,5 +588,45 @@ describe('groupArrangement — the whole arrangement an installed object\'s .cus
     ]);
     const parsed = ObjectExtensionSchema.safeParse({ extend: 'quote', fieldGroups: arrangement });
     expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+  });
+});
+
+describe('readFields — a reference on a type that reads none is stripped at the read door', () => {
+  // A shipped inspector kept `reference` on a retype, and the designer shows
+  // no control for it on such a type, while the publish gate refuses it
+  // (`field/reference-on-non-reference-type`). Stripped on read, the next
+  // edit-and-save writes the field without it.
+  it('drops it from a text / number / select field, in both draft shapes', () => {
+    const record = readFields({
+      vendor_name: { type: 'text', label: 'Vendor', reference: 'vendor' },
+      vendor_no: { type: 'number', label: 'No', reference: 'vendor' },
+      tier: { type: 'select', label: 'Tier', reference: 'vendor', options: [{ value: 'a', label: 'A' }] },
+    });
+    for (const e of record.entries) expect(e.def, e.name).not.toHaveProperty('reference');
+    const array = readFields([{ name: 'vendor_name', type: 'text', label: 'Vendor', reference: 'vendor' }]);
+    expect(array.entries[0].def).toEqual({ type: 'text', label: 'Vendor' });
+    expect(writeFields(record)).toMatchObject({ vendor_name: { type: 'text', label: 'Vendor' } });
+  });
+
+  it('keeps it on the types that read it: lookup, master_detail, tree, user and summary', () => {
+    const view = readFields({
+      a: { type: 'lookup', label: 'A', reference: 'vendor' },
+      b: { type: 'master_detail', label: 'B', reference: 'vendor' },
+      c: { type: 'tree', label: 'C', reference: 'po' },
+      d: { type: 'user', label: 'D', reference: 'sys_user' },
+      e: { type: 'summary', label: 'E', reference: 'po_line', summaryOperations: { object: 'po_line', function: 'count' } },
+    });
+    for (const e of view.entries) expect(e.def, e.name).toHaveProperty('reference');
+  });
+
+  it('CONTROL — leaves a type the spec does not declare as it is', () => {
+    const view = readFields({ legacy: { type: 'not_a_spec_type', label: 'L', reference: 'vendor' } });
+    expect(view.entries[0].def).toHaveProperty('reference', 'vendor');
+  });
+
+  it('readsReference is the spec\'s REFERENCE_VALUE_TYPES plus summary', () => {
+    for (const t of REFERENCE_VALUE_TYPES) expect(readsReference(t), t).toBe(true);
+    expect(readsReference('summary')).toBe(true);
+    for (const t of ['text', 'number', 'select', 'formula', 'date', undefined]) expect(readsReference(t), String(t)).toBe(false);
   });
 });
