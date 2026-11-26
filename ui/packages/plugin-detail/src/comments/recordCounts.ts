@@ -25,16 +25,33 @@
  *   whose `parent_id` is one of the records, grouped by `parent_id`. Only an
  *   object with `enable.files` has any.
  *
+ * - Both count rows by the stamped pair (`object_name` + `record_id`,
+ *   `parent_object` + `parent_id`), the indexed key each read gate narrows by.
+ *   The record page reads a record's comments by `thread_id`, so a comment
+ *   written before the pair existed is counted there and not here until
+ *   `os migrate comment-parent-pair --apply` has stamped it.
+ *
  * Both ride the existing grouped door (`DataSource.queryGroupHeaders`, `POST
  * /data/:object/query`), as the reader: each source's access hooks judge the
- * aggregate as they judge a read. A refused or failed read draws no count. A
- * partial answer (`hasMore`: the door cut the groups) still gives the records
- * it names their exact count; a record it does not name has no count, rather
- * than a zero it may not have.
+ * aggregate as they judge a read. A refused or failed read draws no count.
+ *
+ * A cut answer (`hasMore`: the door cut the groups to the deployment's default
+ * page size, `OS_DATA_DEFAULT_PAGE_SIZE`) is never read as the whole set: a
+ * record it does not name may have rows. The records it names keep their
+ * exact count, and the reader asks again over the records it did not name,
+ * still ONE grouped read per round, until an answer is whole
+ * (`askRecordCounts`). A record still unnamed when the rounds stop (an answer
+ * that names none of them, or `MAX_COUNT_ROUNDS`) has no count, never a zero.
+ *
+ * The counts are asked again when the surface reloads (`reloadKey`) and when a
+ * write to a counted object is announced on the data-invalidation bus (a
+ * comment posted or resolved, an attachment uploaded or deleted, in the record
+ * drawer a card opens).
  */
 
 import * as React from 'react';
 import type { DataSource } from '@object-ui/types';
+import { useDataInvalidation } from '@object-ui/react';
 
 /** The object that holds a record's comments. */
 export const COMMENT_COUNT_OBJECT = 'sys_comment';
@@ -108,6 +125,58 @@ export function readRecordCounts(answer: unknown, keyField: string, ids: readonl
   return counts;
 }
 
+/** The records an answer names (its rows' `keyField`), among `ids`. */
+function namedRecordIds(answer: readonly unknown[], keyField: string, ids: readonly string[]): Set<string> {
+  const asked = new Set(ids);
+  const named = new Set<string>();
+  for (const row of answer) {
+    if (!row || typeof row !== 'object') continue;
+    const key = (row as Record<string, unknown>)[keyField];
+    if (key === null || key === undefined) continue;
+    if (asked.has(String(key))) named.add(String(key));
+  }
+  return named;
+}
+
+/**
+ * The most grouped reads one count takes over a cut answer before the records
+ * it has not named are left without a count (see the header).
+ */
+export const MAX_COUNT_ROUNDS = 20;
+
+/**
+ * Each of `objectName`'s records `ids`' count of `source` (`sys_comment` or
+ * `sys_attachment`), or `null` when the first answer is not a list of rows.
+ * One grouped read when the answer is whole; over a cut answer (`hasMore`),
+ * one more over the records it did not name, until an answer is whole, names
+ * none of them, or `MAX_COUNT_ROUNDS` is reached. A refused read throws.
+ */
+export async function askRecordCounts(
+  dataSource: Pick<DataSource, 'queryGroupHeaders'>,
+  source: string,
+  objectName: string,
+  ids: readonly string[],
+): Promise<Record<string, number> | null> {
+  const comment = source === COMMENT_COUNT_OBJECT;
+  const keyField = comment ? 'record_id' : 'parent_id';
+  const counts: Record<string, number> = Object.create(null);
+  let remaining = [...ids];
+  for (let round = 0; remaining.length > 0 && round < MAX_COUNT_ROUNDS; round++) {
+    const query = comment ? compileCommentCountQuery(objectName, remaining) : compileAttachmentCountQuery(objectName, remaining);
+    const answer = await dataSource.queryGroupHeaders!(source, query);
+    // `hasMore` rides ON the array: read it off the answer as returned.
+    const cut = Array.isArray(answer) && (answer as { hasMore?: unknown }).hasMore === true;
+    const read = readRecordCounts(answer, keyField, remaining);
+    if (read === null) return round === 0 ? null : counts;
+    Object.assign(counts, read);
+    if (!cut) break;
+    const named = namedRecordIds(answer as readonly unknown[], keyField, remaining);
+    if (named.size === 0) break;
+    remaining = remaining.filter((id) => !named.has(id));
+  }
+  return counts;
+}
+
 export interface RecordCountsInput {
   dataSource: DataSource | null | undefined;
   objectName: string | undefined;
@@ -128,12 +197,14 @@ export interface RecordCountsData {
   attachments: RecordCounts | null;
 }
 
-type Held = { question: string; counts: Record<string, number> | null };
+type Held = { scope: string; question: string; counts: Record<string, number> | null };
 
 /**
- * The comment and attachment counts of the records drawn: at most one grouped
- * read per counted object for the whole set, asked again when the set, the
- * object or `reloadKey` changes. Nothing is read for a count not asked, for no
+ * The comment and attachment counts of the records drawn: one grouped read per
+ * counted object for the whole set (more only over a cut answer, see
+ * `askRecordCounts`), asked again when the set, the object or `reloadKey`
+ * changes, or when a write to the counted object is announced on the
+ * data-invalidation bus. Nothing is read for a count not asked, for no
  * records, or over a data source that cannot answer a grouped read.
  */
 export function useRecordCounts(input: RecordCountsInput): RecordCountsData {
@@ -141,11 +212,16 @@ export function useRecordCounts(input: RecordCountsInput): RecordCountsData {
   const ids = recordCountIds(recordIds);
   const idsKey = JSON.stringify(ids);
   const canAsk = !!objectName && ids.length > 0 && typeof dataSource?.queryGroupHeaders === 'function';
-  const commentQuestion = canAsk && comments ? JSON.stringify([COMMENT_COUNT_OBJECT, objectName, idsKey]) : '';
-  const attachmentQuestion = canAsk && attachments ? JSON.stringify([ATTACHMENT_COUNT_OBJECT, objectName, idsKey]) : '';
+  const askComments = canAsk && comments;
+  const askAttachments = canAsk && attachments;
+  const commentQuestion = askComments ? JSON.stringify([COMMENT_COUNT_OBJECT, objectName, idsKey]) : '';
+  const attachmentQuestion = askAttachments ? JSON.stringify([ATTACHMENT_COUNT_OBJECT, objectName, idsKey]) : '';
+  // A write to the counted object (any of its rows) moves the count.
+  const commentWrites = useDataInvalidation(askComments ? COMMENT_COUNT_OBJECT : undefined);
+  const attachmentWrites = useDataInvalidation(askAttachments ? ATTACHMENT_COUNT_OBJECT : undefined);
 
-  const commentCounts = useCountRead(dataSource, commentQuestion, reloadKey);
-  const attachmentCounts = useCountRead(dataSource, attachmentQuestion, reloadKey);
+  const commentCounts = useCountRead(dataSource, commentQuestion, reloadKey, commentWrites);
+  const attachmentCounts = useCountRead(dataSource, attachmentQuestion, reloadKey, attachmentWrites);
   return { comments: commentCounts, attachments: attachmentCounts };
 }
 
@@ -153,6 +229,7 @@ function useCountRead(
   dataSource: DataSource | null | undefined,
   question: string,
   reloadKey: unknown,
+  writes: number,
 ): Record<string, number> | null {
   const [held, setHeld] = React.useState<Held | null>(null);
   React.useEffect(() => {
@@ -160,26 +237,36 @@ function useCountRead(
     let cancelled = false;
     const [source, objectName, idsKey] = JSON.parse(question) as [string, string, string];
     const ids = JSON.parse(idsKey) as string[];
-    const comment = source === COMMENT_COUNT_OBJECT;
-    const query = comment ? compileCommentCountQuery(objectName, ids) : compileAttachmentCountQuery(objectName, ids);
-    const keyField = comment ? 'record_id' : 'parent_id';
+    const scope = JSON.stringify([source, objectName]);
     // Nothing is cleared before the answer lands: asking again (a reload, a
-    // record moved) keeps the counts on screen until the new ones.
+    // write, a record moved) keeps the counts on screen until the new ones.
     Promise.resolve()
-      .then(() => dataSource.queryGroupHeaders!(source, query))
+      .then(() => askRecordCounts(dataSource, source, objectName, ids))
       .then(
-        (rows) => {
-          if (!cancelled) setHeld({ question, counts: readRecordCounts(rows, keyField, ids) });
+        (counts) => {
+          if (!cancelled) setHeld({ scope, question, counts });
         },
         () => {
-          if (!cancelled) setHeld({ question, counts: null });
+          if (!cancelled) setHeld({ scope, question, counts: null });
         },
       );
     return () => {
       cancelled = true;
     };
-  }, [dataSource, question, reloadKey]);
-  // Read in the render the question changes: counts of another set of records
-  // (or a count no longer asked) are never drawn.
-  return question && held?.question === question ? held.counts : null;
+  }, [dataSource, question, reloadKey, writes]);
+  return React.useMemo(() => {
+    if (!question || !held) return null;
+    if (held.question === question) return held.counts;
+    // Another set of the same object's records (a lane's next page, a card
+    // created): the counts of the records in both sets stay drawn until the
+    // new answer, so no foot blinks. Another object's counts, or a count no
+    // longer asked, are never drawn.
+    const [source, objectName, idsKey] = JSON.parse(question) as [string, string, string];
+    if (held.scope !== JSON.stringify([source, objectName]) || held.counts === null) return null;
+    const kept: Record<string, number> = Object.create(null);
+    for (const id of JSON.parse(idsKey) as string[]) {
+      if (held.counts[id] !== undefined) kept[id] = held.counts[id];
+    }
+    return kept;
+  }, [question, held]);
 }

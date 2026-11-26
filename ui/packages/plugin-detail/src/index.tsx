@@ -313,6 +313,8 @@ export {
   compileCommentCountQuery,
   compileAttachmentCountQuery,
   readRecordCounts,
+  askRecordCounts,
+  MAX_COUNT_ROUNDS,
   CommentItem,
   CommentThread,
   CommentComposer,

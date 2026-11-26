@@ -20,15 +20,20 @@
  *       footer is drawn;
  *   (c) an object without `enable.files` is never asked its attachments, and
  *       one with `enable.feeds: false` never its comments;
- *   (d) a refused read draws no count, and the board still draws its cards.
+ *   (d) a refused read draws no count, and the board still draws its cards;
+ *   (e) a cut answer (`hasMore`, the door's default page size) is asked again
+ *       over the cards it did not name, so every card past the cut still
+ *       shows its count;
+ *   (f) a write to a counted object announced on the data-invalidation bus (a
+ *       comment posted in the record drawer) asks the counts again.
  */
 
 import React from 'react';
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, waitFor, cleanup } from '@testing-library/react';
+import { render, waitFor, cleanup, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { ValueDataSource, extractRecords } from '@object-ui/core';
-import { SchemaRendererProvider } from '@object-ui/react';
+import { SchemaRendererProvider, notifyDataChanged } from '@object-ui/react';
 import { ObjectKanban } from './ObjectKanban';
 // The board renders inside a `React.lazy` boundary; importing the chunk at
 // module scope bills the cold transform to the import phase (objectui#3010).
@@ -101,7 +106,7 @@ const ATTACHMENTS: Row[] = [
  * it: one row per group key, `count` per group, over the rows `where` keeps
  * (evaluated by `ValueDataSource`, as a backend would).
  */
-function countDoor(tables: Record<string, Row[]>, refuse: ReadonlySet<string> = new Set()) {
+function countDoor(tables: Record<string, Row[]>, refuse: ReadonlySet<string> = new Set(), page?: number) {
   return vi.fn(async (object: string, query: any) => {
     if (refuse.has(object)) throw Object.assign(new Error('forbidden'), { status: 403 });
     const store = new ValueDataSource<Row>({ items: tables[object] ?? [] });
@@ -111,7 +116,10 @@ function countDoor(tables: Record<string, Row[]>, refuse: ReadonlySet<string> = 
     const key = query.groupBy[0];
     const groups = new Map<unknown, number>();
     for (const row of kept) groups.set(row[key] ?? null, (groups.get(row[key] ?? null) ?? 0) + 1);
-    return [...groups].map(([k, count]) => ({ [key]: k, count }));
+    const rows = [...groups].map(([k, count]) => ({ [key]: k, count }));
+    // The door's default page size: a grouped read naming no `limit` is cut,
+    // and the answer says so ON the array.
+    return page !== undefined ? Object.assign(rows.slice(0, page), { hasMore: rows.length > page }) : rows;
   });
 }
 
@@ -119,8 +127,10 @@ async function renderBoard(
   extra: Record<string, unknown>,
   enable: Record<string, unknown> = { feeds: true, files: true },
   refuse?: ReadonlySet<string>,
+  page?: number,
+  tables: Record<string, Row[]> = { sys_comment: COMMENTS, sys_attachment: ATTACHMENTS },
 ) {
-  const queryGroupHeaders = countDoor({ sys_comment: COMMENTS, sys_attachment: ATTACHMENTS }, refuse);
+  const queryGroupHeaders = countDoor(tables, refuse, page);
   const dataSource = {
     find: vi.fn().mockResolvedValue({ data: DEALS, total: DEALS.length }),
     queryGroupHeaders,
@@ -220,5 +230,42 @@ describe('the card footer counts (objectstack#36423)', () => {
     expect(countReads(queryGroupHeaders, 'sys_comment')).toHaveLength(1);
     expect(container.querySelector('[data-kanban-card-comments]')).toBeNull();
     expect(container.textContent).toContain('Alpha');
+  });
+
+  it('(e) a cut answer is asked again over the cards it did not name', async () => {
+    // A page of one group: d1 then d3 have open threads, each answer cut.
+    const { container, queryGroupHeaders } = await renderBoard(
+      { cardFooter: { comments: true } },
+      { feeds: true, files: true },
+      undefined,
+      1,
+    );
+    await waitFor(() => expect(cardOf(container, 'd3').querySelector('[data-kanban-card-comments]')).not.toBeNull());
+    expect(cardOf(container, 'd1').querySelector('[data-kanban-card-comments]')).toHaveAttribute('data-kanban-card-comments', '2');
+    expect(cardOf(container, 'd3').querySelector('[data-kanban-card-comments]')).toHaveAttribute('data-kanban-card-comments', '1');
+    const reads = countReads(queryGroupHeaders, 'sys_comment');
+    // Each round is one grouped read over the cards not yet named, never one
+    // per card; the second answer is whole (one group fits the page).
+    expect(reads.map(([, q]) => q.where.record_id.$in)).toEqual([['d1', 'd2', 'd3'], ['d2', 'd3']]);
+  });
+
+  it('(f) a comment written elsewhere asks the counts again', async () => {
+    const comments: Row[] = [{ id: 'c1', object_name: 'foot_deal', record_id: 'd2', parent_id: null, is_resolved: false }];
+    const { container, queryGroupHeaders } = await renderBoard(
+      { cardFooter: { comments: true } },
+      { feeds: true, files: true },
+      undefined,
+      undefined,
+      { sys_comment: comments, sys_attachment: [] },
+    );
+    await waitFor(() => expect(cardOf(container, 'd2').querySelector('[data-kanban-card-comments]')).toHaveAttribute('data-kanban-card-comments', '1'));
+    expect(cardOf(container, 'd1').querySelector('[data-kanban-card-footer]')).toBeNull();
+
+    // The record drawer posts a thread on d1: the data source's mutation event
+    // reaches the bus as a `sys_comment` write.
+    comments.push({ id: 'c2', object_name: 'foot_deal', record_id: 'd1', parent_id: null, is_resolved: false });
+    act(() => notifyDataChanged({ objectName: 'sys_comment', recordId: 'c2' }));
+    await waitFor(() => expect(cardOf(container, 'd1').querySelector('[data-kanban-card-comments]')).toHaveAttribute('data-kanban-card-comments', '1'));
+    expect(countReads(queryGroupHeaders, 'sys_comment')).toHaveLength(2);
   });
 });

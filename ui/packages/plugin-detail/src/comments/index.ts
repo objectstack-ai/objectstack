@@ -28,6 +28,8 @@ export {
   compileCommentCountQuery,
   compileAttachmentCountQuery,
   readRecordCounts,
+  askRecordCounts,
+  MAX_COUNT_ROUNDS,
   COMMENT_COUNT_OBJECT,
   ATTACHMENT_COUNT_OBJECT,
   RECORD_COUNT_ALIAS,
