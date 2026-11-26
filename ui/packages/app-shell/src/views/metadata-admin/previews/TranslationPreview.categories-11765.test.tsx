@@ -68,6 +68,7 @@ const ONE_ENTRY: Record<string, { data: Record<string, unknown>; key: string; ro
     row: () => keys(2),
   },
   pages: { data: { home: { label: 'Accueil' } }, key: 'home', row: () => keys(1) },
+  forms: { data: { 'lead.web_intake': { label: 'Inscription web' } }, key: 'lead.web_intake', row: () => keys(1) },
   flows: { data: { onboarding: { label: 'Intégration' } }, key: 'onboarding', row: () => keys(1) },
   hooks: {
     data: { credit_guard: { refusals: { CREDIT_LIMIT: { message: 'Limite de crédit dépassée.' } } } },

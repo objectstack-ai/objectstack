@@ -908,6 +908,8 @@ const TYPE_COUNT: Readonly<Record<string, (t: Translate, count: number) => strin
     t('preview.changes.typeCount.ai_context', { count, defaultValue: '{{count}} AI context packs' }),
   datasource: (t, count) =>
     t('preview.changes.typeCount.datasource', { count, defaultValue: '{{count}} datasources' }),
+  // objectstack#37086 — a `form` item (ADR-0159 card ②) drafts and publishes like a view.
+  form: (t, count) => t('preview.changes.typeCount.form', { count, defaultValue: '{{count}} forms' }),
 };
 
 /** The types {@link TYPE_COUNT} names, for the test that holds it to the spec's registry. */

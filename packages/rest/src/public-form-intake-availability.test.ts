@@ -15,6 +15,9 @@ import { RestServer } from './rest-server';
 // [#10126] Pay the first transform of these dist-resolved workspace deps at
 // MODULE LOAD rather than inside a clocked `it()` body.
 import '@objectstack/spec/ui';
+// …and `@objectstack/objectql`, which `rest-server.ts`'s meta-object routes reach
+// through a dynamic import inside a handler (`check:test-source-alias`).
+import '@objectstack/objectql';
 
 const ORG = 'org_alpha';
 const SLUG = 'contact-us';

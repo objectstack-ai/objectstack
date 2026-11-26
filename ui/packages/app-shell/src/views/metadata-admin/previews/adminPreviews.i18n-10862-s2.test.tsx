@@ -469,6 +469,7 @@ describe('TranslationPreview reads the designer locale (objectui#10862)', () => 
         { key: 'engine.translationPreview.category.datasets' },
         { key: 'engine.translationPreview.category.reports' },
         { key: 'engine.translationPreview.category.pages' },
+        { key: 'engine.translationPreview.category.forms' },
         { key: 'engine.translationPreview.category.flows' },
         { key: 'engine.translationPreview.category.hooks' },
         { key: 'engine.translationPreview.category.positions' },
@@ -482,7 +483,7 @@ describe('TranslationPreview reads the designer locale (objectui#10862)', () => 
         { key: 'engine.translationPreview.keyCountOne', vars: { count: 1 } },
       ]);
       // The bundle's own locale is author data, not the designer's language.
-      expectAsWritten(['French', 'fr-FR', 'account', '"Un"', '2/17 (12%)']);
+      expectAsWritten(['French', 'fr-FR', 'account', '"Un"', '2/18 (11%)']);
     });
   }
 });

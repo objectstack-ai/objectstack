@@ -59,9 +59,11 @@
  * envelope `TransportScopedMetaRequest` is imported from
  * `meta-collection-routes.ts`, where slice 13a moved it on from `ui-routes.ts`
  * (slice 10's home for it), and the data doors' `ServerScopedDataRequest` from
- * `data-action-routes.ts`, where slice 1 moved it. `anonymousFormIntakeWithdrawnIn`,
+ * `data-action-routes.ts`, where slice 1 moved it.
  * `PUBLIC_FORM_SERVER_MANAGED_FIELDS` and `isExpectedRouteError`, which only
- * this body read, are imported here instead of there. No export was added
+ * this body read, are imported here instead of there (and so was
+ * `anonymousFormIntakeWithdrawnIn`, until ADR-0159 card ② judged withdrawal
+ * through `formIntakeLayer`). No export was added
  * anywhere, and the published surface does not move.
  */
 
@@ -69,7 +71,6 @@ import {
     anonymousFormIntakeCandidates,
     anonymousFormIntakePosture,
     anonymousFormIntakeUnavailability,
-    anonymousFormIntakeWithdrawnIn,
     anonymousFormObjectName,
 } from '@objectstack/metadata-core';
 import { isEmptyForRequired, isMissing } from '@objectstack/core';
@@ -205,7 +206,7 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
     // document under its override (the hard requirement ruled on #28238,
     // option 3). A candidate is served only when no body of its view name
     // in that layer explicitly withdraws the same form
-    // (`anonymousFormIntakeWithdrawnIn`: matched by slot or by slug, the
+    // (then `anonymousFormIntakeWithdrawnIn`: matched by slot or by slug, the
     // link kept with a switch set to `false`), so a withdrawal in one
     // package closes the name's form in every package (a known limit that
     // fails closed). Another view publishing the same slug is a different
