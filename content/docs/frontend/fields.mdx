@@ -84,6 +84,36 @@ ObjectUI comes with built-in support for the standard [ObjectStack Protocol](htt
 | `user` | Person picker — searches the `sys_user` object (a lookup specialized to users) |
 | `owner` | Record owner — a `user` field, typically read-only and stamped with the current user |
 
+## Quantities with a unit
+
+A `number` field that declares `unitConfig` is a quantity, and every face draws it with its unit: grid and
+list cells, the record page, the quick-look panel, related lists, and the form (read-only, and beside the
+edited box). A record-mode quantity, for example, declares
+`unitConfig: { unitMode: 'record', unitField: 'unit_code' }` on its `number` field.
+
+- **Which unit.** `unitMode: 'fixed'` shows its one `unit`. `unitMode: 'record'` shows the code the row's
+  `unitField` holds; the list, grid and related-list reads fetch that field, and the row's
+  `organization_id`, even when no column shows them. A `text` field declaring `unitMode: 'code'` shows the
+  code's label.
+- **Choosing a unit.** In a form, a `text` field declaring `unitMode: 'code'`, and the `unitField` a
+  `record` quantity on the same form points at, are a searchable unit picker, never a typed box: the
+  organization's non-retired units, then the standard codes, each by name and limited to the declared
+  `unitDimension`. The picker stores the code. Read-only, the field shows the unit's name.
+- **Which label.** A standard code (`KGM`, `H87`, …) shows the platform's name for it in the reader's
+  language, served by the platform's i18n service (`messages.standardUnit<CODE>`), falling back to the
+  English name in `@objectstack/spec` (`STANDARD_UNIT_NAMES`). An organization's own code shows its
+  `sys_unit` label.
+- **How many decimal places.** A standard code takes the organization's `sys_standard_unit_setting` row,
+  and an organization code its `sys_unit.decimal_places`, always the row of the record's own
+  organization. The field's `scale` is the ceiling. The number is drawn at that fixed width, rounded half
+  away from zero (`1.5` beside a unit of 0 places reads `2`). With no unit setting, the field's own width
+  applies. Only the display rounds: the stored value, totals, exports and the API keep the exact value.
+- **The bare code.** A retired organization unit, or one whose row the reader may not read, shows its code
+  with no label.
+
+The unit rows are read through the data source of the surrounding `SchemaRendererProvider`, once per
+session.
+
 ## How the Console draws field metadata
 
 What a field's metadata makes the Console draw (number inputs, polymorphic record pointers,
