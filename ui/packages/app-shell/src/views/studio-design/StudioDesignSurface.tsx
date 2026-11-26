@@ -207,10 +207,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   const onPackageChanged = React.useCallback(() => {
     setPublishNonce((n) => n + 1);
     emitMetadataRefresh();
-  }, []);
+  }, [setPublishNonce]);
   const onPackageRenamed = React.useCallback(
     (name: string) => setPkgEntry((prev) => (prev && prev.id === packageId ? { ...prev, name } : prev)),
-    [packageId],
+    [packageId, setPkgEntry],
   );
   React.useEffect(() => {
     // objectstack#36909 — the package's permission sets, where the retired

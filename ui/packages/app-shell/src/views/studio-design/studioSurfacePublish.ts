@@ -320,6 +320,19 @@ export function useStudioPublishAction({
       setPublishing(false);
     }
     await refreshPending();
-  }, [shellClient, packageId, pairId, draftScope, refreshPending, locale, heldEdit, saveBar.dirty]);
+  }, [
+    shellClient,
+    packageId,
+    pairId,
+    draftScope,
+    refreshPending,
+    locale,
+    heldEdit,
+    saveBar.dirty,
+    setPublishing,
+    setPublishRefusals,
+    setChangesOpen,
+    setPublishNonce,
+  ]);
   return { openAccessRef, doPublish };
 }

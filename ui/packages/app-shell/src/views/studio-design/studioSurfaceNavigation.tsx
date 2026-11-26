@@ -111,7 +111,7 @@ export function useStudioSurfaceNavigation({
       }
       setChangesOpen(false);
     },
-    [allScope, packageId, draftScope, confirmLeavePillar, shellNavigate, currentPathname],
+    [allScope, packageId, draftScope, confirmLeavePillar, shellNavigate, currentPathname, setChangesOpen],
   );
   // objectstack#36899 — a menu entry or a palette pick that is the page
   // already shown, on another query, asks about unsaved work first: the

@@ -162,7 +162,7 @@ export function useStudioDraftLedger({
     }
     setDraftNonce((n) => n + 1);
     void refreshPendingRef.current({ afterSave: true });
-  }, []);
+  }, [setDraftNonce]);
   // objectstack#26730 — the refusal kept for an entry, under its row in the
   // sheet. No "Show me" there: the sheet's way to an item is its own link, and
   // the strip's opens an input only in the pillar that holds the item.
