@@ -570,6 +570,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
 | **rule** | `string` | optional | The `name` of the ADVISORY validation rule this finding reports. Present only on an advisory rule hit. |
 | **severity** | `Enum<'warning' \| 'info'>` | optional | The advisory rule's declared severity, `warning` or `info`. Present only on an advisory rule hit. |
+| **scope** | `{ field: string; value: string }[]` | optional | The row columns a scoped lookup cell was resolved within, each with the cell the row gave it, in the order the refusal names them. Present only on an import cell error whose `code` is `reference_out_of_scope`: the value matches a record, but none within these columns, so a client can name the scoping column and its cell in its own text instead of parsing `message`. |
 
 
 ---
@@ -632,6 +633,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
 | **rule** | `string` | optional | The `name` of the ADVISORY validation rule this finding reports. Present only on an advisory rule hit. |
 | **severity** | `Enum<'warning' \| 'info'>` | optional | The advisory rule's declared severity, `warning` or `info`. Present only on an advisory rule hit. |
+| **scope** | `{ field: string; value: string }[]` | optional | The row columns a scoped lookup cell was resolved within, each with the cell the row gave it, in the order the refusal names them. Present only on an import cell error whose `code` is `reference_out_of_scope`: the value matches a record, but none within these columns, so a client can name the scoping column and its cell in its own text instead of parsing `message`. |
 
 
 ---
@@ -3384,6 +3386,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
 | **rule** | `string` | optional | The `name` of the ADVISORY validation rule this finding reports. Present only on an advisory rule hit. |
 | **severity** | `Enum<'warning' \| 'info'>` | optional | The advisory rule's declared severity, `warning` or `info`. Present only on an advisory rule hit. |
+| **scope** | `{ field: string; value: string }[]` | optional | The row columns a scoped lookup cell was resolved within, each with the cell the row gave it, in the order the refusal names them. Present only on an import cell error whose `code` is `reference_out_of_scope`: the value matches a record, but none within these columns, so a client can name the scoping column and its cell in its own text instead of parsing `message`. |
 
 
 ---
@@ -3522,6 +3525,14 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
 | **rule** | `string` | optional | The `name` of the ADVISORY validation rule this finding reports. Present only on an advisory rule hit. |
 | **severity** | `Enum<'warning' \| 'info'>` | optional | The advisory rule's declared severity, `warning` or `info`. Present only on an advisory rule hit. |
+| **scope** | `{ field: string; value: string }[]` | optional | The row columns a scoped lookup cell was resolved within, each with the cell the row gave it, in the order the refusal names them. Present only on an import cell error whose `code` is `reference_out_of_scope`: the value matches a record, but none within these columns, so a client can name the scoping column and its cell in its own text instead of parsing `message`. |
+
+### Nested Shape: `ValidateDataIssue.scope[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | API name of the row column that scoped the lookup. |
+| **value** | `string` | ✅ | The cell the row gave that column, as the importer typed it. |
 
 
 ---
