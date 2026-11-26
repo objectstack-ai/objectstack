@@ -1247,6 +1247,7 @@ const ar = {
     addColumn: "إضافة عمود",
     moveCard: "نقل بطاقة",
     noCards: "لا بطاقات",
+    notLoaded: "بطاقات غير محمّلة: {{count}}",
     columnCards: "بطاقات العمود {{column}}",
     laneCards: "بطاقات {{column}} - {{lane}}",
     dropBlocked: "لا يمكن نقل بطاقة من {{from}} إلى {{to}}.",
