@@ -167,7 +167,8 @@ describe('[ADR-0160 D3] the outline comes in pages that list every heading', () 
   const pagesOf = (headings: ReturnType<typeof md>) => {
     const pages: Array<ReturnType<typeof boundedOutline>['outline']> = [];
     let from: number | undefined = 0;
-    while (from !== undefined) {
+    // Bounded, so pages that never advance fail here rather than loop.
+    while (from !== undefined && pages.length <= headings.length) {
       const page = boundedOutline(headings, from);
       expect(page.outline.length).toBeGreaterThan(0);
       expect(page.outline.length).toBeLessThanOrEqual(RECORD_CONTEXT_OUTLINE_MAX_ENTRIES);
