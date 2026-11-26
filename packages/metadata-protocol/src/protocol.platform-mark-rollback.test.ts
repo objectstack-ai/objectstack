@@ -275,6 +275,25 @@ describe('[#37604] a version the platform registered is never restored into a pa
         });
     }
 
+    // [#37604 N2] The commit names its package, as `recordPackageCommit` always writes it: the restore limb
+    // reads that package's row, so the scenario is reachable through `revertCommit` too.
+    it('revertCommit of a commit that names its package: the platform\'s version lands in failed[] 409-coded, the package\'s row byte-identical (BASE: written into it)', async () => {
+        const { protocol, rows, serveCommit } = await withdrawnPlatformRecord();
+        const before = JSON.stringify(rows);
+        serveCommit({
+            id: 'c1', commit_id: 'c1', organization_id: null, package_id: PKG, operation: 'apply', message: 'the package\'s commit under revert', created_at: '2026-01-01T00:00:00Z',
+            items: JSON.stringify([{ type: 'skill', name: 'helper', existedBefore: true, prevVersion: 1 }]),
+        });
+
+        const res = await protocol.revertCommit({ commitId: 'c1' });
+
+        expect(res.failed).toHaveLength(1);
+        expect(res.failed[0]).toMatchObject({ type: 'skill', name: 'helper', code: 'RESOURCE_CONFLICT' });
+        expect(res.failed[0]!.error).toContain('the platform registered');
+        expect(res.revertedCount).toBe(0);
+        expect(JSON.stringify(rows)).toBe(before);
+    });
+
     it('control: the package\'s own version is restored into its row', async () => {
         const { protocol, rows } = await withdrawnPlatformRecord();
         await protocol.rollbackMetaItem({ type: 'skill', name: 'helper', toVersion: 3, packageId: PKG });
