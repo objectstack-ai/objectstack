@@ -172,7 +172,7 @@ import {
   diagnoseObjectListRead,
   type DiagnosedObjectListing,
 } from './metadata-completeness.js';
-import { resolveQueryReadLimits, staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { resolveQueryReadPageCap, staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 // [ADR-0149 D2] The `/meta` list translation and its locale parse, the pair
 // the HTTP door's `loadDatasets` runs — imported, never restated, so both
 // transports localize a saved dataset with one function.
@@ -191,21 +191,6 @@ import {
   type ObjectSchemaMaskSecuritySurface,
   type ObjectSchemaReadDelegateSource,
 } from '@objectstack/metadata-core';
-
-/**
- * [ADR-0160 D3] The most rows one record-context read may ask for, offset 0:
- * the smaller of the deployment's maximum page size and its query row budget
- * (`resolveQueryReadLimits`), `undefined` when neither is set. This
- * transport's engine read plans no read window of its own, but the limits are
- * one value per deployment, which the `/mcp` door's data door refuses past and
- * `query_records` probes within on this transport too; asked of both doors, a
- * principal's pack is cut at the same row on each, and the cut is stated.
- */
-function recordContextPageCap(): number | undefined {
-  const { maxPageSize, rowBudget } = resolveQueryReadLimits();
-  const caps = [maxPageSize, rowBudget].filter((n): n is number => n !== undefined);
-  return caps.length > 0 ? Math.min(...caps) : undefined;
-}
 
 /**
  * [#25138] The object reads this transport asks of the `protocol` service,
@@ -1947,8 +1932,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
         if (typeof surface?.getQueryableFields !== 'function') return undefined;
         return await surface.getQueryableFields(object, await resolvePrincipal());
       },
-      // [ADR-0160 D3] The deployment's page cap ({@link recordContextPageCap}).
-      pageCap: () => recordContextPageCap(),
+      // [ADR-0160 D3] The deployment's page cap (`resolveQueryReadPageCap`), the
+      // same value the `/mcp` door answers.
+      pageCap: () => resolveQueryReadPageCap(),
       userTextLocales: () => self.userTextLocales!(),
     });
     bridge.recordContextToolDefinitions = () => service.recordContextTools().definitions;

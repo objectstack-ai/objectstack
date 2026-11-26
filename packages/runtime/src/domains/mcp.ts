@@ -8,7 +8,7 @@
  * Fetch-Request normalization ride along as family helpers.
  */
 
-import { isMcpServerEnabled, resolveQueryReadLimits } from '@objectstack/types';
+import { isMcpServerEnabled, resolveQueryReadPageCap } from '@objectstack/types';
 import { MCP_OAUTH_SCOPES, MCP_OAUTH_SCOPE_DATA_READ, deriveAiFaceName } from '@objectstack/spec/ai';
 import type { ErrorCode, MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
@@ -1756,7 +1756,7 @@ export function buildMcpBridge(
             // read asking for more rows than the deployment's maximum page
             // size or its row budget (`@objectstack/types`'
             // `query-read-limits.ts`), so the executor asks for no more.
-            pageCap: () => recordContextPageCap(),
+            pageCap: () => resolveQueryReadPageCap(),
         }));
     }
     return bridge;
@@ -1794,20 +1794,6 @@ export async function resolveMcpRecordContextToolsService(
         return undefined;
     }
     return service && typeof service.recordContextTools === 'function' ? (service as McpRecordContextToolsService) : undefined;
-}
-
-/**
- * [ADR-0160 D3] The most rows one record-context read may ask the data door
- * for, offset 0: the smaller of the deployment's maximum page size and its
- * query row budget, `undefined` when neither is set. The data door refuses,
- * never clamps, a read over either (`resolveQueryReadLimits`), so a related
- * list asked for more would refuse the whole call instead of being cut and
- * stated.
- */
-function recordContextPageCap(): number | undefined {
-    const { maxPageSize, rowBudget } = resolveQueryReadLimits();
-    const caps = [maxPageSize, rowBudget].filter((n): n is number => n !== undefined);
-    return caps.length > 0 ? Math.min(...caps) : undefined;
 }
 
 /**

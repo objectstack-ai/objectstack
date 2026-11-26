@@ -120,8 +120,8 @@ export const RecordContextRelatedListSchema = lazySchema(() => z.object({
   object: z.string().describe('The child object'),
   label: z.string().describe('The child object\'s plural label at the caller\'s locale'),
   field: z.string().describe('The child\'s field that points at the record'),
-  rows: z.array(RecordContextRelatedRowSchema).describe('The rows the caller may read, up to the row cap'),
-  truncated: z.literal(true).optional().describe('Present when more rows existed past the row cap'),
+  rows: z.array(RecordContextRelatedRowSchema).describe('The rows the caller may read, up to the list\'s `limit` (the row cap when it names none), or fewer when the door\'s page cap is lower'),
+  truncated: z.literal(true).optional().describe('Present when more rows existed past the rows given: at the list\'s `limit`, at the row cap, or below either at the door\'s page cap'),
 }));
 
 /** One heading of a body outline. */

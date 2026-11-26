@@ -371,11 +371,13 @@ describe('[ADR-0160 D4] the /mcp route answers through a package pack the real p
  * real `SecurityPlugin` and the real protocol. Nothing of the metadata plane,
  * the data plane or the executor is a double.
  *
- * The caller is one identity: the stdio session resolves its
+ * The caller is one identity per call: the stdio session resolves its
  * `OS_MCP_STDIO_API_KEY` through `resolveAuthzContext` and
  * `assembleExecutionContext`, and the `/mcp` request is handed the context
  * those same two calls assemble for the same key. Every case below asks both
  * doors the same call and requires the same bytes back, refusals included.
+ * The key's owner is `usr_member`; one case names `usr_plain` as its owner
+ * instead, the same user bar the capability that lifts a masking rule.
  *
  * Where `main` differs from ADR-0160 as amended 2026-11-25 (a related child
  * THIS caller is not served is left out and stated, not refused), the case
@@ -391,6 +393,14 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
     let protocol: ObjectStackProtocolImplementation;
     let dispatcher: HttpDispatcher;
     let caller: ExecutionContext;
+    /**
+     * A second caller of the same key's door, without the capability that lifts
+     * `rc_step.serial`'s masking rule: `usr_member` holds `rc_unmask` through
+     * its own grant of `rc_unmasker`; `usr_plain` holds the baseline only.
+     */
+    let plainCaller: ExecutionContext;
+    /** Whom the key's owner row names on this call: the stdio door re-resolves it per call. */
+    let keyOwner: 'usr_member' | 'usr_plain' = 'usr_member';
     let rpc: (method: string, params?: unknown) => Promise<any>;
     /** The real `security` service both doors resolve. */
     let securityService: any;
@@ -434,8 +444,8 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
                         stage: { name: 'stage', type: 'text', label: 'Stage' },
                         rank: { name: 'rank', type: 'number', label: 'Rank' },
                         policy: { name: 'policy', type: 'lookup', reference: 'rc_policy', label: 'Policy' },
-                        // A masking rule the caller's capability lifts: the security service lists it as
-                        // queryable for this caller, where the contract's fallback never would.
+                        // A masking rule `rc_unmask` lifts: the security service lists it as queryable
+                        // for `usr_member`, where the contract's fallback never would, and not for `usr_plain`.
                         serial: { name: 'serial', type: 'text', label: 'Serial', maskingRule: { keepHead: 1, keepTail: 1 }, requiredPermissions: ['rc_unmask'] },
                     },
                 },
@@ -511,10 +521,13 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         engine.registry.disablePackage(OFF_PKG);
 
         const sets = [PermissionSetSchema.parse({
-            name: 'rc_member', label: 'Member', isDefault: true, systemPermissions: ['rc_unmask'],
+            name: 'rc_member', label: 'Member', isDefault: true,
             objects: { '*': READ_ALL, rc_hidden: READ_NONE },
             fields: { 'rc_policy.secret_note': { readable: false, editable: false } },
             rowLevelSecurity: [{ name: 'rc_own_revisions', object: 'rc_revision', operation: 'select', using: 'owner_id == current_user.id' }],
+        }), PermissionSetSchema.parse({
+            // Granted to `usr_member` alone (its `sys_user_permission_set` row below).
+            name: 'rc_unmasker', label: 'Unmasker', systemPermissions: ['rc_unmask'], objects: {},
         })];
         const services: Record<string, any> = {
             manifest: { register: vi.fn() },
@@ -540,10 +553,11 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         await new RecordContextServicePlugin().init(ctx as never);
         protocol = new ObjectStackProtocolImplementation(engine as any);
 
-        // The key's auth tables (`sys_api_key`, `sys_user`, `sys_member`) are
-        // not part of this kernel: these answers stand in for them, for the one
-        // key (owner `usr_member`, active in `org_1`); every other read is the
-        // engine's, and the stdio door's are recorded with their context.
+        // The key's auth tables (`sys_api_key`, `sys_user`, `sys_member`,
+        // `sys_user_permission_set`) are not part of this kernel: these answers
+        // stand in for them, for the one key (owner {@link keyOwner}, active in
+        // `org_1`; `usr_member` alone granted `rc_unmasker`); every other read is
+        // the engine's, and the stdio door's are recorded with their context.
         const keyedQl = new Proxy(engine as any, {
             get(target, prop, receiver) {
                 if (prop === 'update') {
@@ -552,11 +566,21 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
                 }
                 if (prop === 'find') {
                     return async (object: string, query?: any, options?: any) => {
+                        const users = ['usr_member', 'usr_plain'];
                         if (object === 'sys_api_key') {
-                            return [{ id: 'k1', user_id: 'usr_member', revoked: false, active_organization_id: 'org_1' }];
+                            return [{ id: 'k1', user_id: keyOwner, revoked: false, active_organization_id: 'org_1' }];
                         }
-                        if (object === 'sys_user') return query?.where?.id === 'usr_member' ? [{ id: 'usr_member' }] : [];
-                        if (object === 'sys_member') return [{ id: 'm1', user_id: 'usr_member', organization_id: 'org_1', role: 'member' }];
+                        if (object === 'sys_user') return users.includes(query?.where?.id) ? [{ id: query.where.id }] : [];
+                        if (object === 'sys_member') {
+                            const members = users.map((u, i) => ({ id: `m${i + 1}`, user_id: u, organization_id: 'org_1', role: 'member' }));
+                            const who = query?.where?.user_id;
+                            return who === undefined ? members : members.filter((m) => m.user_id === who);
+                        }
+                        if (object === 'sys_user_permission_set') {
+                            return query?.where?.user_id === 'usr_member'
+                                ? [{ id: 'g1', user_id: 'usr_member', permission_set: 'rc_unmasker', organization_id: 'org_1' }]
+                                : [];
+                        }
                         if (object.startsWith('sys_') && !target.registry.getObject(object)) return [];
                         stdioReads.push({ object, context: query?.context ?? options?.context });
                         return target.find(object, query, options);
@@ -566,10 +590,13 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
                 return typeof value === 'function' ? value.bind(target) : value;
             },
         });
-        caller = assembleExecutionContext({
+        const resolveCaller = async (): Promise<ExecutionContext> => assembleExecutionContext({
             authz: await resolveAuthzContext({ ql: keyedQl, headers: { 'x-api-key': KEY }, tenancyPosture: undefined, client: { transport: 'stdio' } } as never),
             oauth: undefined, localization: undefined, requestLocale: undefined, accessToken: undefined,
         } as never) as ExecutionContext;
+        caller = await resolveCaller();
+        keyOwner = 'usr_plain';
+        try { plainCaller = await resolveCaller(); } finally { keyOwner = 'usr_member'; }
 
         // The stdio door: the real plugin's long-lived session, over an in-process transport.
         const stdioServices = new Map<string, unknown>(Object.entries({
@@ -631,7 +658,7 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
 
     interface DoorAnswer { isError: boolean; text: string }
 
-    const overHttp = async (args: Record<string, unknown>, tool = 'get_record_context'): Promise<DoorAnswer> => {
+    const overHttp = async (args: Record<string, unknown>, tool = 'get_record_context', executionContext: ExecutionContext = caller): Promise<DoorAnswer> => {
         const body = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool, arguments: args } };
         const res = await dispatcher.handleMcp(body, {
             request: new Request('http://localhost/api/v1/mcp', {
@@ -641,7 +668,7 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
             }),
             response: {},
             environmentId: undefined,
-            executionContext: caller,
+            executionContext,
         } as any);
         expect(res.response?.status).toBe(200);
         const result = (res.response?.body as any)?.result;
@@ -658,6 +685,19 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         expect(typeof http.text).toBe('string');
         expect(stdio).toEqual(http);
         return { isError: http.isError, text: http.text, payload: JSON.parse(http.text) };
+    };
+    /** {@link both}, as `usr_plain`: the /mcp request carries its context, and the key's owner row names it for the stdio call. */
+    const bothAsPlain = async (args: Record<string, unknown>, tool = 'get_record_context') => {
+        keyOwner = 'usr_plain';
+        try {
+            const http = await overHttp(args, tool, plainCaller);
+            const stdio = await overStdio(args, tool);
+            expect(typeof http.text).toBe('string');
+            expect(stdio).toEqual(http);
+            return { isError: http.isError, text: http.text, payload: JSON.parse(http.text) };
+        } finally {
+            keyOwner = 'usr_member';
+        }
     };
 
     it('precondition: the stdio session reads as the caller the /mcp request carries', async () => {
@@ -775,6 +815,29 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         expect(answer.isError).toBe(false);
         expect(answer.payload.notes).toEqual([]);
         expect(answer.payload.data.related[0].rows.map((r: { id: string }) => r.id)).toEqual(['s4', 's2', 's3', 's1']);
+    });
+
+    it('[ADR-0160 D3, second amendment] an orderBy on a masked field whose rule is NOT lifted for the caller drops the section with the statement on both doors, never refusing and naming nothing of it', async () => {
+        // Precondition: the two callers differ in the capability alone, and each door reads as its caller.
+        expect(plainCaller).toMatchObject({ userId: 'usr_plain', tenantId: 'org_1' });
+        expect(caller.systemPermissions).toContain('rc_unmask');
+        expect(plainCaller.systemPermissions ?? []).not.toContain('rc_unmask');
+        expect(await securityService.getQueryableFields('rc_step', plainCaller)).not.toContain('serial');
+        expect(await securityService.getQueryableFields('rc_step', caller)).toContain('serial');
+        stdioReads.length = 0;
+        const answer = await bothAsPlain({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_unmasked_order' });
+        expect(stdioReads.find((r) => r.object === 'rc_policy')?.context).toMatchObject({ userId: 'usr_plain', tenantId: 'org_1' });
+        expect(answer.isError).toBe(false);
+        expect(answer.payload.data.record.id).toBe('p1');
+        expect(answer.payload.data).not.toHaveProperty('related');
+        expect(answer.payload.notes.map((n: { kind: string }) => n.kind)).toEqual(['not_visible']);
+        expect(answer.payload.notes[0]).not.toHaveProperty('object');
+        // No section, row, count or field name of the child (the pack's own label, "Steps by serial", is the author's).
+        for (const word of ['rc_step', '"serial"', 'N-', 'Step s']) expect(answer.text).not.toContain(word);
+        // Control leg: the same pack, as the caller whose capability lifts the rule, reads the section.
+        const control = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_unmasked_order' });
+        expect(control.payload.notes).toEqual([]);
+        expect(control.payload.data.related[0].rows.map((r: { id: string }) => r.id)).toEqual(['s4', 's2', 's3', 's1']);
     });
 
     it('[ADR-0160 D3] an orderBy on a registry-injected field (created_at) is accepted by the own-field check and by both doors', async () => {

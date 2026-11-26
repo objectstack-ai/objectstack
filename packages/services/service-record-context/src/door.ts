@@ -53,7 +53,7 @@ export interface RecordContextDoor {
    * that `where` joined under `$and`, and with its `orderBy` (ADR-0160 D3,
    * second amendment): still one query. The door decides each expansion
    * target's API exposure: a target it does not expose is left unexpanded,
-   * so the lookup carries no id and no name (ADR-0160 D3, amendment 4).
+   * so the lookup carries no id and no name (ADR-0160 D3 "Object level").
    */
   query(
     objectName: string,
