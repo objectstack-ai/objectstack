@@ -1290,7 +1290,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       compactToolbar: {
         label: "Barre d’outils compacte",
-        helpText: "Regrouper Groupe/Couleur/Densité/Masquer les champs dans une seule fenêtre de paramètres de la vue"
+        helpText: "Regrouper Groupe/Couleur/Densité/Masquer les champs dans une seule fenêtre « Paramètres de la vue ». Activé par défaut : absent ou `true`, le moteur de rendu dessine cette barre d’outils compacte ; `false` dessine la barre d’outils large, avec un bouton par contrôle. La barre compacte ne dessine pas de bouton Actualiser, donc `userActions.refresh` ne régit que la barre large ; le tirer pour actualiser n’est affecté par aucune des deux clés."
       },
       rowHeight: {
         label: "Hauteur de ligne",

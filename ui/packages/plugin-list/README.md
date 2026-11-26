@@ -20,11 +20,12 @@ The toolbar and cell renderers are tuned for low visual noise on dense tables:
 - **Unified toolbar row**: view tabs (`schema.tabs`), user filters and tool
   buttons share a single bordered row. The previous stacked rows (`tabs` /
   `description` / `toolbar`) are collapsed into one separator line.
-- **Four tool buttons by default**: the right side of the row is Filter, Sort,
-  Display and Search. **Display** holds the rest — a Layout row (the
-  visualization switcher, when the list offers more than one), Group, Row
-  color, Hide fields, Density, a session-only Row numbers switch and an Edit
-  inline switch, with Reset to view default, Refresh and Export in its footer.
+- **One View settings popover by default**: the list's settings sit in one
+  **View settings** popover (objectstack#35878) — the view's name, its
+  columns (drag to reorder, hide, add) and, each only where the host offers
+  it, Layout (the visualization switcher), Group, Row height and Row color,
+  with Save, Restore defaults and Export in its footer. The compact toolbar
+  draws no Refresh button; Refresh is a wide-toolbar button.
   Its trigger counts the settings that differ from the view's own. Each
   control saves what its own toolbar button saves; the panel stores nothing
   of its own. A view that sets `compactToolbar: false` gets one toolbar
