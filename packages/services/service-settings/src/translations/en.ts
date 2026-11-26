@@ -345,6 +345,7 @@ export const en: PlatformTranslationData = {
           help: 'Include rendered prompts (not just metadata) in trace rows.' },
         embedder_provider: {
           label: 'Provider',
+          help: 'Read when the server starts: a saved change to any embedder setting takes effect after the next restart.',
           options: {
             none: 'Disabled (no embeddings)',
             openai: 'OpenAI',

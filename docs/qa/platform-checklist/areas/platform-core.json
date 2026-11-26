@@ -5276,6 +5276,134 @@
           "ref": "#32020"
         }
       ]
+    },
+    {
+      "id": "platform-core.disabled-package-every-surface-agrees",
+      "title": "Once a package is disabled every surface says the same: its objects are gone from the MCP tools, global search and the metadata reads as well as the data API and the console, and enabling brings every surface back together",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin, who disables and enables the package",
+        "the admin's MCP client with a personal osk_ key"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the writable probe package of platform-core.package-lifecycle-enable-disable, published with a searchable probe object holding seeded rows and a nav entry"
+        ]
+      },
+      "steps": [
+        "with the package enabled: over MCP call list_objects and query_records on the probe object; GET /api/v1/search?q= a term in a probe row; GET /api/v1/meta/object/PROBE; open the probe's list in the console",
+        "PATCH /api/v1/packages/:id/disable",
+        "repeat every read of steps[0]",
+        "PATCH /api/v1/packages/:id/enable and repeat every read again"
+      ],
+      "acceptance": [
+        {
+          "clause": "after disable no surface serves the probe object: MCP list_objects omits it and query_records refuses it, global search returns no probe hit, the metadata read does not serve it, and the console shows its named not-found state",
+          "oracle": "api",
+          "verify": "compare the five reads before and after disable (packages/objectql/src/registry-packages.ts#disablePackage flips the registry every surface reads)",
+          "evidence": "the five reads in both states"
+        },
+        {
+          "clause": "after enable every surface serves it again, the rows intact",
+          "oracle": "api",
+          "verify": "the five reads match the first state, row counts equal",
+          "evidence": "the reads after enable"
+        }
+      ],
+      "negative": [
+        "any one surface still serving the disabled package's object while another refuses it is a FAIL: the surfaces disagree",
+        "a search hit or an MCP row from a disabled package is a FAIL"
+      ],
+      "source": [
+        "docs/NORTH-STAR.md, Product areas, area:package core feature 1: once disabled every surface says the same",
+        "packages/objectql/src/registry-packages.ts#disablePackage",
+        "the REST, /meta/app and console half is platform-core.package-lifecycle-enable-disable"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-25",
+          "change": "initial — maps the every-surface half of North Star core feature package 1 (MCP and search beside the REST and console reads platform-core.package-lifecycle-enable-disable covers); read from source at 49c8e0f0, no live run made",
+          "ref": "#35212"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.release-notes-and-migration-guide-gates",
+      "title": "Every released major has a curated, navigable release page, every breaking change carries its migration in its changeset and its ADR-0087 disposition, and the protocol upgrade guide is generated from the change registry — each gate can go red",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "build",
+      "personas": [
+        "ci",
+        "the release maintainer who reads the gates before a release"
+      ],
+      "fixtures": {
+        "app": "any",
+        "requires": [
+          "a checkout with packages/spec/CHANGELOG.md and content/docs/releases",
+          "a built packages/spec for the upgrade-guide check"
+        ]
+      },
+      "steps": [
+        "run pnpm check:release-notes; record the verdict and the released majors it read",
+        "run pnpm check:adr-0087-registration; record the verdict",
+        "run pnpm --filter @objectstack/spec check:upgrade-guide and check:spec-changes; record the verdicts",
+        "run each gate's --self-test; record that each red path is exercised",
+        "red probe: in a scratch copy, remove the newest major's entry from content/docs/releases/meta.json; run check:release-notes against it; record the red; revert"
+      ],
+      "acceptance": [
+        {
+          "clause": "every gate is green on a clean tree",
+          "oracle": "build",
+          "verify": "each command exits 0 with its own pass line",
+          "evidence": "the gate outputs"
+        },
+        {
+          "clause": "a released major without a navigable release page fails the release-notes gate, naming the major",
+          "oracle": "build",
+          "verify": "the probe run exits non-zero naming the unwired page (scripts/check-release-notes.mjs#findProblems; the two documented exceptions are scripts/check-release-notes.mjs#KNOWN_MISSING)",
+          "evidence": "the red output and the green re-run"
+        },
+        {
+          "clause": "the upgrade guide is a projection of the change registry, so a registry change without its guide cannot pass",
+          "oracle": "build",
+          "verify": "check:upgrade-guide generates in memory and exits 0 (packages/spec/scripts/build-upgrade-guide.ts#build)",
+          "evidence": "the gate output"
+        },
+        {
+          "clause": "the self-tests prove each gate can go red",
+          "oracle": "build",
+          "verify": "every --self-test passes its batteries",
+          "evidence": "the self-test outputs"
+        }
+      ],
+      "negative": [
+        "a green release-notes run with the newest major unwired is a FAIL of the gate",
+        "a breaking changeset that lands without its migration and disposition is a FAIL of the registration gate; report it against the changeset, not the ledger"
+      ],
+      "source": [
+        "docs/NORTH-STAR.md, Product areas, area:package core feature 4: every release has release notes, and a breaking change has a migration guide",
+        "scripts/check-release-notes.mjs#findProblems",
+        "scripts/check-adr-0087-registration.mjs#MIGRATION_LEDGER_GENERATOR",
+        "packages/spec/scripts/build-upgrade-guide.ts#build",
+        "AGENTS.md, Post-Task Checklist step 3 (breaking changesets carry their migration)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-25",
+          "change": "initial — maps North Star core feature package 4 to an item; read from source at 49c8e0f0, no live run made",
+          "ref": "#35212"
+        }
+      ]
     }
   ]
 }

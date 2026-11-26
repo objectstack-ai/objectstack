@@ -92,6 +92,7 @@
     "content/docs/data-modeling/relationships.mdx",
     "content/docs/data-modeling/schema-design.mdx",
     "content/docs/data-modeling/seed-data.mdx",
+    "content/docs/data-modeling/units.mdx",
     "content/docs/data-modeling/validation-rules.mdx",
     "content/docs/data-modeling/validation.mdx",
     "content/docs/data-modeling/virtual-objects.mdx",

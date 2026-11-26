@@ -633,6 +633,7 @@ export const de: PlatformTranslationData = {
         },
         embedder_provider: {
           label: 'Anbieter',
+          help: 'Wird beim Serverstart gelesen: Eine gespeicherte Änderung an einer Embedder-Einstellung wirkt nach dem nächsten Neustart.',
           options: {
             none: 'Deaktiviert (keine Embeddings)',
             openai: 'OpenAI',

@@ -4505,6 +4505,42 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_standard_unit_setting: {
+    label: "Standard Unit Setting",
+    pluralLabel: "Standard Unit Settings",
+    description: "How many decimal places a quantity in a standard unit of measure (KGM, H87, …) displays with in this organization — one row per standard unit the organization has set.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Standard Unit",
+        help: "The standard unit code (UN/ECE Recommendation 20) in exact uppercase, for example KGM for kilogram, GRM for gram or H87 for piece. The organization's own units carry their decimal places on the unit itself, under Units of Measure. The code cannot be changed after the setting is created."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored and shown. Delete the setting to clear it."
+      }
+    },
+    _views: {
+      all_settings: {
+        label: "All",
+        description: "Decimal places a quantity in a standard unit displays with in this organization. A field's own decimal places still limit what is stored and shown.",
+        emptyState: {
+          title: "No standard unit settings yet",
+          message: "Standard units display with the decimal places of the field that holds the quantity. Add a setting to give a standard unit, such as grams or kilograms, its own number of decimal places."
+        }
+      }
+    },
+    _validations: {
+      standard_unit_setting_code_standard: {
+        message: "Enter a standard unit code in exact uppercase, for example KGM or H87. An organization's own unit carries its decimal places on the unit itself, under Units of Measure."
+      },
+      standard_unit_setting_code_immutable: {
+        message: "A setting's unit cannot be changed after it is created. Delete it and add a setting for the other unit instead."
+      }
+    }
+  },
   sys_work_calendar: {
     label: "Calendário de trabalho",
     pluralLabel: "Calendários de trabalho",

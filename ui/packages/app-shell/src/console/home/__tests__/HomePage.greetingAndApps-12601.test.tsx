@@ -92,10 +92,11 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 }));
 
 // The build agent served beside a custom one, with the ask and authoring CTA
-// predicates stubbed off: the build chip keeps its "Build an app" form (an
-// agent-less deployment, and since objectstack#36969 one that serves no build
-// agent, gets its Studio form, `HomePage.noAgentsBuildChip-26614.test.tsx`),
-// and no AI CTA joins the greeting row, which holds the builder chips alone.
+// predicates stubbed off: no build chip is drawn, since "Build an app" was
+// ruled off the page (objectstack#37227; an agent-less deployment, and since
+// objectstack#36969 one that serves no build agent, gets the Studio form,
+// `HomePage.noAgentsBuildChip-26614.test.tsx`), and no AI CTA joins the
+// greeting row, which holds the template chip alone.
 vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-chatbot/core')>()),
   useAgents: () => ({ agents: [{ name: 'build' }, { name: 'custom_helper' }] }),
@@ -234,25 +235,24 @@ describe('the builder chips (objectui#12601)', () => {
     expect(screen.queryByTestId('home-start-template')).toBeNull();
   });
 
-  it('CONTROL — an admin gets both chips, live, beside the greeting', async () => {
+  it('CONTROL — an admin gets the template chip, live, beside the greeting, and no "Build an app"', async () => {
     const user = userEvent.setup();
     render(<HomePage />);
-    const build = screen.getByTestId('home-build-app');
     const template = screen.getByTestId('home-start-template');
-    expect(build).toBeEnabled();
     expect(template).toBeEnabled();
-    expect(build).toHaveTextContent('«home.build.title»');
     expect(template).toHaveTextContent('«home.template.title»');
-    // One row: the chips share the summary's section, with no cover card.
+    // One row: the chip shares the summary's section, with no cover card.
     const section = screen.getByTestId('home-work-summary').closest('section')!;
-    expect(section).toContainElement(build);
     expect(section).toContainElement(template);
+    // objectstack#37227 — the build agent is served: no build chip of either form.
+    expect(screen.queryByTestId('home-build-app')).toBeNull();
+    expect(screen.queryByTestId('home-build-in-studio')).toBeNull();
+    expect(section).not.toHaveTextContent('«home.build.title»');
     expect(screen.queryByTestId('home-authoring-gate-reason')).toBeNull();
 
-    await user.click(build);
-    expect(navigateMock).toHaveBeenCalledWith('/studio');
     await user.click(template);
     expect(navigateMock).toHaveBeenCalledWith('/apps/setup/system/marketplace');
+    expect(navigateMock).not.toHaveBeenCalledWith('/studio');
   });
 
   it('a chip withheld for want of the capability explains itself through the tooltip wrapper', async () => {
@@ -265,7 +265,7 @@ describe('the builder chips (objectui#12601)', () => {
     expect(reason).toHaveClass('sr-only');
     expect(reason.id).not.toBe('');
 
-    for (const testId of ['home-build-app', 'home-start-template']) {
+    for (const testId of ['home-start-template']) {
       const chip = screen.getByTestId(testId);
       expect(chip).toBeDisabled();
       // The button and its wrapper are both described by the one reason.
@@ -277,11 +277,11 @@ describe('the builder chips (objectui#12601)', () => {
       expect(wrapper).toHaveAttribute('aria-describedby', reason.id);
     }
 
-    await user.hover(screen.getByTestId('home-build-app').parentElement!);
+    await user.hover(screen.getByTestId('home-start-template').parentElement!);
     expect(await screen.findByRole('tooltip')).toHaveTextContent('«home.build.noCapability»');
 
     // Withheld means inert: a click reaches no route.
-    await user.click(screen.getByTestId('home-build-app'));
+    await user.click(screen.getByTestId('home-start-template'));
     expect(navigateMock).not.toHaveBeenCalled();
   });
 
@@ -290,7 +290,7 @@ describe('the builder chips (objectui#12601)', () => {
     state.marketplaceEnabled = false;
     render(<HomePage />);
 
-    expect(screen.getByTestId('home-build-app')).toBeEnabled();
+    expect(screen.queryByTestId('home-build-app')).toBeNull();
     const template = screen.getByTestId('home-start-template');
     expect(template).toBeDisabled();
     const reason = screen.getByTestId('home-marketplace-disabled-reason');
