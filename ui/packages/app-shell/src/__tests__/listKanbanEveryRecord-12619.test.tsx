@@ -411,6 +411,8 @@ describe('a lookup-laned board under a list view counts and totals each whole la
     id: `deal-${String(i).padStart(2, '0')}`,
     name: `Deal ${String(i).padStart(2, '0')}`,
     account: i >= 60 ? 'acc-c' : i % 2 === 0 ? 'acc-a' : 'acc-b',
+    // The same split on a text field, for a board laned by a field that is no reference.
+    tier: i >= 60 ? 'bronze' : i % 2 === 0 ? 'gold' : 'silver',
     amount: i,
   }));
   const ACCOUNTS: Row[] = [
@@ -425,6 +427,7 @@ describe('a lookup-laned board under a list view counts and totals each whole la
       fields: {
         name: { type: 'text', label: 'Deal Name' },
         account: { type: 'lookup', label: 'Account', reference: ACCOUNT },
+        tier: { type: 'text', label: 'Tier' },
         amount: { type: 'number', label: 'Amount' },
       },
     },
@@ -439,19 +442,26 @@ describe('a lookup-laned board under a list view counts and totals each whole la
     kanban: { groupByField: 'account', titleField: 'name' },
   };
 
-  /** The platform's grouped-aggregate door: `COUNT(*)` counts rows, the rest read `field`. */
-  function dealSource(withDoor = true) {
+  /**
+   * The platform's grouped-aggregate door: `COUNT(*)` counts rows, the rest
+   * read `field`. `door`: `true` answers whole, `false` is no door, `'refuse'`
+   * refuses the read (a `403`), `'cut'` answers two groups and `hasMore`, as
+   * the door cuts a grouped read to its default page size.
+   */
+  function dealSource(door: boolean | 'refuse' | 'cut' = true, rows: Row[] = DEALS) {
+    const withDoor = door !== false;
     const stores: Record<string, ValueDataSource<Row>> = {
-      [DEAL]: new ValueDataSource<Row>({ items: DEALS }),
+      [DEAL]: new ValueDataSource<Row>({ items: rows }),
       [ACCOUNT]: new ValueDataSource<Row>({ items: ACCOUNTS }),
     };
     const queryGroupHeaders = vi.fn(async (object: string, query: any) => {
+      if (door === 'refuse') throw Object.assign(new Error('Forbidden'), { status: 403 });
       const kept = (await stores[object].find(object, { ...(query.where ? { $filter: query.where } : {}), $top: 100000 } as any)) as any;
       const rows: Row[] = Array.isArray(kept) ? kept : kept.data ?? kept.records ?? [];
       const key = query.groupBy[0];
       const groups = new Map<unknown, Row[]>();
       for (const row of rows) groups.set(row[key] ?? null, [...(groups.get(row[key] ?? null) ?? []), row]);
-      return [...groups].map(([k, members]) => {
+      const answer: Row[] & { hasMore?: boolean } = [...groups].map(([k, members]) => {
         const out: Row = { [key]: k };
         for (const agg of query.aggregations) {
           if (agg.function === 'count' && !agg.field) {
@@ -469,6 +479,10 @@ describe('a lookup-laned board under a list view counts and totals each whole la
         }
         return out;
       });
+      if (door !== 'cut') return answer;
+      const cut: Row[] & { hasMore?: boolean } = answer.slice(0, 2);
+      cut.hasMore = true;
+      return cut;
     });
     return {
       find: vi.fn(async (object: string, params: any) => stores[object].find(object, params)),
@@ -568,5 +582,73 @@ describe('a lookup-laned board under a list view counts and totals each whole la
     await onePageDrawn();
     await waitFor(() => expect(headerTotal('acc-a')).toBe('156+'));
     expect(headerTotal('acc-b')).toBe('144+');
+  });
+
+  it.each([
+    ['refuses the read', 'refuse'],
+    ['cuts the read (hasMore)', 'cut'],
+  ] as const)('CONTROL: when the door %s, the counts and the header total are the page\'s, marked `+`, and no lane past the page is drawn', async (_, door) => {
+    const ds = dealSource(door);
+    mountBoard(ds, { ...BOARD_VIEW, kanban: { ...BOARD_VIEW.kanban, summarizeField: 'amount' } });
+
+    await onePageDrawn();
+    await waitFor(() => expect(ds.queryGroupHeaders).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(headerTotal('acc-a')).toBe('156+'));
+    expect(headerTotal('acc-b')).toBe('144+');
+    expect(laneBadge('acc-a')).toBe('13+');
+    expect(laneBadge('acc-b')).toBe('12+');
+    expect(screen.queryByRole('group', { name: 'Cyan Corp' })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'acc-c' })).toBeNull();
+  });
+
+  it('counts under the view\'s filter, the one its own window was fetched with', async () => {
+    const ds = dealSource();
+    mountBoard(ds, { ...BOARD_VIEW, filter: [{ field: 'amount', operator: 'greater_than', value: 9 }] });
+
+    await waitFor(() => expect(cards()).toHaveLength(25));
+    // 10, 12, … 58 and 11, 13, … 59: 25 each; all 10 of acc-c clear the filter.
+    await waitFor(() => expect(laneBadge('acc-a')).toBe('25'));
+    expect(laneBadge('acc-b')).toBe('25');
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Cyan Corp' })).toBeInTheDocument());
+    expect(laneBadge('Cyan Corp')).toBe('10');
+    expect(ds.queryGroupHeaders.mock.calls[0][1].where).toBeDefined();
+  });
+
+  it('a lane past the page says how many cards it did not load, never "No cards"', async () => {
+    mountBoard(dealSource(), BOARD_VIEW);
+
+    await onePageDrawn();
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Cyan Corp' })).toBeInTheDocument());
+    expect(within(lane('Cyan Corp')).getByText('Cards not loaded: 10')).toBeInTheDocument();
+    expect(within(lane('Cyan Corp')).queryByText('No cards')).toBeNull();
+  });
+
+  it('a board laned by a text field counts each whole lane but draws no lane past the page', async () => {
+    const ds = dealSource();
+    mountBoard(ds, { ...BOARD_VIEW, kanban: { ...BOARD_VIEW.kanban, groupByField: 'tier' } });
+
+    await waitFor(() => expect(cards()).toHaveLength(25));
+    await waitFor(() => expect(laneBadge('gold')).toBe('30'));
+    expect(laneBadge('silver')).toBe('30');
+    // The read names `bronze`, which sits past the page: a key the aggregate
+    // spells for a field that is no reference draws no lane.
+    expect(screen.queryByRole('group', { name: 'bronze' })).toBeNull();
+  });
+
+  it('a float total reads as the page path prints it, without binary residue', async () => {
+    const FLOATS: Row[] = [
+      { id: 'f1', name: 'Float 1', account: 'acc-a', tier: 'gold', amount: 0.1 },
+      { id: 'f2', name: 'Float 2', account: 'acc-a', tier: 'gold', amount: 0.2 },
+      { id: 'f3', name: 'Float 3', account: 'acc-b', tier: 'gold', amount: 0.7 },
+    ];
+    const ds = dealSource(true, FLOATS);
+    mountBoard(ds, { ...BOARD_VIEW, kanban: { ...BOARD_VIEW.kanban, summarizeField: 'amount' } });
+
+    await waitFor(() => expect(cards()).toHaveLength(3));
+    // The read answers 0.1 + 0.2 = 0.30000000000000004 for acc-a.
+    await waitFor(() => expect(ds.queryGroupHeaders).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(laneBadge('acc-a')).toBe('2'));
+    expect(headerTotal('acc-a')).toBe('0.3');
+    expect(headerTotal('acc-b')).toBe('0.7');
   });
 });

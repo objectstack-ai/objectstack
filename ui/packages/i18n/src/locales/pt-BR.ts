@@ -1150,6 +1150,7 @@ const pt = {
     addColumn: "Adicionar coluna",
     moveCard: "Mover cartão",
     noCards: "Sem cartões",
+    notLoaded: "Cartões não carregados: {{count}}",
     columnCards: "Cartões da coluna {{column}}",
     laneCards: "Cartões de {{column}} - {{lane}}",
     dropBlocked: "Um cartão em {{from}} não pode ser movido para {{to}}.",

@@ -1121,6 +1121,7 @@ const de = {
     addColumn: "Spalte hinzufügen",
     moveCard: "Karte verschieben",
     noCards: "Keine Karten",
+    notLoaded: "Nicht geladene Karten: {{count}}",
     columnCards: "Karten in Spalte {{column}}",
     laneCards: "Karten in {{column}} - {{lane}}",
     dropBlocked: "Eine Karte aus {{from}} kann nicht nach {{to}} verschoben werden.",

@@ -72,8 +72,9 @@ import { laneKeyOf } from './kanbanReferenceLanes';
  * objectstack#37327 — the same read answers that board's other lane figures,
  * which a page cannot: each lane's record count ({@link LANE_COUNT_ALIAS}),
  * which its header and a foot `count` write, and the `SUM` of the view's
- * `summarizeField`, which its header total writes. Its group keys are the
- * lanes, so a lane whose records all sit past the page is drawn too. The read
+ * `summarizeField`, which its header total writes. Over a lookup lane field
+ * its group keys are the lanes, so a lane whose records all sit past the page
+ * is drawn too. The read
  * is asked on that board whether or not the view draws a statistic; it is
  * still one grouped aggregate per board. A count the read cannot give (no
  * door, a refusal, a partial answer) is the page's, marked `+`.
@@ -254,6 +255,19 @@ function numberOf(raw: unknown): number | null {
   return null;
 }
 
+/**
+ * A sum as the page path prints it (objectstack#37327): no binary residue. The
+ * page path (`sumLaneField`) rounds to the widest input's decimals, so `0.1 +
+ * 0.2` reads `0.3`; a lane read's `SUM` over a float column, or a fold of
+ * several groups' sums, arrives with the residue already in it
+ * (`0.30000000000000004`) and no inputs to measure. Fifteen significant digits
+ * is what a double holds exactly, so rounding there drops the residue and no
+ * digit the column stored.
+ */
+export function withoutBinaryResidue(value: number): number {
+  return Number.isInteger(value) ? value : Number(value.toPrecision(15));
+}
+
 /** One group's contribution to its lane. */
 interface Part {
   value: unknown;
@@ -269,7 +283,7 @@ function foldParts(parts: readonly Part[], type: KanbanLaneAggregate): LaneFigur
       if (value === null) return null;
       total += value;
     }
-    return total;
+    return withoutBinaryResidue(total);
   }
   if (type === 'avg') {
     let weighted = 0;

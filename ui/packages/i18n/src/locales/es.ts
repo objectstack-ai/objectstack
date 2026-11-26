@@ -1155,6 +1155,7 @@ const es = {
     addColumn: "Añadir columna",
     moveCard: "Mover tarjeta",
     noCards: "Sin tarjetas",
+    notLoaded: "Tarjetas no cargadas: {{count}}",
     columnCards: "Tarjetas de la columna {{column}}",
     laneCards: "Tarjetas de {{column}} - {{lane}}",
     dropBlocked: "Una tarjeta de {{from}} no se puede mover a {{to}}.",

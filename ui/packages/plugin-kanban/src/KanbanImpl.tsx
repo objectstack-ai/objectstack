@@ -50,6 +50,9 @@ const useKanbanT = createSafeTranslation(
   {
     'kanban.addCard': 'Add card',
     'kanban.noCards': 'No cards',
+    // objectstack#37327 — a lane whose whole count the board knows and none of
+    // whose cards are on the page it was handed.
+    'kanban.notLoaded': 'Cards not loaded: {{count}}',
     'kanban.cardTitlePlaceholder': 'Enter card title…',
     'kanban.loadMore': 'Load more',
     // The heading of the swimlane that holds cards with no value in the
@@ -1134,6 +1137,9 @@ function KanbanColumnView({
   // read has not answered or cannot (see `KanbanBoardProps.laneCounts`).
   const hostCount = pagedCount ? null : wholeLaneCount(laneCounts, String(column.id), safeCards.length)
   const laneCountOf = pagedCount ?? hostCount
+  // A lane that holds records none of which is on the page draws that, never
+  // "No cards" under a count above zero.
+  const notLoaded = safeCards.length === 0 && hostCount !== null && !hostCount.atLeast && hostCount.count > 0
   // objectstack#30431 — no count before the records settle; see `LaneCountPending`.
   const countPending = !useKanbanRecordsSettled()
   const laneCountText = countPending
@@ -1245,8 +1251,8 @@ function KanbanColumnView({
                 {!isOver && quickAdd && onQuickAdd && (
                   <Plus className="h-3.5 w-3.5 opacity-60" aria-hidden />
                 )}
-                <span className="text-xs">
-                  {isOver ? '↓ ' : ''}{t('kanban.noCards')}
+                <span className="text-xs" {...(notLoaded ? { 'data-kanban-lane-not-loaded': '' } : {})}>
+                  {isOver ? '↓ ' : ''}{notLoaded ? t('kanban.notLoaded', { count: hostCount?.count ?? 0 }) : t('kanban.noCards')}
                 </span>
               </div>
             )}

@@ -1424,6 +1424,7 @@ const en = {
     addColumn: 'Add column',
     moveCard: 'Move card',
     noCards: 'No cards',
+    notLoaded: 'Cards not loaded: {{count}}',
     columnCards: '{{column}} cards',
     laneCards: '{{column}} - {{lane}} cards',
     dropBlocked: 'A card in {{from}} cannot be moved to {{to}}.',

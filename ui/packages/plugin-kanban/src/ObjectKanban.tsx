@@ -166,6 +166,21 @@ type KanbanCardMoveOutcome = Exclude<
 >;
 const MOVED: KanbanCardMoveOutcome = { kind: 'moved' };
 
+/**
+ * objectstack#37327 — the fields a referenced record's title is read from
+ * (`referencedRecordTitle`): the lane field's `displayField`, then the target's
+ * name field. `null` when they cannot be named — no definition, or a legacy
+ * `titleFormat` template, whose fields are not declared — and the read then
+ * asks every field, as before.
+ */
+function referencedTitleFields(targetDef: any, displayField: string | undefined): string[] | null {
+  if (!targetDef || typeof targetDef !== 'object' || targetDef.titleFormat) return null;
+  const fields = [displayField, resolveNameField(targetDef)].filter(
+    (field): field is string => typeof field === 'string' && field !== '' && field !== 'id',
+  );
+  return fields.length > 0 ? [...new Set(fields)] : null;
+}
+
 function isUsableRowLimit(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0;
 }
@@ -1828,14 +1843,20 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
    * record (one read of those records on the lane field's target object) and
    * by its key until then. The empty group is not one of them: the trailing
    * "Uncategorized" lane is drawn by the cards it holds.
+   *
+   * Only over a lane field that names the object it references
+   * (`laneTargetObject`): a reference's group key is its foreign key, the
+   * value `laneKeyOf` keys a card by. Any other lane field without options (a
+   * text, number, boolean or date field) draws the page's lanes only, since
+   * the aggregate need not spell its key as a `find` row spells the value.
    */
   const lanesFromData = JSON.parse(statisticLanesKey).ids === null;
   const extraLaneIds = useMemo((): string[] => {
     const keys = laneReadHeld?.keys;
-    if (!hostLaneRead || !lanesFromData || !keys) return [];
+    if (!hostLaneRead || !lanesFromData || !keys || !laneTargetObject) return [];
     const drawn = new Set((effectiveColumns as Array<{ id: unknown }>).map((col) => String(col.id)));
     return keys.filter((key) => !drawn.has(key));
-  }, [hostLaneRead, lanesFromData, laneReadHeld, effectiveColumns]);
+  }, [hostLaneRead, lanesFromData, laneReadHeld, effectiveColumns, laneTargetObject]);
   const extraLaneIdsKey = JSON.stringify(extraLaneIds);
   const [extraLaneTitles, setExtraLaneTitles] = useState<{ key: string; titles: Record<string, string> } | null>(null);
   useEffect(() => {
@@ -1843,8 +1864,19 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     if (ids.length === 0 || !laneTargetObject || typeof dataSource?.find !== 'function') return;
     let cancelled = false;
     const key = `${laneTargetObject}:${extraLaneIdsKey}`;
+    // An `id IN (…)` read of the referenced records, beside the grouped read
+    // rather than inside it: the public aggregate door refuses a dotted
+    // `groupBy`, so a group row carries the foreign key and never the title.
+    // The list is bounded: a cut answer names no lane past the page, so it is
+    // at most one page of groups, and the read runs only when such a lane
+    // exists. It projects the id and the fields a title is read from.
+    const titleFields = referencedTitleFields(laneTargetDef, laneDisplayField);
     Promise.resolve()
-      .then(() => dataSource.find(laneTargetObject, { $filter: { id: { $in: ids } }, $top: ids.length } as any))
+      .then(() => dataSource.find(laneTargetObject, {
+        $filter: { id: { $in: ids } },
+        $top: ids.length,
+        ...(titleFields ? { $select: ['id', ...titleFields] } : {}),
+      } as any))
       .then(
         (result) => {
           const titles: Record<string, string> = Object.create(null);

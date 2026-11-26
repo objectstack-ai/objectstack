@@ -1121,6 +1121,7 @@ const ko = {
     addColumn: "열 추가",
     moveCard: "카드 이동",
     noCards: "카드 없음",
+    notLoaded: "로드되지 않은 카드: {{count}}",
     columnCards: "{{column}} 열의 카드",
     laneCards: "{{column}} - {{lane}}의 카드",
     dropBlocked: "{{from}}의 카드는 {{to}}에 놓을 수 없습니다.",

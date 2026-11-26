@@ -1121,6 +1121,7 @@ const ja = {
     addColumn: "カラムを追加",
     moveCard: "カードを移動",
     noCards: "カードがありません",
+    notLoaded: "未読み込みのカード: {{count}}",
     columnCards: "{{column}} のカード",
     laneCards: "{{column}} - {{lane}} のカード",
     dropBlocked: "{{from}} のカードは {{to}} に移動できません。",
