@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { RESERVED_URL_PARAMS } from '../../urlParams.js';
+import { RECORD_DETAIL_TAB_PARAM, RESERVED_URL_PARAMS } from '../../urlParams.js';
 import {
   STUDIO_RETURN_PARAM,
   readStudioReturn,
@@ -36,6 +36,7 @@ import {
   STUDIO_QUERY_PARAMS,
   STUDIO_RETIRED_INTERFACES_KEPT_PARAMS,
 } from './studioAddressTable.js';
+import { studioOverviewTab, studioPackageOverviewPath } from './studioOverviewAddress.js';
 import { DESIGNER_SURFACE_PARAM } from '../metadata-admin/nav-selection.js';
 import { CATALOG_SCOPE_PARAM, ENVIRONMENT_SCOPE } from '../metadata-admin/catalog-scope.js';
 import {
@@ -163,6 +164,25 @@ describe('studioOwdOverviewPath — the sharing overview\'s own route (objectsta
   });
 });
 
+describe('studioPackageOverviewPath — 概览 Overview\'s own route (objectstack#37454)', () => {
+  it('is the package\'s `overview` section, on Info, or on Pending with `?tab=pending`', () => {
+    expect(studioPackageOverviewPath('crm')).toBe('/studio/crm/overview');
+    expect(studioPackageOverviewPath('crm', { tab: 'info' })).toBe('/studio/crm/overview');
+    expect(studioPackageOverviewPath('crm', { tab: 'pending' })).toBe('/studio/crm/overview?tab=pending');
+    // The open tab rides the console's reserved key, not a Studio restatement of it (ui AGENTS rule #8).
+    expect(new URL(studioPackageOverviewPath('crm', { tab: 'pending' }), 'http://x').searchParams.get(RECORD_DETAIL_TAB_PARAM)).toBe('pending');
+    expect(RESERVED_URL_PARAMS).toContain(RECORD_DETAIL_TAB_PARAM);
+    expect(studioPackageOverviewPath('com.example crm')).toBe('/studio/com.example%20crm/overview');
+  });
+
+  it('reads `?tab=`: `pending` opens Pending; anything else, or nothing, opens Info', () => {
+    expect(studioOverviewTab('pending')).toBe('pending');
+    expect(studioOverviewTab('info')).toBe('info');
+    expect(studioOverviewTab(null)).toBe('info');
+    expect(studioOverviewTab('history')).toBe('info');
+  });
+});
+
 describe('the mapping table agrees with the code (objectstack#36895)', () => {
   it('every `?surface=` row redirects from its pillar address to where the row says, in one hop (objectstack#36909)', () => {
     // Every type has moved: each row names its redirect, and the ONE redirect
@@ -195,6 +215,7 @@ describe('the mapping table agrees with the code (objectstack#36895)', () => {
       'review',
       'package',
       CATALOG_SCOPE_PARAM,
+      RECORD_DETAIL_TAB_PARAM,
       'new',
     ]);
     expect(STUDIO_QUERY_PARAMS.find((row) => row.key === CATALOG_SCOPE_PARAM)?.values).toBe(ENVIRONMENT_SCOPE);
@@ -207,7 +228,7 @@ describe('the mapping table agrees with the code (objectstack#36895)', () => {
     const builders = new Set([
       'studioLandingPath', 'studioPackagePath', 'studioPillarPath', 'studioOrgScopePath',
       'studioMetadataAreaRoot', 'studioMetadataTypePath', 'studioMetadataItemAddress', 'studioChangesReviewPath',
-      'studioItemReviewPath', 'retiredInterfacesTarget', 'studioOwdOverviewPath',
+      'studioItemReviewPath', 'retiredInterfacesTarget', 'studioOwdOverviewPath', 'studioPackageOverviewPath',
     ]);
     for (const family of STUDIO_ADDRESS_FAMILIES) expect(builders.has(family.builder), family.id).toBe(true);
   });

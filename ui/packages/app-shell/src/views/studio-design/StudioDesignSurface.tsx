@@ -4,8 +4,10 @@
  * StudioDesignSurface — the open-source WYSIWYG design surface (ADR-0080).
  *
  * Routed as /studio/:packageId/metadata/* (the "All metadata" area, where
- * objects, flows and permission sets open their designers full-screen) and
- * /studio/:packageId/owd (the sharing overview). objectstack#36909 — the
+ * objects, flows and permission sets open their designers full-screen),
+ * /studio/:packageId/owd (the sharing overview) and
+ * /studio/:packageId/overview (概览 Overview, the package's own page,
+ * objectstack#37454). objectstack#36909 — the
  * retired pillar addresses (`data`, `automations`, `access`, `interfaces`)
  * never reach this surface: the route redirects them
  * (`StudioPillarRedirect`), and any other segment draws a not-found state.
@@ -68,6 +70,7 @@ import { studioEntryFallbackPath, useStudioEntryPermissions } from './studioEntr
 import { SETUP_PACKAGES_PATH } from '../metadata-admin/packageSource.js';
 import { StudioBackToApp, type StudioAppTarget } from './StudioBackToApp.js';
 import { StudioPackageMenu } from './StudioPackageMenu.js';
+import { StudioPackageOverviewPage } from './StudioPackageOverviewPage.js';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { type NewFlowTrigger } from './AutomationsFlowRail.js';
 import {
@@ -168,7 +171,13 @@ import {
   type DraftPublishOptions,
 } from '../../preview/DraftChangesPanel.js';
 import { toast } from 'sonner';
-import { STUDIO_OWD_SECTION, studioItemPath, studioMetadataTypePath, studioPillarPath } from './studioAddress.js';
+import {
+  STUDIO_OVERVIEW_SECTION,
+  STUDIO_OWD_SECTION,
+  studioItemPath,
+  studioMetadataTypePath,
+  studioPillarPath,
+} from './studioAddress.js';
 
 /** The batch door's `backfillApplied` receipt, by reference to what the client returns (objectui#12929). */
 type PublishBackfillReceipt = NonNullable<
@@ -1270,6 +1279,27 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // ⌘K, and a second palette would draw a second dialog.
   const paletteHosted = useCommandPaletteProviderMounted();
 
+  // objectstack#37139 — the package's 「⋯」 menu: a current package (never
+  // `~org` or `~all`) that is there, and a manage_metadata holder.
+  // objectstack#37454 — drawn in 概览 Overview's header, moved there from the
+  // top bar with its six rows as they were (ADR-0084, amended 2026-11-26).
+  const packageMenu =
+    packageId !== null && !pkgMissing && canAuthorPackage ? (
+      <StudioPackageMenu
+        packageId={packageId}
+        packageName={pkgEntry?.id === packageId ? pkgEntry.name : packageId}
+        writable={pkgWritable}
+        pendingCount={shownPendingCount}
+        locale={locale}
+        onChanged={onPackageChanged}
+        onRenamed={onPackageRenamed}
+        beforeNavigate={confirmLeavePillar}
+        navigate={shellNavigate}
+      />
+    ) : null;
+  // objectstack#37454 — the package's rename re-reads 概览's row too.
+  const overviewRefresh = `${publishNonce}:${pkgEntry?.id === packageId ? pkgEntry.name : ''}`;
+
   const publishButton = (
     <button
       type="button"
@@ -1387,23 +1417,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 locale={locale}
                 beforeNavigate={confirmLeavePillar}
                 navigate={shellNavigate}
-                // objectstack#37139 — the package's 「⋯」 menu: a current package
-                // (never `~org` or `~all`) that is there, and a manage_metadata holder.
-                menu={
-                  packageId !== null && !pkgMissing && canAuthorPackage ? (
-                    <StudioPackageMenu
-                      packageId={packageId}
-                      packageName={pkgEntry?.id === packageId ? pkgEntry.name : packageId}
-                      writable={pkgWritable}
-                      pendingCount={shownPendingCount}
-                      locale={locale}
-                      onChanged={onPackageChanged}
-                      onRenamed={onPackageRenamed}
-                      beforeNavigate={confirmLeavePillar}
-                      navigate={shellNavigate}
-                    />
-                  ) : null
-                }
               />
             </div>
 
@@ -1529,6 +1542,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               beside it, not overlaying the page under `md`. */}
           {/* objectstack#36899 — the left menu and the page beside it. The
               menu docks in this row, below the header (a drawer under 768 px). */}
+          {/* objectui#12725 — the pillars' item headers read the ledger the
+              badge counts (`studioItemDraftStatus.ts`). objectstack#37454 —
+              so may the menu beside them: 概览's pending badge is that count. */}
+          <StudioPendingDraftsContext.Provider value={pillarPendingDrafts}>
           <div className="relative flex min-h-0 flex-1 overflow-hidden">
           {showMenu && <StudioMenu segment={scopeSegment} locale={locale} onReenterPillar={reenterPillar} />}
           <div
@@ -1536,9 +1553,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
             data-testid="studio-pillars-host"
             data-studio-slot={slotHost && slotOpen && slotHasContent && !isMobile ? 'open' : 'closed'}
           >
-            {/* objectui#12725 — the pillars' item headers read the ledger the
-                badge counts (`studioItemDraftStatus.ts`). */}
-            <StudioPendingDraftsContext.Provider value={pillarPendingDrafts}>
             {/* objectui#11272 — every pillar is keyed by package: a package
                 switch keeps this route mounted, and every piece of a pillar's
                 state is the package's (objectui#11203). Unkeyed,
@@ -1606,6 +1620,39 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                   setChangesOpen(true);
                 }}
               />
+            ) : tab === STUDIO_OVERVIEW_SECTION ? (
+              // objectstack#37454 (ADR-0084, amended 2026-11-26) — 概览
+              // Overview, the package's own page. Its Pending tab is the
+              // changes panel in place, wired to the very publish the top
+              // bar's Publish runs (`doPublish`), on the same drafts
+              // (`draftScope`) and with the same read-only gate.
+              <StudioPackageOverviewPage
+                key={packageId}
+                packageId={packageId}
+                packageName={pkgEntry?.id === packageId ? pkgEntry.name : packageId}
+                writable={pkgWritable}
+                apps={publishedApps}
+                app={packageApp}
+                pendingCount={shownPendingCount}
+                locale={locale}
+                menu={packageMenu}
+                refreshKey={overviewRefresh}
+                beforeNavigate={confirmLeavePillar}
+                navigate={shellNavigate}
+                pending={
+                  <DraftChangesPanel
+                    embedded
+                    open
+                    onOpenChange={() => {}}
+                    reloadKey={`${publishNonce}:${shownPendingCount ?? ''}`}
+                    packageId={draftScope}
+                    onPublish={publishReadOnly ? undefined : doPublish}
+                    publishing={publishing}
+                    renderEntryNote={renderPublishRefusal}
+                    customizationOf={pairId !== null ? baseLabel : undefined}
+                  />
+                }
+              />
             ) : tab === STUDIO_OWD_SECTION ? (
               // objectstack#36905 (decision 11) — the organization-wide default
               // sharing overview's own route; its unsaved rows gate the header.
@@ -1626,9 +1673,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 sentence={tFormat('engine.studio.notFound.pillar', locale, { pillar: tab })}
               />
             )}
-            </StudioPendingDraftsContext.Provider>
           </div>
           </div>
+          </StudioPendingDraftsContext.Provider>
         </div>
 
         {/* objectui#12725 — the one right slot: properties OR the copilot.
