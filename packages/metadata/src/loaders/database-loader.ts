@@ -1921,7 +1921,7 @@ export class DatabaseLoader implements MetadataLoader {
     // registration alone: a rollback never restores it (a restored body is
     // written without the platform's mark, so the row would stop being the
     // platform's record). Refused before anything is written.
-    if (existing && isPlatformOrigin(storedRowBodyOf(existing))) refusePlatformRecordRollback(type, name);
+    refusePlatformRecordRestore(type, name, existing);
     if (restoresBinding) {
       // [#32540 C8] Refused before any write: an object the column cannot
       // store, or an object-less binding whose place an unnameable row holds.
@@ -2682,25 +2682,33 @@ function generateId(): string {
 }
 
 /**
- * [#37013] A row's stored body as written (`metadata`, parsed when stored as
- * text), for reading a stamp off it; `undefined` for a missing row or a body
- * that does not parse, which is then no platform record.
+ * [#37013, #37130] Refuse a rollback or restore whose target `row` (a
+ * `sys_metadata` row, its body read with {@link storedRowBodyOf}) is the
+ * platform's own record: `409 RESOURCE_CONFLICT`, naming the fix, before
+ * anything is written. Only the platform's registration writes that record; a
+ * rollback restores a package's or the environment's item. The one rule the
+ * metadata service's `rollback` ({@link DatabaseLoader.registerRollback}) and
+ * the metadata protocol's restore doors (`rollbackMetaItem` and the restore
+ * limb of `revertCommit`, through `SysMetadataRepository.restoreVersion`)
+ * share: a row the platform's record does not hold passes.
  */
-/**
- * [#37013] Refuse a rollback whose row is the platform's own record: `409
- * RESOURCE_CONFLICT`, naming the fix. Only the platform's registration writes
- * that record; a rollback restores a package's or the environment's item.
- */
-function refusePlatformRecordRollback(type: string, name: string): never {
+export function refusePlatformRecordRestore(type: string, name: string, row: Record<string, unknown> | null | undefined): void {
+  if (!row || !isPlatformOrigin(storedRowBodyOf(row))) return;
   const err = new Error(
     `${type}/${name}: the row this rollback would restore is the platform's own record, which only the platform's registration writes. ` +
-    'It is not rolled back: the platform registers it again at its next boot. To restore an earlier version of a package\'s item of the name, name that package.',
+    'It is not rolled back: the platform registers it again at its next boot. To restore an earlier version of a package\'s item of the name, name that package; ' +
+    'to make an earlier version the environment\'s own item of the name, save that version\'s body again.',
   ) as Error & { code?: string; status?: number };
   err.code = 'RESOURCE_CONFLICT';
   err.status = 409;
   throw err;
 }
 
+/**
+ * [#37013] A row's stored body as written (`metadata`, parsed when stored as
+ * text), for reading a stamp off it; `undefined` for a missing row or a body
+ * that does not parse, which is then no platform record.
+ */
 function storedRowBodyOf(row: Record<string, unknown> | undefined): unknown {
   const stored = row?.metadata;
   if (typeof stored !== 'string') return stored ?? undefined;
