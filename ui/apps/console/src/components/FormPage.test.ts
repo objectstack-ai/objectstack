@@ -40,7 +40,7 @@ describe('declaredSectionColumns', () => {
 describe('buildSections — a section draws what the shared layout rule answers (#37665)', () => {
   const objectSchema = { name: 'lead', fields: { a: { type: 'text' }, b: { type: 'text' } } };
   const counts = (form: Record<string, unknown>) =>
-    buildSections({ type: 'simple', ...form } as any, objectSchema).map((s) => s.columns);
+    buildSections({ type: 'simple', ...form } as Parameters<typeof buildSections>[0], objectSchema).map((s) => s.columns);
 
   it('the form view\'s `columns: 1` caps a `columns: 2` section at one', () => {
     expect(counts({ columns: 1, sections: [{ columns: 2, fields: ['a', 'b'] }] })).toEqual([1]);
