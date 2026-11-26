@@ -81,6 +81,9 @@ function mockServer() {
 function makeRes() {
   const res: any = {
     header: () => res,
+    setHeader: () => res,
+    send: (b: unknown) => { res._json = b; return res; },
+    write: () => true,
     end: () => res,
     status: (code: number) => { res._status = code; return res; },
     json: (b: unknown) => { res._json = b; return res; },
@@ -90,7 +93,7 @@ function makeRes() {
 
 interface Answer { status: number; body: any }
 
-async function boot(ships: { forms?: unknown[]; views?: unknown[] }) {
+async function boot(ships: { forms?: unknown[]; views?: unknown[] }, opts: { i18n?: unknown } = {}) {
   const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as any);
   const engine = new ObjectQL();
   engine.registerDriver(driver, true);
@@ -109,7 +112,12 @@ async function boot(ships: { forms?: unknown[]; views?: unknown[] }) {
   } as any);
   await engine.syncSchemas();
   const protocol: any = new ObjectStackProtocolImplementation(engine as any, () => new Map());
-  const rest = new RestServer(mockServer() as any, protocol, { api: { requireAuth: false } } as any);
+  const rest = new RestServer(
+    mockServer() as any, protocol, { api: { requireAuth: false } } as any,
+    undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+    // i18nServiceProvider — the 14th constructor argument.
+    opts.i18n !== undefined ? async () => opts.i18n as any : undefined,
+  );
   rest.registerRoutes();
   const route = (method: string, path: string) => {
     const found = rest.getRoutes().find((r: any) => r.method === method && r.path === path);
@@ -118,9 +126,9 @@ async function boot(ships: { forms?: unknown[]; views?: unknown[] }) {
   };
   const resolve = route('GET', '/api/v1/forms/:slug');
   const submit = route('POST', '/api/v1/forms/:slug/submit');
-  const get = async (slug = SLUG): Promise<Answer> => {
+  const get = async (slug = SLUG, headers: Record<string, string> = {}): Promise<Answer> => {
     const res = makeRes();
-    await resolve.handler({ params: { slug }, query: {}, headers: {} } as any, res);
+    await resolve.handler({ params: { slug }, query: {}, headers } as any, res);
     return { status: res._status ?? 200, body: res._json };
   };
   const post = async (slug = SLUG): Promise<Answer> => {
@@ -157,7 +165,15 @@ async function boot(ships: { forms?: unknown[]; views?: unknown[] }) {
       version: 1, created_at: now, updated_at: now,
     }, { context: { isSystem: true } });
   };
-  return { engine, protocol, get, post, records, install, saveInto, saveBeforeTheGate, seedRow };
+  /** `GET /api/v1/meta/:type/:name` as `caller` (`systemPermissions`), or anonymous-free when `caller` is omitted. */
+  const meta = async (type: string, name: string, caller?: { systemPermissions: string[] }, headers: Record<string, string> = {}): Promise<Answer> => {
+    (rest as any).resolveExecCtx = async () => (caller ? { userId: 'u_reader', ...caller } : undefined);
+    const item = route('GET', '/api/v1/meta/:type/:name');
+    const res = makeRes();
+    await item.handler({ method: 'GET', path: `/api/v1/meta/${type}/${name}`, params: { type, name }, query: {}, body: {}, headers } as any, res);
+    return { status: res._status ?? 200, body: res._json };
+  };
+  return { engine, protocol, rest, get, post, records, install, saveInto, saveBeforeTheGate, seedRow, meta };
 }
 
 type Booted = Awaited<ReturnType<typeof boot>>;
@@ -807,5 +823,74 @@ describe('[ADR-0159 D5] a `form` save, reset and delete: the old-shape row of th
     expect(String(err?.message)).toContain('the old-shape removal failed');
     expect(await rawRows(b, 'form', NAME, PAIR)).toEqual([]);
     expect(await rawRows(b, 'view', NAME, PAIR)).toEqual(view);
+  });
+});
+
+describe('[ADR-0159 card ② item 2, D5, ADR-0029 D9.2a] the `/meta/form` read: its audience, one definition per address, the override\'s own text', () => {
+  const engines: ObjectQL[] = [];
+  afterAll(async () => {
+    for (const engine of engines) await engine.destroy().catch(() => {});
+  });
+  const booted = async (ships: { forms?: unknown[]; views?: unknown[] }, opts: { i18n?: unknown } = {}): Promise<Booted> => {
+    const b = await boot(ships, opts);
+    engines.push(b.engine);
+    return b;
+  };
+  const CAP = 'ftt.legal_desk';
+  const holder = { systemPermissions: [CAP] };
+  const stranger = { systemPermissions: [] as string[] };
+
+  it('a caller refused a form\'s document at `/api/v1/meta/view/NAME` is refused it at `/api/v1/meta/form/NAME`; its holder is served both', async () => {
+    // A view item's own audience gate travels with the form it projects. On
+    // this tree only a row at rest carries one on a form (the `view` write
+    // door refuses an item-level `requiredPermissions`, and a form body
+    // declares none), so the row is seeded as stored.
+    const b = await booted({});
+    await b.seedRow('view', NAME, null, viewItem(true, { requiredPermissions: [CAP] }));
+    const view = await b.meta('view', NAME, stranger);
+    const form = await b.meta('form', NAME, stranger);
+    expect(view.status, JSON.stringify(view.body)).toBe(403);
+    expect([form.status, form.body?.error?.code ?? form.body?.code]).toEqual([view.status, view.body?.error?.code ?? view.body?.code]);
+    expect(JSON.stringify(form.body)).not.toContain('Contact us');
+    // CONTROL: the holder reads both.
+    expect((await b.meta('view', NAME, holder)).status).toBe(200);
+    const served = await b.meta('form', NAME, holder);
+    expect(served.status, JSON.stringify(served.body)).toBe(200);
+    expect(JSON.stringify(served.body)).toContain('Contact us');
+  });
+
+  it('one definition per address: a package-less stored `form` row over a base that ships the form as an old shape is listed once, at the base\'s address, with the row\'s body (D5 served-row order)', async () => {
+    const b = await booted({ views: [container(true)] });
+    await b.seedRow('form', NAME, null, formItem(false, { label: 'Package-less row' }));
+    const listed = ((await b.protocol.getMetaItems({ type: 'form' })).items as any[]).filter((f) => f?.name === NAME);
+    expect(listed.map((f) => [f._packageId, f.label, f._formDefinedIn ?? null])).toEqual([[BASE, 'Package-less row', null]]);
+    const byName: any = await b.protocol.getMetaItem({ type: 'form', name: NAME });
+    expect(byName.item?.label).toBe('Package-less row');
+    // Fail-closed as before: the row switches the form off.
+    await closedOnBothDoors(b);
+  });
+
+  it('an override\'s own changed text outranks the base\'s catalog on `/meta/form` and on the public door; text it kept is translated (ablate: the `form` row of PACKAGED_BASE_ACCESSORS)', async () => {
+    const BUNDLE: Record<string, any> = {
+      en: {},
+      de: { forms: { [NAME]: { title: 'Kontaktieren Sie uns' } } },
+    };
+    const i18n = { getLocales: () => ['en', 'de'], getTranslations: (l: string) => BUNDLE[l], getDefaultLocale: () => 'en' };
+    const de = { 'accept-language': 'de' };
+    const b = await booted({ forms: [formItem(true, { title: 'Contact us' })] }, { i18n });
+    // CONTROL: the base's own title is translated.
+    expect((await b.get(SLUG, de)).body?.form?.title).toBe('Kontaktieren Sie uns');
+    await b.install(PAIR);
+    await b.saveInto('form', PAIR, formItem(true, { ...overrides, title: 'Write to us' }));
+    const door = await b.get(SLUG, de);
+    expect(door.status, JSON.stringify(door.body)).toBe(200);
+    expect(door.body?.form?.title).toBe('Write to us');
+    const read = await b.meta('form', NAME, stranger, de);
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    expect(JSON.stringify(read.body)).toContain('Write to us');
+    expect(JSON.stringify(read.body)).not.toContain('Kontaktieren Sie uns');
+    // An override that keeps the base's title is served the translation.
+    await b.saveInto('form', PAIR, formItem(true, { ...overrides, title: 'Contact us' }));
+    expect((await b.get(SLUG, de)).body?.form?.title).toBe('Kontaktieren Sie uns');
   });
 });

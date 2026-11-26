@@ -3442,6 +3442,9 @@ const PACKAGED_BASE_ACCESSORS: ReadonlyMap<string, string> = new Map<string, str
     ['app', 'getPackagedAppBase'],
     ['book', 'getPackagedBookBase'],
     ['mapping', 'getPackagedMappingBase'],
+    // [ADR-0159, ADR-0029 D9.2a] A `form` override's own changed text outranks
+    // its base's catalog, the base an authored `form` item or an old shape's projection.
+    ['form', 'getPackagedFormBase'],
 ]);
 
 /**

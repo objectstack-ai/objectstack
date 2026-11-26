@@ -3055,6 +3055,11 @@ export class ObjectStackProtocolImplementation implements
         return ProtocolDiscoveryAndBasesFacet.getPackagedMappingBase(protocolHost(this), name);
     }
 
+    /** Contract: the shared docblock on {@link getPackagedPageBase}; [ADR-0159 D5] an old-shape base's form is its projection. */
+    getPackagedFormBase(name: string): unknown {
+        return ProtocolDiscoveryAndBasesFacet.getPackagedFormBase(protocolHost(this), name);
+    }
+
     /**
      * [#30062, ADR-0146 D2] The base package a SERVED metadata document is the
      * declared override of, or `undefined` when it is none — read off the
