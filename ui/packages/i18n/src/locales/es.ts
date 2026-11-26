@@ -4780,6 +4780,9 @@ const es = {
       metrics: 'Métricas',
       noAddedFilter: 'Sin filtro añadido a la definición del conjunto de datos',
     },
+    recordCitations: {
+      title: 'Citado de registros',
+    },
     tool: {
       aggregate_data: "Resumir los datos",
       get_record: "Leer el registro",

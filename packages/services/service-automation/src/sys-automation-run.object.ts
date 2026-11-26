@@ -239,7 +239,16 @@ export const SysAutomationRun = ObjectSchema.create({
     // run. Its `started_at` is the due time and `finished_at` the instant it
     // was detected; it ran no step. ⛔ Not a failure either.
     status: Field.select(
-      ['running', 'paused', 'completed', 'failed', 'cancelled', 'timed_out', 'refused', 'missed'],
+      [
+        'running',
+        'paused',
+        { label: 'completed', value: 'completed', color: 'green' },
+        { label: 'failed', value: 'failed', color: 'red' },
+        { label: 'cancelled', value: 'cancelled', color: 'red' },
+        'timed_out',
+        'refused',
+        'missed',
+      ],
       {
         label: 'Status',
         required: true,

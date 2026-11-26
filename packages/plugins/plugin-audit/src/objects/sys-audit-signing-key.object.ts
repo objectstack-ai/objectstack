@@ -58,7 +58,7 @@ export const SysAuditSigningKey = ObjectSchema.create({
     status: Field.select(
       {
         options: [
-          { label: 'Active', value: 'active' },
+          { label: 'Active', value: 'active', color: 'green' },
           { label: 'Retired', value: 'retired' },
         ],
         label: 'Status',

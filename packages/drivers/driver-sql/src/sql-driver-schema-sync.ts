@@ -2892,6 +2892,54 @@ export function emitsDeclaredColumnDefault(field: any): boolean {
 }
 
 /**
+ * [#37413] Whether this field's SQLite column DEFAULT is the `NOW()`
+ * expression ({@link sqliteNowColumnDefaultSql}) — the DEFAULT SQLite refuses
+ * on `ALTER TABLE … ADD COLUMN` to a table that holds a row (`Cannot add a
+ * column with non-constant default`). Both faces of the SQLite schema sync ask
+ * it: the local `createColumn` and the Turso remote face's
+ * `columnDeclarationSQL`. On such an `ADD COLUMN` the column is added nullable
+ * with no DEFAULT, the existing rows are filled by
+ * {@link sqliteNowBackfillSql}, and the drift differ reports what is still
+ * owed (`set_column_default`, and `tighten_not_null` under `storage.notNull`)
+ * for the schema-drift ceremony — never a table rebuild inside the sync.
+ */
+export function declaresSqliteNowColumnDefault(field: any): boolean {
+  if (String(field?.type || 'string') === 'formula') return false;
+  return isNowDefaultValue(field?.defaultValue) && sqliteDeclaredColumnDefaultSql(field) !== null;
+}
+
+/**
+ * [#37413] A SQLite identifier, double-quoted with an embedded `"` doubled —
+ * the one spelling {@link sqliteNowBackfillSql} and the Turso remote face's
+ * hand-written DDL both write.
+ */
+export function quoteSqliteIdentifier(name: string): string {
+  return `"${String(name).replace(/"/g, '""')}"`;
+}
+
+/**
+ * [#37413] The one statement that fills the existing rows of a populated SQLite
+ * table in the columns an `ADD COLUMN` just added without their `NOW()` DEFAULT
+ * ({@link declaresSqliteNowColumnDefault}): each column takes the expression
+ * the DEFAULT would have given ({@link sqliteNowColumnDefaultSql}). SQLite
+ * fixes `'now'` once per statement, so every row takes the same instant — the
+ * instant of the sync. Only a NULL is filled (`COALESCE`, and the `WHERE` names
+ * the rows holding one), so a value a writer stored in the column is never
+ * overwritten. Both faces send it in the same transaction as the `ADD COLUMN`.
+ * `null` when no such column was added.
+ */
+export function sqliteNowBackfillSql(table: string, added: ReadonlyArray<readonly [string, any]>): string | null {
+  const columns = added.filter(([, field]) => declaresSqliteNowColumnDefault(field));
+  if (columns.length === 0) return null;
+  const sets = columns.map(([name, field]) => {
+    const col = quoteSqliteIdentifier(name);
+    return `${col} = COALESCE(${col}, ${sqliteNowColumnDefaultSql(String(field?.type || 'string'))})`;
+  });
+  const holdsNull = columns.map(([name]) => `${quoteSqliteIdentifier(name)} IS NULL`);
+  return `UPDATE ${quoteSqliteIdentifier(table)} SET ${sets.join(', ')} WHERE ${holdsNull.join(' OR ')}`;
+}
+
+/**
  * The body of `SqlDriver#applyDeclaredColumnDefault`; the method's docblock there is its contract.
  *
  * [#37320] `expressionForm`: the literal is emitted parenthesised, `DEFAULT

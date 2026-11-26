@@ -26,9 +26,10 @@
  *   os g flow order_line --object order_line
  *                              → exit 0, reaches the stack, no wiring lines to add
  *
- * `--object` because the starter declares an object of its own: with two in
- * the stack, which one a flow binds is the author's to say (#21325).
- *   os validate                → exit 0, `Data: 2 Objects`, `Logic: 1 Flows`
+ * `--object` because the starter declares objects of its own (companies and
+ * contacts): with several in the stack, which one a flow binds is the author's
+ * to say (#21325).
+ *   os validate                → exit 0, `Data: 3 Objects`, `Logic: 1 Flows`
  *
  * Asserted: exit statuses, the named subjects, the absence of the wiring
  * lines `os g` prints for a scaffold that did not arrive (code an author
@@ -167,8 +168,8 @@ describe('[#20333] `npm create objectstack` → `os g flow` → `os validate`', 
 
   it('`os validate` exits 0 and counts the generated flow beside the control', () => {
     expect(validate.code, out(validate)).toBe(0);
-    // The starter's own object plus the generated one.
-    expect(validate.stdout).toMatch(/\bData: 2 Objects\b/);
+    // The starter's two objects (company, contact) plus the generated one.
+    expect(validate.stdout).toMatch(/\bData: 3 Objects\b/);
     expect(validate.stdout).toMatch(/\bLogic: 1 Flows\b/);
   });
 });

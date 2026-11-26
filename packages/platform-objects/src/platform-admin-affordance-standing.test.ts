@@ -79,7 +79,8 @@ const PACKAGES_DIR = join(REPO_ROOT, 'packages');
 
 /** Object files that are templates for a generated project, not definitions this repo boots. */
 const SCAFFOLDING_TEMPLATES: readonly string[] = [
-  'packages/create-objectstack/src/templates/blank/src/objects/note.object.ts',
+  'packages/create-objectstack/src/templates/blank/src/objects/company.object.ts',
+  'packages/create-objectstack/src/templates/blank/src/objects/contact.object.ts',
 ];
 
 const ADMIN_NAMESPACE = '/api/v1/auth/admin/';

@@ -42,7 +42,7 @@ export default defineConfig({
     include: ['test/**/*.test.ts', 'src/**/*.test.ts'],
     // `src/templates/` is PAYLOAD: copied byte-for-byte into a scaffolded
     // project and never compiled here (tsconfig.json excludes it too). The
-    // blank template ships its own `note.test.ts`, which boots THAT project's
+    // blank template ships its own `starter.test.ts`, which boots THAT project's
     // stack through `@objectstack/verify` — a dependency of the scaffolded
     // project, not of this package. It runs where it lands: the Scaffold E2E
     // workflow scaffolds a project, installs it from the registry and runs

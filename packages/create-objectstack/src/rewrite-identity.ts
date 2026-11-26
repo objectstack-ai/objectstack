@@ -212,12 +212,20 @@ function tsFiles(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-const namePrefixRe = (ns: string, flags: string) =>
-  new RegExp(`(\\bname:\\s*)(['"\`])${ns}_([a-z0-9_]+)\\2`, flags);
+// Every quoted literal that IS a name under `ns`: `'<ns>_x'`, `"<ns>_x"` or
+// `` `<ns>_x` ``, wherever it stands. Not only `name: '<ns>_x'`: the template's
+// objects are also REFERENCED by name — a lookup's target, a related list, a
+// view's `data.object`, a navigation entry's `objectName` — and a reference
+// left on the template's namespace points, in the scaffolded project, at an
+// object that no longer exists. A name is a whole literal, so a longer string
+// that merely contains `<ns>_` is not one and is left alone.
+const namespacedLiteralRe = (ns: string, flags: string) =>
+  new RegExp(`(['"\`])${ns}_([a-z0-9_]+)\\1`, flags);
 
 /**
- * Rewrite `name: '<from>_x'` → `name: '<to>_x'` in every `*.ts` under `dir`.
- * Returns the number of literals rewritten.
+ * Rewrite every `'<from>_x'` literal → `'<to>_x'` in every `*.ts` under `dir`:
+ * the names the template declares (`name: '<from>_x'`) and every place it
+ * references one of them. Returns the number of literals rewritten.
  */
 export function rewriteObjectNamePrefix(
   dir: string,
@@ -228,10 +236,10 @@ export function rewriteObjectNamePrefix(
   for (const file of tsFiles(dir)) {
     const before = fs.readFileSync(file, 'utf8');
     const after = before.replace(
-      namePrefixRe(from, 'g'),
-      (_m, prefix: string, q: string, rest: string) => {
+      namespacedLiteralRe(from, 'g'),
+      (_m, q: string, rest: string) => {
         rewritten++;
-        return `${prefix}${q}${to}_${rest}${q}`;
+        return `${q}${to}_${rest}${q}`;
       },
     );
     if (after !== before) fs.writeFileSync(file, after);
@@ -240,9 +248,9 @@ export function rewriteObjectNamePrefix(
 }
 
 /**
- * Any `name: '<oldNs>_…'` literal still present after a rewrite that does NOT
- * also carry the `<newNs>_` prefix — i.e. metadata the scaffolded project will
- * be rejected for. Each entry is `file:line` relative to `dir`, plus the
+ * Any `'<oldNs>_…'` literal still present after a rewrite that does NOT also
+ * carry the `<newNs>_` prefix — a name the scaffolded project will be rejected
+ * for, or a reference to an object the project no longer has. Each entry is `file:line` relative to `dir`, plus the
  * offending text.
  *
  * Both halves of the predicate are needed. A new namespace may itself begin
@@ -259,8 +267,8 @@ export function findStaleNamespacePrefixes(
   oldNs: string,
   newNs: string,
 ): { file: string; line: number; text: string }[] {
-  const oldRe = namePrefixRe(oldNs, 'g');
-  const newRe = namePrefixRe(newNs, '');
+  const oldRe = namespacedLiteralRe(oldNs, 'g');
+  const newRe = namespacedLiteralRe(newNs, '');
   const stale: { file: string; line: number; text: string }[] = [];
   for (const file of tsFiles(dir)) {
     const lines = fs.readFileSync(file, 'utf8').split('\n');

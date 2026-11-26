@@ -29,12 +29,15 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { screen, fireEvent } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import { TABLE_COLUMN_TYPES } from '@object-ui/types';
-import { renderComponent } from '../../../__tests__/test-utils';
+import { openCellEditor, renderSelectFirstTable } from '../../../__tests__/test-utils';
 // Module-scope side-effect import, not a `beforeAll` — see
 // object-ui/no-dynamic-import-in-test-hook (objectui#3010/#3021).
 import '../../../renderers';
+// `react-page` reaches a dynamic `import('@object-ui/react-runtime')`: pay its load
+// at collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 // @ts-expect-error — plain-JS shared helper, intentionally untyped (`allowJs: false`)
 import { maskComments } from '../../../../../../scripts/js-comment-mask.mjs';
 
@@ -112,7 +115,6 @@ function schemaWithColumnType(type?: string) {
   return {
     type: 'data-table' as const,
     editable: true,
-    singleClickEdit: true,
     columns: [
       { header: 'Name', accessorKey: 'name' },
       { header: 'Stage', accessorKey: 'stage', ...(type ? { type } : {}) },
@@ -126,7 +128,7 @@ describe('an out-of-union type degrades to the no-type path — the column survi
     // ⛔ The rule the fold must never break: an undeclared type drops the
     // ANNOTATION, never the column. A producer that fails to fold still hands
     // this renderer a raw spec field type, and the column must still draw.
-    const { container } = renderComponent(schemaWithColumnType(OUT_OF_UNION));
+    const { container } = renderSelectFirstTable(schemaWithColumnType(OUT_OF_UNION));
     expect(screen.getByText('Stage')).toBeTruthy();
     expect(container.textContent).toContain('won');
   });
@@ -136,10 +138,12 @@ describe('an out-of-union type degrades to the no-type path — the column survi
     // renderer's non-date / non-numeric path IS the `undefined` path. Both
     // land on the built-in text input.
     const editorFor = (type?: string): string | null => {
-      const { container, unmount } = renderComponent(schemaWithColumnType(type));
+      // Select-first with a per-cell save, the one way the table edits
+      // (objectstack#35827): a click selects, a double-click opens the editor.
+      const { container, unmount } = renderSelectFirstTable(schemaWithColumnType(type));
       const cells = container.querySelectorAll('tbody td');
-      fireEvent.click(cells[1] as HTMLElement);
-      const input = container.querySelector('tbody input');
+      openCellEditor(cells[1] as HTMLElement);
+      const input = container.querySelector('td[data-editing-cell] input');
       const result = input ? (input.getAttribute('type') ?? '(none)') : null;
       unmount();
       return result;

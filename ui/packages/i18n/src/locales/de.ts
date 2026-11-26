@@ -4683,6 +4683,9 @@ const de = {
       metrics: 'Kennzahlen',
       noAddedFilter: 'Kein zusätzlicher Filter zur Datenset-Definition',
     },
+    recordCitations: {
+      title: 'Zitiert aus Datensätzen',
+    },
     tool: {
       aggregate_data: "Die Daten zusammenfassen",
       get_record: "Den Datensatz lesen",

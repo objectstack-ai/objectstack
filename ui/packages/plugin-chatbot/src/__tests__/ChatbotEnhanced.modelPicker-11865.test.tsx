@@ -176,3 +176,31 @@ describe('the composer footer reads in one line and names its 「+」 (objectsta
     expect(within(trigger).getByTestId('model-picker-value')).toHaveClass('truncate');
   });
 });
+
+describe('the closed picker shows the tier name alone when the model carries one (objectstack#35578)', () => {
+  // The composite label cloud serves (tier · model name), beside the tier name alone.
+  const TIERED = [
+    { id: 'haiku', label: 'Fast · Claude Haiku 5.5', tierLabel: 'Fast' },
+    { id: 'sonnet', label: 'Advanced · Claude Sonnet 5' },
+  ];
+
+  it('a model with a tier name: the trigger reads the tier name only; its full label is the title and the list row', async () => {
+    const { trigger } = mount('haiku', { models: TIERED });
+    expect(within(trigger()).getByTestId('model-picker-value').textContent).toBe('Fast');
+    expect(trigger()).toHaveAttribute('title', 'Fast · Claude Haiku 5.5');
+    const options = await openPicker(trigger());
+    expect(options.map((o) => o.textContent)).toEqual(['Fast · Claude Haiku 5.5', 'Advanced · Claude Sonnet 5']);
+  });
+
+  it('a model without one: the trigger reads its label, as before', () => {
+    const { trigger } = mount('sonnet', { models: TIERED });
+    expect(within(trigger()).getByTestId('model-picker-value').textContent).toBe('Advanced · Claude Sonnet 5');
+    expect(trigger()).toHaveAttribute('title', 'Advanced · Claude Sonnet 5');
+  });
+
+  it('picking from the list still writes the model id', async () => {
+    const { onModelChange, trigger } = mount('haiku', { models: TIERED });
+    await pick(trigger(), 'Advanced · Claude Sonnet 5');
+    expect(onModelChange.mock.calls).toEqual([['sonnet']]);
+  });
+});

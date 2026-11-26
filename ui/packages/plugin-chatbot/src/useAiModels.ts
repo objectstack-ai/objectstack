@@ -10,10 +10,12 @@
  * default model id. Free / single-model envs return one entry, so the footer
  * picker (which `ChatbotEnhanced` renders only for 2+ models) stays hidden.
  *
- * Intentionally dependency-free (uses `fetch`), mirroring {@link useAgents}.
+ * It asks through the host's `apiFetch`, else the global `fetch`, and imports no
+ * HTTP client, mirroring {@link useAgents}.
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useContext, useEffect, useRef, useState, useCallback } from 'react';
+import { SchemaRendererContext, type ApiFetch } from '@object-ui/react';
 import type { ChatbotModelOption } from './ChatbotEnhanced';
 
 export interface UseAiModelsOptions {
@@ -40,6 +42,7 @@ interface RawModel {
   label?: string;
   default?: boolean;
   costMultiplier?: unknown;
+  tierLabel?: unknown;
   [key: string]: unknown;
 }
 
@@ -67,21 +70,39 @@ function costMultiplierOf(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
+/**
+ * objectstack#35578 — `tierLabel` is kept only as the spec declares it
+ * (`AiModelsResponseSchema`: a non-empty string). Anything else is no tier
+ * name, so the closed picker shows the label rather than a blank.
+ */
+function tierLabelOf(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
 function normalize(raw: RawModel[]): ChatbotModelOption[] {
   return raw
     .filter((m) => typeof m?.id === 'string' && (m.id as string).length > 0)
     .map((m) => {
       const costMultiplier = costMultiplierOf(m.costMultiplier);
+      const tierLabel = tierLabelOf(m.tierLabel);
       return {
         id: m.id as string,
         label: m.label || (m.id as string),
         ...(costMultiplier !== undefined ? { costMultiplier } : {}),
+        ...(tierLabel !== undefined ? { tierLabel } : {}),
       };
     });
 }
 
 /**
  * Fetch the AI-model allowlist for the current environment.
+ *
+ * Every request rides the host's AUTHENTICATED fetch (`SchemaRendererProvider`'s
+ * `apiFetch`), the channel the renderers' own reads use: a session held by its
+ * bearer token alone carries no cookie, so `credentials: 'include'` on the bare
+ * global fetch read as anonymous, and a `401` never reached the host's
+ * session-ended check. A host that mounts no provider keeps the global fetch,
+ * cookies included.
  *
  * @example
  * const { models, defaultModelId } = useAiModels({ apiBase: '/api/v1/ai' });
@@ -99,6 +120,11 @@ export function useAiModels(options: UseAiModelsOptions = {}): UseAiModelsReturn
   // triggering a refetch on every render.
   const headersRef = useRef(headers);
   headersRef.current = headers;
+  // The host's authenticated fetch, or the global one with no provider (see the
+  // hook's doc). Held in a ref like the headers.
+  const apiFetch = useContext(SchemaRendererContext)?.apiFetch;
+  const fetchRef = useRef<ApiFetch>(apiFetch ?? fetch);
+  fetchRef.current = apiFetch ?? fetch;
 
   useEffect(() => {
     if (!enabled || !apiBase) return;
@@ -121,7 +147,7 @@ export function useAiModels(options: UseAiModelsOptions = {}): UseAiModelsReturn
       setIsLoading(true);
       setError(undefined);
       try {
-        const res = await fetch(url, {
+        const res = await fetchRef.current(url, {
           method: 'GET',
           headers: { Accept: 'application/json', ...(headersRef.current ?? {}) },
           credentials: 'include',

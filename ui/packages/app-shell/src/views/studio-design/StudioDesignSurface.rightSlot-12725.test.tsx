@@ -9,8 +9,9 @@
  *  - Selecting a canvas element switches it to that element's properties, the
  *    copilot folded to a strip at the slot's foot; Esc, or a click on empty
  *    canvas, returns to the item's own properties.
- *  - `⌘.` / `Ctrl+.` switches the two; the top bar's right-most icon hides the
- *    slot, remembered under the Studio key, never the console's.
+ *  - `⌘.` / `Ctrl+.` switches the two; the right-most icon of the page's title
+ *    row (the top bar's, before objectstack#37455) hides the slot, remembered
+ *    under the Studio key, never the console's.
  *  - The canvas has no 画布 / 源码 / 属性 tabs: one status line, and the item's
  *    definition opens from its ⋯ menu.
  *  - The pillar names are visible from 1024 px (`lg`), icons below.
@@ -192,6 +193,42 @@ describe('Studio right slot — controls (objectui#12725)', () => {
 
   // objectui#12725 phase 2 — re-pointed from Data to Access, for the reason above.
 
+});
+
+// objectstack#37455 — the slot's control left the top bar for the end of the
+// open page's title row: the item header's, and the list page's.
+describe('Studio right slot — its control ends the page\'s title row (objectstack#37455)', () => {
+  it('the sharing overview: the AI assistant ends its item header behind a hairline, not the top bar, and hides and shows the slot', async () => {
+    renderAt('owd');
+    await waitFor(() => expect(slot()).toHaveAttribute('data-mode', 'copilot'));
+    const itemHeader = screen.getByTestId('owd-item-header');
+    const ai = await within(itemHeader).findByTestId('topbar-ai-assistant');
+    expect(within(screen.getByTestId('studio-shell-header')).queryByTestId('topbar-ai-assistant')).toBeNull();
+    expect(screen.getAllByTestId('topbar-ai-assistant')).toHaveLength(1);
+    // The last control of the header's action slot, the hairline right before it.
+    const actionSlot = ai.parentElement as HTMLElement;
+    expect(actionSlot.lastElementChild).toBe(ai);
+    expect(ai.previousElementSibling).toHaveAttribute('data-testid', 'studio-title-row-divider');
+    expect(within(actionSlot).getByTestId('access-explain')).toBeInTheDocument();
+
+    expect(slot()).toBeVisible();
+    expect(ai).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(ai);
+    expect(slot()).not.toBeVisible();
+    expect(within(itemHeader).getByTestId('topbar-ai-assistant')).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(within(itemHeader).getByTestId('topbar-ai-assistant'));
+    expect(slot()).toBeVisible();
+    expect(slot()).toHaveAttribute('data-mode', 'copilot');
+  });
+
+  it('a list page: the AI assistant ends the list\'s title row, inside the page, not the top bar', async () => {
+    renderAt('data');
+    const ai = await screen.findByTestId('topbar-ai-assistant', undefined, { timeout: 4000 });
+    expect(within(screen.getByTestId('studio-shell-header')).queryByTestId('topbar-ai-assistant')).toBeNull();
+    expect(screen.getByTestId('studio-pillars-host')).toContainElement(ai);
+    expect(ai.closest('[data-slot="studio-title-row-end"]')).not.toBeNull();
+    expect(screen.getAllByTestId('topbar-ai-assistant')).toHaveLength(1);
+  });
 });
 
 // objectstack#35061 item 1 — the pillars' host is what every rail's narrow form

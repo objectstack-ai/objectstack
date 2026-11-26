@@ -174,9 +174,9 @@ export const SysNotification = ObjectSchema.create({
     // (#27855); the stored values stay the lowercase codes the emitters write.
     severity: Field.select({
       options: [
-        { label: 'Info', value: 'info' },
-        { label: 'Warning', value: 'warning' },
-        { label: 'Critical', value: 'critical' },
+        { label: 'Info', value: 'info', color: 'blue' },
+        { label: 'Warning', value: 'warning', color: 'yellow' },
+        { label: 'Critical', value: 'critical', color: 'red' },
       ],
       label: 'Severity',
       required: false,

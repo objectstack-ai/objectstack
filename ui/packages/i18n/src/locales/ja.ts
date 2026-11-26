@@ -4685,6 +4685,9 @@ const ja = {
       metrics: '指標',
       noAddedFilter: 'データセットの定義に追加されたフィルターなし',
     },
+    recordCitations: {
+      title: 'レコードからの引用',
+    },
     tool: {
       aggregate_data: "関連データを集計する",
       get_record: "このレコードを読み込む",

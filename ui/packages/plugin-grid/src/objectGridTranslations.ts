@@ -57,8 +57,7 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'table.nextPage': 'Next page',
   'table.lastPage': 'Last page',
   // The default inline-edit saves' success toast (objectui#12303), counted in
-  // the rows the server accepted — the `table.modified` unit the table's
-  // "Save All" bar counts in.
+  // the rows the server accepted.
   'table.saved': '{{count}} row saved',
   'table.saved_one': '{{count}} row saved',
   'table.saved_other': '{{count}} rows saved',
