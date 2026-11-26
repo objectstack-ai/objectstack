@@ -283,11 +283,13 @@ it is sealed on every deployment whose `AuditPlugin` has a crypto provider.
   missing. The window is counted to the start of a UTC day, so a row can stay
   up to a day past it, and at most 10,000 such rows leave per object per sweep,
   so a backlog drains over several sweeps; once it has, a chain gains at most
-  one expiry amendment a day. A tenant-scoped retention window applies to that
-  organization's chain, and the chain of rows about no organization expires
-  under the longest window configured, so no row leaves before the window set
-  for it. While no sealer is running (no crypto provider), the sweeper keeps
-  them and says so once.
+  one expiry amendment a day. A tenant-scoped retention window is matched to
+  each row by the column it is set on (`organization_id`), which need not be
+  the chain column (`tenant_id`, or `seal.chainField`): a chain expires under
+  the longest window among the organizations whose rows it holds, and the
+  chain of rows about no organization under the longest window configured, so
+  no row leaves before the window set for it. While no sealer is running (no
+  crypto provider), the sweeper keeps them and says so once.
 - Sealing needs a crypto provider, which the host passes to `AuditPlugin` as
   `cryptoProvider`. `os serve` passes the one it seals every secret with; an
   app that puts its own `AuditPlugin` in `plugins` passes one itself. Without

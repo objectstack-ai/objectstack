@@ -28,10 +28,11 @@ function matches(row: Row, where: Record<string, unknown> = {}): boolean {
       const ops = cond as Record<string, unknown>;
       const isNull = value === null || value === undefined;
       if ('$null' in ops && ops.$null !== isNull) return false;
-      if (isNull && ['$gte', '$gt', '$lt', '$in'].some((op) => op in ops)) return false;
+      if (isNull && ['$gte', '$gt', '$lt', '$lte', '$in'].some((op) => op in ops)) return false;
       if ('$gte' in ops && !((value as number) >= (comparable(ops.$gte) as number))) return false;
       if ('$gt' in ops && !((value as number) > (comparable(ops.$gt) as number))) return false;
       if ('$lt' in ops && !((value as number) < (comparable(ops.$lt) as number))) return false;
+      if ('$lte' in ops && !((value as number) <= (comparable(ops.$lte) as number))) return false;
       if ('$in' in ops && !(ops.$in as unknown[]).some((v) => comparable(v) === value)) return false;
       return true;
     }

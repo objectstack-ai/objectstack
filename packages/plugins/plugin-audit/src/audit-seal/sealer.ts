@@ -535,7 +535,7 @@ export class AuditSealer {
 
   /**
    * ADR-0154 D8: plan one sweep's expiry of sealed object `request.object`
-   * (`expiry.ts`), the LifecycleService's `LifecycleSealedExpiry`. It holds the
+   * (`expiry.ts`), the LifecycleService's `LifecycleExpiryPrefix`. It holds the
    * pass's locks while it plans and signs — `audit.sealer` and the audit seal
    * lock on the object's database — so two replicas' sweeps never sign two
    * expiries over one range. The run's `complete()` runs later, after the
@@ -552,6 +552,7 @@ export class AuditSealer {
     if (!plan) return [];
     const memo = [
       `${auditExpiryCutoff(Date.parse(request.cutoff))}|${request.policy}|${request.policyValue}`,
+      `on:${request.tenantColumn ?? ''}`,
       ...(request.tenants ?? []).map((t) => `${t.tenantId}=${auditExpiryCutoff(Date.parse(t.cutoff))}|${t.policyValue}`).sort(),
     ].join(';');
     if (this.drainedAt.get(plan.name) === memo) return [];
@@ -568,9 +569,17 @@ export class AuditSealer {
       const session = await trySealPassLocks(this.options.engine, [plan.name]);
       if (session.held) return [];
       try {
+        let archive: SealStorageDriver | undefined;
+        try {
+          archive = plan.archiveTo ? this.options.engine.datasource?.(plan.archiveTo) : undefined;
+        } catch {
+          archive = undefined;
+        }
         const expiry = new ObjectExpiry({
           engine: this.options.engine,
           object: plan.name,
+          chainField: plan.chainField,
+          ...(archive ? { archive } : {}),
           signer,
           ...(seams.sink ? { sink: seams.sink } : {}),
           trust: new SigningKeyTrust(anchoredPublicKeyOf(this.options.engine, crypto, signer)),
@@ -618,10 +627,10 @@ export class AuditSealer {
   }
 }
 
-/** One pass over one sealed object. */
-/** Stored expiry amendments one head or floor read walks, newest first, for the newest admitted one. */
-const LAST_EXPIRY_SCAN = 10;
+/** Stored expiry amendments one page of a head or floor read takes, newest first, while it looks for an admitted one. */
+const LAST_EXPIRY_PAGE = 50;
 
+/** One pass over one sealed object. */
 class ObjectPass {
   private readonly heads = new Map<string, ChainHead | null>();
   private readonly hot: SealStorageDriver;
@@ -944,38 +953,44 @@ class ObjectPass {
 
   /**
    * D8: the stored `expiry` amendment of this object (narrowed by `where`) that
-   * is highest by `field` among those admitted — whose signature verifies under
-   * a trusted key (D6) — or `undefined`. A row that is not admitted is passed
-   * over, so a head or a floor never follows one. A malformed one is a
-   * chain-local fault of its chain (S4). It is read only where no checkpoint
-   * answers: a chain's head, and the floor of an object whose every checkpoint
-   * expired.
+   * is highest by `field` among those admitted — bound where it is stored (its
+   * signed object is this one and its signed organization is the chain it is
+   * stored under) and signed under a trusted key (D6) — or `undefined`. Every
+   * stored one is walked, page by page, so no run of rows that are not admitted
+   * hides an admitted one; a row that is not admitted is passed over, so a head
+   * or a floor never follows one. A malformed one is a chain-local fault of its
+   * chain (S4). It is read only where no checkpoint answers: a chain's head, and
+   * the floor of an object whose every checkpoint expired.
    */
   private async lastExpiry(where: Row, field: 'last_sequence' | 'covered_to'): Promise<ExpiryAmendmentBody | undefined> {
     const driver = this.options.engine.getDriverForObject(AUDIT_AMENDMENT_OBJECT);
     if (!driver) return undefined;
-    let rows: Row[];
-    try {
-      rows = await driver.find(AUDIT_AMENDMENT_OBJECT, {
-        where: { sealed_object: this.plan.name, kind: 'expiry', ...where },
-        orderBy: [{ field, order: 'desc' }],
-        limit: LAST_EXPIRY_SCAN,
-      });
-    } catch (err) {
-      if (isMissingTableError(err, AUDIT_AMENDMENT_OBJECT)) return undefined;
-      throw err;
-    }
-    for (const row of rows) {
-      let body;
+    for (let offset = 0; ; offset += LAST_EXPIRY_PAGE) {
+      let rows: Row[];
       try {
-        body = amendmentBodyFromRow(row);
+        rows = await driver.find(AUDIT_AMENDMENT_OBJECT, {
+          where: { sealed_object: this.plan.name, kind: 'expiry', ...where },
+          orderBy: [{ field, order: 'desc' }, { field: 'id', order: 'asc' }],
+          limit: LAST_EXPIRY_PAGE,
+          offset,
+        });
       } catch (err) {
-        throw new ChainFault(String(row.chain_key), err);
+        if (isMissingTableError(err, AUDIT_AMENDMENT_OBJECT)) return undefined;
+        throw err;
       }
-      if (body.kind !== 'expiry') continue;
-      if ((await this.trust().signature(body.signing_key_id, signedBodyBytes(body), row.signature)) === 'ok') return body;
+      for (const row of rows) {
+        let body;
+        try {
+          body = amendmentBodyFromRow(row);
+        } catch (err) {
+          throw new ChainFault(String(row.chain_key), err);
+        }
+        if (body.kind !== 'expiry') continue;
+        if (body.sealed_object !== this.plan.name || chainKeyOf(body.tenant_id) !== String(row.chain_key)) continue;
+        if ((await this.trust().signature(body.signing_key_id, signedBodyBytes(body), row.signature)) === 'ok') return body;
+      }
+      if (rows.length < LAST_EXPIRY_PAGE) return undefined;
     }
-    return undefined;
   }
 
   /** D6: the keys this deployment trusts, as the expiry and the verifier admit them. */

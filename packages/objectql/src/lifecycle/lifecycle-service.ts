@@ -411,7 +411,7 @@ export interface LifecycleFloorViolation {
 export interface LifecycleSweepEntry {
   object: string;
   class: string;
-  /** `expiry`: [ADR-0154 D8] a sealed object's whole checkpoints, through {@link LifecycleSealedExpiry}. */
+  /** `expiry`: [ADR-0154 D8] a sealed object's whole checkpoints, through {@link LifecycleExpiryPrefix}. */
   policy: 'ttl' | 'retention' | 'rotation' | 'rotation-fallback' | 'archive' | 'expiry';
   cutoff: string;
   /** `undefined` when the driver doesn't report a count. */
@@ -527,7 +527,7 @@ export type LifecycleReapGuard = (
  * [ADR-0154 D8] What the sweep asks the sealed-object expiry for, once per
  * sweep and policy of an object that declares `lifecycle.seal`.
  */
-export interface LifecycleSealedExpiryRequest {
+export interface LifecycleExpiryPrefixRequest {
   readonly object: string;
   /** The policy whose window expires the rows. */
   readonly policy: 'archive.keep' | 'retention.maxAge' | 'ttl.expireAfter';
@@ -537,18 +537,30 @@ export interface LifecycleSealedExpiryRequest {
   readonly cutoff: string;
   /**
    * The tenant-scoped windows of this policy (`retention_overrides` at tenant
-   * scope), each through the same floors: an organization's chain expires
-   * under its own organization's window, in place of {@link policyValue} and
-   * {@link cutoff}. A chain of no one organization (the deployment chain)
-   * expires under the longest of all of them and the global one, so no chain
-   * ever expires under a window shorter than one configured for its rows.
-   * Absent when no tenant overrides the window.
+   * scope), each through the same floors, in place of {@link policyValue}
+   * and {@link cutoff} for the rows that organization owns by
+   * {@link tenantColumn}: a chain expires under the longest window among the
+   * owners of its rows (an owner with none of its own under the global one),
+   * and a chain of no one organization (the deployment chain) under the
+   * longest of all of them and the global one, so no chain ever expires under
+   * a window shorter than one configured for a row in it. Absent when no
+   * tenant overrides the window.
    */
   readonly tenants?: ReadonlyArray<{ readonly tenantId: string; readonly policyValue: string; readonly cutoff: string }>;
+  /**
+   * The column {@link tenants} are configured on — the partition `reap()`
+   * uses (`organization_id`, or an attribution column), which need not be
+   * the object's chain column. Each row is matched to a window by this
+   * column: a chain expires under the longest window among the owners of the
+   * rows it holds, the chain of rows about no organization under the longest
+   * window of all, so no chain is shorter than a window set for a row in it.
+   * Present exactly when `tenants` is.
+   */
+  readonly tenantColumn?: string;
 }
 
 /** One chain's expiry, planned and signed: the rows the sweep deletes, then {@link complete}. */
-export interface LifecycleSealedExpiryRun {
+export interface LifecycleExpiryPrefixRun {
   /** The chain, for the report. */
   readonly chain: string;
   /** Exactly the rows the removed checkpoints list. The sweep deletes these and no other. */
@@ -564,12 +576,12 @@ export interface LifecycleSealedExpiryRun {
  * read as `missing`. The sealer's owner (`@objectstack/plugin-audit`) answers
  * which whole checkpoints of each chain have expired and writes the signed
  * `expiry` amendment for them before it answers; the sweep then deletes
- * exactly the rows they list and only then calls {@link LifecycleSealedExpiryRun.complete}.
+ * exactly the rows they list and only then calls {@link LifecycleExpiryPrefixRun.complete}.
  * A plan that throws keeps every row for the next sweep, as a vetoing reap
  * guard does.
  */
-export interface LifecycleSealedExpiry {
-  plan(request: LifecycleSealedExpiryRequest): Promise<readonly LifecycleSealedExpiryRun[]>;
+export interface LifecycleExpiryPrefix {
+  plan(request: LifecycleExpiryPrefixRequest): Promise<readonly LifecycleExpiryPrefixRun[]>;
 }
 
 export class LifecycleService {
@@ -595,7 +607,7 @@ export class LifecycleService {
    */
   private readonly reapGuards = new Map<string, LifecycleReapGuard[]>();
   /** [ADR-0154 D8] The one sealed-object expiry, when the sealer's owner registered it. */
-  private sealedExpiry: LifecycleSealedExpiry | undefined;
+  private sealedExpiry: LifecycleExpiryPrefix | undefined;
   /** [ADR-0154 D8] Sealed objects already said about, by cause, so a standing state is said once. */
   private readonly sealedSaid = new Set<string>();
   /**
@@ -920,7 +932,7 @@ export class LifecycleService {
    * Until one is registered, a sealed object's expiring rows are KEPT: the
    * sweep never deletes a sealed row by its own cutoff (see {@link sweepSealed}).
    */
-  registerExpiryPrefix(expiry: LifecycleSealedExpiry): () => void {
+  registerExpiryPrefix(expiry: LifecycleExpiryPrefix): () => void {
     if (!expiry || typeof expiry.plan !== 'function') {
       throw new Error('[lifecycle] registerExpiryPrefix requires an object with a plan(request) method');
     }
@@ -1673,10 +1685,11 @@ export class LifecycleService {
    *
    * A settings override of the window applies as on any object, through the
    * same floors, and the value applied is the one the amendment signs. A
-   * tenant-scoped override applies to its organization's chain, on the
-   * partition {@link tenantWindowsFor} decides for every reap: it travels as
-   * {@link LifecycleSealedExpiryRequest.tenants}, and each chain's amendment
-   * signs the window it expired under.
+   * tenant-scoped override travels as {@link LifecycleExpiryPrefixRequest.tenants},
+   * with the column {@link tenantWindowsFor} partitions on: a chain expires
+   * under the longest window among the owners, by that column, of the rows it
+   * holds (the chain of rows about no organization under the longest of all),
+   * and each chain's amendment signs the window it expired under.
    */
   private async reapSealed(
     engine: LifecycleEngineLike,
@@ -1687,7 +1700,7 @@ export class LifecycleService {
     const object = obj.name;
     const ov = this.governance.overrides[object] ?? {};
     const legs: Array<{
-      policy: LifecycleSealedExpiryRequest['policy'];
+      policy: LifecycleExpiryPrefixRequest['policy'];
       kind: 'ttl' | 'retention';
       key: 'expireAfter' | 'maxAge';
       declared: string;
@@ -1715,7 +1728,12 @@ export class LifecycleService {
           engine,
           obj,
           lc,
-          { policy: leg.policy, policyValue, cutoffMs: this.now() - windowMs, ...(tenants.length > 0 ? { tenants } : {}) },
+          {
+            policy: leg.policy,
+            policyValue,
+            cutoffMs: this.now() - windowMs,
+            ...(partition && tenants.length > 0 ? { tenants, tenantColumn: partition.column } : {}),
+          },
           report,
           null,
         ),
@@ -1726,7 +1744,7 @@ export class LifecycleService {
 
   /**
    * [ADR-0154 D8] One policy's expiry of a sealed object. The registered
-   * {@link LifecycleSealedExpiry} plans it and signs each chain's `expiry`
+   * {@link LifecycleExpiryPrefix} plans it and signs each chain's `expiry`
    * amendment first; then exactly the rows each run lists are deleted — from
    * `stores` (the hot store and the archive, by id) when the object archives,
    * else through the engine like any reap, its guards asked — and only then
@@ -1741,10 +1759,11 @@ export class LifecycleService {
     obj: LifecycleObjectLike,
     lc: Lifecycle,
     leg: {
-      policy: LifecycleSealedExpiryRequest['policy'];
+      policy: LifecycleExpiryPrefixRequest['policy'];
       policyValue: string;
       cutoffMs: number;
-      tenants?: LifecycleSealedExpiryRequest['tenants'];
+      tenants?: LifecycleExpiryPrefixRequest['tenants'];
+      tenantColumn?: string;
     },
     report: LifecycleSweepReport,
     stores: readonly ArchiveCapableDriver[] | null,
@@ -1780,7 +1799,7 @@ export class LifecycleService {
       policy: leg.policy,
       policyValue: leg.policyValue,
       cutoff,
-      ...(leg.tenants ? { tenants: leg.tenants } : {}),
+      ...(leg.tenants ? { tenants: leg.tenants, tenantColumn: leg.tenantColumn } : {}),
     });
     let deleted = 0;
     for (const run of runs) {

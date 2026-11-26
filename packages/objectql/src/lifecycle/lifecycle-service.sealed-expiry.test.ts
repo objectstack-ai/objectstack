@@ -4,9 +4,9 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   LifecycleService,
   type LifecycleObjectLike,
-  type LifecycleSealedExpiry,
-  type LifecycleSealedExpiryRequest,
-  type LifecycleSealedExpiryRun,
+  type LifecycleExpiryPrefix,
+  type LifecycleExpiryPrefixRequest,
+  type LifecycleExpiryPrefixRun,
 } from './lifecycle-service.js';
 import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 import { parseLifecycleDuration } from './duration.js';
@@ -98,9 +98,9 @@ function service(engine: any, logger = recordingLogger().logger) {
 
 function expiryOf(runs: Array<{ chain: string; rowIds: string[] }>) {
   const completed: string[] = [];
-  const requests: LifecycleSealedExpiryRequest[] = [];
-  const expiry: LifecycleSealedExpiry = {
-    plan: vi.fn(async (request: LifecycleSealedExpiryRequest): Promise<LifecycleSealedExpiryRun[]> => {
+  const requests: LifecycleExpiryPrefixRequest[] = [];
+  const expiry: LifecycleExpiryPrefix = {
+    plan: vi.fn(async (request: LifecycleExpiryPrefixRequest): Promise<LifecycleExpiryPrefixRun[]> => {
       requests.push(request);
       return runs.map((r) => ({ ...r, complete: async () => void completed.push(r.chain) }));
     }),
@@ -249,6 +249,8 @@ describe('LifecycleService — a sealed object expires only through the sealed e
       { tenantId: 'org_long', policyValue: '400d', cutoff: isoCutoff('400d') },
       { tenantId: 'org_short', policyValue: '10d', cutoff: isoCutoff('10d') },
     ]);
+    // The column the windows are configured on travels with them: the expiry matches a chain to one only there.
+    expect(requests[0].tenantColumn).toBe('organization_id');
     expect(warns.join('\n')).not.toMatch(/do not apply/);
   });
 

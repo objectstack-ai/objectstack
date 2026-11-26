@@ -644,6 +644,12 @@ export abstract class ChainCheck<C extends VerdictLedger = VerdictLedger> {
         continue;
       }
       const chain = chainKeyOf(body.tenant_id);
+      if (row.chain_key !== chain) {
+        this.check.fault({
+          object: this.name, chain, kind: 'chain_key', amendment: String(row.id),
+          message: `${body.kind} amendment ${String(row.id)}: stored under chain '${String(row.chain_key)}', but its signed organization is chain '${chain}'`,
+        });
+      }
       const signed = await this.check.signature(body.signing_key_id, signedBodyBytes(body), row.signature);
       if (signed !== 'ok') {
         // An amendment nothing vouches for is ignored: the row it would explain reads as what it is.
@@ -750,7 +756,16 @@ export abstract class ChainCheck<C extends VerdictLedger = VerdictLedger> {
   ): Promise<void> {
     const body = checkpointBodyFromRow(row);
     const at = { object: this.name, chain: head.chain };
-    if (this.expiryCovering(head.chain, head.sequence)) {
+    const covering = this.expiryCovering(head.chain, head.sequence);
+    if (covering && Date.parse(body.window_end) > Date.parse(covering.covered_to)) {
+      // D8: an honoured range expires only the windows it covers. A checkpoint in it whose own window ends later
+      // was never expired by it, so its rows are judged as what they are.
+      this.check.fault({
+        ...at, kind: 'expiry', sequence: body.sequence,
+        message: `checkpoint ${body.sequence}: its window ends ${body.window_end}, later than the honoured expiry of sequences ` +
+          `${covering.first_sequence}–${covering.last_sequence} covers (${covering.covered_to}) — its rows are judged, not expired`,
+      });
+    } else if (covering) {
       // D8: a row a checkpoint inside an honoured range lists is expired, gone or not yet gone.
       for (const id of body.row_ids) {
         this.held.add(id);

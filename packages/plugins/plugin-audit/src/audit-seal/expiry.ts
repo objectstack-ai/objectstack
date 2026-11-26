@@ -21,7 +21,7 @@ import type { SigningKeyTrust } from './verifier.js';
 /**
  * ADR-0154 D8 — expiry removes a sealed prefix of each chain and writes a
  * signed amendment. This is the audit plugin's half of the seam the
- * LifecycleService calls (`LifecycleSealedExpiry` in `@objectstack/objectql`):
+ * LifecycleService calls (`LifecycleExpiryPrefix` in `@objectstack/objectql`):
  * it answers, per chain, the run of whole checkpoints that expired and the
  * rows they list, having signed and stored the chain's `expiry` amendment
  * first. The sweep then deletes exactly those rows, and only after them
@@ -63,8 +63,10 @@ export const AUDIT_EXPIRY_MAX_ROWS_PER_SWEEP = 10_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** Checkpoints read per page of one chain's run. A checkpoint lists up to 10,000 row ids, so pages stay small. */
 const PAGE_SIZE = 20;
-/** Expiry amendments read from the top of a chain to find its last admitted one. */
-const LATEST_EXPIRY_SCAN = 10;
+/** Stored expiry amendments read per page while looking for a chain's newest admitted one. */
+const AMENDMENT_PAGE_SIZE = 50;
+/** Row ids per read of their owners (S4). */
+const OWNER_READ_BATCH = 500;
 const MAX_SIGN_ATTEMPTS = 3;
 const NO_KEY_YET = 'unknown';
 
@@ -75,14 +77,16 @@ export function auditExpiryCutoff(cutoffMs: number): number {
   return Math.floor(cutoffMs / DAY_MS) * DAY_MS;
 }
 
-/** What the sweep asks (`LifecycleSealedExpiryRequest`, `@objectstack/objectql`). */
+/** What the sweep asks (`LifecycleExpiryPrefixRequest`, `@objectstack/objectql`). */
 export interface AuditExpiryRequest {
   readonly object: string;
   readonly policy: string;
   readonly policyValue: string;
   readonly cutoff: string;
-  /** Tenant-scoped windows: an organization's chain expires under its own (see {@link windowOf}). */
+  /** Tenant-scoped windows, each for the rows its organization owns by {@link tenantColumn} (see {@link windowOf}). */
   readonly tenants?: ReadonlyArray<{ readonly tenantId: string; readonly policyValue: string; readonly cutoff: string }>;
+  /** The column {@link tenants} are configured on, which need not be the chain column. */
+  readonly tenantColumn?: string;
 }
 
 /** The window one chain expires under: its day-aligned cutoff and the policy value its amendment signs. */
@@ -98,26 +102,49 @@ const cutoffOf = (cutoff: string): number => {
 };
 
 /**
- * The window chain `key` expires under. An organization's chain (`org:<id>`)
- * takes its organization's tenant-scoped window where one is set, else the
- * global one. Any other chain — the deployment chain, of no one organization —
- * takes the longest of the global window and every tenant window, so no chain
- * expires under a window shorter than one configured for its rows.
+ * The window chain `key` expires under, for an object chained on `chainField`,
+ * never shorter than the window configured for any row it holds (seat ruling
+ * on review 7202871622 S4).
+ *
+ * - No tenant window: the global one.
+ * - Not an organization's chain (the deployment chain): the longest of the
+ *   global window and every tenant window.
+ * - The tenant windows are configured on the chain column itself: the chain
+ *   holds its organization's rows alone, so it takes that organization's
+ *   window, else the global one.
+ * - Otherwise a chain may hold rows several organizations own, by the column
+ *   the windows are configured on. `owners` are those owners, one per row
+ *   (`null` for a row about no organization, `undefined` for a row that could
+ *   not be read): the chain takes the longest window among them, an owner
+ *   with no window of its own taking the global one and an unread row the
+ *   longest of all. Without `owners`, the longest of all.
  */
-export function windowOf(request: AuditExpiryRequest, key: string): ChainWindow {
+export function windowOf(
+  request: AuditExpiryRequest,
+  key: string,
+  chainField: string,
+  owners?: ReadonlyArray<string | null | undefined>,
+): ChainWindow {
   const global: ChainWindow = { cutoffMs: cutoffOf(request.cutoff), policyValue: request.policyValue };
   const tenants = request.tenants ?? [];
   if (tenants.length === 0) return global;
   const windowOfTenant = (t: (typeof tenants)[number]): ChainWindow => ({ cutoffMs: cutoffOf(t.cutoff), policyValue: t.policyValue });
-  if (key.startsWith('org:')) {
-    const own = tenants.find((t) => chainKeyOf(t.tenantId) === key);
-    return own ? windowOfTenant(own) : global;
-  }
   // The longest window is the earliest cutoff.
-  return tenants.map(windowOfTenant).reduce((longest, t) => (t.cutoffMs < longest.cutoffMs ? t : longest), global);
+  const longest = (windows: readonly ChainWindow[]): ChainWindow =>
+    windows.length === 0 ? global : windows.reduce((a, b) => (b.cutoffMs < a.cutoffMs ? b : a));
+  const longestOfAll = longest([global, ...tenants.map(windowOfTenant)]);
+  if (!key.startsWith('org:')) return longestOfAll;
+  const ownerWindow = (owner: string | null): ChainWindow => {
+    const own = owner === null ? undefined : tenants.find((t) => t.tenantId === owner);
+    return own ? windowOfTenant(own) : global;
+  };
+  if (request.tenantColumn === chainField) return ownerWindow(key.slice('org:'.length));
+  if (!owners) return longestOfAll;
+  if (owners.some((o) => o === undefined)) return longestOfAll;
+  return longest([...new Set(owners as ReadonlyArray<string | null>)].map(ownerWindow));
 }
 
-/** One chain's planned expiry (`LifecycleSealedExpiryRun`, `@objectstack/objectql`). */
+/** One chain's planned expiry (`LifecycleExpiryPrefixRun`, `@objectstack/objectql`). */
 export interface AuditExpiryRun {
   readonly chain: string;
   readonly rowIds: readonly string[];
@@ -128,6 +155,10 @@ export interface AuditExpiryRun {
 export interface ObjectExpiryOptions {
   readonly engine: SealStorageEngine;
   readonly object: string;
+  /** The object's chain column (`lifecycle.seal.chainField`, default `tenant_id`). */
+  readonly chainField: string;
+  /** The object's `archive.to` datasource, if it has one: owners of archived rows are read there (S4). */
+  readonly archive?: SealStorageDriver;
   readonly signer: IAuditCheckpointSigner & { activeKeyId?(): Promise<string | null> };
   readonly sink?: IAuditCheckpointSink;
   readonly trust: SigningKeyTrust;
@@ -189,7 +220,7 @@ export class ObjectExpiry {
       if (!candidate) break;
       const key = String(candidate.chain_key);
       after = key;
-      const run = await this.chainRun(key, windowOf(request, key), budget, request);
+      const run = await this.chainRun(key, budget, request);
       if (!run) continue;
       runs.push(run.run);
       budget -= run.run.rowIds.length;
@@ -220,34 +251,92 @@ export class ObjectExpiry {
     }
   }
 
-  /** The chain's last expiry that is admitted (its signature verifies under a trusted key), if any. */
-  private async latestExpiry(key: string): Promise<ExpiryAmendmentBody | undefined> {
+  /**
+   * Whether a stored body belongs where it is stored: its signed object is this
+   * one and its signed organization is chain `key`. The row's `sealed_object`
+   * and `chain_key` columns are not signed; the body is.
+   */
+  private bound(key: string, body: { readonly sealed_object: string; readonly tenant_id: string | null }): boolean {
+    return body.sealed_object === this.object && chainKeyOf(body.tenant_id) === key;
+  }
+
+  /** A chain holding a row that is not bound to it is not expired at all, and that is said once. */
+  private refuseUnbound(key: string, what: string): null {
+    this.options.say(
+      `expiry:unbound:${this.object}:${key}`,
+      `AuditSealer: '${this.object}' chain '${key}' is NOT expired: ${what} stored under it is signed for another ` +
+        'object or organization. Nothing in the chain is deleted; os audit verify reports it.',
+    );
+    return null;
+  }
+
+  /** A chain whose checkpoints do not link one to the next is not expired at all, and that is said once. */
+  private refuseUnlinked(key: string, sequence: number): null {
+    this.options.say(
+      `expiry:link:${this.object}:${key}`,
+      `AuditSealer: '${this.object}' chain '${key}' is NOT expired: its checkpoint ${sequence} does not link to the ` +
+        'one before it (or to the last expiry). Nothing in the chain is deleted; os audit verify reports the link.',
+    );
+    return null;
+  }
+
+  /**
+   * The chain's last expiry that is admitted — bound to the chain and signed
+   * under a trusted key — if any, walking every stored one newest first. A
+   * stored expiry under the chain that is bound elsewhere answers `null`: the
+   * chain is not expired at all.
+   */
+  private async latestExpiry(key: string): Promise<ExpiryAmendmentBody | undefined | null> {
     if (!this.amendments) return undefined;
-    const rows = await this.find(this.amendments, AUDIT_AMENDMENT_OBJECT, {
-      where: { sealed_object: this.object, chain_key: key, kind: 'expiry' },
-      orderBy: [{ field: 'last_sequence', order: 'desc' }],
-      limit: LATEST_EXPIRY_SCAN,
-    });
-    for (const stored of rows) {
-      let body;
-      try {
-        body = amendmentBodyFromRow(stored);
-      } catch {
-        continue;
+    for (let offset = 0; ; offset += AMENDMENT_PAGE_SIZE) {
+      const rows = await this.find(this.amendments, AUDIT_AMENDMENT_OBJECT, {
+        where: { sealed_object: this.object, chain_key: key, kind: 'expiry' },
+        orderBy: [{ field: 'last_sequence', order: 'desc' }, { field: 'id', order: 'asc' }],
+        limit: AMENDMENT_PAGE_SIZE,
+        offset,
+      });
+      for (const stored of rows) {
+        let body;
+        try {
+          body = amendmentBodyFromRow(stored);
+        } catch {
+          continue;
+        }
+        if (body.kind !== 'expiry') continue;
+        if (!this.bound(key, body)) return this.refuseUnbound(key, `the expiry amendment ${String(stored.id)}`);
+        if ((await this.options.trust.signature(body.signing_key_id, signedBodyBytes(body), stored.signature)) === 'ok') return body;
       }
-      if (body.kind !== 'expiry' || body.sealed_object !== this.object) continue;
-      if ((await this.options.trust.signature(body.signing_key_id, signedBodyBytes(body), stored.signature)) === 'ok') return body;
+      if (rows.length < AMENDMENT_PAGE_SIZE) return undefined;
     }
-    return undefined;
+  }
+
+  /**
+   * The owners of `ids` by `column`, one per id, read from the object's hot
+   * store and then its archive for the ids the hot store does not hold
+   * (`undefined` for a row neither holds).
+   */
+  private async ownersOf(ids: readonly string[], column: string): Promise<Array<string | null | undefined>> {
+    const byId = new Map<string, string | null>();
+    const hot = this.options.engine.getDriverForObject(this.object);
+    for (const store of [hot, this.options.archive]) {
+      if (!store) continue;
+      const unread = ids.filter((id) => !byId.has(id));
+      for (let at = 0; at < unread.length; at += OWNER_READ_BATCH) {
+        const batch = unread.slice(at, at + OWNER_READ_BATCH);
+        for (const row of await this.find(store, this.object, { where: { id: { $in: batch } }, limit: batch.length })) {
+          const owner = row[column];
+          byId.set(String(row.id), owner === null || owner === undefined || owner === '' ? null : String(owner));
+        }
+      }
+    }
+    return ids.map((id) => (byId.has(id) ? byId.get(id)! : undefined));
   }
 
   private async chainRun(
     key: string,
-    window: ChainWindow,
     budget: number,
     request: AuditExpiryRequest,
   ): Promise<{ run: AuditExpiryRun; cut: boolean } | null> {
-    const { cutoffMs } = window;
     const [firstRow] = await this.find(this.checkpoints, AUDIT_CHECKPOINT_OBJECT, {
       where: { sealed_object: this.object, chain_key: key },
       orderBy: [{ field: 'sequence', order: 'asc' }],
@@ -256,11 +345,14 @@ export class ObjectExpiry {
     if (!firstRow) return null;
     const first = this.parse(key, firstRow);
     if (!first) return null;
+    // Each checkpoint either branch takes, this first one included, is bound to the chain before it is taken.
     const latest = await this.latestExpiry(key);
+    if (latest === null) return null;
 
     // A sweep that stopped after the amendment was stored: its range is finished first. Each checkpoint left in
-    // it is admitted as in a fresh run, and they must run consecutively to the amendment's last sequence, whose
-    // digest it carries: a row that is not the platform's own deletes nothing, and neither does its range.
+    // it is admitted as in a fresh run — bound to the chain, signed under a trusted key — and they must run
+    // consecutively, each linked to the one before, to the amendment's last sequence, whose digest it carries:
+    // a row that is not the platform's own deletes nothing, and neither does its range.
     if (latest && latest.last_sequence >= first.sequence) {
       if (first.sequence < latest.first_sequence) return this.refuseResume(key, latest, first.sequence);
       const taken: Taken[] = [];
@@ -272,10 +364,13 @@ export class ObjectExpiry {
       })) {
         const body = this.parse(key, stored);
         if (!body) return null;
-        const admitted =
-          body.sequence === next &&
-          (await this.options.trust.signature(body.signing_key_id, signedBodyBytes(body), stored.signature)) === 'ok';
-        if (!admitted) return this.refuseResume(key, latest, body.sequence);
+        if (!this.bound(key, body)) return this.refuseUnbound(key, `the checkpoint ${body.sequence}`);
+        if (body.sequence !== next) return this.refuseResume(key, latest, body.sequence);
+        const previous = taken[taken.length - 1];
+        if (previous && body.previous_digest !== checkpointDigest(previous.body)) return this.refuseResume(key, latest, body.sequence);
+        if ((await this.options.trust.signature(body.signing_key_id, signedBodyBytes(body), stored.signature)) !== 'ok') {
+          return this.refuseResume(key, latest, body.sequence);
+        }
         taken.push({ stored, body });
         next += 1;
       }
@@ -298,6 +393,15 @@ export class ObjectExpiry {
       );
       return null;
     }
+    // The first links to the last expiry's last removed checkpoint (sequence 0 links to nothing: `parse` holds it).
+    if (latest && first.previous_digest !== latest.last_removed_digest) return this.refuseUnlinked(key, first.sequence);
+
+    // Where a chain may hold rows several organizations own, each checkpoint's owners decide its window (S4).
+    const byOwners =
+      key.startsWith('org:') && (request.tenants?.length ?? 0) > 0 && request.tenantColumn !== undefined &&
+      request.tenantColumn !== this.options.chainField;
+    const owners: Array<string | null | undefined> = [];
+    let window = windowOf(request, key, this.options.chainField, byOwners ? [] : undefined);
 
     const taken: Taken[] = [];
     let rows = 0;
@@ -312,7 +416,15 @@ export class ObjectExpiry {
       for (const stored of page) {
         const body = this.parse(key, stored);
         if (!body || body.sequence !== next) break walk; // a malformed checkpoint or a gap ends the run
-        if (Date.parse(canonicalDatetime(body.window_end, 'window_end')) > cutoffMs) break walk;
+        if (!this.bound(key, body)) return this.refuseUnbound(key, `the checkpoint ${body.sequence}`);
+        const previous = taken[taken.length - 1];
+        if (previous && body.previous_digest !== checkpointDigest(previous.body)) return this.refuseUnlinked(key, body.sequence);
+        let candidate = window;
+        if (byOwners) {
+          owners.push(...(await this.ownersOf(body.row_ids, request.tenantColumn!)));
+          candidate = windowOf(request, key, this.options.chainField, owners);
+        }
+        if (Date.parse(canonicalDatetime(body.window_end, 'window_end')) > candidate.cutoffMs) break walk;
         if (taken.length > 0 && rows + body.row_ids.length > budget) {
           cut = true;
           break walk;
@@ -326,6 +438,8 @@ export class ObjectExpiry {
           );
           break walk;
         }
+        // The window only lengthens as owners join, and windows end in order: every checkpoint taken ended by it.
+        window = candidate;
         taken.push({ stored, body });
         rows += body.row_ids.length;
         next += 1;
@@ -407,7 +521,7 @@ export class ObjectExpiry {
     }
   }
 
-  /** The rows `taken` list, and the removal of its checkpoints and then their seeds, once the rows are gone. */
+  /** The rows `taken` list, and the removal of their seeds and checkpoints, once the rows are gone. */
   private runOf(key: string, taken: readonly Taken[]): AuditExpiryRun {
     const ids = new Set<string>();
     for (const { body } of taken) for (const id of body.row_ids) ids.add(id);
@@ -417,8 +531,12 @@ export class ObjectExpiry {
       chain: key,
       rowIds: [...ids],
       async complete() {
-        for (const { stored } of taken) await checkpoints.delete!(AUDIT_CHECKPOINT_OBJECT, String(stored.id));
-        for (const { body } of taken) await dropAuditSealSecret(engine, body.seed_handle);
+        // Oldest first, each seed before its checkpoint: a stop part way leaves no seed whose checkpoint is gone,
+        // and the checkpoints left are this range's, which the next sweep resumes.
+        for (const { stored, body } of taken) {
+          await dropAuditSealSecret(engine, body.seed_handle);
+          await checkpoints.delete!(AUDIT_CHECKPOINT_OBJECT, String(stored.id));
+        }
       },
     };
   }
