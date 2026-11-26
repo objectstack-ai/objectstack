@@ -242,6 +242,11 @@ export function PageShell({
   // Setup catalog, not to the package-scoped Studio list of the same type.
   const [search] = useSearchParams();
   const scopeSuffix = environmentScopeSuffix(search);
+  // objectstack#37520 (N3) — the hairline before the assistant separates it
+  // from the row's own stats and actions; a row with neither draws none, as
+  // the item header and the directory header already do (`StudioTitleRowEnd`
+  // still draws it before Save, which always counts as an action).
+  const rowHasOwnControls = (stats?.length ?? 0) > 0 || !!actions;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -325,7 +330,7 @@ export function PageShell({
               {/* objectstack#37455 — under Studio, the page's Save and the AI
                   assistant end the title row (nothing elsewhere, nor embedded
                   in another page). */}
-              {!embedded && <StudioTitleRowEnd />}
+              {!embedded && <StudioTitleRowEnd divider={rowHasOwnControls} />}
             </div>
           </div>
         </div>
@@ -382,7 +387,7 @@ export function PageShell({
               ))}
               {actions}
               {/* objectstack#37455 — under Studio, the page's Save and the AI assistant end the title row. */}
-              {!embedded && <StudioTitleRowEnd />}
+              {!embedded && <StudioTitleRowEnd divider={rowHasOwnControls} />}
             </div>
           </div>
         </div>

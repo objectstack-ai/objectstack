@@ -17,9 +17,12 @@
  *    refused 409 with the `?package=` remedy, naming no package, and stores
  *    no row (#34144 ruling A, #34262: a disabled package holds no name, so a
  *    save naming none has no row to write). Re-enabled, the same save is
- *    kept. A delete of the stored package-less row removes it while the
- *    package is disabled, as before. A save at a member the package ships is
- *    refused, as before.
+ *    kept. With the package disabled again, a save and a delete of the
+ *    stored package-less row are refused 409 with the enable as the remedy
+ *    and the row is left as it was (ADR-0150 D3, the 2026-11-26 note: the
+ *    row is the holder's customization, hidden with it; the delete removed
+ *    it). Re-enabled, the row is served again and the delete removes it. A
+ *    save at a member the package ships is refused, as before.
  *  - S5: while an ENABLED package holds the name through a stored row the
  *    registry has not read, the row is served and listed as on `main`, in
  *    either read order.
@@ -191,7 +194,7 @@ describe('[#33401, review#2 S1] the lists leave out the package-less row the by-
 });
 
 describe('[#33401, review#2 S3] a package-less save and delete while every holder is disabled', () => {
-    it('a save at a member the package never ships is refused naming no package and stores no row; re-enabled it is kept; a delete removes it; a save at a shipped member is refused, as before', async () => {
+    it('a save at a member the package never ships is refused naming no package and stores no row; re-enabled it is kept; disabled again, a save and a delete of that row are refused with the enable as the remedy and the row stays; re-enabled, the delete removes it; a save at a shipped member is refused, as before', async () => {
         const stores: Stores = new Map();
         const { engine, protocol } = await boot(stores);
         engine.registry.disablePackage(PKG);
@@ -216,12 +219,31 @@ describe('[#33401, review#2 S3] a package-less save and delete while every holde
             .toMatchObject({ success: true, state: 'active' });
         expect(packagelessRows(stores)).toEqual(['fr-FR']);
         expect(await subjectAt(protocol, 'fr-FR')).toBe('SAVED fr');
-        // Unchanged: with the package disabled again, a delete naming no package removes the row.
+        // FROM (`main` 5dbcc02b): with the package disabled again, a delete
+        // naming no package removed the row (`success: true`), and a save
+        // edited it unseen. TO (ADR-0150 D3, the 2026-11-26 note): the row is
+        // the holder's customization, hidden with it, so both are refused 409
+        // with the enable as the remedy, never `?package=`, and the row stays.
         engine.registry.disablePackage(PKG);
+        const storedRow = () => JSON.stringify(Array.from(stores.get('sys_metadata')?.values() ?? [])
+            .filter((r) => r.name === NAME && r.state === 'active').map((r) => [r.package_id ?? null, r.bundle_member ?? null, r.metadata, r.version]));
+        const before = storedRow();
+        for (const write of [
+            () => protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('fr-FR', 'EDITED fr') } as any),
+            () => protocol.deleteMetaItem({ type: 'email_template', name: NAME, member: 'fr-FR' } as any),
+        ]) {
+            const hidden: any = await write().then(() => undefined, (error: unknown) => error);
+            expect([hidden?.status, hidden?.code], String(hidden?.message)).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(String(hidden?.message).startsWith('Enable the package that holds email_template ')).toBe(true);
+            expect(String(hidden?.message)).not.toContain(PKG);
+        }
+        expect(storedRow()).toBe(before);
+        // CONTROL — re-enabled: the row is served as it was, and the delete removes it, as before.
+        engine.registry.enablePackage(PKG);
+        expect(await subjectAt(protocol, 'fr-FR')).toBe('SAVED fr');
         expect(await protocol.deleteMetaItem({ type: 'email_template', name: NAME, member: 'fr-FR' } as any))
             .toMatchObject({ success: true });
         expect(packagelessRows(stores)).toEqual([]);
-        engine.registry.enablePackage(PKG);
         expect(await subjectAt(protocol, 'fr-FR')).toBeUndefined();
     });
 });

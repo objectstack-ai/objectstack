@@ -419,6 +419,17 @@ export interface VisibleObjectExtension {
    */
   relatedListEntries: AnyRec[];
   /**
+   * [#36595] Its `relatedLists` as written, bare names included (`undefined`
+   * when it writes none): the `.custom` arrangement (ADR-0146 D10). Where the
+   * key is written, each entry REPLACES every entry of the owner and of the
+   * placements that it covers (`relatedListNameCovers`), so a bare name or an
+   * unlabelled entry takes a title away and `{ list, hidden: true }` takes the
+   * tab away (`registry-custom-arrangement.ts`, `@objectstack/objectql`). The
+   * one reader that needs the bare names is the `_relatedLists.LIST` check of
+   * `validate-translation-references.ts`.
+   */
+  relatedListArrangement?: unknown[];
+  /**
    * [#33494] Set on an entry the host's registry already holds
    * ({@link StoredObjectExtension}), folded in at its priority but never
    * located: its fields are no field of the stack, so no walk names one.
@@ -510,6 +521,7 @@ export function objectExtensionsByTarget(
           ...(Array.isArray(ext.relatedLists) ? ext.relatedLists : []),
           ...(Array.isArray(ext.place) ? ext.place : []),
         ].filter(isRec),
+        ...(Array.isArray(ext.relatedLists) ? { relatedListArrangement: ext.relatedLists } : {}),
         label: ext.label,
         fieldPatches: isRec(ext.fieldPatches)
           ? Object.fromEntries(

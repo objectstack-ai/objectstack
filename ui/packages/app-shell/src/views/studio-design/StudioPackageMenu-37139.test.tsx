@@ -45,6 +45,7 @@ import '@objectstack/lint';
 // `lazy()` detail entry: its first load is paid at collection too.
 import '@object-ui/plugin-detail';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
+import { StudioEntryPermissionsProvider } from './studioEntryPermissions';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 await loadStudioCatalogue('zh');
 
@@ -201,15 +202,18 @@ function Elsewhere() {
 }
 
 function renderAt(entry: string, perms = AUTHOR) {
+  // The console's Studio gate hands its pages the set it read (`StudioEntryPermissionsProvider`).
   return render(
     <MePermissionsProvider initialPermissions={perms}>
-      <MemoryRouter initialEntries={[entry]}>
-        <Routes>
-          <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-          <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
-          <Route path="*" element={<Elsewhere />} />
-        </Routes>
-      </MemoryRouter>
+      <StudioEntryPermissionsProvider value={perms.systemPermissions}>
+        <MemoryRouter initialEntries={[entry]}>
+          <Routes>
+            <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
+            <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
+            <Route path="*" element={<Elsewhere />} />
+          </Routes>
+        </MemoryRouter>
+      </StudioEntryPermissionsProvider>
     </MePermissionsProvider>,
   );
 }
@@ -345,7 +349,18 @@ describe('no 「⋯」 without a current package or without manage_metadata (obj
     expect(screen.queryByTestId('studio-package-menu')).toBeNull();
     cleanup();
 
+    // objectstack#37565 — the cross-package leg draws no overview: its root is
+    // Setup's directory page now, so `~all/overview` lands there…
     renderAt('/studio/~all/overview');
+    expect(await screen.findByTestId('elsewhere', undefined, { timeout: 8000 })).toHaveTextContent(
+      '/apps/setup/component/security/access-directory',
+    );
+    expect(screen.queryByTestId('studio-package-overview')).toBeNull();
+    expect(screen.queryByTestId('studio-package-menu')).toBeNull();
+    cleanup();
+
+    // …and a page the leg still draws carries no 「⋯」 either.
+    renderAt('/studio/~all/metadata/permission/admin?scope=environment');
     await waitFor(() => expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent(t('engine.studio.menu.environment', locale)), {
       timeout: 8000,
     });

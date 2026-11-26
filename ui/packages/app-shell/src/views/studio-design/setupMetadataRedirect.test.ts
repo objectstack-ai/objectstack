@@ -16,11 +16,17 @@ import {
   setupMetadataStudioPath,
 } from './setupMetadataRedirect.js';
 import { areaLocationRedirect } from './metadataArea.js';
+import {
+  ACCESS_DIRECTORY_PATH,
+  accessDirectoryLocation,
+  studioAllLegSetupRedirect,
+} from '../setup/accessDirectory.js';
 
 describe('setupMetadataStudioPath', () => {
   it.each([
     // [rest, search, expected]
-    ['', '', '/studio/~all/metadata'],
+    // objectstack#37565 — the leg's root is the environment directory, Setup's page now.
+    ['', '', '/apps/setup/component/security/access-directory'],
     ['_diagnostics', '', '/studio/~all/metadata/_diagnostics'],
     ['object', '', '/studio/~all/metadata/object'],
     ['object/account', '', '/studio/~all/metadata/object/account'],
@@ -30,15 +36,30 @@ describe('setupMetadataStudioPath', () => {
     ['object/account', '?package=crm', '/studio/crm/metadata/object/account?package=crm'],
     ['object', 'package=crm', '/studio/crm/metadata/object?package=crm'],
     ['object', '?package=all', '/studio/~all/metadata/object?package=all'],
-    // `?scope=environment` is the cross-package leg; it binds no package.
-    ['position', '?scope=environment', '/studio/~all/metadata/position?scope=environment'],
-    ['position', '?scope=environment&package=crm', '/studio/~all/metadata/position?scope=environment'],
+    // `?scope=environment` is the cross-package leg; it binds no package. objectstack#37565 —
+    // a directory type's list there is Setup's page now; its item still opens in Studio.
+    ['position', '?scope=environment', '/apps/setup/component/security/access-directory/position?scope=environment'],
+    ['position', '?scope=environment&package=crm', '/apps/setup/component/security/access-directory/position?scope=environment'],
+    ['position/manager', '?scope=environment', '/studio/~all/metadata/position/manager?scope=environment'],
     // `?review=1` is kept, alone or beside a package.
     ['object/account', '?review=1', '/studio/~all/metadata/object/account?review=1'],
     ['object/account', '?package=crm&review=1', '/studio/crm/metadata/object/account?package=crm&review=1'],
     // A trailing or doubled slash does not leak into the target.
     ['object/', '', '/studio/~all/metadata/object'],
   ])('%s %s → %s', (rest, search, expected) => {
+    // A principal who may open Setup (objectstack#37565).
+    expect(setupMetadataStudioPath(rest, search, '', true)).toBe(expected);
+  });
+
+  // objectstack#37565 — for a principal who may not open Setup (and by default), the
+  // environment directory's addresses stay on the cross-package leg, where they landed before.
+  it.each([
+    ['', '', '/studio/~all/metadata'],
+    ['position', '?scope=environment', '/studio/~all/metadata/position?scope=environment'],
+    ['position', '?scope=environment&package=crm', '/studio/~all/metadata/position?scope=environment'],
+    ['position/manager', '?scope=environment', '/studio/~all/metadata/position/manager?scope=environment'],
+  ])('without Setup: %s %s → %s', (rest, search, expected) => {
+    expect(setupMetadataStudioPath(rest, search, '', false)).toBe(expected);
     expect(setupMetadataStudioPath(rest, search)).toBe(expected);
   });
 
@@ -69,12 +90,22 @@ describe('setupMetadataStudioPath', () => {
     for (const [rest, search] of [
       ['object/account', ''],
       ['object/account', '?package=crm'],
-      ['position', '?scope=environment&package=crm'],
+      ['position/manager', '?scope=environment&package=crm'],
       ['object', '?package=all&review=1'],
     ] as const) {
       const target = new URL(setupMetadataStudioPath(rest, search)!, 'http://x');
       const [, , leg, , ...tail] = target.pathname.split('/');
       expect(areaLocationRedirect(decodeURIComponent(leg), tail.join('/'), target.search)).toBeNull();
+      expect(studioAllLegSetupRedirect(tail.join('/'), target.search)).toBeNull();
+    }
+    // objectstack#37565 — a directory address lands on Setup's page, which serves it without a further hop.
+    for (const [rest, search] of [
+      ['', ''],
+      ['position', '?scope=environment&package=crm'],
+    ] as const) {
+      const target = new URL(setupMetadataStudioPath(rest, search, '', true)!, 'http://x');
+      expect(target.pathname.startsWith(ACCESS_DIRECTORY_PATH)).toBe(true);
+      expect(accessDirectoryLocation(target.pathname.slice(ACCESS_DIRECTORY_PATH.length), target.search)).toBeNull();
     }
   });
 });

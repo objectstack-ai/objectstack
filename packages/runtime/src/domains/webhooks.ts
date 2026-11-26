@@ -78,9 +78,11 @@
  */
 
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
+import { operationUserMessage } from '@objectstack/core';
 import type { IWebhookService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { requestLocaleOf } from './own-door-bridge.js';
 
 /**
  * The one path this domain claims — exactly, with no sub-paths: the redeliver
@@ -113,13 +115,13 @@ export async function handleWebhooksRedeliverRequest(
 ): Promise<HttpDispatcherResult> {
     const service = await deps.resolveService(context, WEBHOOKS_SLOT, context.environmentId) as
         Pick<IWebhookService, 'handleRedeliver'> | undefined;
+    // [#37610] The `501` is the operation-message catalog's, in the request's
+    // top `Accept-Language` tag, as the own-door bridge answers its own.
     if (!service) {
         return {
             handled: true,
             response: deps.error(
-                'Webhook redelivery is not available: no webhooks service is registered. '
-                + '@objectstack/plugin-webhooks registers it once its redelivery veto is installed, which needs '
-                + 'the data engine and @objectstack/service-messaging; the boot log names the one that is missing.',
+                operationUserMessage('webhook_redeliver_service_unregistered', { locale: requestLocaleOf(context) }),
                 501,
             ),
         };
@@ -128,8 +130,7 @@ export async function handleWebhooksRedeliverRequest(
         return {
             handled: true,
             response: deps.error(
-                'Webhook redelivery is not available: the registered webhooks service '
-                + 'does not implement handleRedeliver.',
+                operationUserMessage('webhook_redeliver_member_missing', { locale: requestLocaleOf(context) }),
                 501,
             ),
         };

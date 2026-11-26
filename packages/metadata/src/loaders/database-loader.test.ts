@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { DatabaseLoader } from './database-loader.js';
+import { DatabaseLoader, ENVIRONMENT_HISTORY_MARK, isPlatformRecordRow, refusePlatformRecordRestore } from './database-loader.js';
 import type { MetadataLoader } from './loader-interface.js';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { MetadataManager } from '../metadata-manager.js';
@@ -4269,6 +4269,26 @@ describe('[#37013] a platform-registered skill and a package\'s same-named skill
     expect(JSON.stringify(await rowOf(PKG))).toBe(before);
   });
 
+  // [#37604 item 1] After the withdrawal the package is the name's one holder, so a version attributed
+  // to the environment is its slot's (M1); the version the platform registered is still never restored
+  // into the package's row.
+  for (const [door, address] of [['naming the package', { packageId: PKG }], ['naming no package (the name\'s one holder)', {}]] as const) {
+    it(`after the platform withdraws its record, rollback ${door} of the version the platform registered: refused 409 RESOURCE_CONFLICT, the package's row byte-identical (BASE: the platform's version written into the package's row)`, async () => {
+      const manager = await platformThenPackage();
+      await manager.unregister('skill', NAME, { notify: false, origin: 'platform' });
+      const history = (await driver.find('sys_metadata_history', { where: { type: 'skill', name: NAME } })) as Array<Record<string, unknown>>;
+      const platformVersion = Number(history.find((row) => String(row.metadata).includes('platform v1'))!.version);
+      const before = JSON.stringify(await rowOf(PKG));
+
+      const refused: any = await manager.rollback('skill', NAME, platformVersion, address).catch((error) => error);
+
+      expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+      expect(String(refused.message)).toContain('the platform registered');
+      expect(JSON.stringify(await rowOf(PKG))).toBe(before);
+      expect(((await manager.get('skill', NAME, PKG)) as any)?.instructions).toBe('package rules');
+    });
+  }
+
   it('the platform withdrawing its record leaves the environment\'s own item of the name', async () => {
     const manager = managerOver();
     await manager.register('skill', NAME, platformSkill('platform v1'), { notify: false, origin: 'platform' });
@@ -4901,6 +4921,31 @@ describe('[#37039] a stored row\'s package binding is read from its package colu
   });
 
   /**
+   * [#37604] A loader that cannot be read at all loses both walks of one
+   * `listPackageBindings` read: it is named once in `errors`, and its rows
+   * are not read a second time. BEFORE: `errors` named it twice, and the
+   * failure was reported twice for one read.
+   */
+  it('[#37604] listPackageBindings over a loader the list walk lost names it once and does not read its rows again (BEFORE: named twice)', async () => {
+    const rowBindingReads = vi.fn(async () => { throw new Error('sys_metadata unreachable'); });
+    const unreachable: MetadataLoader = {
+      contract: { name: 'down', protocol: 'datasource:', capabilities: { read: true, write: false, watch: false, list: true } },
+      async load() { throw new Error('sys_metadata unreachable'); },
+      async loadMany() { throw new Error('sys_metadata unreachable'); },
+      async list() { throw new Error('sys_metadata unreachable'); },
+      async exists() { return false; },
+      async stat() { return null; },
+      loadRowBindings: rowBindingReads,
+    } as unknown as MetadataLoader;
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerLoader(unreachable);
+    const read = await manager.listPackageBindings('skill');
+    expect(read.degraded).toBe(true);
+    expect(read.errors.filter((error) => error.startsWith('down:'))).toHaveLength(1);
+    expect(rowBindingReads).not.toHaveBeenCalled();
+  });
+
+  /**
    * [#37130 N7] Two nodes over the same rows, on a first boot: both read the
    * legacy agent row with its column empty, and the first node's priming pass
    * binds the column. The second node's pass finds the row already bound and
@@ -4944,5 +4989,34 @@ describe('[#37039] a stored row\'s package binding is read from its package colu
     expect(await loader.loadMany<Record<string, unknown>>('skill')).toContainEqual({ name: 'normal', label: 'normal', instructions: 'normal' });
     const manager = new MetadataManager({ formats: ['json'], loaders: [new DatabaseLoader({ driver })] });
     expect(await manager.list('skill')).toContainEqual({ name: 'normal', label: 'normal', instructions: 'normal' });
+  });
+});
+
+// ---------- [#37604 N5] one reader of the platform's own record ----------
+
+describe('[#37604 N5] isPlatformRecordRow is the one reader, and the restore refusal asks it', () => {
+  const marked = JSON.stringify({ name: 'helper', instructions: 'x', _provenance: 'platform' });
+
+  it('a package-less row whose body carries the mark is the platform\'s record: the restore is refused with the envelope', () => {
+    const row = { package_id: null, metadata: marked };
+    expect(isPlatformRecordRow(row)).toBe(true);
+    let refused: any;
+    try { refusePlatformRecordRestore('skill', 'helper', row); } catch (error) { refused = error; }
+    expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect(String(refused.message)).toContain('platform\'s own record');
+    expect(String(refused.message)).toContain('until the platform\'s next registration at boot');
+  });
+
+  it('a row bound to a package by its column is that package\'s, whatever its body keeps: not refused (BEFORE: refused, prescribing to name the package already named)', () => {
+    const row = { package_id: 'com.acme.crm', metadata: marked };
+    expect(isPlatformRecordRow(row)).toBe(false);
+    expect(() => refusePlatformRecordRestore('skill', 'helper', row)).not.toThrow();
+  });
+
+  it('a history row attributed to the environment reads as a version the platform registered; one attributed to a package does not', () => {
+    expect(isPlatformRecordRow({ package_id: ENVIRONMENT_HISTORY_MARK, metadata: marked })).toBe(true);
+    expect(isPlatformRecordRow({ package_id: 'com.acme.crm', metadata: marked })).toBe(false);
+    expect(isPlatformRecordRow({ package_id: null, metadata: JSON.stringify({ name: 'helper', _provenance: 'platform', _packageId: 'com.acme.crm' }) })).toBe(false);
+    expect(isPlatformRecordRow({ package_id: null, metadata: '{not json' })).toBe(false);
   });
 });

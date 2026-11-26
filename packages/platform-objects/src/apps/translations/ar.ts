@@ -79,6 +79,7 @@ export const ar: TranslationData = {
         // the same case as the entry above; see `en.ts` (#31123).
         nav_scim_credentials: { label: 'بيانات اعتماد SCIM' },
         nav_api_keys: { label: 'مفاتيح API' },
+        nav_access_directory: { label: 'المناصب والأذونات' },
 
         // صندوق الموافقات = the Approvals Inbox component (#7234) — the surface
         // with decision actions. The three below are the engine's raw tables; the

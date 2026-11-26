@@ -3153,6 +3153,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Ferramentas",
         helpText: "Nomes das ferramentas (aceita curinga: action_*)"
       },
+      context: {
+        label: "Pacote de contexto",
+        helpText: "Pacote de contexto com o qual esta skill trabalha (seu nome). Requer get_record_context em Ferramentas. Via MCP, o prompt passa a aceitar um ID de registro opcional"
+      },
       triggerConditions: {
         label: "Condições de ativação",
         helpText: "Condições programáticas (por exemplo, objectName == \"case\")"

@@ -168,7 +168,7 @@ describe('objectstack#26882 — a retryable engine refusal keeps the screen, its
     error: { code: 'INVALID_SCREEN_INPUT', message: 'Invalid screen input: dueDate must be a date', httpStatus: 400 },
   };
 
-  it('the typed values stay, the sentence is shown, and Submit resubmits the same run', async () => {
+  it('the typed values stay, a refusal banner is shown, and Submit resubmits the same run', async () => {
     const user = userEvent.setup();
     const authFetch = vi
       .fn(async (_url: string, _init?: RequestInit) => jsonResponse({ success: true, data: { success: true } }))
@@ -182,7 +182,9 @@ describe('objectstack#26882 — a retryable engine refusal keeps the screen, its
     await user.type(screen.getByRole('textbox', { name: 'Notes' }), 'Asked for Tuesday');
     await user.click(screen.getByRole('button', { name: 'Submit' }));
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('dueDate must be a date'));
+    // The banner is the catalog's sentence, not the engine's (objectstack#37526).
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent("Some values on this step weren't accepted."));
+    expect(screen.getByRole('alert')).not.toHaveTextContent('dueDate must be a date');
     expect(screen.getByRole('textbox', { name: 'Next Step' })).toHaveValue('Call back');
     expect(screen.getByRole('textbox', { name: 'Notes' })).toHaveValue('Asked for Tuesday');
     expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled();

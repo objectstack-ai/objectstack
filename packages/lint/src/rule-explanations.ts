@@ -5025,7 +5025,8 @@ const CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
       'form, or each operation of the per-operation map), each field\'s, each object action\'s and ' +
       'each top-level action\'s, each flow\'s, an app\'s and each of its nav entries (through `navigation`, ' +
       '`areas`, `tabs`, `children` and `items`), a view\'s (its own, its `config`\'s, its default ' +
-      '`list`\'s and each `listViews` entry\'s, on views and on objects) and a dashboard\'s.',
+      '`list`\'s and each `listViews` entry\'s, on views and on objects), a dashboard\'s, and a book\'s ' +
+      '`audience.systemPermission`, the same gate on a manual\'s pages.',
     'A warning, not an error: the lint reads every package of the artifact being built, but it ' +
       'cannot see the capabilities other installed packages declare, and the reference fails closed ' +
       'anyway, so a dangling one is almost certainly a typo to surface, not a build to break. If ' +

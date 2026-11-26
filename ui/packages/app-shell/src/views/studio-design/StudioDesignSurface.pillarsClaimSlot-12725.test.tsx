@@ -442,3 +442,48 @@ describe('CONTROL — a pillar that claims nothing (objectui#12725)', () => {
     expect(slotProps()).toBeEmptyDOMElement();
   });
 });
+
+// objectstack#37520 (S1) — with no copilot served, the title row's right-most
+// icon is the slot's show / hide toggle, not the AI assistant. objectstack#37455
+// moved it from the top bar to the end of the open page's title row; the flow
+// designer claims the slot from the start (its Configuration), so the toggle
+// is drawn there with nothing selected.
+describe('no copilot served: the slot\'s toggle ends the page\'s title row (objectstack#37520)', () => {
+  const toggle = () => screen.getByTestId('studio-slot-toggle');
+
+  it('in the page\'s title row, behind a hairline, not in the top bar; it hides and shows the slot', async () => {
+    copilot.available = false;
+    await openFlow();
+    await waitFor(() => expect(slot()).toBeVisible());
+    expect(slot()).toHaveAttribute('data-mode', 'props');
+
+    const button = await screen.findByTestId('studio-slot-toggle');
+    expect(screen.getAllByTestId('studio-slot-toggle')).toHaveLength(1);
+    expect(within(screen.getByTestId('studio-shell-header')).queryByTestId('studio-slot-toggle')).toBeNull();
+    expect(screen.getByTestId('studio-pillars-host')).toContainElement(button);
+    expect(slot().contains(button)).toBe(false);
+    // The last control of its row, the hairline right before it.
+    expect(button.parentElement?.lastElementChild).toBe(button);
+    expect(button.previousElementSibling).toHaveAttribute('data-testid', 'studio-title-row-divider');
+    expect(screen.queryByTestId('topbar-ai-assistant')).toBeNull();
+
+    expect(button).toHaveAttribute('aria-pressed', 'true');
+    expect(button).toHaveAccessibleName(t('engine.studio.slot.collapse', 'en'));
+    fireEvent.click(button);
+    expect(slot()).not.toBeVisible();
+    expect(toggle()).toHaveAttribute('aria-pressed', 'false');
+    expect(toggle()).toHaveAccessibleName(t('engine.studio.slot.expand', 'en'));
+
+    fireEvent.click(toggle());
+    expect(slot()).toBeVisible();
+    expect(slot()).toHaveAttribute('data-mode', 'props');
+    expect(toggle()).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('CONTROL: with a copilot served, the same row ends with the AI assistant and no toggle', async () => {
+    await openFlow();
+    const ai = await screen.findByTestId('topbar-ai-assistant', undefined, SLOW);
+    expect(screen.getByTestId('studio-pillars-host')).toContainElement(ai);
+    expect(screen.queryByTestId('studio-slot-toggle')).toBeNull();
+  });
+});

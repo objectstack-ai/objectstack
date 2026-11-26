@@ -289,6 +289,15 @@ export type FlowResponseOutcome<S = unknown> =
          * more.
          */
         retryable: boolean;
+        /**
+         * [objectstack#37526] Present only on a `400 INVALID_SCREEN_INPUT`: the
+         * engine refused this screen's values before consuming the pause. Each
+         * entry names the screen field (`field`) and the ADR-0114 code it broke
+         * (`code`), read off `error.details.fields`; `[]` when the server
+         * served none. A runner places them at its fields in its own language
+         * and does not show `error`, which names the screen's declared fields.
+         */
+        screenInput?: readonly ScreenInputFinding[];
     }
     | ({ kind: 'paused'; runId?: string; screen: S; data: FlowRunResult } & Pick<AutomationResult, 'flowLabel'>)
     | ({ kind: 'done'; data: FlowRunResult | undefined; successMessage?: string } & Pick<AutomationResult, 'flowLabel'>);
@@ -550,6 +559,31 @@ export function apiActionRefusalResult(
  * in. The flow's own `successMessage` / `errorMessage` are answered as served
  * — the engine renders and translates them (objectstack#28054, see the header).
  */
+/** [objectstack#37526] One field a screen refusal names: the field's name and the ADR-0114 code it broke. */
+export interface ScreenInputFinding {
+    field: string;
+    code: string;
+}
+
+/**
+ * [objectstack#37526] The findings of a `400 INVALID_SCREEN_INPUT`, read off
+ * `error.details.fields` (`{ field, code, message }` entries, the slot
+ * `VALIDATION_FAILED` uses). Only the two members a runner keys on are kept,
+ * and an entry missing either is dropped; `message` is the engine's English
+ * and stays off screen.
+ */
+export function screenInputFindings(json: unknown): ScreenInputFinding[] {
+    const fields = (errorEnvelopeDetails(json) as { fields?: unknown }).fields;
+    if (!Array.isArray(fields)) return [];
+    const out: ScreenInputFinding[] = [];
+    for (const entry of fields) {
+        if (!entry || typeof entry !== 'object') continue;
+        const { field, code } = entry as { field?: unknown; code?: unknown };
+        if (typeof field === 'string' && field !== '' && typeof code === 'string' && code !== '') out.push({ field, code });
+    }
+    return out;
+}
+
 export function interpretFlowResponse<S = unknown>(
     res: { ok: boolean; status: number },
     json: any,
@@ -588,6 +622,10 @@ export function interpretFlowResponse<S = unknown>(
             kind: 'failed',
             error: refusalEnvelopeMessage(json, `${label} failed (HTTP ${res.status})`, locale),
             retryable: true,
+            // The screen's own values were refused (objectstack#37526).
+            ...(res.status === 400 && errorCodeIs(json?.error, 'INVALID_SCREEN_INPUT')
+                ? { screenInput: screenInputFindings(json) }
+                : {}),
         };
     }
 

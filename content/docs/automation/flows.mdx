@@ -1512,6 +1512,18 @@ Like the `$`-namespace rule above, the refusal happens **before** the suspension
 is consumed: nothing is applied, the run stays parked, and the corrected
 submission still lands.
 
+The refusal also names each finding on its own, in `error.details.fields`: one
+`{ field, code, message }` entry per violated field, with the field's `name`
+and an ADR-0114 field code (`required`, `invalid_type`, `invalid_value`,
+`min_value`, `max_value`, `unknown_field`), the same entries a
+`VALIDATION_FAILED` carries. A client places the refusal at its fields from
+those, in its own language; `error.message` keeps the whole sentence, with the
+declared field names, for logs and API callers. The Console's flow runner marks
+each field it names, by the label it shows, and its banner reads a sentence of
+its own instead of the engine's. It also counts a value of only spaces as no
+answer to a `required` field, as the server does, so that one never leaves the
+dialog.
+
 Three shapes declare no contract and so keep the pass-through — the same way an
 action with no `params` is untouched, unless it is a declarative
 `operation: 'update'`, whose empty list is an empty accept set:

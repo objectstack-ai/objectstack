@@ -5678,6 +5678,8 @@ const zh = {
     completed: '流程「{{flow}}」已完成',
     alreadySubmitted: '上一步已提交成功，流程已进入当前步骤。',
     noLongerWaiting: '这一步可能已经处理完成。请关闭对话框，确认记录后再重试。',
+    invalidScreenInput: '这一步有些值未被接受。请检查后重试。',
+    fieldNotAccepted: '{{field}}：此值不被接受',
   },
   appManagement: {
     title: '应用',
