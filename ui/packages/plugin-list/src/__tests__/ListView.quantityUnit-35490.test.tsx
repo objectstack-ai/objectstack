@@ -74,7 +74,7 @@ describe('list view: a quantity with its unit column not shown (objectstack#3549
       const rows = [...document.querySelectorAll('tbody tr')].map((tr) => (tr.textContent ?? '').replace(/ /g, ' '));
       expect(rows[0]).toContain('4.0 Box of 12');
       // The row of organization B: B's setting of 0 places, not A's of 3.
-      expect(rows[1]).toContain('2 g');
+      expect(rows[1]).toContain('2 gram');
     });
     const read = calls.find((c) => c.object === 'line')!;
     expect(read.params.$select).toEqual(expect.arrayContaining(['unit_code', 'organization_id']));

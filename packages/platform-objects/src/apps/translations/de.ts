@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { deObjects } from './de.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * Deutsch (de) — Setup App Translations
  */
 export const de: TranslationData = {
   objects: deObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('de'),
   apps: {
     account: {
       label: 'Konto',

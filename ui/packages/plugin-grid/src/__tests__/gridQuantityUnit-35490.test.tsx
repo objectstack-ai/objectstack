@@ -84,8 +84,8 @@ describe('object grid: a quantity with its unit (objectstack#35490)', () => {
     await waitFor(() => {
       const rows = rowTexts();
       expect(rows[0]).toContain('4.0 Box of 12');
-      expect(rows[0]).toContain('1.3 kg');
-      expect(rows[1]).toContain('1.500 g');
+      expect(rows[0]).toContain('1.3 kilogram');
+      expect(rows[1]).toContain('1.500 gram');
       expect(rows[2]).toContain('2 JIN1');
     });
     const read = calls.find((c) => c.object === 'line')!;
@@ -106,8 +106,8 @@ describe('object grid with no SchemaRendererProvider: the known degraded shape (
     await waitFor(() => expect(screen.getByText('L1')).toBeInTheDocument());
     const rows = rowTexts();
     expect(rows[0]).toContain('4 BOX_12');
-    expect(rows[0]).toContain('1.25 kg');
-    expect(rows[1]).toContain('1.5 g');
+    expect(rows[0]).toContain('1.25 kilogram');
+    expect(rows[1]).toContain('1.5 gram');
     expect(calls.some((c) => c.object === 'sys_unit' || c.object === 'sys_standard_unit_setting')).toBe(false);
     expect(screen.queryByRole('alert')).toBeNull();
   });

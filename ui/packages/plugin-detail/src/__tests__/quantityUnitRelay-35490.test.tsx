@@ -77,7 +77,7 @@ describe('the declared unitConfig reaches the detail cells (objectstack#35490)',
     );
     await waitFor(() => {
       expect(flat(container.textContent)).toContain('4.0 Box of 12');
-      expect(flat(container.textContent)).toContain('1.3 kg');
+      expect(flat(container.textContent)).toContain('1.3 kilogram');
     });
   });
 

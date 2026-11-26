@@ -87,7 +87,7 @@ describe.each<Face>(['grid', 'detail', 'form'])('the %s face', (face) => {
 
   it("draws a fixed-mode quantity with the standard label and its organization's setting", async () => {
     draw(face, FIXED_QTY, 1234.5, { organization_id: 'org_a' }, unitSource());
-    await waitFor(() => expect(faceText()).toBe('1,235 kg'));
+    await waitFor(() => expect(faceText()).toBe('1,235 kilogram'));
   });
 
   it('draws a deleted (retired) org unit as the bare code, at the field width', async () => {
@@ -107,15 +107,15 @@ describe.each<Face>(['grid', 'detail', 'form'])('the %s face', (face) => {
 
   it("takes the decimal places of the record's own organization's row", async () => {
     draw(face, RECORD_QTY, 1.5, { unit_code: 'GRM', organization_id: 'org_b' }, unitSource());
-    await waitFor(() => expect(faceText()).toBe('2 g'));
+    await waitFor(() => expect(faceText()).toBe('2 gram'));
     cleanup();
     draw(face, RECORD_QTY, 1.5, { unit_code: 'GRM', organization_id: 'org_a' }, unitSource());
-    await waitFor(() => expect(faceText()).toBe('1.500 g'));
+    await waitFor(() => expect(faceText()).toBe('1.500 gram'));
   });
 
   it("never shows more places than the field's scale (L4)", async () => {
     draw(face, { ...RECORD_QTY, scale: 2 }, 1.5, { unit_code: 'GRM', organization_id: 'org_a' }, unitSource());
-    await waitFor(() => expect(faceText()).toBe('1.50 g'));
+    await waitFor(() => expect(faceText()).toBe('1.50 gram'));
   });
 
   it('draws a bare number when the row names no unit', async () => {
@@ -136,10 +136,13 @@ describe('the edited form box', () => {
   });
 });
 
-describe('the per-locale standard label (ADR-0158 L2, 2A)', () => {
-  it("reads the reader's locale", async () => {
+describe('the per-locale standard name (ADR-0158 L2, 2A)', () => {
+  it("reads the name the server serves for the reader's locale (`app.messages.standardUnit<CODE>`)", async () => {
+    // The served translation document lays the platform bundles under `app`,
+    // as the console's loader does (`transformSpecTranslations`).
+    const resources = { zh: { app: { messages: { standardUnitKGM: '千克' } } } };
     render(
-      <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }}>
+      <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false, resources } as never}>
         <SchemaRendererContext.Provider value={{ dataSource: unitSource() } as never}>
           <div data-testid="face">{React.createElement(getCellRenderer('number'), { value: 2, field: FIXED_QTY, dependentValues: { organization_id: 'org_a' } })}</div>
         </SchemaRendererContext.Provider>
@@ -159,7 +162,7 @@ describe('a unit-code field (Open item 8)', () => {
         <div data-testid="b"><Cell value="JIN1" field={CODE} dependentValues={{ organization_id: 'org_a' }} /></div>
       </SchemaRendererContext.Provider>,
     );
-    await waitFor(() => expect(text(screen.getByTestId('a').textContent)).toBe('pc'));
+    await waitFor(() => expect(text(screen.getByTestId('a').textContent)).toBe('piece'));
     expect(text(screen.getByTestId('b').textContent)).toBe('JIN1');
   });
 });

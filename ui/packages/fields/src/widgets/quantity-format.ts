@@ -35,8 +35,8 @@ export interface QuantityDisplay {
   unit?: string;
   /**
    * Whether the stored value has more decimal places than the number shows.
-   * Computed for every quantity; nothing renders from it yet (ADR-0158 Open
-   * item 6's second half decides whether a marker does).
+   * Computed for every quantity; nothing renders from it (ADR-0158 Open item
+   * 6 was ruled A, with no marker).
    */
   hidden: boolean;
 }
@@ -69,12 +69,15 @@ function placesOf(value: number): number {
 /**
  * The fraction-digit bounds a quantity is drawn at, given its display places.
  *
- * ⭐ The rounding rule lives here and nowhere else: ADR-0158 Open item 6's
+ * ⭐ The rounding rule lives here and nowhere else. ADR-0158 Open item 6's
  * second half (what a unit's display default does with a stored value that
- * has more places) is answered by this function. Today it is a fixed width,
- * as a currency amount is drawn at its currency's digits: a unit of 3 places
- * shows 1.5 as `1.500`, and a unit of 0 places shows 1.5 rounded, the way
- * `Intl` rounds.
+ * has more places) was ruled A on objectstack#35490: round at render, half
+ * away from zero, at a fixed width, as a currency amount is drawn at its
+ * currency's digits. A unit of 3 places shows 1.5 as `1.500`, and a unit of
+ * 0 places shows 1.5 as `2`. `Intl.NumberFormat`'s default rounding mode,
+ * `halfExpand`, is that rule. Only the display rounds: the stored value, a
+ * footer's total (summed exact, then formatted), an export, the API and MCP
+ * keep the exact value.
  */
 function quantityFractionDigits(places: number): { minimumFractionDigits: number; maximumFractionDigits: number } {
   return { minimumFractionDigits: places, maximumFractionDigits: places };

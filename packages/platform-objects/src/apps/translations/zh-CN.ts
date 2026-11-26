@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { zhCNObjects } from './zh-CN.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * 简体中文 (zh-CN) — Setup App Translations
  */
 export const zhCN: TranslationData = {
   objects: zhCNObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('zh-CN'),
   apps: {
     account: {
       label: '账户',

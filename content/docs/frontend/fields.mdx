@@ -98,13 +98,15 @@ edited box).
   `unitField` holds; the list, grid and related-list reads fetch that field, and the row's
   `organization_id`, even when no column shows them. A `text` field declaring `unitMode: 'code'` shows the
   code's label.
-- **Which label.** A standard code (`KGM`, `H87`, …) shows the platform's label in the reader's language,
-  from the `units.standard` table of each language pack. An organization's own code shows its `sys_unit`
-  label.
+- **Which label.** A standard code (`KGM`, `H87`, …) shows the platform's name for it in the reader's
+  language, served by the platform's i18n service (`messages.standardUnit<CODE>`), falling back to the
+  English name in `@objectstack/spec` (`STANDARD_UNIT_NAMES`). An organization's own code shows its
+  `sys_unit` label.
 - **How many decimal places.** A standard code takes the organization's `sys_standard_unit_setting` row,
   and an organization code its `sys_unit.decimal_places`, always the row of the record's own
-  organization. The field's `scale` is the ceiling. With no unit setting, the field's own width applies.
-  Nothing is rounded when the record is saved.
+  organization. The field's `scale` is the ceiling. The number is drawn at that fixed width, rounded half
+  away from zero (`1.5` beside a unit of 0 places reads `2`). With no unit setting, the field's own width
+  applies. Only the display rounds: the stored value, totals, exports and the API keep the exact value.
 - **The bare code.** A retired organization unit, or one whose row the reader may not read, shows its code
   with no label.
 

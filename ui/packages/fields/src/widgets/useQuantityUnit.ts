@@ -22,7 +22,7 @@
 
 import { useContext, useEffect, useState } from 'react';
 import { SchemaRendererContext } from '@object-ui/react';
-import { en } from '@object-ui/i18n';
+import { standardUnitName } from '@objectstack/spec/data';
 import {
   quantityUnitCode,
   resolveQuantityUnit,
@@ -83,17 +83,24 @@ export function readUnitCatalog(source: UnitSource): Promise<UnitCatalog> {
 }
 
 /**
- * The platform's label for a standard code in the reader's locale (ADR-0158
- * L2, 2A), or `undefined` for a code with none. One function, so where the
- * per-locale names live can move without any caller changing.
+ * The platform's name for a standard code in the reader's locale (ADR-0158
+ * L2, 2A), or `undefined` for a code that is not one.
+ *
+ * The per-locale names are served by the platform's i18n service: each
+ * platform bundle's `messages.standardUnit<CODE>`, which the console's served
+ * translation document lays under the `app` namespace. Absent a served name
+ * (no provider, or a locale the server does not translate), the English base
+ * name `STANDARD_UNIT_NAMES` in `@objectstack/spec` answers. One function, so
+ * where the names live can move without any caller changing.
  */
 export function useStandardUnitLabel(): (code: string) => string | undefined {
   const { t } = useFieldTranslation();
   return (code: string) => {
-    const base = (en.units.standard as Readonly<Record<string, string>>)[code];
+    const base = standardUnitName(code);
     if (base === undefined) return undefined;
-    const label = t(`units.standard.${code}`, { defaultValue: base });
-    return typeof label === 'string' && label !== '' && label !== `units.standard.${code}` ? label : base;
+    const key = `app.messages.standardUnit${code}`;
+    const served = t(key, { defaultValue: base });
+    return typeof served === 'string' && served !== '' && served !== key ? served : base;
   };
 }
 

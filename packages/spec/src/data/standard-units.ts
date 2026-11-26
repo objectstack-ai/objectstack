@@ -180,6 +180,71 @@ export const STANDARD_UNITS: Readonly<Record<string, StandardUnit>> = Object.fre
 });
 
 /**
+ * The English base name of every standard code (ADR-0158 L2, 2A: "Standard U1
+ * codes get a platform-shipped per-locale label table"), keyed exactly as
+ * {@link STANDARD_UNITS} is. Each locale's name is served by the platform's
+ * i18n service (the platform translation bundles' `messages`, keyed
+ * `units.standard.<CODE>`) and falls back to this name; a reader with no
+ * translation (an export, an MCP tool) names a unit from here. A pin test
+ * holds this table to exactly the keys of {@link STANDARD_UNITS}, so a code
+ * added there without a name here goes red.
+ */
+export const STANDARD_UNIT_NAMES: Readonly<Record<string, string>> = Object.freeze({
+  KGM: 'kilogram',
+  GRM: 'gram',
+  MGM: 'milligram',
+  TNE: 'tonne',
+  LBR: 'pound',
+  ONZ: 'ounce',
+  MTR: 'metre',
+  MMT: 'millimetre',
+  CMT: 'centimetre',
+  KMT: 'kilometre',
+  INH: 'inch',
+  FOT: 'foot',
+  YRD: 'yard',
+  MTK: 'square metre',
+  CMK: 'square centimetre',
+  MMK: 'square millimetre',
+  FTK: 'square foot',
+  MTQ: 'cubic metre',
+  LTR: 'litre',
+  MLT: 'millilitre',
+  GLL: 'US gallon',
+  SEC: 'second',
+  MIN: 'minute',
+  HUR: 'hour',
+  DAY: 'day',
+  WEE: 'week',
+  H87: 'piece',
+  PR: 'pair',
+  DZN: 'dozen',
+  XBG: 'bag',
+  XBE: 'bundle',
+  XBO: 'bottle',
+  XBX: 'box',
+  XCT: 'carton',
+  XCS: 'case',
+  XCR: 'crate',
+  XDR: 'drum',
+  XPK: 'package',
+  XPX: 'pallet',
+  XRO: 'roll',
+  XSA: 'sack',
+});
+
+/**
+ * The English base name of a standard code ({@link STANDARD_UNIT_NAMES}), or
+ * `undefined` for a code that is not one: an own-property lookup in exact
+ * uppercase, as {@link standardUnitOf} reads the table.
+ */
+export function standardUnitName(code: unknown): string | undefined {
+  return typeof code === 'string' && Object.prototype.hasOwnProperty.call(STANDARD_UNIT_NAMES, code)
+    ? STANDARD_UNIT_NAMES[code]
+    : undefined;
+}
+
+/**
  * The ONE membership lookup of the standard unit table (ADR-0158 U1): the
  * entry {@link STANDARD_UNITS} holds for `code` as an OWN property, or
  * `undefined` when it holds none.
