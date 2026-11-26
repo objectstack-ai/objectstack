@@ -23,6 +23,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { toast } from '../../../ui/sonner';
+// The layout renderers reach `@object-ui/react-runtime` through a dynamic import;
+// pay that load during collection, not inside a clocked case (check:test-source-alias).
+import '@object-ui/react-runtime';
 // Registers the renderers at module scope (object-ui/no-dynamic-import-in-test-hook).
 import '../../../renderers';
 
