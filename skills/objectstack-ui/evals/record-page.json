@@ -4,11 +4,12 @@
     {
       "id": 1,
       "prompt": "On the lead record page, put the Tasks tab first, and have that tab list only the open tasks (a task whose `status` is not `done`): our reps want those before anything else when they open a lead. The `task` object already has a `lead` master_detail field, `event` has a `lead` lookup, and leads keep their attachments.",
-      "expected_output": "No page file. The lead's `relatedLists` is its record page's tab list, so it names the lists the page keeps, Tasks first: `relatedLists: ['task', 'event', 'sys_attachment']`. Once declared, only the named lists show: listing the task alone would take the Attachments tab away and leave Events to follow unarranged. Approvals and the activity stream still follow when unlisted, so they need no entry (naming `'sys_approval_request'` and `'sys_activity'` is right too). The request also asks for open tasks only: `relatedListFilter: { status: { $ne: 'done' } }` on the child's `task.lead` field keeps the tab to them. Not a field group naming the task list (that moves the table into the Details, which was not asked), not `inlineEdit`, not a `kind: 'full'` page, and no tabs slot.",
+      "expected_output": "No page file. The lead's `relatedLists` is its record page's tab list, so it names the lists the page keeps, Tasks first: `relatedLists: ['task', 'event', 'sys_attachment']`. Once declared, only the named lists show: listing the task alone would take the Events and Attachments tabs away. Approvals and the activity stream still follow when unlisted, so they need no entry (naming `'sys_approval_request'` and `'sys_activity'` is right too). The request also asks for open tasks only: `relatedListFilter: { status: { $ne: 'done' } }` on the child's `task.lead` field keeps the tab to them. Not a field group naming the task list (that moves the table into the Details, which was not asked), not `inlineEdit`, not a `kind: 'full'` page, and no tabs slot.",
       "files": [],
       "assertions": {
         "must_contain": [
           "relatedLists",
+          "'event'",
           "'sys_attachment'",
           "relatedListFilter"
         ],
