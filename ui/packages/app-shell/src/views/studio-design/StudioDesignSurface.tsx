@@ -63,6 +63,8 @@ import { PACKAGE_LIST_TOAST_ID } from './PackageSwitcher.js';
 import { studioEntryFallbackPath, useStudioEntryPermissions } from './studioEntryPermissions.js';
 import { SETUP_PACKAGES_PATH } from '../metadata-admin/packageSource.js';
 import { StudioBackToApp, type StudioAppTarget } from './StudioBackToApp.js';
+import { StudioPackageMenu } from './StudioPackageMenu.js';
+import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { type NewFlowTrigger } from './AutomationsFlowRail.js';
 import {
   CreateTakenNotice,
@@ -943,6 +945,20 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // Setup → Packages for a principal who may open it, the "All metadata" area
   // for a Studio-only author (the same choice as Studio's entry).
   const notFoundExit = studioEntryFallbackPath(useStudioEntryPermissions());
+  // objectstack#37139 — the package's 「⋯」 menu (`StudioPackageMenu`) is a
+  // manage_metadata holder's. A revert or an adoption changes what the package
+  // holds: the pillars re-read their baseline, the pending count re-reads (the
+  // nonce's effect above), and the other surfaces hear of it. Saved package
+  // info renames the bar's package name in place.
+  const canAuthorPackage = useCanAuthorMetadata();
+  const onPackageChanged = React.useCallback(() => {
+    setPublishNonce((n) => n + 1);
+    emitMetadataRefresh();
+  }, []);
+  const onPackageRenamed = React.useCallback(
+    (name: string) => setPkgEntry((prev) => (prev && prev.id === packageId ? { ...prev, name } : prev)),
+    [packageId],
+  );
   React.useEffect(() => {
     openAccessRef.current = () => {
       if (confirmLeavePillar()) shellNavigate(studioPillarPath(scopeSegment, 'access', { segmentEncoding: 'verbatim' }));
@@ -1412,6 +1428,23 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 locale={locale}
                 beforeNavigate={confirmLeavePillar}
                 navigate={shellNavigate}
+                // objectstack#37139 — the package's 「⋯」 menu: a current package
+                // (never `~org` or `~all`) that is there, and a manage_metadata holder.
+                menu={
+                  packageId !== null && !pkgMissing && canAuthorPackage ? (
+                    <StudioPackageMenu
+                      packageId={packageId}
+                      packageName={pkgEntry?.id === packageId ? pkgEntry.name : packageId}
+                      writable={pkgWritable}
+                      pendingCount={shownPendingCount}
+                      locale={locale}
+                      onChanged={onPackageChanged}
+                      onRenamed={onPackageRenamed}
+                      beforeNavigate={confirmLeavePillar}
+                      navigate={shellNavigate}
+                    />
+                  ) : null
+                }
               />
             </div>
 

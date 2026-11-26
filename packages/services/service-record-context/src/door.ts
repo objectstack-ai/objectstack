@@ -47,16 +47,36 @@ export interface RecordContextDoor {
   listContextPacks(): Promise<readonly unknown[]>;
   /** The record, read as the caller; `null` (or a throw) when the caller cannot read it. */
   get(objectName: string, id: string): Promise<unknown>;
-  /** A list read as the caller, `query_records`' read (with its one-level `expand`). */
+  /**
+   * A list read as the caller, `query_records`' read (with its one-level
+   * `expand`). A related list with a `where` is read with the link filter and
+   * that `where` joined under `$and`, and with its `orderBy` (ADR-0160 D3,
+   * second amendment): still one query.
+   */
   query(
     objectName: string,
-    opts: { where: Record<string, unknown>; fields?: string[]; limit?: number; expand?: string[] },
+    opts: {
+      where: Record<string, unknown>;
+      fields?: string[];
+      limit?: number;
+      expand?: string[];
+      orderBy?: Array<{ field: string; order: 'asc' | 'desc' }>;
+    },
   ): Promise<unknown>;
   /**
    * [#35137] The served-schema field names and the readable ones, both asked
    * as the caller. OPTIONAL: absent, or `undefined`, names no withheld field.
    */
   fieldVisibilityOf?(objectName: string): Promise<{ served: readonly string[]; readable: readonly string[] } | undefined>;
+  /**
+   * [ADR-0160 D3, second amendment] The fields the caller may QUERY ON in
+   * `objectName` — filter or sort by — the security service's
+   * `getQueryableFields` for the caller. OPTIONAL: absent, or `undefined`,
+   * the executor takes that contract's fallback (a field that declares a
+   * `maskingRule` is never queryable, and neither is one the caller's served
+   * schema hides or field-level security withholds).
+   */
+  queryableFieldsOf?(objectName: string): Promise<readonly string[] | undefined>;
   /**
    * [ADR-0090 D10] Whether a read on `objectName` is narrowed by the agent
    * ceiling, with the security service's sentence. OPTIONAL: a door with no

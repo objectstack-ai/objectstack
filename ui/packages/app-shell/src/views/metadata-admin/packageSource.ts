@@ -211,3 +211,20 @@ export const SETUP_PACKAGES_PATH = `${packagesHref('/apps/setup')}?${PACKAGES_FA
  * 「Add app」 menu). The create lands in Studio on the new package.
  */
 export const SETUP_NEW_PACKAGE_PATH = `${SETUP_PACKAGES_PATH}&${PACKAGES_NEW_PARAM}=${PACKAGES_NEW_PACKAGE_VALUE}`;
+
+/**
+ * The administration face opened on one package's row (objectstack#37139):
+ * `?package=ID` opens that package's detail sheet once the list has loaded,
+ * read once and dropped from the address like {@link PACKAGES_NEW_PARAM}.
+ * Page-local, like {@link PACKAGES_SOURCE_PARAM}.
+ */
+export const PACKAGES_PACKAGE_PARAM = 'package';
+
+/**
+ * Setup → Packages on one package's row (objectstack#37139): Studio's package
+ * menu's 「Manage in Setup…」, where the package is enabled, disabled or
+ * deleted.
+ */
+export function setupPackagePath(packageId: string): string {
+  return `${SETUP_PACKAGES_PATH}&${PACKAGES_PACKAGE_PARAM}=${encodeURIComponent(packageId)}`;
+}

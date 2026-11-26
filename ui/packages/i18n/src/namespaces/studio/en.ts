@@ -3550,7 +3550,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.menu.noMatches': 'Nothing in the menu matches.',
   'engine.studio.menu.expand': 'Show the menu',
   'engine.studio.menu.collapse': 'Hide the menu',
-  'engine.studio.menu.typeCount': '{count} types',
   'engine.studio.menu.itemCount': '{count} items',
   'engine.studio.menu.orgFlows': 'Organization flows',
   'engine.studio.menu.owd': 'Default sharing',
@@ -3559,6 +3558,8 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#37201 — the 「高级」 fold (ADR-0084, amended 2026-11-25), and a 常用 type with no item yet.
   'engine.studio.menu.advanced': 'Advanced',
   'engine.studio.menu.emptyType': 'None yet: open the list to make the first',
+  // objectstack#37360 — the fold's last row, under no group (ADR-0084, amended 2026-11-25).
+  'engine.studio.menu.allTypes': 'All types',
   // objectstack#36502 — the notice on a retired Interfaces link's landing.
   'engine.studio.interfacesRetired.sentence': 'Interface edits have moved into the app.',
   'engine.studio.interfacesRetired.backToApp': 'Back to the app',
@@ -3571,6 +3572,18 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.backToAppTitle': 'Leave Studio and go back to {app}',
   'engine.studio.backToAppTitleNoApp': 'Leave Studio and go back to your apps',
   'engine.studio.mark': 'Studio',
+  // objectstack#37139 — the 「⋯」 package menu beside the app or package name:
+  // the development face's whole-package actions, for a manage_metadata holder.
+  'engine.studio.packageMenu.trigger': 'Package actions',
+  'engine.studio.packageMenu.editInfo': 'Edit package info',
+  'engine.studio.packageMenu.duplicate': 'Duplicate as a new package',
+  'engine.studio.packageMenu.revert': 'Revert to last publish',
+  'engine.studio.packageMenu.manageInSetup': 'Manage in Setup…',
+  'engine.studio.packageMenu.noChanges': 'Nothing has changed since the last publish.',
+  'engine.studio.packageMenu.duplicateTitle': 'Duplicate “{name}” as a new package',
+  'engine.studio.packageMenu.duplicateDescription': 'The copy is a new package you can change on its own. Its objects are renamed to the new package’s namespace.',
+  'engine.studio.packageMenu.revertTitle': 'Revert “{name}” to its last publish?',
+  'engine.studio.packageMenu.revertDescription': 'Every change made since the last publish is discarded, and the package goes back to its last published version. Discarded changes cannot be recovered.',
   'engine.studio.publishTitle': 'Review and publish every pending draft in this package together',
   'engine.studio.publishNoneTitle': 'No drafts pending publish',
   'engine.studio.publishedAll': 'Published all drafts in this package',
@@ -3651,27 +3664,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.org.description': 'The organization’s own flows that belong to no package, such as a clone of a packaged flow. They open editable.',
   // ADR-0146 D11 — no link out: no Setup page copies a flow into this scope any more.
   'engine.studio.org.none': 'No flows outside a package. To change a packaged flow, open its package and use New similar.',
-  // objectstack#36748 — the new-app step of the package dialog (`newAppDoor.ts`).
-  // The Studio home's app-worded dialog was removed (objectstack#36908); the
-  // create-package dialog's 「同时创建应用」 (objectstack#37134) runs the step
-  // and reads `nameTaken` and `appFailed`. The app-worded rows have no reader
-  // since; they stay as released rows.
-  'engine.studio.newApp.title': 'New app',
-  'engine.studio.newApp.description': 'Give your app a name; everything else is filled in for you. It opens as soon as it is created.',
-  'engine.studio.newApp.advancedHint': 'App ID, namespace, version and type, filled in from the name.',
-  'engine.studio.newApp.id': 'App ID',
-  'engine.studio.newApp.help.id': 'The app’s unique ID, in reverse-domain form. It is also the app’s address.',
-  'engine.studio.newApp.help.name': 'The app’s name, as people see it.',
-  'engine.studio.newApp.help.description': 'What the app is for.',
-  'engine.studio.newApp.help.namespace': 'A short identifier that starts the name of every object in this app (e.g. “todo” → “todo_task”, “todo_project”).',
-  'engine.studio.newApp.help.version': 'The app’s version (semantic versioning).',
-  'engine.studio.newApp.help.type': 'The app’s kind.',
-  'engine.studio.newApp.help.defaultDatasource': 'Where every object in this app stores its data by default.',
-  'engine.studio.newApp.help.dependencies': 'Other apps or modules this app builds on.',
-  'engine.studio.newApp.nsDerived': 'Filled in from the app ID until you edit it.',
-  'engine.studio.newApp.created': 'Created app “{name}”.',
-  'engine.studio.newApp.exists': 'An app with the same ID already exists.',
-  'engine.studio.newApp.failed': 'Could not create the app',
+  // objectstack#36748 — the new-app step of the package dialog (`newAppDoor.ts`),
+  // run by the create-package dialog's 「同时创建应用」 (objectstack#37134).
   'engine.studio.newApp.nameTaken': 'The app “{label}” already uses the identifier “{name}”. Change the namespace under Advanced.',
   'engine.studio.newApp.appFailed': '“{name}” was created, but its app could not go live: {reason}. Use Create app in the Studio top bar to try again.',
   // objectstack#28561 — assignments are Setup's (ADR-0146 D7): the area links
@@ -3989,6 +3983,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.directory.invalidTooltip': '{count} invalid item(s) — click to fix',
   'engine.directory.warnTooltip': '{count} item(s) with warnings',
   'engine.directory.itemCountTooltip': '{count} item(s) of this type',
+  // objectstack#37360 — a type the package holds no item of yet, listed under 全部类型 All types.
+  'engine.directory.notHeld': 'None yet',
+  'engine.directory.notHeldTitle': 'This package holds none yet: open the list to make the first',
+  'engine.directory.notHeldReadOnlyTitle': 'This package holds none, and none can be made here',
   // objectstack ADR-0146 D3 (#28568) — the customization marks, counts and
   // filter of the All metadata area, from a base's customization read.
   'engine.customizationMark.customized': 'Customized ({baseName})',

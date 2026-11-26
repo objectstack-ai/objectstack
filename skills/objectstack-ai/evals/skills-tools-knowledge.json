@@ -84,11 +84,21 @@
     {
       "id": 9,
       "prompt": "Index our `policy_doc` records (`title`, `body`) for the assistant with the in-memory adapter. Each body is a long Markdown handbook with headings; answers should cite one section, at most 600 characters, and neighbouring passages should overlap by 100 characters.",
-      "expected_output": "Emits a `KnowledgeSourceSchema.parse({...})` record with `adapter: 'memory'` (the adapter that takes the service's passages) and `source: { kind: 'object', object: 'policy_doc', contentFields: ['title', 'body'], split: { strategy: 'markdown', maxChars: 600 } }`: one section per heading, each passage embedded with its heading path, 600 characters at most unless the embedder's input limit is lower. Declines the overlap: passages never overlap, and the `knowledge.chunk_overlap` setting is retired (a write naming it is refused `400 UNKNOWN_KEY`), so it writes no overlap key and no `chunkSize`.",
+      "expected_output": "Emits a `KnowledgeSourceSchema.parse({...})` record with `adapter: 'memory'` (the adapter that takes the service's passages) and `source: { kind: 'object', object: 'policy_doc', contentFields: ['title', 'body'], split: { strategy: 'markdown', maxChars: 600 } }`: one section per heading, each passage embedded with its heading path, 600 characters at most unless the embedder's input limit is lower. Declines the overlap: passages never overlap, and the `knowledge.chunk_overlap` setting is retired (a write naming it is refused `400 UNKNOWN_KEY`), so it writes no overlap key and no chunk-size key.",
       "files": [],
       "assertions": {
         "must_contain": ["split", "strategy", "markdown", "maxChars"],
         "must_not_contain": ["chunkSize", "chunkOverlap", "overlap: 100"]
+      }
+    },
+    {
+      "id": 10,
+      "prompt": "Add an Ask AI button to the contract record page, so a user can ask the assistant about the contract they are looking at. Write the action.",
+      "expected_output": "Emits a `defineAction` with `type: 'ask_ai'`, `objectName: 'contract'` and `locations: ['record_header']` (or `['record_more']`), with no `target` and no `ai.exposed: true`: the action pins the assistant's conversation to the record and opens it, sending no message. States that it is never a tool (`list_actions` skips it, `run_action` refuses it, no `action_` tool exists for it) and that the console draws it only where the in-app assistant is on and honours a conversation focus; elsewhere it is absent, not disabled.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["ask_ai", "record_header", "locations"],
+        "must_not_contain": ["target:"]
       }
     }
   ]

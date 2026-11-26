@@ -183,7 +183,11 @@ describe('the directory under the area (objectstack#28561)', () => {
     const kernel: MetadataAreaHost = { packageId: PLATFORM, readOnly: true, basePath: `/studio/${PLATFORM}/metadata` };
     mount(kernel, `/studio/${PLATFORM}/metadata?package=${PLATFORM}`, <MetadataDirectoryPage />);
     // Setup would repair this URL onto a project package; the area keeps its own.
-    expect(await screen.findByText(t('engine.directory.noMatches', 'en-US'))).toBeInTheDocument();
+    // objectstack#37360 — rewritten on purpose: the kernel package holds none of these types, so the
+    // directory lists each as one it holds none of yet (全部类型 All types), scoped to the kernel package.
+    // It read "No matches".
+    expect((await tile('flow')).getAttribute('href')).toBe(`/studio/${PLATFORM}/metadata/flow?package=${PLATFORM}`);
+    expect(screen.getByTestId('directory-tile-not-held-flow')).toBeInTheDocument();
     expect(where()).toBe(`/studio/${PLATFORM}/metadata?package=${PLATFORM}`);
   });
 
