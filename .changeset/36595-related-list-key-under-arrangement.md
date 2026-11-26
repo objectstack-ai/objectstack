@@ -1,5 +1,6 @@
 ---
 '@objectstack/lint': minor
+'@objectstack/spec': patch
 ---
 
 fix(lint)!: a `_relatedLists` translation key over a list the `.custom` arrangement hides or re-states without a label is refused, as nothing reads it
