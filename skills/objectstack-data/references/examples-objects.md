@@ -1,4 +1,28 @@
-# Data — object authoring examples (moved verbatim from SKILL.md)
+# Data — object keys, examples, search, extensions
+
+## Object keys
+
+Beyond `SKILL.md` § Object Definition. Every key, `enable` flag
+(`ObjectCapabilities`) and default: `data/object.zod.ts`
+([_index.md](./_index.md)). The ones to get right:
+
+| Property | Default | Description |
+|:--|:--|:--|
+| `color` | `gray` | Tile colour behind the white `icon`: `gray` `blue` `teal` `green` `amber` `orange` `red` `pink` `purple` (no hex). Group the app's objects into a few business families, one name each, as the platform's own objects do: people `blue`, security `purple`, approvals and work `orange`, messaging `pink`, integrations `teal`, reference data and finance `green`, audit and settings `amber`. `red` only for an alert object; one nobody opens gets none |
+| `highlightFields` | derived | Ordered field keys used as a record's compact face: the columns a **related list** renders on the parent's detail page, and what a lookup picker shows. Declare it on the CHILD object (see [Relationships](../rules/relationships.md)) |
+| `nameField` | derived (e.g. `'name'`/`'title'`) | Record-title field: the stored field used as the record's display name. Use a single text/email field; a composite title to import, sort or search by is a stored computed field (a non-`formula` field with an `expression`); a text formula is display-only |
+| `ownership` | `'user'` | Whether `owner_id` exists at all, a different axis from `sharingModel` |
+
+### Object Capabilities (`enable`)
+
+| Flag | Default | Purpose |
+|:--|:--|:--|
+| `fieldHistory` | on | A changed field's old → new values on the activity timeline, served per the reader's field read rule. `false`: off for the object. A field opts out with its own `fieldHistory: false`; a media or structured field (`json`, `address`, `code`…) shows values only with `true`, a credential never. `sys_audit_log` keeps its own grant |
+| `trackHistory` | `false` | Ledger view on the record page and the `history` API verb; not the values switch |
+| `apiMethods` | all | Whitelist over the six primitives (`get`, `list`, `create`, `update`, `delete`, `bulk`); derived verbs (search/export/upsert/…) follow automatically |
+| `feeds` | `true` | Feed, comments, mentions; `false` hides the feed UI and rejects new comments |
+| `activities` | `true` | Activity timeline (`sys_activity` mirror of CRUD); `false` stops mirroring and hides the timeline |
+| `aiReadable` | — | Platform `sys_*` objects only; on an app object, `false` included, refused at parse |
 
 ## Field Groups (MVP)
 
@@ -190,3 +214,91 @@ agents, tools, skills, reports, email-templates). Enforcement: `PUT`/`DELETE` on
 `/api/v1/meta/:type/:name` return `403 item_locked`, and an artifact lock
 overrides a package lock. Default to **no** `protection` block for
 tenant-authored metadata.
+
+## Search Fields (`searchableFields`)
+
+`searchableFields` on the object is the canonical set `$search` scans.
+Leave it unset and search auto-defaults to the `nameField` plus the object's
+short-text and enum columns (`text` / `email` / `phone` / `url` / `autonumber` /
+`textarea` / `markdown` / `select`) plus every field marked `searchable: true`,
+of any type except `secret` / `password` / `vector` or a virtual `formula`. `searchable: false`, the
+default, never removes a field the type default scans; declare
+`searchableFields` to choose the set. Views may narrow it, never widen it.
+
+### ⛔ Searching by a related record's title — mirror the value, always
+
+`$search` scans **the queried object's own columns**. A dotted path is never a
+search target: unlike `fields` / `sort` / `filters`, the search axis does not
+resolve traversal, and `project_id.name` in `searchableFields` (or in a
+`$searchFields` override) is **refused** (`os validate`
+`searchable-field-unknown`; a request, `400 INVALID_FIELD`).
+
+**The one prescription** (`SKILL.md` trap 2), for a task list searched by project name:
+
+```typescript
+{
+  name: 'task',
+  enable: { searchable: true },
+  fields: {
+    name:         { type: 'text', required: true },
+    project_id:   { type: 'lookup', reference: 'project' },
+    project_name: { type: 'text', label: 'Project Name' },
+  },
+  searchableFields: ['name', 'project_name'],
+}
+```
+
+`?search=apollo` expands to `name $contains 'apollo' OR project_name $contains
+'apollo'` — one single-table scan, every driver.
+
+❌ **Never mirror onto a `formula` field.** It is *virtual* (no column to scan)
+and CEL reads only this record's own fields, so it cannot hold the related title;
+a `formula` entry in any `searchableFields` is refused — `os validate`
+`searchable-field-unsearchable`, a request `400 INVALID_FIELD`.
+
+**Mirror maintenance is the trade-off.** Cover both paths: a `beforeInsert` / `beforeUpdate` hook on `task`
+stamps `project_name` from the incoming `project_id`'s parent; an `afterUpdate`
+hook on `project` re-stamps its tasks when it is renamed. Rows written past the hooks (bulk import, direct SQL) need a
+one-off backfill. See [Lifecycle Hooks](./data-hooks.md).
+
+## Object Extension Model
+
+To add fields/validations/indexes to an object you do not own, author
+`defineObjectExtension({ extend, fields, fieldPatches, place, priority })` and register it on
+`defineStack({ objectExtensions: [...] })`. `priority` sets merge order (default
+`200`, `0–999`); an extension adds, never removes, except that a new
+`label` without `pluralLabel` clears the base plural unless a tenant authored it (set both). ⛔ `extend`
+is not object-level `ownership` (`'user' | 'business_unit' | 'org' | 'none'`).
+
+`place: [{ field: 'tax_id', group: 'basic', after: 'industry' }, { list: 'acme_contract', after: 'crm_opportunity' }]`
+puts the extension's own fields, groups (`{ group: { key, label }, after }`) and child lists
+after (or `before`) a named item, where the target declares `fieldGroups` / `relatedLists`.
+
+**A `fieldPatches` patch** (`SKILL.md` trap 3) carries display keys only:
+`label`, `description`, `inlineHelpText`,
+`placeholder`, and an option's `label` keyed by its stored `value`; the type,
+values and rules stay the owner's. A key the tenant edited keeps the tenant's
+text; between two extensions the higher `priority` wins. A patch naming a field
+or option value the target lacks is refused at install and by `os validate`, and
+a `picklist`-bound field's options are never patchable. Example:
+`defineObjectExtension({ extend: 'crm_account', fieldPatches: { industry: { label: 'Sector' }, type: { options: { customer: { label: 'Client' } } } } })`.
+Translate patched text in the patching package's `translations`, under the
+owner's keys (`objects.crm_account.fields.industry.label`, `.help`,
+`.options.<value>`): the owner's translation of the replaced text never applies, a
+pair `.custom` translation comes first on `/meta`, and an untranslated locale
+serves the patch text.
+
+**An object an installed package ships** is extended from the
+base's paired `.custom` package (`hotcrm.custom`; **objectstack-platform**
+§ Customizing an installed package), never replaced: it takes no `overrides`
+declaration. Every field the pair adds ends in `__c` (`region__c`). The suffix is
+reserved to the pair, so a `__c` field in any other package, or an unsuffixed
+field in a `.custom` extension, is refused at save, publish and install and by
+`os validate` / `os build`.
+Only the pair's extension may also write `fieldGroups` and `relatedLists`, shaped
+as on an object. A written key replaces that arrangement whole (the owner's and
+every `place`): an unlisted field shows after the last group, an unnamed tab
+still shows after the listed ones, and `{ list: 'crm_note', hidden: true }` hides
+a tab. Outside a `.custom` package both keys are refused at those doors: use `place`.
+Studio's **Add field** on a base object writes the same extension, as an
+`object_extension` item of the pair.

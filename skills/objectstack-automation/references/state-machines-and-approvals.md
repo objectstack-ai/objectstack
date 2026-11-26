@@ -229,7 +229,7 @@ an id that does not exist gets.
 | `expression` | A **CEL expression** resolved at node entry (`value` = the expression string) — see **Dynamic approvers** below. The optional `resolveAs: 'user'(default) \| 'department' \| 'position' \| 'team'` re-expands each resolved id through the graph |
 
 **A packaged flow's `queue` approver** (ADR-0150 D3) resolves `value` as a
-packaged assignment rule does (SKILL.md § Assignment rules), from the package
+packaged assignment rule does (examples-flows.md § Assignment rules), from the package
 whose flow body runs; a disabled package holds none. `acme.deals` naming
 `acme.crm`'s `crm_finance` declares `dependencies: { 'acme.crm': '^1.0.0' }`.
 Refused (`outside-closure`, `ambiguous-in-closure`), the node opens no request:

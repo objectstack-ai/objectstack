@@ -171,7 +171,7 @@ rowLevelSecurity: [
   a parent's owner, parent optional → an optional master (relationships.md);
   one record, once → a sharing rule or a manual share; a team's records → a
   sharing rule whose `sharedWith: { type: 'queue', value: '<queue name>' }`
-  reaches an ownership queue's members (SKILL.md § Ownership queues).
+  reaches an ownership queue's members (§ Ownership queues below).
 - A package's rule reads `value` as its package's queue, else the one
   holder in its declared `dependencies` closure plus `sys`, else (none
   declares it) an org's `sys_queue` row. Else it grants no one new, warned
@@ -190,7 +190,7 @@ rowLevelSecurity: [
   in its declared `dependencies` closure plus `sys`; else it is refused. It
   still loads; the boot's catalog reference report logs each refusal with every
   candidate, and the position grants nothing through that name (its other sets
-  still do). `outside-closure` / `ambiguous-in-closure` as for a queue above
+  still do). The two closure refusals are as for a queue above
   (the environment: a set authored in Setup; a second package shipping a name
   is refused at install). Fix: declare the dependency. Stored grants,
   environment-authored positions, admin overlays of a package position and the
@@ -345,3 +345,42 @@ references by table (sharing, queue and share recipients, pending approvers,
 invitations) for an admin. Not carried (warned): an old name still a position anywhere,
 claimed twice, recorded under another owner (a package or the environment),
 switched off, or a disabled claimant.
+
+## Access depth — `readScope` / `writeScope`
+
+Beyond `SKILL.md` § Access depth: a scope
+widens the owner match declaratively instead of a hand-written RLS policy
+(ADR-0057 D1): it resolves at request time into an `owner_id IN (…)` set and
+AND-injects like RLS. Open-core boundary ADR-0016: the plugin goes in
+`plugins[]`, and `defineStack` errors unless the stack declares
+`requires: ['hierarchy-security']`. The CLI only advises on a
+missing or unwired plugin: `os validate` warns, `os verify --json` lists it in
+`capabilities`.
+
+## Ownership queues — park a record for a team to claim
+
+Every `ownership: 'user'` object carries a platform-injected `queue` column
+beside `owner_id` (an object declaring its own `queue` field is refused). A
+record **sits in** a queue when `owner_id` is empty and `queue` names it: the
+queue's members read and edit it (rows widen, verbs never — no delete). Declare
+the queue on the stack; a declared queue's members are positions only, an
+organization adds users and teams through `sys_queue_member` rows:
+
+<!-- os:check -->
+```typescript
+import { defineQueue } from '@objectstack/spec/security';
+
+export const supportIntake = defineQueue({
+  name: 'crm_support_intake',   // the one name the `queue` column, a rule, an approver and a sharing recipient use
+  label: 'Support Intake',
+  members: [{ type: 'position', value: 'crm_service_agent' }],
+});
+// defineStack({ queues: [supportIntake], assignmentRules: [...] }) — routing rows in: objectstack-automation
+```
+
+**Claim** is an ordinary by-id update, `{ owner_id: <your id> }`, admitted to a
+member while the record is unowned; one writer wins, the other gets `409
+CONCURRENT_UPDATE`. **Release**: the owner writes `owner_id: null` and the record
+sits in its home queue again. **Move**: writing another `queue` is a transfer
+(`allowTransfer` or `modifyAllRecords`). ⛔ Never a per-record `assigned_to`
+picklist, a round-robin counter field, or a hook that picks an owner.

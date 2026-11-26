@@ -48,8 +48,7 @@ exemption, so a row that already violates the rule is refused on any edit until
 a repairing write lands (frozen, not bricked). A condition that must hold only
 from a transition onward is not this tool: use `requiredWhen` or a field bound
 (`min` / `max` / `minLength` / `maxLength`), which judge the write, not the
-stored row (see **Choose by intent — invariant or transition gate** in
-`SKILL.md`).
+stored row (`SKILL.md` § Conditional Field Rules).
 
 <!-- os:check -->
 ```typescript
@@ -103,7 +102,8 @@ driver layer. See [indexing.md](./indexing.md) for index options.
 A `validations[]` entry. `initialStates` holds the one state a record may be
 CREATED in; publish refuses a machine without it
 (`state-machine-no-initial-states`) unless it is update-only
-(`events: ['update']`). `[]` marks a terminal state:
+(`events: ['update']`). `[]` marks a terminal state; `transitions` keys and
+values are option `value`s, never labels:
 
 ```json
 {
@@ -327,3 +327,66 @@ priority: 1000   // User validations (run last)
   events: ['update'],  // ✅ Only validate on update
 }
 ```
+
+## Conditional Field Rules
+
+A rule that belongs to the data model goes on the **field definition** and
+applies everywhere the field is edited:
+New and Edit, named and public forms, inline master-detail grids, API writes.
+
+<!-- os:check -->
+```typescript
+import { P } from '@objectstack/spec';
+import { ObjectSchema, Field } from '@objectstack/spec/data';
+
+export const Invoice = ObjectSchema.create({
+  name: 'invoice',
+  sharingModel: 'public_read_write',
+  fields: {
+    status: Field.select({
+      options: [
+        { label: 'Draft', value: 'draft' },
+        { label: 'Sent', value: 'sent' },
+        { label: 'Paid', value: 'paid' },
+        { label: 'Void', value: 'void' },
+      ],
+    }),
+    paid_at: Field.datetime({
+      visibleWhen: P`record.status == 'paid'`,
+      requiredWhen: P`record.status == 'paid'`,
+    }),
+    locked_total: Field.currency({
+      readonlyWhen: P`record.status == 'paid'`,
+    }),
+  },
+});
+```
+
+- `showOnCreate: false` keeps a field off every create surface; edit, the
+  record page and lists keep it. Refused beside `required: true`.
+- Use `readonlyWhen` for state-locked fields; the ObjectQL write path ignores
+  incoming changes when the predicate is `TRUE` (for everyone; per permission
+  set → field permission `when`, rules/security.md).
+- **`readonly: true` governs the end-user surface, not trusted system writers.**
+  A stripped write (REST/UI, and any `runAs:'user'` flow) reports success.
+  Imports and migrations are system-context writes too. Keep the field `readonly` when automation maintains it; the flow
+  side: [objectstack-automation → Failure routing & `runAs`](../../objectstack-automation/SKILL.md#failure-routing--runas).
+- Use `requiredWhen` for conditional requiredness; the ObjectQL validator
+  enforces it on submit. The removed `conditionalRequired` alias is a parse
+  error.
+- **Choose by intent — invariant or transition gate**
+  ([Script Validation](#script-validation), Tool choice). "Required when X"
+  reads like an invariant and is not one; an invariant written as a gate never
+  enforces itself.
+- For inline `master_detail` grids, predicates are evaluated row-by-row against
+  the child row's `record`, so line-item rules should live on child fields.
+- For complex predicates, load **objectstack-formula** and emit CEL via
+  `P\`...\``; do not use Salesforce-style `AND`, `IN (...)`, or `{field}`
+  syntax.
+
+`os validate` catches a bare field ref (`done` for `record.done`) in any of
+these predicates. Unchecked, it faults at run time: an `error` validation rule
+or `requiredWhen` refuses the write naming it, an option `visibleWhen` only a
+write picking the option (forms still offer it); a `readonlyWhen` field stays
+editable and the save succeeds without its change (logged); a formula reads
+`null` (logged).
