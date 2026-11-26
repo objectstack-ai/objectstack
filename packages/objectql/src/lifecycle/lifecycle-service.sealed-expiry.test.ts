@@ -183,7 +183,7 @@ describe('LifecycleService — a sealed object expires only through the sealed e
   it('a run a reap guard vetoes in part is not completed: its rows that went stay gone, its checkpoints stay for the next sweep', async () => {
     const { engine, deletes } = engineOver([RETAINED], { rows: [{ id: 'r1' }, { id: 'r2' }, { id: 'r3' }] });
     const svc = service(engine);
-    svc.registerReapGuard('app_ledger', async (_o, rows) => rows.map((r) => r.id).filter((id) => id !== 'r2'));
+    svc.registerReapGuard('app_ledger', async (_o, rows) => rows.map((r) => r.id as string).filter((id) => id !== 'r2'));
     const { expiry, completed } = expiryOf([
       { chain: 'org:a', rowIds: ['r1', 'r2'] },
       { chain: 'org:b', rowIds: ['r3'] },

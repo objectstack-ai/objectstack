@@ -457,7 +457,8 @@ for (const cell of DIALECT_CELLS) {
     }, cell.timeout);
 
     it('audit-metadata-bodies --apply still redacts the cleartext copy (the control)', async () => {
-      const { payload } = await runJson(auditBodies, ['--apply', '--yes', '--database-url', fixture!.databaseUrl]);
+      // [#31908] sys_audit_log is sealed by default, and SQLite offers no session lock: --sealer-stopped (ADR-0154 D3 amended, B).
+      const { payload } = await runJson(auditBodies, ['--apply', '--yes', '--sealer-stopped', '--database-url', fixture!.databaseUrl]);
 
       expect(payload.apply).toBe(true);
       expect(payload.report.byObject.sys_audit_log.rewritten).toBe(1);
