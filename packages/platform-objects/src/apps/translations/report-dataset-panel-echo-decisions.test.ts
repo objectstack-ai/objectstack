@@ -85,7 +85,7 @@ const DECISIONS: readonly Decision[] = [
     prop: 'label',
     en: 'Data Source',
     verdict: ALL_TRANSLATE,
-    reason: `${SIBLING_PRECEDENT} Precedent: report.fields['blocks.dataset']. ⚠️ #36838 renamed this \`en\` label from "Dataset" to "Data Source", the title the blocks grid already gives the same key, so one form names it once. Re-read against the new English: each translated value is still byte-identical to its blocks twin, whose \`en\` is now the same string, so top level and blocks keep reading one word per locale. Those words carry the older dataset vocabulary at both positions; moving them to the business wording is a translator pass over both positions together, not this rename.`,
+    reason: `${SIBLING_PRECEDENT} Precedent: report.fields['blocks.dataset']. ⚠️ #36838 renamed this \`en\` label from "Dataset" to "Data Source", the title the blocks grid already gives the same key, so one form names it once. Re-read against the new English: each translated value is still byte-identical to its blocks twin, whose \`en\` is now the same string, so top level and blocks keep reading one word per locale. #36836 then moved both positions together to the business wording: 数据来源 / データソース / Fuente de datos — the zh word the console overlay already renders, and the ja and es words this catalog already spends on the data source in the report's own dateRange.dimension hint.`,
   },
   {
     type: 'report',
@@ -94,7 +94,7 @@ const DECISIONS: readonly Decision[] = [
     en: 'The report reads its numbers from here; everyone sees only the records they have access to.',
     verdict: ALL_TRANSLATE,
     reason:
-      'Prose, not a term of art, and it was a byte copy in all three locales while the sibling helpTexts on the same panel (type, columns, order, chart) were authored. A fill. ⚠️ #36447 reworded this `en` source into business terms (from "Dataset to bind (measures/dimensions come from its semantic layer)"); the zh-CN / ja-JP / es-ES verdicts and values above were taken against the OLD English and were not re-judged.',
+      'Prose, not a term of art, and it was a byte copy in all three locales while the sibling helpTexts on the same panel (type, columns, order, chart) were authored. A fill. ⚠️ #36447 reworded this `en` source into business terms (from "Dataset to bind (measures/dimensions come from its semantic layer)"); #36836 re-translated all three values from the new English (zh-CN copied from the console overlay, which already carried it).',
   },
   {
     type: 'report',
@@ -102,7 +102,7 @@ const DECISIONS: readonly Decision[] = [
     prop: 'label',
     en: 'Metrics',
     verdict: ALL_TRANSLATE,
-    reason: `${SIBLING_PRECEDENT} Precedent: report.fields['blocks.values']. ⚠️ #36838 renamed this \`en\` label from "Values" to "Metrics", the title the blocks grid already gives the same key, so one form names it once. Re-read against the new English: each translated value is still byte-identical to its blocks twin, whose \`en\` is now the same string, so top level and blocks keep reading one word per locale. Those words carry the older dataset vocabulary at both positions; moving them to the business wording is a translator pass over both positions together, not this rename.`,
+    reason: `${SIBLING_PRECEDENT} Precedent: report.fields['blocks.values']. ⚠️ #36838 renamed this \`en\` label from "Values" to "Metrics", the title the blocks grid already gives the same key, so one form names it once. Re-read against the new English: each translated value is still byte-identical to its blocks twin, whose \`en\` is now the same string, so top level and blocks keep reading one word per locale. #36836 then moved both positions together to the business wording: 指标 / 指標 / Métricas, the zh word the console overlay already renders.`,
   },
   {
     type: 'report',
@@ -111,7 +111,7 @@ const DECISIONS: readonly Decision[] = [
     en: 'The metrics to show, such as totals, counts, averages or ratios (from the data source).',
     verdict: ALL_TRANSLATE,
     reason:
-      'Prose. Its own sibling order.helpText names the same two vocabularies (rows/columns dimensions, values measures) in authored text in every locale, so the vocabulary existed and this leaf simply never got it. ⚠️ #36447 reworded this `en` source into business terms (from "Measure names (from the dataset) to display"); the zh-CN / ja-JP / es-ES verdicts and values above were taken against the OLD English and were not re-judged. ⚠️ #36838 reworded it again (from "The metrics to total or count (from the data source)."), because a measure may be any dataset measure, not only a total or a count. Re-read against that English: the three values say "the measure names to show" and promise no narrower set, so they stay true; their dataset vocabulary is left to a translator pass (ja-JP and es-ES: #36836).',
+      'Prose. Its own sibling order.helpText names the same two vocabularies (rows/columns dimensions, values measures) in authored text in every locale, so the vocabulary existed and this leaf simply never got it. ⚠️ #36447 reworded this `en` source into business terms (from "Measure names (from the dataset) to display"); the zh-CN / ja-JP / es-ES verdicts and values above were taken against the OLD English and were not re-judged. ⚠️ #36838 reworded it again (from "The metrics to total or count (from the data source)."), because a measure may be any dataset measure, not only a total or a count. #36836 re-translated all three values from that English, naming the same four examples (totals, counts, averages, ratios) in each locale. #37384 then re-translated the sibling order.helpText from its business English (a grouping or a metric) in all three locales, so the sibling no longer spells those two vocabularies; the precedent above is kept as the record of why this leaf was reached.',
   },
   {
     type: 'report',
@@ -119,7 +119,7 @@ const DECISIONS: readonly Decision[] = [
     prop: 'label',
     en: 'Group By',
     verdict: ALL_TRANSLATE,
-    reason: `${SIBLING_PRECEDENT} Precedent: report.fields['blocks.rows'], and the adjacent top-level columns is authored on the same panel. ⚠️ #36838 renamed this \`en\` label from "Rows" to "Group By", the title the blocks grid already gives the same key, so one form names it once. Re-read against the new English: each translated value is still byte-identical to its blocks twin, whose \`en\` is now the same string, so top level and blocks keep reading one word per locale. Those words carry the older axis vocabulary at both positions; moving them to the business wording is a translator pass over both positions together, not this rename.`,
+    reason: `${SIBLING_PRECEDENT} Precedent: report.fields['blocks.rows'], and the adjacent top-level columns is authored on the same panel. ⚠️ #36838 renamed this \`en\` label from "Rows" to "Group By", the title the blocks grid already gives the same key, so one form names it once. Re-read against the new English: each translated value is still byte-identical to its blocks twin, whose \`en\` is now the same string, so top level and blocks keep reading one word per locale. #36836 then moved both positions together to the business wording: 分组 / グループ化 / Agrupar por, the zh word the console overlay already renders, with columns and its blocks twin following as 列分组 / 列のグループ化 / Agrupar columnas por.`,
   },
   {
     type: 'report',
@@ -128,7 +128,7 @@ const DECISIONS: readonly Decision[] = [
     en: 'The fields to group by (from the data source).',
     verdict: ALL_TRANSLATE,
     reason:
-      'Prose, and the neighbouring columns.helpText — the same sentence for the other axis — is authored in all three locales. Nothing distinguishes the two but one having been reached. ⚠️ #36447 reworded this `en` source into business terms (from "Dimension names (from the dataset) to group rows by"); the zh-CN / ja-JP / es-ES verdicts and values above were taken against the OLD English and were not re-judged.',
+      'Prose, and the neighbouring columns.helpText — the same sentence for the other axis — is authored in all three locales. Nothing distinguishes the two but one having been reached. ⚠️ #36447 reworded this `en` source into business terms (from "Dimension names (from the dataset) to group rows by"); #36836 re-translated all three values from the new English (zh-CN copied from the console overlay, which already carried it).',
   },
   {
     type: 'dataset',

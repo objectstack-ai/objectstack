@@ -77,6 +77,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { t } from '../metadata-admin/i18n';
 
 // jsdom has no matchMedia — useIsMobile / useIsWideViewport need a stub.
@@ -129,7 +130,7 @@ async function renderSurface() {
     <MemoryRouter initialEntries={['/studio/app.a/interfaces']}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );

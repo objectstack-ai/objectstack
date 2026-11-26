@@ -5505,10 +5505,12 @@ const argv = process.argv.slice(2);
  * The importer never reached the statement after its own `import()`, and a
  * caller reading the status alone cannot tell that apart from a clean import.
  *
- * Nothing imports this file today (every reference in `.github/**`,
- * `package.json` and `scripts/**` spawns it as `node scripts/...`), so the
- * guard silences no census: the only top-level statement it moves behind
- * `isEntrypoint` is CLI dispatch.
+ * Three files import it for its exports (`check-docs-image-tag.mjs` for
+ * `readPre`, `check-future-spec-major.mjs` for `readProtocolLockstepInputs`,
+ * `pm/l1-face.mjs` for `entriesIn`), which this guard is what makes safe;
+ * every other reference in `.github/**`, `package.json` and `scripts/**`
+ * spawns it as `node scripts/...`. The guard silences no census: the only
+ * top-level statement it moves behind `isEntrypoint` is CLI dispatch.
  */
 const invokedDirectly = isEntrypoint(import.meta.url);
 

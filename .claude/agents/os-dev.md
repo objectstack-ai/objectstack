@@ -112,19 +112,8 @@ model: opus
 
 ## Toolchain traps
 
-- `--workspace-concurrency=2` 只对过滤后的 run-command(`run` / `build`)成立,放在 `--filter` 之前。
-- 放在 filter 之后会被转发给底层脚本,且该 flag 不叫 `--concurrency`。
-- pnpm 10 在 `install` 上直接拒绝它(`ERROR Unknown option: 'workspace-concurrency'`)。
-- pnpm `overrides` 只住在 `pnpm-workspace.yaml`;加进 `package.json` 的那份什么都不改。
-- OSV override 的上界 ⛔ 永不写成恰好排除修复版:上界放在 major 边界,只挪替换目标。
-- 新 fake engine 的 `delete()` 开头用 `@objectstack/objectql` 的 `assertEngineDeleteDispatch(options)`。
-- ⛔ 永不手抄一份 id/multi 检查,那正是 `check:engine-double-contract` 点名的洞。
-- 从门禁绿跑清单里挑一个已 pin 的 fake 照抄。
-- 缺一种该文件没有的 double 时,覆写文件里已有的 double 优于 pin 新的:不动台账。
+- 逐工具陷阱(pnpm 并发与 `overrides`、OSV override、fake engine、`ui/` typecheck、浏览器验证)住 pm-dispatch `references/dev-traps.md`,碰到才读。
 - 匹配到零个脚本的 `pnpm --filter` 运行以 0 退出:什么都没跑,读上去却是通过。
-- `ui/` 的包把 typecheck 拼作 `type-check`(连字符);核对输出里确实回显了脚本名。
-- 浏览器验证:Chromium 已预装,`PLAYWRIGHT_BROWSERS_PATH` 指向 `/opt/pw-browsers`。
-- launch 传 `executablePath: '/opt/pw-browsers/chromium'`;⛔ 永不跑 `playwright install`。
 
 ## 本地验证范围 —— 本地只跑定向门禁,全农场归 CI
 
@@ -202,25 +191,7 @@ model: opus
 - `git reset --soft origin/main` 会把你分支点之后他人已合并的文件整批 stage 成你的。
 - 起点在哪的 reset/diff/log/rebase 一律锚基本规则 1 记录的 `"$BASE"`。
 - `log -S/--follow/blame` 判日期或先后前,先 `git rev-parse --is-shallow-repository`,true 就加深申报。
-- `merge-base --is-ancestor` 的非祖先在浅检出上是假绿:缺的对象只扣下祖先路径,不会造一条。
-- 失效单向:exit 0(是祖先)自证,任何检出里都作数;只有 exit 1 要控制腿。
-- 还没发布、不在 main 上、`Blocked-by` 已落地这些前提核验,要的恰是 exit 1。
-- 阴性读数按两条腿写:同一检出、同一目标 ref 上再跑一个已知在其历史里的 commit。
-- 它必须答 exit 0;否则阴性作废,`git fetch --deepen` / `--unshallow` 到控制腿转 0 再重读。
-- ⛔ 控制腿别挑浅窗内的近亲:控制 commit 至少与被测那个同深;两条腿的退出码都进报告。
-- `--is-shallow-repository` 是便宜的触发器不是判据,判据是控制腿。
-- 反向验证与消融是一次性证明:前后运行引在 PR 正文与报告里;⛔ 不留永久测试文件。
-- 两者都先 commit 修复再回退或变异:恢复腿指向 `HEAD`,`HEAD` 必须先装着你的实现。
-- 未提交时 `git checkout origin/main -- <path>` 不留恢复点,`git checkout HEAD -- <path>` 删的正是实现。
-- 通则:失效形态是 exit 0 且什么都没做的清理步骤,只能靠观察状态验证,永不靠读退出码。
-- 恢复腿与变异腿完全对称,四条硬线如下。
-- ① 恢复写 `git checkout HEAD -- <path>`,⛔ 永不裸 `git checkout -- <path>`:裸恢复从索引取。
-- 取回的正是变异本身,exit 0、无异常输出;点名 `HEAD` 绕开被污染的索引。
-- ② 恢复由 `git diff HEAD` 为空来证明(`git status` 干净是同一句话的另一半),不由退出码证明。
-- ③ trap 里的路径一律绝对:变异前先 `REPO_ROOT="$(git rev-parse --show-toplevel)"`。
-- 恢复针对 `"$REPO_ROOT/<path>"`;信任顺序:trap 只是崩溃路径上的便利,字节/哈希比对才是证明。
-- ④ 空哈希读作 FAILURE,不是没得比:`git hash-object` 对解析不到的路径输出的是空。
-- 比对对象是该路径的 HEAD blob 哈希:空或缺失 ⇒ 失败;不匹配 ⇒ 响亮地非零退出并停下。
+- `merge-base --is-ancestor` 判祖先前读 pm-dispatch `references/dev-traps.md`〈浅检出上的祖先读数〉。
 - 拒收类用例断言信封,不断言 throw 本身;最小断言集是错误的 `code` 与 `status`(ADR-0112 信封)。
 - 单独的 `expect(...).toThrow()` 不是拒收测试:抛裸 `Error` 的未修复 driver 照样绿。
 - 从不抛错的传输层转红时,它指向缺陷之外。
@@ -235,40 +206,15 @@ model: opus
 - 整个换掉(它 pin 的恰是你删的那个分支:断言持续通过,正因为什么都不再产出)。
 - 按规则的消费半径扫 fixture,不按被编辑的包:其它包的 fixture 也在喂这条收窄的规则。
 - push 前枚举规则的调用方并 grep 它们的 fixture。
-- 反向验证跑之前先定预期方向;三个真实方向:转红(常态);诊断变多而非变少;反转。
-- 变多:删掉一个喂计数的读取,能让下游门禁多出一个发现。
-- 反转:canonical-first 的 `??` 链,非法拼写落到 schema 的具名拒收,规则绿、schema 红。
-- 报告你实际观察到的方向;永不硬套模板的预设。
 - 消融一行为一次,仅当 diff 改了测试钉住的行为;配置、脚本、workflow、文档 ⛔ 不消融。
-- ablation 的成立条件是解析路径,不是套件名:被测主体经依赖的 `exports` 解析。
-- 那指向该包的 `dist/`,不是 `src/`;且没有 vitest alias 把 specifier 拉回源码。
-- 这批 pair 的台账是 `scripts/check-test-source-alias.mjs` 的 `KNOWN_UNALIASED_TEST_IMPORTS`。
-- `packages/qa/dogfood` 是一例,不是定义;读成 dogfood 专属,普通单元套件里的 ablation 会被当真。
-- 两个方向不对称:没 build 的修复是会被注意到的假红;没 build 的 ablation 保持绿。
-- 那份绿给一条可能永远失败不了的断言背书,对 CI 永久隐形(CI 构建正确,那边永远绿)。
-- 每一腿(变异与还原)都是:改动 → 证明它真落到了磁盘 → `pnpm --filter <pkg> build`。
-- 落盘走 `node scripts/ablation-replace.mjs`,不走 `-i` 家族:锚点必须命中,写入与还原按磁盘核验。
-- 再证明它到达了 `dist/`,才读运行结果:`node scripts/ablation-dist-preflight.mjs <pkg> '<marker>'`。
-- 删守卫的消融以及每个还原腿,用 `--absent`。
-- ⛔ 还原腿不可跳过:留在 `dist/` 里的 marker 会让变异代码对该树之后的每次运行继续生效。
-- ⛔ 不拿编辑工具的退出码当落盘证据:`sed`、`perl -i`、`str.replace`、`re.sub` 零命中也 exit 0。
-- 这一步无条件成立,没有 build/dist 的消融同样要做。
-- 观察要锚定你打算改的那处文本:注入文本与被删文本各 `grep -c` 一次。
-- 裸 `git diff --stat` 非空只证明有改动:同轮其它编辑会替它变绿,等长替换字节差为零。
-- 确认没过 ⇒ 这次消融没跑,读数作废:改锚点重来,并在报告里说明第一次是空操作。
-- ⛔ 不悄悄重跑到有东西落地,那是把同一个缺陷复制到上一层。
-- 硬线:消融/变异脚本一律自带 `trap '<restore>' EXIT INT TERM` 还原。
+- 做反向验证或消融前读 pm-dispatch `references/dev-ablation.md`,整套做法住那里,照做。
 
 ## Definition of done(按序)
 
 - 实现满足 issue 的验收判据。
 - 测试:新增/更新覆盖;跑受影响包的 `pnpm test` / `pnpm typecheck`,为报告留真实输出。
 - 范围按本地验证范围节圈定;`packages/cli` 的卡本地只欠 `unit` 层,`integration` 层声明给 CI。
-- 跑法 `pnpm --filter @objectstack/cli exec vitest run --project unit`;CI 的 `pnpm test` 跑两层。
-- 只有 diff 碰到 integration 层文件、spawn 入口(`bin/`、`test/helpers/serve-process.ts`)时才本地跑它。
-- driver/kernel 启动路径同此;那时跑 `--project integration` 并在报告里说明,否则写已声明给 CI。
-- 层是测出来的,不是列出来的:spawn CLI 或启动 driver 的测试按 `packages/cli/vitest-tiers.ts` 落。
-- 分区 pin `test/vitest-tiers-partition.test.ts` 在某个测试文件两层皆无或皆有时变红。
+- `packages/cli` 卡与 driver/kernel 启动路径的分层跑法住 pm-dispatch `references/dev-traps.md`,碰到才读。
 - Draft PR 指向 `main`,正文首行 `Fixes #<n>`;合并不应关卡时用 `Part of #<n>`,并说明留下哪一半。
 - 全量 dogfood 只在终 head 跑一次,仅当标题带 `!` 或 `Clause-②:` 带 `(narrowing)` 臂(yes/no 皆算)。
 - 命令同 CI:按 ① 建闭包,锁下 `pnpm --filter @objectstack/dogfood test`;⛔ 无 `OS_TEST_SHARD`、无路径。

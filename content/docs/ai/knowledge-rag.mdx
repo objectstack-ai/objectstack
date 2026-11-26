@@ -9,7 +9,7 @@ Part of the [AI module](/docs/ai) — how agents retrieve knowledge through the 
 ObjectStack ships a Knowledge Protocol that lets you retrieve from pluggable backends (RAGFlow, LlamaIndex, Dify, custom pgvector, …) with one call: `KnowledgeService.search(query, { sourceIds?, topK? })`. The framework defines the contract and runs permission-aware filtering; the adapter plugin does the actual retrieval. See [the protocol design](/docs/protocol/knowledge) for the rationale.
 
 <Callout type="info">
-**This whole stack is open.** The `@objectstack/service-knowledge` service, the adapter plugins (`@objectstack/knowledge-memory`, `@objectstack/knowledge-ragflow`, `@objectstack/knowledge-pgvector`), the `@objectstack/embedder-openai` embedder, and the permission-aware retrieval + event sync below all ship in the **open-source framework**. The workflow is: declare your knowledge sources, pick an adapter, and call `search` — retrieval respects the same row-level security as any ObjectQL query. Only the in-product chat *runtime* that consumes retrieval ships in ObjectOS; see the callout under [Retrieving knowledge](#retrieving-knowledge).
+**This whole stack is open.** The `@objectstack/service-knowledge` service, the adapter plugins (`@objectstack/knowledge-memory`, `@objectstack/knowledge-ragflow`, `@objectstack/knowledge-pgvector`, `@objectstack/knowledge-turso`), the `@objectstack/embedder-openai` embedder, and the permission-aware retrieval + event sync below all ship in the **open-source framework**. The workflow is: declare your knowledge sources, pick an adapter, and call `search` — retrieval respects the same row-level security as any ObjectQL query. Only the in-product chat *runtime* that consumes retrieval ships in ObjectOS; see the callout under [Retrieving knowledge](#retrieving-knowledge).
 </Callout>
 
 ## Wiring
@@ -98,6 +98,44 @@ Protocol, adapters, embedder, and `KnowledgeService.search` — is open, so you 
 installed ([Connect an MCP Client](/docs/ai/connect-mcp)).
 </Callout>
 
+## Searching inside chosen records
+
+Pass `scope` to search only inside some records: the records an object source indexes, or a parent record that source reaches through a lookup it lists in `metadataFields`.
+
+```ts
+// Only the clauses of one policy: the clause source lists its `policy` lookup in metadataFields.
+const hits = await knowledge.search('notice period', {
+  topK: 5,
+  scope: [{ object: 'policy', ids: [policyId] }],
+  executionContext,
+});
+```
+
+An adapter that reads the scope filters before it ranks, so the `topK` hits all come from inside the scope. Whatever the adapter does, the service drops any hit outside the scope, so an adapter that ignores it may answer fewer than `topK`. A source the scope does not reach is not searched, and `scope: []` answers nothing, never everything. A scope narrows what is searched; each hit is still re-checked against the caller, so it never shows a record the caller could not read. Bounds, the parent-link rules and what an adapter must do are in [the protocol's record scope](/docs/protocol/knowledge#record-scope).
+
+## The `search_knowledge` tool
+
+An AI client searches through one tool, `search_knowledge`, defined once by the knowledge service. The MCP door (HTTP and stdio) and the in-product agent serve that one definition unchanged, so every client is offered the same arguments and gets the same answer. It searches only sources whose `aiExposed` is not `false`, and reads as the person asking.
+
+| Argument | What it does |
+|:--|:--|
+| `query` | What to look for, in plain words. Required. |
+| `sourceIds` | Only these sources, by the ids every answer lists in `sources`. Omit to search them all. |
+| `topK` | At most this many hits, 1 to 20, default 5. Counts records or groups in the two modes below. |
+| `granularity` | `"chunk"` (the default): one hit per passage. `"record"`: one hit per record, its best passage. |
+| `groupBy` | One hit per value of a field the source lists in `metadataFields`, such as `policy`: "which policies", not "which clauses". Implies `"record"`; refused with `"chunk"`. A source of indexed records that does not list the field answers nothing for that call; a file or web source still answers, one hit per document, with no `groupValue`. |
+| `scope` | Only inside these records: a list of `{ object, ids }`, as `KnowledgeSearchOptions.scope` reads it above. At most 10 entries of at most 500 ids. |
+
+Each hit carries `sourceId`, `documentId`, `title`, `snippet`, `score`, and for an indexed record `record: { object, id }`, which the record tools read. It also carries `headingPath`, the headings its passage sits under, where the document has headings, and under `groupBy` the group's value as `groupValue`: the value as the index stores it (a string, a number, or a list for a multi-value lookup), absent on a hit of a file or web source. The answer also lists the searchable `sources`, and in `refused` any source that could not be searched.
+
+The tool is stricter than the service in a few places, so that a mistake is reported instead of being answered as "nothing matched":
+
+- An empty `scope`, an entry with no ids, and an empty `sourceIds` are refused, not answered with no hits.
+- An object name, record id or field name over 255 characters, or one holding a NUL character, is refused.
+- Each malformed argument is refused `VALIDATION_ERROR` (400), naming the argument. Over MCP, a shape the tool's schema states (an empty or over-long `scope`, a string over 255 characters, an unknown `granularity` or key) is refused first by the MCP input-validation check, as error `-32602` naming the argument, without that code. The coded refusal answers what the schema cannot state, such as a NUL character or `groupBy` with `"chunk"`, and every malformed argument the in-product agent sends.
+
+The answer never says how many hits the permission re-check or the scope removed. A `scope` entry or `groupBy` field that only a withheld source would answer gets the same empty answer as one that no source answers, so the answer never shows that a withheld source exists.
+
 ## What you get for free
 
 - **Permission-aware retrieval.** Every hit with a `sourceRecordId` is re-checked against the caller's `ExecutionContext` via `IDataEngine` — the same RLS that gates plain ObjectQL queries. A salesperson asking "find proposals about ACME" only sees the proposals they could already read directly. Before a source is searched, the caller's field-level read rules and the object's API exposure are asked too: a source serving a field the caller may not query is not searched for them (see [the protocol's source admission](/docs/protocol/knowledge#source-admission-exposure-and-field-level-rules)). File / HTTP hits pass through (ACL is the adapter's problem).
@@ -180,7 +218,35 @@ Known residual: text made mostly of random hex or base64 — UUIDs, sha256 diges
 
 ## When the model or the split changes: rebuild
 
-Vectors from two embedding models are not comparable, and neither are the passages of two splits. So every source's index is built under one **index fingerprint** — the embedding model and dimensions the adapter reports, the resolved split, and the content list — which the knowledge service computes and carries on every write and every search, and the adapter checks against the index it holds. Change any of them and the source's stored index is **refused** (`KNOWLEDGE_REBUILD_REQUIRED`, 409) until a complete reindex rebuilds it; it never answers with vectors of the old model ranked against the new one. A search over several sources still answers from the others, and the `search_knowledge` tool names each refused source in `refused`. Changing `where` or `metadataFields` changes no vector: a complete reindex repairs it in place. The full rules are in [the protocol's fingerprint section](/docs/protocol/knowledge#36-the-index-fingerprint).
+Vectors from two embedding models are not comparable, and neither are the passages of two splits. So every source's index is built under one **index fingerprint** — the embedding model and dimensions the adapter reports, the resolved split, and the content list — which the knowledge service computes and carries on every write and every search, and the adapter checks against the index it holds. Change any of them and the source's stored index is **refused** (`KNOWLEDGE_REBUILD_REQUIRED`, 409) until a complete reindex rebuilds it — which the next boot starts by itself, or `os knowledge rebuild` (below) does now; it never answers with vectors of the old model ranked against the new one. A search over several sources still answers from the others, and the `search_knowledge` tool names each refused source in `refused`. Changing `where` or `metadataFields` changes no vector: a complete reindex repairs it in place. The full rules are in [the protocol's fingerprint section](/docs/protocol/knowledge#36-the-index-fingerprint).
+
+## The first build, and rebuilding a source
+
+Event sync keeps an index in step with rows as they are written; it never indexes the rows a source matched before it was mounted. So after every boot the knowledge service reads what each source's adapter holds and builds, once, in the background, every `object` source that needs it — the boot never waits for it:
+
+| What the adapter holds | At boot |
+|:--|:--|
+| nothing for the source (or, for an adapter without an index status, no document) | built |
+| an index under another fingerprint (embedding model, dimensions or split) | built anew, beside the old index where the store keeps generations |
+| the same fingerprint, but the source's `where`, `metadataFields`, title rule or withheld fields changed | rebuilt in place; unchanged documents are skipped |
+| the same fingerprint and recipe | left alone |
+
+A source with `refresh.onRecordChange: false` is left to its external indexer, and an adapter that reports neither an index status nor its documents is never built automatically: the boot log says so, and you rebuild it by hand. With several server nodes sharing a cluster lock driver (`OS_CLUSTER_DRIVER=redis`, [Cluster](/docs/kernel/cluster)), only one builds a source: the build runs under the `cluster` service's lock, and a node that finds the source built when it gets the lock builds nothing. `KnowledgeServicePlugin({ buildAtBoot: false })` turns the boot builds off.
+
+<Callout type="warn">
+**A build costs money.** A complete build reads every row the source's `where` matches and sends the listed content fields of each one the index does not already hold unchanged to your embedding provider, which bills for them. The first build of a large source, or a rebuild after you change the embedding model or the split, sends all of it. The boot log line that starts a build says so.
+
+The default `memory` adapter holds nothing after a restart, so with it **every boot is a first build**: each boot sends the whole source to the embedding provider again, on every node, because each process keeps its own index. Use a persistent adapter (pgvector, Turso, RAGFlow) for a source you do not want re-embedded on each restart. And "only one node builds a source" holds only with a shared cluster lock driver: the default `memory` cluster driver's lock is a per-process mutex, so with it every node builds the source itself.
+</Callout>
+
+To rebuild a source yourself, as an administrator (an account with `manage_platform_settings`):
+
+```bash
+os knowledge status                    # each source: built, never built or due a rebuild, and the last build
+os knowledge rebuild support_articles  # start a complete build and follow its progress
+```
+
+`os knowledge rebuild` starts the build on the server and prints its progress — rows read, documents written, unchanged, purged, and those that cannot be indexed — until it ends; `--no-wait` returns once it has started. Both commands call the `knowledge` settings actions `rebuild` and `index_status` (`POST /api/settings/knowledge/rebuild` with `{ "source": "ID" }`). The server logs each build's start, its progress every ten seconds, and its result. A build's progress lives on the node that runs it: behind a load balancer, read it from that node.
 
 ## Self-hosted vector store: PostgreSQL + pgvector
 
@@ -196,6 +262,20 @@ new KnowledgePgvectorPlugin({ queryPrefix: '' /* e.g. BGE's query instruction */
 - It stores each passage's text, which is as sensitive as the record it came from and is in every backup.
 
 Details — the tables, an approximate index as an operator's step, rebuilds — are in [the protocol's pgvector section](/docs/protocol/knowledge#41-knowledge-pgvector--the-open-vector-store-on-postgresql).
+
+## Local vector store: a libSQL file
+
+`@objectstack/knowledge-turso` keeps passages and vectors in a libSQL file of its own — by default `knowledge.db` under the project's `.objectstack/data/`, never the platform database's file — so a deployment on SQLite gets semantic search, Chinese text included, with no database server to run. Until `os dev` mounts it for you, add the package and register `KnowledgeTursoPlugin` beside the knowledge service yourself. Point a source at it with `adapter: 'turso'`:
+
+```ts
+new KnowledgeTursoPlugin(), // or { url: 'file:/var/lib/app/knowledge.db' }, ':memory:', a libsql:// URL
+```
+
+- It searches by an exact scan; the organization filter, the record scope and the metadata `filter` run in SQL before ranking. 10,000 passages of 1,536 dimensions take about 82 MB and a search about 50 ms; larger sources belong on pgvector.
+- A changed model or split is rebuilt beside the old index, which keeps answering until the reindex completes.
+- Where libSQL has no native build (Windows on ARM), boot goes on and its sources answer `SERVICE_UNAVAILABLE`.
+
+Details are in [the protocol's turso section](/docs/protocol/knowledge#42-knowledge-turso--the-open-vector-store-in-a-libsql-file).
 
 ## Why we did not build a vector DB
 

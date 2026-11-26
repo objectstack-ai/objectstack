@@ -137,7 +137,7 @@ import {
 } from './metadata-completeness.js';
 // [#30892] The file seam and what `read_file` renders from it.
 import { READ_FILE_MAX_BYTES, ReadFileExtractionBusyError, renderReadFile, type McpFileBridge } from './file-content.js';
-import { actionConfirmationElicitorFor, type McpActionCallDoor } from './action-confirmation-elicitation.js';
+import { actionCallDoorFor, type McpActionCallDoor, type McpActionCallDoorFacts } from './action-confirmation-elicitation.js';
 import type { McpLatestPer } from './types.js';
 // [#35145] `expand` and `related`: the relation reads, judged before any read.
 import {
@@ -684,6 +684,10 @@ export interface McpActionBridge {
    * the person through `door.elicitConfirmation` first, once every admission
    * gate has passed: `accept` runs the call, any other answer refuses it, and
    * nothing is handed off. Without `door` the call is handed off as above.
+   * [#34325] `facts.elicitsCapableClients`, passed only without `door`, says
+   * this door would have asked a client that advertised `elicitation`: the
+   * `no_confirmation_service` refusal then names that route too. A bridge
+   * that does not read `facts` answers exactly as before.
    */
   runAction(
     name: string,
@@ -699,6 +703,7 @@ export interface McpActionBridge {
       params?: Record<string, unknown>;
     } & AIActionConfirmation,
     door?: McpActionCallDoor,
+    facts?: McpActionCallDoorFacts,
   ): Promise<unknown>;
   /**
    * [#30771] The capability refusal `runAction` would throw for an action on
@@ -727,7 +732,8 @@ export interface McpActionBridge {
    * gated action resolves to `ActionConfirmationPending` instead, as
    * {@link runAction} does, and the run stays parked. [#33712] `door` as on
    * {@link runAction}: an elicited `accept` resumes the run, any other
-   * answer refuses it and the run stays parked.
+   * answer refuses it and the run stays parked. [#34325] `facts` as on
+   * {@link runAction}.
    *
    * OPTIONAL, like {@link McpDataBridge.aggregate}. A host that cannot resume
    * runs omits it, and `resume_run` is then not registered.
@@ -736,6 +742,7 @@ export interface McpActionBridge {
     runId: string,
     input: { values?: Record<string, unknown> } & AIActionConfirmation,
     door?: McpActionCallDoor,
+    facts?: McpActionCallDoorFacts,
   ): Promise<unknown>;
 }
 
@@ -1746,7 +1753,10 @@ function sentFieldHead(name: string): string {
 /**
  * The field names a `where` the caller sent addresses, in order: each
  * condition key, through the logical operators. Other `$` keys are operators,
- * never names.
+ * never names. Nor is the search companion key (`SEARCH_COMPANION_FIELD`): it
+ * is the engine's own column, present only where search provisions it and in
+ * no schema's field list, so a `where` refused for another reason never names
+ * it as not recorded.
  */
 function whereFieldNames(where: unknown, into: string[]): string[] {
   if (Array.isArray(where)) {
@@ -1759,6 +1769,7 @@ function whereFieldNames(where: unknown, into: string[]): string[] {
       if (WHERE_LOGICAL_OPERATORS.has(key)) whereFieldNames(value, into);
       continue;
     }
+    if (key === SEARCH_COMPANION_FIELD) continue;
     into.push(key);
   }
   return into;
@@ -2666,6 +2677,16 @@ const WITHHELD_FIELDS_DESCRIPTION =
  */
 const OBJECT_QUERY_SOURCE_DESCRIPTION =
   'Quote the answer\'s source.line as the source of any figure you give from it.';
+
+/**
+ * [#35138] The one line `query_records`, `aggregate_records` and `get_record`
+ * describe the `notRecorded` / `ifNotRecorded` members with
+ * ({@link NotRecordedMembers}): read up front, so a refusal that carries them
+ * is never read as an empty answer. It names nothing; the members do.
+ */
+const NOT_RECORDED_DESCRIPTION =
+  'A refusal that carries notRecorded means what it names is not recorded in this app: '
+  + 'follow its ifNotRecorded, and never report 0 or empty for it.';
 
 /**
  * [#35138] The caller's locale ladder for a sentence the tools compose into a
@@ -4116,6 +4137,7 @@ export function registerObjectTools(
           'matched, so do not sum, count or rank the rows as if whole: read on with offset, or use aggregate_records ' +
           'where offered. ' +
           OBJECT_QUERY_SOURCE_DESCRIPTION + ' ' +
+          NOT_RECORDED_DESCRIPTION + ' ' +
           'A filter value "{current_user_id}" stands for you, e.g. approvals waiting on you: objectName ' +
           '"sys_approval_request", where {"status":"pending","pending_approvers":{"$contains":"{current_user_id}"}}. ' +
           // [ruling B] A person field holds a user id; names repeat, so email.
@@ -4272,6 +4294,7 @@ export function registerObjectTools(
             'totals and breakdowns. An amount whose records each carry their own currency is answered only grouped by ' +
             'its currency code field. Name a lookup group by its <key>__label, never by the id. ' +
             OBJECT_QUERY_SOURCE_DESCRIPTION + ' ' +
+            NOT_RECORDED_DESCRIPTION + ' ' +
             // [aggregate order and cut] A ranking question ("the top five
             // customers by revenue") is answered by the database: ordered,
             // cut, and the number of groups before the cut stated.
@@ -4486,6 +4509,8 @@ export function registerObjectTools(
           `To read it with the records that point at it, pass related: up to ${GET_RECORD_MAX_RELATED_LISTS} child ` +
           `objects, e.g. [{"object":"crm_opportunity"}], each list at most ${relatedMaxRows} rows; the answer is then ` +
           '{ record, related: [...] }. ' +
+          // [#35138] get_record sends no field names, so its notRecorded only ever names an object.
+          NOT_RECORDED_DESCRIPTION + ' ' +
           WITHHELD_FIELDS_DESCRIPTION,
         inputSchema: strictToolInput(
           { surface: 'this get_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
@@ -5102,12 +5127,17 @@ export function registerActionTools(
         };
         // [#33712] Step 1 of the amended confirmation contract: a client that
         // advertised `elicitation` on a server that read its `initialize` (the
-        // stdio door) is asked in place. Otherwise the bridge is called
-        // exactly as before and hands a gated call off.
-        const elicitConfirmation = actionConfirmationElicitorFor(server, extra);
-        const result = elicitConfirmation
-          ? await bridge.runAction(actionName, request, { elicitConfirmation })
-          : await bridge.runAction(actionName, request);
+        // stdio door) is asked in place. Otherwise the bridge hands a gated
+        // call off. [#34325] On that door a client without the capability is
+        // named to the bridge (`facts.elicitsCapableClients`), so a no-service
+        // refusal names the client route; the per-request HTTP server calls
+        // the bridge exactly as before.
+        const { door, facts } = actionCallDoorFor(server, extra);
+        const result = door
+          ? await bridge.runAction(actionName, request, door)
+          : facts
+            ? await bridge.runAction(actionName, request, undefined, facts)
+            : await bridge.runAction(actionName, request);
         return textResult(result);
       } catch (err) {
         return landedWriteResultOrError(
@@ -5193,10 +5223,13 @@ export function registerActionTools(
           // at the closed input, as on `run_action`.
           const request = { values };
           // [#33712] As `run_action`: asked in place where the client can be.
-          const elicitConfirmation = actionConfirmationElicitorFor(server, extra);
-          const result = elicitConfirmation
-            ? await resumeRun(runId, request, { elicitConfirmation })
-            : await resumeRun(runId, request);
+          // [#34325] And the same door facts for a no-service refusal.
+          const { door, facts } = actionCallDoorFor(server, extra);
+          const result = door
+            ? await resumeRun(runId, request, door)
+            : facts
+              ? await resumeRun(runId, request, undefined, facts)
+              : await resumeRun(runId, request);
           return textResult(result);
         } catch (err) {
           return errorResultFromThrown(err, `resume_run ${runId}`);

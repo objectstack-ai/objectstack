@@ -71,6 +71,8 @@ import {
   listViewPredicates,
   parentRelationshipFieldDef,
   PLATFORM_RECORD_COLUMNS,
+  shownQuantityUnitReads,
+  declaresQuantityUnit,
   recordDisplayValueAt,
   resolveNameField,
   composeParentScopeFilter,
@@ -1974,6 +1976,17 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         if (declared && !readable(field)) continue;
         projection.add(field);
       }
+      // [ADR-0158] A drawn quantity's unit: a `record`-mode quantity's code
+      // field and the row's organization, which the number cell reads off the
+      // row. The code field passes the same declared and FLS gates;
+      // `organization_id` is a platform column every object carries.
+      const drawnDefs = Object.fromEntries(drawnKeys.map((key) => [key, parentRelationshipFieldDef(fields, key)]));
+      for (const field of shownQuantityUnitReads(drawnKeys, drawnDefs)) {
+        const declared = parentRelationshipFieldDef(fields, field) !== undefined;
+        if (!declared && !PLATFORM_RECORD_COLUMNS.has(field)) continue;
+        if (declared && !readable(field)) continue;
+        projection.add(field);
+      }
       // The mobile card gallery's cover: no column shows it, but the gallery
       // reads it off every row. Asked for when the child DECLARES it (either
       // container shape) and FLS allows it — on every viewport, not only on
@@ -3039,6 +3052,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         // refuses a field-level `currency`, so without this a fixed-EUR amount
         // read in the tenant's currency in this list (objectui#12242).
         ...(def.currencyConfig && { currencyConfig: def.currencyConfig }),
+        // A quantity's unit (ADR-0158): the number cell draws its label and
+        // display decimal places from it.
+        ...((def as { unitConfig?: unknown }).unitConfig ? { unitConfig: (def as { unitConfig?: unknown }).unitConfig } : {}),
         // A formula's declared result type, which picks its face in the formula
         // cell: `currency` draws through the currency cell with the
         // `currencyConfig` above. Without it a money formula read as a bare
@@ -3093,6 +3109,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           // its sibling code field, or, when it follows the parent, the record
           // this list hangs under, laid on the row by `withFollowedParent`.
           ...(recordCurrencyField(def) !== undefined && { dependentValues: withFollowedParent(row, def, parentRecord) ?? undefined }),
+          // A quantity reads its unit code and organization off the ROW (ADR-0158).
+          ...(recordCurrencyField(def) === undefined && declaresQuantityUnit(def as { type?: string; unitConfig?: unknown }) && { dependentValues: row }),
         });
       };
     };

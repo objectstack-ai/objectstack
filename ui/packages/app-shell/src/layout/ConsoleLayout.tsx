@@ -39,6 +39,7 @@ import { useHomePath } from '../hooks/useHomePath.js';
 import { AppHeader } from './AppHeader.js';
 import { DesignModeProvider, useDesignModeController } from './designMode.js';
 import { DesignModeBar } from './DesignModeBar.js';
+import { useDesignModeArrival } from './useDesignModeArrival.js';
 import { useResponsiveSidebar } from '../hooks/useResponsiveSidebar.js';
 import { usePhoneNavDrawerHistory } from './usePhoneNavDrawerHistory.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
@@ -234,6 +235,10 @@ export function ConsoleLayout({
   // objectstack#36362 — the app's design mode, held here so it stays on from
   // page to page of the app; never on a phone, which has no 「Design layout」.
   const designMode = useDesignModeController({ appName: activeAppName, appBasePath, enabled: !phone });
+  // objectstack#36907 — a Studio dashboard list's 「New」 arrives with the
+  // mode asked to enter and the 「Add menu item」 picker on its dashboards;
+  // read once and cleared, so Back or a reload enters nothing.
+  useDesignModeArrival(designMode, !phone);
   // objectstack#30043 — the page in view, handed to the dock as its
   // `context.surface` (cloud#1610's shape): the object of a list, the object
   // and record id of a record page, the dashboard, report or page. Read off the

@@ -7,6 +7,7 @@ import type {
   AdapterIndexStatus,
   AdapterListDocumentsOptions,
   AdapterListDocumentsPage,
+  AdapterScopeTerm,
   AdapterSearchOptions,
 } from '@objectstack/spec/contracts';
 import type {
@@ -34,6 +35,15 @@ import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
  * stores each document's `docHash` as given and lists it back as stored, in
  * document-id order, the cursor being the last id of the page before. It runs
  * the contract suite of `@objectstack/service-knowledge/testing`.
+ *
+ * The first reader of the record scope (ADR-0161 K8, item 17): when a search
+ * is handed `scope`, it ranks only the passages of documents some term holds
+ * for — a `record` term on the document's `sourceRecordId`, a `metadata` term
+ * on its stored `metadata[field]` (a list when any element is in `ids`),
+ * compared as strings — after the organization filter and before the scoring,
+ * so `topK` is filled from them alone. An empty list ranks nothing. Each hit
+ * carries its document's `metadata`, which the service's check after the
+ * answer reads.
  *
  * The first reader of the organization filter (ADR-0161 K8, item 9): it
  * stores each document's `organizationId` as given and, when a search is
@@ -205,10 +215,13 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
     const inScope = organizations === undefined
       ? chunks
       : chunks.filter((c) => c.organizationId !== undefined && organizations.has(c.organizationId));
+    // The record scope next (ADR-0161 K8, item 17): absent → every document;
+    // present → only the documents some term holds for; `[]` → nothing.
+    const scoped = opts.scope === undefined ? inScope : inScope.filter(inRecordScope(opts.scope));
     const filter = opts.filter ?? {};
     const filtered = Object.keys(filter).length
-      ? inScope.filter((c) => matchesFilter(c.metadata, filter))
-      : inScope;
+      ? scoped.filter((c) => matchesFilter(c.metadata, filter))
+      : scoped;
 
     const scored = filtered.map((c) => ({
       chunk: c,
@@ -354,6 +367,23 @@ function cosineSimilarity(
     if (w) dot += v * w;
   }
   return dot / (aNorm * bNorm);
+}
+
+/**
+ * Whether a passage's document is in the record scope: some term holds, a
+ * `record` term on `sourceRecordId`, a `metadata` term on `metadata[field]`.
+ * A stored string or number matches when `String(value)` is one of the ids, a
+ * list when any element does; anything else, or no value, never.
+ */
+function inRecordScope(terms: readonly AdapterScopeTerm[]): (chunk: ChunkRecord) => boolean {
+  const compiled = terms.map((term) => ({ term, ids: new Set(term.ids) }));
+  const holds = (value: unknown, ids: ReadonlySet<string>): boolean =>
+    (typeof value === 'string' || typeof value === 'number') && ids.has(String(value));
+  return (chunk) =>
+    compiled.some(({ term, ids }) => {
+      const value = term.kind === 'record' ? chunk.sourceRecordId : chunk.metadata[term.field];
+      return Array.isArray(value) ? value.some((element) => holds(element, ids)) : holds(value, ids);
+    });
 }
 
 function matchesFilter(

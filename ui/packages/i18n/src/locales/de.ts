@@ -4870,6 +4870,7 @@ const de = {
   },
   chatbotQuota: {
     title: "Upgrade erforderlich",
+    limitTitle: "KI-Limit erreicht",
     fallbackMessage: "Sie haben Ihr KI-Kontingent erreicht.",
     buyCredits: "Credit-Paket kaufen",
     upgradePlan: "Tarif upgraden",

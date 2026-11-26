@@ -380,6 +380,8 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
   async search(query: string, opts: AdapterSearchOptions): Promise<KnowledgeHit[]> {
     // An empty organization set ranks nothing (ADR-0161 K8, item 9).
     if (opts.organizationIds !== undefined && opts.organizationIds.length === 0) return [];
+    // A record scope with no term that has ids ranks nothing (ADR-0161 K8, item 17).
+    if (opts.scope !== undefined && !opts.scope.some((term) => term.ids.length > 0)) return [];
     const pool = this.requirePool();
     const readiness = await this.ready();
     // The embedder first: without one the service's fingerprint carries no
@@ -413,6 +415,31 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     if (opts.organizationIds !== undefined) {
       params.push(opts.organizationIds);
       where.push(`organization_id = ANY($${params.length}::text[])`);
+    }
+    if (opts.scope !== undefined) {
+      // The record scope (ADR-0161 K8, item 17), a union of terms, beside the
+      // organization filter so `topK` is filled from in-scope documents. Ids
+      // and field names go as bound parameters. A `metadata` term holds for a
+      // stored string or number equal to an id as text, or a list with such an
+      // element; a missing value or any other kind holds for nothing.
+      const terms: string[] = [];
+      for (const term of opts.scope) {
+        if (term.ids.length === 0) continue;
+        params.push(term.ids);
+        const ids = `$${params.length}::text[]`;
+        if (term.kind === 'record') {
+          terms.push(`source_record_id = ANY(${ids})`);
+          continue;
+        }
+        params.push(term.field);
+        const value = `(metadata -> $${params.length}::text)`;
+        terms.push(
+          `EXISTS (SELECT 1 FROM jsonb_array_elements(CASE jsonb_typeof(${value}) WHEN 'array' THEN ${value} ` +
+            `ELSE jsonb_build_array(${value}) END) AS e(v) ` +
+            `WHERE jsonb_typeof(e.v) IN ('string', 'number') AND e.v #>> '{}' = ANY(${ids}))`,
+        );
+      }
+      where.push(`(${terms.join(' OR ')})`);
     }
     for (const [key, value] of Object.entries(opts.filter ?? {})) {
       params.push(key, JSON.stringify(value === undefined ? null : value));

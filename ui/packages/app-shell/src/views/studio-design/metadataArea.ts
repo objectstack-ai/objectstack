@@ -2,13 +2,14 @@
 
 /**
  * The addresses of Studio's "All metadata" area (objectstack ADR-0146 D1,
- * #28561): its routes, the one reserved segment it adds, and the pillar each
- * pillar type opens in. Pure, so the routing rules are pinned without a render.
+ * #28561): its routes, the one reserved segment it adds, and where a retired
+ * pillar address lands in it. Pure, so the routing rules are pinned without a
+ * render.
  *
  * ## Two legs
  *
- *  - Per package: `/studio/<package>/metadata/...`, beside the pillars of
- *    that package. The metadata-admin pages, mounted unchanged, scoped to it.
+ *  - Per package: `/studio/<package>/metadata/...`. The metadata-admin pages,
+ *    mounted unchanged, scoped to it.
  *  - Across packages: `/studio/~all/metadata/...`. The environment catalog
  *    (positions, capabilities, permission sets, sharing rules), whose items
  *    have one name per deployment and may belong to no package (ADR-0131 D3),
@@ -39,18 +40,16 @@ import { LIST_SOURCE_PARAM } from '../metadata-admin/metadataListState.js';
 import { DESIGNER_SURFACE_PARAM, parseSurfaceParam } from '../metadata-admin/nav-selection.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
-  STUDIO_ITEM_PILLAR,
   STUDIO_ITEM_REVIEW_PARAM,
   STUDIO_ITEM_REVIEW_VALUE,
+  STUDIO_METADATA_AREA,
   STUDIO_ORG_SCOPE_SEGMENT,
   STUDIO_ORG_SCOPE_TYPE,
-  studioItemPillar,
+  studioAddressParts,
   studioMetadataAreaAddress,
   studioMetadataAreaRoot,
   studioMetadataItemAddress,
   studioMetadataTypePath,
-  studioPillarItemAddress,
-  type StudioPillarKey,
 } from './studioAddress.js';
 import { DESIGNER_SURFACE_NAV_PARAM, DESIGNER_SURFACE_VIEW_PARAM } from './useSurfaceDeepLink.js';
 import { STUDIO_ORG_SCOPE_SOURCE, isStudioOrgScope, studioOrgScopePath } from './studioScope.js';
@@ -58,7 +57,6 @@ import { STUDIO_ORG_SCOPE_SOURCE, isStudioOrgScope, studioOrgScopePath } from '.
 // objectstack#36895 — the area's segments are Studio address vocabulary, owned
 // by `studioAddress.ts`; re-exported under their names here.
 export { STUDIO_METADATA_AREA, STUDIO_ALL_PACKAGES_SEGMENT } from './studioAddress.js';
-export type { StudioPillarKey } from './studioAddress.js';
 
 /** Whether a `/studio/:packageId` route segment names the cross-package leg. */
 export function isStudioAllPackagesScope(segment: string | null | undefined): boolean {
@@ -70,51 +68,9 @@ export function studioMetadataAreaPath(segment: string): string {
   return studioMetadataAreaRoot(segment);
 }
 
-/**
- * ADR-0146 D1 — "A pillar type opened from the directory opens its pillar".
- * The types each pillar designs; every other type opens the area's generic
- * item page.
- *
- * objectstack#36502 — pages, dashboards, reports and views have no pillar
- * since the Interfaces pillar retired: they are designed in the running app,
- * and this area's generic item page is where they are read and, as a
- * fallback, edited as metadata.
- */
-export const AREA_PILLAR_FOR_TYPE: Readonly<Record<string, StudioPillarKey>> = STUDIO_ITEM_PILLAR;
-
 /** The area's generic item page of one item of a package. */
 export function studioMetadataItemPath(packageId: string, item: { type: string; name: string }): string {
   return studioMetadataItemAddress(packageId, item.type, item.name);
-}
-
-/** A pillar of a package, opened on one item through its `?surface=` deep link. */
-export function studioPillarItemPath(
-  packageId: string,
-  pillar: StudioPillarKey,
-  item: { type: string; name: string },
-): string {
-  return studioPillarItemAddress(packageId, pillar, item);
-}
-
-/**
- * The pillar an item of the area opens in, as a path, or `null` when the
- * area's generic item page is where it opens:
- *  - a type no pillar designs;
- *  - the cross-package leg, which names no package to open a pillar of;
- *  - the environment scope, whose catalog item is the environment's, by name;
- *  - `?review=1`, which opens the draft review on the generic page, as it does
- *    on Setup's (the console's draft-review links name that page).
- */
-export function areaItemPillarPath(input: {
-  packageId: string | null;
-  type: string;
-  name: string;
-  search: URLSearchParams;
-}): string | null {
-  const pillar = studioItemPillar(input.type);
-  if (!pillar || !input.packageId) return null;
-  if (areaItemAsksGenericPage(input.search)) return null;
-  return studioPillarItemPath(input.packageId, pillar, { type: input.type, name: input.name });
 }
 
 /**
@@ -133,8 +89,7 @@ export function areaItemAsksGenericPage(search: URLSearchParams): boolean {
  * full-screen in the area rather than the generic item page: the permission
  * set's matrix (`StudioPermissionSetPage`), the object designer (`DataPillar`
  * on one object) and the flow designer (`AutomationsPillar`, fixed on one
- * flow). A designer card adds its type here in the PR that deletes the type's
- * row from `STUDIO_ITEM_PILLAR`.
+ * flow). A type that gains a full-screen designer is added here.
  */
 export const AREA_DESIGNER_PAGE_TYPES: readonly string[] = Object.freeze(['permission', 'object', 'flow']);
 
@@ -202,7 +157,9 @@ export function orgScopeFlowOf(pathname: string, segment: string | null | undefi
  * `?action=` (the designer opens its Actions tab on it) and `?changes=review`
  * (the server's draft review link, `studioChangesReviewLink`).
  *
- * `search` is the URL's query, with or without its `?`.
+ * `search` is the URL's query, with or without its `?`. The address is the
+ * pillar's mapping alone: the route lands it through
+ * {@link settledAreaAddress}, which adds the `?package=` the area would.
  */
 export function dataPillarRedirect(packageId: string, search: string): string {
   const params = new URLSearchParams(search);
@@ -241,10 +198,9 @@ export const AREA_CUSTOMIZE_EDITOR_TYPES: readonly string[] = ['dataset', 'view'
 /**
  * Whether an item of the area opens the form editor rather than the generic
  * item page: a form-editor type, or on a read-only package a customize-editor
- * type, on a package's leg, under the same exceptions as
- * {@link areaItemPillarPath} (the cross-package leg and the environment scope
- * name no package to write, and `?review=1` opens the generic page's draft
- * review).
+ * type, on a package's leg, except where {@link areaItemAsksGenericPage} asks
+ * the generic page (the cross-package leg and the environment scope name no
+ * package to write, and `?review=1` opens the generic page's draft review).
  */
 export function areaItemOpensFormEditor(input: {
   packageId: string | null;
@@ -352,4 +308,18 @@ function orgScopeAreaRedirect(segment: string, rest: string, params: URLSearchPa
     params.get(LIST_SOURCE_PARAM) === STUDIO_ORG_SCOPE_SOURCE;
   if (settled) return null;
   return studioMetadataAreaAddress(STUDIO_ORG_SCOPE_SEGMENT, rest.replace(/\/+$/, ''), { query: next, segmentEncoding: 'verbatim' });
+}
+
+/**
+ * objectstack#36909 — an area address put on the leg its query names, as the
+ * area would put it ({@link areaLocationRedirect}), so a redirect INTO the
+ * area lands in one hop: the area finds nothing to change and redirects no
+ * further. Any other address comes back as it is.
+ *
+ * Idempotent: a settled address settles to itself.
+ */
+export function settledAreaAddress(address: string): string {
+  const parts = studioAddressParts(address);
+  if (!parts || parts.section !== STUDIO_METADATA_AREA) return address;
+  return areaLocationRedirect(parts.segment, parts.rest, parts.search) ?? address;
 }

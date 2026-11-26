@@ -158,7 +158,7 @@ const perPackageWarnings = (warnings: unknown[]): string[] =>
 const CONFIG_MULTI = `
 const coreManifest = {
   id: 'com.example.bcount.core', name: 'bcount core', namespace: 'bc',
-  version: '1.0.0', type: 'app', engines: { protocol: '^18' },
+  version: '1.0.0', type: 'app', engines: { protocol: '^19' },
 };
 const coreObjects = [{
   name: 'bc_account', label: 'Account', pluralLabel: 'Accounts', sharingModel: 'private',
@@ -177,7 +177,7 @@ const coreApps = [{
 
 const ordersManifest = {
   id: 'com.example.bcount.orders', name: 'bcount orders', namespace: 'bc',
-  version: '1.0.0', type: 'module', engines: { protocol: '^18' },
+  version: '1.0.0', type: 'module', engines: { protocol: '^19' },
   dependencies: { 'com.example.bcount.core': '^1.0.0' },
 };
 const ordersObjects = [{
@@ -224,7 +224,7 @@ import { defineStack } from '@objectstack/spec';
 export default defineStack({
   manifest: {
     id: 'com.example.bcsingle', name: 'bcsingle', namespace: 'bs',
-    version: '1.0.0', type: 'app', engines: { protocol: '^18' },
+    version: '1.0.0', type: 'app', engines: { protocol: '^19' },
   },
   objects: [{
     name: 'bs_thing', label: 'Thing', pluralLabel: 'Things', sharingModel: 'private',

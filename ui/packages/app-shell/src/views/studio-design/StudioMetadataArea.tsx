@@ -53,7 +53,6 @@ import {
   areaItemAsksGenericPage,
   areaItemOpensDesignerPage,
   areaItemOpensFormEditor,
-  areaItemPillarPath,
   areaLocationRedirect,
   studioMetadataAreaPath,
 } from './metadataArea.js';
@@ -154,15 +153,15 @@ interface AreaEditorProps {
 }
 
 /**
- * `<root>/:type/:name`: a pillar type opens its pillar, an object, a flow or
- * a permission set its designer full-screen (`areaItemOpensDesignerPage`), an email template or a
+ * `<root>/:type/:name`: an object, a flow or a permission set opens its
+ * designer full-screen (`areaItemOpensDesignerPage`), an email template or a
  * translation the form editor (`areaItemOpensFormEditor`), every other type
- * the generic item page (`areaItemPillarPath` lists when).
+ * the generic item page.
  *
  * Decided once per item, when it opens (the item is the key below): the item
  * page itself rewrites the query it opened with (it drops `?review=1` once the
- * review sheet is open), and that must not send an open review on to the
- * pillar.
+ * review sheet is open), and that must not move an open review to the
+ * designer.
  */
 function AreaItem({ editor }: { editor: AreaEditorProps }): React.ReactElement {
   const { type = '', name = '' } = useParams<{ type: string; name: string }>();
@@ -201,11 +200,10 @@ function AreaItemOpen({
     const genericPage = areaItemAsksGenericPage(search) && !getMetadataResource(type)?.EditPage;
     const designer =
       (areaItemOpensDesignerPage(at) || (editor.orgScope === true && type === STUDIO_ORG_SCOPE_TYPE)) && !genericPage;
-    if (designer) return { designer: true, formEditor: false, pillarPath: null };
-    if (areaItemOpensFormEditor({ ...at, readOnly: host?.readOnly === true })) return { designer: false, formEditor: true, pillarPath: null };
-    return { designer: false, formEditor: false, pillarPath: areaItemPillarPath({ ...at, name }) };
+    if (designer) return { designer: true, formEditor: false };
+    if (areaItemOpensFormEditor({ ...at, readOnly: host?.readOnly === true })) return { designer: false, formEditor: true };
+    return { designer: false, formEditor: false };
   });
-  if (opens.pillarPath) return <Navigate to={opens.pillarPath} replace />;
   if (opens.designer && host?.packageId && type === 'object') {
     // objectstack#36904 — the object designer, full-screen on the object's address.
     return (
@@ -321,6 +319,17 @@ function AreaCreate({ customization }: { customization: StudioBaseCustomization 
   if (type === 'report' && host?.packageId && (!host.readOnly || host.pairCreate)) {
     return (
       <StudioAreaAppOpen packageId={host.packageId} target={{ kind: 'new-report' }} fallback={<AreaOwnCreate customization={customization} />} />
+    );
+  }
+  // objectstack#36907 — a dashboard is made in its app's design mode, in the
+  // 「Add menu item」 picker, so it hangs in a menu (objectstack#36359): the
+  // app opens with the mode entered and the picker on its dashboards. What
+  // the mode saves goes to the package, or a read-only base's pair. With no
+  // app to open, or on a phone, the area's own create, as for a report; the
+  // list offers no New in either case (`useStudioDashboardNew`).
+  if (type === 'dashboard' && host?.packageId && (!host.readOnly || host.pairCreate)) {
+    return (
+      <StudioAreaAppOpen packageId={host.packageId} target={{ kind: 'new-dashboard' }} fallback={<AreaOwnCreate customization={customization} />} />
     );
   }
   return <AreaOwnCreate customization={customization} />;

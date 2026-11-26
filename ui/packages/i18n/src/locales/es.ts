@@ -4979,6 +4979,7 @@ const es = {
   },
   chatbotQuota: {
     title: "Se requiere actualizar",
+    limitTitle: "Límite de IA alcanzado",
     fallbackMessage: "Ha alcanzado su cuota de IA.",
     buyCredits: "Comprar un paquete de créditos",
     upgradePlan: "Mejorar el plan",

@@ -2239,16 +2239,16 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "Identidad y tipo de informe."
       },
       dataset_binding: {
-        label: "Vinculación del conjunto de datos",
-        description: "El conjunto de datos de la capa semántica que renderiza este informe. Las medidas y las filas provienen, respectivamente, de las medidas y las dimensiones del conjunto de datos."
+        label: "Vinculación de la fuente de datos",
+        description: "De dónde provienen las cifras del informe, cómo se agrupan y ordenan, y qué registros se abren al hacer clic en una fila."
       },
       joined_blocks: {
         label: "Bloques unidos",
-        description: "Bloques adicionales unidos en un solo informe (solo informes joined)."
+        description: "Otros bloques apilados en el mismo informe, cada uno con su propia fuente de datos (solo informes joined)."
       },
       filter_and_chart: {
         label: "Filtro y gráfico",
-        description: "Filtros a nivel de informe y presentación del gráfico."
+        description: "Las condiciones de filtro y cómo se muestra el gráfico."
       },
       period_and_export: {
         label: "Periodo y exportación",
@@ -2272,24 +2272,24 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Tipo de informe: tabular/summary/matrix/joined"
       },
       dataset: {
-        label: "Conjunto de datos",
-        helpText: "Conjunto de datos a vincular (las medidas/dimensiones provienen de su capa semántica)"
+        label: "Fuente de datos",
+        helpText: "El informe obtiene sus cifras de aquí; cada persona solo ve los registros a los que tiene acceso."
       },
       values: {
-        label: "Medidas",
-        helpText: "Nombres de medida (del conjunto de datos) que se mostrarán"
+        label: "Métricas",
+        helpText: "Las métricas que se mostrarán, como totales, recuentos, promedios o proporciones (de la fuente de datos)."
       },
       rows: {
-        label: "Filas",
-        helpText: "Nombres de dimensión (del conjunto de datos) por los que agrupar las filas"
+        label: "Agrupar por",
+        helpText: "Los campos por los que agrupar (de la fuente de datos)."
       },
       columns: {
-        label: "Columnas",
-        helpText: "Nombres de dimensión en horizontal (solo matrix)"
+        label: "Agrupar columnas por",
+        helpText: "Grupos distribuidos en las columnas (solo informes matrix)."
       },
       order: {
         label: "Orden",
-        helpText: "Claves de ordenación, la más significativa primero (una dimensión de rows/columns o una medida de values). Las dimensiones de tiempo son cronológicas de forma predeterminada."
+        helpText: "Por qué ordenar, lo más importante primero (una agrupación o una métrica). Las agrupaciones de tiempo se ordenan por fecha de forma predeterminada."
       },
       "order.by": {
         label: "Ordenar por"
@@ -2299,11 +2299,11 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       drilldown: {
         label: "Desglose",
-        helpText: "Haz clic en una fila/celda agregada para abrir los registros subyacentes"
+        helpText: "Haz clic en una fila o celda resumida para abrir los registros que hay detrás."
       },
       blocks: {
         label: "Bloques",
-        helpText: "Subinformes vinculados a un conjunto de datos (solo informe joined)"
+        helpText: "Subinformes, cada uno con su propia fuente de datos (solo informes joined)."
       },
       "blocks.name": {
         label: "Nombre"
@@ -2318,16 +2318,16 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Tipo de bloque"
       },
       "blocks.dataset": {
-        label: "Conjunto de datos"
+        label: "Fuente de datos"
       },
       "blocks.rows": {
-        label: "Filas"
+        label: "Agrupar por"
       },
       "blocks.columns": {
-        label: "Columnas"
+        label: "Agrupar columnas por"
       },
       "blocks.values": {
-        label: "Medidas"
+        label: "Métricas"
       },
       "blocks.runtimeFilter": {
         label: "Filtro en tiempo de ejecución"
@@ -2337,15 +2337,15 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       runtimeFilter: {
         label: "Filtro en tiempo de ejecución",
-        helpText: "Filtro de ámbito en tiempo de renderizado, combinado con AND en el momento de la consulta"
+        helpText: "Un filtro que se aplica cada vez que se muestra el informe, además de las condiciones propias de la fuente de datos."
       },
       chart: {
         label: "Gráfico",
-        helpText: "Configuración de gráfico (type, legend, colors)"
+        helpText: "Tipo y configuración del gráfico."
       },
       dateRange: {
         label: "Rango de fechas",
-        helpText: "Periodo predeterminado e interruptor de rango personalizado. La dimensión debe ser una dimensión de fecha del conjunto de datos; déjela vacía cuando el conjunto de datos tenga exactamente una."
+        helpText: "El período con el que se abre el informe y si cada persona puede elegir su propio rango."
       },
       "dateRange.dimension": {
         label: "Campo de fecha",
@@ -2361,7 +2361,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       exportOptions: {
         label: "Opciones de exportación",
-        helpText: "Formatos de descarga (csv, xlsx) y nombre de archivo. Quién puede descargar lo determina el permiso de exportación del objeto del conjunto de datos."
+        helpText: "Formatos de descarga (csv, xlsx) y nombre de archivo. Quién puede descargar lo determina el permiso de exportación del objeto de la fuente de datos."
       },
       "exportOptions.formats": {
         label: "Formatos",

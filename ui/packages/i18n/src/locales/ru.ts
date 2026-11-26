@@ -5097,6 +5097,7 @@ const ru = {
   },
   chatbotQuota: {
     title: "Требуется обновление тарифа",
+    limitTitle: "Лимит ИИ исчерпан",
     fallbackMessage: "Вы исчерпали квоту ИИ.",
     buyCredits: "Купить пакет кредитов",
     upgradePlan: "Повысить тариф",

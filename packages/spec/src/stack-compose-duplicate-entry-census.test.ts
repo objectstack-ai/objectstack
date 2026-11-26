@@ -237,7 +237,9 @@ describe('composeStacks - CONTROL: two packages each declaring one entry under o
       row.key === 'apis' ? { artifactFlows: ['dupe_flow'] } : undefined,
     );
 
-  it.each(CENSUS.filter((row) => row.key !== 'objects').map((row) => [row.key, row] as const))(
+  // `jobs` is not here: one job name enabled in two packages is refused across them
+  // (`stack-composed-job-name-across-holders.test.ts`), since the boot schedules a job by its bare name.
+  it.each(CENSUS.filter((row) => row.key !== 'objects' && row.key !== 'jobs').map((row) => [row.key, row] as const))(
     '%s: under `manifest: \'preserve\'` each body is judged on its own, and the pair composes',
     (_key, row) => {
       const r = refusalOf(() => composeStacks([firstInput(row), otherPackage(row)], { manifest: 'preserve' }));

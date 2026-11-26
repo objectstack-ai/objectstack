@@ -407,6 +407,10 @@ export function useStageChange(
     );
     const sendable = (values: Record<string, unknown>) =>
       noLongerAsked.size === 0 ? values : Object.fromEntries(Object.entries(values).filter(([k]) => !noLongerAsked.has(k)));
+    // The record the move would leave: the merge the collector judges its
+    // rows on. A row a refusal names carries it too, so its options read the
+    // move even when no collected row is shown (objectstack#37270).
+    const moved = { ...record, [statusField]: stage.value };
     return (
       <RequiredFieldsDialog
         // A new pick is a new collection: the dialog's typed values reset.
@@ -426,7 +430,7 @@ export function useStageChange(
           const def = objectFields?.[name] as Record<string, unknown> | undefined;
           if (!def || typeof def !== 'object' || name === statusField) return null;
           if (!hasFieldEditWidget(def.type as string | undefined) || !fillable(name, def)) return null;
-          return label({ name, def: { name, ...def } });
+          return label({ name, def: { name, ...def }, record: moved });
         }}
         // The stage field and an object-level (`_record`) reason read alone,
         // as `stageRefusalLines` reads them; another field by its label.

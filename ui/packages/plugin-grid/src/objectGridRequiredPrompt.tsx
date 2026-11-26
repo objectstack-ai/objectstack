@@ -206,7 +206,9 @@ export function useCellRequiredPrompt(inputs: CellRequiredPromptInputs): {
       // A field a refusal names joins the dialog when it could have been asked
       // for: it has an edit widget and this reader may write it.
       if (!hasFieldEditWidget(def.type) || !fillable(name, def)) return null;
-      return label({ name, def: { name, ...def } });
+      // The record the change would leave, the merge the collector judges its
+      // rows on, so the row's options read the change (objectstack#37270).
+      return label({ name, def: { name, ...def }, record: { ...record, [columnKey]: value } });
     };
     return (
       <RequiredFieldsDialog

@@ -2239,16 +2239,16 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "ID とレポートタイプ。"
       },
       dataset_binding: {
-        label: "データセットのバインド",
-        description: "このレポートがレンダリングするセマンティックレイヤーのデータセット。メジャーと行は、それぞれこのデータセットのメジャーとディメンションから取得します。"
+        label: "データソースの紐付け",
+        description: "レポートの数値をどこから取得し、どのようにグループ化して並べ替えるか、そして行をクリックしたときにどのレコードを開くか。"
       },
       joined_blocks: {
         label: "結合ブロック",
-        description: "1 つのレポートに結合する追加ブロック（joined レポートのみ）。"
+        description: "同じレポートに積み重ねる他のブロック。それぞれ独自のデータソースを持ちます（joined レポートのみ）。"
       },
       filter_and_chart: {
         label: "フィルターとチャート",
-        description: "レポートレベルのフィルターとチャート表示。"
+        description: "フィルター条件と、チャートの表示方法。"
       },
       period_and_export: {
         label: "期間とエクスポート",
@@ -2272,24 +2272,24 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "レポート種別: tabular/summary/matrix/joined"
       },
       dataset: {
-        label: "データセット",
-        helpText: "バインドするデータセット（メジャー/ディメンションはセマンティックレイヤーから取得）"
+        label: "データソース",
+        helpText: "レポートはここから数値を読み取ります。各ユーザーには、アクセス権のあるレコードだけが表示されます。"
       },
       values: {
-        label: "メジャー",
-        helpText: "表示するメジャー名（データセットから取得）"
+        label: "指標",
+        helpText: "表示する指標。合計、件数、平均、比率など（データソースから取得）。"
       },
       rows: {
-        label: "行",
-        helpText: "行をグループ化するディメンション名（データセットから取得）"
+        label: "グループ化",
+        helpText: "グループ化に使うフィールド（データソースから取得）。"
       },
       columns: {
-        label: "列",
-        helpText: "横方向のディメンション名（matrix のみ）"
+        label: "列のグループ化",
+        helpText: "列方向に展開するグループ（matrix レポートのみ）。"
       },
       order: {
         label: "並び順",
-        helpText: "ソートキー（優先度の高い順）。rows/columns のディメンション、または values のメジャーを指定します。時間ディメンションは既定で時系列順です。"
+        helpText: "並べ替えの基準。重要なものから順に指定します（グループまたは指標）。時間のグループは既定で日付順に並びます。"
       },
       "order.by": {
         label: "並び替えキー"
@@ -2299,11 +2299,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       drilldown: {
         label: "ドリルダウン",
-        helpText: "集計された行/セルをクリックして、元になったレコードを開きます"
+        helpText: "集計された行またはセルをクリックして、その元になっているレコードを開きます。"
       },
       blocks: {
         label: "ブロック",
-        helpText: "データセットにバインドされたサブレポート（joined レポートのみ）"
+        helpText: "サブレポート。それぞれ独自のデータソースを持ちます（joined レポートのみ）。"
       },
       "blocks.name": {
         label: "名前"
@@ -2318,16 +2318,16 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ブロックタイプ"
       },
       "blocks.dataset": {
-        label: "データセット"
+        label: "データソース"
       },
       "blocks.rows": {
-        label: "行"
+        label: "グループ化"
       },
       "blocks.columns": {
-        label: "列"
+        label: "列のグループ化"
       },
       "blocks.values": {
-        label: "メジャー"
+        label: "指標"
       },
       "blocks.runtimeFilter": {
         label: "実行時フィルター"
@@ -2337,15 +2337,15 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       runtimeFilter: {
         label: "実行時フィルター",
-        helpText: "レンダリング時のスコープフィルター。クエリ時に AND で結合されます"
+        helpText: "レポートを表示するたびに適用されるフィルター。データソース自体の条件に加えて適用されます。"
       },
       chart: {
         label: "チャート",
-        helpText: "チャート設定（type, legend, colors）"
+        helpText: "チャートの種類と設定。"
       },
       dateRange: {
         label: "日付範囲",
-        helpText: "既定の期間とカスタム範囲の切り替え。ディメンションはデータセットの日付ディメンションである必要があります。データセットに日付ディメンションが 1 つだけの場合は空欄のままにします。"
+        helpText: "レポートを開いたときに表示される期間と、利用者が自分で範囲を選べるかどうか。"
       },
       "dateRange.dimension": {
         label: "日付フィールド",
@@ -2361,7 +2361,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       exportOptions: {
         label: "エクスポートオプション",
-        helpText: "ダウンロード形式（csv, xlsx）とファイル名。ダウンロードできるユーザーは、データセットのオブジェクトのエクスポート権限で決まります。"
+        helpText: "ダウンロード形式（csv, xlsx）とファイル名。ダウンロードできるユーザーは、データソースのオブジェクトのエクスポート権限で決まります。"
       },
       "exportOptions.formats": {
         label: "形式",

@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { zhHantObjects } from './zh-Hant.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * 繁體中文 (zh-Hant) — Setup App Translations
  */
 export const zhHant: TranslationData = {
   objects: zhHantObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('zh-Hant'),
   apps: {
     account: {
       label: '帳戶',
@@ -95,6 +98,7 @@ export const zhHant: TranslationData = {
         nav_settings_localization: { label: '在地化' },
         nav_exchange_rates: { label: '匯率' },
         nav_units_of_measure: { label: '計量單位' },
+        nav_standard_unit_settings: { label: '標準單位設定' },
         nav_work_calendars: { label: '工作日曆' },
         nav_work_calendar_exceptions: { label: '日曆例外' },
         nav_settings_company: { label: '公司' },

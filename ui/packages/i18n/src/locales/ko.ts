@@ -4869,6 +4869,7 @@ const ko = {
   },
   chatbotQuota: {
     title: "업그레이드 필요",
+    limitTitle: "AI 사용 한도 도달",
     fallbackMessage: "AI 사용 한도에 도달했습니다.",
     buyCredits: "크레딧 팩 구매",
     upgradePlan: "요금제 업그레이드",

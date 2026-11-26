@@ -5131,6 +5131,7 @@ const zhHant = {
   },
   chatbotQuota: {
     title: '需要升級',
+    limitTitle: 'AI 額度已用盡',
     fallbackMessage: 'AI 額度已用完。',
     buyCredits: '購買額度包',
     upgradePlan: '升級方案',

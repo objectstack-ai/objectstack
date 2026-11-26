@@ -546,6 +546,14 @@ export class DraftVersionGuard {
   }
 }
 
+/** {@link DraftSaveGuard.heldDraftVersion} over a guard: the token of the `If-Match` it holds. */
+export function heldDraftVersionOf(guard: Pick<DraftVersionGuard, 'heldFor'>): DraftSaveGuard['heldDraftVersion'] {
+  return (type, name, packageId) => {
+    const pin = guard.heldFor(type, name, packageId);
+    return pin && 'ifMatch' in pin ? pin.ifMatch : undefined;
+  };
+}
+
 export interface DraftSaveGuard {
   /** A guarded `client.save` — same arguments, resolves what it ended in. */
   save: DraftVersionGuard['save'];
@@ -557,6 +565,14 @@ export interface DraftSaveGuard {
   recordPublished: DraftVersionGuard['recordPublished'];
   /** The Save's pinned publish (rules 7–8 above). */
   publish: DraftVersionGuard['publish'];
+  /**
+   * objectstack#36350 — the version of the draft this buffer last wrote or read
+   * at the item (the `If-Match` it holds: a save's receipt version, or the
+   * load's draft read), for a publish pinned to that draft (`draftVersion`).
+   * `undefined` when it holds no token (no draft, or a server that serves no
+   * version): such a publish goes unpinned.
+   */
+  heldDraftVersion: (type: string, name: string, packageId?: string | null) => string | undefined;
   /** The conflict dialog; render it once, anywhere in the caller's tree. */
   dialog: React.ReactElement;
 }
@@ -613,6 +629,7 @@ export function useDraftSaveGuard(client: Pick<MetadataClient, 'save'>, onReload
     forget: guard.forget,
     recordPublished: guard.recordPublished,
     publish: guard.publish,
+    heldDraftVersion: heldDraftVersionOf(guard),
     dialog: <DraftConflictDialog conflict={pending?.conflict ?? null} onChoose={choose} />,
   };
 }

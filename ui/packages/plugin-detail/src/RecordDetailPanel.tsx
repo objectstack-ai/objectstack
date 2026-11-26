@@ -189,6 +189,9 @@ export function buildRecordDetailFields(
         // refuses a field-level `currency`, so without this a fixed-EUR amount
         // read in the tenant's currency here (objectui#12242).
         currencyConfig: def.currencyConfig,
+        // A quantity's unit (ADR-0158): the number cell draws its label and
+        // display decimal places from it.
+        unitConfig: (def as { unitConfig?: unknown }).unitConfig,
         // A formula's declared result type, which picks its face in the formula
         // cell: `currency` draws through the currency cell with the
         // `currencyConfig` above. Without it a money formula read as a bare

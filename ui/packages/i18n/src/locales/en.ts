@@ -5842,6 +5842,7 @@ const en = {
   },
   chatbotQuota: {
     title: 'Upgrade needed',
+    limitTitle: 'AI limit reached',
     fallbackMessage: 'You have reached your AI quota.',
     buyCredits: 'Buy a credit pack',
     upgradePlan: 'Upgrade plan',

@@ -64,7 +64,7 @@ import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
 import { AUDIT_FIELD_NAMES, detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, isObjectExportOffered, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob, readWithheldFieldNames, refersToWithheldField, withHeaderSortPick } from '@object-ui/core';
+import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, isObjectExportOffered, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob, readWithheldFieldNames, refersToWithheldField, withHeaderSortPick, shownQuantityUnitReads } from '@object-ui/core';
 import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField, recordCurrencyReadField } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -4375,6 +4375,15 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // path's `master_detail` arrives with the expand roots above.
           for (const read of shownRecordCurrencyReads(schema.columns, objectDef?.fields)) {
             if (!read.expand) addSpeculative(read.field);
+          }
+
+          // [ADR-0158] A shown quantity's unit: a `record`-mode quantity's code
+          // field, and the row's organization, which picks the unit's display
+          // decimal places (`useQuantityUnit` reads both off the row). The
+          // code field through the speculative gate; `organization_id` is a
+          // platform column every object carries but none declares.
+          for (const f of shownQuantityUnitReads(schema.columns, objectDef?.fields)) {
+            addPredicateField(f);
           }
 
           // View-specific runtime fields. Each non-grid view binds to one

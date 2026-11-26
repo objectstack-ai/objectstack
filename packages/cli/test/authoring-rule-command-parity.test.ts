@@ -37,7 +37,7 @@ const cliBin = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'bin', '
 
 /** A stack that satisfies the security linter, so only the planted defect gates. */
 const withBaseline = (stack: Record<string, unknown>) => ({
-  manifest: { id: 'com.example.parity', namespace: 'parity', version: '1.0.0', name: 'Parity', type: 'app', engines: { protocol: '^18' } },
+  manifest: { id: 'com.example.parity', namespace: 'parity', version: '1.0.0', name: 'Parity', type: 'app', engines: { protocol: '^19' } },
   ...stack,
 });
 

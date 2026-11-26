@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { koObjects } from './ko.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * 한국어 (ko) — Setup App Translations
  */
 export const ko: TranslationData = {
   objects: koObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('ko'),
   apps: {
     account: {
       label: '계정',
@@ -96,6 +99,7 @@ export const ko: TranslationData = {
         nav_settings_localization: { label: '현지화' },
         nav_exchange_rates: { label: '환율' },
         nav_units_of_measure: { label: '측정 단위' },
+        nav_standard_unit_settings: { label: '표준 단위 설정' },
         nav_work_calendars: { label: '근무 캘린더' },
         nav_work_calendar_exceptions: { label: '캘린더 예외' },
         nav_settings_company: { label: '회사' },
