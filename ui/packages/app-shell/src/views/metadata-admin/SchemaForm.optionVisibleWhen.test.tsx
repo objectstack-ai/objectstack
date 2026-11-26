@@ -3,6 +3,8 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { SchemaForm } from './SchemaForm';
+// Paid at module top, during collection (check:test-source-alias): the source under test reaches it through a dynamic import.
+import '@objectstack/lint';
 import type { FormFieldSpec, FormViewSpec } from './form-spec';
 import { WIDGETS, resolveColorWidgetKey } from './widgets';
 import { ExpressionProvider } from '../../providers/ExpressionProvider';

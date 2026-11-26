@@ -46,6 +46,9 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { resolveSectionGroupReferences, sectionEntryName } from '@object-ui/plugin-form';
 import { SchemaForm } from './SchemaForm';
+// Paid at module top, during collection (check:test-source-alias): the source under test reaches it through a dynamic import.
+import '@objectstack/formula';
+import '@objectstack/lint';
 import type { FormSectionSpec, FormViewSpec } from './form-spec';
 import type { RichMetadataTypeEntry } from './useMetadata';
 
