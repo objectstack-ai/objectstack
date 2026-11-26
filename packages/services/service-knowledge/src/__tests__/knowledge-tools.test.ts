@@ -368,6 +368,23 @@ describe('search_knowledge — scope, granularity and groupBy: malformed argumen
     expect(idErr.message).toContain(`"s${'z'.repeat(63)}…"`);
     expect(idErr.message.length).toBeLessThan(300);
   });
+
+  it('repeats a short caller string as its JSON escape: a quote, a newline and a NUL never come back raw', async () => {
+    const { service } = setup();
+    const tools = service.knowledgeTools();
+    const odd = 'a"b\nc\u0000d';
+    const escaped = '"a\\"b\\nc\\u0000d"';
+    expect(JSON.stringify(odd)).toBe(escaped);
+    const keyErr = await tools.searchKnowledge({ query: 'q', [odd]: 1 }, caller).catch((e) => e);
+    const idErr = await tools.searchKnowledge({ query: 'q', sourceIds: [odd] }, caller).catch((e) => e);
+    expect(keyErr).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(idErr).toMatchObject({ code: 'NOT_FOUND', status: 404 });
+    for (const err of [keyErr, idErr]) {
+      expect(err.message).toContain(escaped);
+      expect(err.message).not.toContain('\n');
+      expect(err.message).not.toContain('\u0000');
+    }
+  });
 });
 
 /**
@@ -481,6 +498,23 @@ describe('search_knowledge — scope, granularity and groupBy over the knowledge
     const answer = await tools.searchKnowledge({ query: 'q', groupBy: 'policy' }, caller);
     expect(answer.hits.map((h) => [h.record?.id, h.groupValue])).toEqual([['c1', 'P_leave'], ['c3', 'P_travel']]);
     expect(JSON.stringify(answer)).not.toContain('draft');
+  });
+
+  it('groupBy over a file source: one hit per document, and no groupValue even where its hit carries the field', async () => {
+    const manuals = {
+      id: 'manuals',
+      label: 'Manuals',
+      adapter: 'memory',
+      source: { kind: 'file', uris: ['file:///manual.md'] },
+    } as unknown as KnowledgeSource;
+    const adapter = adapterWith({
+      manuals: [{ chunkId: 'manuals:m#0', documentId: 'manuals:m', sourceId: 'manuals', score: 0.95, snippet: 'manual', metadata: { policy: 'P_manual' } }],
+    });
+    const service = new KnowledgeService({ logger: { warn: () => undefined, debug: () => undefined } });
+    service.registerAdapter('memory', adapter);
+    service.registerSource(manuals);
+    const answer = await service.knowledgeTools().searchKnowledge({ query: 'q', groupBy: 'policy' }, caller);
+    expect(answer.hits).toEqual([{ sourceId: 'manuals', documentId: 'manuals:m', snippet: 'manual', score: 0.95 }]);
   });
 
   it('scope: only hits from the named records', async () => {

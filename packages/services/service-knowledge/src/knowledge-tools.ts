@@ -3,6 +3,7 @@
 import type { AIToolDefinition, IKnowledgeService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { KnowledgeHit, KnowledgeSource, ObjectKnowledgeSource } from '@objectstack/spec/ai';
+import { SEARCH_SCOPE_MAX_ENTRIES, SEARCH_SCOPE_MAX_IDS } from './knowledge-search-scope.js';
 
 /**
  * The knowledge AI tool, `search_knowledge`, defined once with one executor
@@ -67,10 +68,11 @@ export const SEARCH_KNOWLEDGE_DEFAULT_TOP_K = 5;
 /**
  * The most entries one `scope` argument holds, and the most ids one entry
  * holds: the bounds `IKnowledgeService.search` holds its `scope` option to
- * (`KnowledgeSearchOptions.scope`), stated in the definition.
+ * (`KnowledgeSearchOptions.scope`, `knowledge-search-scope.ts`), read from
+ * there and stated in the definition.
  */
-export const SEARCH_KNOWLEDGE_MAX_SCOPE_ENTRIES = 10;
-export const SEARCH_KNOWLEDGE_MAX_SCOPE_IDS = 500;
+export const SEARCH_KNOWLEDGE_MAX_SCOPE_ENTRIES: number = SEARCH_SCOPE_MAX_ENTRIES;
+export const SEARCH_KNOWLEDGE_MAX_SCOPE_IDS: number = SEARCH_SCOPE_MAX_IDS;
 
 /**
  * The longest object name, record id or field name the tool takes, in UTF-16
@@ -128,8 +130,9 @@ export interface SearchKnowledgeHit {
   headingPath?: string[];
   /**
    * Under `groupBy`: the value of that field the hit's record holds — the
-   * group the hit stands for — as the index stores it. Absent on a hit of a
-   * `file` / `http` source, which stands for its document.
+   * group the hit stands for — as the index stores it (a string, a number, a
+   * list for a `multiple` lookup). Absent on a hit of a `file` / `http`
+   * source, which answers under `groupBy` one hit per document.
    */
   groupValue?: unknown;
 }
@@ -197,8 +200,10 @@ const SEARCH_KNOWLEDGE_DESCRIPTION =
   + 'To find which records match rather than which passages (which policies, not which clauses), send '
   + '`granularity: "record"`: one hit per record, its best passage, and `topK` counts records. To group by a '
   + 'field the source indexes with its passages instead (one hit per policy for a search over clauses, say), send '
-  + '`groupBy` with that field\'s name: one hit per value, which the hit carries as `groupValue`; a source that '
-  + 'does not index that field answers nothing for that search. To look inside records you already know (one '
+  + '`groupBy` with that field\'s name: one hit per value, which the hit carries as `groupValue` (the value as the '
+  + 'index stores it: a string, a number or a list). A source of indexed records that does not index that field '
+  + 'answers nothing for that search; a file or web source still answers, one hit per document and with no '
+  + '`groupValue`. To look inside records you already know (one '
   + 'policy, say), send `scope`: a list of `{ object, ids }` entries, at most '
   + `${SEARCH_KNOWLEDGE_MAX_SCOPE_ENTRIES} entries of at most ${SEARCH_KNOWLEDGE_MAX_SCOPE_IDS} ids. An entry naming `
   + 'the object a source indexes searches those records\' passages; an entry naming a parent object searches the '

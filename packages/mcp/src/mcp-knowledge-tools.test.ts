@@ -362,6 +362,9 @@ describe('[ADR-0161 K9] search_knowledge over the real definition — every tran
     expect(JSON.stringify(stdio)).toBe(JSON.stringify(http));
     const [definition] = getKnowledgeToolDefinitions();
     expect(http!.description).toBe(definition.description);
+    // The listed schema IS the definition's: no transport-side edit of a bound, a description or a key.
+    const { $schema: _dialect, ...listed } = http!.inputSchema;
+    expect(listed).toEqual(definition.parameters);
     expect(Object.keys(http!.inputSchema.properties).sort()).toEqual(['granularity', 'groupBy', 'query', 'scope', 'sourceIds', 'topK']);
     // The nested scope schema reaches the client whole, bounds included.
     expect(http!.inputSchema.properties.scope).toMatchObject({
@@ -386,11 +389,34 @@ describe('[ADR-0161 K9] search_knowledge over the real definition — every tran
     expect(answer.hits.map((h) => h.record?.id)).toEqual(['c3']);
   });
 
-  it('a scope past its bound is refused before the bridge is asked', async () => {
+  it('a scope past its bound is refused by the schema check before the bridge is asked, with the same answer on both doors', async () => {
+    const args = { query: 'q', scope: Array.from({ length: 11 }, () => ({ object: 'clause', ids: ['c1'] })) };
     const bridge = realBridge();
     const search = vi.spyOn(bridge, 'searchKnowledge');
-    const json = await callTool(bridge, { query: 'q', scope: Array.from({ length: 11 }, () => ({ object: 'clause', ids: ['c1'] })) });
-    expect(Boolean(json.error) || json.result?.isError === true).toBe(true);
+    const http = (await callTool(bridge, args)).result!;
+    const stdio = (await rawOverStdio(realBridge(), {
+      jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: SEARCH_KNOWLEDGE_TOOL_NAME, arguments: args },
+    })).result as { content: Array<{ text: string }>; isError?: boolean };
     expect(search).not.toHaveBeenCalled();
+    // The SDK's input-validation refusal (-32602), naming the argument: a schema-stated shape never reaches the
+    // executor over MCP, so it carries no ADR-0112 code. The coded VALIDATION_ERROR is the executor's own.
+    expect(http.isError).toBe(true);
+    expect(http.content[0].text).toContain('-32602');
+    expect(http.content[0].text).toContain('scope');
+    expect(stdio.isError).toBe(true);
+    expect(stdio.content[0].text).toBe(http.content[0].text);
+  });
+
+  it('a shape the schema cannot state (a NUL in an id) reaches the executor and answers its coded VALIDATION_ERROR on both doors', async () => {
+    const args = { query: 'q', scope: [{ object: 'clause', ids: ['c1\u0000x'] }] };
+    const http = (await callTool(realBridge(), args)).result!;
+    const stdio = (await rawOverStdio(realBridge(), {
+      jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: SEARCH_KNOWLEDGE_TOOL_NAME, arguments: args },
+    })).result as { content: Array<{ text: string }>; isError?: boolean };
+    expect(http.isError).toBe(true);
+    expect(JSON.parse(http.content[0].text).error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(http.content[0].text).toContain('`scope`');
+    expect(stdio.isError).toBe(true);
+    expect(stdio.content[0].text).toBe(http.content[0].text);
   });
 });
