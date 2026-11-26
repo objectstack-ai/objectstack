@@ -788,14 +788,10 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         const warnLines = vi.spyOn(console, 'warn').mockImplementation(() => {});
         try {
             const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
-            // Reached through each door, so the answer is the outage's on both.
-            expect(failing.mock.calls.filter(([object]) => object === 'rc_revision').length).toBeGreaterThanOrEqual(2);
-            expect(answer.isError).toBe(true);
-            expect(answer.payload.error).toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
-            for (const word of ['rc_revision', 'disk I/O', 'version']) expect(answer.text).not.toContain(word);
+            await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
             // An outage is a fault, never a declared capability absence: each door logs it at error,
             // with the outage as its cause, on every call, the second included.
-            await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
+            expect(warnLines.mock.calls.filter(([line]) => String(line).includes('capability absence'))).toEqual([]);
             const faults = errorLines.mock.calls.filter(([line]) =>
                 typeof line === 'string' && line.startsWith('[5xx] 500') && line.includes('get_record_context rc_policy'));
             expect(faults).toHaveLength(4);
@@ -803,7 +799,11 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
                 expect(meta).toMatchObject({ status: 500, code: 'INTERNAL_ERROR' });
                 expect(String((meta as { stack?: unknown }).stack)).toContain(`Caused by: Error: ${OUTAGE}`);
             }
-            expect(warnLines.mock.calls.filter(([line]) => String(line).includes('capability absence'))).toEqual([]);
+            // Reached through each door, so the answer is the outage's on both.
+            expect(failing.mock.calls.filter(([object]) => object === 'rc_revision').length).toBeGreaterThanOrEqual(4);
+            expect(answer.isError).toBe(true);
+            expect(answer.payload.error).toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
+            for (const word of ['rc_revision', 'disk I/O', 'version']) expect(answer.text).not.toContain(word);
         } finally {
             failing.mockRestore();
             errorLines.mockRestore();
