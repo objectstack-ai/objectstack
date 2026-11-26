@@ -86,6 +86,34 @@ describe('ObjectLogger — an error record carries the cause chain', () => {
     });
 });
 
+describe('a cause is redacted like the error', () => {
+    it('withholds the named fields of a non-Error object cause, under the logger\'s own redact list', () => {
+        const chunks: string[] = [];
+        vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: unknown) => {
+            chunks.push(String(chunk));
+            return true;
+        }) as never);
+        const logger = createLogger({ format: 'json', level: 'debug', redact: ['password', 'apiKey', 'pin'] });
+        logger.error('withheld', new Error('w', { cause: { code: 'ECONNRESET', password: 'hunter2', apiKey: 'sk-live-1', pin: '0000' } }));
+        const line = chunks.join('');
+        for (const value of ['hunter2', 'sk-live-1', '0000']) expect(line).not.toContain(value);
+        const record = JSON.parse(line.trim()) as ErrorRecord;
+        expect(JSON.parse(record.error?.causes?.[0].message ?? '')).toEqual({
+            code: 'ECONNRESET',
+            password: '***REDACTED***',
+            apiKey: '***REDACTED***',
+            pin: '***REDACTED***',
+        });
+    });
+
+    it('a link whose message read throws ends the chain in a marker, and the record is still written', () => {
+        const unreadable = new Error('unreadable');
+        Object.defineProperty(unreadable, 'message', { get() { throw new Error('getter'); } });
+        const record = recordOf((logger) => logger.error('unreadable', new Error('w', { cause: unreadable })));
+        expect(record.error?.causes).toEqual([{ message: '[cause chain link unreadable: reading it threw]' }]);
+    });
+});
+
 describe('parity — the logger and the fault log render one shape', () => {
     const cycle = () => {
         const a = new Error('a');
@@ -103,10 +131,27 @@ describe('parity — the logger and the fault log render one shape', () => {
         ['a deep chain', deep],
         ['a string cause', () => new Error('w', { cause: 'socket hang up' })],
         ['an object cause', () => new Error('w', { cause: { code: 'ECONNRESET' } })],
+        ['an object cause with withheld fields', () => new Error('w', { cause: { code: 'E1', password: 'p', apiKey: 'k' } })],
+        ['an object cause that cannot be serialized', () => {
+            const loop: Record<string, unknown> = { code: 'E2' };
+            loop.self = loop;
+            return new Error('w', { cause: loop });
+        }],
+        ['a link whose message read throws', () => {
+            const unreadable = new Error('unreadable');
+            Object.defineProperty(unreadable, 'message', { get() { throw new Error('getter'); } });
+            return new Error('w', { cause: new Error('mid', { cause: unreadable }) });
+        }],
+        ['a throwing cause getter', () => {
+            const hostile = new Error('w');
+            Object.defineProperty(hostile, 'cause', { get() { throw new Error('getter'); } });
+            return hostile;
+        }],
     ];
     it.each(fixtures)('%s', (_name, make) => {
         const error = make();
         const record = recordOf((logger) => logger.error('parity', error));
-        expect(record.error?.causes).toEqual(faultCauseChain(error));
+        // The record omits `causes` when the chain is empty; the fault log's helper answers `[]`.
+        expect(record.error?.causes ?? []).toEqual(faultCauseChain(error));
     });
 });

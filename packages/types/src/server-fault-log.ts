@@ -302,6 +302,13 @@ export const FAULT_CAUSE_DEPTH_LIMIT = 5;
  * Bounded both ways: a cycle (`a.cause = b; b.cause = a`) stops at the first
  * repeat, and a chain deeper than {@link FAULT_CAUSE_DEPTH_LIMIT} stops there;
  * either says so in a last link, so a cut chain never reads as a whole one.
+ * A link whose read throws ends the chain in a marker link too.
+ *
+ * A non-Error object cause is serialized with `isRedacted` applied key by
+ * key, the same rule a logger applies to its own fields. The default is the
+ * logger's default redact list (`LoggerConfig.redact`), matched on the
+ * lower-cased name, so the console fallback, which has no logger config,
+ * errs towards withholding.
  *
  * ⛔ Operator-only. It feeds the log line; no door puts it on the wire, and a
  * 5xx answer withholds even the wrapper's own sentence.
@@ -309,10 +316,14 @@ export const FAULT_CAUSE_DEPTH_LIMIT = 5;
  * `@objectstack/core`'s `ObjectLogger` renders the same shape for every
  * `logger.error(message, err)`. It keeps its own copy because its `./logger`
  * entry is browser-safe and bundled by `@objectstack/client`, which does not
- * depend on this package; `logger.test.ts` there pins the two to the same
- * output.
+ * depend on this package; `logger-error-cause.test.ts` there pins the two to
+ * the same output.
  */
-export function faultCauseChain(thrown: unknown, limit: number = FAULT_CAUSE_DEPTH_LIMIT): FaultCauseLine[] {
+export function faultCauseChain(
+    thrown: unknown,
+    isRedacted: (key: string) => boolean = isDefaultRedactedFieldName,
+): FaultCauseLine[] {
+    const limit = FAULT_CAUSE_DEPTH_LIMIT;
     const lines: FaultCauseLine[] = [];
     const seen = new Set<unknown>([thrown]);
     let current = causeOf(thrown);
@@ -326,7 +337,14 @@ export function faultCauseChain(thrown: unknown, limit: number = FAULT_CAUSE_DEP
             break;
         }
         seen.add(current);
-        lines.push(causeLine(current));
+        try {
+            lines.push(causeLine(current, isRedacted));
+        } catch {
+            // A link whose name, message or stack read throws (a hostile getter, a Proxy)
+            // ends the chain in a marker; it must not cost the whole line.
+            lines.push({ message: '[cause chain link unreadable: reading it threw]' });
+            break;
+        }
         current = causeOf(current);
     }
     return lines;
@@ -342,14 +360,28 @@ function causeOf(value: unknown): unknown {
     }
 }
 
-function causeLine(cause: unknown): FaultCauseLine {
+/** `LoggerConfig.redact`'s default words (`@objectstack/spec` `logging.zod.ts`). */
+const DEFAULT_REDACTED_WORDS = ['password', 'token', 'secret', 'key'] as const;
+
+function isDefaultRedactedFieldName(key: string): boolean {
+    const lower = key.toLowerCase();
+    return DEFAULT_REDACTED_WORDS.some((word) => lower.includes(word));
+}
+
+function causeLine(cause: unknown, isRedacted: (key: string) => boolean): FaultCauseLine {
     if (cause instanceof Error) {
         return {
             message: `${cause.name}: ${cause.message}`,
             ...(cause.stack ? { stack: cause.stack } : {}),
         };
     }
-    return { message: typeof cause === 'string' ? cause : safeStringify(cause) };
+    if (typeof cause === 'string') return { message: cause };
+    try {
+        const text = JSON.stringify(cause, (key, value) => (key !== '' && isRedacted(key) ? '***REDACTED***' : value));
+        return { message: text ?? String(cause) };
+    } catch {
+        return { message: String(cause) };
+    }
 }
 
 /**

@@ -118,6 +118,49 @@ describe('faultCauseChain — bounded both ways', () => {
         expect(faultCauseChain('a string throw')).toEqual([]);
         expect(faultCauseChain(undefined)).toEqual([]);
     });
+
+    it('a link whose message read throws ends the chain in a marker, and the line is still written', () => {
+        const unreadable = new Error('unreadable');
+        Object.defineProperty(unreadable, 'message', { get() { throw new Error('getter'); } });
+        const outer = withCause(OUTER, withCause(MID, unreadable));
+        expect(faultCauseChain(outer)).toEqual([
+            expect.objectContaining({ message: `Error: ${MID}` }),
+            { message: '[cause chain link unreadable: reading it threw]' },
+        ]);
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+            expect(logServerFault({ status: 500, error: outer })).toBe(true);
+            const meta = faultLines(spy)[0][1] as { causes?: Array<{ message: string }> };
+            expect(meta.causes?.[1]).toEqual({ message: '[cause chain link unreadable: reading it threw]' });
+        } finally {
+            spy.mockRestore();
+        }
+    });
+});
+
+describe('a cause is redacted like the error', () => {
+    it('withholds the named fields of a non-Error object cause and keeps the rest', () => {
+        const chain = faultCauseChain(withCause('w', { code: 'ECONNRESET', password: 'hunter2', apiKey: 'sk-live-1', nested: { authToken: 't-1' } }));
+        expect(chain).toHaveLength(1);
+        expect(JSON.parse(chain[0].message)).toEqual({
+            code: 'ECONNRESET',
+            password: '***REDACTED***',
+            apiKey: '***REDACTED***',
+            nested: { authToken: '***REDACTED***' },
+        });
+        for (const value of ['hunter2', 'sk-live-1', 't-1']) expect(chain[0].message).not.toContain(value);
+    });
+
+    it('the console fallback line carries the withheld form', () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+            logServerFault({ status: 500, error: withCause(OUTER, { password: 'hunter2' }) });
+            const meta = faultLines(spy)[0][1] as { causes?: Array<{ message: string }> };
+            expect(meta.causes).toEqual([{ message: '{"password":"***REDACTED***"}' }]);
+        } finally {
+            spy.mockRestore();
+        }
+    });
 });
 
 describe('logServerFault — an injected logger renders the chain itself', () => {
