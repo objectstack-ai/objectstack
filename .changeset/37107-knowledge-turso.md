@@ -1,6 +1,7 @@
 ---
 '@objectstack/knowledge-turso': patch
 '@objectstack/spec': patch
+'@objectstack/service-settings': patch
 ---
 
 feat(knowledge): the libSQL vector store moves into the open framework, with generations, listing and the adapter contract suite
@@ -15,4 +16,5 @@ ADR-0161 Execution row 7; cloud ADR-0119 D5 (#37107).
 - **Generations under the index fingerprint (ADR-0161 K7; K8, item 8).** A generation table `knowledge_generation` and one passage table per source and generation, `knowledge_<source>_g<n>`. A write or a search under another fingerprint is refused `409 KNOWLEDGE_REBUILD_REQUIRED` (registered in the error-code ledger for this package). `beginBuild` under a new fingerprint opens a generation beside the active one, which keeps answering its own fingerprint; `completeBuild` switches to it, records the recipe hash and drops the old table; `indexStatus` answers the fingerprint, the recipe hash and whether a build is under way. One builder per source, held by a unique index on the generation table. A table of the cloud-repo releases (`knowledge_<source>`) is never served: a search answers `KNOWLEDGE_REBUILD_REQUIRED`, and the table is dropped when the first complete reindex finishes.
 - **Listing, hashes, organizations.** `listDocuments` pages the generation the writes go to, each document's `docHash` as stored; hits carry `docHash` and the passage's `headingPath`; the organization filter and the metadata `filter` run in SQL before ranking, by an exact cosine scan (no DiskANN index, which ranks before it filters). A passage whose text is unchanged is not embedded again.
 - **When it cannot run**, because the database cannot be opened or `@libsql/client` has no native build for the platform (Windows on ARM), the plugin still registers and boot goes on; `healthCheck` answers `ok: false` and every call answers `503 SERVICE_UNAVAILABLE`, its reason in the error's `remedy`.
+- **Settings → Knowledge, "Test connection" on Turso** no longer says the package ships from another repository, or that a store with no URL reuses the platform's database: it names `@objectstack/knowledge-turso`, registered beside the knowledge service, and its default file.
 - The package runs `runKnowledgeAdapterContract` with every member declared, on `:memory:` and on a `file:` URL, in its own unit tests.
