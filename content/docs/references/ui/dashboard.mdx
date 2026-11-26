@@ -33,7 +33,7 @@ const result = DashboardSchema.parse(data);
 | **description** | `string \| Record<string, string>` | optional | Dashboard description |
 | **header** | `{ showTitle?: boolean; showDescription?: boolean; actions?: object[] }` | optional | Dashboard header configuration |
 | **widgets** | `{ id: string; title?: string \| Record<string, string>; description?: string \| Record<string, string>; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; … }[]` | ✅ | Widgets to display |
-| **columns** | `integer` | optional | Number of grid columns (default 12) |
+| **columns** | `integer` | optional | Number of grid columns. When absent, inferred from the widgets: 12 if any widget layout reaches past column 4 (x + w > 4), otherwise 4 |
 | **gap** | `integer` | optional | Space between widgets, in steps of 0.25rem (4 = 1rem) |
 | **refreshIntervalSeconds** | `number` | optional | Auto-refresh interval in seconds |
 | **refreshInterval** | `never` | optional | [REMOVED] `dashboard.refreshInterval` was renamed to `refreshIntervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `refreshIntervalSeconds`; the value (seconds) is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |

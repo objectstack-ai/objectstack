@@ -1820,8 +1820,11 @@ export const DashboardSchema = lazySchema(() => strictObject({
   /** Collection of widgets */
   widgets: z.array(DashboardWidgetSchema).describe('Widgets to display'),
 
-  /** Grid column count — defaults to 12 for a standard 12-column grid */
-  columns: z.number().int().min(1).max(24).optional().describe('Number of grid columns (default 12)'),
+  /**
+   * Grid column count. Absent, the renderer infers it from the widgets: 12 when
+   * any widget's layout reaches past column 4 (`x + w > 4`), otherwise 4.
+   */
+  columns: z.number().int().min(1).max(24).optional().describe('Number of grid columns. When absent, inferred from the widgets: 12 if any widget layout reaches past column 4 (x + w > 4), otherwise 4'),
 
   /** Space between widgets, in steps of 0.25rem (4 = 1rem) */
   gap: z.number().int().min(0).optional().describe('Space between widgets, in steps of 0.25rem (4 = 1rem)'),

@@ -31,6 +31,12 @@ export default defineConfig({
       // `platform-objects` takes explicit subpaths: its export map is not uniform.
       { find: /^@objectstack\/service-settings$/, replacement: path.resolve(__dirname, '../service-settings/src/index.ts') },
       { find: /^@objectstack\/types$/, replacement: path.resolve(__dirname, '../../types/src/index.ts') },
+      // The plugin builds its settings-configured embedder from
+      // `@objectstack/embedder-openai`; its source, like every sibling here.
+      {
+        find: /^@objectstack\/embedder-openai$/,
+        replacement: path.resolve(__dirname, '../../plugins/embedder-openai/src/index.ts'),
+      },
       {
         find: /^@objectstack\/platform-objects\/system$/,
         replacement: path.resolve(__dirname, '../../platform-objects/src/system/index.ts'),

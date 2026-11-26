@@ -159,6 +159,10 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // `requiredPermissions`: the object grant decides (every member reads,
       // organization admins write), and Setup itself already needs `setup.access`.
       { id: 'nav_units_of_measure', type: 'object', label: 'Units of Measure', objectName: 'sys_unit', viewName: 'all_units', icon: 'ruler' },
+      // [ADR-0158 U6, Open item 10] The decimal places each standard unit
+      // displays with in the organization, next to the organization's own
+      // units. No `requiredPermissions`, for the same reason as the entry above.
+      { id: 'nav_standard_unit_settings', type: 'object', label: 'Standard Unit Settings', objectName: 'sys_standard_unit_setting', viewName: 'all_settings', icon: 'ruler' },
       // [ADR-0157 D1, D3] Working calendars and their holidays, beside the
       // other organization reference data Localization governs. The exceptions
       // get their own entry because their list page is the import door for a

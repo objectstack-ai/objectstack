@@ -219,7 +219,7 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
     status: 'demonstrated',
     files: ['src/ai/record-context.ai-context.ts'],
     notes:
-      'Two context packs (ADR-0160): a project brief (own fields, a lookup read through to the account, tasks as a related list) and a task with its notes as a body (whole, or an outline read by anchor). Read by `get_record_context` over MCP; the service is wired in objectstack.config.ts plugins.',
+      'Two context packs (ADR-0160): a project brief (own fields, a lookup read through to the account, its open tasks as a related list, filtered, ordered by due date and cut by `where` / `orderBy` / `limit`) and a task with its notes as a body (whole, or an outline read by anchor). Read by `get_record_context` over MCP; the service is wired in objectstack.config.ts plugins.',
   },
   skill: {
     status: 'waived',

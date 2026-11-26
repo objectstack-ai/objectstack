@@ -12,6 +12,8 @@
     "AiContextBodySchema": "ai/AiContextBody",
     "AiContextRelated": "ai/AiContextRelated",
     "AiContextRelatedSchema": "ai/AiContextRelated",
+    "AiContextRelatedWhere": "ai/AiContextRelatedWhere",
+    "AiContextRelatedWhereSchema": "ai/AiContextRelatedWhere",
     "AiContextSchema": "ai/AiContext",
     "BlueprintApp": "ai/BlueprintApp",
     "BlueprintAppSchema": "ai/BlueprintApp",

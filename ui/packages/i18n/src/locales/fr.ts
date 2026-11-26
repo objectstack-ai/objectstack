@@ -3813,7 +3813,6 @@ const fr = {
   },
   home: {
     build: {
-      title: "Créer une application",
       noCapability: "La création d'applications n'est pas disponible dans ce système : elle requiert l'autorisation « Gérer les métadonnées », que votre compte ne possède pas.",
       inStudio: "Nouvelle application vierge",
     },
@@ -3821,13 +3820,11 @@ const fr = {
       title: "Partir d'un modèle",
       marketplaceDisabled: "Aucune place de marché d'applications n'est configurée pour ce runtime : il n'y a donc aucun modèle à installer ici.",
     },
-    welcomeAdminDescription: "Décrivez votre activité en une phrase — l'IA génère les objets, les écrans, les API et les outils d'agent. Ou configurez tout vous-même depuis le menu de gauche.",
     welcomeAdminDescriptionNoBuild: "Configurez votre première application depuis le menu Administration à gauche. Une fois les données en place, l'assistant IA pourra vous aider à les explorer.",
     welcomeAdminDescriptionNoAi: "Configurez votre première application depuis le menu Administration à gauche.",
     noAppsTitle: "Aucune application pour l'instant",
     noAppsDescription: "Le système est en cours de configuration — les applications partagées par votre administrateur apparaîtront ici.",
     noAppsAddDescription: "Créez votre première application, ou partez d'un modèle ou de la place de marché.",
-    buildWithAI: "Créer avec l'IA",
     askAI: "Demander à l'IA",
     recoveryReminder: {
       message: "Définissez un mot de passe de secours afin de pouvoir vous connecter même si l'authentification unique est indisponible.",
@@ -4977,6 +4974,7 @@ const fr = {
   },
   chatbotQuota: {
     title: "Mise à niveau requise",
+    limitTitle: "Limite d'IA atteinte",
     fallbackMessage: "Vous avez atteint votre quota d'IA.",
     buyCredits: "Acheter un pack de crédits",
     upgradePlan: "Changer d'offre",

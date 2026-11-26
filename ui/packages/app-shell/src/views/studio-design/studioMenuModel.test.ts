@@ -10,6 +10,11 @@
  * 2026-11-25): each group's entries in the table's order, each stamped with
  * its tier, the four entries that are not a type in 高级, a 常用 type the
  * settled sweep counts none of marked empty, and the 常用 types always listed.
+ *
+ * objectstack#37360 — 全部类型 All types (ADR-0084, amended 2026-11-25): a
+ * package's entry under no group, opening the area's type directory, which is
+ * now its current entry; CONTROL: the fold's rule still leaves out a 高级 type
+ * the package holds none of.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -19,6 +24,7 @@ import {
   STUDIO_MENU_GROUPS,
   buildStudioMenu,
   readStudioMenuAdvancedCookie,
+  studioMenuAllTypesEntry,
   studioMenuCurrentKey,
   studioMenuEntryMatches,
   studioMenuScope,
@@ -252,11 +258,13 @@ describe('the current entry (aria-current)', () => {
     return studioMenuCurrentKey({ segment, pathname, search: query ? `?${query}` : '' });
   };
 
-  it('an area page is its type, diagnostics, or nothing at the directory', () => {
+  // objectstack#37360 — rewritten on purpose: the directory is now an entry's page, 全部类型 All types.
+  // It was "an area page is its type, diagnostics, or nothing at the directory".
+  it('an area page is its type, diagnostics, or at the directory 全部类型 All types', () => {
     expect(current(PKG, `/studio/${PKG}/metadata/view`)).toBe('type:view');
     expect(current(PKG, `/studio/${PKG}/metadata/view/v1/history`)).toBe('type:view');
     expect(current(PKG, `/studio/${PKG}/metadata/_diagnostics`)).toBe('diagnostics');
-    expect(current(PKG, `/studio/${PKG}/metadata`)).toBeNull();
+    expect(current(PKG, `/studio/${PKG}/metadata`)).toBe('allTypes');
   });
 
   it('a pillar page is the type it designs; the OWD overview\'s route is that entry', () => {
@@ -301,5 +309,45 @@ describe('the group names: one dictionary for the menu and the directory (ADR-00
         expect(studioMenuGroupLabel(g, locale), `${g} in ${locale}`).toBe(translateMetadataDomain(g, locale));
       }
     }
+  });
+});
+
+describe('全部类型 All types: the 高级 fold\'s last row, under no group (objectstack#37360, ADR-0084 amended 2026-11-25)', () => {
+  it('a package has it: it opens the area\'s type directory, and it is 高级', () => {
+    expect(studioMenuAllTypesEntry(studioMenuScope(PKG))).toEqual({
+      key: 'allTypes',
+      kind: 'allTypes',
+      to: `/studio/${PKG}/metadata`,
+      tier: 'advanced',
+    });
+  });
+
+  it('~org and ~all, which draw no fold, have none', () => {
+    expect(studioMenuAllTypesEntry(studioMenuScope('~org'))).toBeNull();
+    expect(studioMenuAllTypesEntry(studioMenuScope('~all'))).toBeNull();
+  });
+
+  it('it sits under no group: no group of the menu or of either tier holds it', () => {
+    const menu = buildStudioMenu({ scope: studioMenuScope(PKG), types: SERVED, counts: {} });
+    const keys = menu.flatMap((g) => g.entries.map((e) => e.key));
+    expect(keys).not.toContain('allTypes');
+    const tiers = studioMenuTiers(menu);
+    expect([...tiers.common, ...tiers.advanced].flatMap((g) => g.entries.map((e) => e.key))).not.toContain('allTypes');
+  });
+
+  it('CONTROL: the fold\'s rule does not change — a 高级 type the package holds none of is still left out', async () => {
+    const { scopeDirectoryEntries } = await import('../metadata-admin/directoryScope');
+    // The package holds a hook and nothing else of 高级; email_template and doc are served, held by none.
+    const listed = scopeDirectoryEntries(SERVED, {
+      environment: false,
+      packageId: PKG,
+      packagesByType: { hook: [PKG], email_template: ['com.other.pkg'] },
+      always: STUDIO_MENU_ALWAYS_TYPES,
+    });
+    const advanced = studioMenuTiers(buildStudioMenu({ scope: studioMenuScope(PKG), types: listed, counts: { hook: 2 } })).advanced;
+    const keys = advanced.flatMap((g) => g.entries.map((e) => e.key));
+    expect(keys).toContain('type:hook');
+    expect(keys).not.toContain('type:email_template');
+    expect(keys).not.toContain('type:doc');
   });
 });

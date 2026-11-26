@@ -2234,8 +2234,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "ID とレポートタイプ。"
       },
       dataset_binding: {
-        label: "データセットのバインド",
-        description: "このレポートがレンダリングするセマンティックレイヤーのデータセット。メジャーと行は、それぞれこのデータセットのメジャーとディメンションから取得します。"
+        label: "データソースの紐付け",
+        description: "レポートの数値をどこから取得し、どのようにグループ化して並べ替えるか、そして行をクリックしたときにどのレコードを開くか。"
       },
       joined_blocks: {
         label: "結合ブロック",
@@ -2267,19 +2267,19 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "レポート種別: tabular/summary/matrix/joined"
       },
       dataset: {
-        label: "データセット",
-        helpText: "バインドするデータセット（メジャー/ディメンションはセマンティックレイヤーから取得）"
+        label: "データソース",
+        helpText: "レポートはここから数値を読み取ります。各ユーザーには、アクセス権のあるレコードだけが表示されます。"
       },
       values: {
-        label: "メジャー",
-        helpText: "表示するメジャー名（データセットから取得）"
+        label: "指標",
+        helpText: "表示する指標。合計、件数、平均、比率など（データソースから取得）。"
       },
       rows: {
-        label: "行",
-        helpText: "行をグループ化するディメンション名（データセットから取得）"
+        label: "グループ化",
+        helpText: "グループ化に使うフィールド（データソースから取得）。"
       },
       columns: {
-        label: "列",
+        label: "列のグループ化",
         helpText: "横方向のディメンション名（matrix のみ）"
       },
       order: {
@@ -2294,7 +2294,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       drilldown: {
         label: "ドリルダウン",
-        helpText: "集計された行/セルをクリックして、元になったレコードを開きます"
+        helpText: "集計された行またはセルをクリックして、その元になっているレコードを開きます。"
       },
       blocks: {
         label: "ブロック",
@@ -2313,16 +2313,16 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ブロックタイプ"
       },
       "blocks.dataset": {
-        label: "データセット"
+        label: "データソース"
       },
       "blocks.rows": {
-        label: "行"
+        label: "グループ化"
       },
       "blocks.columns": {
-        label: "列"
+        label: "列のグループ化"
       },
       "blocks.values": {
-        label: "メジャー"
+        label: "指標"
       },
       "blocks.runtimeFilter": {
         label: "実行時フィルター"
@@ -2332,7 +2332,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       runtimeFilter: {
         label: "実行時フィルター",
-        helpText: "レンダリング時のスコープフィルター。クエリ時に AND で結合されます"
+        helpText: "レポートを表示するたびに適用されるフィルター。データソース自体の条件に加えて適用されます。"
       },
       chart: {
         label: "チャート",

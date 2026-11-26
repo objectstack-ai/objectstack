@@ -54,6 +54,16 @@ export const DEFAULT_SPLIT_MIN_CHARS = 200;
 /** The share of the embedder's input limit a passage may fill, by `estimateTokens`. */
 export const SPLIT_TOKEN_BUDGET_SHARE = 0.8;
 
+/**
+ * The version of this splitter's algorithm — one of the index fingerprint's
+ * components (ADR-0161 K7). Bump it in the change that makes the splitter
+ * give different passages for the same text and the same resolved split:
+ * every index built by an adapter that takes chunks then reads as built under
+ * another fingerprint, and is rebuilt as a new generation rather than mixing
+ * old passages with new ones.
+ */
+export const SPLIT_ALGORITHM_VERSION = 1;
+
 /** The split a source resolves to: what {@link splitDocument} cuts by. */
 export interface ResolvedSplit {
   strategy: KnowledgeSplitStrategy;

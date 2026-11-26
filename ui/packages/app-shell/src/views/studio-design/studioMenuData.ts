@@ -40,6 +40,7 @@ export const STUDIO_MENU_ENTRY_LABEL_KEYS: Readonly<Record<Exclude<StudioMenuEnt
   owd: 'engine.studio.menu.owd',
   diagnostics: 'engine.studio.menu.diagnostics',
   environment: 'engine.studio.menu.environment',
+  allTypes: 'engine.studio.menu.allTypes',
 };
 
 /** The menu's served data, for one `/studio/:segment` (see {@link useStudioMenuTypes}). */
