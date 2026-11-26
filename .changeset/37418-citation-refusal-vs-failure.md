@@ -5,7 +5,7 @@
 
 feat(record-context): the citation verifier tells a refusal from a failure and reports failures to the host
 
-Clause-②: no
+Clause-②: yes (widening) — new optional third argument of the exported verifyRecordCitations and two new exported types; existing calls unchanged
 Metadata-protocol: none
 
 ADR-0160 D9 verifies an answer's citations once, so a citation lost to an outage is lost for good. `verifyRecordCitations` used to drop a citation the same way whether the verifying call was refused or failed.
