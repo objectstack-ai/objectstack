@@ -181,6 +181,8 @@ describe('objectui#5040 — a spec typed as `FormFieldSpec` configures its widge
       return {
         ok: true,
         status: 200,
+        // The authenticated fetch reads a rotated token off every answer (objectstack#37225).
+        headers: new Headers(),
         json: async () => ({ fields: [{ name: 'amount', label: 'Amount' }] }),
       } as unknown as Response;
     });

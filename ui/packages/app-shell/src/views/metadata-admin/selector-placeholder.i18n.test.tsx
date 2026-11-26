@@ -62,6 +62,8 @@ describe('metadata-admin selector placeholders (objectui#4387 key collapse)', ()
       vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
+        // The authenticated fetch reads a rotated token off every answer (objectstack#37225).
+        headers: new Headers(),
         json: async () => ({ fields: [{ name: 'name', label: 'Name', type: 'text' }] }),
       }),
     );
