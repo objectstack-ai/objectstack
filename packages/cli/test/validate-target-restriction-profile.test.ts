@@ -86,7 +86,7 @@ const json = (r: Run): Record<string, any> => {
  * leaves out of the artifact, so no target runs it and `allowCode` reads none.
  */
 const STACK = `{
-  manifest: { id: 'com.example.rpt', namespace: 'rpt', version: '1.0.0', name: 'Rpt', type: 'app', engines: { protocol: '^18' } },
+  manifest: { id: 'com.example.rpt', namespace: 'rpt', version: '1.0.0', name: 'Rpt', type: 'app', engines: { protocol: '^19' } },
   requires: ['automation', 'triggers'],
   objects: [{ name: 'rpt_doc', label: 'Doc', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } }],
   hooks: [{ name: 'rpt_audit', object: 'rpt_doc', events: ['beforeInsert'], handler: 'rpt_audit_fn' }],
@@ -119,7 +119,7 @@ const STACK = `{
  * object lifecycle hook whose body is sandboxed JavaScript.
  */
 const TEAM_STACK = `{
-  manifest: { id: 'com.example.rptt', namespace: 'rptt', version: '1.0.0', name: 'Rptt', type: 'app', engines: { protocol: '^18' } },
+  manifest: { id: 'com.example.rptt', namespace: 'rptt', version: '1.0.0', name: 'Rptt', type: 'app', engines: { protocol: '^19' } },
   requires: ['automation', 'triggers'],
   objects: [{ name: 'rptt_doc', label: 'Doc', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } }],
   hooks: [{ name: 'rptt_stamp', object: 'rptt_doc', events: ['beforeInsert'], body: { language: 'js', source: 'return;' } }],
