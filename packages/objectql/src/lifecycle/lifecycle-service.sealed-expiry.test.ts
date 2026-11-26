@@ -8,6 +8,7 @@ import {
   type LifecycleSealedExpiryRequest,
   type LifecycleSealedExpiryRun,
 } from './lifecycle-service.js';
+import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 import { parseLifecycleDuration } from './duration.js';
 
 /**
@@ -77,10 +78,12 @@ function engineOver(objects: LifecycleObjectLike[], opts: { hot?: ReturnType<typ
     },
     async find(object: string, q: any) {
       finds.push({ object, where: q?.where });
-      const ids: string[] = q?.where?.id?.$in ?? [];
-      return rows.filter((r) => ids.includes(r.id as string));
+      const ids: string[] | undefined = q?.where?.id?.$in;
+      const matched = ids ? rows.filter((r) => ids.includes(r.id as string)) : rows;
+      return typeof q?.limit === 'number' ? matched.slice(0, q.limit) : matched;
     },
     async delete(object: string, q: any) {
+      assertEngineDeleteDispatch(q);
       deletes.push({ object, where: q?.where, context: q?.context });
       rows = rows.filter((r) => r.id !== q?.where?.id);
       return { deletedCount: 1 };

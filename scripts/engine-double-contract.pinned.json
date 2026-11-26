@@ -3102,6 +3102,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/lifecycle/lifecycle-service.sealed-expiry.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/meta-object-primary-designation-roundtrip.test.ts",
       "verb": "delete",
       "pinned": 1
