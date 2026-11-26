@@ -130,3 +130,47 @@ describe('MetadataClient.publish — package binding on the promotion (#5420)', 
     expect(JSON.parse(String(seen[0]?.body))).toEqual({ message: 'ship it' });
   });
 });
+
+/**
+ * objectstack#36350 (ruling 7168616260) — the promotion's pin on the DRAFT it
+ * promotes travels in the publish body as `draftVersion`, beside `message`
+ * (`PublishMetaItemRequestSchema.draftVersion`); `If-Match` keeps pinning the
+ * active row. Omitted, the body carries no such key and the publish is
+ * unpinned, as before.
+ */
+describe('MetadataClient.publish — the draft pin (`draftVersion`, objectstack#36350)', () => {
+  function recordBodies() {
+    const sent: { body: unknown; headers: Record<string, string> }[] = [];
+    const client = new MetadataClient({
+      baseUrl: 'http://localhost:3000',
+      fetch: vi.fn(async (_url: string, init?: RequestInit) => {
+        sent.push({
+          body: JSON.parse(String(init?.body ?? '{}')),
+          headers: { ...((init?.headers ?? {}) as Record<string, string>) },
+        });
+        return new Response(JSON.stringify({ success: true, version: 'hmac-sha256:next' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as unknown as typeof fetch,
+    });
+    return { sent, client };
+  }
+
+  it('sends `draftVersion` in the body beside `message`, and `ifMatch` as If-Match', async () => {
+    const { sent, client } = recordBodies();
+    await client.publish('view', 'task.all', {
+      message: 'ship it',
+      draftVersion: 'hmac-sha256:draft-v1',
+      ifMatch: 'hmac-sha256:active-v1',
+    });
+    expect(sent[0]?.body).toEqual({ message: 'ship it', draftVersion: 'hmac-sha256:draft-v1' });
+    expect(sent[0]?.headers['If-Match']).toBe('hmac-sha256:active-v1');
+  });
+
+  it('omitted, the body carries no `draftVersion` key', async () => {
+    const { sent, client } = recordBodies();
+    await client.publish('view', 'task.all');
+    expect(sent[0]?.body).toEqual({});
+  });
+});

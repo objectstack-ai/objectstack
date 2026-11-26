@@ -16,7 +16,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router-dom';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { SidebarProvider } from '@object-ui/components';
 import { NavigationRenderer } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
@@ -140,7 +140,9 @@ vi.mock('../../views/studio-design/packages-io', async (importOriginal) => ({
 }));
 vi.mock('../../utils/getIcon', () => ({ getIcon: () => () => null }));
 
-import { DesignModeProvider, useDesignMode, useDesignModeController } from '../designMode';
+import { DesignModeProvider, useDesignMode, useDesignModeController, useHoldDesignModeOut } from '../designMode';
+import { useDesignModeArrival } from '../useDesignModeArrival';
+import { designModeAddDashboardArrival } from '../designModeArrival';
 import { DesignModeBar } from '../DesignModeBar';
 import DesignModeMenu from '../DesignModeMenu';
 import { closestCenter, type CollisionDetection } from '@dnd-kit/core';
@@ -1306,5 +1308,231 @@ describe('the design-mode menu save and drag, hardened (objectstack#36538)', () 
       act(() => dragEnd.current!({ active: { id: 'home' }, over: null }));
       expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', []]]);
     });
+  });
+});
+
+/*
+ * objectstack#36907 — a Studio dashboard list's 「New」 arrives in the app with
+ * `designModeAddDashboardArrival` in the navigation state. The shell
+ * (`useDesignModeArrival`, as `ConsoleLayout` calls it) reads it once, clears
+ * it from the history entry, and enters the mode with the picker open on its
+ * 「Dashboards」; where `enter` refuses, nothing more happens and the mode
+ * says why; on a phone, nothing at all.
+ */
+const STUDIO_LIST = '/studio/com.acme.crm/metadata/dashboard?package=com.acme.crm';
+
+/** The shell's hold on the mode, as `ConsoleLayout` wires it, the arrival read included. */
+function ArrivalHarness({ enabled = true, editorOpen = false }: { enabled?: boolean; editorOpen?: boolean }) {
+  const mode = useDesignModeController({ appName: 'crm', appBasePath: '/apps/crm', enabled });
+  useDesignModeArrival(mode, enabled);
+  return (
+    <DesignModeProvider value={mode}>
+      {mode.active && <DesignModeBar mode={mode} />}
+      {editorOpen && <OpenEditor />}
+      <SidebarProvider>
+        {mode.active && (
+          <DesignModeMenu
+            app={{ name: 'crm', navigation: servedNav.current ?? NAVIGATION, _packageId: 'com.acme.crm' }}
+            basePath="/apps/crm"
+            resolveTargetLabel={(target) => (target.kind === 'object' ? OBJECT_LABELS[target.objectName] : undefined)}
+          />
+        )}
+      </SidebarProvider>
+      <ArriveAgain />
+    </DesignModeProvider>
+  );
+}
+
+/** A dashboard's or a report's own editor, open: it holds the mode out (objectstack#36692). */
+function OpenEditor() {
+  useHoldDesignModeOut(true);
+  return null;
+}
+
+/** The address and the navigation state on screen, as `JSON`. */
+function Here() {
+  const { pathname, search, state } = useLocation();
+  return <span data-testid="here" data-at={`${pathname}${search}`} data-state={JSON.stringify(state ?? null)} />;
+}
+
+/** A second arrival into the app on screen: Studio's New, taken again; and the browser's Back. */
+function ArriveAgain() {
+  const navigate = useNavigate();
+  return (
+    <>
+      <button type="button" onClick={() => navigate('/apps/crm', { state: designModeAddDashboardArrival(STUDIO_LIST) })}>
+        arrive again
+      </button>
+      <button type="button" onClick={() => navigate(-1)}>
+        browser back
+      </button>
+    </>
+  );
+}
+
+const here = () => {
+  const el = screen.getByTestId('here');
+  return { at: el.getAttribute('data-at'), state: JSON.parse(el.getAttribute('data-state') ?? 'null') };
+};
+
+function arrive(props: { enabled?: boolean; editorOpen?: boolean } = {}, entry: { pathname: string; state: unknown } = {
+  pathname: '/apps/crm',
+  state: designModeAddDashboardArrival(STUDIO_LIST),
+}) {
+  return render(
+    <MemoryRouter initialEntries={[entry]}>
+      <ArrivalHarness {...props} />
+      <Here />
+    </MemoryRouter>,
+  );
+}
+
+describe("the arrival from a Studio dashboard list's New (objectstack#36907)", () => {
+  it('enters the mode with the picker open on 「Dashboards」, 「New dashboard…」 first, for an entry at the end of the top level', async () => {
+    listed.dashboard = [{ name: 'revenue', label: 'Revenue' }];
+    try {
+      arrive();
+      await flush();
+      expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
+      const picker = await screen.findByTestId('design-menu-picker');
+      const rows = within(within(picker).getByTestId('design-menu-picker-rows')).getAllByRole('button').map((b) => b.textContent);
+      expect(rows).toEqual(['New dashboard…', 'Revenue']);
+      expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', []], '…']);
+      expect(toastError).not.toHaveBeenCalled();
+    } finally {
+      listed.dashboard = [];
+    }
+  });
+
+  it('is read once: the history entry is cleared, so a reload of it, or Back to it, enters nothing', async () => {
+    arrive();
+    await flush();
+    expect(here()).toEqual({ at: '/apps/crm', state: null });
+    expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
+    cleanup();
+
+    // The same entry, reloaded: what the history holds now carries no arrival.
+    arrive({}, { pathname: '/apps/crm', state: null });
+    await flush();
+    expect(screen.queryByTestId('design-mode-bar')).toBeNull();
+    expect(screen.queryByTestId('design-menu-picker')).toBeNull();
+  });
+
+  it('「Create」 in it: the dashboard hangs at the end of the top level and opens for editing, with × back to the Studio list', async () => {
+    arrive();
+    await flush();
+    const picker = await screen.findByTestId('design-menu-picker');
+    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-dashboard'));
+    const naming = await screen.findByTestId('design-menu-new-dashboard');
+    fireEvent.change(within(naming).getByTestId('design-menu-new-name'), { target: { value: 'Payment analysis' } });
+    fireEvent.click(within(naming).getByTestId('design-menu-new-create'));
+    await flush();
+    await flush();
+    await flush();
+
+    expect(written.map(([verb, type, name]) => `${verb} ${type} ${name}`)).toEqual([
+      'save dashboard payment_analysis',
+      'publish dashboard payment_analysis',
+      'save app crm',
+      'publish app crm',
+    ]);
+    const navigation = (written[2][3] as { navigation: Array<{ id: string }> }).navigation;
+    expect(navigation.at(-1)).toEqual({ id: 'nav_item_1', type: 'dashboard', dashboardName: 'payment_analysis' });
+    expect(screen.queryByTestId('design-mode-bar')).toBeNull();
+    const landed = here();
+    expect(landed.at!.split('?')[0]).toBe('/apps/crm/dashboard/payment_analysis');
+    expect(new URLSearchParams(landed.at!.split('?')[1]).get('studio')).toBe(STUDIO_LIST);
+    expect(landed.state).toEqual({ designModeNewDashboard: 'payment_analysis' });
+  });
+
+  it("closing that picker drops the Studio list: a dashboard made from another 「Add menu item」 opens without it", async () => {
+    arrive();
+    await flush();
+    fireEvent.keyDown(await screen.findByTestId('design-menu-picker'), { key: 'Escape' });
+    await flush();
+    expect(screen.queryByTestId('design-menu-picker')).toBeNull();
+    const picker = await openDashboards();
+    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-dashboard'));
+    const naming = await screen.findByTestId('design-menu-new-dashboard');
+    fireEvent.change(within(naming).getByTestId('design-menu-new-name'), { target: { value: 'Payment analysis' } });
+    fireEvent.click(within(naming).getByTestId('design-menu-new-create'));
+    await flush();
+    await flush();
+    await flush();
+    expect(here().at).toBe('/apps/crm/dashboard/payment_analysis');
+  });
+
+  it('where an editor of its own holds the mode out, entering refuses and says why; the arrival does nothing more and is cleared', async () => {
+    render(
+      <MemoryRouter initialEntries={['/apps/crm/dashboard/ops']}>
+        <ArrivalHarness editorOpen />
+        <Here />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByText('arrive again'));
+    await flush();
+    expect(toastError).toHaveBeenCalledWith('Save or cancel your dashboard or report changes before designing the layout.');
+    expect(screen.queryByTestId('design-mode-bar')).toBeNull();
+    expect(screen.queryByTestId('design-menu-picker')).toBeNull();
+    expect(here()).toEqual({ at: '/apps/crm', state: null });
+    expect(written).toEqual([]);
+  });
+
+  it('the same refusal when the editor opens in the very commit the arrival lands in', async () => {
+    arrive({ editorOpen: true });
+    await flush();
+    expect(toastError).toHaveBeenCalledWith('Save or cancel your dashboard or report changes before designing the layout.');
+    expect(screen.queryByTestId('design-mode-bar')).toBeNull();
+    expect(here()).toEqual({ at: '/apps/crm', state: null });
+  });
+
+  it('on a phone the mode is never on: the arrival enters nothing, says nothing, and is cleared', async () => {
+    arrive({ enabled: false });
+    await flush();
+    expect(screen.queryByTestId('design-mode-bar')).toBeNull();
+    expect(screen.queryByTestId('design-menu-picker')).toBeNull();
+    expect(toastError).not.toHaveBeenCalled();
+    expect(here()).toEqual({ at: '/apps/crm', state: null });
+  });
+
+  it('the arrival entry is replaced, not stacked: Back from it goes to the page before, and enters nothing', async () => {
+    render(
+      <MemoryRouter
+        initialEntries={['/apps/crm/home', { pathname: '/apps/crm', state: designModeAddDashboardArrival(STUDIO_LIST) }]}
+        initialIndex={1}
+      >
+        <ArrivalHarness />
+        <Here />
+      </MemoryRouter>,
+    );
+    await flush();
+    expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('design-mode-cancel'));
+    fireEvent.click(screen.getByText('browser back'));
+    await flush();
+    expect(here()).toEqual({ at: '/apps/crm/home', state: null });
+    expect(screen.queryByTestId('design-mode-bar')).toBeNull();
+    expect(screen.queryByTestId('design-menu-picker')).toBeNull();
+  });
+
+  it('an arrival read on a phone holds nothing: the window widening later opens no mode', async () => {
+    const { rerender } = arrive({ enabled: false });
+    await flush();
+    rerender(
+      <MemoryRouter initialEntries={['/apps/crm']}>
+        <ArrivalHarness enabled />
+        <Here />
+      </MemoryRouter>,
+    );
+    await flush();
+    expect(screen.queryByTestId('design-mode-bar')).toBeNull();
+    expect(screen.queryByTestId('design-menu-picker')).toBeNull();
+  });
+
+  it('CONTROL — the menu door enters the mode with no picker open', async () => {
+    start();
+    await flush();
+    expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
+    expect(screen.queryByTestId('design-menu-picker')).toBeNull();
   });
 });

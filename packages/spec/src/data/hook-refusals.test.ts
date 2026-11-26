@@ -7,7 +7,9 @@ import {
   hookRefusalsWithoutSandboxedBody,
   HOOK_REFUSAL_REASON_PATTERN,
   hookRefusalReasonsThrownIn,
+  isUndeclaredThrownReason,
   undeclaredHookRefusalAtRun,
+  unreadableHookRefusalListAtRun,
   undeclaredHookRefusalCodeAtSave,
   undeclaredHookRefusalReasonAtRun,
   undeclaredHookRefusalReasonAtSave,
@@ -472,5 +474,121 @@ describe('hookForm refusals row — help names every hook kind that may declare 
 
   it('the handler it names is a row the same form offers', () => {
     expect(help('handler')).not.toBe('');
+  });
+});
+
+// #36877 (ruling 7178348458 letter A): one throw names an ordered list of
+// declared reasons, `{ code, reasons: [{ reason, params? }, …] }`.
+describe('hookRefusalReasonsThrownIn — the reasons of a thrown list (#36877)', () => {
+  it.each([
+    [
+      "throw { code: 'SUBMIT_REFUSED', reasons: [{ reason: 'on_report', params: { name } }, { reason: 'approved' }] };",
+      [{ code: 'SUBMIT_REFUSED', reason: 'on_report', listed: true }, { code: 'SUBMIT_REFUSED', reason: 'approved', listed: true }],
+    ],
+    [
+      "const e = new Error('x'); e.code = 'SUBMIT_REFUSED'; e.reasons = [{ reason: 'approved' }]; throw e;",
+      [{ code: 'SUBMIT_REFUSED', reason: 'approved', listed: true }],
+    ],
+    [
+      // a single reason beside a list: each read as what it is
+      "throw { code: 'C', reason: 'r', reasons: [{ reason: 'l' }] };",
+      [{ code: 'C', reason: 'r' }, { code: 'C', reason: 'l', listed: true }],
+    ],
+    [
+      // the list as a direct member of the object Object.assign stamps
+      "throw Object.assign(new Error('x'), { code: 'C', reasons: [{ reason: 'l' }] });",
+      [{ code: 'C', reason: 'l', listed: true }],
+    ],
+    [
+      // CONTROL: a `reasons` key nested under `params` is not the thrown list
+      // (the run reads `e.reasons` only), so its reason is read as main reads
+      // any `reason: 'x'` in the statement: a single, unlisted pair
+      "throw { code: 'C', params: { reasons: [{ reason: 'late' }] } };",
+      [{ code: 'C', reason: 'late' }],
+    ],
+  ])('reads %j', (source, pairs) => {
+    expect(hookRefusalReasonsThrownIn(source)).toEqual(pairs);
+  });
+
+  it.each([
+    // a list built in a variable is the run-time refusal's
+    "const lines = [{ reason: 'r' }]; throw { code: 'C', reasons: lines };",
+    // a list on a name nobody throws
+    "const e = {}; e.code = 'C'; e.reasons = [{ reason: 'r' }]; return e;",
+    // inside a string or a comment
+    "// throw { code: 'C', reasons: [{ reason: 'r' }] }\nreturn;",
+  ])('reads nothing in %j', (source) => {
+    expect(hookRefusalReasonsThrownIn(source)).toEqual([]);
+  });
+
+  it('isUndeclaredThrownReason: a listed reason is judged under every code, a single one only under a code with reasons', () => {
+    expect(isUndeclaredThrownReason({ code: 'C', reason: 'r', listed: true }, undefined)).toBe(true);
+    expect(isUndeclaredThrownReason({ code: 'C', reason: 'r' }, undefined)).toBe(false);
+    expect(isUndeclaredThrownReason({ code: 'C', reason: 'r', listed: true }, { r: {} })).toBe(false);
+    expect(isUndeclaredThrownReason({ code: 'C', reason: 'x', listed: true }, { r: {} })).toBe(true);
+  });
+
+  it('the run-time list fault names the hook, the code and what is wrong', () => {
+    expect(unreadableHookRefusalListAtRun('expense_gate', 'SUBMIT_REFUSED', 'both')).toContain(
+      "hook 'expense_gate' threw code 'SUBMIT_REFUSED' with both a `reason` and a `reasons` list",
+    );
+    expect(unreadableHookRefusalListAtRun('expense_gate', 'SUBMIT_REFUSED', 'empty')).toContain('names no reason');
+    expect(unreadableHookRefusalListAtRun('expense_gate', 'SUBMIT_REFUSED', 'malformed')).toContain('not a list of');
+  });
+});
+
+describe('Hook.refusals — a listed reason is refused at save where the body names it literally (#36877)', () => {
+  const refusals = {
+    SUBMIT_REFUSED: {
+      message: 'Nothing was submitted.',
+      reasons: { on_report: { message: 'Already on a report.' }, approved: { message: 'Already approved.' } },
+    },
+    PLAIN: { message: 'Refused.' },
+  };
+
+  it('accepts a list of declared reasons', () => {
+    const r = HookSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'SUBMIT_REFUSED', reasons: [{ reason: 'on_report' }, { reason: 'approved' }] };"),
+      refusals,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('refuses an undeclared listed reason at body.source, one issue, naming the declared reasons', () => {
+    const r = HookSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'SUBMIT_REFUSED', reasons: [{ reason: 'approved' }, { reason: 'missing' }] };"),
+      refusals,
+    });
+    expect(r.success).toBe(false);
+    const issues = r.error!.issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.path).toEqual(['body', 'source']);
+    expect(issues[0]!.message).toBe(undeclaredHookRefusalReasonAtSave('SUBMIT_REFUSED', 'missing', ['on_report', 'approved'], 'body.source'));
+  });
+
+  it('refuses a listed reason under a code that declares no reasons (declared: none)', () => {
+    const r = HookSchema.safeParse({
+      ...base,
+      body: body("const e = new Error('x'); e.code = 'PLAIN'; e.reasons = [{ reason: 'approved' }]; throw e;"),
+      refusals,
+    });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.message).toContain('(declared: none)');
+  });
+
+  it('CONTROL: a `reasons` list nested under `params` is not a thrown list, so it saves under a code with no reasons', () => {
+    const r = HookSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'PLAIN', params: { reasons: [{ reason: 'late' }] } };"),
+      refusals,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('CONTROL: a single reason under a code that declares no reasons still saves, as before', () => {
+    const r = HookSchema.safeParse({ ...base, body: body("throw { code: 'PLAIN', reason: 'anything' };"), refusals });
+    expect(r.success).toBe(true);
   });
 });

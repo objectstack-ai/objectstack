@@ -14,7 +14,7 @@ import { RuntimeDraftBar } from './RuntimeDraftBar';
 
 function makeMetadataClient(draftItem: unknown = null) {
   return {
-    get: vi.fn().mockResolvedValue(draftItem),
+    getDraft: vi.fn().mockResolvedValue(draftItem),
     publish: vi.fn().mockResolvedValue(undefined),
     reset: vi.fn().mockResolvedValue(undefined),
   };
@@ -45,7 +45,7 @@ describe('RuntimeDraftBar (ADR-0034)', () => {
     await waitFor(() => expect(screen.getByTestId('runtime-draft-bar')).toBeTruthy());
     expect(screen.getByTestId('runtime-draft-publish')).toBeTruthy();
     expect(screen.getByTestId('runtime-draft-discard')).toBeTruthy();
-    expect(metadataClient.get).toHaveBeenCalledWith('view', 'my_view', { state: 'draft' });
+    expect(metadataClient.getDraft).toHaveBeenCalledWith('view', 'my_view');
     expect(onResume).toHaveBeenCalledWith({ columns: ['name'] });
   });
 
@@ -76,7 +76,7 @@ describe('RuntimeDraftBar (ADR-0034)', () => {
       <RuntimeDraftBar type="report" name="my_report" metadataClient={metadataClient} />,
     );
 
-    await waitFor(() => expect(metadataClient.get).toHaveBeenCalled());
+    await waitFor(() => expect(metadataClient.getDraft).toHaveBeenCalled());
     expect(container.querySelector('[data-testid="runtime-draft-bar"]')).toBeNull();
   });
 
@@ -120,7 +120,7 @@ describe('RuntimeDraftBar (ADR-0034)', () => {
       <RuntimeDraftBar type="view" name="my_view" metadataClient={metadataClient} savedSignal={0} />,
     );
 
-    await waitFor(() => expect(metadataClient.get).toHaveBeenCalled());
+    await waitFor(() => expect(metadataClient.getDraft).toHaveBeenCalled());
     expect(container.querySelector('[data-testid="runtime-draft-bar"]')).toBeNull();
 
     // Host saved a draft → bump the signal → indicator appears at once.
@@ -155,6 +155,138 @@ describe('RuntimeDraftBar (ADR-0034)', () => {
     );
 
     expect(container.querySelector('[data-testid="runtime-draft-bar"]')).toBeNull();
-    expect(metadataClient.get).not.toHaveBeenCalled();
+    expect(metadataClient.getDraft).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * objectstack#36350 (ruling 7168616260) — the bar's Publish is pinned to the
+ * draft the bar showed: the version its draft read's envelope carried, sent as
+ * `draftVersion`. A draft another writer changed since is refused by the door
+ * (`409 METADATA_CONFLICT`) instead of being published on that writer's behalf.
+ */
+describe('RuntimeDraftBar — Publish is pinned to the draft it showed (objectstack#36350)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('sends the shown draft\'s version as `draftVersion`', async () => {
+    const metadataClient = makeMetadataClient({
+      type: 'report',
+      name: 'my_report',
+      item: { label: 'Pipeline' },
+      version: 'hmac-sha256:draft-v1',
+    });
+
+    render(<RuntimeDraftBar type="report" name="my_report" metadataClient={metadataClient} />);
+    fireEvent.click(await screen.findByTestId('runtime-draft-publish'));
+
+    await waitFor(() =>
+      expect(metadataClient.publish).toHaveBeenCalledWith('report', 'my_report', { draftVersion: 'hmac-sha256:draft-v1' }),
+    );
+  });
+
+  it('a moved draft\'s refusal is said and the indicator stays: nothing was published', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const metadataClient = makeMetadataClient({
+      type: 'report',
+      name: 'my_report',
+      item: { label: 'Pipeline' },
+      version: 'hmac-sha256:draft-v1',
+    });
+    metadataClient.publish.mockRejectedValue(
+      Object.assign(new Error('report/my_report draft changed since the version this publish pinned (draftVersion)'), {
+        status: 409,
+        code: 'METADATA_CONFLICT',
+      }),
+    );
+
+    render(<RuntimeDraftBar type="report" name="my_report" metadataClient={metadataClient} />);
+    fireEvent.click(await screen.findByTestId('runtime-draft-publish'));
+
+    await waitFor(() => expect(metadataClient.publish).toHaveBeenCalled());
+    expect(screen.getByTestId('runtime-draft-bar')).toBeTruthy();
+  });
+
+  it('after the host\'s own save (savedSignal) the Publish is pinned to that save\'s receipt version, not to the draft read before it', async () => {
+    const metadataClient = makeMetadataClient({
+      type: 'view',
+      name: 'my_view',
+      item: { columns: ['name'] },
+      version: 'hmac-sha256:draft-v1',
+    });
+
+    const { rerender } = render(
+      <RuntimeDraftBar type="view" name="my_view" metadataClient={metadataClient} savedSignal={0} />,
+    );
+    await screen.findByTestId('runtime-draft-publish');
+    // The view settings saved: its receipt names the draft it wrote.
+    rerender(
+      <RuntimeDraftBar
+        type="view"
+        name="my_view"
+        metadataClient={metadataClient}
+        savedSignal={1}
+        savedDraftVersion="hmac-sha256:saved-v2"
+      />,
+    );
+    fireEvent.click(await screen.findByTestId('runtime-draft-publish'));
+
+    await waitFor(() =>
+      expect(metadataClient.publish).toHaveBeenCalledWith('view', 'my_view', { draftVersion: 'hmac-sha256:saved-v2' }),
+    );
+    // ⛔ No re-read pins it: one draft read, on open.
+    expect(metadataClient.getDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it('save-then-publish window: another writer\'s draft write after the host\'s save is refused at Publish, and the bar stays', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    // No draft on open; the host's save writes one (receipt v2); then another
+    // writer's rename moves it (v3, never shown here). The door refuses the
+    // Publish pinned to v2.
+    const metadataClient = makeMetadataClient(null);
+    metadataClient.publish.mockImplementation(async (_t: string, _n: string, options?: { draftVersion?: string }) => {
+      if (options?.draftVersion !== 'hmac-sha256:moved-v3') {
+        throw Object.assign(new Error('view/my_view draft changed since the version this publish pinned (draftVersion)'), {
+          status: 409,
+          code: 'METADATA_CONFLICT',
+        });
+      }
+      return {};
+    });
+
+    const { rerender } = render(
+      <RuntimeDraftBar type="view" name="my_view" metadataClient={metadataClient} savedSignal={0} />,
+    );
+    await waitFor(() => expect(metadataClient.getDraft).toHaveBeenCalled());
+    rerender(
+      <RuntimeDraftBar
+        type="view"
+        name="my_view"
+        metadataClient={metadataClient}
+        savedSignal={1}
+        savedDraftVersion="hmac-sha256:saved-v2"
+      />,
+    );
+    fireEvent.click(await screen.findByTestId('runtime-draft-publish'));
+
+    await waitFor(() =>
+      expect(metadataClient.publish).toHaveBeenCalledWith('view', 'my_view', { draftVersion: 'hmac-sha256:saved-v2' }),
+    );
+    // Refused: nothing published, the indicator stays for the author to review.
+    expect(screen.getByTestId('runtime-draft-bar')).toBeTruthy();
+  });
+
+  it('a host that gives no receipt version leaves the Publish after its save unpinned', async () => {
+    const metadataClient = makeMetadataClient({ item: { columns: ['name'] }, version: 'hmac-sha256:draft-v1' });
+
+    const { rerender } = render(
+      <RuntimeDraftBar type="view" name="my_view" metadataClient={metadataClient} savedSignal={0} />,
+    );
+    await screen.findByTestId('runtime-draft-publish');
+    rerender(<RuntimeDraftBar type="view" name="my_view" metadataClient={metadataClient} savedSignal={1} />);
+    fireEvent.click(await screen.findByTestId('runtime-draft-publish'));
+
+    await waitFor(() => expect(metadataClient.publish).toHaveBeenCalledWith('view', 'my_view'));
   });
 });

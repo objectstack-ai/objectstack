@@ -370,3 +370,57 @@ describe('the runner\'s own faults pass an action\'s refusal catalogue untouched
         }
     });
 });
+
+/**
+ * [#36877, ruling 7178348458 letter A] An action that refuses a whole selection
+ * names several declared reasons in one throw; the `/actions` door answers each
+ * sentence in the caller's language, in the order thrown, with the entry's own
+ * sentence last, and the lines structured on `details.refusals`.
+ */
+describe('[#36877] an action\'s reasons list on the `/actions` door', () => {
+    const LIST = {
+        ...REFUSALS,
+        NOT_SUBMITTED: {
+            message: 'Nothing was submitted.',
+            status: 409,
+            params: ['name'],
+            reasons: {
+                on_report: { message: 'Expense {{ name }} is already on an expense report.' },
+                approved: { message: 'Expense {{ name }} is already approved.' },
+            },
+        },
+    };
+    const KEY = 'objects.crm_invoice._actions.submit_signoff.refusals.NOT_SUBMITTED';
+    const i18n = () => i18nService({
+        [`${KEY}.message`]: '未提交任何费用。',
+        [`${KEY}.reasons.on_report.message`]: '费用 {{ name }} 已在报销单上。',
+        [`${KEY}.reasons.approved.message`]: '费用 {{ name }} 已审批。',
+    });
+    const source = "throw Object.assign(new Error('internal detail'), { code: 'NOT_SUBMITTED', reasons: ["
+        + "{ reason: 'on_report', params: { name: 'Taxi 12' } }, { reason: 'approved', params: { name: 'Hotel 7' } }] });";
+
+    it('every line translated, the closing sentence last, the list on details.refusals', async () => {
+        const err = await rejectionOf(boundAction(source, { refusals: LIST, i18n })(actionCtx('zh-CN')));
+        const response = await throughActionsDoor(err);
+        expect(response.status).toBe(409);
+        expect(response.body.error.userMessage).toBe('费用 Taxi 12 已在报销单上。\n费用 Hotel 7 已审批。\n未提交任何费用。');
+        expect(response.body.error.details.refusals).toEqual([
+            { reason: 'on_report', message: '费用 Taxi 12 已在报销单上。' },
+            { reason: 'approved', message: '费用 Hotel 7 已审批。' },
+        ]);
+        expect(JSON.stringify(response.body)).not.toContain('internal detail');
+        // The reader the MCP `run_action` tool answers a throw with agrees.
+        expect(actionsDoorAnswerOf(err, 'crm_invoice').details).toEqual({ refusals: response.body.error.details.refusals });
+    });
+
+    it('an undeclared listed reason is the 500 fault naming the action, the code and the reason', async () => {
+        const err = await rejectionOf(boundAction(
+            "const r = 'gone'; throw { code: 'NOT_SUBMITTED', reasons: [{ reason: 'approved' }, { reason: r }] };",
+            { refusals: LIST },
+        )(actionCtx()));
+        expect(err).toBeInstanceOf(SandboxError);
+        expect(err.innerMessage).toBeUndefined();
+        expect(err.message).toContain("action 'submit_signoff' threw code 'NOT_SUBMITTED' with reason 'gone'");
+        expect(mapDataError(err, 'crm_invoice').status).toBe(500);
+    });
+});
