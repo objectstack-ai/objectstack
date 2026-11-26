@@ -684,28 +684,16 @@ export const de: PlatformTranslationData = {
       title: 'Wissen',
       description: 'Vektorspeicher-Backend für RAG und Wissensquellen.',
       groups: {
-        adapter: {
-          title: 'Backend',
-          description: 'Legen Sie fest, wo Dokument-Chunks und ihre Vektoren gespeichert werden.',
-        },
         turso: {
           title: 'Turso / libSQL',
-          description: 'Funktioniert mit verwaltetem Turso, lokaler Datei oder im Arbeitsspeicher.',
+          description: 'Wird nur verwendet, wenn die Plattformdatenbank nicht PostgreSQL ist; unter PostgreSQL liegt der Wissensspeicher in der Plattformdatenbank, und diese Felder werden nicht gelesen. Funktioniert mit verwaltetem Turso, lokaler Datei oder im Arbeitsspeicher.',
         },
         indexing: {
           title: 'Standardwerte für die Indexierung',
           description: 'Ein an der Wissensquelle selbst gesetzter Wert hat Vorrang vor diesen Standardwerten.',
         },
-        permissions: { title: 'Berechtigungen' },
       },
       keys: {
-        adapter: {
-          label: 'Adapter',
-          options: {
-            memory: 'Im Arbeitsspeicher (nur Entwicklung / Test)',
-            turso: 'Turso / libSQL (Cloud oder lokal)',
-          },
-        },
         turso_url: {
           label: 'Verbindungs-URL',
           help: 'Beispiele: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
@@ -715,27 +703,9 @@ export const de: PlatformTranslationData = {
           label: 'Ziel-Chunkgröße (Zeichen)',
           help: 'Längste Passage in Zeichen, wenn der Wissensdienst ein Dokument aufteilt. Eine an der Wissensquelle selbst gesetzte Größe hat Vorrang; das Eingabelimit des Embedding-Modells kann den Wert senken.',
         },
-        over_fetch: {
-          label: 'Over-Fetch-Faktor',
-          help: 'Die Suche holt das Vielfache der angeforderten Ergebnisanzahl, damit nach dem Filtern nach Dokumentdetails genug zum Zurückgeben bleiben.',
-        },
-        enforce_rls: {
-          label: 'RLS bei der Suche erzwingen',
-          help: 'Prüft jeden Treffer erneut gegen die Berechtigungen des Aufrufers auf Datensatzebene.',
-        },
       },
       actions: {
         test: { label: 'Verbindung testen' },
-      },
-      banners: {
-        adapter_switch_warning: {
-          title: 'Vorhandene Indizes werden nicht migriert',
-          text: 'Ein Adapterwechsel migriert vorhandene Indizes NICHT — mit dem bisherigen Adapter indexierte Dokumente sind bis zur Neuindexierung nicht erreichbar.',
-        },
-        enforce_rls_warning: {
-          title: 'RLS in der Produktion eingeschaltet lassen',
-          text: 'Das Abschalten umgeht den plattformeigenen Schutz vor Datenabfluss aus dem Vektorspeicher — in der Produktion eingeschaltet lassen.',
-        },
       },
     },
     lifecycle: {

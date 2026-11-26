@@ -550,41 +550,21 @@ export const jaJP: PlatformTranslationData = {
       title: 'ナレッジ',
       description: 'RAG / ナレッジソース用のベクトルストアバックエンド。',
       groups: {
-        adapter: { title: 'バックエンド',
-          description: 'ドキュメントチャンクとそのベクトルの保存先を選択します。' },
         turso: { title: 'Turso / libSQL',
-          description: 'マネージド Turso、ローカルファイル、インメモリのいずれでも動作します。' },
+          description: 'プラットフォームのデータベースが PostgreSQL でない場合にのみ使用されます。PostgreSQL の場合、ナレッジストアはプラットフォームのデータベース内にあり、これらの項目は読み取られません。マネージド Turso、ローカルファイル、インメモリのいずれでも動作します。' },
         indexing: { title: 'インデックスのデフォルト値',
           description: 'ナレッジソース自体に設定した値が、これらの既定値より優先されます。' },
-        permissions: { title: '権限' },
       },
       keys: {
-        adapter: {
-          label: 'アダプター',
-          options: {
-            memory: 'インメモリ（開発/テスト専用）',
-            turso: 'Turso / libSQL（クラウドまたはローカル）',
-          },
-        },
         turso_url: { label: '接続 URL',
           help: '例: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:' },
         turso_auth_token: { label: '認証トークン',
           help: 'マネージド Turso URL の場合のみ必要です。' },
         chunk_target: { label: '目標チャンクサイズ（文字数）',
           help: 'ナレッジサービスがドキュメントを分割するときの、パッセージ 1 件あたりの最大文字数。ナレッジソース自身に設定したサイズが優先され、埋め込みモデルの入力上限によって小さくなることがあります。' },
-        over_fetch: { label: 'オーバーフェッチ倍率',
-          help: '検索では要求された件数のこの倍数の結果を取得し、ドキュメント情報で絞り込んだ後も十分な件数が残るようにします。' },
-        enforce_rls: { label: '検索時に RLS を強制',
-          help: '各ヒットを呼び出し元のレコードレベル権限に対して再確認します。' },
       },
       actions: {
         test: { label: '接続テスト' },
-      },
-      banners: {
-        adapter_switch_warning: { title: '既存のインデックスは移行されません',
-          text: 'アダプターを切替えても既存のインデックスは移行されません。' },
-        enforce_rls_warning: { title: '本番環境では有効のままにしてください',
-          text: '無効化するとプラットフォーム固有のセーフガードがスキップされます。' },
       },
     },
 

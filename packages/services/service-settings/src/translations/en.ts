@@ -385,43 +385,21 @@ export const en: PlatformTranslationData = {
       title: 'Knowledge',
       description: 'Vector-store backend for RAG / knowledge sources.',
       groups: {
-        adapter: { title: 'Backend',
-          description: 'Choose where document chunks and their vectors are stored.' },
         turso: { title: 'Turso / libSQL',
-          description: 'Works against managed Turso, local file, or in-memory.' },
+          description: 'Used only when the platform database is not PostgreSQL; on PostgreSQL the knowledge store lives in the platform database and these fields are not read. Works against managed Turso, local file, or in-memory.' },
         indexing: { title: 'Indexing defaults',
           description: 'A value set on a knowledge source itself wins over these defaults.' },
-        permissions: { title: 'Permissions' },
       },
       keys: {
-        adapter: {
-          label: 'Adapter',
-          options: {
-            memory: 'In-memory (dev / test only)',
-            turso: 'Turso / libSQL (cloud or local)',
-          },
-        },
         turso_url: { label: 'Connection URL',
           help: 'Examples: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:' },
         turso_auth_token: { label: 'Auth token',
           help: 'Only required for managed Turso URLs.' },
         chunk_target: { label: 'Target chunk size (chars)',
           help: 'Longest passage, in characters, when the knowledge service splits a document. A size set on a knowledge source itself wins; the embedding model\'s input limit can lower it.' },
-        over_fetch: { label: 'Over-fetch multiplier',
-          help: 'Search fetches this many times the requested number of results, so enough are left to return after they are filtered by document details.' },
-        enforce_rls: { label: 'Enforce RLS on search',
-          help: 'Re-check every hit against the caller\'s record-level permissions.' },
       },
       actions: {
         test: { label: 'Test connection' },
-      },
-      banners: {
-        adapter_switch_warning: { title: 'Existing indices are not migrated',
-          text: 'Switching adapter does NOT migrate existing indices — documents indexed under the '
-            + 'previous adapter become unreachable until re-indexed.' },
-        enforce_rls_warning: { title: 'Leave RLS on in production',
-          text: 'Disabling skips the platform\'s unique safeguard against vector-store data leakage — '
-            + 'leave on in production.' },
       },
     },
   },

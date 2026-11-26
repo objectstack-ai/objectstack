@@ -106,7 +106,10 @@ describe('settings `visible` — declaration ⇄ evaluator', () => {
     // service's passages too, so the target size applies to it.
     // 87 -> 83 with the retired third `knowledge.adapter` option: its group and
     // its three keys each carried one predicate over `data.adapter`.
-    expect(predicates).toHaveLength(83);
+    // 83 -> 79 at #37104: `knowledge.adapter` itself was retired (nothing read
+    // it), so the four predicates over it went too: the `turso` group and its
+    // two keys now always show, and `over_fetch` was retired with its own.
+    expect(predicates).toHaveLength(79);
   });
 
   it('every bundled predicate is accepted by BOTH sides', () => {

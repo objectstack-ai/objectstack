@@ -693,25 +693,13 @@ export const fr: PlatformTranslationData = {
       title: 'Connaissances',
       description: 'Backend de stockage vectoriel pour le RAG et les sources de connaissances.',
       groups: {
-        adapter: {
-          title: 'Backend',
-          description: 'Choisissez où sont stockés les morceaux de documents et leurs vecteurs.',
-        },
-        turso: { title: 'Turso / libSQL', description: 'Fonctionne avec Turso géré, un fichier local ou en mémoire.' },
+        turso: { title: 'Turso / libSQL', description: 'Utilisé uniquement lorsque la base de données de la plateforme n’est pas PostgreSQL ; sous PostgreSQL, le magasin de connaissances se trouve dans la base de données de la plateforme et ces champs ne sont pas lus. Fonctionne avec Turso géré, un fichier local ou en mémoire.' },
         indexing: {
           title: 'Valeurs d’indexation par défaut',
           description: 'Une valeur définie sur la source de connaissances elle-même l’emporte sur ces valeurs par défaut.',
         },
-        permissions: { title: 'Autorisations' },
       },
       keys: {
-        adapter: {
-          label: 'Adaptateur',
-          options: {
-            memory: 'En mémoire (dév. / test uniquement)',
-            turso: 'Turso / libSQL (cloud ou local)',
-          },
-        },
         turso_url: {
           label: 'URL de connexion',
           help: 'Exemples : libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
@@ -724,27 +712,9 @@ export const fr: PlatformTranslationData = {
           label: 'Taille cible des morceaux (caractères)',
           help: 'Longueur maximale d’un passage, en caractères, lorsque le service de connaissances découpe un document. Une taille fixée sur la source elle-même l’emporte ; la limite d’entrée du modèle d’embedding peut l’abaisser.',
         },
-        over_fetch: {
-          label: 'Multiplicateur de sur-récupération',
-          help: 'La recherche récupère ce multiple du nombre de résultats demandés, pour qu’il en reste assez à renvoyer après le filtrage selon les détails des documents.',
-        },
-        enforce_rls: {
-          label: 'Appliquer la RLS à la recherche',
-          help: 'Revérifie chaque résultat selon les autorisations au niveau des enregistrements de l’appelant.',
-        },
       },
       actions: {
         test: { label: 'Tester la connexion' },
-      },
-      banners: {
-        adapter_switch_warning: {
-          title: 'Les index existants ne sont pas migrés',
-          text: 'Changer d’adaptateur ne migre PAS les index existants — les documents indexés avec l’adaptateur précédent deviennent inaccessibles jusqu’à leur réindexation.',
-        },
-        enforce_rls_warning: {
-          title: 'Laissez la RLS activée en production',
-          text: 'La désactiver contourne la protection propre à la plateforme contre les fuites de données du stockage vectoriel — laissez-la activée en production.',
-        },
       },
     },
     lifecycle: {

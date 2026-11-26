@@ -551,41 +551,21 @@ export const esES: PlatformTranslationData = {
       title: 'Conocimiento',
       description: 'Backend de almacén de vectores para RAG / fuentes de conocimiento.',
       groups: {
-        adapter: { title: 'Backend',
-          description: 'Elige dónde se almacenan los fragmentos de documento y sus vectores.' },
         turso: { title: 'Turso / libSQL',
-          description: 'Funciona con Turso gestionado, archivo local o en memoria.' },
+          description: 'Solo se usa cuando la base de datos de la plataforma no es PostgreSQL; con PostgreSQL, el almacén de conocimiento está en la base de datos de la plataforma y estos campos no se leen. Funciona con Turso gestionado, archivo local o en memoria.' },
         indexing: { title: 'Valores predeterminados de indexación',
           description: 'Un valor definido en la propia fuente de conocimiento prevalece sobre estos valores predeterminados.' },
-        permissions: { title: 'Permisos' },
       },
       keys: {
-        adapter: {
-          label: 'Adaptador',
-          options: {
-            memory: 'En memoria (solo desarrollo / pruebas)',
-            turso: 'Turso / libSQL (nube o local)',
-          },
-        },
         turso_url: { label: 'URL de conexión',
           help: 'Ejemplos: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:' },
         turso_auth_token: { label: 'Token de autenticación',
           help: 'Solo se requiere para URLs de Turso gestionado.' },
         chunk_target: { label: 'Tamaño objetivo de fragmento (caracteres)',
           help: 'Longitud máxima de un pasaje, en caracteres, cuando el servicio de conocimiento divide un documento. Un tamaño fijado en la propia fuente tiene prioridad; el límite de entrada del modelo de embeddings puede reducirlo.' },
-        over_fetch: { label: 'Multiplicador de sobre-obtención',
-          help: 'La búsqueda obtiene este múltiplo del número de resultados pedido, para que queden suficientes tras filtrarlos por los datos del documento.' },
-        enforce_rls: { label: 'Aplicar RLS en la búsqueda',
-          help: 'Vuelve a comprobar cada resultado contra los permisos a nivel de registro del solicitante.' },
       },
       actions: {
         test: { label: 'Probar conexión' },
-      },
-      banners: {
-        adapter_switch_warning: { title: 'Los índices existentes no se migran',
-          text: 'Cambiar de adaptador NO migra los índices existentes.' },
-        enforce_rls_warning: { title: 'Mantenlo activado en producción',
-          text: 'Desactivarlo omite la salvaguarda exclusiva de la plataforma.' },
       },
     },
 
