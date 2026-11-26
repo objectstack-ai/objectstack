@@ -271,10 +271,10 @@ dev/test), `@objectstack/knowledge-pgvector` (`'pgvector'`) or `@objectstack/kno
 |:---------|:--------|
 | `id` | Snake_case source id |
 | `label` / `description` | Display metadata |
-| `adapter` | Adapter id (e.g. `'pgvector'`, `'memory'`), resolved via `IKnowledgeService.registerAdapter` |
+| `adapter` | Adapter id, resolved via `IKnowledgeService.registerAdapter` |
 | `adapterConfig` | Adapter-specific configuration (opaque to the service) |
 | `source` | What gets indexed — discriminated on `kind`: `'object'` \| `'file'` \| `'http'` |
-| `embedding` | Optional `EmbeddingModelSchema` ref (`provider`, `model`, `dimensions`) — adapters managing embeddings internally (Dify, Vectara) may ignore it |
+| `embedding` | Optional `EmbeddingModelSchema` ref (`provider`, `model`, `dimensions`) — adapters managing embeddings internally may ignore it |
 | `vectorStore` | Optional `VectorStoreSchema` ref (`provider`, `collection`) — same caveat |
 | `refresh` | `onRecordChange` (default `true` for object sources) + optional `cron` (for an external scheduler; not self-scheduled) |
 | `aiExposed` | May `search_knowledge` expose this source to agents (default `true`) — `false` indexes it without making it agent-searchable |
@@ -306,8 +306,8 @@ export const supportKb: KnowledgeSource = KnowledgeSourceSchema.parse({
 
 **Splitting (`split`, object sources only).** The knowledge service cuts each
 document into passages for an adapter declaring `capabilities.chunks`
-(`memory`, `pgvector`, `turso`). An adapter that does not declare it receives
-whole documents; `split` has no effect on it. `split: { strategy, maxChars?, minChars? }`:
+(`memory`, `pgvector`, `turso`). Any other adapter receives whole documents;
+`split` has no effect on it. `split: { strategy, maxChars?, minChars? }`:
 
 - `recursive` (default): cuts at blank lines, then line breaks, then sentence
   ends. For prose.

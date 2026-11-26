@@ -33,9 +33,9 @@ What to do if you used it:
 
 Also in this change, text only: `@objectstack/spec` comments on `KnowledgeSource.adapter`, `KnowledgeSource.embedding`, `IKnowledgeAdapter` and `IKnowledgeService` name adapters that exist; the `@objectstack/service-knowledge` README and package description, and the `@objectstack/embedder-openai` README, name the adapters this repository builds (the embedder README now says which of them take an `embedder`).
 
-In `@objectstack/skills`, `skills/objectstack-ai/SKILL.md` (*Knowledge Sources (RAG)*, rewritten in place, 487 lines before and after):
+In `@objectstack/skills`, `skills/objectstack-ai/SKILL.md` (*Knowledge Sources (RAG)*, rewritten in place, 487 lines and 6798 tokens before and after):
 
 - The wiring paragraph names `@objectstack/knowledge-memory` (`'memory'`, dev/test), `@objectstack/knowledge-pgvector` (`'pgvector'`) and `@objectstack/knowledge-turso` (`'turso'`), where it named the retired package and `'ragflow'`.
-- The `adapter` row and the example source use `'pgvector'`. An agent following the old example wrote a source bound to an adapter that never retrieved anything.
-- The splitting paragraph says which adapters take the service's passages (`memory`, `pgvector`, `turso`); an adapter that does not declare `capabilities.chunks` receives whole documents.
+- The example source uses `'pgvector'`. An agent following the old example wrote a source bound to an adapter that never retrieved anything. The `adapter` row no longer repeats example ids, and the `embedding` row no longer names engines no adapter here serves.
+- The splitting paragraph says which adapters take the service's passages (`memory`, `pgvector`, `turso`); any other adapter receives whole documents.
 - `evals/skills-tools-knowledge.json`, case 3: the prompt says the deployment runs PostgreSQL with pgvector, and the expected answer writes `adapter: 'pgvector'` and no `split` key, because the default `recursive` split fits article prose. The case keeps what it exercised (an object source with `where`, `metadataFields` and `refresh`, registered through `KnowledgeServicePlugin`); the in-memory adapter is already case 9.
