@@ -203,7 +203,7 @@ const result = ApiMethod.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **list** | `{ pinned: string[]; more?: string[] }` | optional | The list scope's arrangement: actions of the object placed at `list_toolbar`, as drawn on the list page toolbar, and `$import` / `$export` as pinned buttons (not pinned, they stay in the page's own Import / Export menu). Omit to draw it as before. |
-| **record** | `{ pinned: string[]; more?: string[] }` | optional | The record scope's arrangement: actions of the object placed at `record_header` or `record_more`, as drawn in the record header (record page, side preview, a phone's bottom bar). Omit to draw it as before. |
+| **record** | `{ pinned: string[]; more?: string[] }` | optional | The record scope's arrangement: actions of the object placed at `record_header` or `record_more`, as drawn in the record header (record page, side preview, a phone's bottom bar). The same order leads the actions a grid row already offers, adding none: the row's ⋮ menu, its right-click menu and, on a list page, the selection bar's actions for one selected record (`pinned` names first, then `more` names, then the rest as before). The selection bar's buttons, at most three, are the first of that order; a row's own inline button does not change. Omit to draw each as before. |
 
 ### Nested Shape: `Object.userActions`
 
@@ -744,7 +744,7 @@ const result = ApiMethod.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **list** | `{ pinned: string[]; more?: string[] }` | optional | The list scope's arrangement: actions of the object placed at `list_toolbar`, as drawn on the list page toolbar, and `$import` / `$export` as pinned buttons (not pinned, they stay in the page's own Import / Export menu). Omit to draw it as before. |
-| **record** | `{ pinned: string[]; more?: string[] }` | optional | The record scope's arrangement: actions of the object placed at `record_header` or `record_more`, as drawn in the record header (record page, side preview, a phone's bottom bar). Omit to draw it as before. |
+| **record** | `{ pinned: string[]; more?: string[] }` | optional | The record scope's arrangement: actions of the object placed at `record_header` or `record_more`, as drawn in the record header (record page, side preview, a phone's bottom bar). The same order leads the actions a grid row already offers, adding none: the row's ⋮ menu, its right-click menu and, on a list page, the selection bar's actions for one selected record (`pinned` names first, then `more` names, then the rest as before). The selection bar's buttons, at most three, are the first of that order; a row's own inline button does not change. Omit to draw each as before. |
 
 ### Nested Shape: `ObjectExtension.indexes[number]`
 
