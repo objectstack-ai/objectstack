@@ -6060,6 +6060,19 @@ const AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const AI_CONTEXT_SORT_FIELD_UNSORTABLE_EXPLANATION: RuleExplanation = {
+  rule: 'ai-context-sort-field-unsortable',
+  covers: 'which fields may order a related list of a context pack',
+  paragraphs: [
+    'A related list\'s `orderBy` runs in the one query that reads the list. A field the object does not offer as ' +
+      'a sort, a formula (computed on read, no column to order by) or a field whose author declared ' +
+      '`sortable: false`, is refused by the record doors (`INVALID_SORT`), so `get_record_context` leaves the whole ' +
+      'list out of every answer rather than read it in another order.',
+    'Order the list by a field that is offered as a sort, or remove the field from `orderBy`.',
+    AI_CONTEXT_PACK_SILENCE,
+  ],
+};
+
 // ── Assignment rules (`validate-assignment-rules.ts`) ──
 
 const ASSIGNMENT_RULE_USER_TARGET_EXPLANATION: RuleExplanation = {
@@ -7049,6 +7062,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [AI_CONTEXT_FIELD_UNKNOWN_EXPLANATION.rule]: AI_CONTEXT_FIELD_UNKNOWN_EXPLANATION,
   [AI_CONTEXT_RELATED_LINK_UNKNOWN_EXPLANATION.rule]: AI_CONTEXT_RELATED_LINK_UNKNOWN_EXPLANATION,
   [AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION.rule]: AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION,
+  [AI_CONTEXT_SORT_FIELD_UNSORTABLE_EXPLANATION.rule]: AI_CONTEXT_SORT_FIELD_UNSORTABLE_EXPLANATION,
   [ASSIGNMENT_RULE_USER_TARGET_EXPLANATION.rule]: ASSIGNMENT_RULE_USER_TARGET_EXPLANATION,
   [ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION.rule]: ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION,
   [SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION.rule]: SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION,
