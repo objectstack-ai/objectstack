@@ -694,8 +694,15 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * View All Records: Super-user read access. 
    * Bypasses Sharing Rules and Ownership checks.
    * Equivalent to Microsoft Dataverse "Organization" level read access.
+   *
+   * [The field-axis split, ruling of record 6912661484, step 3] It widens
+   * which RECORDS the caller reads and nothing else: it casts no field vote,
+   * so a field another set hides with `readable: false` stays hidden from its
+   * holders. Reading every field is `viewAllFields`. Until protocol 19 it
+   * voted `readable: true` on every field of the object; `os migrate meta
+   * --from 18` writes `viewAllFields: true` beside it in an older source.
    */
-  viewAllRecords: z.boolean().default(false).describe('View All Data (Bypass Sharing)'),
+  viewAllRecords: z.boolean().default(false).describe('View All Data (Bypass Sharing): reads every record of the object. Casts no field vote: a field another permission set hides stays hidden; reading every field is viewAllFields.'),
   
   /**
    * Modify All Records: Super-user write access.
@@ -723,8 +730,14 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * an explicit `allowDelete: false` beside it is refused, because the
    * evaluator never reads it. "Edit every record, delete none" is a `criteria`
    * sharing rule with `accessLevel: 'edit'`, not this bit.
+   *
+   * [The field-axis split, ruling of record 6912661484, step 3] Like View All
+   * it casts no field vote: a field another set hides or locks stays hidden
+   * or locked, and so does a field this set's own row hides or locks. Until
+   * protocol 19 it voted `readable: true` and `editable: true` on every field
+   * of the object, its own rows included.
    */
-  modifyAllRecords: z.boolean().default(false).describe('Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies. Includes delete: an omitted allowDelete parses to true, and an explicit allowDelete: false beside it is refused.'),
+  modifyAllRecords: z.boolean().default(false).describe('Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies. Includes delete: an omitted allowDelete parses to true, and an explicit allowDelete: false beside it is refused. Casts no field vote: field rows (this set\'s and others\') still hide or lock their fields; reading every field is viewAllFields.'),
 
   /**
    * View All Fields: a READ vote on every field of the object, fields added
@@ -743,11 +756,11 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * - Allowed on the `'*'` wildcard entry, where it votes on every object the
    *   set does not name explicitly (the same lookup the super-user bits take).
    *
-   * Today `viewAllRecords` / `modifyAllRecords` still vote on every field
-   * too, so on an object entry that carries either bit (the set's own entry
-   * for the object, else its `'*'` entry) this key changes nothing; the
-   * built-in admin sets carry it so they keep their field visibility when
-   * those two bits stop voting on fields.
+   * It is the ONLY object-wide bit that votes on fields: since protocol 19
+   * `viewAllRecords` / `modifyAllRecords` cast no field vote (step 3 of the
+   * split). The built-in admin sets carry it on `'*'`, and `os migrate meta
+   * --from 18` writes it beside either bit in an older source, so a migrated
+   * set keeps every read those bits voted.
    *
    * Deliberately OPTIONAL (no Zod default), like `allowExport`: a default
    * would materialize the key into every parsed entry, and a runtime built
@@ -1084,18 +1097,13 @@ const FIELD_PERMISSION_ROLLUP_REASON_ON_HIDDEN =
  * condition matches, the entry votes as declared; on any other row the entry
  * is absent, so the most-permissive merge
  * (`PermissionEvaluator.getFieldPermissions`) is unchanged. Beside the
- * declaring sets, a set holding the super-user bypass on the object, or
- * carrying `viewAllFields` on it, votes on every field of it, on every row
- * (ADR-0066 ⑧ note of 2026-11-02, ruling of record 6573563853; the field-axis
- * split, ruling of record 6912661484): `viewAllRecords` votes
- * `readable: true`, and so does `viewAllFields` (under the same exception as
- * View All, below), `modifyAllRecords` votes `readable: true` and
- * `editable: true`; View All and View All Fields
- * never grant an edit. One exception (ADR-0066 ⑧ note of 2026-11-15): a set
- * holding View All without Modify All casts no read vote on a field its OWN
- * entry declares `readable: false`, so that row binds the set's own holders;
- * another set's vote, and the Modify All vote, are as before. Otherwise union
- * without deny is unchanged. The write gate
+ * declaring sets, a set carrying `viewAllFields` on the object votes
+ * `readable: true` on every field of it, on every row, and never an edit
+ * (the field-axis split, ruling of record 6912661484), except a field its OWN
+ * entry declares `readable: false`: that row binds the set's own holders.
+ * `viewAllRecords` and `modifyAllRecords` cast no field vote since protocol
+ * 19 (until then they voted on every field, ruling of record 6573563853).
+ * Otherwise union without deny is unchanged. The write gate
  * judges it on the stored row before an update and on the incoming row of an
  * insert. It reaches the EDIT vote only: reads are row-blind (per-row masking
  * waits for a measured need), so `readable: false` beside a `when` is refused
@@ -1159,11 +1167,10 @@ export const FieldPermissionSchema = lazySchema(() => strictObject(
       + 'votes on every row. Present, the entry votes as declared on the rows the condition matches and is ABSENT on '
       + 'every other row, so the most-permissive merge across the caller\'s sets is unchanged: a set that locks a '
       + 'field only from a stage onward does not lock the rows before it, and a co-held set that says nothing about '
-      + 'the field still lifts nothing, unless it holds the super-user bypass on the object (its own entry for the '
-      + 'object, otherwise its `\'*\'` wildcard). Such a set votes on every field of the object, on every row, '
-      + 'whatever `when` says: `viewAllRecords` votes `readable: true`, and `modifyAllRecords` votes `readable: true` '
-      + 'and `editable: true`, so a row-conditioned lock never binds a Modify All holder. View All never grants an '
-      + 'edit. Otherwise union without deny is unchanged. The write gate judges the condition '
+      + 'the field still lifts nothing. A set carrying `viewAllFields` on the object (its own entry for the object, '
+      + 'otherwise its `\'*\'` wildcard) votes `readable: true` on every field, on every row, and never an edit, so a '
+      + 'row-conditioned lock binds its holders; `viewAllRecords` and `modifyAllRecords` cast no field vote. '
+      + 'Otherwise union without deny is unchanged. The write gate judges the condition '
       + 'on the stored row BEFORE an update (so a lock on `status in [...]` holds on an approved row even when the '
       + 'write changes `status`) and on the incoming row of an insert, as the caller sent it. It reaches the EDIT vote '
       + 'only — reads are judged row-blind — so `readable: false` beside a `when` is refused at parse time: keep '

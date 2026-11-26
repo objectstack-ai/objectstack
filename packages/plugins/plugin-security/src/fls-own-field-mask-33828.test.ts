@@ -1,27 +1,25 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [ADR-0066 D2 ⑧ note of 2026-11-15] A permission set's own explicit
-// `readable: false` row on a field binds that set's holders over the set's own
-// View All vote: the set casts no read vote on the field. Everything else of
-// the 2026-11-02 note (ruling of record 6573563853) stands, and is pinned here
-// from the other side:
+// [ADR-0066 D2 ⑧, v19 #36055] View All and Modify All widen records only and
+// cast no field vote, so a set's own `readable: false` row binds its holders
+// beside its own View All or Modify All, and its own `editable: false` row
+// binds beside its own Modify All. The own-row rule of the 2026-11-15 note
+// (#33828) now lives on `viewAllFields`, the one "every field" vote:
 //
 //   1. THE SET'S OWN ROW — a holder of the set alone is not served the field,
-//      in both field merges;
-//   2. REVERSE PINS — another set's View All or Modify All on the object still
-//      reads the field, the shipped `admin_full_access` included;
-//   3. UNCHANGED — Modify All votes on every field, the set's own rows
-//      included, and an edit lock beside View All binds as it always did;
-//   4. ROW-BLIND PARITY — `/auth/me/permissions`' merge answers what
+//      in both field merges, beside View All or Modify All;
+//   2. CROSS-SET — another set's View All or Modify All no longer reads the
+//      field; another set's `viewAllFields` (the shipped `admin_full_access`
+//      included) still reads it, read-only;
+//   3. ROW-BLIND PARITY — `/auth/me/permissions`' merge answers what
 //      `getFieldPermissions` answers on every pair above;
-//   5. THE ROW-LEVEL BYPASS — the set still holds View All on the object.
+//   4. THE ROW-LEVEL BYPASS — the set still holds View All on the object.
 //
 // Below them, the field-axis split's `viewAllFields` (ruling of record
-// 6912661484): the same own-row rule on the read-only bit, and the step-2
-// no-behaviour-change pin for the built-in admin sets.
+// 6912661484): the own-row rule on the read-only bit, and the step-3 pin for
+// the built-in admin sets, which read every field through the bit alone.
 //
-// The fixtures follow `fls-superuser-vote.test.ts`, which keeps the pins of
-// the ruling this note amends.
+// The fixtures follow `fls-superuser-vote.test.ts`.
 
 import { describe, it, expect } from 'vitest';
 import type { PermissionSet } from '@objectstack/spec/security';
@@ -73,6 +71,17 @@ const MODIFY_ALL_OWN_MASK = set({
   fields: OWN_MASK,
 });
 
+/** The bit alone: plain object read and `viewAllFields`, no record bypass. */
+const VIEW_ALL_FIELDS = set({ name: 'field_reader', objects: { [OBJ]: { allowRead: true, viewAllFields: true } } });
+/** The bit beside the set's own rows hiding the same fields. */
+const VIEW_ALL_FIELDS_OWN_MASK = set({
+  name: 'field_reader_masked',
+  objects: { [OBJ]: { allowRead: true, viewAllFields: true } },
+  fields: OWN_MASK,
+});
+/** The bit on the set's wildcard. */
+const WILDCARD_VIEW_ALL_FIELDS = set({ name: 'wildcard_field_reader', objects: { '*': { allowRead: true, viewAllFields: true } } });
+
 const evaluator = new PermissionEvaluator();
 const merge = (sets: PermissionSet[]) => evaluator.getFieldPermissions(OBJ, sets);
 /** The `fields` slot `/auth/me/permissions` serves for `sets`, projected to this object's fields. */
@@ -93,15 +102,12 @@ const MERGES: Array<[string, (sets: PermissionSet[]) => Record<string, { readabl
   ['/auth/me/permissions', rowBlind],
 ];
 
-describe.each(MERGES)('[ADR-0066 ⑧ note of 2026-11-15] a set\'s own readable: false row wins over its own View All vote · %s', (_merge, read) => {
+describe.each(MERGES)('[v19 #36055] a set\'s own rows bind beside its own View All or Modify All · %s', (_merge, read) => {
   it('a holder of the set alone is not served the fields the set hides', () => {
-    const fp = read([VIEW_ALL_OWN_MASK]);
-    for (const f of MASKED) expect(fp[f], f).toEqual({ readable: false, editable: false });
-  });
-
-  it('the same holds when the set holds View All through its wildcard', () => {
-    const fp = read([WILDCARD_VIEW_ALL_OWN_MASK]);
-    for (const f of MASKED) expect(fp[f], f).toEqual({ readable: false, editable: false });
+    for (const s of [VIEW_ALL_OWN_MASK, WILDCARD_VIEW_ALL_OWN_MASK, MODIFY_ALL_OWN_MASK]) {
+      const fp = read([s]);
+      for (const f of MASKED) expect(fp[f], `${s.name} ${f}`).toEqual({ readable: false, editable: false });
+    }
   });
 
   it('a plain co-held set changes nothing: only a vote reads a field', () => {
@@ -110,71 +116,45 @@ describe.each(MERGES)('[ADR-0066 ⑧ note of 2026-11-15] a set\'s own readable: 
     for (const f of MASKED) expect(fp[f], f).toEqual({ readable: false, editable: false });
   });
 
-  it('the set\'s View All still reads a field ANOTHER set hides', () => {
-    const partial = set({
-      name: 'auditor_partial',
-      objects: { [OBJ]: { allowRead: true, viewAllRecords: true } },
-      fields: { [`${OBJ}.code`]: { readable: false, editable: false } },
-    });
-    const fp = read([partial, APP_MASK]);
-    expect(fp.code, 'code').toEqual({ readable: false, editable: false });
-    for (const f of MASKED.filter((m) => m !== 'code')) expect(fp[f], f).toEqual({ readable: true, editable: false });
+  it('View All or Modify All no longer reads a field ANOTHER set hides', () => {
+    for (const second of [VIEW_ALL, MODIFY_ALL]) {
+      const fp = read([second, APP_MASK]);
+      for (const f of MASKED) expect(fp[f], `${second.name} ${f}`).toEqual({ readable: false, editable: false });
+      const both = read([VIEW_ALL_OWN_MASK, second]);
+      for (const f of MASKED) expect(both[f], `${second.name} ${f}`).toEqual({ readable: false, editable: false });
+    }
   });
 
-  it('[reverse pin, ruling 6573563853] a second set holding View All on the object still reads every field', () => {
-    const fp = read([VIEW_ALL_OWN_MASK, VIEW_ALL]);
-    for (const f of MASKED) expect(fp[f], f).toEqual({ readable: true, editable: false });
-    // Resolution order does not matter.
-    expect(read([VIEW_ALL, VIEW_ALL_OWN_MASK])).toEqual(fp);
-  });
-
-  it('[reverse pin, ruling 6573563853] a second set holding Modify All on the object still reads and edits every field', () => {
-    for (const second of [MODIFY_ALL, shipped(ADMIN_FULL_ACCESS)]) {
+  it('another set\'s viewAllFields still reads every field, read-only, the shipped admin_full_access included', () => {
+    for (const second of [VIEW_ALL_FIELDS, shipped(ADMIN_FULL_ACCESS)]) {
       const fp = read([VIEW_ALL_OWN_MASK, second]);
-      for (const f of MASKED) expect(fp[f], `${second.name} ${f}`).toEqual({ readable: true, editable: true });
+      for (const f of MASKED) expect(fp[f], `${second.name} ${f}`).toEqual({ readable: true, editable: false });
       // Resolution order does not matter.
       expect(read([second, VIEW_ALL_OWN_MASK])).toEqual(fp);
     }
   });
 
-  it('[unchanged] Modify All votes on every field, the set\'s own rows included', () => {
-    const own = read([MODIFY_ALL_OWN_MASK]);
-    for (const f of MASKED) expect(own[f], f).toEqual({ readable: true, editable: true });
-    const readOnlyRows = set({
-      name: 'operator_read_only_rows',
-      objects: { [OBJ]: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
-      fields: Object.fromEntries(MASKED.map((f) => [`${OBJ}.${f}`, { readable: true, editable: false }])),
-    });
-    const locked = read([readOnlyRows]);
-    for (const f of MASKED) expect(locked[f], f).toEqual({ readable: true, editable: true });
-    // Both bits on one entry: the Modify All vote is the one that counts.
-    const both = set({
-      name: 'both_bits_masked',
-      objects: { [OBJ]: { allowRead: true, allowEdit: true, viewAllRecords: true, modifyAllRecords: true } },
-      fields: OWN_MASK,
-    });
-    const bothBits = read([both]);
-    for (const f of MASKED) expect(bothBits[f], f).toEqual({ readable: true, editable: true });
-  });
-
-  it('[unchanged] an edit lock beside the set\'s own View All binds: View All never granted an edit', () => {
-    const lock = set({
-      name: 'auditor_read_only_rows',
-      objects: { [OBJ]: { allowRead: true, allowEdit: true, viewAllRecords: true } },
-      fields: Object.fromEntries(MASKED.map((f) => [`${OBJ}.${f}`, { readable: true, editable: false }])),
-    });
-    const fp = read([lock]);
-    for (const f of MASKED) expect(fp[f], f).toEqual({ readable: true, editable: false });
+  it('an edit lock beside the set\'s own View All or Modify All binds', () => {
+    for (const bits of [{ viewAllRecords: true }, { modifyAllRecords: true }, { viewAllRecords: true, modifyAllRecords: true }]) {
+      const lock = set({
+        name: 'read_only_rows',
+        objects: { [OBJ]: { allowRead: true, allowEdit: true, ...bits } },
+        fields: Object.fromEntries(MASKED.map((f) => [`${OBJ}.${f}`, { readable: true, editable: false }])),
+      });
+      const fp = read([lock]);
+      for (const f of MASKED) expect(fp[f], f).toEqual({ readable: true, editable: false });
+    }
   });
 });
 
-describe('[ADR-0066 ⑧ note of 2026-11-15] the row-blind /auth/me/permissions merge agrees with getFieldPermissions', () => {
+describe('[v19 #36055] the row-blind /auth/me/permissions merge agrees with getFieldPermissions', () => {
   const combos: Array<[string, PermissionSet[]]> = [
     ['viewAll with its own mask', [VIEW_ALL_OWN_MASK]],
     ['wildcard viewAll with its own mask', [WILDCARD_VIEW_ALL_OWN_MASK]],
     ['viewAll with its own mask + viewAll', [VIEW_ALL_OWN_MASK, VIEW_ALL]],
     ['viewAll with its own mask + modifyAll', [VIEW_ALL_OWN_MASK, MODIFY_ALL]],
     ['viewAll with its own mask + admin_full_access', [VIEW_ALL_OWN_MASK, shipped(ADMIN_FULL_ACCESS)]],
+    ['viewAll with its own mask + viewAllFields', [VIEW_ALL_OWN_MASK, VIEW_ALL_FIELDS]],
     ['viewAll with its own mask + the app mask', [VIEW_ALL_OWN_MASK, APP_MASK]],
     ['modifyAll with its own mask', [MODIFY_ALL_OWN_MASK]],
   ];
@@ -184,7 +164,7 @@ describe('[ADR-0066 ⑧ note of 2026-11-15] the row-blind /auth/me/permissions m
   });
 });
 
-describe('[ADR-0066 ⑧ note of 2026-11-15] the row-level bypass is untouched', () => {
+describe('[v19 #36055] the row-level bypass is untouched', () => {
   it('a View All set that hides a field of the object still holds View All on it', () => {
     expect(evaluator.superuserBypassSets(OBJ, [VIEW_ALL_OWN_MASK], { bit: 'view' })).toEqual(['auditor_masked']);
     expect(evaluator.superuserBypassSets(OBJ, [VIEW_ALL_OWN_MASK], { bit: 'modify' })).toEqual([]);
@@ -195,20 +175,9 @@ describe('[ADR-0066 ⑧ note of 2026-11-15] the row-level bypass is untouched', 
 //
 // The read-only object-permission bit: a read vote on every field of the
 // object, no edit vote, and a set's own `readable: false` row beats it. Both
-// merges ask the one shared vote (`superuserFieldVote`), so each pin below is
-// taken on both. Then the no-behaviour-change pin of step 2: the built-in
-// admin sets answer the same maps with and without the bit.
-
-/** The bit alone: plain object read and `viewAllFields`, no record bypass. */
-const VIEW_ALL_FIELDS = set({ name: 'field_reader', objects: { [OBJ]: { allowRead: true, viewAllFields: true } } });
-/** The bit beside the set's own rows hiding the same fields. */
-const VIEW_ALL_FIELDS_OWN_MASK = set({
-  name: 'field_reader_masked',
-  objects: { [OBJ]: { allowRead: true, viewAllFields: true } },
-  fields: OWN_MASK,
-});
-/** The bit on the set's wildcard. */
-const WILDCARD_VIEW_ALL_FIELDS = set({ name: 'wildcard_field_reader', objects: { '*': { allowRead: true, viewAllFields: true } } });
+// merges ask the one shared vote (`viewAllFieldsReadVote`), so each pin below
+// is taken on both. Then the step-3 pin: the built-in admin sets read every
+// field through the bit alone, so without it they would read none.
 
 describe.each(MERGES)('[ruling 6912661484] viewAllFields is a read vote on every field, and only a read vote · %s', (_merge, read) => {
   it('it alone opens, read-only, every field another set hides', () => {
@@ -277,7 +246,7 @@ describe('[ruling 6912661484] viewAllFields: the row-blind merge agrees with get
   });
 });
 
-describe('[ruling 6912661484, step 2] no behaviour change: the built-in admin sets answer the same with and without viewAllFields', () => {
+describe('[ruling 6912661484, step 3, #36055] the built-in admin sets read every field through viewAllFields alone', () => {
   const withoutBit = (s: PermissionSet): PermissionSet => {
     const objects = Object.fromEntries(
       Object.entries(s.objects ?? {}).map(([k, v]) => {
@@ -296,34 +265,14 @@ describe('[ruling 6912661484, step 2] no behaviour change: the built-in admin se
     expect('viewAllFields' in (shipped('organization_admin_no_bypass').objects?.['*'] as Record<string, unknown>)).toBe(false);
   });
 
-  // Each shipped admin set as it would answer WITHOUT the bit, beside the same
-  // set as shipped, WITH it. (The wall-less variant's control is below.)
-  const pairs: Array<[string, PermissionSet, PermissionSet]> = [
-    ['organization_admin', withoutBit(shipped('organization_admin')), shipped('organization_admin')],
-    ['admin_full_access', withoutBit(shipped(ADMIN_FULL_ACCESS)), shipped(ADMIN_FULL_ACCESS)],
-  ];
-  const companions: Array<[string, PermissionSet[]]> = [
-    ['alone', []],
-    ['+ the app mask', [APP_MASK]],
-    ['+ View All', [VIEW_ALL]],
-    ['+ View All with its own mask', [VIEW_ALL_OWN_MASK]],
-    ['+ View All with its own mask + the app mask', [VIEW_ALL_OWN_MASK, APP_MASK]],
-  ];
-
-  for (const [label, before, after] of pairs) {
-    for (const [companionLabel, companion] of companions) {
-      for (const [mergeLabel, read] of MERGES) {
-        it(`${label} ${companionLabel} · ${mergeLabel}`, () => {
-          expect(read([after, ...companion])).toEqual(read([before, ...companion]));
-          expect(read([...companion, after])).toEqual(read([...companion, before]));
-          // And on the identity object the admin sets name rows for.
-          const sysUser = (sets: PermissionSet[]) =>
-            mergeLabel === 'getFieldPermissions'
-              ? evaluator.getFieldPermissions('sys_user', sets)
-              : buildEffectiveFieldPermissions(sets);
-          expect(sysUser([after, ...companion])).toEqual(sysUser([before, ...companion]));
-        });
-      }
+  for (const name of ['organization_admin', ADMIN_FULL_ACCESS]) {
+    for (const [mergeLabel, read] of MERGES) {
+      it(`${name} + the app mask: read-only with the bit, hidden without it · ${mergeLabel}`, () => {
+        const withIt = read([shipped(name), APP_MASK]);
+        for (const f of MASKED) expect(withIt[f], f).toEqual({ readable: true, editable: false });
+        const without = read([withoutBit(shipped(name)), APP_MASK]);
+        for (const f of MASKED) expect(without[f], f).toEqual({ readable: false, editable: false });
+      });
     }
   }
 

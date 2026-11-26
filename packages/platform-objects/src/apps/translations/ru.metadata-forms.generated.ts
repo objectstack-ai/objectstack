@@ -114,7 +114,12 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "Сворачивание",
-        helpText: "Можно ли свернуть раздел. Форма ввода следует настройке. На стандартной странице записи читатель может свернуть любую группу с заголовком, поэтому там настройка задаёт только начальное состояние: Collapsed начинается свёрнутым, остальные — развёрнутыми. Если не задано: нельзя."
+        helpText: "Можно ли свернуть раздел. Форма ввода следует настройке. На стандартной странице записи читатель может свернуть любую группу с заголовком, поэтому там настройка задаёт только начальное состояние: Collapsed начинается свёрнутым, остальные — развёрнутыми. Если не задано: нельзя.",
+        options: {
+          none: "Нет — всегда открыт в форме ввода, без переключателя",
+          expanded: "Развёрнуто — сворачиваемый, изначально открыт",
+          collapsed: "Свёрнуто — сворачиваемый, изначально закрыт"
+        }
       },
       "fieldGroups.visibleWhen": {
         label: "Видимо, когда",
@@ -134,7 +139,56 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.type": {
         label: "Тип",
-        helpText: "Тип поля"
+        helpText: "Тип поля",
+        options: {
+          text: "Текст",
+          textarea: "Многострочный текст",
+          email: "Эл. почта",
+          url: "URL-адрес",
+          phone: "Телефон",
+          password: "Пароль",
+          markdown: "Текст Markdown",
+          html: "HTML-разметка",
+          richtext: "Форматированный текст",
+          number: "Число",
+          currency: "Валюта",
+          percent: "Процент",
+          date: "Дата",
+          datetime: "Дата и время",
+          time: "Время",
+          boolean: "Логический",
+          toggle: "Переключатель-тумблер",
+          select: "Выбор",
+          multiselect: "Множественный выбор",
+          radio: "Переключатель",
+          checkboxes: "Флажки",
+          lookup: "Поиск (ссылка)",
+          master_detail: "Главная–подчинённая",
+          tree: "Дерево",
+          image: "Изображение",
+          file: "Файл",
+          avatar: "Аватар",
+          video: "Видео",
+          audio: "Аудио",
+          formula: "Формула (вычисляемая)",
+          summary: "Сводка (свёртка)",
+          autonumber: "Автонумерация",
+          composite: "Составное (встроенное)",
+          repeater: "Повторитель (встроенный массив)",
+          record: "Запись (словарь по ключам)",
+          location: "Местоположение (GPS)",
+          address: "Адрес",
+          code: "Код",
+          json: "Данные JSON",
+          color: "Цвет",
+          rating: "Рейтинг",
+          slider: "Ползунок",
+          signature: "Подпись",
+          qrcode: "QR / Штрихкод",
+          progress: "Прогресс",
+          tags: "Теги",
+          vector: "Векторное представление"
+        }
       },
       "fields.description": {
         label: "Описание",
@@ -186,7 +240,12 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.valueDomain": {
         label: "Домен значений",
-        helpText: "Стандарт, которому должно принадлежать записываемое значение; запись со значением вне его отклоняется"
+        helpText: "Стандарт, которому должно принадлежать записываемое значение; запись со значением вне его отклоняется",
+        options: {
+          iana_time_zone: "Часовой пояс IANA",
+          iso_4217_currency: "Код валюты ISO 4217",
+          iso_3166_alpha2: "Код страны ISO 3166-1 alpha-2"
+        }
       },
       "fields.rows": {
         label: "Строки",
@@ -226,7 +285,12 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.options.kind": {
         label: "Тип",
-        helpText: "Категория жизненного цикла (только для выбора одного значения / переключателя): шаг на пути, успешное завершение или неуспешное завершение. Обязательна для каждого варианта поля стадии."
+        helpText: "Категория жизненного цикла (только для выбора одного значения / переключателя): шаг на пути, успешное завершение или неуспешное завершение. Обязательна для каждого варианта поля стадии.",
+        options: {
+          open: "Открыто",
+          won: "Выиграно",
+          lost: "Проиграно"
+        }
       },
       "fields.reference": {
         label: "Ссылка",
@@ -238,11 +302,20 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.deleteBehavior": {
         label: "Поведение при удалении",
-        helpText: "Что происходит при удалении связанной записи"
+        helpText: "Что происходит при удалении связанной записи",
+        options: {
+          set_null: "Установить null",
+          cascade: "Каскадно (удалить дочерние)",
+          restrict: "Запретить (заблокировать удаление)"
+        }
       },
       "fields.transferBehavior": {
         label: "Поведение при смене владельца",
-        helpText: "Может ли «Сменить владельца» у связанной записи заодно передать записи, которые ссылаются на неё через это поле"
+        helpText: "Может ли «Сменить владельца» у связанной записи заодно передать записи, которые ссылаются на неё через это поле",
+        options: {
+          none: "Нет (остаются у своего владельца)",
+          cascade: "Каскадно (предложить перенести вместе с указанной записью)"
+        }
       },
       "fields.multiple": {
         label: "Множественный выбор",
@@ -254,7 +327,15 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.returnType": {
         label: "Тип результата",
-        helpText: "Тип результата формул"
+        helpText: "Тип результата формул",
+        options: {
+          text: "Текст",
+          number: "Число",
+          boolean: "Логический",
+          date: "Дата",
+          currency: "Валюта",
+          percent: "Процент"
+        }
       },
       "fields.summaryOperations": {
         label: "Операции сводки",
@@ -270,7 +351,14 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.summaryOperations.function": {
         label: "Функция",
-        helpText: "Функция агрегации"
+        helpText: "Функция агрегации",
+        options: {
+          count: "Количество",
+          sum: "Сумма",
+          avg: "Среднее",
+          min: "Минимум",
+          max: "Максимум"
+        }
       },
       "fields.autonumberFormat": {
         label: "Формат автонумерации",
@@ -375,15 +463,31 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "indexes.unique": {
         label: "Уникальный индекс",
-        helpText: "Область уникальности (ADR-0120). Если не задано: не уникален. Устаревшее голое true (означает глобальную) не предлагается; индекс с ним сохраняет его, пока вы не выберете область."
+        helpText: "Область уникальности (ADR-0120). Если не задано: не уникален. Устаревшее голое true (означает глобальную) не предлагается; индекс с ним сохраняет его, пока вы не выберете область.",
+        options: {
+          global: "Глобально — один владелец на всю установку, ровно по этим столбцам",
+          organization: "Организация — один владелец на организацию (драйвер добавляет столбец организации в начало)"
+        }
       },
       ownership: {
         label: "Владение",
-        helpText: "Модель владения записями. Если отсутствует, принимается user."
+        helpText: "Модель владения записями. Если отсутствует, принимается user.",
+        options: {
+          user: "Пользователь — переназначаемый owner_id плюс owning_business_unit_id",
+          business_unit: "Бизнес-подразделение — только owning_business_unit_id, без owner_id",
+          org: "Организация",
+          none: "Нет — без владельца записи, ни одной из привязок"
+        }
       },
       sharingModel: {
         label: "Модель общего доступа",
-        helpText: "Видимость записей по умолчанию для всей организации для внутренних пользователей. Пользовательский объект без неё во время выполнения становится private (ADR-0090 D1)."
+        helpText: "Видимость записей по умолчанию для всей организации для внутренних пользователей. Пользовательский объект без неё во время выполнения становится private (ADR-0090 D1).",
+        options: {
+          private: "Частный — только владелец",
+          public_read: "Публичное чтение — читают все, пишет владелец",
+          public_read_write: "Публичное чтение/запись — все читают и пишут",
+          controlled_by_parent: "Управляется родителем — наследуется от главной записи"
+        }
       },
       sharing: {
         label: "Общий доступ",
@@ -407,7 +511,11 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "access.default": {
         label: "По умолчанию",
-        helpText: "public: охватывается подстановочными назначениями '*'. private: требует явного назначения для объекта и не подпадает под подстановочную безопасность на уровне строк."
+        helpText: "public: охватывается подстановочными назначениями '*'. private: требует явного назначения для объекта и не подпадает под подстановочную безопасность на уровне строк.",
+        options: {
+          public: "Публичный — охватывается подстановочными (*) правами",
+          private: "Частный — нужен явный доступ к каждому объекту"
+        }
       },
       requiredPermissions: {
         label: "Требуемые разрешения",
@@ -423,11 +531,22 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "publicSharing.allowedAudiences": {
         label: "Разрешённые аудитории",
-        helpText: "Аудитории, которые может указывать новая ссылка; любые другие отклоняются. Если не задано: только по ссылке. Любой аудитории всё равно нужна сама ссылка: «вошедшие» дополнительно требует вошедшего пользователя, а «почта» — адреса получателя в списке ссылки."
+        helpText: "Аудитории, которые может указывать новая ссылка; любые другие отклоняются. Если не задано: только по ссылке. Любой аудитории всё равно нужна сама ссылка: «вошедшие» дополнительно требует вошедшего пользователя, а «почта» — адреса получателя в списке ссылки.",
+        options: {
+          public: "Публичный",
+          link_only: "Только по ссылке — любой, у кого есть ссылка",
+          signed_in: "Вошедшие — вошедшие пользователи со ссылкой",
+          email: "Эл. почта — указанные получатели со ссылкой"
+        }
       },
       "publicSharing.allowedPermissions": {
         label: "Разрешённые права",
-        helpText: "Уровни прав, которые может выдавать новая ссылка; любые другие отклоняются. Если не задано: только просмотр."
+        helpText: "Уровни прав, которые может выдавать новая ссылка; любые другие отклоняются. Если не задано: только просмотр.",
+        options: {
+          view: "Просмотр",
+          comment: "Комментирование",
+          edit: "Редактирование"
+        }
       },
       "publicSharing.maxExpiryDays": {
         label: "Максимальный срок (дней)",
@@ -487,7 +606,11 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       editMode: {
         label: "Режим редактирования",
-        helpText: "Намерение по взаимодействию при редактировании записей этого объекта. Если отсутствует, отрисовщик выбирает своё значение по умолчанию. Намерение для всех отрисовщиков, а не оформление."
+        helpText: "Намерение по взаимодействию при редактировании записей этого объекта. Если отсутствует, отрисовщик выбирает своё значение по умолчанию. Намерение для всех отрисовщиков, а не оформление.",
+        options: {
+          modal: "Модальное окно — форма редактирования в диалоге поверх текущего представления",
+          page: "Страница — переход на отдельный полностраничный маршрут редактирования"
+        }
       },
       fileAccessDelegate: {
         label: "Делегат доступа к файлам",
@@ -499,7 +622,14 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.class": {
         label: "Класс",
-        helpText: "Контракт хранения строк этого объекта"
+        helpText: "Контракт хранения строк этого объекта",
+        options: {
+          record: "Запись (бизнес-истина — постоянно)",
+          audit: "Аудит (журнал соответствия — хранение → архив → удаление)",
+          telemetry: "Телеметрия (высокочастотный журнал — короткое хранение)",
+          transient: "Временные (эфемерное состояние — истечение по TTL)",
+          event: "Событие (сообщения шины — очень короткий TTL)"
+        }
       },
       "lifecycle.retention": {
         label: "Хранение",
@@ -527,7 +657,10 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.storage.strategy": {
         label: "Стратегия",
-        helpText: "Стратегия хранения"
+        helpText: "Стратегия хранения",
+        options: {
+          rotation: "Ротация (временные шарды + удаление самых старых)"
+        }
       },
       "lifecycle.storage.shards": {
         label: "Сегменты",
@@ -535,7 +668,12 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.storage.unit": {
         label: "Единица",
-        helpText: "Временная ширина одного сегмента"
+        helpText: "Временная ширина одного сегмента",
+        options: {
+          day: "День",
+          week: "Неделя",
+          month: "Месяц"
+        }
       },
       "lifecycle.archive": {
         label: "Архив",
@@ -666,7 +804,11 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       percentDisplay: {
         label: "Отображение в процентах",
-        helpText: "Как значение показывается только для чтения — в ячейках списка и на странице записи. Если не задано: индикатор выполнения рядом с процентом. Индикатор: всегда индикатор выполнения, для прогресса. Простой: только процент, для ставки или вероятности."
+        helpText: "Как значение показывается только для чтения — в ячейках списка и на странице записи. Если не задано: индикатор выполнения рядом с процентом. Индикатор: всегда индикатор выполнения, для прогресса. Простой: только процент, для ставки или вероятности.",
+        options: {
+          bar: "Полоса",
+          plain: "Простой"
+        }
       },
       currencyConfig: {
         label: "Настройка валюты",
@@ -674,7 +816,12 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "currencyConfig.currencyMode": {
         label: "Режим валюты",
-        helpText: "dynamic (по умолчанию): у поля нет своей валюты, суммы отображаются в валюте арендатора по умолчанию (настройка localization.currency). fixed: у поля одна валюта, defaultCurrency. record: у каждой записи своя валюта, хранящаяся в поле, которое указывает currencyField."
+        helpText: "dynamic (по умолчанию): у поля нет своей валюты, суммы отображаются в валюте арендатора по умолчанию (настройка localization.currency). fixed: у поля одна валюта, defaultCurrency. record: у каждой записи своя валюта, хранящаяся в поле, которое указывает currencyField.",
+        options: {
+          dynamic: "Динамическая — валюта арендатора по умолчанию",
+          fixed: "Фиксированная — одна валюта для этого поля",
+          record: "Запись — каждая запись указывает свою валюту"
+        }
       },
       "currencyConfig.currencyField": {
         label: "Поле валюты",
@@ -771,11 +918,19 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       deleteBehavior: {
         label: "Поведение при удалении",
-        helpText: "Что происходит при удалении связанной записи"
+        helpText: "Что происходит при удалении связанной записи",
+        options: {
+          cascade: "Каскадно (удалить дочерние)",
+          restrict: "Запретить (заблокировать удаление)"
+        }
       },
       transferBehavior: {
         label: "Поведение при смене владельца",
-        helpText: "Может ли «Сменить владельца» у связанной записи заодно передать записи, которые ссылаются на неё через это поле"
+        helpText: "Может ли «Сменить владельца» у связанной записи заодно передать записи, которые ссылаются на неё через это поле",
+        options: {
+          none: "Нет (остаются у своего владельца)",
+          cascade: "Каскадно (предложить перенести вместе с указанной записью)"
+        }
       },
       relatedListFilter: {
         label: "Фильтр связанного списка",
@@ -819,7 +974,11 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       inlineEdit: {
         label: "Inline Edit",
-        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields.",
+        options: {
+          grid: "Сетка (редактировать строки в таблице)",
+          form: "Форма (открывать каждую строку в полной форме)"
+        }
       },
       inlineTitle: {
         label: "Встроенный заголовок",
@@ -855,7 +1014,15 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       returnType: {
         label: "Тип результата",
-        helpText: "Объявленный тип значения формулы, проставляемый по выведенному типу CEL. Потребители читают его вместо повторного разбора выражения. Currency: денежная сумма в валюте, которую объявляет настройка валюты этого поля (если не задана — dynamic)."
+        helpText: "Объявленный тип значения формулы, проставляемый по выведенному типу CEL. Потребители читают его вместо повторного разбора выражения. Currency: денежная сумма в валюте, которую объявляет настройка валюты этого поля (если не задана — dynamic).",
+        options: {
+          text: "Текст",
+          number: "Число",
+          boolean: "Логический",
+          date: "Дата",
+          currency: "Валюта",
+          percent: "Процент"
+        }
       },
       summaryOperations: {
         label: "Операции сводки",
@@ -867,7 +1034,14 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "summaryOperations.function": {
         label: "Функция",
-        helpText: "Функция агрегации"
+        helpText: "Функция агрегации",
+        options: {
+          count: "Количество",
+          sum: "Сумма",
+          min: "Минимум",
+          max: "Максимум",
+          avg: "Среднее"
+        }
       },
       "summaryOperations.field": {
         label: "Поле",
@@ -1007,7 +1181,11 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "body.language": {
         label: "Язык",
-        helpText: "expression = чистая формула; js = JavaScript в песочнице"
+        helpText: "expression = чистая формула; js = JavaScript в песочнице",
+        options: {
+          expression: "Выражение (L1)",
+          js: "JavaScript (L2 в песочнице)"
+        }
       },
       "body.source": {
         label: "Источник",
@@ -1070,7 +1248,11 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Выполнять в фоне, не блокируя транзакцию"
       },
       onError: {
-        label: "При ошибке"
+        label: "При ошибке",
+        options: {
+          abort: "Прервать",
+          log: "Записать в журнал"
+        }
       },
       timeoutMs: {
         label: "Тайм-аут (мс)",
@@ -1078,7 +1260,12 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       runAs: {
         label: "Выполнять от имени",
-        helpText: "Удостоверение для операций с данными ctx.api: унаследовать от вызвавшей записи (по умолчанию), system (повышенные права) или user (вызвавший пользователь)"
+        helpText: "Удостоверение для операций с данными ctx.api: унаследовать от вызвавшей записи (по умолчанию), system (повышенные права) или user (вызвавший пользователь)",
+        options: {
+          inherit: "Наследовать (запускающая запись)",
+          system: "Система (повышенные права)",
+          user: "Пользователь (запустивший пользователь)"
+        }
       },
       condition: {
         label: "Условие",
@@ -1516,7 +1703,14 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       type: {
         label: "Тип",
-        helpText: "Вид страницы. «Список / Интерфейс» привязывает исходное представление к подготовленной поверхности — её внешний вид (таблица / канбан / календарь / …) — это визуализация, задаваемая в разделе «Интерфейс», а не тип страницы."
+        helpText: "Вид страницы. «Список / Интерфейс» привязывает исходное представление к подготовленной поверхности — её внешний вид (таблица / канбан / календарь / …) — это визуализация, задаваемая в разделе «Интерфейс», а не тип страницы.",
+        options: {
+          list: "Страница списка / интерфейса",
+          record: "Страница записи",
+          home: "Главная страница",
+          app: "Страница приложения",
+          utility: "Служебная панель"
+        }
       },
       template: {
         label: "Шаблон",
@@ -1629,7 +1823,12 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "interfaceConfig.recordAction": {
         label: "Действие с записью",
-        helpText: "Как щелчок по записи открывает её сведения"
+        helpText: "Как щелчок по записи открывает её сведения",
+        options: {
+          drawer: "Боковая панель (просмотр справа)",
+          page: "Полная страница",
+          none: "Не кликабельно"
+        }
       },
       "interfaceConfig.showRecordCount": {
         label: "Показывать число записей",
@@ -1794,7 +1993,26 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "dateRange.defaultRange": {
         label: "Default Period",
-        helpText: "The period the dashboard opens with."
+        helpText: "The period the dashboard opens with.",
+        options: {
+          today: "Сегодня",
+          yesterday: "Вчера",
+          this_week: "Эта неделя",
+          last_week: "Прошлая неделя",
+          this_month: "Этот месяц",
+          last_month: "Прошлый месяц",
+          next_month: "Следующий месяц",
+          this_quarter: "Этот квартал",
+          last_quarter: "Прошлый квартал",
+          next_quarter: "Следующий квартал",
+          this_year: "Этот год",
+          last_year: "Прошлый год",
+          last_7_days: "Последние 7 дней",
+          last_30_days: "Последние 30 дней",
+          last_90_days: "Последние 90 дней",
+          next_30_days: "Следующие 30 дней",
+          custom: "Произвольный…"
+        }
       },
       "dateRange.allowCustomRange": {
         label: "Allow Custom Range",
@@ -1970,7 +2188,13 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       mode: {
         label: "Режим",
-        helpText: "Семантический режим действия. Сейчас читается только эвристикой ИИ «человек в контуре» — ни один отрисовщик от него не зависит."
+        helpText: "Семантический режим действия. Сейчас читается только эвристикой ИИ «человек в контуре» — ни один отрисовщик от него не зависит.",
+        options: {
+          create: "Создание",
+          edit: "Редактирование",
+          delete: "Удаление",
+          custom: "Пользовательское"
+        }
       },
       order: {
         label: "Порядок",
@@ -1990,7 +2214,11 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "body.language": {
         label: "Язык",
-        helpText: "expression = чистая формула; js = JavaScript в песочнице"
+        helpText: "expression = чистая формула; js = JavaScript в песочнице",
+        options: {
+          expression: "Выражение (L1)",
+          js: "JavaScript (L2 в песочнице)"
+        }
       },
       "body.source": {
         label: "Источник",
@@ -2107,7 +2335,10 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       operation: {
         label: "Операция",
-        helpText: "Декларативная запись полей одной записи: 'update' применяет `patch`, объединённый под собранными `params`, к текущей записи ОТ ИМЕНИ ВЫЗЫВАЮЩЕГО — никогда с системными правами, поэтому разрешения вызывающего, хуки и проверки объекта срабатывают так же, как при правке пользователем."
+        helpText: "Декларативная запись полей одной записи: 'update' применяет `patch`, объединённый под собранными `params`, к текущей записи ОТ ИМЕНИ ВЫЗЫВАЮЩЕГО — никогда с системными правами, поэтому разрешения вызывающего, хуки и проверки объекта срабатывают так же, как при правке пользователем.",
+        options: {
+          update: "Обновить текущую запись"
+        }
       },
       patch: {
         label: "Изменения полей",
@@ -2353,7 +2584,26 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "dateRange.defaultRange": {
         label: "Default Period",
-        helpText: "The period the report opens with."
+        helpText: "The period the report opens with.",
+        options: {
+          today: "Сегодня",
+          yesterday: "Вчера",
+          this_week: "Эта неделя",
+          last_week: "Прошлая неделя",
+          this_month: "Этот месяц",
+          last_month: "Прошлый месяц",
+          next_month: "Следующий месяц",
+          this_quarter: "Этот квартал",
+          last_quarter: "Прошлый квартал",
+          next_quarter: "Следующий квартал",
+          this_year: "Этот год",
+          last_year: "Прошлый год",
+          last_7_days: "Последние 7 дней",
+          last_30_days: "Последние 30 дней",
+          last_90_days: "Последние 90 дней",
+          next_30_days: "Следующие 30 дней",
+          custom: "Произвольный…"
+        }
       },
       "dateRange.allowCustomRange": {
         label: "Allow Custom Range",
@@ -3026,7 +3276,11 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       surface: {
         label: "Поверхность",
-        helpText: "Поверхность продукта, к которой привязан этот агент (ADR-0063 §1). Подключаются только навыки, собственная поверхность которых совпадает или равна 'both', а набор инструментов агента — объединение инструментов этих навыков. По умолчанию 'ask'."
+        helpText: "Поверхность продукта, к которой привязан этот агент (ADR-0063 §1). Подключаются только навыки, собственная поверхность которых совпадает или равна 'both', а набор инструментов агента — объединение инструментов этих навыков. По умолчанию 'ask'.",
+        options: {
+          ask: "Ask (диалоговые поверхности)",
+          build: "Build (поверхности разработки)"
+        }
       },
       instructions: {
         label: "Инструкции",
@@ -3038,7 +3292,7 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       planning: {
         label: "Планирование",
-        helpText: "Настройка автономного рассуждения: максимальное число итераций рассуждения до остановки агента (1–100, по умолчанию 10)."
+        helpText: "Настройка автономного рассуждения: предохранитель от бесконечного цикла, считаемый в вызовах модели (один вызов модели плюс его пакет инструментов), после которого агент останавливается (1–1000, по умолчанию 10)."
       },
       memory: {
         label: "Память",
@@ -3143,7 +3397,12 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       surface: {
         label: "Поверхность",
-        helpText: "Поверхность агента, к которой привязан этот навык (ADR-0063 §3). Привязка к агенту с другой поверхностью — жёсткая ошибка при разрешении, а не тихий пропуск. По умолчанию 'ask'."
+        helpText: "Поверхность агента, к которой привязан этот навык (ADR-0063 §3). Привязка к агенту с другой поверхностью — жёсткая ошибка при разрешении, а не тихий пропуск. По умолчанию 'ask'.",
+        options: {
+          ask: "Ask (диалоговые поверхности)",
+          build: "Build (поверхности разработки)",
+          both: "Оба"
+        }
       },
       instructions: {
         label: "Инструкции",

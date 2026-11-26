@@ -26,10 +26,10 @@
  * ({@link DESTRUCTIVE_CLASS_KEYS}, `permission-evaluator.ts`). With the two
  * bypass bits gone a `'*'` entry is no longer a superuser wildcard: the
  * evaluator applies it to a private object only when it carries them
- * (ADR-0066 D2). The field merge's vote reads those two bits and
- * `viewAllFields` (the field-axis split, ruling of record 6912661484): left
- * standing, `viewAllFields` would keep the field half of View All under the
- * ceiling, re-opening every field another of the agent's sets hides. On the set: `systemPermissions` (emptied) and `adminScope` (removed),
+ * (ADR-0066 D2). The field merge's one object-wide vote is `viewAllFields`
+ * (the field-axis split, ruling of record 6912661484): left standing, it
+ * would keep a read of every field under the ceiling, re-opening every field
+ * another of the agent's sets hides. On the set: `systemPermissions` (emptied) and `adminScope` (removed),
  * in both the definition and the row spellings the delegated-administration
  * gate reads.
  *

@@ -1,9 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [ADR-0066 D2 ⑧ note of 2026-11-15] A permission set's own `readable: false`
-// binds beside the set's own View All, so the roll-up source rules read that
-// mask as hiding the field, on the parent and on the child alike. Modify All
-// still votes on every field, so a mask beside it hides nothing.
+// [ADR-0066 D2 ⑧ note of 2026-11-15; v19 #36055] A permission set's own
+// `readable: false` binds beside the set's own View All, and from v19 beside
+// its own Modify All too (neither bit casts a field vote), so the roll-up
+// source rules read that mask as hiding the field, on the parent and on the
+// child alike.
 //
 // The pins the note flips stay in `validate-rollup-source-visibility.test.ts`;
 // the cases below are the ones it adds. Every case goes through the registry
@@ -101,8 +102,8 @@ describe('a View All set\'s own mask binds', () => {
   });
 });
 
-describe('Modify All still votes on every field', () => {
-  it('both bits on the child entry: the hidden child field is readable, so nothing is reported', () => {
+describe('[v19 #36055] Modify All casts no field vote either', () => {
+  it('both bits on the child entry: the hidden child field stays unreadable, so the sum over it is reported', () => {
     const findings = viaRegistry(
       stackOf(
         set({
@@ -111,6 +112,6 @@ describe('Modify All still votes on every field', () => {
         }),
       ),
     );
-    expect(findings).toEqual([]);
+    expect(pairs(findings)).toEqual([[UNREADABLE, W_TOTAL]]);
   });
 });

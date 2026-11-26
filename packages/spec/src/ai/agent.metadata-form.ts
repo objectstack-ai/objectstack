@@ -39,7 +39,7 @@ export const agentForm = defineMetadataForm({
       fields: [
         { field: 'instructions', required: true, widget: 'textarea', helpText: 'System prompt — tell the agent how to behave and what it can do' },
         { field: 'model', type: 'composite', helpText: 'AI model configuration (provider, model name, temperature, etc.)' },
-        { field: 'planning', type: 'composite', helpText: 'Autonomous reasoning configuration: the maximum number of reasoning iterations before the agent stops (1–100, default 10).' },
+        { field: 'planning', type: 'composite', helpText: 'Autonomous reasoning configuration: a runaway fuse counted in model calls, each one model call plus its tool batch, after which the agent stops (1–1000, default 10).' },
         { field: 'memory', type: 'composite', helpText: 'Long-term memory: distilled notes kept per user, recalled before each conversation and written by a reflection every reflectionInterval delivered interactions. When long-term memory is enabled, maxEntries and reflectionInterval are required. Enforced by the cloud AI runtime.' },
         // `lifecycle` input removed with the key (#21320): the conversation state
         // machine was parsed and never read — a form for it was false compliance.
