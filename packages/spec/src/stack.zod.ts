@@ -6587,8 +6587,19 @@ function validateCrossReferences(
             // hides the entry when the object isn't in the SchemaRegistry,
             // and stack-level cross-ref validation must skip it.
             if (!nav.requiresObject) {
+              // A platform-prefixed name is still refused: the prefix test
+              // cannot tell an object every environment carries from one a
+              // plugin contributes, so exempting it would let a menu point at
+              // an object that is absent. The message names the fix instead —
+              // `requiresObject` — because "not defined in objects" alone
+              // invites declaring a package copy of a platform object.
+              const base = `App '${appName}' navigation references object '${nav.objectName}' which is not defined in objects.`;
               errors.push(
-                `App '${appName}' navigation references object '${nav.objectName}' which is not defined in objects.`,
+                isPlatformObjectName(nav.objectName)
+                  ? `${base} '${nav.objectName}' is provided by the platform or a plugin, not by this stack: `
+                    + `add requiresObject: '${nav.objectName}' to the entry (the menu then hides it wherever the object `
+                    + `is not registered), and do not declare a copy of the object in this package.`
+                  : base,
               );
             }
           }

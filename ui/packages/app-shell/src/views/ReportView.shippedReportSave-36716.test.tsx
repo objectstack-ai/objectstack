@@ -73,7 +73,7 @@ vi.mock('./studio-design/packages-io', async (importOriginal) => ({
   ensureCustomizationPackage: vi.fn((base: string) => doors.ensure(base)),
 }));
 const walled = vi.hoisted(() => ({ value: false }));
-vi.mock('./studio-design/StudioCustomizeControls', async (importOriginal) => ({
+vi.mock('./studio-design/customizeOverride', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useCustomizeDoorWalled: () => walled.value,
 }));

@@ -2081,6 +2081,7 @@
     "api/ValidateDataIssue:field",
     "api/ValidateDataIssue:message",
     "api/ValidateDataIssue:rule",
+    "api/ValidateDataIssue:scope",
     "api/ValidateDataIssue:severity",
     "api/ValidateDataRequest:data",
     "api/ValidateDataRequest:mode",

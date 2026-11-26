@@ -15,6 +15,7 @@ import { Button } from '@object-ui/components';
 import { useNavigationContext } from '../../../context/NavigationContext.js';
 import { AppHeader } from '../../../layout/AppHeader.js';
 import { CONSOLE_TOP_BAR } from '../../../layout/consoleTopBar.js';
+import { CONSOLE_FULL_HEIGHT } from '../../../layout/chromeBannerHost.js';
 
 export function OrganizationLayout() {
   const { t } = useObjectTranslation();
@@ -79,7 +80,7 @@ export function OrganizationLayout() {
   ];
 
   return (
-    <div className="flex min-h-svh w-full flex-col bg-background" data-testid="organization-layout">
+    <div className={`flex ${CONSOLE_FULL_HEIGHT.minSvh} w-full flex-col bg-background`} data-testid="organization-layout">
       <header className={CONSOLE_TOP_BAR}>
         <AppHeader variant="orgs" />
       </header>

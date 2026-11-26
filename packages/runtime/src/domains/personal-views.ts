@@ -30,6 +30,8 @@ export const PERSONAL_VIEWS_BRIDGE: OwnDoorBridge = Object.freeze({
     member: 'handlePersonalViewDoor',
     producer: '@objectstack/plugin-auth (AuthPlugin)',
     noun: 'the personal view delete door',
+    // [#37352] The catalog key of `noun`: the bridge's `501` follows the request's language.
+    nounKey: 'own_door_personal_view_delete',
     tag: 'personal-views',
 });
 

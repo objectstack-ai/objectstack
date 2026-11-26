@@ -75,8 +75,8 @@
 
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
-import { isDraftVersionConflict, publishedPinOf, type DraftPin } from '../views/metadata-admin/DraftConflictDialog.js';
-import { overrideDraftBody } from '../views/studio-design/StudioCustomizeControls.js';
+import { isDraftVersionConflict, publishedPinOf, type DraftPin } from '../views/metadata-admin/draftVersionGuard.js';
+import { overrideDraftBody } from '../views/studio-design/customizeOverride.js';
 import {
   ensureCustomizationPackage,
   fetchListedPackageManifests,
