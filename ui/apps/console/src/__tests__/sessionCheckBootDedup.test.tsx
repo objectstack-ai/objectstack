@@ -21,7 +21,7 @@ import indexHtml from '../../index.html?raw';
 import mainSource from '../main.tsx?raw';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, cleanup } from '@testing-library/react';
-import { AuthGuard, AuthProvider, useAuth } from '@object-ui/auth';
+import { AuthGuard, AuthProvider, TokenStorage, useAuth } from '@object-ui/auth';
 import { preflightAuth } from '../lib/auth-preflight';
 import { readConsoleDiscovery } from '../lib/early-discovery';
 import { getSharedDiscovery } from '@object-ui/data-objectstack';
@@ -1015,5 +1015,28 @@ describe('a bearer-only session: the stored Bearer rides me/localization on all 
     expect(authorizationOf(localizationCalls()[0])).toBeNull();
     expect(authorizationOf(localizationCalls()[1])).toBe(`Bearer ${BEARER}`);
     expect(readCachedLanguageSeed()).toBe('zh-CN');
+  });
+
+  it('blocked storage (an embed whose localStorage throws): the token sign-in kept in memory still rides the provider read', async () => {
+    vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError');
+    });
+    expect(() => window.localStorage.getItem('auth-session-token')).toThrow();
+    try {
+      // Sign-in stores the token; with storage blocked, `TokenStorage` keeps it in memory.
+      TokenStorage.set(BEARER);
+      expect(TokenStorage.get()).toBe(BEARER);
+      expect(new Headers(meLocalizationInit('zh-CN').headers).get('Authorization')).toBe(`Bearer ${BEARER}`);
+      render(
+        <LocalizationFetchProvider endpoint={ME}>
+          <Value />
+        </LocalizationFetchProvider>,
+      );
+      expect(await screen.findByText('zh-CN/CNY')).toBeTruthy();
+      expect(localizationCalls()).toHaveLength(1);
+      expect(authorizationOf(localizationCalls()[0])).toBe(`Bearer ${BEARER}`);
+    } finally {
+      TokenStorage.clear();
+    }
   });
 });

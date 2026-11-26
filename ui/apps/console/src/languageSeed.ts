@@ -128,7 +128,7 @@
  * Bearer the same way, for the same parse-time hand-off.
  */
 import { cacheLanguageSeed, readCachedLanguageSeed, readStoredLanguage } from '@object-ui/i18n';
-import { getSessionOwnerChangeCount } from '@object-ui/auth';
+import { TokenStorage, getSessionOwnerChangeCount } from '@object-ui/auth';
 import { inflightGetKey, sharedGetJson } from '@object-ui/types';
 import { resolveLocaleAmong } from '@objectstack/spec/system';
 import { readConsoleDiscovery } from './lib/early-discovery';
@@ -147,18 +147,16 @@ interface MeLocalizationResponse {
 }
 
 /**
- * The Bearer every console request carries, `''` when there is none or storage
- * is blocked: the key `createAuthenticatedFetch` reads (`TokenStorage`), read
- * here as `index.html` and `early-discovery.ts` read it.
+ * The Bearer every console request carries, `''` when there is none: read
+ * through `TokenStorage`, the store `createAuthenticatedFetch` reads, so a
+ * storage-blocked page (an embed whose `localStorage` throws, itself a
+ * bearer-only session) still sends the in-memory token the sign-in kept.
+ * `index.html` runs before the bundle and reads `localStorage` by hand; when
+ * the two answers differ the inits differ and the provider sends its own read,
+ * the "token stored after parse" shape.
  */
-const TOKEN_KEY = 'auth-session-token';
-
 function storedToken(): string {
-  try {
-    return localStorage.getItem(TOKEN_KEY) || '';
-  } catch {
-    return '';
-  }
+  return TokenStorage.get() || '';
 }
 
 /**

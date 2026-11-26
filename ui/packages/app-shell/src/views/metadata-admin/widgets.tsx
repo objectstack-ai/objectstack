@@ -1204,10 +1204,11 @@ const EMPTY_FIELD_SELECTOR_OPTIONS: FieldSelectorOption[] = [];
  * `credentials: 'include'`: a bare `fetch` with no init sends the session cookie
  * alone (the default `same-origin` credentials), so a session held by its bearer
  * token alone was answered as anonymous and a `401` never reached the console's
- * session-ended check.
+ * session-ended check. The object name is encoded into the path: the request
+ * now carries the bearer, so it names exactly the object it was given.
  */
 async function fetchFieldSelectorOptions(objectName: string): Promise<FieldSelectorOption[]> {
-  const res = await createAuthenticatedFetch()(`/api/v1/objects/${objectName}/fields`, {
+  const res = await createAuthenticatedFetch()(`/api/v1/objects/${encodeURIComponent(objectName)}/fields`, {
     credentials: 'include',
   });
   // Read the body BEFORE branching on `ok`: a refusal usually carries the more
