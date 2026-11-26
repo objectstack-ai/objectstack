@@ -395,9 +395,11 @@ describe('AppContent — zero-app component/metadata destinations (objectui#3610
     await waitFor(() => expect(pathname()).toBe(SETUP_DIRECTORY));
     expect(chain).toEqual(['/apps/setup/component/metadata/directory', SETUP_DIRECTORY]);
     expect(screen.queryByTestId('studio-probe')).not.toBeInTheDocument();
-    // The destination is a Setup component page, which this zero-app branch
-    // serves no more than any other (objectstack#37565): what is pinned here is
-    // the one hop onto it, never a bounce to the host.
+    // The destination is a Setup component page, and this zero-app branch
+    // serves no Setup component page (objectstack#37565): with zero apps it
+    // renders the no-apps empty state, as every Setup page does — never a
+    // bounce to the host, and never Studio.
+    expect(await screen.findByTestId('create-first-app-btn')).toBeInTheDocument();
     expect(screen.queryByTestId('root-landing')).not.toBeInTheDocument();
   });
 
