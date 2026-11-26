@@ -25,6 +25,9 @@ import {
   studioMetadataItemAddress,
   studioMetadataTypePath,
   studioOwdOverviewPath,
+  studioOverviewTab,
+  studioPackageOverviewPath,
+  STUDIO_OVERVIEW_TAB_PARAM,
   studioPackagePath,
   studioAddressParts,
   studioPath,
@@ -163,6 +166,22 @@ describe('studioOwdOverviewPath — the sharing overview\'s own route (objectsta
   });
 });
 
+describe('studioPackageOverviewPath — 概览 Overview\'s own route (objectstack#37454)', () => {
+  it('is the package\'s `overview` section, on Info, or on Pending with `?tab=pending`', () => {
+    expect(studioPackageOverviewPath('crm')).toBe('/studio/crm/overview');
+    expect(studioPackageOverviewPath('crm', { tab: 'info' })).toBe('/studio/crm/overview');
+    expect(studioPackageOverviewPath('crm', { tab: 'pending' })).toBe('/studio/crm/overview?tab=pending');
+    expect(studioPackageOverviewPath('com.example crm')).toBe('/studio/com.example%20crm/overview');
+  });
+
+  it('reads `?tab=`: `pending` opens Pending; anything else, or nothing, opens Info', () => {
+    expect(studioOverviewTab('pending')).toBe('pending');
+    expect(studioOverviewTab('info')).toBe('info');
+    expect(studioOverviewTab(null)).toBe('info');
+    expect(studioOverviewTab('history')).toBe('info');
+  });
+});
+
 describe('the mapping table agrees with the code (objectstack#36895)', () => {
   it('every `?surface=` row redirects from its pillar address to where the row says, in one hop (objectstack#36909)', () => {
     // Every type has moved: each row names its redirect, and the ONE redirect
@@ -195,6 +214,7 @@ describe('the mapping table agrees with the code (objectstack#36895)', () => {
       'review',
       'package',
       CATALOG_SCOPE_PARAM,
+      STUDIO_OVERVIEW_TAB_PARAM,
       'new',
     ]);
     expect(STUDIO_QUERY_PARAMS.find((row) => row.key === CATALOG_SCOPE_PARAM)?.values).toBe(ENVIRONMENT_SCOPE);
@@ -207,7 +227,7 @@ describe('the mapping table agrees with the code (objectstack#36895)', () => {
     const builders = new Set([
       'studioLandingPath', 'studioPackagePath', 'studioPillarPath', 'studioOrgScopePath',
       'studioMetadataAreaRoot', 'studioMetadataTypePath', 'studioMetadataItemAddress', 'studioChangesReviewPath',
-      'studioItemReviewPath', 'retiredInterfacesTarget', 'studioOwdOverviewPath',
+      'studioItemReviewPath', 'retiredInterfacesTarget', 'studioOwdOverviewPath', 'studioPackageOverviewPath',
     ]);
     for (const family of STUDIO_ADDRESS_FAMILIES) expect(builders.has(family.builder), family.id).toBe(true);
   });
