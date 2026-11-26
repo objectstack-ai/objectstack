@@ -19,6 +19,7 @@ import { aiTestEmbedderActionHandler } from '@objectstack/service-settings';
 import { RECORD_RESTORED_EVENT } from '@objectstack/spec/data';
 import { KnowledgeService } from './knowledge-service.js';
 import type { KnowledgeLogger } from './knowledge-service.js';
+import type { KnowledgeBuildLock } from './knowledge-build.js';
 import type { KnowledgeFieldSecurity } from './knowledge-source-admission.js';
 import { createKnowledgeReapGuard, guardedObjectsFor } from './knowledge-reap-guard.js';
 import { contributeKnowledgeSettings } from './knowledge-settings-contribution.js';
@@ -336,6 +337,17 @@ export interface KnowledgeServicePluginOptions {
   enableEventSync?: boolean;
   /** Default top-K when callers omit it. @default 10 */
   defaultTopK?: number;
+  /**
+   * Build, after boot and in the background, every source whose adapter
+   * holds nothing for it or marks it as needing a rebuild (ADR-0161 K7,
+   * "What starts a rebuild"; `KnowledgeService.buildSourcesAtBoot`). One node
+   * builds each source, under the `cluster` service's lock. A build sends the
+   * source's content fields to the embedding provider, which bills for them.
+   * `false` leaves every source as it is; an administrator then builds one
+   * with `os knowledge rebuild`.
+   * @default true
+   */
+  buildAtBoot?: boolean;
 }
 
 /**
@@ -489,6 +501,20 @@ export class KnowledgeServicePlugin implements Plugin {
             throw err;
           }
         }),
+      // The cluster lock a build runs under, so one node builds a source
+      // (`knowledge-build.ts`). Resolved when a build starts; no `cluster`
+      // service is a one-node composition, and a lookup that throws for any
+      // other reason is the service's to report.
+      resolveBuildLock: () => {
+        let cluster: { lock?: KnowledgeBuildLock } | undefined;
+        try {
+          cluster = ctx.getService<{ lock?: KnowledgeBuildLock } | undefined>('cluster') ?? undefined;
+        } catch (err) {
+          if (isServiceNotRegisteredError(err, 'cluster')) return undefined;
+          throw err;
+        }
+        return cluster?.lock && typeof cluster.lock.acquire === 'function' ? cluster.lock : undefined;
+      },
     });
 
     for (const source of this.options.sources ?? []) {
@@ -500,7 +526,7 @@ export class KnowledgeServicePlugin implements Plugin {
     // The knowledge settings page, the `ai` embedder section, both test
     // actions and the Setup entry are offered only where this service is
     // mounted — never by default (`@objectstack/service-settings`).
-    contributeKnowledgeSettings(ctx, this.version);
+    contributeKnowledgeSettings(ctx, this.version, this.service);
     ctx.logger.info?.(
       `KnowledgeServicePlugin: registered '${KNOWLEDGE_SERVICE}' service (eventSync=${
         this.options.enableEventSync !== false
@@ -516,6 +542,13 @@ export class KnowledgeServicePlugin implements Plugin {
     // `EMBEDDER_SERVICE` where it embeds, not at boot.
     ctx.hook('kernel:bootstrapped', async () => {
       await this.provideEmbedder(ctx);
+      // [ADR-0161 K7] The first build: every source a build is due for is
+      // built once, in the background — after the embedder is provided,
+      // since a build embeds, and never awaited, so the boot does not wait
+      // for it. `buildAtBoot: false` turns it off.
+      if (this.options.buildAtBoot !== false && this.service) {
+        void this.service.buildSourcesAtBoot();
+      }
     });
 
     if (this.options.enableEventSync === false) return;
@@ -769,6 +802,9 @@ export class KnowledgeServicePlugin implements Plugin {
    * the same one either way: a teardown the kernel does not reach.
    */
   async destroy(): Promise<void> {
+    // The boot's first-build pass starts no further build; one already
+    // walking runs to its end (a walk cannot be cancelled part-way).
+    this.service?.stopBuilds();
     if (!this.subscriptionId) return;
     try {
       await this.realtime?.unsubscribe(this.subscriptionId);
