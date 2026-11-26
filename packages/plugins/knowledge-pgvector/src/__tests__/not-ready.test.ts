@@ -117,6 +117,31 @@ describe('knowledge-pgvector when the database is not ready', () => {
     expect(health).toMatchObject({ ok: false, message: expect.stringContaining('ECONNREFUSED') });
   });
 
+  it('a CREATE EXTENSION that loses a race to another session is no refusal: the extension it finds afterwards counts', async () => {
+    // Two sessions run `CREATE EXTENSION IF NOT EXISTS vector` on a fresh
+    // database at once; the loser fails on the catalogue's unique key, after
+    // the winner has installed it.
+    let installed = false;
+    const pool: PgPoolLike = {
+      query: async <R>(text: string) => {
+        if (text.includes('FROM pg_extension')) {
+          return { rows: (installed ? [{ schema: 'public', version: '0.8.7' }] : []) as R[] };
+        }
+        if (text.startsWith('CREATE EXTENSION')) {
+          installed = true;
+          throw new Error('duplicate key value violates unique constraint "pg_extension_name_index"');
+        }
+        return { rows: [] as R[] };
+      },
+      connect: async () => {
+        throw new Error('no transaction expected');
+      },
+    };
+    const adapter = new PgvectorKnowledgeAdapter({ pool, embedder: new FakeEmbedder() });
+    const health = await adapter.healthCheck();
+    expect(health.ok).toBe(true);
+  });
+
   it('with no embedder, a search or a listing is SERVICE_UNAVAILABLE, never a rebuild refusal of a healthy index', async () => {
     // A ready store holding one generation, searched under a fingerprint that
     // differs only because the embedder (model, width) is not registered yet.

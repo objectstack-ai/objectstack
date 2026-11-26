@@ -508,8 +508,8 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
   // `gen:test-typecheck-debt` script; the other ten measured ZERO and deliberately
   // have NEITHER, because at zero residue a ledger holds nothing while a MISSING one
   // is read by the gate as `{ entries: {} }` — under which any error is red
-  // immediately, with no entry to be added to. That is why this block adds four rows
-  // and not fourteen: `reconcileGenerators`'s population is the manifest SCRIPTS, so
+  // immediately, with no entry to be added to. That is why this block added four rows
+  // and not fourteen (three today: the fourth package was retired, its ledger with it): `reconcileGenerators`'s population is the manifest SCRIPTS, so
   // a package that defines no generator needs no disposition, and inventing one would
   // record a decision about a file that does not exist.
   {
@@ -543,15 +543,6 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'it. Its residue is only 3 errors, and that makes it MORE exposed to the failure this row '
       + 'prevents rather than less: a recomputation on a half-merged tree can double a 3 without '
       + 'anyone noticing the number moved.',
-  },
-  {
-    path: 'packages/plugins/knowledge-ragflow/test-typecheck-debt.json',
-    gen: 'gen:test-typecheck-debt',
-    owner: '@objectstack/knowledge-ragflow',
-    why:
-      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
-      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
-      + 'it.',
   },
   // ── #14173: `packages/lint`'s starting ledger, wired to the same instrument ──
   //

@@ -129,12 +129,13 @@ describe('objectui#6152 round 5 — the `chatbot-floating` face keeps its own `f
  * B): the declarations did NOT move. Read off the member, so a deletion — which read
  * as `any` through `BaseSchema`'s index signature until objectui#8347, and does not
  * compile now — or a tombstone — which would read as `undefined` — is red here.
+ * `singleClickEdit` left with the staged editing model (objectstack#35827): it
+ * chose how the retired click-to-edit opened a cell, and nothing reads it now.
  */
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
 type Expect<T extends true> = T;
 
 export type assertionInlineEditFlagsKeepTheirDeclarations = [
   Expect<Equal<TsDataTableSchema['editable'], boolean | undefined>>,
-  Expect<Equal<TsDataTableSchema['singleClickEdit'], boolean | undefined>>,
   Expect<Equal<TsDataTableSchema['selectionStyle'], undefined>>,
 ];

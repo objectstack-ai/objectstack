@@ -46,7 +46,8 @@ const BORN_CLOSED = 'Declared closed from its first day: an unrecognized key is 
 
 /**
  * `get_record_context` input: the record, by object and id, and optionally
- * the pack to read it through and one section of its body.
+ * the pack to read it through and one section of its body, or the page of its
+ * body outline to list.
  */
 export const GetRecordContextInputSchema = lazySchema(() => strictObject(
   {
@@ -75,6 +76,10 @@ export const GetRecordContextInputSchema = lazySchema(() => strictObject(
     ),
     anchor: z.string().min(1).optional().describe(
       'One section of the record\'s body, by the `anchor` an earlier answer\'s body outline issued',
+    ),
+    outlineFrom: z.number().int().min(0).optional().describe(
+      'Where the body outline\'s page starts: the `outlineNext` an earlier answer\'s body gave. Omit it for the '
+      + 'first page. Not with `anchor`',
     ),
   },
 ));
@@ -138,9 +143,14 @@ export const RecordContextBodySchema = lazySchema(() => z.object({
   text: z.string().optional().describe('The body text, or the one section `anchor` asked for'),
   anchor: z.string().optional().describe('The section `text` holds, when the call named one'),
   outline: z.array(RecordContextOutlineEntrySchema).optional().describe(
-    'The body\'s headings in order, when the body is past the bound and is not carried whole. Held to the '
-    + 'service\'s outline bounds: a cut leaves out the deepest headings first and is stated by an '
-    + '`outline_truncated` note',
+    'The body\'s headings in body order, when the body is past the bound and is not carried whole. One page, held '
+    + 'to the service\'s outline bounds: the pages run through every heading short enough to list, shallowest level '
+    + 'first, so a cut leaves the deepest headings to later pages, and is stated by an `outline_truncated` note, '
+    + 'which also counts any heading too long for any page to list',
+  ),
+  outlineNext: z.number().int().min(1).optional().describe(
+    'Present when a heading a later page lists remains past this outline page: pass it as `outlineFrom` to list '
+    + 'the next page. Absent on the last page, even when headings too long to list remain',
   ),
   truncated: z.literal(true).optional().describe(
     'Present when `text` was cut at the bound: a long body with no headings, or a section past the bound',
@@ -172,9 +182,10 @@ export const RecordContextDataSchema = lazySchema(() => z.object({
  *   the caller and must not be treated as empty or absent (names nothing);
  * - `body_outline` — the body is past the bound and carried as an outline;
  * - `body_truncated` — the body (or a section) was cut at the bound;
- * - `outline_truncated` — the outline was cut at the service's outline bounds:
- *   its sentence says how many headings are not listed (every heading's anchor
- *   still reads its section);
+ * - `outline_truncated` — the outline page does not list every heading (the
+ *   service's outline bounds): its sentence says which headings this page
+ *   lists, how many it does not, and, where headings remain, the `outlineFrom`
+ *   that lists the next page (the body's `outlineNext`);
  * - `related_truncated` — the related list on `object` was cut: at its entry's
  *   `limit`, at the row cap, or below either at the door's page cap;
  * - `narrowed` — the agent ceiling narrows what the caller reads on `object`

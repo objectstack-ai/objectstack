@@ -5,7 +5,7 @@ description: Pluggable RAG / knowledge retrieval for ObjectStack agents — prot
 ---
 
 ObjectStack does not ship its own RAG engine. The market has many mature
-options (RAGFlow, LlamaIndex, Dify, Vectara, pgvector + custom pipelines)
+options (LlamaIndex, Dify, Vectara, pgvector + custom pipelines)
 and competing with them on chunking, embeddings, hybrid retrieval, and
 rerankers is not where the framework can add value.
 
@@ -80,11 +80,9 @@ delegates the rest to plugins.
 │  • Source registry (metadata)        │    │                              │
 │  • Ingest router → adapter.upsert    │    │  • knowledge-memory   │
 │  • Search router  → adapter.search   │    │      (dev/test only)         │
-│  • Permission wrapper (RLS filter)   │    │  • knowledge-ragflow  │
-│  • Event sync (record.* → upsert)    │    │      (reference impl, REST)  │
-│  • Audit + metrics                   │    │  • knowledge-pgvector │
-│                                      │    │      (PostgreSQL + pgvector) │
-│                                      │    │  • knowledge-turso    │
+│  • Permission wrapper (RLS filter)   │    │  • knowledge-pgvector │
+│  • Event sync (record.* → upsert)    │    │      (PostgreSQL + pgvector) │
+│  • Audit + metrics                   │    │  • knowledge-turso    │
 │                                      │    │      (libSQL file, local)    │
 │  Registers `knowledge` service       │    │  (llamaindex / dify: planned)│
 └──────────────────────────────────────┘    └──────────────────────────────┘
@@ -151,7 +149,7 @@ source: {
 }
 ```
 
-Every source binds to a named **adapter id** (e.g. `'ragflow'`,
+Every source binds to a named **adapter id** (e.g. `'pgvector'`,
 `'memory'`). The adapter id is resolved at runtime by the plugin that
 registers itself with that name. Adapter config (endpoint, dataset id,
 …) is passed through opaquely.
@@ -486,7 +484,6 @@ Adapters ship as standalone npm packages, registered via the standard
 ```ts
 import { KnowledgeServicePlugin } from '@objectstack/service-knowledge';
 import { KnowledgeMemoryPlugin } from '@objectstack/knowledge-memory';
-import { KnowledgeRagflowPlugin } from '@objectstack/knowledge-ragflow';
 import { KnowledgePgvectorPlugin } from '@objectstack/knowledge-pgvector';
 import { KnowledgeTursoPlugin } from '@objectstack/knowledge-turso';
 
@@ -494,10 +491,6 @@ defineStack({
   plugins: [
     new KnowledgeServicePlugin(),
     new KnowledgeMemoryPlugin(),                        // dev / test
-    new KnowledgeRagflowPlugin({                        // production
-      endpoint: process.env.RAGFLOW_URL!,
-      apiKey: process.env.RAGFLOW_KEY!,
-    }),
     new KnowledgePgvectorPlugin(),                      // self-hosted, PostgreSQL + pgvector
     new KnowledgeTursoPlugin(),                         // local / not on PostgreSQL, a libSQL file
   ],
@@ -558,13 +551,25 @@ an exact scan.
   that embeds questions and passages differently.
 - **Re-embedding.** A passage whose text is unchanged (its `chunk_hash`) is
   not embedded again; its row's metadata is rewritten.
-- **Rebuilds.** A changed fingerprint is refused (§3.6). This store does not
-  yet build a second generation beside the first: `beginBuild` under a new
-  fingerprint is refused, and the reindex result carries the exact
-  statements that clear the source — one `DELETE` per passage table, then
-  the generation row — after which a complete reindex builds it afresh. A
-  first generation never takes over passage rows left behind without a
-  generation row: they are deleted when it opens.
+- **Rebuilds.** A write or a search under another fingerprint is refused
+  (§3.6). `beginBuild` under a new fingerprint opens a generation beside the
+  active one, so a complete reindex rebuilds the source with nothing cleared
+  by hand. The walk and the event-sync writes of the build carry the new
+  fingerprint and land in the new generation only. A search during the build
+  is refused `KNOWLEDGE_REBUILD_REQUIRED`, saying the source is being
+  rebuilt. `completeBuild` makes the new generation active and retires the
+  old one in one transaction. It then deletes the old one's passages in
+  batches (`deleteBatchSize`, default 1,000) and its row last; a deletion
+  that stops is finished by the next build. One builder per source: a
+  PostgreSQL advisory lock, held on a connection of its own from
+  `beginBuild` to `completeBuild`. A second builder is refused
+  `LOCK_CONFLICT` (409). The lock is freed at completion, when the process or
+  its connection dies, or after `buildLockIdleMs` (15 minutes) without a
+  call of the build (event-sync writes do not count). It is a session lock,
+  so the store needs a direct or session-mode connection, never a
+  transaction-mode pooler. A stopped build is resumed by the next `beginBuild` under the same
+  fingerprint, with what it wrote. A generation never takes over passage rows
+  left without a generation row: they are deleted before any generation opens.
 - **An approximate index is an operator's step.** The store creates no
   HNSW or IVFFlat index; add one by hand when a table outgrows an exact scan
   (`CREATE INDEX ON os_knowledge.knowledge_vec_d1536 USING hnsw (embedding
@@ -960,11 +965,11 @@ purge](#reindex-skip-and-purge)); nothing runs that reindex on a schedule yet.
 
 ## 7. MVP (Phase 1) scope
 
-Phase 1 ships the protocol, the orchestrator, two adapters, and the AI
-tool wiring. It is **not** production-grade — it is "production-shaped":
-the surface is stable, the unique value-add (permission-aware
-retrieval) works end-to-end, and a real adapter (`ragflow`) is wired
-up.
+Phase 1 ships the protocol, the orchestrator, the in-memory reference
+adapter, and the AI tool wiring. It is **not** production-grade — it is
+"production-shaped": the surface is stable and the unique value-add
+(permission-aware retrieval) works end-to-end. The vector stores that
+followed (§4.1, §4.2) are the adapters to run in production.
 
 | Component | In Phase 1 | Notes |
 |-----------|-----------:|-------|
@@ -974,7 +979,7 @@ up.
 | `IKnowledgeAdapter` contract | ✅ | upsert / search / delete / healthCheck; optional `listDocuments` with a contract test suite (`@objectstack/service-knowledge/testing`) |
 | `service-knowledge` orchestrator | ✅ | Adapter routing, RLS wrapper, sync |
 | `knowledge-memory` | ✅ | In-process; deterministic fake embedder |
-| `knowledge-ragflow` | ✅ | Minimal REST adapter (datasets + chunks + retrieval) |
+| `knowledge-ragflow` | retired | Shipped in Phase 1; its requests did not match the RAGFlow HTTP API, and the package was removed. Use `knowledge-pgvector`, `knowledge-turso` or an adapter of your own |
 | `search_knowledge` AI tool | ✅ | Threads `ToolExecutionContext` |
 | Event-driven sync for `object` sources | ✅ (sync) | MVP synchronous; queue in Phase 2 |
 | Console source-management UI | ⏳ Phase 2 |  |
@@ -1005,7 +1010,7 @@ describe *configuration*; the Knowledge Protocol describes *behaviour*.
 Adapters may consume `EmbeddingModel` / `VectorStore` references from a
 `KnowledgeSource.embedding` field (when supplied), but they are free to
 ignore them when the underlying backend manages embeddings
-internally (RAGFlow, Dify, Vectara).
+internally (Dify, Vectara).
 
 ---
 
@@ -1019,7 +1024,7 @@ internally (RAGFlow, Dify, Vectara).
   (a) indexing one passage per field-visibility class or (b) standardising
   a `redact` step. Deferred.
 - **Multiple adapters per source.** Useful for mirroring (e.g. write
-  to RAGFlow and pgvector simultaneously) but adds significant
+  to pgvector and an external engine simultaneously) but adds significant
   complexity. Not in Phase 1.
 - **Embedding cost attribution.** Belongs in `service-analytics`. The
   Knowledge Protocol simply emits typed events.

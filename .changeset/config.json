@@ -80,7 +80,6 @@
       "@objectstack/knowledge-memory",
       "@objectstack/knowledge-pgvector",
       "@objectstack/knowledge-turso",
-      "@objectstack/knowledge-ragflow",
       "@objectstack/embedder-openai",
       "@objectstack/account",
       "create-objectstack",

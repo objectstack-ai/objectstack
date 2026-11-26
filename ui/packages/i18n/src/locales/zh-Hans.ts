@@ -4943,6 +4943,9 @@ const zh = {
       metrics: '指标',
       noAddedFilter: '未在数据集定义之外添加筛选条件',
     },
+    recordCitations: {
+      title: '引自记录',
+    },
     tool: {
       aggregate_data: '汇总相关数据',
       get_record: '读取这条记录',

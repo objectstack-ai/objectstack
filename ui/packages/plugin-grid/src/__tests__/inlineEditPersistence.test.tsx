@@ -1,16 +1,17 @@
 /**
  * Inline-edit persistence (生产报工 regression)
  *
- * Repro of the reported bug: edit a cell, commit it (Enter / blur), then click
- * the row-save or "全部保存" button — after the grid refreshes the value is gone.
+ * Repro of the reported bug: edit a cell, commit it, save it — and the value
+ * is gone. The staged row-save and "全部保存" buttons are retired
+ * (objectstack#35827): the commit itself is the save.
  *
- * This drives the FULL path (DataTable edit → ObjectGrid defaultRowSave /
- * defaultBatchSave → dataSource.update → refresh → refetch) against an
+ * This drives the FULL path (DataTable edit → ObjectGrid defaultRowSave →
+ * dataSource.update) against an
  * in-memory fake server, so a passing test means the grid code persists
  * correctly and a failing one pinpoints where the value is dropped.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
@@ -85,7 +86,7 @@ function renderGrid(dataSource: any) {
   };
   return render(
     <ActionProvider>
-      <ObjectGrid cellSelection={false} schema={schema} dataSource={dataSource} />
+      <ObjectGrid schema={schema} dataSource={dataSource} />
     </ActionProvider>,
   );
 }
@@ -100,7 +101,7 @@ const dateCellInput = (container: HTMLElement) => {
 };
 
 describe('ObjectGrid — inline edit persists through save + refresh', () => {
-  it('row-save writes the edited date to the backend and survives refresh', async () => {
+  it('a committed cell writes the edited date to the backend', async () => {
     const ds = makeDataSource();
     const { container } = renderGrid(ds);
     await waitFor(() => expect(screen.getByText('过渡段箱体+底板拼板')).toBeInTheDocument());
@@ -110,25 +111,15 @@ describe('ObjectGrid — inline edit persists through save + refresh', () => {
     const tds = Array.from(firstRow.querySelectorAll('td'));
     const dateTd = tds.find((td) => td.querySelector('div')?.textContent === '—') as HTMLElement
       ?? tds[tds.length - 2];
+    // Select-first (objectstack#35827): a click selects, a double-click edits,
+    // and the Enter that commits the cell is its save.
     fireEvent.click(dateTd);
-
-    const input = await waitFor(() => {
-      const el = dateTd.querySelector('input') as HTMLInputElement;
-      expect(el).toBeTruthy();
-      return el;
-    });
+    fireEvent.doubleClick(dateTd);
+    await waitFor(() => expect(dateTd.querySelector('[data-slot="cell-editor-overlay"] input')).toBeTruthy());
+    await act(async () => {});
+    const input = dateTd.querySelector('[data-slot="cell-editor-overlay"] input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '2026-06-29' } });
     fireEvent.keyDown(input, { key: 'Enter' });
-
-    // Click "Save All" (全部保存) — the batch-save path the user used.
-    const saveAll = await waitFor(() => {
-      const btn = Array.from(container.querySelectorAll('button')).find((b) =>
-        /Save All|全部保存/.test(b.textContent || ''),
-      ) as HTMLButtonElement;
-      expect(btn).toBeTruthy();
-      return btn;
-    });
-    fireEvent.click(saveAll);
 
     await waitFor(() => expect(ds.update).toHaveBeenCalled());
     // The fourth argument is the save's write options: this fixture's rows carry

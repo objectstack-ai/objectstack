@@ -8,8 +8,9 @@
  * `invalid_option`.
  *
  * Two rules read it: `flow-condition-option-label`
- * (`validate-flow-trigger-readiness.ts`, a start condition comparing an
- * option's label) and `flow-node-write-unknown-option`
+ * (`validate-flow-trigger-readiness.ts`, an option's label compared where the
+ * row holds its value: a start condition, an edge condition, a `decision`
+ * branch, a query filter's operand) and `flow-node-write-unknown-option`
  * (`validate-flow-node-writes.ts`, a CRUD write of a literal no option
  * carries). One reading, so the two cannot disagree about what an option is.
  *
@@ -19,6 +20,7 @@
  * extensions tie on (which definition wins is registration order).
  */
 
+import { flowFilterOperands } from '@objectstack/spec/automation';
 import { isMultiValueField } from '@objectstack/spec/data';
 import { objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
 
@@ -97,10 +99,36 @@ export interface OptionLabelComparison {
 /** One quoted literal, either quote (no escapes: a label with a quote in it is not judged). */
 const QUOTED = String.raw`(?:'([^'\\]*)'|"([^"\\]*)")`;
 
-/** A read of `field`: `record.F`, `previous.F` or bare `F`, not a member of something else. */
-function readOf(field: string): string {
-  const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return String.raw`(?:(?:record|previous)\.)?${escaped}(?![\w.])`;
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * [#36964] How a condition reaches one object's fields: the variable roots a
+ * read is spelled under (`record.F`, `deal.F`), and whether a bare `F` reads
+ * the field too.
+ */
+export interface FieldReads {
+  /** Roots a read may be spelled under, each followed by `.F`. */
+  readonly roots: readonly string[];
+  /** Whether a bare `F` reads the field (the flattened trigger record). */
+  readonly bare: boolean;
+  /**
+   * Names a bare read does NOT reach the field by: a flow variable, node id
+   * or screen field bound under the same name wins over the flattened field
+   * (`seedRunVariables`), so a bare read of one is a read of that binding.
+   */
+  readonly shadowed?: ReadonlySet<string>;
+}
+
+/** The trigger record, as a start condition reads it: `record.F`, `previous.F` or bare `F`. */
+export const TRIGGER_RECORD_READS: FieldReads = Object.freeze({ roots: ['record', 'previous'], bare: true });
+
+/** A read of `field` under `reads`, not a member of something else. */
+function readOf(field: string, reads: FieldReads): string {
+  const roots = reads.roots.map(escapeRegExp).join('|');
+  const bare = reads.bare && !reads.shadowed?.has(field);
+  const root = roots ? String.raw`(?:(?:${roots})\.)${bare ? '?' : ''}` : '';
+  if (!root && !bare) return String.raw`(?!)`;
+  return String.raw`${root}${escapeRegExp(field)}(?![\w.])`;
 }
 
 /**
@@ -108,8 +136,8 @@ function readOf(field: string): string {
  * `'L' == F`, `'L' != F`, and each member of `F in [...]`. A literal that sits
  * elsewhere in the source (the comparand of another field) is not one.
  */
-function comparandsOf(src: string, field: string): string[] {
-  const read = readOf(field);
+function comparandsOf(src: string, field: string, reads: FieldReads): string[] {
+  const read = readOf(field, reads);
   const lead = String.raw`(?:^|[^\w.])`;
   const out: string[] = [];
   const pick = (m: RegExpExecArray, at: number) => {
@@ -133,22 +161,92 @@ function comparandsOf(src: string, field: string): string[] {
  * holds that option's value: the label must be the comparand of that field
  * (`F == 'L'`, `'L' != F`, `F in ['L', ...]`), not merely quoted somewhere in
  * the source. A label that is also some option's value is never reported
- * (the literal may be that value).
+ * (the literal may be that value). `reads` says how the source reaches the
+ * object's fields: the trigger record by default, a record variable
+ * (`deal.F`) for a row a `get_record` step bound [#36964].
  */
 export function optionLabelComparisons(
   src: string,
   options: ReadonlyMap<string, SelectOptions>,
+  reads: FieldReads = TRIGGER_RECORD_READS,
 ): OptionLabelComparison[] {
   const out: OptionLabelComparison[] = [];
   for (const [field, opts] of options) {
     if (opts.labels.size === 0) continue;
     const seen = new Set<string>();
-    for (const literal of comparandsOf(src, field)) {
+    for (const literal of comparandsOf(src, field, reads)) {
       const value = opts.labels.get(literal);
       if (value === undefined || seen.has(literal)) continue;
       seen.add(literal);
       out.push({ field, label: literal, value });
     }
+  }
+  return out;
+}
+
+/** [#36964] One label written as a query filter's operand where the value was meant. */
+export interface OptionLabelOperand extends OptionLabelComparison {
+  /** Where the operand sits inside the filter, as `flowFilterOperands` spells it. */
+  readonly path: readonly (string | number)[];
+  /**
+   * Whether the operand excludes (`$ne`, `$nin`, or under an odd number of
+   * `$not`), so the label excludes no record instead of matching none.
+   */
+  readonly negated: boolean;
+}
+
+/** The operators whose operand is compared with the field for (in)equality. */
+const EQUALITY_OPERATORS: ReadonlySet<string> = new Set(['$eq', '$ne', '$in', '$nin']);
+const EXCLUDING_OPERATORS: ReadonlySet<string> = new Set(['$ne', '$nin']);
+
+/**
+ * [#36964] The option labels a query filter (`get_record` / `update_record` /
+ * `delete_record` `filter`, a time-relative sweep's `filter`) matches a select
+ * field of its object against, where the row holds that option's value. The
+ * filter is read the way the filter grammar reads it ({@link flowFilterOperands},
+ * the spec's one walk of it): an operand counts when it is a field's implicit
+ * equality, its `$eq` / `$ne` comparand or a member of its `$in` / `$nin`
+ * list, at the top level or under `$and` / `$or` / `$not`. Not judged: a
+ * nested-relation condition (the field is another object's), an ordering or
+ * text operator, and any operand that is not a plain string — a CEL value
+ * envelope is evaluated before the query, and a string carrying a brace is a
+ * template or a query placeholder (`{current_user_id}`) resolved at run time.
+ * A label that is also some option's value is never reported.
+ */
+export function optionLabelOperands(
+  filter: unknown,
+  options: ReadonlyMap<string, SelectOptions>,
+): OptionLabelOperand[] {
+  const out: OptionLabelOperand[] = [];
+  for (const { path, value } of flowFilterOperands(filter)) {
+    if (typeof value !== 'string' || value.includes('{')) continue;
+    let at = 0;
+    let negated = false;
+    while (at < path.length) {
+      const segment = path[at];
+      if ((segment === '$and' || segment === '$or') && typeof path[at + 1] === 'number') at += 2;
+      else if (segment === '$not') {
+        negated = !negated;
+        at += 1;
+      } else break;
+    }
+    const field = path[at];
+    if (typeof field !== 'string' || field.startsWith('$')) continue;
+    const opts = options.get(field);
+    const meant = opts?.labels.get(value);
+    if (meant === undefined) continue;
+    const rest = path.slice(at + 1);
+    const operator = rest.length === 0 ? '$eq' : rest[0];
+    if (typeof operator !== 'string' || !EQUALITY_OPERATORS.has(operator)) continue;
+    // A list element is a member of `$in` / `$nin`; any deeper path is no operand of this field's.
+    if (rest.length > 2 || (rest.length === 2 && (typeof rest[1] !== 'number' || !operator.endsWith('in')))) continue;
+    out.push({
+      field,
+      label: value,
+      value: meant,
+      path,
+      negated: negated !== EXCLUDING_OPERATORS.has(operator),
+    });
   }
   return out;
 }

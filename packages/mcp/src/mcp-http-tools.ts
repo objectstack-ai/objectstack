@@ -1374,7 +1374,11 @@ function errorResultFromThrown(err: unknown, request: string, objectName?: strin
     ...(answer.declaredCode !== undefined ? { declaredCode: answer.declaredCode } : {}),
     ...(answer.userMessage !== undefined ? { userMessage: answer.userMessage } : {}),
   };
-  if (answer.code === StandardErrorCode.enum.PERMISSION_DENIED) return codedErrorResult(envelope);
+  // [#37512] Its `details` stay withheld; a listed refusal an app declared at
+  // 403 still names its lines ({@link withRefusalReasonsRelay} says which).
+  if (answer.code === StandardErrorCode.enum.PERMISSION_DENIED) {
+    return withRefusalReasonsRelay(codedErrorResult(envelope), err, envelope);
+  }
   // A fault (5xx) carries nothing but the door's sanitised answer: a thrown
   // `details` rides only on a refusal, as `/actions` serves no producer
   // context on a fault.
@@ -1397,7 +1401,7 @@ function errorResultFromThrown(err: unknown, request: string, objectName?: strin
  * for the pin; not on the package entry.
  */
 export const REFUSAL_REASONS_RELAY_LEAD =
-  'Tell the user every line below, whole and in this order, rather than a userMessage the door may have cut:\n';
+  'Tell the user every line below, whole and in this order, in place of userMessage:\n';
 
 /**
  * [#37416] A refusal thrown as a declared `reasons` list (#36877, ruling
@@ -1432,18 +1436,31 @@ export const REFUSAL_REASONS_RELAY_LEAD =
  *
  * ## When it is withheld
  *
- * - A `PERMISSION_DENIED` answer gets no block, as it gets no `details` (the
- *   ruling on #7450, {@link errorResultFromThrown}).
- * - An answer that serves no `userMessage`, or a fault (5xx), gets none: the
- *   door decided that the marked sentence does not reach this caller, and the
- *   lines are that sentence.
+ * - [#37512] The security gate's own refusal gets no block: a served
+ *   `PERMISSION_DENIED` with no `declaredCode` (the ruling on #7450,
+ *   {@link errorResultFromThrown}). A refusal an app's catalogue declared at
+ *   `403` under its own code is served as `PERMISSION_DENIED` too, the doors'
+ *   demotion of an unregistered code, with that code in `declaredCode`; it
+ *   gets the block. It is not the gate's refusal, and both REST doors serve
+ *   its lines whole to the same caller as `details.refusals` (`mapDataError`,
+ *   `thrownAnswerOf`). The relay never reads `details`, so the gate's
+ *   `positions` and `permissionSets` reach it on no path, and the `details`
+ *   withholding in {@link errorResultFromThrown} is unchanged.
+ * - An answer that serves no `userMessage` gets none: there is no sentence for
+ *   the lines to stand in for.
+ * - A fault (5xx) gets none. The block's lines are a refusal's reasons, and a
+ *   refusal catalogue declares only a 4xx (`declaredRefusalEntrySchema`,
+ *   `@objectstack/spec`), so a listed throw at a 5xx is no catalogue refusal.
+ *   The doors still serve its `userMessage` (and `/data` its
+ *   `details.refusals`); this tool serves the `userMessage` in the envelope,
+ *   and serves a fault no `details`.
  */
 function withRefusalReasonsRelay<R extends { content: Array<{ type: 'text'; text: string }> }>(
   result: R,
   err: unknown,
-  served: { code?: string; status?: number; userMessage?: string },
+  served: { code?: string; status?: number; declaredCode?: string; userMessage?: string },
 ): R {
-  if (served.code === StandardErrorCode.enum.PERMISSION_DENIED) return result;
+  if (served.code === StandardErrorCode.enum.PERMISSION_DENIED && served.declaredCode === undefined) return result;
   if (served.userMessage === undefined) return result;
   if (served.status !== undefined && isServerFault(served.status)) return result;
   const text = refusalReasonsRelayText(err);
@@ -2392,6 +2409,13 @@ interface DeleteEachOutcome {
  *
  * Measured on a booted stack: REST `DELETE` answers the sandboxed refusal
  * `400 HOOK_ABORTED` and the code hook's bare throw `500 INTERNAL_ERROR`.
+ *
+ * [#37512] A refusal thrown as a declared `reasons` list needs no relay block
+ * here ({@link withRefusalReasonsRelay}). It is coded, so its `reason` is the
+ * thrown value's own sentence, never the door's 500-character cut: the
+ * runtime's refusal catalogue sets that sentence to the same text as
+ * `userMessage`, every listed line whole and in order, its closing line last.
+ * So the group already names each line as ruling 7178348458 term 3 asks.
  */
 function rowRefusalOf(err: unknown, objectName: string): Omit<DeleteRefusalGroup, 'count' | 'recordIds'> | undefined {
   const door = dataDoorAnswerOf(err, objectName);

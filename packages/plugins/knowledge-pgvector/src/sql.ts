@@ -23,6 +23,13 @@ export const DEFAULT_KNOWLEDGE_SCHEMA = 'os_knowledge';
 /** The generation table: one row per generation of a source. */
 export const GENERATION_TABLE = 'knowledge_generation';
 
+/**
+ * The state of a generation row: `active` (the one searched), `building` (the
+ * one a build under a new fingerprint fills), `retired` (replaced, its
+ * passages being deleted in batches).
+ */
+export type GenerationState = 'active' | 'building' | 'retired';
+
 /** The passage table of one vector width: `knowledge_vec_d<dimensions>`. */
 export function vectorTable(dimensions: number): string {
   if (!Number.isInteger(dimensions) || dimensions < 1) {
@@ -51,6 +58,10 @@ export function schemaDdl(schema: string): string[] {
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (source_id, generation)
 )`,
+    // One active generation per source, and one under construction (ADR-0161
+    // K7). A generation being deleted is `retired` and held by neither.
+    `CREATE UNIQUE INDEX IF NOT EXISTS "${GENERATION_TABLE}_active" ON ${qualified(schema, GENERATION_TABLE)} (source_id) WHERE state = 'active'`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "${GENERATION_TABLE}_building" ON ${qualified(schema, GENERATION_TABLE)} (source_id) WHERE state = 'building'`,
   ];
 }
 
