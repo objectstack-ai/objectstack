@@ -12,7 +12,12 @@
  * - an embedding call that never answers is cancelled at the stall bound: the
  *   record says `timed-out`, the lease is released, and the source's walk
  *   chain is free for the next build;
- * - a build that keeps making progress is never cut by the bound.
+ * - a build that keeps making progress (pages, or purge deletions) is never
+ *   cut by the bound;
+ * - the completion is not a page: once begun it is waited on past the bound,
+ *   and the source's walk queue stays held until it settles;
+ * - a hung purge removal keeps its document listed and its queue held, so
+ *   later builds wait there until it answers.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -282,13 +287,90 @@ describe('a build that stalls is cancelled at the bound', () => {
     expect(calls.completeBuild).toBe(1);
   });
 
-  it('a call outside the page loop that never answers (here completeBuild) is cancelled, and frees the source for the next build', async () => {
+  it('the completion is not a page: a slow switch outlives the bound, the build waits for it, and no build begins beside it', async () => {
     vi.useFakeTimers();
     const db = makeEngine(rows(10));
     const { adapter, calls } = makeAdapter();
     const complete = adapter.completeBuild!.bind(adapter);
+    let answer: () => void = () => {};
+    let first = true;
+    adapter.completeBuild = (ctx) => {
+      if (!first) return complete(ctx);
+      first = false;
+      // The first completion (a switch and its sweep) answers only when the test says so.
+      return new Promise<void>((resolve) => {
+        answer = () => void complete(ctx).then(resolve);
+      });
+    };
+    const { lock, state } = makeLock();
+    const { service } = makeService(db.engine, adapter, lock);
+
+    const pending = service.rebuildSource('kb', { trigger: 'operator' });
+    let settled = false;
+    void pending.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(2 * BUILD_STALL_LIMIT_MS);
+
+    // Well past the bound, the build still waits on its completion: not
+    // cancelled, the lease kept, and its record running.
+    expect(settled).toBe(false);
+    expect(service.buildRecord('kb')?.status).toBe('running');
+    expect(state.released).toBe(0);
+    expect(calls.beginBuild).toBe(1);
+
+    // A rebuild asked on this node meanwhile is the same build, not a second one.
+    expect((await service.rebuildSource('kb', { trigger: 'operator' })).status).toBe('running');
+    // A complete walk asked meanwhile waits behind the completion: its
+    // beginBuild (where a store takes its builder lock) does not run beside it.
+    const queued = service.reindexSource('kb');
+    await vi.advanceTimersByTimeAsync(BUILD_STALL_LIMIT_MS);
+    expect(calls.beginBuild).toBe(1);
+
+    answer();
+    const record = await pending;
+    expect(record.status).toBe('done');
+    expect(calls.completeBuild).toBe(1);
+    expect(state.released).toBe(1);
+
+    // Only now does the queued walk begin its build, after the first one's
+    // completion settled: nothing of it can clear what the next build holds.
+    expect((await queued).ok).toBe(true);
+    expect(calls.beginBuild).toBe(2);
+    expect(calls.completeBuild).toBe(2);
+  });
+
+  it('a purge that keeps deleting is never cut by the bound, however long it runs', async () => {
+    vi.useFakeTimers();
+    const db = makeEngine(rows(10));
+    const { adapter, calls } = makeAdapter();
+    // Three stored documents whose rows are gone: three purge deletions.
+    const stored = new Set(['kb:gone1', 'kb:gone2', 'kb:gone3']);
+    adapter.listDocuments = async () => ({ documents: [...stored].map((documentId) => ({ documentId, docHash: 'h' })) });
+    adapter.delete = async (ids) => {
+      // Each deletion takes most of the bound; the three together take far longer than it.
+      await new Promise<void>((resolve) => setTimeout(resolve, BUILD_STALL_LIMIT_MS - 60_000));
+      for (const id of ids) stored.delete(id);
+    };
+    const { lock } = makeLock();
+    const { service } = makeService(db.engine, adapter, lock);
+
+    const pending = service.rebuildSource('kb', { trigger: 'operator' });
+    await vi.advanceTimersByTimeAsync(4 * BUILD_STALL_LIMIT_MS);
+    const record = await pending;
+
+    expect(record).toMatchObject({ status: 'done', result: { ok: true, purged: 3 } });
+    expect(stored.size).toBe(0);
+    expect(calls.completeBuild).toBe(1);
+  });
+
+  it('a hung listing is cancelled at the bound, completes nothing, and frees the source', async () => {
+    vi.useFakeTimers();
+    const db = makeEngine(rows(10));
+    const { adapter, calls } = makeAdapter();
     let hang = true;
-    adapter.completeBuild = (ctx) => (hang ? new Promise<void>(() => {}) : complete(ctx));
+    adapter.listDocuments = async () => {
+      if (hang) return new Promise<never>(() => {});
+      return { documents: [] };
+    };
     const { lock, state } = makeLock();
     const { service } = makeService(db.engine, adapter, lock);
 
@@ -296,47 +378,66 @@ describe('a build that stalls is cancelled at the bound', () => {
     await vi.advanceTimersByTimeAsync(BUILD_STALL_LIMIT_MS + 1_000);
     expect((await pending).status).toBe('timed-out');
     expect(state.released).toBe(1);
+    expect(calls.completeBuild).toBe(0);
 
-    // The walk stopped waiting on the hung completion, so the next build is not queued behind it.
     hang = false;
     state.held = true;
-    const next = await service.rebuildSource('kb', { trigger: 'operator' });
-    expect(next.status).toBe('done');
+    expect((await service.rebuildSource('kb', { trigger: 'operator' })).status).toBe('done');
     expect(calls.completeBuild).toBe(1);
   });
 
-  it('a hung listing or a hung purge is cancelled at the bound, completes nothing, and frees the source', async () => {
-    for (const where of ['listing', 'purge'] as const) {
-      vi.useFakeTimers();
-      const db = makeEngine(rows(10));
-      const { adapter, calls } = makeAdapter();
-      let hang = true;
-      adapter.listDocuments = async () => {
-        if (hang && where === 'listing') return new Promise<never>(() => {});
-        return { documents: [{ documentId: 'kb:gone', docHash: 'h' }] };
-      };
-      adapter.delete = async () => {
-        if (hang && where === 'purge') return new Promise<void>(() => {});
-      };
-      const { lock, state } = makeLock();
-      const { service } = makeService(db.engine, adapter, lock);
+  it('a hung purge removal keeps that document listed and its queue held: each later build waits there and is cancelled, until the removal answers', async () => {
+    vi.useFakeTimers();
+    const db = makeEngine(rows(10));
+    const { adapter, calls } = makeAdapter();
+    // One stored document whose row is gone; the store lists it until a removal lands.
+    const stored = new Set(['kb:gone']);
+    adapter.listDocuments = async () => ({ documents: [...stored].map((documentId) => ({ documentId, docHash: 'h' })) });
+    const removals: string[][] = [];
+    let answer: () => void = () => {};
+    adapter.delete = (ids) => {
+      removals.push(ids);
+      if (removals.length > 1) {
+        for (const id of ids) stored.delete(id);
+        return Promise.resolve();
+      }
+      // The first removal answers only when the test says so.
+      return new Promise<void>((resolve) => {
+        answer = () => {
+          for (const id of ids) stored.delete(id);
+          resolve();
+        };
+      });
+    };
+    const { lock, state } = makeLock();
+    const { service } = makeService(db.engine, adapter, lock);
 
-      const pending = service.rebuildSource('kb', { trigger: 'operator' });
-      await vi.advanceTimersByTimeAsync(BUILD_STALL_LIMIT_MS + 1_000);
-      expect((await pending).status, where).toBe('timed-out');
-      expect(state.released, where).toBe(1);
-      expect(calls.completeBuild, where).toBe(0);
+    const first = service.rebuildSource('kb', { trigger: 'operator' });
+    await vi.advanceTimersByTimeAsync(BUILD_STALL_LIMIT_MS + 1_000);
+    expect((await first).status).toBe('timed-out');
+    expect(state.released).toBe(1);
+    expect(calls.completeBuild).toBe(0);
 
-      hang = false;
-      state.held = true;
-      // The hung removal still holds that one document's own sync chain (a
-      // per-document chain, not the source's walk chain), so the next build
-      // is run against a store that no longer lists it.
-      if (where === 'purge') adapter.listDocuments = async () => ({ documents: [] });
-      expect((await service.rebuildSource('kb', { trigger: 'operator' })).status, where).toBe('done');
-      expect(calls.completeBuild, where).toBe(1);
-      vi.useRealTimers();
-    }
+    // The store still lists the document, so the next build reaches it in its
+    // purge, queues behind the hung removal, and is cancelled in its turn.
+    state.held = true;
+    const second = service.rebuildSource('kb', { trigger: 'operator' });
+    await vi.advanceTimersByTimeAsync(BUILD_STALL_LIMIT_MS + 1_000);
+    const secondRecord = await second;
+    expect(secondRecord.status).toBe('timed-out');
+    expect(secondRecord.message).toMatch(/no page finished/);
+    expect(removals).toHaveLength(1);
+    expect(stored.has('kb:gone')).toBe(true);
+    expect(calls.completeBuild).toBe(0);
+
+    // Once the hung removal answers, the document is gone and the next build completes.
+    answer();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stored.has('kb:gone')).toBe(false);
+    state.held = true;
+    const third = await service.rebuildSource('kb', { trigger: 'operator' });
+    expect(third.status).toBe('done');
+    expect(calls.completeBuild).toBe(1);
   });
 
   it('applies with no cluster service too (one node): the bound needs no lock', async () => {
@@ -371,5 +472,19 @@ describe('startBuildFence', () => {
     await vi.advanceTimersByTimeAsync(10_000);
     expect(settled).toBe(false);
     expect(quiet.stop()).toBeUndefined();
+  });
+
+  it('completing() disarms the bound for good: cancelled never settles after it, and progressed() does not re-arm it', async () => {
+    vi.useFakeTimers();
+    const fence = startBuildFence({ leaseMs: 1_000, stallMs: 5_000 });
+    let settled = false;
+    void fence.cancelled.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(4_000);
+    fence.completing();
+    fence.progressed();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(settled).toBe(false);
+    expect(fence.stop()).toBeUndefined();
+    fence.close();
   });
 });

@@ -37,11 +37,25 @@
  * A build that finishes no page for {@link BUILD_STALL_LIMIT_MS} (an
  * embedding call or a store call that never answers) is cancelled: the walk
  * stops waiting on that call, the lease is released, and the record says
- * `timed-out`. The bound is a fixed ceiling on the time between two pages, not
- * on a whole build, so a large source that keeps making progress is never
- * cut short. A call the build stopped waiting on cannot be withdrawn: if it
- * answers later its write lands in the store as any page's would, and the
- * walk never continues after it.
+ * `timed-out`. The bound is a fixed ceiling on the time between two pages (or
+ * two purge deletions), not on a whole build, so a large source that keeps
+ * making progress is never cut short. A call the build stopped waiting on
+ * cannot be withdrawn: if it answers later its write lands in the store as
+ * any page's would, and the walk never continues after it. A purge removal
+ * that never answers also keeps that document's own sync queue held, and the
+ * store still lists the document, so every later complete build reaches it in
+ * its purge, waits there and is cancelled in turn, until the removal answers
+ * or the process restarts.
+ *
+ * The completion (the adapter's `completeBuild`: pgvector's switch to the new
+ * generation and its sweep of the replaced one) is not a page. It begins only
+ * if the fence still lets the build go on, and once it has begun the bound no
+ * longer applies: a switch that began before the bound passed still commits,
+ * and the build waits for it however long it takes, so its record reads
+ * `done` or `failed`, never `timed-out`. Until it settles the source's walk
+ * queue stays held, so no rebuild on this node begins a build (or takes the
+ * store's builder lock) beside it. A completion that never answers keeps the
+ * build `running` until it answers or the process restarts.
  *
  * ## What a build costs
  *
@@ -262,8 +276,14 @@ export interface KnowledgeBuildFence {
   stop(): KnowledgeBuildStop | undefined;
   /** Settles with the stop once the build passed {@link BUILD_STALL_LIMIT_MS} without a page; never rejects. */
   readonly cancelled: Promise<KnowledgeBuildStop>;
-  /** A page finished: the stall bound starts again. */
+  /** A page (or a purge deletion) finished: the stall bound starts again. */
   progressed(): void;
+  /**
+   * The build's completion began: it is not a page, so the stall bound is
+   * disarmed for the rest of the build and {@link cancelled} never settles
+   * after this. The lease is still renewed until {@link close}.
+   */
+  completing(): void;
   /** The build ended: renewal stops and the bound is disarmed. */
   close(): void;
 }
@@ -289,6 +309,7 @@ export function startBuildFence(opts: {
   const { handle, leaseMs, stallMs } = opts;
   let stopped: KnowledgeBuildStop | undefined;
   let closed = false;
+  let unbounded = false;
   let renewalLost = false;
   const renews = typeof handle?.renew === 'function';
   let heldUntil = Date.now() + leaseMs;
@@ -313,9 +334,9 @@ export function startBuildFence(opts: {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const arm = (): void => {
     if (timer) clearTimeout(timer);
-    if (closed || stopped) return;
+    if (closed || stopped || unbounded) return;
     timer = setTimeout(() => {
-      if (closed || stopped) return;
+      if (closed || stopped || unbounded) return;
       const minutes = Math.round(stallMs / 60_000);
       stopped = {
         reason: 'timed-out',
@@ -356,6 +377,10 @@ export function startBuildFence(opts: {
     cancelled,
     progressed() {
       arm();
+    },
+    completing() {
+      unbounded = true;
+      if (timer) clearTimeout(timer);
     },
     close() {
       closed = true;

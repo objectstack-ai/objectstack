@@ -507,8 +507,11 @@ export class KnowledgeService implements IKnowledgeService {
    * The paged walk of {@link reindexSource}; runs inside that source's chain.
    * Under a build's `fence` it stops before a page once the fence says so
    * (and before its purge and completion), and stops waiting on a read, a
-   * write or `beginBuild` once the build is cancelled, so the source's chain
-   * is not held by a call that never answers.
+   * write, the listing, the purge or `beginBuild` once the build is
+   * cancelled, so the source's chain is not held by such a call that never
+   * answers. Each page and each purge deletion restarts the fence's bound.
+   * The completion is not raced: the chain stays held until it settles (see
+   * {@link completeBuild}).
    */
   private async walkObjectSource(
     source: KnowledgeSource,
@@ -791,7 +794,13 @@ export class KnowledgeService implements IKnowledgeService {
         adapter,
         engine,
         candidates,
-        serialize: (documentId, task) => chainAfter(this.recordSyncTails, documentId, task),
+        // Each settled deletion (or confirmed keep) is progress: a large,
+        // healthy purge restarts the fence's bound as it goes.
+        serialize: async (documentId, task) => {
+          const outcome = await chainAfter(this.recordSyncTails, documentId, task);
+          fence?.progressed();
+          return outcome;
+        },
         index: plan.index,
       }));
     } catch (err) {
@@ -831,8 +840,12 @@ export class KnowledgeService implements IKnowledgeService {
    * walk's result into `ok: false`: every page was written, but the adapter
    * did not record what it holds, so the next complete walk builds again.
    * Under a build's `fence`, a build that must stop (its lease lost during
-   * the purge, or its bound passed) completes nothing, and the call is raced
-   * against the bound.
+   * the purge, or its bound passed) completes nothing. Once the completion
+   * begins it is not a page: the fence's bound is disarmed
+   * (`fence.completing()`) and the call is awaited however long it takes, so
+   * a switch that began still commits and the record never reads
+   * `timed-out` over it. The source's walk chain stays held until it settles,
+   * so no rebuild on this node begins a build beside it.
    */
   private async completeBuild(
     source: KnowledgeSource,
@@ -850,8 +863,9 @@ export class KnowledgeService implements IKnowledgeService {
       };
     }
     if (typeof adapter.completeBuild !== 'function') return done;
+    fence?.completing();
     try {
-      await fencedCall(fence, adapter.completeBuild(ctx));
+      await adapter.completeBuild(ctx);
       return done;
     } catch (err) {
       return {
@@ -987,7 +1001,9 @@ export class KnowledgeService implements IKnowledgeService {
    *   lease stops it before its next page (`lease-lost`), and a build that
    *   finishes no page for {@link BUILD_STALL_LIMIT_MS} is cancelled
    *   (`timed-out`); either way the lease is released and nothing is purged
-   *   or completed.
+   *   or completed. The completion is not bounded: once it has begun the
+   *   build waits for it, so a switch that began before the bound passed
+   *   still commits, and the record reads `done` or `failed`.
    *
    * Progress is logged at `info` when the build starts (with what it costs),
    * at most every {@link BUILD_PROGRESS_LOG_INTERVAL_MS} while it walks, and
