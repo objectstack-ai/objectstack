@@ -359,9 +359,9 @@ following each field's own rules. Authored there:
   [Record Presentation](./navigation.md#record-presentation--surface-width--columns-are-auto-derived).
 
 A container's `form`, `formViews.default` and `formViews.create` still parse
-and steer nothing (sections, tabs, steps, `subforms`, `defaults`, `modalSize`);
-`os validate` warns `form-view-internal-not-loaded`. Two kinds of form view
-load:
+and steer no create or edit form; `os validate` warns
+`form-view-internal-not-loaded` unless a `type: 'form'` action's literal
+`target` names it: it loads as a named form. These load:
 
 **A named form** is a `formViews` entry under any other key, registered as
 `OBJECT.key`; an action of `type: 'form'` whose `target` is that name opens it
