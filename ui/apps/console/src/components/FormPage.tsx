@@ -930,7 +930,10 @@ export function buildSections(
             }),
             colSpan: override.colSpan,
             span: (override as { span?: 'auto' | 'full' }).span,
-            field: { multiple: override.multiple ?? def.multiple },
+            // The wide default reads the OBJECT field's own `multiple`, as the
+            // spec and the record form (`sectionFields.ts`) do; a form-level
+            // `multiple` changes the widget above, not the default width.
+            field: { multiple: def.multiple },
           },
           cols,
         ) as 1 | 2 | 3 | 4,

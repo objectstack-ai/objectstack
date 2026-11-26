@@ -34,6 +34,8 @@ const OBJECT_SCHEMA = {
     summary: { type: 'text', label: 'Summary' },
     notes: { type: 'textarea', label: 'Notes' },
     owner: { type: 'text', label: 'Owner' },
+    attachments: { type: 'file', label: 'Attachments', multiple: true },
+    receipt: { type: 'file', label: 'Receipt' },
   },
 };
 
@@ -83,7 +85,9 @@ function renderForm(fields: unknown[], columns = 2) {
 
 /** The grid cell of one row: the element that carries the row's span class. */
 async function rowOf(label: string): Promise<HTMLElement> {
-  await waitFor(() => expect(screen.getByLabelText(label)).toBeInTheDocument());
+  // The label, not the control: an upload widget is named by the label's id
+  // (a `group` widget), so a `for`-based lookup cannot be the wait.
+  await waitFor(() => expect(screen.getByText(label, { selector: 'label, label *' })).toBeInTheDocument());
   const labelEl = screen.getByText(label, { selector: 'label, label *' }).closest('label');
   expect(labelEl).not.toBeNull();
   return labelEl!.parentElement as HTMLElement;
@@ -122,5 +126,20 @@ describe('objectstack#37559 — /forms/:name honours a form field span', () => {
     renderForm([{ field: 'notes', colSpan: 1 }, { field: 'owner', colSpan: 2 }, 'title'], 4);
     expect(cellsOf(await rowOf('Notes'))).toBe(1);
     expect(cellsOf(await rowOf('Owner'))).toBe(2);
+  });
+
+  it("an authored colSpan wider than the section clamps to the section's column count", async () => {
+    renderForm([{ field: 'owner', colSpan: 4 }, 'title']);
+    expect(cellsOf(await rowOf('Owner'))).toBe(2);
+  });
+
+  it("a file field whose OBJECT field declares `multiple: true` takes the whole row on `span: 'auto'`", async () => {
+    renderForm(['title', 'attachments']);
+    expect(cellsOf(await rowOf('Attachments'))).toBe(2);
+  });
+
+  it('CONTROL — a form-level `multiple: true` over a single-file object field does not widen it', async () => {
+    renderForm(['title', { field: 'receipt', multiple: true }]);
+    expect(cellsOf(await rowOf('Receipt'))).toBe(1);
   });
 });
