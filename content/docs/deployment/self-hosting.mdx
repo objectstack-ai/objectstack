@@ -469,6 +469,25 @@ but logins bounce and browsers block API calls. Enable HSTS and tune security
 headers only after TLS is confirmed — see
 [Production Readiness](/docs/deployment/production-readiness).
 
+### Serve HTTP/2 to browsers
+
+Serve the public origin over HTTP/2 (HTTP/3 too, if your front offers it).
+The runtime itself speaks HTTP/1.1 on `OS_PORT`, and that is fine for the hop
+from the proxy; it is the hop to the browser that matters. A Console page
+loads about 150 script files before it can paint its first screen. Over
+HTTP/1.1 a browser opens at most six connections to one origin and queues the
+rest, so those files arrive in about 25 rounds, one network round trip each;
+over HTTP/2 they share one connection and arrive together. Measured with
+Lighthouse's desktop profile (40 ms round trips), the same build painted its
+first screen about 1.4–2 s later over HTTP/1.1; the gap grows with the
+round-trip time.
+
+Caddy and most cloud load balancers serve HTTP/2 over TLS by default. nginx
+needs it switched on (`http2 on;` in the `server` block from nginx 1.25.1,
+`listen 443 ssl http2;` before that). To check a deployment, open the Console,
+then in the browser's DevTools Network panel read the Protocol column for the
+page's scripts: it should say `h2` (or `h3`), not `http/1.1`.
+
 ## Scaling beyond one node
 
 The default in-process coordination (locks, queues, schedules) is
