@@ -682,6 +682,9 @@ export function useDraftSaveGuard(client: Pick<MetadataClient, 'save'>, onReload
   React.useLayoutEffect(() => {
     guard.bind({ client: () => client, reload: onReload, notSaved: notSavedIn(locale) });
   });
+  // objectstack#37440 — one function for the guard's life, as the guard's own
+  // members are: a Save callback may name it among its dependencies.
+  const [heldDraftVersion] = React.useState(() => heldDraftVersionOf(guard));
   // A dialog left open by an unmount answers "keep editing": nothing is sent.
   const pendingRef = React.useRef(pending);
   React.useLayoutEffect(() => {
@@ -699,7 +702,7 @@ export function useDraftSaveGuard(client: Pick<MetadataClient, 'save'>, onReload
     forget: guard.forget,
     recordPublished: guard.recordPublished,
     publish: guard.publish,
-    heldDraftVersion: heldDraftVersionOf(guard),
+    heldDraftVersion,
     dialog: <DraftConflictDialog conflict={pending?.conflict ?? null} onChoose={choose} />,
   };
 }

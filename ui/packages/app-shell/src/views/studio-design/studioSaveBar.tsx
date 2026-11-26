@@ -372,7 +372,7 @@ export const publishCreated: PinnedPublish = async (client, type, name, options 
  * Absent (a receipt without a version), both go unpinned, as before.
  */
 export async function publishSavedItem(
-  client: Pick<MetadataClient, 'publish' | 'reset' | 'getDraft'>,
+  client: Pick<MetadataClient, 'publish' | 'reset'>,
   item: SavedItem,
   hadDraft: boolean,
 ): Promise<UnpinnedPublishOutcome>;
@@ -383,7 +383,7 @@ export async function publishSavedItem(
   pinned: PinnedPublish,
 ): Promise<PublishSavedOutcome>;
 export async function publishSavedItem(
-  client: Pick<MetadataClient, 'publish' | 'reset' | 'getDraft'>,
+  client: Pick<MetadataClient, 'publish' | 'reset'> & Partial<Pick<MetadataClient, 'getDraft'>>,
   item: SavedItem,
   hadDraft: boolean,
   pinned?: PinnedPublish,
@@ -427,7 +427,14 @@ export async function publishSavedItem(
     if (pinned) {
       // A reload takes the saved draft back BEFORE the buffer is re-read, so
       // the re-read installs the live row, never the draft that lost.
-      const outcome = await pinned(client, item.type, item.name, publishScope, discardBeforeReload);
+      // The pinned overload's client carries `getDraft` (the guard's rule 10).
+      const outcome = await pinned(
+        client as Pick<MetadataClient, 'publish' | 'getDraft'>,
+        item.type,
+        item.name,
+        publishScope,
+        discardBeforeReload,
+      );
       if (outcome === 'reloaded') {
         emitMetadataRefresh();
         return { ok: false, reloaded: true, draftDiscarded };

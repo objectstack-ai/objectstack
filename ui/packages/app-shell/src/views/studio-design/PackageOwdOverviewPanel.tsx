@@ -67,7 +67,7 @@ import { readFields } from '../metadata-admin/previews/object-fields-io.js';
 import { t, tFormat, type SupportedLocale } from '../metadata-admin/i18n.js';
 import { cbpMasterDetailDefaultsRequired, deriveMasterObject, requireCbpMasterDetails } from './owd-sharing.js';
 import { toast } from 'sonner';
-import { type DraftPin, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
+import { draftReceiptVersion, type DraftPin, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
 import {
   STUDIO_SAVE_TOAST_ID,
   publishSavedItem,
@@ -509,8 +509,10 @@ export function PackageOwdOverviewPanel({
         // runtime resolved from the list; the authoring door refuses the two
         // together, for the whole object. So the resolved `options` stay out of
         // the body, on every bound field and on nothing else.
+        // objectstack#37440 — the version this row's own draft write returned, which pins its publish.
+        let draftVersion: string | undefined;
         try {
-          await client.save('object', s.row.name, dropServedPicklistOptions(next), {
+          const receipt = await client.save('object', s.row.name, dropServedPicklistOptions(next), {
             mode: 'draft',
             packageId,
             surface: 'studio',
@@ -518,6 +520,7 @@ export function PackageOwdOverviewPanel({
             // prerequisite below, and only on the rows that carry one.
             ...(force && relations.length > 0 ? { force: true } : {}),
           });
+          draftVersion = draftReceiptVersion(receipt);
         } catch (e) {
           // objectstack#27458 — making the relationship required is a change
           // the server's destructive-change guard asks to confirm (409). Name
@@ -551,7 +554,7 @@ export function PackageOwdOverviewPanel({
         recordPublished('object', s.row.name, packageId, editPinsRef.current.get(s.row.name) ?? null);
         const live = await publishSavedItem(
           client,
-          { type: 'object', name: s.row.name, packageId },
+          { type: 'object', name: s.row.name, packageId, draftVersion },
           s.row.hasDraft,
           publishPinned,
         );
