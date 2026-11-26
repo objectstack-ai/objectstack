@@ -2188,8 +2188,30 @@ export class ProtocolSaveFacet {
                 // stored value. A token naming no current head — the raw
                 // stored hash included — is answered here, in this door's own
                 // conflict envelope and with its own audit row.
+                //
+                // [#37628] A FIRST draft — no draft row at this address yet — is
+                // a pending change over the published row, and the `version` a
+                // read of that row served is the token its caller holds. So the
+                // token is compared with the published head the draft will
+                // replace on publish (the active row at the package the draft is
+                // written into), and on a match the draft is written as a first
+                // draft (`null` parent, which the repository's lock still judges:
+                // a draft another caller wrote in between is refused there). A
+                // published row that moved since the read is refused here,
+                // naming its current version; with no published row either, the
+                // head stays `null`, as before.
+                const firstDraft = mode === 'draft' && currentStored === null && typeof request.parentVersion === 'string';
+                const comparedStored = firstDraft
+                    ? (await repo.headAt(ref, {
+                        state: 'active',
+                        packageId: writeHead.packageId,
+                        member: itemDiscriminator(singularTypeForRepo, request.item),
+                        body: request.item,
+                    })).head?.hash ?? null
+                    : currentStored;
                 try {
-                    parentVersion = await host.storedParentForToken(ref, request.parentVersion, currentStored);
+                    const matched = await host.storedParentForToken(ref, request.parentVersion, comparedStored);
+                    parentVersion = firstDraft ? null : matched;
                 } catch (err: unknown) {
                     if (err instanceof ConflictError) throw await host.saveConflict(err, request, writeSource);
                     throw err;
