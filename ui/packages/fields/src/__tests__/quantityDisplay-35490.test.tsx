@@ -178,6 +178,13 @@ describe('formatQuantity — the one formatter', () => {
     expect(formatQuantity(1.5, field, { code: 'GRM', standard: true, label: 'g', decimals: 3 }, 'en-US').hidden).toBe(false);
   });
 
+  it('rounds half away from zero, on both signs (OI6, ruled A)', () => {
+    const pc = { code: 'H87', standard: true, label: 'pc', decimals: 0 };
+    expect(formatQuantity(-1.5, field, pc, 'en-US').number).toBe('-2');
+    expect(formatQuantity(2.5, field, pc, 'en-US').number).toBe('3');
+    expect(formatQuantity(-2.5, field, pc, 'en-US').number).toBe('-3');
+  });
+
   it('keeps the field width when the unit has no decimal places of its own', () => {
     expect(formatQuantity(1.25, { ...field, scale: 2 }, { code: 'KGM', standard: true, label: 'kg' }, 'en-US').text).toBe('1.25\u00a0kg');
     expect(quantityDisplayPlaces(undefined, field)).toBeUndefined();

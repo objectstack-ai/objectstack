@@ -184,7 +184,9 @@ export const STANDARD_UNITS: Readonly<Record<string, StandardUnit>> = Object.fre
  * codes get a platform-shipped per-locale label table"), keyed exactly as
  * {@link STANDARD_UNITS} is. Each locale's name is served by the platform's
  * i18n service (the platform translation bundles' `messages`, keyed
- * `units.standard.<CODE>`) and falls back to this name; a reader with no
+ * `standardUnit` followed by the code, e.g. `standardUnitKGM`: one segment,
+ * because the i18n adapter walks a dotted key as nesting) and falls back to
+ * this name; a reader with no
  * translation (an export, an MCP tool) names a unit from here. A pin test
  * holds this table to exactly the keys of {@link STANDARD_UNITS}, so a code
  * added there without a name here goes red.
