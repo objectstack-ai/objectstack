@@ -21,6 +21,11 @@
  * names such a name and no holder the name alone addresses picks nothing: the
  * page asks for a pick among the holders it lists. A name with one holder is
  * listed, linked and handed on as before.
+ *
+ * objectstack#37532 — the list and the picked item's section share the page's
+ * scroll. On a two-column layout the list is held in view and scrolls on its
+ * own, so a pick far down a long list never leaves the section above the
+ * visible area; on one column, a pick brings the section into view.
  */
 
 import * as React from 'react';
@@ -131,7 +136,22 @@ export function CatalogAssignmentPage({
     void metadataRef.current.refresh(type).finally(() => setNonce((n) => n + 1));
   }, [type]);
 
+  // objectstack#37532 — a pick the administrator made brings the section into
+  // view (on one column it sits below the whole list). Only a pick: a link
+  // opened with an item named leaves the scroll where the page starts it.
+  const sectionRef = React.useRef<HTMLElement>(null);
+  const revealOnPick = React.useRef(false);
+  React.useEffect(() => {
+    if (!revealOnPick.current) return;
+    revealOnPick.current = false;
+    const section = sectionRef.current;
+    if (!section || typeof section.scrollIntoView !== 'function') return;
+    const { top } = section.getBoundingClientRect();
+    if (top < 0 || top > window.innerHeight / 2) section.scrollIntoView({ block: 'start' });
+  }, [picked, pickedPackage]);
+
   const pick = (entry: CatalogEntry) => {
+    revealOnPick.current = true;
     setSearch(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -264,10 +284,17 @@ export function CatalogAssignmentPage({
         refresh={{ onRefresh: reload, label: copy.refresh, busy: read.kind === 'loading' }}
       />
       <div className="grid gap-4 p-6 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
-        <nav aria-label={copy.listLabel} className="min-w-0 rounded-md border">
+        {/* objectstack#37532 — two columns: the list stays in view and scrolls on its own. */}
+        <nav
+          aria-label={copy.listLabel}
+          data-testid={`${testId}-list`}
+          className="min-w-0 rounded-md border md:sticky md:top-6 md:max-h-[calc(100svh-var(--os-chrome-banners,0px)-3rem)] md:self-start md:overflow-y-auto"
+        >
           {list}
         </nav>
-        <section className="min-w-0">{detail}</section>
+        <section ref={sectionRef} className="min-w-0 scroll-mt-6" data-testid={`${testId}-section`}>
+          {detail}
+        </section>
       </div>
     </div>
   );
