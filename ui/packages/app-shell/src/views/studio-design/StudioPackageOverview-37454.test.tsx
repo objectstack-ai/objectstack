@@ -379,8 +379,12 @@ function renderPage(entry = `/studio/${OWN}/overview`) {
   );
 }
 
-/** The surface with its address printed outside the routes, so a redirect that leaves the route is still read. */
-function renderSurfaceAt(entry: string) {
+/**
+ * The surface with its address printed outside the routes, so a redirect that
+ * leaves the route is still read. `bare` mounts the surface without the
+ * pillar redirect in front of it, to read the surface's own guard.
+ */
+function renderSurfaceAt(entry: string, { bare = false } = {}) {
   return render(
     <MePermissionsProvider initialPermissions={AUTHOR}>
       <MemoryRouter initialEntries={[entry]}>
@@ -389,9 +393,13 @@ function renderSurfaceAt(entry: string) {
           <Route
             path="/studio/:packageId/:tab"
             element={
-              <StudioPillarRedirect>
+              bare ? (
                 <StudioDesignSurface />
-              </StudioPillarRedirect>
+              ) : (
+                <StudioPillarRedirect>
+                  <StudioDesignSurface />
+                </StudioPillarRedirect>
+              )
             }
           />
         </Routes>
@@ -441,8 +449,14 @@ describe('the overview\'s branch order (objectstack#37454)', () => {
     expect(screen.queryByTestId('studio-package-menu')).toBeNull();
   });
 
-  it('the package-less scope has no overview: ~org/overview redirects to its area', async () => {
-    renderSurfaceAt('/studio/~org/overview');
+  // Two doors stand in front of it: the pillar redirect, which sends every
+  // `~org` address but Automations to the scope's area, and the surface's own
+  // guard behind it. Each is read on its own.
+  it.each([
+    ['through the route as the console mounts it', false],
+    ['the surface alone: its own guard', true],
+  ])('the package-less scope has no overview: ~org/overview redirects to its area (%s)', async (_door, bare) => {
+    renderSurfaceAt('/studio/~org/overview', { bare });
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent(studioOrgScopePath()), { timeout: 8000 });
     expect(screen.queryByTestId('studio-package-overview')).toBeNull();
     expect(screen.queryByTestId('studio-package-menu')).toBeNull();
