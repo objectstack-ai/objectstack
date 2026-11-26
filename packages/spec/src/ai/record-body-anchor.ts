@@ -68,6 +68,10 @@ function markdownHeadingOf(line: string): { level: number; heading: string } | u
  * how the citation verifier reads an `html` or `richtext` body
  * (`@objectstack/service-record-context`'s `verifyRecordCitations`), so the
  * two never disagree on what a tag is.
+ *
+ * It is not a sanitizer: it reads text out of markup for matching and never
+ * makes markup safe to render. Entities are left encoded, and the text on
+ * either side of a removed tag is joined with nothing between.
  */
 export function stripBodyTags(text: string): string {
   let out = '';

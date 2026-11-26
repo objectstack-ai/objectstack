@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { ptBRObjects } from './pt-BR.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * Português do Brasil (pt-BR) — Setup App Translations
  */
 export const ptBR: TranslationData = {
   objects: ptBRObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('pt-BR'),
   apps: {
     account: {
       label: 'Conta',

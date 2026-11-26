@@ -2236,11 +2236,11 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       joined_blocks: {
         label: "Bloques unidos",
-        description: "Bloques adicionales unidos en un solo informe (solo informes joined)."
+        description: "Otros bloques apilados en el mismo informe, cada uno con su propia fuente de datos (solo informes joined)."
       },
       filter_and_chart: {
         label: "Filtro y gráfico",
-        description: "Filtros a nivel de informe y presentación del gráfico."
+        description: "Las condiciones de filtro y cómo se muestra el gráfico."
       },
       period_and_export: {
         label: "Periodo y exportación",
@@ -2277,11 +2277,11 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       columns: {
         label: "Agrupar columnas por",
-        helpText: "Nombres de dimensión en horizontal (solo matrix)"
+        helpText: "Grupos distribuidos en las columnas (solo informes matrix)."
       },
       order: {
         label: "Orden",
-        helpText: "Claves de ordenación, la más significativa primero (una dimensión de rows/columns o una medida de values). Las dimensiones de tiempo son cronológicas de forma predeterminada."
+        helpText: "Por qué ordenar, lo más importante primero (una agrupación o una métrica). Las agrupaciones de tiempo se ordenan por fecha de forma predeterminada."
       },
       "order.by": {
         label: "Ordenar por"
@@ -2295,7 +2295,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       blocks: {
         label: "Bloques",
-        helpText: "Subinformes vinculados a un conjunto de datos (solo informe joined)"
+        helpText: "Subinformes, cada uno con su propia fuente de datos (solo informes joined)."
       },
       "blocks.name": {
         label: "Nombre"
@@ -2333,11 +2333,11 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       chart: {
         label: "Gráfico",
-        helpText: "Configuración de gráfico (type, legend, colors)"
+        helpText: "Tipo y configuración del gráfico."
       },
       dateRange: {
         label: "Rango de fechas",
-        helpText: "Periodo predeterminado e interruptor de rango personalizado. La dimensión debe ser una dimensión de fecha del conjunto de datos; déjela vacía cuando el conjunto de datos tenga exactamente una."
+        helpText: "El período con el que se abre el informe y si cada persona puede elegir su propio rango."
       },
       "dateRange.dimension": {
         label: "Campo de fecha",
@@ -2353,7 +2353,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       exportOptions: {
         label: "Opciones de exportación",
-        helpText: "Formatos de descarga (csv, xlsx) y nombre de archivo. Quién puede descargar lo determina el permiso de exportación del objeto del conjunto de datos."
+        helpText: "Formatos de descarga (csv, xlsx) y nombre de archivo. Quién puede descargar lo determina el permiso de exportación del objeto de la fuente de datos."
       },
       "exportOptions.formats": {
         label: "Formatos",
