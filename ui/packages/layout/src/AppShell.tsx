@@ -305,7 +305,9 @@ export function AppShell({
   useAppShellBranding(branding, branding?.title);
 
   return (
-    <SidebarProvider defaultOpen={defaultOpen} className="!flex-col h-svh overflow-hidden">
+    // The viewport less the banners the console draws above this shell
+    // (`--os-chrome-banners`, objectstack#37528); unset anywhere else.
+    <SidebarProvider defaultOpen={defaultOpen} className="!flex-col h-[calc(100svh-var(--os-chrome-banners,0px))] overflow-hidden">
       {/* 1. Full-width top bar spanning entire screen. 48 px, the height of
           every console frame's bar (objectui#12639): the class is the one
           `@object-ui/app-shell` spells as `CONSOLE_TOP_BAR`, and that

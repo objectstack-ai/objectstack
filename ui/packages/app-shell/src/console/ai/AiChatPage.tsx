@@ -21,6 +21,7 @@ import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
 import { toast } from 'sonner';
 import { Package as PackageIcon, Sparkles as SparklesIcon } from 'lucide-react';
 import { useAdapter } from '../../providers/AdapterProvider.js';
+import { CONSOLE_FULL_HEIGHT } from '../../layout/chromeBannerHost.js';
 import { isPlatformBuiltinApp } from '../../utils/platformApp.js';
 import { useMetadata } from '../../providers/MetadataProvider.js';
 import { formatPublishFailures, type PublishFailure } from '../../views/studio-design/metadataError.js';
@@ -1567,7 +1568,7 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
   );
 
   return (
-    <div className="flex h-svh w-full flex-col bg-background" data-testid="ai-chat-page">
+    <div className={cn('flex w-full flex-col bg-background', CONSOLE_FULL_HEIGHT.svh)} data-testid="ai-chat-page">
       <header className={cn(CONSOLE_TOP_BAR, 'bg-background/95 backdrop-blur')}>
         {/* Mobile: open the chats list as a sheet. The DESKTOP collapse toggle
             is NOT in the top nav — it lives at the bottom-left of the chats
