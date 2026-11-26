@@ -701,7 +701,7 @@ export const ptBR: PlatformTranslationData = {
         },
         turso_url: {
           label: 'URL de conexão',
-          help: 'Exemplos: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
+          help: 'Exemplos: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
         },
         turso_auth_token: { label: 'Token de autenticação', help: 'Necessário apenas para URLs do Turso gerenciado.' },
         chunk_target: {

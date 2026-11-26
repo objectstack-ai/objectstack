@@ -84,6 +84,16 @@
  * `AnotherApprover` / `OverrideAnotherApprover`. The error's `message` keeps
  * its English for the developer and the log.
  *
+ * ## The record-deleted cancellation
+ *
+ * [#37531] `approvalAutoCancelledRecordDeleted` is the system note a pending
+ * request writes when the record it is about is deleted
+ * (`record-deleted-cancel-note.ts`): `{{object}}` is the object (its label in
+ * the reader's language when the pack holds one, else its name) and
+ * `{{record}}` the record's id. The `en` sentence, with the object's name, is
+ * the `comment` the row stores. Rendered the same way as the administrators'
+ * note, from the request's own `cancel_reason`, `object_name` and `record_id`.
+ *
  * ## The record's activity entry
  *
  * [#35723] `approvalActivity*` are the one line an approval step writes on the
@@ -144,6 +154,7 @@ const enSentences = {
   approvalSubmitterExcludedFallback: "The request's submitter was removed from its approvers because this step sets excludeSubmitter; the declared fallbackApprovers decide it.",
   approvalSubmitterExcludedAdministrators: "The request's submitter was removed from its approvers because this step sets excludeSubmitter; this organization's administrators decide it.",
   approvalSubmitterExcludedNoOne: "The request's submitter was removed from its approvers because this step sets excludeSubmitter, and no one else could take it.",
+  approvalAutoCancelledRecordDeleted: "Auto-cancelled: the {{object}} record '{{record}}' this request is about was deleted",
   approvalNoApprover: 'No one else can approve this request yet. An organization administrator must add a member who can approve it, then reassign the request to them.',
   approvalNoApproverHolding: 'No one else can approve this request yet. An organization administrator must add a member who holds {{who}}; that member can then decide it.',
   approvalNoApproverTitle: 'No one can approve your {{object}} {{record}} yet',
@@ -276,6 +287,7 @@ export const zhCNMessages: ApprovalMessages = {
   approvalSubmitterExcludedFallback: '本步骤设置了 excludeSubmitter，提交人已从审批人中移除；由声明的 fallbackApprovers 决定。',
   approvalSubmitterExcludedAdministrators: '本步骤设置了 excludeSubmitter，提交人已从审批人中移除；由本组织管理员决定。',
   approvalSubmitterExcludedNoOne: '本步骤设置了 excludeSubmitter，提交人已从审批人中移除，且没有其他人可以处理。',
+  approvalAutoCancelledRecordDeleted: '已自动取消：本申请所针对的{{object}}记录「{{record}}」已被删除',
   approvalNoApprover: '目前还没有其他人能审批此请求。组织管理员需要添加一名可以审批的成员，然后将请求转交给该成员。',
   approvalNoApproverHolding: '目前还没有其他人能审批此请求。组织管理员需要添加一名担任{{who}}的成员，之后由该成员决定。',
   approvalNoApproverTitle: '您的{{object}} {{record}} 暂时无人可以审批',
@@ -345,6 +357,7 @@ export const jaJPMessages: ApprovalMessages = {
   approvalSubmitterExcludedFallback: 'このステップは excludeSubmitter を設定しているため、申請者は承認者から除外されました。宣言された fallbackApprovers が判断します。',
   approvalSubmitterExcludedAdministrators: 'このステップは excludeSubmitter を設定しているため、申請者は承認者から除外されました。この組織の管理者が判断します。',
   approvalSubmitterExcludedNoOne: 'このステップは excludeSubmitter を設定しているため、申請者は承認者から除外されました。他に引き受けられる人はいません。',
+  approvalAutoCancelledRecordDeleted: '自動取消：この申請の対象である{{object}}レコード「{{record}}」が削除されました',
   approvalNoApprover: 'このリクエストを承認できる人はまだ他にいません。組織の管理者が承認できるメンバーを追加し、リクエストをそのメンバーに再割り当てする必要があります。',
   approvalNoApproverHolding: 'このリクエストを承認できる人はまだ他にいません。組織の管理者が{{who}}を担うメンバーを追加する必要があります。追加されたメンバーが判断できます。',
   approvalNoApproverTitle: 'あなたの{{object}} {{record}} を承認できる人がまだいません',
@@ -414,6 +427,7 @@ export const esESMessages: ApprovalMessages = {
   approvalSubmitterExcludedFallback: 'El solicitante se quitó de los aprobadores de este paso porque el paso define excludeSubmitter; la deciden los fallbackApprovers declarados.',
   approvalSubmitterExcludedAdministrators: 'El solicitante se quitó de los aprobadores de este paso porque el paso define excludeSubmitter; la deciden los administradores de esta organización.',
   approvalSubmitterExcludedNoOne: 'El solicitante se quitó de los aprobadores de este paso porque el paso define excludeSubmitter, y nadie más puede tomarla.',
+  approvalAutoCancelledRecordDeleted: "Cancelada automáticamente: se eliminó el registro de {{object}} '{{record}}' al que se refiere esta solicitud",
   approvalNoApprover: 'Nadie más puede aprobar esta solicitud todavía. Un administrador de la organización debe añadir un miembro que pueda aprobarla y luego reasignarle la solicitud.',
   approvalNoApproverHolding: 'Nadie más puede aprobar esta solicitud todavía. Un administrador de la organización debe añadir un miembro que ocupe {{who}}; ese miembro podrá entonces decidirla.',
   approvalNoApproverTitle: 'Nadie puede aprobar todavía su {{object}} {{record}}',
@@ -483,6 +497,7 @@ export const zhHantMessages: ApprovalMessages = {
   approvalSubmitterExcludedFallback: '本步驟設定了 excludeSubmitter，因此提交人已從核准人中移除；由宣告的 fallbackApprovers 決定。',
   approvalSubmitterExcludedAdministrators: '本步驟設定了 excludeSubmitter，因此提交人已從核准人中移除；由本組織的管理員決定。',
   approvalSubmitterExcludedNoOne: '本步驟設定了 excludeSubmitter，因此提交人已從核准人中移除，且沒有其他人能接手。',
+  approvalAutoCancelledRecordDeleted: '已自動取消：本申請所針對的{{object}}記錄「{{record}}」已被刪除',
   approvalNoApprover: '目前還沒有其他人能核准此請求。組織管理員需要新增一名可以核准的成員，再將請求轉交給該成員。',
   approvalNoApproverHolding: '目前還沒有其他人能核准此請求。組織管理員需要新增一名擔任{{who}}的成員，之後由該成員決定。',
   approvalNoApproverTitle: '你的{{object}} {{record}} 暫時無人可以核准',
@@ -552,6 +567,7 @@ export const arMessages: ApprovalMessages = {
   approvalSubmitterExcludedFallback: 'أُزيل مقدِّم الطلب من الموافِقين لأن هذه الخطوة تضبط excludeSubmitter؛ ويبتّ فيه fallbackApprovers المعلنون.',
   approvalSubmitterExcludedAdministrators: 'أُزيل مقدِّم الطلب من الموافِقين لأن هذه الخطوة تضبط excludeSubmitter؛ ويبتّ فيه مسؤولو هذه المؤسسة.',
   approvalSubmitterExcludedNoOne: 'أُزيل مقدِّم الطلب من الموافِقين لأن هذه الخطوة تضبط excludeSubmitter، ولا أحد غيره يمكنه تولّيه.',
+  approvalAutoCancelledRecordDeleted: 'أُلغي تلقائيًا: حُذف سجل {{object}} «{{record}}» الذي يخصّه هذا الطلب',
   approvalNoApprover: 'لا يمكن لأحد آخر الموافقة على هذا الطلب بعد. يجب على مسؤول المؤسسة إضافة عضو يمكنه الموافقة عليه، ثم إعادة تعيين الطلب إليه.',
   approvalNoApproverHolding: 'لا يمكن لأحد آخر الموافقة على هذا الطلب بعد. يجب على مسؤول المؤسسة إضافة عضو يشغل {{who}}؛ وعندها يمكن لهذا العضو البتّ فيه.',
   approvalNoApproverTitle: 'لا يمكن لأحد الموافقة على طلبك بشأن {{object}} {{record}} بعد',
@@ -621,6 +637,7 @@ export const frMessages: ApprovalMessages = {
   approvalSubmitterExcludedFallback: 'Le demandeur a été retiré des approbateurs, car cette étape définit excludeSubmitter ; les fallbackApprovers déclarés décident.',
   approvalSubmitterExcludedAdministrators: 'Le demandeur a été retiré des approbateurs, car cette étape définit excludeSubmitter ; les administrateurs de cette organisation décident.',
   approvalSubmitterExcludedNoOne: 'Le demandeur a été retiré des approbateurs, car cette étape définit excludeSubmitter, et personne d’autre ne peut la prendre.',
+  approvalAutoCancelledRecordDeleted: 'Annulée automatiquement : l’enregistrement {{object}} « {{record}} » concerné par cette demande a été supprimé',
   approvalNoApprover: 'Personne d’autre ne peut encore approuver cette demande. Un administrateur de l’organisation doit ajouter un membre qui peut l’approuver, puis lui réattribuer la demande.',
   approvalNoApproverHolding: 'Personne d’autre ne peut encore approuver cette demande. Un administrateur de l’organisation doit ajouter un membre qui occupe {{who}} ; ce membre pourra alors la décider.',
   approvalNoApproverTitle: 'Personne ne peut encore approuver votre demande sur {{object}} {{record}}',
@@ -690,6 +707,7 @@ export const ptBRMessages: ApprovalMessages = {
   approvalSubmitterExcludedFallback: 'O solicitante foi removido dos aprovadores porque esta etapa define excludeSubmitter; os fallbackApprovers declarados decidem.',
   approvalSubmitterExcludedAdministrators: 'O solicitante foi removido dos aprovadores porque esta etapa define excludeSubmitter; os administradores desta organização decidem.',
   approvalSubmitterExcludedNoOne: 'O solicitante foi removido dos aprovadores porque esta etapa define excludeSubmitter, e ninguém mais pode assumi-la.',
+  approvalAutoCancelledRecordDeleted: "Cancelada automaticamente: o registro de {{object}} '{{record}}' a que esta solicitação se refere foi excluído",
   approvalNoApprover: 'Ninguém mais pode aprovar esta solicitação ainda. Um administrador da organização precisa adicionar um membro que possa aprová-la e depois reatribuir a solicitação a ele.',
   approvalNoApproverHolding: 'Ninguém mais pode aprovar esta solicitação ainda. Um administrador da organização precisa adicionar um membro que ocupe {{who}}; esse membro poderá então decidi-la.',
   approvalNoApproverTitle: 'Ninguém pode aprovar ainda sua solicitação sobre {{object}} {{record}}',
@@ -759,6 +777,7 @@ export const ruMessages: ApprovalMessages = {
   approvalSubmitterExcludedFallback: 'Отправитель запроса исключён из согласующих, так как на этом этапе задан excludeSubmitter; решают объявленные fallbackApprovers.',
   approvalSubmitterExcludedAdministrators: 'Отправитель запроса исключён из согласующих, так как на этом этапе задан excludeSubmitter; решают администраторы этой организации.',
   approvalSubmitterExcludedNoOne: 'Отправитель запроса исключён из согласующих, так как на этом этапе задан excludeSubmitter, и больше никто не может его взять.',
+  approvalAutoCancelledRecordDeleted: 'Отменён автоматически: запись {{object}} «{{record}}», к которой относится этот запрос, удалена',
   approvalNoApprover: 'Пока больше никто не может согласовать этот запрос. Администратор организации должен добавить участника, который может его согласовать, и переназначить запрос на него.',
   approvalNoApproverHolding: 'Пока больше никто не может согласовать этот запрос. Администратор организации должен добавить участника, занимающего {{who}}; затем этот участник сможет принять решение.',
   approvalNoApproverTitle: 'Ваш запрос по {{object}} {{record}} пока некому согласовать',
@@ -828,6 +847,7 @@ export const deMessages: ApprovalMessages = {
   approvalSubmitterExcludedFallback: 'Der Einreicher wurde aus den Genehmigern entfernt, weil dieser Schritt excludeSubmitter setzt; die deklarierten fallbackApprovers entscheiden.',
   approvalSubmitterExcludedAdministrators: 'Der Einreicher wurde aus den Genehmigern entfernt, weil dieser Schritt excludeSubmitter setzt; die Administratoren dieser Organisation entscheiden.',
   approvalSubmitterExcludedNoOne: 'Der Einreicher wurde aus den Genehmigern entfernt, weil dieser Schritt excludeSubmitter setzt, und niemand sonst kann sie übernehmen.',
+  approvalAutoCancelledRecordDeleted: 'Automatisch abgebrochen: Der {{object}}-Datensatz „{{record}}“, auf den sich diese Anfrage bezieht, wurde gelöscht',
   approvalNoApprover: 'Noch kann niemand sonst diese Anfrage genehmigen. Ein Administrator der Organisation muss ein Mitglied hinzufügen, das sie genehmigen kann, und ihm die Anfrage dann neu zuweisen.',
   approvalNoApproverHolding: 'Noch kann niemand sonst diese Anfrage genehmigen. Ein Administrator der Organisation muss ein Mitglied hinzufügen, das {{who}} innehat; dieses Mitglied kann dann darüber entscheiden.',
   approvalNoApproverTitle: 'Noch kann niemand Ihre Anfrage zu {{object}} {{record}} genehmigen',
@@ -897,6 +917,7 @@ export const koMessages: ApprovalMessages = {
   approvalSubmitterExcludedFallback: '이 단계에 excludeSubmitter가 설정되어 있어 제출자가 승인자에서 제외되었습니다. 선언된 fallbackApprovers가 결정합니다.',
   approvalSubmitterExcludedAdministrators: '이 단계에 excludeSubmitter가 설정되어 있어 제출자가 승인자에서 제외되었습니다. 이 조직의 관리자가 결정합니다.',
   approvalSubmitterExcludedNoOne: '이 단계에 excludeSubmitter가 설정되어 있어 제출자가 승인자에서 제외되었으며, 다른 누구도 맡을 수 없습니다.',
+  approvalAutoCancelledRecordDeleted: '자동 취소됨: 이 요청의 대상인 {{object}} 레코드 \'{{record}}\'이(가) 삭제되었습니다',
   approvalNoApprover: '아직 다른 누구도 이 요청을 승인할 수 없습니다. 조직 관리자가 승인할 수 있는 구성원을 추가한 뒤 요청을 그 구성원에게 재할당해야 합니다.',
   approvalNoApproverHolding: '아직 다른 누구도 이 요청을 승인할 수 없습니다. 조직 관리자가 {{who}}을(를) 맡은 구성원을 추가해야 하며, 그러면 그 구성원이 결정할 수 있습니다.',
   approvalNoApproverTitle: '아직 {{object}} {{record}}을(를) 승인할 수 있는 사람이 없습니다',

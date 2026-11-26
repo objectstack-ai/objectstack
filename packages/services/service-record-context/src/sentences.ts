@@ -103,6 +103,10 @@ const WRITTEN = {
     objectRefusedUnnamed: (pack: string, root: string) =>
       `Context pack '${pack}' on '${root}' reads an object you cannot read, so the pack cannot be read for you. `
       + 'Nothing was returned. Read the record with get_record.',
+    // A failure, not a refusal: it says nothing about what the caller may read.
+    readFailed: (pack: string, root: string) =>
+      `Context pack '${pack}' on '${root}' could not be read just now: a read it needs failed. This says nothing `
+      + 'about what you may read. Nothing was returned. Try again later, or read the record with get_record.',
     anchorUnresolved: (anchor: string) =>
       `No section '${anchor}' can be read through this pack for this record. Call get_record_context without `
       + '\'anchor\' to read the current outline.',
@@ -146,6 +150,8 @@ const WRITTEN = {
       `'${root}' 上的资料包 '${pack}' 会读取对象 '${object}'，而本入口不向你提供它，因此无法为你读取这个资料包。没有返回任何内容。请用 get_record 读取记录。`,
     objectRefusedUnnamed: (pack: string, root: string) =>
       `'${root}' 上的资料包 '${pack}' 会读取一个你无权读取的对象，因此无法为你读取这个资料包。没有返回任何内容。请用 get_record 读取记录。`,
+    readFailed: (pack: string, root: string) =>
+      `'${root}' 上的资料包 '${pack}' 暂时无法读取：它需要的一次读取失败了。这与你能读取什么无关。没有返回任何内容。请稍后再试，或用 get_record 读取记录。`,
     anchorUnresolved: (anchor: string) =>
       `无法通过这个资料包为这条记录读取章节 '${anchor}'。请不带 'anchor' 调用 get_record_context 以读取当前大纲。`,
     outlineFromUnresolved: (from: number) =>

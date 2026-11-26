@@ -138,7 +138,7 @@ export const ptBR: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'Ateliê de metadados para desenvolvedores, analistas e integradores',
       navigation: {
         group_overview: { label: 'Visão geral' },

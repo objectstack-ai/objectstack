@@ -354,8 +354,7 @@ resolves keys with fallback:
 import type { II18nService } from '@objectstack/spec/contracts';
 ```
 
-(The contract's source `.ts` is not part of the published package — only
-`src/**/*.zod.ts` ships — so there is no `node_modules` source to read.)
+(Only `src/**/*.zod.ts` ships, so the contract's `.ts` source is not in `node_modules` to read.)
 
 Methods implemented by both shipped adapters (`FileI18nAdapter` from
 `@objectstack/service-i18n`, and the in-memory fallback `@objectstack/core`
@@ -372,9 +371,9 @@ The in-memory fallback additionally resolves locale codes through `resolveLocale
 case-insensitive → same platform-table language (`zh-TW` → `zh-Hant`) → base language
 `zh-CN` → `zh` → first registered variant `zh` → `zh-CN`.
 
-The contract also declares optional methods — `getFieldLabels`, `getCoverage`,
-`suggestTranslations` — that **no shipped implementation provides**. Treat them
-as extension points for a custom workbench or TMS adapter. (`getAppBundle` /
+The contract declares optional methods — `getFieldLabels`, `getCoverage`,
+`suggestTranslations` — that **no shipped implementation provides**: extension
+points for a custom workbench or TMS adapter. (`getAppBundle` /
 `loadAppBundle` went with the `o.*` shape they returned.)
 
 ### Registration
@@ -382,7 +381,8 @@ as extension points for a custom workbench or TMS adapter. (`getAppBundle` /
 You do not wire this plugin: `os serve` registers `I18nServicePlugin` itself whenever the
 stack config carries `translations` or `i18n` (kernel bootstrap is
 **objectstack-platform → Runtime Boot Sequence**). It self-registers
-`GET /api/v1/i18n/locales`, `/translations/:locale` and `/labels/:object/:locale`.
+`GET /api/v1/i18n/locales`, `/translations/:locale` and `/labels/:object/:locale`; the locales
+answer marks the default locale (`isDefault`) and names `sourceLocale` (the declared one, else the default).
 
 ---
 

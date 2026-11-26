@@ -190,7 +190,7 @@ export const en: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'Metadata workbench for developers, analysts, and implementers',
       navigation: {
         group_overview: { label: 'Overview' },
