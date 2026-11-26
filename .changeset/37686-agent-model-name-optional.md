@@ -4,7 +4,7 @@
 
 feat(spec): an agent's model name is optional — absent means the host's default model for the environment
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: added
 Skills-docs: follow-up owed — skills/objectstack-ai/SKILL.md, skills/objectstack-ai/evals/skills-tools-knowledge.json
 
