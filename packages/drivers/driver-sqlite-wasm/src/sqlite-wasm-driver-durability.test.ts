@@ -126,3 +126,64 @@ describe('SqliteWasmDriver durability & resilience', () => {
     expect(rows[0].note).toBeNull();
   });
 });
+
+/**
+ * `disconnect()` is the durability boundary: when it returns, the committed
+ * image is on disk, however long the final flush takes. The connection's own
+ * final flush runs as the Knex pool's destroyer, and tarn stops waiting for a
+ * destroyer after `destroyTimeoutMillis` (5 s by default). At that point it
+ * resolves anyway. A whole-image fsync on a loaded disk can take longer than
+ * that. A short pool timeout and a slowed fsync stand in for the loaded disk
+ * here. Measured: a refused boot's rollback returned before its schema sync
+ * was on disk, and the dogfood ownership-upgrade test read the v17 bytes.
+ */
+describe('SqliteWasmDriver disconnect waits for its final flush', () => {
+  let dir: string | undefined;
+  let restoreSync: (() => void) | undefined;
+
+  afterEach(() => {
+    restoreSync?.();
+    restoreSync = undefined;
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  it('a write committed before disconnect() is on disk when it returns, even when the flush outlasts the pool destroy timeout', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'wasm-dur-disconnect-'));
+    const file = join(dir, 'slow.db');
+    const driver = new SqliteWasmDriver({
+      filename: file,
+      persist: 'on-disconnect',
+      pool: { min: 1, max: 1, destroyTimeoutMillis: 50 } as any,
+    });
+    await driver.initObjects([{ name: 'acct', fields: { name: { type: 'string' } } }]);
+    await (driver as any).flush();
+    await (driver as any).knex('acct').insert({ id: 'a1', name: 'A' });
+
+    // Every fsync from here on takes 400 ms, eight times the pool's destroy timeout.
+    const { open } = await import('node:fs/promises');
+    const probe = await open(file, 'r');
+    const proto = Object.getPrototypeOf(probe) as { sync: (...args: unknown[]) => Promise<void> };
+    await probe.close();
+    const sync = proto.sync;
+    proto.sync = async function (this: unknown, ...args: unknown[]) {
+      await new Promise((r) => setTimeout(r, 400));
+      return sync.apply(this, args);
+    };
+    restoreSync = () => {
+      proto.sync = sync;
+    };
+
+    await driver.disconnect();
+
+    const reopened = new SqliteWasmDriver({ filename: file, persist: 'on-disconnect' });
+    try {
+      const rows = await (reopened as any).knex('acct');
+      expect(rows.map((r: { id: string }) => r.id)).toEqual(['a1']);
+    } finally {
+      restoreSync();
+      restoreSync = undefined;
+      await reopened.disconnect();
+    }
+  });
+});
