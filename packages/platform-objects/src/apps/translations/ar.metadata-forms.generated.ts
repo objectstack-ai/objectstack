@@ -114,7 +114,12 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "الطي",
-        helpText: "ما إذا كان يمكن طي القسم. يتبع نموذج الإدخال الإعداد كما هو. في صفحة السجل الافتراضية يمكن للقارئ طي كل مجموعة لها عنوان، لذا يحدد الإعداد هناك الحالة الأولى فقط: Collapsed تبدأ مطوية والبقية مفتوحة. عند عدم التعيين: لا."
+        helpText: "ما إذا كان يمكن طي القسم. يتبع نموذج الإدخال الإعداد كما هو. في صفحة السجل الافتراضية يمكن للقارئ طي كل مجموعة لها عنوان، لذا يحدد الإعداد هناك الحالة الأولى فقط: Collapsed تبدأ مطوية والبقية مفتوحة. عند عدم التعيين: لا.",
+        options: {
+          none: "لا شيء — مفتوح دائمًا في نموذج الإدخال، بلا مفتاح طي",
+          expanded: "موسّع — قابل للطي، يبدأ مفتوحًا",
+          collapsed: "مطوي — قابل للطي، يبدأ مغلقًا"
+        }
       },
       "fieldGroups.visibleWhen": {
         label: "مرئي عندما",
@@ -134,7 +139,56 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.type": {
         label: "النوع",
-        helpText: "نوع الحقل"
+        helpText: "نوع الحقل",
+        options: {
+          text: "نص",
+          textarea: "منطقة نص",
+          email: "بريد إلكتروني",
+          url: "URL",
+          phone: "هاتف",
+          password: "كلمة مرور",
+          markdown: "Markdown",
+          html: "HTML",
+          richtext: "نص منسّق",
+          number: "رقم",
+          currency: "عملة",
+          percent: "نسبة مئوية",
+          date: "تاريخ",
+          datetime: "التاريخ والوقت",
+          time: "وقت",
+          boolean: "منطقي",
+          toggle: "مفتاح تبديل",
+          select: "اختيار",
+          multiselect: "اختيار متعدد",
+          radio: "أزرار اختيار",
+          checkboxes: "مربعات اختيار",
+          lookup: "بحث (مرجع)",
+          master_detail: "رئيسي–تفصيلي",
+          tree: "شجرة",
+          image: "صورة",
+          file: "ملف",
+          avatar: "صورة رمزية",
+          video: "فيديو",
+          audio: "صوت",
+          formula: "صيغة (محسوبة)",
+          summary: "ملخص (تجميع)",
+          autonumber: "ترقيم تلقائي",
+          composite: "مركّب (مضمّن)",
+          repeater: "مكرِّر (مصفوفة مضمّنة)",
+          record: "سجل (خريطة بمفاتيح)",
+          location: "الموقع (GPS)",
+          address: "العنوان",
+          code: "شيفرة",
+          json: "JSON",
+          color: "لون",
+          rating: "تقييم",
+          slider: "شريط تمرير",
+          signature: "توقيع",
+          qrcode: "QR / رمز شريطي",
+          progress: "تقدّم",
+          tags: "وسوم",
+          vector: "تضمين متجهي"
+        }
       },
       "fields.description": {
         label: "الوصف",
@@ -186,7 +240,12 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.valueDomain": {
         label: "نطاق القيم",
-        helpText: "المعيار الذي يجب أن تنتمي إليه القيمة المكتوبة؛ وتُرفض الكتابة التي تحمل قيمة من خارجه"
+        helpText: "المعيار الذي يجب أن تنتمي إليه القيمة المكتوبة؛ وتُرفض الكتابة التي تحمل قيمة من خارجه",
+        options: {
+          iana_time_zone: "منطقة زمنية IANA",
+          iso_4217_currency: "رمز العملة ISO 4217",
+          iso_3166_alpha2: "رمز الدولة ISO 3166-1 alpha-2"
+        }
       },
       "fields.rows": {
         label: "الصفوف",
@@ -226,7 +285,12 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.options.kind": {
         label: "النوع",
-        helpText: "فئة دورة الحياة (للاختيار ذي القيمة الواحدة / أزرار الاختيار فقط): خطوة على الطريق، أو النهاية الناجحة، أو النهاية غير الناجحة. مطلوبة في كل خيار من خيارات حقل المرحلة."
+        helpText: "فئة دورة الحياة (للاختيار ذي القيمة الواحدة / أزرار الاختيار فقط): خطوة على الطريق، أو النهاية الناجحة، أو النهاية غير الناجحة. مطلوبة في كل خيار من خيارات حقل المرحلة.",
+        options: {
+          open: "مفتوح",
+          won: "فوز",
+          lost: "خسارة"
+        }
       },
       "fields.reference": {
         label: "المرجع",
@@ -238,11 +302,20 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.deleteBehavior": {
         label: "سلوك الحذف",
-        helpText: "ما يحدث عند حذف السجل المُشار إليه"
+        helpText: "ما يحدث عند حذف السجل المُشار إليه",
+        options: {
+          set_null: "تعيين إلى فارغ",
+          cascade: "تتالي (حذف السجلات الفرعية)",
+          restrict: "تقييد (منع الحذف)"
+        }
       },
       "fields.transferBehavior": {
         label: "سلوك تغيير المالك",
-        helpText: "ما إذا كان «تغيير المالك» على السجل المشار إليه يمكنه أيضًا نقل السجلات التي تشير إليه عبر هذا الحقل"
+        helpText: "ما إذا كان «تغيير المالك» على السجل المشار إليه يمكنه أيضًا نقل السجلات التي تشير إليه عبر هذا الحقل",
+        options: {
+          none: "لا شيء (تبقى مع مالكها)",
+          cascade: "تتالي (اقتراح النقل مع السجل المرجعي)"
+        }
       },
       "fields.multiple": {
         label: "متعدد",
@@ -254,7 +327,15 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.returnType": {
         label: "نوع الإرجاع",
-        helpText: "نوع النتيجة للصيغ"
+        helpText: "نوع النتيجة للصيغ",
+        options: {
+          text: "نص",
+          number: "رقم",
+          boolean: "منطقي",
+          date: "تاريخ",
+          currency: "عملة",
+          percent: "نسبة مئوية"
+        }
       },
       "fields.summaryOperations": {
         label: "عمليات التلخيص",
@@ -270,7 +351,14 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.summaryOperations.function": {
         label: "الدالة",
-        helpText: "دالة التجميع"
+        helpText: "دالة التجميع",
+        options: {
+          count: "العدد",
+          sum: "المجموع",
+          avg: "المتوسط",
+          min: "الحد الأدنى",
+          max: "الحد الأقصى"
+        }
       },
       "fields.autonumberFormat": {
         label: "تنسيق الترقيم التلقائي",
@@ -375,15 +463,31 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "indexes.unique": {
         label: "فريد",
-        helpText: "نطاق التفرّد (ADR-0120). عند عدم التعيين: غير فريد. لا تُعرض القيمة المجرّدة المُهمَلة true (وتعني عامًا)؛ والفهرس الذي يحملها يحتفظ بها إلى أن تختار نطاقًا."
+        helpText: "نطاق التفرّد (ADR-0120). عند عدم التعيين: غير فريد. لا تُعرض القيمة المجرّدة المُهمَلة true (وتعني عامًا)؛ والفهرس الذي يحملها يحتفظ بها إلى أن تختار نطاقًا.",
+        options: {
+          global: "عام — مالك واحد على مستوى التثبيت، على هذه الأعمدة بالضبط",
+          organization: "المؤسسة — مالك واحد لكل مؤسسة (يضيف برنامج التشغيل عمود المؤسسة في البداية)"
+        }
       },
       ownership: {
         label: "الملكية",
-        helpText: "نموذج ملكية السجلات. عند الغياب يُحَلّ إلى user."
+        helpText: "نموذج ملكية السجلات. عند الغياب يُحَلّ إلى user.",
+        options: {
+          user: "المستخدم — owner_id قابل لإعادة التعيين مع owning_business_unit_id",
+          business_unit: "وحدة العمل — owning_business_unit_id فقط، بلا owner_id",
+          org: "المؤسسة",
+          none: "لا شيء — بلا مالك لكل سجل، ولا أيٌّ من المرتكزين"
+        }
       },
       sharingModel: {
         label: "نموذج المشاركة",
-        helpText: "رؤية السجلات الافتراضية على مستوى المؤسسة للمستخدمين الداخليين. الكائن المخصّص الذي يُغفله يُحَلّ إلى private وقت التشغيل (ADR-0090 D1)."
+        helpText: "رؤية السجلات الافتراضية على مستوى المؤسسة للمستخدمين الداخليين. الكائن المخصّص الذي يُغفله يُحَلّ إلى private وقت التشغيل (ADR-0090 D1).",
+        options: {
+          private: "خاص — المالك فقط",
+          public_read: "قراءة عامة — الجميع يقرأ، المالك يكتب",
+          public_read_write: "قراءة/كتابة عامة — الجميع يقرأ ويكتب",
+          controlled_by_parent: "يتحكم به الأصل — مشتق من السجل الرئيسي"
+        }
       },
       sharing: {
         label: "المشاركة",
@@ -407,7 +511,11 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "access.default": {
         label: "الافتراضي",
-        helpText: "public: تشمله منح '*' الشاملة. private: يحتاج إلى منح صريح لكل كائن، ويُستثنى من أمان مستوى الصف الشامل."
+        helpText: "public: تشمله منح '*' الشاملة. private: يحتاج إلى منح صريح لكل كائن، ويُستثنى من أمان مستوى الصف الشامل.",
+        options: {
+          public: "عام — مشمول بمنح البدل (*)",
+          private: "خاص — يحتاج إلى منح صريح لكل كائن"
+        }
       },
       requiredPermissions: {
         label: "الأذونات المطلوبة",
@@ -423,11 +531,22 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "publicSharing.allowedAudiences": {
         label: "فئات الجمهور المستهدف المسموح بها",
-        helpText: "فئات الجمهور المستهدف التي يجوز للرابط الجديد تسميتها؛ وتُرفض أي فئة أخرى. عند عدم التعيين: الرابط فقط. تظل كل فئة بحاجة إلى الرابط نفسه: «مسجّل الدخول» يحتاج أيضًا إلى مستخدم مسجّل الدخول، و«البريد الإلكتروني» يحتاج أيضًا إلى أن يكون عنوان المستلم في قائمة الرابط."
+        helpText: "فئات الجمهور المستهدف التي يجوز للرابط الجديد تسميتها؛ وتُرفض أي فئة أخرى. عند عدم التعيين: الرابط فقط. تظل كل فئة بحاجة إلى الرابط نفسه: «مسجّل الدخول» يحتاج أيضًا إلى مستخدم مسجّل الدخول، و«البريد الإلكتروني» يحتاج أيضًا إلى أن يكون عنوان المستلم في قائمة الرابط.",
+        options: {
+          public: "عام",
+          link_only: "الرابط فقط — أي شخص لديه الرابط",
+          signed_in: "مسجّل الدخول — المستخدمون المسجّلون ممن لديهم الرابط",
+          email: "بريد إلكتروني — المستلمون المدرجون ممن لديهم الرابط"
+        }
       },
       "publicSharing.allowedPermissions": {
         label: "الأذونات المسموح بها",
-        helpText: "مستويات الأذونات التي يجوز للرابط الجديد منحها؛ ويُرفض أي مستوى آخر. عند عدم التعيين: العرض فقط."
+        helpText: "مستويات الأذونات التي يجوز للرابط الجديد منحها؛ ويُرفض أي مستوى آخر. عند عدم التعيين: العرض فقط.",
+        options: {
+          view: "عرض",
+          comment: "تعليق",
+          edit: "تحرير"
+        }
       },
       "publicSharing.maxExpiryDays": {
         label: "الحد الأقصى لأيام الانتهاء",
@@ -487,7 +606,11 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       editMode: {
         label: "وضع التحرير",
-        helpText: "نية تفاعل التحرير لسجلات هذا الكائن. عند الغياب، يختار العارض إعداده الافتراضي. نية عابرة للعارضات، وليست تنسيقًا."
+        helpText: "نية تفاعل التحرير لسجلات هذا الكائن. عند الغياب، يختار العارض إعداده الافتراضي. نية عابرة للعارضات، وليست تنسيقًا.",
+        options: {
+          modal: "نافذة منبثقة — نموذج التحرير كمربع حوار فوق العرض الحالي",
+          page: "صفحة — الانتقال إلى مسار تحرير مخصص بصفحة كاملة"
+        }
       },
       fileAccessDelegate: {
         label: "مفوَّض الوصول إلى الملفات",
@@ -499,7 +622,14 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.class": {
         label: "الفئة",
-        helpText: "عقد الاستمرارية لصفوف هذا الكائن"
+        helpText: "عقد الاستمرارية لصفوف هذا الكائن",
+        options: {
+          record: "سجل (حقيقة الأعمال — دائم)",
+          audit: "تدقيق (سجل امتثال — احتفاظ ← أرشفة ← حذف)",
+          telemetry: "قياس عن بعد (سجل عالي التردد — احتفاظ قصير)",
+          transient: "مؤقت (حالة عابرة — انتهاء بانقضاء TTL)",
+          event: "حدث (رسائل الناقل — TTL قصير جدًا)"
+        }
       },
       "lifecycle.retention": {
         label: "الاحتفاظ",
@@ -527,7 +657,10 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.storage.strategy": {
         label: "الاستراتيجية",
-        helpText: "استراتيجية التخزين"
+        helpText: "استراتيجية التخزين",
+        options: {
+          rotation: "تدوير (تقسيم زمني + حذف الأقدم)"
+        }
       },
       "lifecycle.storage.shards": {
         label: "الشرائح",
@@ -535,7 +668,12 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.storage.unit": {
         label: "الوحدة",
-        helpText: "العرض الزمني لشريحة واحدة"
+        helpText: "العرض الزمني لشريحة واحدة",
+        options: {
+          day: "يوم",
+          week: "أسبوع",
+          month: "شهر"
+        }
       },
       "lifecycle.archive": {
         label: "الأرشفة",
@@ -666,7 +804,11 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       percentDisplay: {
         label: "عرض النسبة المئوية",
-        helpText: "كيف تُعرض القيمة للقراءة فقط، في خلايا القوائم وصفحة السجل. عند عدم التعيين: شريط تقدّم بجانب النسبة المئوية. الشريط: شريط التقدّم دائمًا، للتقدّم. عادي: النسبة المئوية وحدها، لمعدّل أو احتمال."
+        helpText: "كيف تُعرض القيمة للقراءة فقط، في خلايا القوائم وصفحة السجل. عند عدم التعيين: شريط تقدّم بجانب النسبة المئوية. الشريط: شريط التقدّم دائمًا، للتقدّم. عادي: النسبة المئوية وحدها، لمعدّل أو احتمال.",
+        options: {
+          bar: "شريط",
+          plain: "نص عادي"
+        }
       },
       currencyConfig: {
         label: "تهيئة العملة",
@@ -674,7 +816,12 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "currencyConfig.currencyMode": {
         label: "وضع العملة",
-        helpText: "dynamic (الافتراضي): ليست للحقل عملة خاصة به، وتُعرض المبالغ بالعملة الافتراضية للمستأجر (الإعداد localization.currency). fixed: للحقل عملة واحدة هي defaultCurrency. record: لكل سجل عملته الخاصة، المخزَّنة في الحقل الذي يسمّيه currencyField."
+        helpText: "dynamic (الافتراضي): ليست للحقل عملة خاصة به، وتُعرض المبالغ بالعملة الافتراضية للمستأجر (الإعداد localization.currency). fixed: للحقل عملة واحدة هي defaultCurrency. record: لكل سجل عملته الخاصة، المخزَّنة في الحقل الذي يسمّيه currencyField.",
+        options: {
+          dynamic: "ديناميكي — العملة الافتراضية للمستأجر",
+          fixed: "ثابت — عملة واحدة لهذا الحقل",
+          record: "سجل — كل سجل يحدد عملته"
+        }
       },
       "currencyConfig.currencyField": {
         label: "حقل العملة",
@@ -771,11 +918,19 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       deleteBehavior: {
         label: "سلوك الحذف",
-        helpText: "ما يحدث عند حذف السجل المُشار إليه"
+        helpText: "ما يحدث عند حذف السجل المُشار إليه",
+        options: {
+          cascade: "تتالي (حذف السجلات الفرعية)",
+          restrict: "تقييد (منع الحذف)"
+        }
       },
       transferBehavior: {
         label: "سلوك تغيير المالك",
-        helpText: "ما إذا كان «تغيير المالك» على السجل المشار إليه يمكنه أيضًا نقل السجلات التي تشير إليه عبر هذا الحقل"
+        helpText: "ما إذا كان «تغيير المالك» على السجل المشار إليه يمكنه أيضًا نقل السجلات التي تشير إليه عبر هذا الحقل",
+        options: {
+          none: "لا شيء (تبقى مع مالكها)",
+          cascade: "تتالي (اقتراح النقل مع السجل المرجعي)"
+        }
       },
       relatedListFilter: {
         label: "عامل تصفية القائمة المرتبطة",
@@ -819,7 +974,11 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       inlineEdit: {
         label: "Inline Edit",
-        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields.",
+        options: {
+          grid: "شبكة (تحرير الصفوف في جدول)",
+          form: "نموذج (فتح كل صف في نموذجه الكامل)"
+        }
       },
       inlineTitle: {
         label: "العنوان المضمَّن",
@@ -855,7 +1014,15 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       returnType: {
         label: "نوع الإرجاع",
-        helpText: "نوع القيمة المُعلَن للصيغة، يُختم من نوع CEL المُستنتَج. يقرؤه المستهلكون بدلًا من إعادة تحليل التعبير. Currency: مبلغ مالي، بالعملة التي تعلنها تهيئة العملة لهذا الحقل (dynamic عند عدم التعيين)."
+        helpText: "نوع القيمة المُعلَن للصيغة، يُختم من نوع CEL المُستنتَج. يقرؤه المستهلكون بدلًا من إعادة تحليل التعبير. Currency: مبلغ مالي، بالعملة التي تعلنها تهيئة العملة لهذا الحقل (dynamic عند عدم التعيين).",
+        options: {
+          text: "نص",
+          number: "رقم",
+          boolean: "منطقي",
+          date: "تاريخ",
+          currency: "عملة",
+          percent: "نسبة مئوية"
+        }
       },
       summaryOperations: {
         label: "عمليات التلخيص",
@@ -867,7 +1034,14 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "summaryOperations.function": {
         label: "الدالة",
-        helpText: "دالة التجميع"
+        helpText: "دالة التجميع",
+        options: {
+          count: "العدد",
+          sum: "المجموع",
+          min: "الحد الأدنى",
+          max: "الحد الأقصى",
+          avg: "المتوسط"
+        }
       },
       "summaryOperations.field": {
         label: "الحقل",
@@ -1007,7 +1181,11 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "body.language": {
         label: "اللغة",
-        helpText: "expression = صيغة خالصة؛ js = JavaScript معزول"
+        helpText: "expression = صيغة خالصة؛ js = JavaScript معزول",
+        options: {
+          expression: "تعبير (L1)",
+          js: "JavaScript (L2 في بيئة معزولة)"
+        }
       },
       "body.source": {
         label: "المصدر",
@@ -1070,7 +1248,11 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "التشغيل في الخلفية، دون حجب المعاملة"
       },
       onError: {
-        label: "عند الخطأ"
+        label: "عند الخطأ",
+        options: {
+          abort: "إيقاف",
+          log: "تسجيل"
+        }
       },
       timeoutMs: {
         label: "المهلة (مللي ثانية)",
@@ -1078,7 +1260,12 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       runAs: {
         label: "التشغيل بهوية",
-        helpText: "الهوية لعمليات بيانات ctx.api: وراثة الكتابة المُطلِقة (الافتراضي)، أو system (مرتفعة الصلاحيات)، أو user (المستخدم المُطلِق)"
+        helpText: "الهوية لعمليات بيانات ctx.api: وراثة الكتابة المُطلِقة (الافتراضي)، أو system (مرتفعة الصلاحيات)، أو user (المستخدم المُطلِق)",
+        options: {
+          inherit: "وراثة (عملية الكتابة المُطلِقة)",
+          system: "النظام (صلاحيات مرفوعة)",
+          user: "المستخدم (المستخدم المُطلِق)"
+        }
       },
       condition: {
         label: "الشرط",
@@ -1516,7 +1703,14 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       type: {
         label: "النوع",
-        helpText: "نوع الصفحة. «قائمة / واجهة» تربط طريقة عرض مصدرية بسطح منسَّق — أما شكلها (شبكة / كانبان / تقويم / …) فهو تصوّر يُضبط ضمن «الواجهة»، وليس نوع صفحة."
+        helpText: "نوع الصفحة. «قائمة / واجهة» تربط طريقة عرض مصدرية بسطح منسَّق — أما شكلها (شبكة / كانبان / تقويم / …) فهو تصوّر يُضبط ضمن «الواجهة»، وليس نوع صفحة.",
+        options: {
+          list: "صفحة قائمة / واجهة",
+          record: "صفحة السجل",
+          home: "الصفحة الرئيسية",
+          app: "صفحة التطبيق",
+          utility: "لوحة الأدوات"
+        }
       },
       template: {
         label: "القالب",
@@ -1629,7 +1823,12 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "interfaceConfig.recordAction": {
         label: "إجراء السجل",
-        helpText: "كيف يفتح النقر على سجل تفاصيله"
+        helpText: "كيف يفتح النقر على سجل تفاصيله",
+        options: {
+          drawer: "درج (معاينة من الجانب الأيمن)",
+          page: "صفحة كاملة",
+          none: "غير قابل للنقر"
+        }
       },
       "interfaceConfig.showRecordCount": {
         label: "إظهار عدد السجلات",
@@ -1794,7 +1993,26 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "dateRange.defaultRange": {
         label: "Default Period",
-        helpText: "The period the dashboard opens with."
+        helpText: "The period the dashboard opens with.",
+        options: {
+          today: "اليوم",
+          yesterday: "أمس",
+          this_week: "هذا الأسبوع",
+          last_week: "الأسبوع الماضي",
+          this_month: "هذا الشهر",
+          last_month: "الشهر الماضي",
+          next_month: "الشهر القادم",
+          this_quarter: "هذا الربع",
+          last_quarter: "الربع الماضي",
+          next_quarter: "الربع القادم",
+          this_year: "هذه السنة",
+          last_year: "السنة الماضية",
+          last_7_days: "آخر 7 أيام",
+          last_30_days: "آخر 30 يومًا",
+          last_90_days: "آخر 90 يومًا",
+          next_30_days: "الـ 30 يومًا القادمة",
+          custom: "مخصص…"
+        }
       },
       "dateRange.allowCustomRange": {
         label: "Allow Custom Range",
@@ -1970,7 +2188,13 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       mode: {
         label: "الوضع",
-        helpText: "الوضع الدلالي للإجراء. لا يقرؤه حاليًا إلا استدلال إشراك الإنسان في حلقة الذكاء الاصطناعي — ولا يتفرّع عليه أي عارض."
+        helpText: "الوضع الدلالي للإجراء. لا يقرؤه حاليًا إلا استدلال إشراك الإنسان في حلقة الذكاء الاصطناعي — ولا يتفرّع عليه أي عارض.",
+        options: {
+          create: "إنشاء",
+          edit: "تحرير",
+          delete: "حذف",
+          custom: "مخصص"
+        }
       },
       order: {
         label: "الترتيب",
@@ -1990,7 +2214,11 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "body.language": {
         label: "اللغة",
-        helpText: "expression = صيغة خالصة؛ js = JavaScript معزول"
+        helpText: "expression = صيغة خالصة؛ js = JavaScript معزول",
+        options: {
+          expression: "تعبير (L1)",
+          js: "JavaScript (L2 في بيئة معزولة)"
+        }
       },
       "body.source": {
         label: "المصدر",
@@ -2107,7 +2335,10 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       operation: {
         label: "العملية",
-        helpText: "كتابة حقول تصريحية في سجل واحد: 'update' تطبّق `patch`، مدموجًا تحت `params` المُجمَّعة، على السجل الحالي بهوية المستدعي — دون رفع صلاحيات النظام أبدًا، فتسري أذونات المستدعي وخطافات الكائن وعمليات التحقق الخاصة به كما في تحرير يجريه المستخدم."
+        helpText: "كتابة حقول تصريحية في سجل واحد: 'update' تطبّق `patch`، مدموجًا تحت `params` المُجمَّعة، على السجل الحالي بهوية المستدعي — دون رفع صلاحيات النظام أبدًا، فتسري أذونات المستدعي وخطافات الكائن وعمليات التحقق الخاصة به كما في تحرير يجريه المستخدم.",
+        options: {
+          update: "تحديث السجل الحالي"
+        }
       },
       patch: {
         label: "الرقعة",
@@ -2353,7 +2584,26 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "dateRange.defaultRange": {
         label: "Default Period",
-        helpText: "The period the report opens with."
+        helpText: "The period the report opens with.",
+        options: {
+          today: "اليوم",
+          yesterday: "أمس",
+          this_week: "هذا الأسبوع",
+          last_week: "الأسبوع الماضي",
+          this_month: "هذا الشهر",
+          last_month: "الشهر الماضي",
+          next_month: "الشهر القادم",
+          this_quarter: "هذا الربع",
+          last_quarter: "الربع الماضي",
+          next_quarter: "الربع القادم",
+          this_year: "هذه السنة",
+          last_year: "السنة الماضية",
+          last_7_days: "آخر 7 أيام",
+          last_30_days: "آخر 30 يومًا",
+          last_90_days: "آخر 90 يومًا",
+          next_30_days: "الـ 30 يومًا القادمة",
+          custom: "مخصص…"
+        }
       },
       "dateRange.allowCustomRange": {
         label: "Allow Custom Range",
@@ -3026,7 +3276,11 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       surface: {
         label: "الواجهة",
-        helpText: "واجهة المنتج التي يرتبط بها هذا الوكيل (ADR-0063 §1). لا تُرفق إلا المهارات التي تطابق واجهتها — أو تكون 'both' — ومجموعة أدوات الوكيل هي اتحاد أدوات تلك المهارات. الافتراضي 'ask'."
+        helpText: "واجهة المنتج التي يرتبط بها هذا الوكيل (ADR-0063 §1). لا تُرفق إلا المهارات التي تطابق واجهتها — أو تكون 'both' — ومجموعة أدوات الوكيل هي اتحاد أدوات تلك المهارات. الافتراضي 'ask'.",
+        options: {
+          ask: "Ask (واجهات المحادثة)",
+          build: "Build (واجهات التأليف)"
+        }
       },
       instructions: {
         label: "التعليمات",
@@ -3143,7 +3397,12 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       surface: {
         label: "الواجهة",
-        helpText: "واجهة الوكيل التي ترتبط بها هذه المهارة (ADR-0063 §3). ربطها بوكيل تختلف واجهته عنها فشلٌ صريح وقت الحل، لا تخطٍّ صامت. الافتراضي 'ask'."
+        helpText: "واجهة الوكيل التي ترتبط بها هذه المهارة (ADR-0063 §3). ربطها بوكيل تختلف واجهته عنها فشلٌ صريح وقت الحل، لا تخطٍّ صامت. الافتراضي 'ask'.",
+        options: {
+          ask: "Ask (واجهات المحادثة)",
+          build: "Build (واجهات التأليف)",
+          both: "كلاهما"
+        }
       },
       instructions: {
         label: "التعليمات",

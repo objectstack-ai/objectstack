@@ -18,6 +18,13 @@
  */
 
 export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "metadataForms.object.fields.fields.type.options.audio": "8796b692f5185060",
+  "metadataForms.object.fields.fields.type.options.avatar": "0f06369995b69b8b",
+  "metadataForms.object.fields.fields.type.options.color": "38520df8c3196700",
+  "metadataForms.object.fields.fields.type.options.html": "798c13f33b440606",
+  "metadataForms.object.fields.fields.type.options.json": "e190c5def83967ab",
+  "metadataForms.object.fields.fields.type.options.markdown": "03e5f168b6606ec4",
+  "metadataForms.object.fields.fields.type.options.url": "2203b0b9f72534f7",
   "objects.sys_email.fields.cc_addresses.label": "02946d952cf15623",
   "objects.sys_email.fields.error.label": "786fed84bd8d5a32",
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",
