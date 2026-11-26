@@ -121,6 +121,9 @@ describe('JsonLogger', () => {
 // alone); the parity block pins it to `faultCauseChain`'s output.
 // ---------------------------------------------------------------------------
 
+/** `new Error(message, { cause })`, spelled for the ES2020 `lib` this package compiles under. */
+const withCause = (message: string, cause: unknown): Error => Object.assign(new Error(message), { cause });
+
 type CauseLine = { message: string; stack?: string };
 type ErrorRecord = { error?: string; stack?: string; causes?: CauseLine[] };
 
@@ -128,7 +131,7 @@ const ROOT = 'SQLITE_IOERR: disk I/O error reading policy_revision.version';
 const MID = 'driver read failed for policy_revision';
 const OUTER = 'The related records of policy could not be read.';
 
-const wrapped = () => new Error(OUTER, { cause: new Error(MID, { cause: new Error(ROOT) }) });
+const wrapped = () => withCause(OUTER, withCause(MID, new Error(ROOT)));
 
 /** The JSON tail of a `ConsoleLogger` line: `[error] msg {...}`. */
 function consoleRecord(line: string, msg: string): ErrorRecord {
@@ -174,7 +177,7 @@ describe.each(LOGGERS)('%s — an error record carries the cause chain', (_name,
 
     it('stops a cycle at its first repeat, and says so', () => {
         const a = new Error('a');
-        const b = new Error('b', { cause: a });
+        const b = withCause('b', a);
         (a as { cause?: unknown }).cause = b;
         expect(recordOf(a).causes?.map((c) => c.message)).toEqual([
             'Error: b',
@@ -184,7 +187,7 @@ describe.each(LOGGERS)('%s — an error record carries the cause chain', (_name,
 
     it(`stops a deep chain after ${FAULT_CAUSE_DEPTH_LIMIT} links, and says so`, () => {
         let error = new Error('link 0');
-        for (let i = 1; i <= 20; i += 1) error = new Error(`link ${i}`, { cause: error });
+        for (let i = 1; i <= 20; i += 1) error = withCause(`link ${i}`, error);
         const causes = recordOf(error).causes ?? [];
         expect(causes).toHaveLength(FAULT_CAUSE_DEPTH_LIMIT + 1);
         expect(causes[FAULT_CAUSE_DEPTH_LIMIT]).toEqual({
@@ -214,11 +217,11 @@ const GLUED_QUALIFIERS = [
     'encryption', 'id', 'jwt', 'master', 'oauth', 'private', 'public', 'refresh', 'root', 'secret',
     'service', 'session', 'shared', 'sign', 'signing', 'ssh', 'token', 'user', 'webhook', 'xsrf',
 ];
+const gluedQualifierCause = () => Object.fromEntries(GLUED_QUALIFIERS.map((qualifier) => [`${qualifier}key`, 'x']));
 
 describe('the glued-qualifier fixture', () => {
     it('CONTROL — faultCauseChain withholds it field by field, so it exercises each qualifier', () => {
-        const cause = Object.fromEntries(GLUED_QUALIFIERS.map((qualifier) => [`${qualifier}key`, 'x']));
-        const [line] = faultCauseChain(new Error('w', { cause }));
+        const [line] = faultCauseChain(withCause('w', gluedQualifierCause()));
         const parsed = JSON.parse(line.message) as Record<string, string>;
         expect(Object.keys(parsed)).toHaveLength(GLUED_QUALIFIERS.length);
         expect(Object.values(parsed).every((value) => value === '***REDACTED***')).toBe(true);
@@ -228,42 +231,38 @@ describe('the glued-qualifier fixture', () => {
 describe.each(LOGGERS)('parity — %s and faultCauseChain render one shape', (_name, recordOf) => {
     const cycle = () => {
         const a = new Error('a');
-        (a as { cause?: unknown }).cause = new Error('b', { cause: a });
+        (a as { cause?: unknown }).cause = withCause('b', a);
         return a;
     };
     const deep = () => {
         let error = new Error('link 0');
-        for (let i = 1; i <= 9; i += 1) error = new Error(`link ${i}`, { cause: error });
+        for (let i = 1; i <= 9; i += 1) error = withCause(`link ${i}`, error);
         return error;
     };
     const fixtures: Array<[string, () => Error]> = [
         ['a nested Error chain', wrapped],
         ['a cycle', cycle],
         ['a deep chain', deep],
-        ['a string cause', () => new Error('w', { cause: 'socket hang up' })],
-        ['an object cause', () => new Error('w', { cause: { code: 'ECONNRESET' } })],
-        ['an object cause with secret-named fields', () => new Error('w', { cause: { code: 'E1', password: 'p', apiKey: 'k' } })],
-        ['field names under the default redact words, whole-word matched', () => new Error('w', {
-            cause: {
-                keys: ['a'], tokens: 3, monkey: 'm', keyword: 'k', secretary: 's', tokenizer: 't',
-                apiKey: 'x', apikey: 'x', accesstoken: 'x', refresh_tokens: ['x'], clientSecret: 'x', password: 'x', API_KEY: 'x',
-            },
+        ['a string cause', () => withCause('w', 'socket hang up')],
+        ['an object cause', () => withCause('w', { code: 'ECONNRESET' })],
+        ['an object cause with secret-named fields', () => withCause('w', { code: 'E1', password: 'p', apiKey: 'k' })],
+        ['field names under the default redact words, whole-word matched', () => withCause('w', {
+            keys: ['a'], tokens: 3, monkey: 'm', keyword: 'k', secretary: 's', tokenizer: 't',
+            apiKey: 'x', apikey: 'x', accesstoken: 'x', refresh_tokens: ['x'], clientSecret: 'x', password: 'x', API_KEY: 'x',
         })],
-        ['every glued qualifier on a default word', () => new Error('w', {
-            cause: Object.fromEntries(GLUED_QUALIFIERS.map((qualifier) => [`${qualifier}key`, 'x'])),
-        })],
-        ['an array inside an object cause', () => new Error('w', {
-            cause: { code: 'E3', attempts: [{ host: 'db-1', password: 'x' }, { host: 'db-2', authToken: 'y' }] },
+        ['every glued qualifier on a default word', () => withCause('w', gluedQualifierCause())],
+        ['an array inside an object cause', () => withCause('w', {
+            code: 'E3', attempts: [{ host: 'db-1', password: 'x' }, { host: 'db-2', authToken: 'y' }],
         })],
         ['an object cause that cannot be serialized', () => {
             const loop: Record<string, unknown> = { code: 'E2' };
             loop.self = loop;
-            return new Error('w', { cause: loop });
+            return withCause('w', loop);
         }],
         ['a link whose message read throws', () => {
             const unreadable = new Error('unreadable');
             Object.defineProperty(unreadable, 'message', { get() { throw new Error('getter'); } });
-            return new Error('w', { cause: new Error('mid', { cause: unreadable }) });
+            return withCause('w', withCause('mid', unreadable));
         }],
         ['a throwing cause getter', () => {
             const hostile = new Error('w');
