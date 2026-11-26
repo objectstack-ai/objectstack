@@ -178,8 +178,8 @@ it out.**
 - **Column count.** On those forms, not authored: the grid follows its **real
   rendered width**, 1 column in a narrow drawer to 4 on a wide page. On a named or
   public form, authored per section: `{ group: 'contact_info', columns: 2 }`
-  (1–4; undeclared draws 2; 1 on a phone). A form view's own `columns` is not
-  read by the form page today.
+  (1–4; 1 on a phone). A form view's own `columns` is not read by the form page
+  today.
 - **`sections` are the escape hatch — reach for them last.** New and Edit
   never read them ([Form Views](./list-views.md#form-views)); a named or
   public form and a page's `record:details` or form block do. The ladder:
