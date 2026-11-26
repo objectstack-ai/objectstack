@@ -403,6 +403,8 @@ const REQUIRED_WHEN_ABSENT = false;
 export interface FieldRuleFaults {
   visibleWhen?: string;
   readonlyWhen?: string;
+  /** The hand lock's predicate (`@objectstack/spec` `Field.uiReadonlyWhen`); fail-open, as `readonlyWhen`. */
+  uiReadonlyWhen?: string;
   requiredWhen?: string;
 }
 
@@ -462,10 +464,24 @@ export function resolveFieldRuleState(
   rules: {
     visibleWhen?: FieldRulePredicate;
     readonlyWhen?: FieldRulePredicate;
+    /**
+     * The HAND lock's predicate (`@objectstack/spec` `Field.uiReadonlyWhen`,
+     * ruling record 7180466652): folded into the same `readonly` verdict, since
+     * every caller of this function is a console surface a person edits
+     * through. Fail-open on a fault, as `readonlyWhen`.
+     */
+    uiReadonlyWhen?: FieldRulePredicate;
     requiredWhen?: FieldRulePredicate;
   },
   record: Record<string, unknown>,
-  statics: { required?: boolean; readonly?: boolean; serverOwnedValue?: boolean; name?: string },
+  statics: {
+    required?: boolean;
+    readonly?: boolean;
+    /** The static hand lock (`Field.uiReadonly`): read-only on every console surface. */
+    uiReadonly?: boolean;
+    serverOwnedValue?: boolean;
+    name?: string;
+  },
   previous?: Record<string, unknown>,
   scope?: Record<string, unknown>,
   fieldContext?: string,
@@ -499,8 +515,13 @@ export function resolveFieldRuleState(
         )
       : VISIBLE_WHEN_ABSENT;
 
+  // The server lock (`readonly` / `readonlyWhen`) and the hand lock
+  // (`uiReadonly` / `uiReadonlyWhen`) answer one question here — "may a person
+  // edit this field now" — so they fold into one verdict. Short-circuited in
+  // that order: a predicate the verdict no longer needs never runs.
   const readonly =
     statics.readonly === true ||
+    statics.uiReadonly === true ||
     (rules.readonlyWhen != null
       ? evalFieldPredicate(
           rules.readonlyWhen,
@@ -509,6 +530,16 @@ export function resolveFieldRuleState(
           previous,
           scope,
           diag('readonlyWhen'),
+        )
+      : READONLY_WHEN_ABSENT) ||
+    (rules.uiReadonlyWhen != null
+      ? evalFieldPredicate(
+          rules.uiReadonlyWhen,
+          record,
+          READONLY_WHEN_FAULTED,
+          previous,
+          scope,
+          diag('uiReadonlyWhen'),
         )
       : READONLY_WHEN_ABSENT);
 

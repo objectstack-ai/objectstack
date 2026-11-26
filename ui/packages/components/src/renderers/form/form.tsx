@@ -2187,6 +2187,7 @@ ComponentRegistry.register('form',
             // `readonly`, so it has nothing to evaluate it for.
             visibleWhen: isFailClosedSectionGate(f) ? undefined : (f as any).visibleWhen,
             readonlyWhen: isCreateForm ? undefined : (f as any).readonlyWhen,
+            uiReadonlyWhen: isCreateForm ? undefined : (f as any).uiReadonlyWhen,
             requiredWhen: (f as any).requiredWhen,
           },
           ruleRecord,
@@ -2262,6 +2263,7 @@ ComponentRegistry.register('form',
             {
               visibleWhen: gate ? undefined : visibleWhen,
               readonlyWhen: isCreateForm ? undefined : (f as any).readonlyWhen,
+              uiReadonlyWhen: isCreateForm ? undefined : (f as any).uiReadonlyWhen,
               requiredWhen: (f as any).requiredWhen,
             },
             ruleRecord,
@@ -2505,6 +2507,7 @@ ComponentRegistry.register('form',
           {
             visibleWhen: (f as any).visibleWhen,
             readonlyWhen: isCreateForm ? undefined : (f as any).readonlyWhen,
+            uiReadonlyWhen: isCreateForm ? undefined : (f as any).uiReadonlyWhen,
             requiredWhen: (f as any).requiredWhen,
           },
           ruleRecord,
@@ -3736,6 +3739,7 @@ ComponentRegistry.register('form',
         readonly: staticReadonly,
         visibleWhen,
         readonlyWhen,
+        uiReadonlyWhen,
         requiredWhen,
         ...fieldProps
       } = field;
@@ -3804,7 +3808,14 @@ ComponentRegistry.register('form',
       // see `isFailClosedSectionGate`.
       const failClosedGate = isFailClosedSectionGate(field);
       const ruleState = resolveFieldRuleState(
-        { visibleWhen: failClosedGate ? undefined : visibleWhen, readonlyWhen: isCreateForm ? undefined : readonlyWhen, requiredWhen },
+        {
+          visibleWhen: failClosedGate ? undefined : visibleWhen,
+          readonlyWhen: isCreateForm ? undefined : readonlyWhen,
+          // The hand lock's predicate (`Field.uiReadonlyWhen`), folded into the
+          // same read-only verdict; judged on an edit only, as `readonlyWhen`.
+          uiReadonlyWhen: isCreateForm ? undefined : uiReadonlyWhen,
+          requiredWhen,
+        },
         ruleRecord,
         {
           required: staticRequired,
