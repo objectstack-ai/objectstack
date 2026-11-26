@@ -31,11 +31,13 @@
  * objectstack#37452 — drawn as the app's menu:
  * 11. A group is the app menu's collapsible group: its label is a disclosure
  *     button, open by default; closing it hides its entries; a search opens
- *     every group it lists.
+ *     every group it lists, chevron included, and holds it open; in the phone
+ *     drawer the label is the app menu's 44 px tap target.
  * 12. An entry draws a bare line icon before its name; the current entry is
  *     the primitive's active row (the pill and left bar).
  * 13. The selected entry is tinted by Studio's graphite accent whatever the
- *     app's theme colour is.
+ *     app's theme colours are: every theme token the app's branding writes
+ *     (primary and accent) is rebound over it.
  *
  * The provider, the sidebar primitive and the router are real; only the
  * metadata reads are doubled.
@@ -535,9 +537,31 @@ describe('drawn as the app\'s menu (objectstack#37452)', () => {
     fireEvent.change(screen.getByTestId('studio-menu-search'), { target: { value: 'position' } });
     expect(entry('type:position')).toBeVisible();
     expect(groupLabel('studio-menu-group-security')).toHaveAttribute('aria-expanded', 'true');
+    // Drawn open, chevron included: the chevron is turned down as on any open group.
+    const chevron = () => groupLabel('studio-menu-group-security').querySelector('svg')!;
+    expect(chevron()).toHaveClass('rotate-90');
+    // A click while the search holds it open changes nothing.
+    fireEvent.click(groupLabel('studio-menu-group-security'));
+    expect(groupLabel('studio-menu-group-security')).toHaveAttribute('aria-expanded', 'true');
+    expect(chevron()).toHaveClass('rotate-90');
+    expect(entry('type:position')).toBeVisible();
     // The author's choice is kept: clearing the search closes it again.
     fireEvent.change(screen.getByTestId('studio-menu-search'), { target: { value: '' } });
     expect(screen.queryByTestId('studio-menu-entry-type:position')).toBeNull();
+    expect(chevron()).not.toHaveClass('rotate-90');
+  });
+
+  it('in the phone drawer a group\'s label is the app menu\'s 44 px tap target; CONTROL: docked it is not', async () => {
+    setWidth(390);
+    renderAt(`/studio/${PKG}/data`);
+    fireEvent.click(toggle());
+    const drawer = await screen.findByRole('dialog');
+    const label = within(drawer).getByTestId('studio-menu-group-data').querySelector('[data-sidebar="group-label"]')!;
+    expect(label).toHaveClass('min-h-[44px]');
+    cleanup();
+    setWidth(1280);
+    renderAt(`/studio/${PKG}/data`);
+    expect(groupLabel('studio-menu-group-data')).not.toHaveClass('min-h-[44px]');
   });
 
   it('an entry draws a bare line icon before its name, on the app menu\'s row', () => {
@@ -569,14 +593,14 @@ describe('drawn as the app\'s menu (objectstack#37452)', () => {
     const ROOT_TOKENS = ['--primary', '--primary-foreground', '--ring', '--sidebar-primary', '--sidebar-ring', '--accent', '--accent-foreground'];
 
     function Branded({ children }: { children: ReactNode }) {
-      // A non-default app theme: a rose primary, written on the page root by the app shell's own hook.
-      useAppShellBranding({ primaryColor: '#e11d48' });
+      // A non-default app theme: a rose primary and an amber accent, written on the page root by the app shell's own hook.
+      useAppShellBranding({ primaryColor: '#e11d48', accentColor: '#f59e0b' });
       return <>{children}</>;
     }
 
     afterEach(() => {
       for (const token of ROOT_TOKENS) document.documentElement.style.removeProperty(token);
-      for (const token of ['--brand-primary', '--brand-primary-hsl']) document.documentElement.style.removeProperty(token);
+      for (const token of ['--brand-primary', '--brand-primary-hsl', '--brand-accent', '--brand-accent-hsl']) document.documentElement.style.removeProperty(token);
     });
 
     /** The declarations a class string makes: `[--x:a_b]` and `dark:[--x:a_b]`, underscores read as spaces. */
@@ -606,6 +630,7 @@ describe('drawn as the app\'s menu (objectstack#37452)', () => {
         (token) => token.startsWith('--') && !token.startsWith('--brand-'),
       );
       expect(written).toContain('--primary');
+      expect(written).toContain('--accent');
       expect(root.getPropertyValue('--primary').trim()).not.toBe(STUDIO_ACCENT_HSL.light);
 
       // The selected entry is the active row, and it sits inside Studio's accent scope.

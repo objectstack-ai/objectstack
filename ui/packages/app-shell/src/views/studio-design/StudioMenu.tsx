@@ -196,18 +196,25 @@ function studioMenuEntryIcon(entry: StudioMenuEntry, group: StudioMenuGroup | nu
 
 /**
  * One group of the menu: the app menu's collapsible group, open until the
- * author closes it, and open whatever its state while a search lists matches.
+ * author closes it. While a search lists matches the group is drawn open,
+ * chevron included, and a click on its label changes nothing: the author's
+ * own choice comes back when the search is cleared. In the phone drawer its
+ * label is the app menu's 44 px tap target.
  */
+function ignoreOpenChange(): void {}
+
 function StudioMenuGroupSection({
   label,
   labelId,
   searching,
+  isMobile,
   testId,
   children,
 }: {
   label: string;
   labelId: string;
   searching: boolean;
+  isMobile: boolean;
   testId: string;
   children: React.ReactNode;
 }): React.ReactElement {
@@ -216,9 +223,9 @@ function StudioMenuGroupSection({
     <NavigationGroupSection
       label={label}
       labelId={labelId}
-      open={open}
-      onOpenChange={setOpen}
-      forceOpen={searching}
+      open={open || searching}
+      onOpenChange={searching ? ignoreOpenChange : setOpen}
+      isMobile={isMobile}
       data-testid={testId}
     >
       {children}
@@ -402,6 +409,7 @@ function StudioMenuBody({
         label={studioMenuGroupLabel(group, locale)}
         labelId={`${searchId}-${tier}-${group}`}
         searching={searching}
+        isMobile={isMobile}
         testId={tier === 'advanced' ? `studio-menu-advanced-group-${group}` : `studio-menu-group-${group}`}
       >
         {entries.map((entry) => renderEntry(entry, group))}

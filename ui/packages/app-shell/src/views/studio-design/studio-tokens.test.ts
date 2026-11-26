@@ -8,7 +8,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { STUDIO_ACCENT, STUDIO_ACCENT_FOREGROUND_HSL, STUDIO_ACCENT_HSL } from './studio-tokens';
+import {
+  STUDIO_ACCENT,
+  STUDIO_ACCENT_FOREGROUND_HSL,
+  STUDIO_ACCENT_HSL,
+  STUDIO_ACCENT_TINT_FOREGROUND_HSL,
+  STUDIO_ACCENT_TINT_HSL,
+} from './studio-tokens';
 
 /** The declarations the class string makes in one theme: `[--x:a_b]` / `dark:[--x:a_b]`, underscores read as spaces. */
 function declarations(dark: boolean): Map<string, string> {
@@ -30,6 +36,15 @@ describe('STUDIO_ACCENT (objectstack#37452)', () => {
       expect(decl.get(token), token).toBe(STUDIO_ACCENT_HSL[theme]);
     }
     expect(decl.get('--primary-foreground')).toBe(STUDIO_ACCENT_FOREGROUND_HSL[theme]);
+    // The hover tint: a faint graphite, never graphite itself.
+    expect(decl.get('--accent')).toBe(STUDIO_ACCENT_TINT_HSL[theme]);
+    expect(decl.get('--accent-foreground')).toBe(STUDIO_ACCENT_TINT_FOREGROUND_HSL[theme]);
+  });
+
+  it('the hover tint is a faint neutral: near white in the light theme, near black in the dark one', () => {
+    const lightness = (hsl: string) => Number.parseFloat(hsl.split(' ')[2]);
+    expect(lightness(STUDIO_ACCENT_TINT_HSL.light)).toBeGreaterThan(90);
+    expect(lightness(STUDIO_ACCENT_TINT_HSL.dark)).toBeLessThan(25);
   });
 
   it('graphite is a neutral: low saturation in both themes, dark in the light theme and light in the dark one', () => {
@@ -50,6 +65,8 @@ describe('STUDIO_ACCENT (objectstack#37452)', () => {
       ['--color-ring', '--ring'],
       ['--color-sidebar-primary', '--sidebar-primary'],
       ['--color-sidebar-ring', '--sidebar-ring'],
+      ['--color-accent', '--accent'],
+      ['--color-accent-foreground', '--accent-foreground'],
     ]) {
       expect(decl.get(color), color).toBe(`hsl(var(${token}))`);
     }
