@@ -4014,7 +4014,7 @@ nothing about the sources.
 
 | Command | Description |
 |---------|-------------|
-| `os knowledge status` | Each source's index state (built, never built, due a rebuild) and the last build the answering node ran |
+| `os knowledge status` | Each source's index state (built, never built, due a rebuild) and the last build the answering node ran, or that it holds none |
 | `os knowledge rebuild` | Start one complete build of a source on the server and follow its progress |
 
 #### `os knowledge status`
@@ -4027,10 +4027,12 @@ os knowledge status support_articles   # one source
 Prints, per source, its adapter and kind, its index state against what the
 server expects (and whether a build is due), and the last build the node that
 answered ran: its progress while it runs, its counts once it ended. A build's
-record lives on the node that ran it, so behind a load balancer the node that
-answers may not be the one building; the index state is read from the store and
-is the same on every node. Exits `1` with the server's refusal text when the
-action is refused.
+record lives in memory on the node that ran it, so behind a load balancer the
+node that answers may not be the one building, and a restarted node remembers
+none. When the answering node holds no record, the command says so: a build
+run on another node, or before a restart, is not shown. The index state is read
+from the store and is the same on every node. Exits `1` with the server's
+refusal text when the action is refused.
 
 #### `os knowledge rebuild`
 
@@ -4042,12 +4044,27 @@ os knowledge rebuild support_articles --no-wait  # start, and return at once
 **A build costs money:** every row the source's `where` matches is read, and the
 content fields of each one the index does not already hold unchanged are sent to
 the embedding provider, which bills for them. The build runs on the server in
-the background; the command reads `index_status` every `--interval` seconds and
-prints the build's progress until it ends. It exits `0` when the build finished,
-and `1` when the server refused the rebuild (an unknown or `file` source, a
-build already running on that node), when the build did not run or did not
-finish, or when the progress was answered by another node than the one
-building (the build continues there). `--no-wait` exits `0` once the build has
+the background; the command reads the index state once before it starts the
+build, then reads `index_status` every `--interval` seconds and prints the
+build's progress until it ends.
+
+Behind a load balancer a progress read can land on a node that is not running
+the build and holds no record of it. That read is not a failure: the command
+falls back to the index state, which the store reports and which is the same on
+every node. When the index was not `current` before the rebuild (never built, a
+new fingerprint, a changed recipe), it turning `current` means a complete build
+recorded itself, and the command exits `0` without the build's counts. When the
+index was already `current`, its state cannot show when the build ends, and the
+command keeps polling until a read reaches the node running the build.
+
+It exits `0` when the build finished (its record says done, or the index turned
+`current`), and `1` when the server refused the rebuild (an unknown or `file`
+source, a build already running on that node), when the build's record says it
+did not run or did not finish, or when `--timeout` seconds of reads (counted as
+reads times `--interval`) reached no record of the build and did not see the
+index turn `current`; it then says the build may still be running and points
+at `os knowledge status`. A read that reaches the build's record starts the
+timeout again. `--no-wait` exits `0` once the build has
 started and reports no outcome: the build can still end without running
 (another node holds the source's lock) or fail, which only `os knowledge status`
 then shows.
@@ -4058,6 +4075,7 @@ then shows.
 | `-t, --token <token>` | both | `OS_TOKEN` | Bearer token of an administrator |
 | `--no-wait` | `rebuild` | — | Return once the build has started; its outcome is not reported |
 | `--interval <s>` | `rebuild` | — | Seconds between two progress reads (default `2`) |
+| `--timeout <s>` | `rebuild` | — | Seconds of reads that reach no record of the build before it stops following and exits `1` (default `600`) |
 
 ### Skills
 
