@@ -3153,7 +3153,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.backToApp': '返回应用',
   'engine.studio.backToAppTitle': '离开 Studio，回到 {app}',
   'engine.studio.backToAppTitleNoApp': '离开 Studio，回到你的应用',
-  'engine.studio.mark': 'Studio',
+  'engine.studio.mark': '应用搭建',
   // objectstack#37139 — 应用名或包名右侧的「⋯」软件包菜单。
   'engine.studio.packageMenu.trigger': '软件包操作',
   'engine.studio.packageMenu.editInfo': '编辑软件包信息',
