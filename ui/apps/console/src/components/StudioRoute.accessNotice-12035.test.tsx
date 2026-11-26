@@ -6,8 +6,9 @@
  * The `/studio` entry gate used to send a non-holder home with no word of why,
  * so a missing capability read exactly like a broken link. It now says, at the
  * URL that was opened, that Studio access is needed (`console.studio.accessRequired`),
- * with a way home that reuses the app refusal screen's label
- * (`empty.appAccessDeniedHome`). `StudioRoute.test.tsx` pins the decision and
+ * with a way home that reuses the app refusal screen's label on a phone
+ * (`empty.appAccessDeniedHome`) and the app pill's row label from 768 px up
+ * (`layout.appSwitcher.backToHome`). `StudioRoute.test.tsx` pins the decision and
  * where the way home leads; this file pins the LANGUAGE.
  *
  * ## Why every pack, and why the expected text is read from the pack
@@ -77,9 +78,10 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   LoadingFallback: () => <div data-testid="loading" />,
   LoadingScreen: () => <div data-testid="error-screen" />,
   getProductName: () => 'ObjectOS',
-  BuilderLanding: () => {
+  // objectstack#36908 — bare `/studio` is Studio's entry, which draws no page.
+  StudioEntryRedirect: () => {
     builderLanding();
-    return <div data-testid="studio-front-door">pick a package</div>;
+    return <div data-testid="studio-entry">entry</div>;
   },
   StudioDesignSurface: () => <div data-testid="studio-pillar-builder" />,
 }));
@@ -92,8 +94,12 @@ const LANGUAGES = Object.keys(builtInLocales) as Language[];
 
 /** The refusal's sentence, as one pack writes it. */
 const sentenceIn = (lang: Language) => builtInLocales[lang].console.studio.accessRequired;
-/** The refusal's way home, as one pack writes it (the app refusal screen's label). */
-const wayHomeIn = (lang: Language) => builtInLocales[lang].empty.appAccessDeniedHome;
+/**
+ * The refusal's way home, as one pack writes it. jsdom's window is 1024 px, a
+ * desktop, where home is an app's start page: the app pill's row label. A
+ * phone keeps the app refusal screen's label; `StudioRoute.test.tsx` pins that.
+ */
+const wayHomeIn = (lang: Language) => builtInLocales[lang].layout.appSwitcher.backToHome;
 
 function LocationProbe() {
   const { pathname } = useLocation();
@@ -120,8 +126,8 @@ function inLanguage(language: Language) {
 beforeEach(() => {
   systemPermissions = [];
   builderLanding.mockClear();
-  // The landing mounts the real `AppHeader`, which reads its user-scoped feeds
-  // on mount; each answers empty here, so no request leaves the process.
+  // A screen that mounts the real `AppHeader` reads its user-scoped feeds on
+  // mount; each answers empty here, so no request leaves the process.
   vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ data: [] })));
 });
 
@@ -164,7 +170,7 @@ describe('CONTROL: a caller with Studio access enters Studio as today', () => {
     systemPermissions = [STUDIO_ENTRY_CAPABILITY];
     renderStudio('/studio/');
 
-    await waitFor(() => expect(screen.getByTestId('studio-front-door')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('studio-entry')).toBeInTheDocument());
     expect(builderLanding).toHaveBeenCalled();
     expect(screen.getByTestId('pathname').textContent).toBe('/studio/');
     expect(screen.queryByText(sentenceIn(lang))).not.toBeInTheDocument();

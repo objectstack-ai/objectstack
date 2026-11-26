@@ -966,6 +966,27 @@ function actionDeclarationReads(deps: DomainHandlerDeps, context: HttpProtocolCo
 }
 
 /**
+ * [#33712] The door the MCP action tools hand the bridge when the client can be
+ * elicited (`McpActionCallDoor`, `@objectstack/mcp`, which this package does
+ * not depend on). [#34325] And, without one, the door's facts
+ * (`McpActionCallDoorFacts`), the fourth argument: the door would have asked a
+ * client that supports confirmation.
+ */
+type McpActionCallDoor = { elicitConfirmation?: actionExec.ActionConfirmationElicitor };
+type McpActionCallDoorFacts = { elicitsCapableClients?: boolean };
+
+/** The door and its facts as `invokeBusinessAction` / `resumeActionRun` wiring: each only when the tool set it. */
+function actionCallDoorWiring(
+    door: McpActionCallDoor | undefined,
+    facts: McpActionCallDoorFacts | undefined,
+): { elicitConfirmation?: actionExec.ActionConfirmationElicitor; elicitsCapableClients?: boolean } {
+    return {
+        ...(typeof door?.elicitConfirmation === 'function' ? { elicitConfirmation: door.elicitConfirmation } : {}),
+        ...(facts?.elicitsCapableClients === true ? { elicitsCapableClients: true } : {}),
+    };
+}
+
+/**
  * Build a principal-bound {@link McpDataBridge}: every method runs AS the
  * request's ExecutionContext through {@link callData} (RLS/permissions) and
  * the per-env metadata reads (the protocol's merged listing, or the metadata
@@ -1573,10 +1594,14 @@ export function buildMcpBridge(
             input: { objectName?: string; namespace?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
             // [#33712] The door's channel to the person's client, set by the
             // tool only when the client can be elicited (`McpActionCallDoor`).
-            door?: { elicitConfirmation?: actionExec.ActionConfirmationElicitor },
+            door?: McpActionCallDoor,
+            // [#34325] Set by the tool only without `door`: the door would
+            // have asked a client that supports confirmation
+            // (`McpActionCallDoorFacts`).
+            facts?: McpActionCallDoorFacts,
         ) => actionExec.invokeBusinessAction(deps, context, name, input ?? {}, {
             driver, envId, ec, getMeta, readObjects: readServedObjects, readActions: readServedActions, callData,
-            ...(typeof door?.elicitConfirmation === 'function' ? { elicitConfirmation: door.elicitConfirmation } : {}),
+            ...actionCallDoorWiring(door, facts),
         }),
         // [#15705] `resume_run`: continue the caller's own paused screen run.
         // Admitted by the same gates as `run_action`; see
@@ -1584,10 +1609,11 @@ export function buildMcpBridge(
         resumeRun: async (
             runId: string,
             input: { values?: Record<string, unknown> } & AIActionConfirmation,
-            door?: { elicitConfirmation?: actionExec.ActionConfirmationElicitor },
+            door?: McpActionCallDoor,
+            facts?: McpActionCallDoorFacts,
         ) => resumeActionRun(deps, context, runId, input ?? {}, {
             driver, envId, ec, getMeta, readObjects: readServedObjects, readActions: readServedActions, callData,
-            ...(typeof door?.elicitConfirmation === 'function' ? { elicitConfirmation: door.elicitConfirmation } : {}),
+            ...actionCallDoorWiring(door, facts),
         }),
         // ── Federation surface (McpFederationBridge, #27745) ───────
         // The `external-datasource` service Studio's datasource page reaches
@@ -1681,6 +1707,7 @@ export function buildMcpBridge(
     // Its door is THIS bridge's own read members, bound to this request's
     // caller: nothing it reads is read any other way.
     if (seams.recordContextTools) {
+        let contextPackEngine: any;
         Object.assign(bridge, recordContextMembers(seams.recordContextTools, bridge, {
             assertApiExposed: (object, action) =>
                 actionExec.refuseUnexposedDataAction(deps, context, action, object, envId, ec, 'refuse'),
@@ -1699,12 +1726,19 @@ export function buildMcpBridge(
             // read decorations (`METADATA_READ_DECORATIONS`) and keeps the
             // ADR-0010 protection envelope the schema declares.
             listContextPacks: async () => {
+                // [ADR-0150 addendum 2026-11-25] The engine whose registry
+                // places each pack's package ({@link packageNamespaceOf}),
+                // resolved beside the read it serves, as `listSkills` does.
+                contextPackEngine = await deps.getObjectQL(context, envId).catch(() => undefined);
                 const merged = await actionExec.readMergedItems(await getProtocol(), 'ai_context');
                 if (merged !== undefined) return merged.map(stripReadDecorations);
                 const meta: any = await getMeta();
                 const listed = typeof meta?.list === 'function' ? await meta.list('ai_context') : [];
                 return Array.isArray(listed) ? listed.map(stripReadDecorations) : [];
             },
+            // [ADR-0150 D6, addendum 2026-11-25] A package's pack is spelt by
+            // its face `NS-NAME`, as a package-held skill's prompt name is.
+            packageNamespace: (packageId: string) => packageNamespaceOf(contextPackEngine, packageId),
         }));
     }
     return bridge;
@@ -1760,6 +1794,7 @@ function recordContextMembers(
         servedObjectDefinitionOf(name: string): Promise<Record<string, unknown> | null>;
         publishedObjectDefinitionOf(name: string): Promise<Record<string, unknown> | null>;
         listContextPacks(): Promise<readonly unknown[]>;
+        packageNamespace(packageId: string): string | undefined;
     },
 ) {
     return {
@@ -2404,6 +2439,8 @@ export async function resumeActionRun(
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: any) => Promise<any>;
         /** [#33712] As `invokeBusinessAction`'s: the person asked in their client, in place of a hand-off. */
         elicitConfirmation?: actionExec.ActionConfirmationElicitor;
+        /** [#34325] As `invokeBusinessAction`'s: a no-service refusal names the client route too. */
+        elicitsCapableClients?: boolean;
         /**
          * [#34386] Present exactly when the call comes through the host's
          * resume door ({@link resumeActionRunRequest}), never at the MCP
@@ -2570,7 +2607,7 @@ export async function resumeActionRun(
             params: {},
             door: 'mcp',
             run: { runId, values: values ?? {}, ...(screenNodeId !== undefined ? { screenNodeId } : {}) },
-        }, ec);
+        }, ec, { elicitsCapableClients: wiring.elicitsCapableClients === true });
         if ('refused' in answer) {
             throw resumeDoorError(deps, answer.refused.message, answer.refused.status, {
                 code: answer.refused.code,

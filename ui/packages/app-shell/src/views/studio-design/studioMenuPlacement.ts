@@ -18,21 +18,30 @@
  *    includes picklist (选项列表) and email template.
  *
  * A type with no row here is drawn in `advanced`, at the end of its group. It
- * is never invisible; the menu applies that rule when it reads this list.
+ * is never invisible: `buildStudioMenu` (`studioMenuModel.ts`) applies that
+ * rule when it reads this list (objectstack#37201).
  *
  * ## Order
  *
- * A consumer sorts the entries of one group, within one tier, by the row's
- * index in {@link STUDIO_MENU_PLACEMENT}. The common rows come first, in the
- * ruled order; the advanced rows follow in the proposal's order, group by
- * group.
+ * `buildStudioMenu` sorts the entries of one group by the row's index in
+ * {@link STUDIO_MENU_PLACEMENT} and stamps each entry with the row's tier;
+ * the menu then draws each tier's entries in that order. The common rows come
+ * first, in the ruled order; the advanced rows follow in the proposal's order,
+ * group by group.
  *
  * ## Pins
  *
- * `studioMenuPlacement.test.ts` holds this list against
- * `DEFAULT_METADATA_TYPE_REGISTRY`: every type the directory can list has
- * exactly one row, and every row names a registered type. Nothing reads the
- * list yet; the menu reads it once `buildStudioMenu` orders by it.
+ * Three pins hold this list, all in `studioMenuPlacement.test.ts`:
+ *  - the registry: against `DEFAULT_METADATA_TYPE_REGISTRY`, every type the
+ *    directory can list has exactly one row, and every row names a
+ *    registered, listable type;
+ *  - the ruled order: the rows, in order, with their tiers, as literals
+ *    (ruling on #37192), so a reordered or re-tiered row fails there;
+ *  - ADR-0084: its type-to-group table's Order and Tier columns equal this
+ *    list, group by group.
+ *
+ * The menu's reading of the list is pinned in `studioMenuModel.test.ts` and
+ * `StudioMenu.test.tsx`.
  */
 
 /** A type's tier in Studio's left menu. */

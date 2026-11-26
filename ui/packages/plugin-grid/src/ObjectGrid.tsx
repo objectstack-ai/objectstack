@@ -1489,12 +1489,14 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // objectstack#36911 — the row menu reads the same locks: a row an approval
   // locks offers no Edit, as the record page offers none (objectstack#35593).
   // Delete stays for a record held by its own approval: the server deletes it
-  // and cancels its request. (The batch read reports only that case today, not
-  // a line held because its master is held, which refuses delete too; #37041.) So the hook also runs on a grid whose rows offer Edit. It still
+  // and cancels its request. objectstack#37231 — a master-detail line held
+  // because its MASTER is held (the read's `lockSource: 'master'`) offers no
+  // Delete either: the detail-row lock hook refuses it with `RECORD_LOCKED`.
+  // So the hook also runs on a grid whose rows offer Edit or Delete. It still
   // reads nothing until it is asked: by a cell being selected, or by a row's
   // actions being reached for (`demandRowActions` below).
-  const rowMenuOffersEdit = canEdit && !!onEdit;
-  const approvalLocks = useRowApprovalLocks(hostCellSelection || rowMenuOffersEdit ? objectName : undefined);
+  const rowMenuReadsLocks = (canEdit && !!onEdit) || (canDelete && !!onDelete);
+  const approvalLocks = useRowApprovalLocks(hostCellSelection || rowMenuReadsLocks ? objectName : undefined);
   /**
    * objectstack#36911 — what reaching for a row's actions asks
    * (`RowActionMenuProps.onActionsDemand`, objectstack#34208): the
@@ -1506,8 +1508,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const probeApprovalLocks = approvalLocks.probe;
   const demandRowActions = useCallback(() => {
     requestRecordVerdicts();
-    if (rowMenuOffersEdit) probeApprovalLocks(pageRecordIds);
-  }, [requestRecordVerdicts, probeApprovalLocks, rowMenuOffersEdit, pageRecordIds]);
+    if (rowMenuReadsLocks) probeApprovalLocks(pageRecordIds);
+  }, [requestRecordVerdicts, probeApprovalLocks, rowMenuReadsLocks, pageRecordIds]);
   // objectstack#35956 — a cell change that makes other fields required asks
   // for them first, and saves them with it (`./objectGridRequiredPrompt`).
   const fieldLabelOf = (field: string): string => {
@@ -2425,6 +2427,21 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           })
           .join(', '),
       })}
+    </p>
+  ) : null;
+
+  // objectstack#37278 — the server answered only PART of the view's groups
+  // (`hasMore` on a header answer: the deployment's default page size cut
+  // them). The groups drawn keep their exact counts, so nothing is withheld
+  // and this is no panel: one line in the draft note's strip, saying the list
+  // of groups is not the whole set.
+  const groupsPartialNote = serverGroupedFetch && groupHeaders.partial ? (
+    <p
+      role="status"
+      className="px-3 sm:px-4 py-1.5 text-xs text-muted-foreground border-b bg-muted/40"
+      data-testid="grid-grouping-more-groups-not-loaded"
+    >
+      {t('grid.grouping.moreGroupsNotLoaded')}
     </p>
   ) : null;
 
@@ -4801,6 +4818,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         >
         {gridDescription}
         {groupingDraftOnlyNote}
+        {groupsPartialNote}
         <div className="space-y-2 p-2">
           {data.map(renderMobileCard)}
         </div>
@@ -5429,6 +5447,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       )}
       {gridDescription}
       {groupingDraftOnlyNote}
+      {groupsPartialNote}
       {gridToolbar}
       <GridHeaderMenuProvider value={hostHeaderMenu === true}>
         <GridCellSelectionProvider value={gridCellSelection}>{renderedGridContent}</GridCellSelectionProvider>

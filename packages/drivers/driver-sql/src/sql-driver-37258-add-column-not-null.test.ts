@@ -107,6 +107,16 @@ function declareAddColumnNotNullSuite(cell: DialectCell): void {
         expect(ops).not.toContain('tighten_not_null:added_dflt');
       });
 
+      // [#37320] The DEFAULT the column took is the one the field declares, so
+      // the differ proposes nothing for it at all — not a `set_column_default`
+      // restating it. MySQL reports a TEXT column's DEFAULT in its expression
+      // spelling, and that is the shape that must not read as a different
+      // literal (the restate statement is refused on a TEXT column there).
+      it('reports no drift for the column that took its declared literal default', async () => {
+        const ops = opsOf(await driver.detectManagedDrift([V2(POPULATED)]));
+        expect(ops.filter((o) => o.endsWith(':added_dflt'))).toEqual([]);
+      });
+
       it('the object stays writable', async () => {
         const created: any = await driver.create(POPULATED, { plain: 'new', added: 'named', added_tags: ['t'] });
         const row: any = await driver.findOne(POPULATED, { where: { id: created.id } });

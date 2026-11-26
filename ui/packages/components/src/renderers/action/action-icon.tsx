@@ -26,6 +26,7 @@ import { Loader2 } from 'lucide-react';
 import { resolveIcon } from './resolve-icon';
 import { hasDeclaredVisibilityGate } from './visibility-gate';
 import { useAutoTriggerOnce } from './auto-trigger';
+import { withRenderableLabel } from './renderable-label';
 import { readStaticParamValues } from './static-params';
 import { toButtonVariant, toRunnerVariant } from './runner-variant';
 import { DisabledReasonTrigger, describedByWithReason, useDisabledReason } from './disabled-reason';
@@ -70,7 +71,7 @@ const ActionIconRenderer = forwardRef<
     context?: ActionIconRendererProps['context'];
   }
 >(
-  ({ schema, className, context: localContext, ...props }: ActionIconRendererProps, ref) => {
+  ({ schema: declaredSchema, className, context: localContext, ...props }: ActionIconRendererProps, ref) => {
     const {
       'data-obj-id': dataObjId,
       'data-obj-type': dataObjType,
@@ -94,6 +95,16 @@ const ActionIconRenderer = forwardRef<
       disabled: hostDisabled,
       ...rest
     } = props;
+
+    // Every label read below goes through the shared guard (see `renderableLabel`):
+    // the `visible` diagnostic, the runner's `label`, `aria-label`, the no-icon
+    // initial, the tooltip, the static-params warning and the auto-trigger's
+    // refusal notice all read this schema, whose non-string label is no label.
+    // `data-obj-id` is the component id `SchemaRenderer` hands down.
+    const schema = React.useMemo(
+      () => withRenderableLabel(declaredSchema, dataObjId ?? declaredSchema.name ?? 'action:icon', 'action:icon'),
+      [declaredSchema, dataObjId],
+    );
 
     const { execute } = useAction();
     const [loading, setLoading] = useState(false);

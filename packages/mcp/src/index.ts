@@ -79,6 +79,7 @@ export {
 } from './action-confirmation-elicitation.js';
 export type {
   McpActionCallDoor,
+  McpActionCallDoorFacts,
   McpActionConfirmationAnswer,
   McpActionConfirmationElicitor,
   McpActionConfirmationSubject,

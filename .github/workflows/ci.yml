@@ -794,6 +794,10 @@ jobs:
             # be added here by hand), and this file.
             temporal_live:
               - 'packages/plugins/knowledge-pgvector/**'
+              # [#37100] The adapter contract suite the pgvector store runs
+              # against the live PostgreSQL: a change to it is a change to that
+              # step's verdict.
+              - 'packages/services/service-knowledge/src/testing.ts'
               - 'packages/drivers/driver-sql/**'
               - 'packages/metadata-protocol/src/**/*live-mysql*'
               - 'packages/metadata-protocol/src/**/*live-postgres*'
@@ -2568,11 +2572,11 @@ jobs:
             ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-build-core-
 
-      # Turbo remote cache (#22077), on all four of this job's build steps: the
+      # Turbo remote cache (#22077), on all five of this job's build steps: the
       # four TURBO_* lines are Build Core's, verbatim, and Build Core's "Turbo
       # remote cache (#21186)" comment holds the write rule, the signing and the
       # PINS. Each of these plans is all `build` tasks with Build Core's hashes
-      # (8, 18, 14 and 31 nodes, measured). The suites between them run vitest
+      # (8, 18, 14, 31 and 20 nodes, measured). The suites between them run vitest
       # through `pnpm --filter`, not turbo, and carry no credentials.
       - name: Build driver-sql and its dependencies
         env:
@@ -2797,6 +2801,32 @@ jobs:
         run: |
           pnpm --filter @objectstack/runtime exec vitest run --project local \
             cascade-delete-multivalue-lookup-real-driver
+
+      # ── The pgvector knowledge store, on the live PostgreSQL (#37100) ──
+      #
+      # The service image above is pgvector's for this package: the
+      # `IKnowledgeAdapter` contract suite (`@objectstack/service-knowledge/testing`),
+      # the card's acceptance cases (a 3072-wide model, two organizations, no
+      # re-embedding, a refused fingerprint) and a complete reindex over a real
+      # ObjectQL + SqlDriver, each in a schema of its own. Without a URL these
+      # files are a named skip; the flag turns that into a red, as on the legs
+      # above. The positional is a SUBSTRING, not a glob (see the
+      # metadata-protocol step): it selects the three `*.live-postgres.test.ts`
+      # files; the unit file runs in Test Core.
+      - name: Build knowledge-pgvector and its dependencies
+        env:
+          TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
+          TURBO_TOKEN: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}
+        run: pnpm exec turbo run build --filter=@objectstack/knowledge-pgvector... --concurrency=4
+
+      - name: Run the pgvector knowledge store against live PostgreSQL
+        env:
+          OS_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          OS_EXPECT_LIVE_DIALECT_MATRIX: '1'
+        run: |
+          pnpm --filter @objectstack/knowledge-pgvector exec vitest run live-postgres
 
   dogfood:
     # Sharded 3-way: the suite is ~60 independent test files, each booting its

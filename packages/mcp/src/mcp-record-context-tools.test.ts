@@ -345,3 +345,55 @@ describe('[ADR-0160 D4] get_record_context — a package pack the real protocol 
     }
   });
 });
+
+describe('[ADR-0150 addendum 2026-11-25] get_record_context — the stdio door places each pack\'s package', () => {
+  const ALPHA = 'com.acme.sales';
+  const BETA = 'com.acme.people';
+  const brief = (packageId: string, label: string) => ({
+    name: 'brief', label, object: 'policy', fields: ['title'], _packageId: packageId, _provenance: 'package',
+  });
+  /** The stdio bridge over two packages' same-name packs, its engine's registry placing `namespaces`. */
+  function placedBridge(namespaces: Record<string, string> | undefined): McpDataBridge {
+    const placed = engine() as IDataEngine & { registry?: unknown };
+    if (namespaces) {
+      placed.registry = { getPackage: (id: string) => (namespaces[id] ? { manifest: { namespace: namespaces[id] } } : undefined) };
+    }
+    const tools = createRecordContextTools();
+    return createStdioDataBridge({
+      engine: placed,
+      metadataService: {
+        getObject: async (name: string) => OBJECTS[name],
+        listObjects: async () => Object.values(OBJECTS),
+        list: async (type: string) => (type === 'ai_context' ? [brief(ALPHA, 'Sales brief'), brief(BETA, 'People brief')] : []),
+      } as unknown as IMetadataService,
+      resolvePrincipal: async () => ({ userId: 'u_key', isSystem: false }) as never,
+      recordContextTools: { recordContextTools: () => tools },
+    });
+  }
+  const call = (context: string) => ({ objectName: 'policy', recordId: 'p1', context });
+
+  it('two packages\' packs of one name on one root: each is reached by its face, alike on both transports', async () => {
+    const bridge = placedBridge({ [ALPHA]: 'sales', [BETA]: 'people' });
+    const sales = await callBoth(bridge, GET_RECORD_CONTEXT_TOOL_NAME, call('sales-brief'));
+    const people = await callBoth(bridge, GET_RECORD_CONTEXT_TOOL_NAME, call('people-brief'));
+    expect(sales.http.isError, JSON.stringify(sales.http.payload)).toBe(false);
+    expect(sales.stdio).toEqual(sales.http);
+    expect(sales.http.payload.data.pack).toEqual({ name: 'brief', label: 'Sales brief' });
+    expect(people.stdio).toEqual(people.http);
+    expect(people.http.payload.data.pack).toEqual({ name: 'brief', label: 'People brief' });
+  });
+
+  it('the bare name both packages hold is refused 409, naming each face', async () => {
+    const { http, stdio } = await callBoth(placedBridge({ [ALPHA]: 'sales', [BETA]: 'people' }), GET_RECORD_CONTEXT_TOOL_NAME, call('brief'));
+    expect(stdio).toEqual(http);
+    expect(http.payload.error).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect(http.payload.error.message).toContain('sales-brief');
+    expect(http.payload.error.message).toContain('people-brief');
+  });
+
+  it('control: an engine whose registry cannot place the packages spells each pack by its bare name, so no face reaches one', async () => {
+    const { http } = await callBoth(placedBridge(undefined), GET_RECORD_CONTEXT_TOOL_NAME, call('sales-brief'));
+    expect(http.isError).toBe(true);
+    expect(http.payload.error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+  });
+});

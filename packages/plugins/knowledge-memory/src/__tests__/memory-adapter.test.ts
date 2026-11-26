@@ -88,13 +88,40 @@ describe('KnowledgeMemoryAdapter', () => {
     expect(tropical[0]?.documentId).toBe('d2');
   });
 
-  it('chunks long documents (snippet bounded)', async () => {
+  it("indexes the service's passages as given: one hit per passage, the service's chunk id, never re-split", async () => {
+    const a = new KnowledgeMemoryAdapter();
+    expect(a.capabilities.chunks).toBe(true);
+    const long = 'lorem ipsum dolor sit amet '.repeat(200);
+    const passages = ['alpha passage about lorem', long, 'gamma passage about lorem'];
+    await a.upsert(
+      [{
+        id: 'long',
+        sourceId: 'src1',
+        content: passages.join('\n\n'),
+        chunks: passages.map((content, index) => ({ id: `long#${index}`, documentId: 'long', index, content })),
+      }],
+      { source },
+    );
+    const hits = await a.search('lorem', { source, topK: 10 });
+    expect(hits.map((h) => h.chunkId).sort()).toEqual(['long#0', 'long#1', 'long#2']);
+    // The long passage comes back whole: the adapter does not cut what the service cut.
+    expect(hits.find((h) => h.chunkId === 'long#1')?.snippet).toBe(long);
+  });
+
+  it('a document handed over without chunks is one passage of its whole text', async () => {
     const a = new KnowledgeMemoryAdapter();
     const long = 'lorem ipsum dolor sit amet '.repeat(200);
     await a.upsert([{ id: 'long', sourceId: 'src1', content: long }], { source });
     const hits = await a.search('lorem', { source, topK: 10 });
-    expect(hits.length).toBeGreaterThan(1);
-    for (const h of hits) expect(h.snippet.length).toBeLessThanOrEqual(900);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ chunkId: 'long#0', snippet: long });
+  });
+
+  it('a document with no passage is still listed with its docHash', async () => {
+    const a = new KnowledgeMemoryAdapter();
+    await a.upsert([{ id: 'empty', sourceId: 'src1', content: '', docHash: 'v1:x', chunks: [] }], { source });
+    expect(await a.listDocuments({ source }, { limit: 10 })).toEqual({ documents: [{ documentId: 'empty', docHash: 'v1:x' }] });
+    expect(await a.search('anything', { source, topK: 5 })).toEqual([]);
   });
 
   it('healthCheck returns ok', async () => {

@@ -644,6 +644,26 @@ function laneBox(
     : { className: columnWidthClasses(columnStyle), style: columnStyle }
 }
 
+/** Han, kana and Hangul: scripts whose glyphs stand upright in vertical text. */
+const UPRIGHT_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u
+
+/**
+ * How a COLLAPSED lane's title runs down its narrow spine.
+ *
+ * A Latin title reads bottom-to-top, the book-spine convention: vertical-rl
+ * lays it top-to-bottom and the 180° turn flips it. That same turn stands
+ * every CJK glyph on its head — vertical-rl already sets Han, kana and Hangul
+ * upright, so the rotation is what made 「已取消」 unreadable. A title in one of
+ * those scripts drops the turn and sets EVERY glyph upright
+ * (`text-orientation: upright`), so a mixed title such as 「Q3 已取消」 runs
+ * down the spine as one column instead of turning its Latin run sideways.
+ */
+function collapsedTitleClass(title: string): string {
+  return UPRIGHT_SCRIPT.test(title)
+    ? "[writing-mode:vertical-rl] [text-orientation:upright]"
+    : "[writing-mode:vertical-rl] rotate-180"
+}
+
 /**
  * The lane heading, as a disclosure when the lane declared `collapsed`
  * (objectui#9628).
@@ -704,7 +724,7 @@ function LaneHeading({
       >
         ▶
       </span>
-      <span className={cn("truncate", collapsed && "[writing-mode:vertical-rl] rotate-180")}>
+      <span className={cn("truncate", collapsed && collapsedTitleClass(column.title))}>
         {column.title}
       </span>
     </button>
@@ -829,12 +849,15 @@ function LaneTotal({
  * objectstack#36520 — a `sum`, `avg`, `min` or `max` covers every record of
  * the lane: the server lane read's figure (`KanbanColumnSummary.figures`),
  * never one added up over the cards the lane has loaded, on every board that
- * queries its own cards. Over cards a host hands in, a `sum` adds them: that
- * is a whole lane only if the host handed every card in. `ListView` hands a
- * board whose lanes it does not know before the query (lanes over a lookup,
- * a view with grouping) its fetched page, so there the `sum` covers that
- * page alone, with no marker (a known gap). Renders nothing without the
- * statistic, or while the figure is pending or unknowable.
+ * queries its own cards. objectstack#36871 — and on a board whose host hands
+ * it its cards together with the query they came from (`laneStatisticQuery`):
+ * `ListView` hands a board whose lanes it does not know before the query
+ * (lanes over a lookup field) one page of rows and that query, so its figures
+ * are the whole lane's too, never the page's. Only over cards a host hands in
+ * WITHOUT its query (rows handed in whole) is a `sum` added up here, and the
+ * other three draw nothing there. A board drawn in swimlanes (a view with
+ * grouping) draws no lane foot. Renders nothing without the statistic, or
+ * while the figure is pending or unknowable.
  */
 function LaneFootStatistic({
   laneId,

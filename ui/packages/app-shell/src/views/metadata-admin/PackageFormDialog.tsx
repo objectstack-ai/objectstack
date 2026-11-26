@@ -4,7 +4,7 @@
  * PackageFormDialog — ONE modal for creating, editing, and viewing a package,
  * rendered from the spec-derived manifest form (`package-schema`) through the
  * generic {@link SchemaForm}. It replaces the three hand-rolled package forms
- * (CreatePackageDialog / EditPackageDialog / the BuilderLanding inline form),
+ * (CreatePackageDialog / EditPackageDialog / the old Studio home's inline form),
  * each of which carried its own field list and id-validation regex — a package
  * created on one surface was rejected by another.
  *
@@ -35,12 +35,12 @@
  * that derives no id never leaves the author at a disabled button with the
  * reason folded away.
  *
- * The Studio landing's 「新建应用」 door (objectstack#36748) is create mode
- * with a `newApp` step: the dialog is titled and worded for an app (a
- * no-code author reads 「应用」, never 「软件包」, on that door — the
- * maintainer's ruling), a free app name is reserved before anything is
- * written, and the package's app is created and made live right after the
- * package. See `studio-design/newAppDoor.ts`.
+ * Create mode handed a `newApp` step offers 「同时创建应用」 / "Also create
+ * an app" (objectstack#37134), ticked by default. Ticked, the dialog runs the
+ * step the Studio home's 「新建应用」 door ran (objectstack#36748): a free app
+ * name is reserved before anything is written, and the package's app is
+ * created and made live right after the package. Unticked, it creates the
+ * package alone. See `studio-design/newAppDoor.ts`.
  */
 
 import * as React from 'react';
@@ -52,6 +52,7 @@ import { NAMESPACE_RE, isSpecPackageId } from '../studio-design/packages-io.js';
 import { PackageIdInput } from '../studio-design/PackageIdInput.js';
 import {
   Button,
+  Checkbox,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -291,33 +292,11 @@ export interface PackageSaveResult {
   /** The server's package payload, when it returned one. */
   package?: { manifest: ManifestRecord } & Record<string, unknown>;
   /**
-   * The new-app door only (objectstack#36748): the app created with the
-   * package, or `null` when the package was created and its app was refused.
+   * Create mode with 「同时创建应用」 ticked only (objectstack#37134): the app
+   * created with the package, or `null` when the package was created and its
+   * app was refused.
    */
   app?: string | null;
-}
-
-/** The spec form's rows whose help line the new-app door words for an app. */
-const APP_DOOR_HELP_ROWS = ['name', 'description', 'namespace', 'version', 'type', 'defaultDatasource', 'dependencies'] as const;
-
-/**
- * The new-app door's wording for the spec form's own rows (objectstack#36748):
- * every help line names the app, Advanced's included.
- */
-function withAppDoorWording(form: FormViewSpec, locale: string): FormViewSpec {
-  const help: Record<string, string> = {};
-  for (const row of APP_DOOR_HELP_ROWS) help[row] = t(`engine.studio.newApp.help.${row}`, locale);
-  return {
-    ...form,
-    sections: (form.sections ?? []).map((section) => ({
-      ...section,
-      fields: section.fields?.map((f) => {
-        const name = fieldName(f);
-        if (!(name in help)) return f;
-        return { ...(typeof f === 'string' ? { field: f } : f), helpText: help[name] };
-      }),
-    })),
-  };
 }
 
 /**
@@ -425,9 +404,10 @@ export function PackageFormDialog({
   manifest?: ManifestRecord | null;
   onSaved?: (result: PackageSaveResult) => void;
   /**
-   * Create mode only: the Studio landing's 「新建应用」 door
-   * (objectstack#36748). The dialog is worded for an app, and the package's
-   * app is created and made live right after the package.
+   * Create mode only: the app step (`newAppStep`, objectstack#36748). The
+   * dialog offers 「同时创建应用」 (objectstack#37134), ticked by default;
+   * ticked, the package's app is created and made live right after the
+   * package.
    */
   newApp?: NewAppStep;
 }) {
@@ -438,21 +418,17 @@ export function PackageFormDialog({
   // resident, so the form is rebuilt once it lands; keyed on the locale alone
   // it kept the `en` answer of its first render under a translated title.
   const catalogueResident = isStudioCatalogueLoaded(locale);
-  // objectstack#36748 — the new-app door: create mode with an app step.
-  const appDoor = mode === 'create' && newApp !== undefined;
   const form = React.useMemo(
-    () => {
-      const spec = getPackageForm(locale, { create: mode === 'create' });
-      return appDoor ? withAppDoorWording(spec, locale) : spec;
-    },
+    () => getPackageForm(locale, { create: mode === 'create' }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the residency flag is the dependency: the form reads the catalogue through `t`
-    [locale, mode, catalogueResident, appDoor],
+    [locale, mode, catalogueResident],
   );
   // objectui#11792 — the `<org>` of a derived `com.<org>.<name>` id. Null
   // outside an AuthProvider and whenever the session has no active
   // organization; `deriveCreatePackageId` then leaves the segment out.
   const orgSlug = useAuth().activeOrganization?.slug ?? null;
   const idInputId = React.useId();
+  const alsoAppId = React.useId();
 
   const createMode = mode === 'create';
   const readOnly = mode === 'view';
@@ -475,6 +451,10 @@ export function PackageFormDialog({
   // objectui#13278 — false while a dependencies row has an empty or duplicate
   // package name; the editor flags the row and save waits for it.
   const [dependenciesValid, setDependenciesValid] = React.useState(true);
+  // objectstack#37134 — 「同时创建应用」: ticked by default each time the
+  // dialog opens. Only offered in create mode with an app step.
+  const [alsoApp, setAlsoApp] = React.useState(true);
+  const offersApp = mode === 'create' && newApp !== undefined;
 
   React.useEffect(() => {
     if (!open) return;
@@ -494,6 +474,7 @@ export function PackageFormDialog({
     setBusy(false);
     setDependenciesValid(true);
     setAdvancedOpen(false);
+    setAlsoApp(true);
   }, [open, createMode, manifest]);
 
   const handleDependenciesChange = React.useCallback((dependencies: DependencyMap, valid: boolean) => {
@@ -572,9 +553,7 @@ export function PackageFormDialog({
 
   // The help line SchemaForm would have shown under the id: the localized row
   // when there is one, else the spec's own `.describe()` (see package-schema).
-  const idHelp = appDoor
-    ? t('engine.studio.newApp.help.id', locale)
-    : (tOptional('engine.packages.form.help.id', locale) ?? ManifestSchema.shape.id.description);
+  const idHelp = tOptional('engine.packages.form.help.id', locale) ?? ManifestSchema.shape.id.description;
 
   // Spec validation → inline issues (only where fields are editable).
   const issues: SchemaFormIssue[] = React.useMemo(() => {
@@ -659,12 +638,14 @@ export function PackageFormDialog({
           version: versionStr,
           type: draft.type ?? 'app',
         };
-        // objectstack#36748 — the new-app door reserves its app's name before
-        // anything is written: a taken one refuses the whole confirm, and the
-        // namespace it is made from sits behind Advanced.
+        // objectstack#36748 — with 「同时创建应用」 ticked (objectstack#37134)
+        // the app's name is reserved before anything is written: a taken one
+        // refuses the whole confirm, and the namespace it is made from sits
+        // behind Advanced.
+        const appStep = offersApp && alsoApp ? newApp : undefined;
         let appName: string | null = null;
-        if (newApp) {
-          const reserved = await newApp.reserve(String(draft.namespace ?? '').trim());
+        if (appStep) {
+          const reserved = await appStep.reserve(String(draft.namespace ?? '').trim());
           if ('taken' in reserved) {
             setError(tFormat('engine.studio.newApp.nameTaken', locale, reserved.taken));
             setAdvancedOpen(true);
@@ -680,14 +661,14 @@ export function PackageFormDialog({
         const id = String((created?.manifest?.id as string) ?? manifestBody.id);
         const createdName = String((created?.manifest?.name as string) ?? manifestBody.name);
         result = { id, mode, package: created };
-        if (newApp && appName) {
+        if (appStep && appName) {
           // The package is there now, so a refused app does not keep the
           // author in the dialog: the toast says so and the top bar's Create
           // app is the way to try again.
           try {
-            await newApp.create(id, appName, createdName);
+            await appStep.create(id, appName, createdName);
             result.app = appName;
-            toast.success(tFormat('engine.studio.newApp.created', locale, { name: createdName }));
+            toast.success(tFormat('engine.packages.create.createdWithApp', locale, { name: createdName }));
           } catch (e) {
             result.app = null;
             toast.error(
@@ -757,7 +738,7 @@ export function PackageFormDialog({
       // Hence `readEnvelopeUserMessage` at the throw site and this read here.
       const marked: boolean = typeof e?.userMessage === 'string' && e.userMessage !== '';
       if (e?.status === 409 || /already exists/i.test(msg)) {
-        setError(marked ? msg : t(appDoor ? 'engine.studio.newApp.exists' : 'engine.packages.create.exists', locale));
+        setError(marked ? msg : t('engine.packages.create.exists', locale));
       } else if (e?.status === 403 || /manage_metadata/i.test(msg)) {
         // objectstack#8270 — for an UNMARKED body this arm still answers
         // exactly as it did, and that is the whole of what objectstack-ai/objectstack#8270 measured. The
@@ -778,7 +759,7 @@ export function PackageFormDialog({
       } else {
         setError(
           msg ||
-            t(appDoor ? 'engine.studio.newApp.failed' : createMode ? 'engine.packages.create.failed' : 'engine.packages.edit.failed', locale),
+            t(createMode ? 'engine.packages.create.failed' : 'engine.packages.edit.failed', locale),
         );
       }
     } finally {
@@ -816,7 +797,7 @@ export function PackageFormDialog({
 
   const title =
     mode === 'create'
-      ? t(appDoor ? 'engine.studio.newApp.title' : 'engine.packages.create.title', locale)
+      ? t('engine.packages.create.title', locale)
       : mode === 'edit'
         ? t('engine.packages.edit.title', locale)
         : t('engine.packages.view.title', locale);
@@ -828,7 +809,7 @@ export function PackageFormDialog({
           <DialogTitle>{title}</DialogTitle>
           {mode === 'create' ? (
             <DialogDescription>
-              {t(appDoor ? 'engine.studio.newApp.description' : 'engine.packages.create.description', locale)}
+              {t('engine.packages.create.description', locale)}
             </DialogDescription>
           ) : (
             <DialogDescription className="font-mono text-xs">
@@ -863,6 +844,26 @@ export function PackageFormDialog({
                 <div className={FLUSH_SECTION}>
                   <SchemaForm {...formProps} form={createForms.tail} />
                 </div>
+                {offersApp && (
+                  <div className="flex items-start gap-2" data-testid="package-form-also-app">
+                    <Checkbox
+                      id={alsoAppId}
+                      checked={alsoApp}
+                      onCheckedChange={(v) => {
+                        setAlsoApp(v === true);
+                        setError(null);
+                      }}
+                      className="mt-0.5"
+                      data-testid="package-form-also-app-checkbox"
+                    />
+                    <div className="space-y-0.5">
+                      <Label htmlFor={alsoAppId} className="text-sm font-medium">
+                        {t('engine.packages.create.alsoApp', locale)}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">{t('engine.packages.create.alsoAppHint', locale)}</p>
+                    </div>
+                  </div>
+                )}
               </section>
               {/* objectstack#27833 — the technical rows. The content stays
                   mounted while closed (`forceMount` plus `hidden`) so the id
@@ -882,7 +883,7 @@ export function PackageFormDialog({
                       {t('engine.packages.form.advanced', locale)}
                     </span>
                     <span className="mt-0.5 block text-xs text-muted-foreground">
-                      {t(appDoor ? 'engine.studio.newApp.advancedHint' : 'engine.packages.create.advancedHint', locale)}
+                      {t('engine.packages.create.advancedHint', locale)}
                     </span>
                   </span>
                   <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=closed]:-rotate-90" />
@@ -894,7 +895,7 @@ export function PackageFormDialog({
                     testId="package-form-id"
                   >
                     <Label htmlFor={idInputId} className="text-sm font-medium">
-                      {t(appDoor ? 'engine.studio.newApp.id' : 'engine.packages.create.id', locale)}
+                      {t('engine.packages.create.id', locale)}
                       <span className="ml-0.5 text-destructive" aria-hidden="true">
                         *
                       </span>
@@ -921,7 +922,7 @@ export function PackageFormDialog({
                   </DerivedField>
                   <DerivedField
                     derived={!touched.namespace}
-                    hint={t(appDoor ? 'engine.studio.newApp.nsDerived' : 'engine.packages.nsRule.derived', locale)}
+                    hint={t('engine.packages.nsRule.derived', locale)}
                     testId="package-form-namespace"
                   >
                     <div className={FLUSH_SECTION}>
@@ -983,7 +984,7 @@ export function PackageFormDialog({
               <Button onClick={submit} disabled={!canSubmit} data-testid="package-form-submit">
                 {busy
                   ? t(createMode ? 'engine.packages.create.creating' : 'engine.packages.edit.saving', locale)
-                  : t(appDoor ? 'engine.studio.app.create' : createMode ? 'engine.packages.create.submit' : 'engine.packages.edit.save', locale)}
+                  : t(createMode ? 'engine.packages.create.submit' : 'engine.packages.edit.save', locale)}
               </Button>
             </>
           )}

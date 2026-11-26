@@ -324,6 +324,49 @@ export function operationMessageTranslationKey(messageKey: string): string {
  *
  * Their English is byte-identical to the fixed sentences the door answered
  * before they were localized.
+ *
+ * How the door reads them, for whoever overrides or debugs them:
+ *
+ *   - The door holds no `i18n` service, so a `translation` item's
+ *     `errors.print_*` entry is NOT consulted for these keys: the built-in
+ *     catalog is the only source of their text.
+ *   - `Accept-Language` is read by its top tag only
+ *     (`preferredLocaleFromHeader`, no q-value negotiation), the platform's
+ *     existing reading; a top tag the catalog lacks answers English.
+ *   - The server fault log records the thrown error's own message. Only a
+ *     throw with an EMPTY message puts the localized sentence into the log line
+ *     in its place (`serverFaultLogMessage`'s fallback); every other throw logs
+ *     its own text, whatever language the caller was answered in.
+ *
+ * The `action_forward_*` keys are the `/actions` door's `503` for a same-origin
+ * `type: 'api'` action it cannot forward (`apiActionForwardUnavailableError`,
+ * `@objectstack/runtime`): the kernel exposes no in-process request path. They
+ * are an operator's sentence, not a business user's, and they say so; they are
+ * localized because the console shows the wire `message` of a refused action
+ * to whoever clicked it (a print action whose forward is unavailable among
+ * them). The door renders them in the caller's language through its execution
+ * context (`locale`, which the dispatcher resolves from the request's top
+ * `Accept-Language` tag, then `workspaceLocale`, then `en`), the reading every
+ * other refusal of that door uses. `{{action}}` is the action's name,
+ * `{{target}}` its quoted target, or `action_forward_target_unnamed` when it
+ * declares none. Code and status are unchanged, and no `userMessage` is added
+ * to the fault.
+ *
+ *   - `action_forward_unavailable` — the REST and MCP doors: the deployment's
+ *     HTTP server is the remedy.
+ *   - `action_forward_unavailable_host` — the host door (`dispatchAction`):
+ *     the kernel the call was handed is the remedy.
+ *
+ * The `own_door_*` keys are the own-door bridge's `501 NOT_IMPLEMENTED` on a
+ * kernel with no `http.server` (`own-door-bridge.ts`, `@objectstack/runtime`):
+ * no service is registered for the door's slot, or the registered one lacks
+ * the door's member. `{{door}}` is the door's noun, itself a key of this
+ * catalog (`own_door_print`), capitalized; `{{slot}}`, `{{producer}}` and
+ * `{{member}}` are the slot, package and member names, never translated. The
+ * bridge reads the request's top `Accept-Language` tag, as the print door
+ * does, and holds no `i18n` service either, so no `errors.own_door_*`
+ * override is consulted. A bridge that names no noun key keeps its English
+ * sentence whatever the request's language.
  */
 export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> = {
   en: {
@@ -390,6 +433,15 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     print_timed_out: 'The record could not be printed to a file in the time a print is allowed.',
     print_failed: 'The record could not be printed to a file because of an error on the server.',
     print_caller_unresolved: 'The caller of this print could not be resolved.',
+    action_forward_unavailable:
+      "Action '{{action}}' is a same-origin `type: 'api'` action whose `target` ({{target}}) this door forwards to in-process, but this deployment's HTTP server exposes no in-process request path (IHttpServer.getRawApp). Operator: run an HTTP server plugin that implements getRawApp; the action is not dispatched around the door.",
+    action_forward_unavailable_host:
+      "Action '{{action}}' is a same-origin `type: 'api'` action whose `target` ({{target}}) this door forwards to in-process, but the kernel dispatchAction was handed exposes no in-process request path (IHttpServer.getRawApp). Pass dispatchAction the kernel your HTTP door is served from: on a multi-kernel host, the kernel that registers `kernel-resolver`, with the call's `environmentId` (an environment's own kernel owns no socket). On a single kernel, run an HTTP server plugin that implements getRawApp. The action is not dispatched around the door.",
+    action_forward_target_unnamed: 'endpoint',
+    own_door_service_unregistered:
+      '{{door}} is not available: no {{slot}} service is registered on this kernel. {{producer}} registers it.',
+    own_door_member_missing: '{{door}} is not available: the registered {{slot}} service does not implement {{member}}.',
+    own_door_print: 'the print door',
   },
   'zh-CN': {
     permission_denied: '您没有执行此操作的权限，如需访问请联系管理员。',
@@ -429,9 +481,17 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     query_field_not_readable: '当前请求按您无权查看的字段筛选、排序或分组，请去掉该条件后重试，或联系管理员。',
     delegation_scope_violation: '此更改超出了您被委派管理的范围，如需更改请联系管理员。',
     print_engine_unavailable: '暂时无法将记录打印为文件：打印引擎尚未就绪，原因已记录在服务器日志中。',
-    print_timed_out: '记录未能在打印允许的时间内打印为文件。',
+    print_timed_out: '打印超时：记录未能在允许的时间内打印为文件。',
     print_failed: '服务器出错，记录未能打印为文件。',
     print_caller_unresolved: '无法确认发起此次打印的用户。',
+    action_forward_unavailable:
+      "动作 '{{action}}' 是同源的 `type: 'api'` 动作，本接口会在进程内将其转发到它的 `target`（{{target}}），但此部署的 HTTP 服务器未提供进程内请求通道（IHttpServer.getRawApp）。运维人员：请运行实现了 getRawApp 的 HTTP 服务器插件；该动作不会绕过本接口执行。",
+    action_forward_unavailable_host:
+      "动作 '{{action}}' 是同源的 `type: 'api'` 动作，本接口会在进程内将其转发到它的 `target`（{{target}}），但传给 dispatchAction 的内核未提供进程内请求通道（IHttpServer.getRawApp）。请把提供 HTTP 接口的内核传给 dispatchAction：在多内核主机上，传入注册了 `kernel-resolver` 的内核，并带上本次调用的 `environmentId`（环境自身的内核不持有套接字）。在单内核上，请运行实现了 getRawApp 的 HTTP 服务器插件。该动作不会绕过本接口执行。",
+    action_forward_target_unnamed: '端点',
+    own_door_service_unregistered: '{{door}}不可用：此内核上未注册 {{slot}} 服务。该服务由 {{producer}} 注册。',
+    own_door_member_missing: '{{door}}不可用：已注册的 {{slot}} 服务未实现 {{member}}。',
+    own_door_print: '打印接口',
   },
   'ja-JP': {
     permission_denied: 'この操作を実行する権限がありません。アクセスが必要な場合は管理者にお問い合わせください。',
@@ -488,10 +548,19 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     delegation_scope_violation:
       'この変更は、管理を委任された範囲を超えています。変更が必要な場合は管理者にお問い合わせください。',
     print_engine_unavailable:
-      '現在、レコードをファイルに印刷できません。印刷エンジンの準備ができていません。原因はサーバーログに記録されています。',
-    print_timed_out: '印刷に許可された時間内にレコードをファイルに印刷できませんでした。',
+      '印刷エンジンの準備ができていないため、現在レコードをファイルに印刷できません。原因はサーバーログに記録されています。',
+    print_timed_out: '制限時間内にレコードをファイルに印刷できませんでした。',
     print_failed: 'サーバーでエラーが発生したため、レコードをファイルに印刷できませんでした。',
     print_caller_unresolved: 'この印刷を要求したユーザーを特定できませんでした。',
+    action_forward_unavailable:
+      "アクション '{{action}}' は同一オリジンの `type: 'api'` アクションで、このエンドポイントはその `target`（{{target}}）へプロセス内で転送しますが、このデプロイメントの HTTP サーバーはプロセス内リクエスト経路（IHttpServer.getRawApp）を提供していません。運用担当者：getRawApp を実装した HTTP サーバープラグインを実行してください。アクションがこのエンドポイントを迂回して実行されることはありません。",
+    action_forward_unavailable_host:
+      "アクション '{{action}}' は同一オリジンの `type: 'api'` アクションで、このエンドポイントはその `target`（{{target}}）へプロセス内で転送しますが、dispatchAction に渡されたカーネルはプロセス内リクエスト経路（IHttpServer.getRawApp）を提供していません。HTTP エンドポイントを提供しているカーネルを dispatchAction に渡してください。マルチカーネルのホストでは、`kernel-resolver` を登録しているカーネルを呼び出しの `environmentId` とともに渡します（環境自身のカーネルはソケットを持ちません）。単一カーネルでは、getRawApp を実装した HTTP サーバープラグインを実行してください。アクションがこのエンドポイントを迂回して実行されることはありません。",
+    action_forward_target_unnamed: 'エンドポイント',
+    own_door_service_unregistered:
+      '{{door}}は利用できません。このカーネルには {{slot}} サービスが登録されていません。このサービスは {{producer}} が登録します。',
+    own_door_member_missing: '{{door}}は利用できません。登録されている {{slot}} サービスは {{member}} を実装していません。',
+    own_door_print: '印刷エンドポイント',
   },
   'es-ES': {
     permission_denied:
@@ -553,10 +622,19 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     delegation_scope_violation:
       'Este cambio está fuera del ámbito que se le ha delegado para administrar. Póngase en contacto con su administrador si es necesario realizarlo.',
     print_engine_unavailable:
-      'Ahora mismo no se pueden imprimir registros en un archivo: el motor de impresión no está listo. El motivo consta en el log del servidor.',
-    print_timed_out: 'No se pudo imprimir el registro en un archivo en el tiempo permitido para una impresión.',
+      'En este momento no se pueden imprimir registros en un archivo: el motor de impresión no está listo. El motivo figura en el registro del servidor.',
+    print_timed_out: 'No se pudo imprimir el registro en un archivo dentro del tiempo permitido.',
     print_failed: 'No se pudo imprimir el registro en un archivo debido a un error en el servidor.',
     print_caller_unresolved: 'No se pudo identificar a la persona que solicitó esta impresión.',
+    action_forward_unavailable:
+      "La acción '{{action}}' es una acción `type: 'api'` del mismo origen cuyo `target` ({{target}}) este punto de acceso reenvía dentro del proceso, pero el servidor HTTP de esta implementación no expone ninguna vía de solicitud en proceso (IHttpServer.getRawApp). Operador: ejecute un plugin de servidor HTTP que implemente getRawApp; la acción no se despacha eludiendo este punto de acceso.",
+    action_forward_unavailable_host:
+      "La acción '{{action}}' es una acción `type: 'api'` del mismo origen cuyo `target` ({{target}}) este punto de acceso reenvía dentro del proceso, pero el kernel que se pasó a dispatchAction no expone ninguna vía de solicitud en proceso (IHttpServer.getRawApp). Pase a dispatchAction el kernel desde el que se sirve su punto de acceso HTTP: en un host con varios kernels, el kernel que registra `kernel-resolver`, con el `environmentId` de la llamada (el kernel propio de un entorno no tiene socket). En un solo kernel, ejecute un plugin de servidor HTTP que implemente getRawApp. La acción no se despacha eludiendo este punto de acceso.",
+    action_forward_target_unnamed: 'punto de acceso',
+    own_door_service_unregistered:
+      '{{door}} no está disponible: no hay ningún servicio {{slot}} registrado en este kernel. Lo registra {{producer}}.',
+    own_door_member_missing: '{{door}} no está disponible: el servicio {{slot}} registrado no implementa {{member}}.',
+    own_door_print: 'el punto de acceso de impresión',
   },
 };
 

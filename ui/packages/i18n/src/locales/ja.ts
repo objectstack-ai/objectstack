@@ -69,6 +69,9 @@ const ja = {
     autofillNoCurrency: '{{field}}は入力されませんでした。選択した金額は {{amount}} ですが、ここではまだ通貨が選択されていません。通貨を選択してから{{field}}を入力してください。',
     autofillCurrencyUnread: '{{field}}は入力されませんでした。選択した金額は {{amount}} ですが、ここでの通貨を読み取れませんでした。通貨を確認してから{{field}}を入力してください。',
     autofillKept: '{{field}}は以前の値のままです。',
+    autofillNowSameCurrency: '選択時に{{field}}は入力されませんでした。レコードは現在 {{to}} です。もう一度選択すると {{amount}} が入力されます。',
+    autofillNowSameCurrencyHeld: '選択時に{{field}}は入力されず、以前の値のままです。レコードは現在 {{to}} です。{{field}}を空にしてからもう一度選択すると {{amount}} が入力されます。',
+    autofillCopiedUnder: '{{field}}は {{amount}} として入力されましたが、レコードは現在 {{to}} です。必要に応じて {{to}} で{{field}}を入力してください。',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -678,6 +681,7 @@ const ja = {
       needsWholeRows:
         "グループ化にはすべてのレコードが必要ですが、このグリッドにはその一部のページしか渡されていないため、グループの件数を数えられません。すべてのレコードを渡すか、queryGroupHeaders を実装したデータソースからグリッドに読み込ませてください。",
       draftOnly: "{{fields}} ではグループ化されていません：公開するまで下書きにのみ存在します。",
+      moreGroupsNotLoaded: "一部のグループは読み込まれていません：このビューのグループ数はサーバーが 1 回の読み取りで返す数を超えているため、一部のみ表示しています。",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -2503,6 +2507,7 @@ const ja = {
       unavailableTitle: "AI アシスタントを利用できません",
       unavailableDescription: "このデプロイでは AI アシスタントが有効になっていません。それ以外の機能は通常どおり動作します。",
       unavailableError: "AI サービスに接続できませんでした。一時的にオフラインの可能性があります — 再試行するか、ホームに戻ってください。",
+      unavailableErrorDesktop: "AI サービスに接続できませんでした。一時的にオフラインの可能性があります — 再試行するか、アプリのスタートページに戻ってください。",
       unavailableRetry: "再試行",
       unavailableHome: "ホームに戻る",
       dock: {
@@ -3732,21 +3737,18 @@ const ja = {
   },
   home: {
     build: {
-      title: "アプリを作る",
       noCapability: "このシステムではアプリの作成はできません — 「メタデータ管理」権限が必要ですが、お使いのアカウントにはありません。",
-      inStudio: "Studio で新規作成",
+      inStudio: "空のアプリを新規作成",
     },
     template: {
       title: "テンプレートから始める",
       marketplaceDisabled: "このランタイムにはアプリマーケットプレイスが設定されていないため、ここからインストールできるテンプレートはありません。",
     },
-    welcomeAdminDescription: "ビジネスを一文で説明してください — AI がオブジェクト、画面、API、エージェントツールを生成します。左のメニューから自分で設定することもできます。",
     welcomeAdminDescriptionNoBuild: "左の管理メニューから最初のアプリケーションを設定してください。データが入ると、AI アシスタントが分析を手伝えます。",
     welcomeAdminDescriptionNoAi: "左の管理メニューから最初のアプリケーションを設定してください。",
     noAppsTitle: "アプリケーションがまだありません",
     noAppsDescription: "システムを準備中です — 管理者が共有したアプリがここに表示されます。",
     noAppsAddDescription: "最初のアプリを作成するか、テンプレートやアプリマーケットプレイスから始めましょう。",
-    buildWithAI: "AI でビルド",
     askAI: "AI に質問",
     recoveryReminder: {
       message: "シングルサインオンが利用できないときでもサインインできるよう、リカバリーパスワードを設定してください。",
@@ -5154,7 +5156,12 @@ const ja = {
     bulkRejected: '{{count}} 件を却下しました',
     bulkRejected_one: '{{count}} 件を却下しました',
     bulkRejected_other: '{{count}} 件を却下しました',
-    bulkPartial: '{{ok}} 件成功、{{fail}} 件失敗：{{which}}',
+    bulkPartialSummary: '{{ok}} 件成功、{{fail}} 件失敗',
+    bulkFailureLine: '{{title}}：{{reason}}',
+    bulkFailuresShowAll: 'すべて表示（{{n}}）',
+    bulkFailuresTitle: '未処理：{{n}} 件',
+    bulkFailuresBody: '以下のリクエストは変更されていません。それぞれに理由が表示されています。',
+    close: '閉じる',
     rejectOneTitle: '「{{title}}」を却下しますか？',
     rejectOneBody: 'リクエストを却下し、申請者に通知します。',
     rejectTitle: 'このリクエストを却下しますか？',

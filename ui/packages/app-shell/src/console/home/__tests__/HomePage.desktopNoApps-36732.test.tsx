@@ -4,8 +4,10 @@
  * objectstack#36732 — the desktop's no-apps empty state, what is left of the
  * retired platform home page. From 768 px up a viewer with no product app (no
  * app but Setup and the platform's own) is drawn 「No applications yet」, and a
- * viewer who may add an app is offered the sidebar's 「Add app」 doors (build
- * with AI, start from a template, the marketplace) as buttons. An administrator
+ * viewer who may add an app is offered the sidebar's 「Add app」 doors (a new
+ * blank app, start from a template, the marketplace) as buttons; 「Build with
+ * AI」 is no longer one of them, and the blank app is offered whether or not the
+ * build agent is served (objectstack#36908). An administrator
  * without `manage_metadata` is told why there are none (objectstack#8270);
  * anyone else is told their administrator shares apps with them.
  *
@@ -116,13 +118,22 @@ afterEach(() => {
 });
 
 describe('HomePage — the desktop no-apps empty state (objectstack#36732)', () => {
-  it('offers an admin who may author the 「Add app」 doors, building with AI first', () => {
+  it('offers an admin who may author the 「Add app」 doors, a new blank app first — with the build agent served too (objectstack#36908)', () => {
     render(<HomePage />);
     const empty = screen.getByTestId('home-no-apps');
     expect(empty).toHaveTextContent('«home.noAppsTitle»');
     expect(empty).toHaveTextContent('«home.noAppsAddDescription»');
-    const ai = screen.getByTestId('home-no-apps-build-with-ai');
-    expect(ai).toHaveAttribute('href', '/studio');
+    expect(screen.queryByTestId('home-no-apps-build-with-ai')).not.toBeInTheDocument();
+    // objectstack#37227 — no 「Build with AI」 by label either, and no bare /studio door.
+    expect(empty).not.toHaveTextContent('«home.buildWithAI»');
+    expect(empty.querySelector('a[href="/studio"]')).toBeNull();
+    const doors = Array.from(empty.querySelectorAll('a[data-testid^="home-no-apps-"]'));
+    expect(doors.map((a) => a.getAttribute('data-testid'))).toEqual([
+      'home-no-apps-new-in-studio',
+      'home-no-apps-template',
+      'home-no-apps-marketplace',
+    ]);
+    expect(screen.getByTestId('home-no-apps-new-in-studio')).toHaveAttribute('href', '/apps/setup/component/developer/packages?face=admin&new=package');
     expect(screen.getByTestId('home-no-apps-template')).toHaveAttribute('href', '/apps/setup/system/marketplace');
     expect(screen.getByTestId('home-no-apps-marketplace')).toHaveAttribute('href', '/apps/setup/system/marketplace');
     // The app tiles the retired page drew are gone: Setup and Studio are no app of the viewer's.
@@ -140,7 +151,7 @@ describe('HomePage — the desktop no-apps empty state (objectstack#36732)', () 
     viewer.buildServed = false;
     render(<HomePage />);
     expect(screen.queryByTestId('home-no-apps-build-with-ai')).not.toBeInTheDocument();
-    expect(screen.getByTestId('home-no-apps-new-in-studio')).toHaveAttribute('href', '/studio?new=package');
+    expect(screen.getByTestId('home-no-apps-new-in-studio')).toHaveAttribute('href', '/apps/setup/component/developer/packages?face=admin&new=package');
     expect(screen.getByTestId('home-no-apps-template')).toBeInTheDocument();
   });
 

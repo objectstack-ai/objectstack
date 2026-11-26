@@ -631,8 +631,8 @@ export function deleteFieldFilterParams(params: URLSearchParams, field: string):
  * finish and text it may not (objectui#9159, applying objectui#8441). A range
  * or equality chip's content is the USER'S OWN comparand, which no UI
  * catalogue key names, so it is finished here as `text` — through the caller's
- * {@link ComparandText} where the field declares options (objectstack#37259),
- * which is the object's own option label, not operator prose. An is-null
+ * {@link ComparandText} (objectstack#37259), which names the value as the grid
+ * cell does, not operator prose. An is-null
  * chip's content is PROSE this module would otherwise hard-code in English
  * for every reader on every locale; it therefore
  * travels as `textKey` and is resolved at the render site, which already
@@ -643,8 +643,9 @@ export interface FilterChip {
   /**
    * Finished text: a comparand, or a pair of range bounds. A whole-value
    * comparand is drawn through the caller's {@link ComparandText}, which names
-   * an options-bearing field's value by its option label; every other
-   * comparand is the user's own text, verbatim.
+   * the value as the grid cell does (a boolean's word, a lookup's record name,
+   * an option's label); every other comparand is the user's own text,
+   * verbatim.
    */
   text?: string;
   /**
@@ -659,9 +660,11 @@ export interface FilterChip {
 
 /**
  * How a chip draws ONE whole comparand of one field: the stored value a user
- * reads, e.g. a select option's translated label rather than its code. The
- * caller owns it because only the caller holds the object's field metadata and
- * the translation catalogue. The default draws the value as itself.
+ * reads, e.g. a select option's translated label rather than its code, the
+ * referenced record's name rather than its id, or the translated true / false
+ * word. The caller owns it because only the caller holds the object's field
+ * metadata, its data source and the translation catalogue. The default draws
+ * the value as itself.
  */
 export type ComparandText = (field: string, value: unknown) => string;
 
@@ -669,7 +672,7 @@ const comparandAsIs: ComparandText = (_field, value) => String(value);
 
 /**
  * The operator words whose comparand is a WHOLE stored value (objectstack#37259),
- * so it may be drawn as that value's option label. A text operator's comparand
+ * so it may be drawn as the caller names that value. A text operator's comparand
  * (`contains`, `starts_with`, …) is a fragment the user typed, which names no
  * option, so it always stays verbatim.
  */
@@ -699,10 +702,10 @@ const WHOLE_VALUE_OP_WORDS: ReadonlySet<string> = new Set(['not_equals', 'in', '
  * list joined with a comma.
  *
  * An equality, negation or membership comparand is drawn through
- * `comparandText` (objectstack#37259): the page passes one that names an
- * options-bearing field's value by its translated option label, the text the
- * grid cell shows for it. Range bounds and text-operator fragments stay
- * verbatim.
+ * `comparandText` (objectstack#37259): the page passes one that names the
+ * value the way the grid cell shows it (a translated option label, a lookup's
+ * record name, the translated true / false word). Range bounds and
+ * text-operator fragments stay verbatim.
  *
  * The emptiness arms are the only ones that yield `textKey` rather than `text`, for the
  * reason on {@link FilterChip}. The keys are the filter builder's existing

@@ -132,6 +132,8 @@ function boot(opts: {
     extraActions?: unknown[];
     /** [#28943] Objects served beside `crm_lead` (by name), e.g. a `sys_api_key` carrying its revoke action. */
     extraObjects?: any[];
+    /** [#37273] Further services by name (an `auth` that resolves a session, for a call through the real `dispatch()`). */
+    services?: Record<string, unknown>;
 } = {}) {
     const disabled = new Set(opts.disabled ?? []);
     const injected: Injected[] = [];
@@ -172,7 +174,8 @@ function boot(opts: {
         getObject: vi.fn(async (name?: string) => (name && served[name]) || objectDef),
     };
     const resolve = (n: string) =>
-        n === 'objectql' || n === 'data' ? ql
+        opts.services?.[n] !== undefined ? opts.services[n]
+        : n === 'objectql' || n === 'data' ? ql
         : n === 'metadata' ? metadata
         : (n === 'http.server' || n === 'http-server') && !opts.noServer ? server
         : null;
@@ -1862,5 +1865,46 @@ describe('[#34912] buildApiActionRequest stamps the caller organization on every
         expect((ban as any).body).toMatchObject({ userId: 'u_target', organizationId: 'org_session' });
         const none = buildApiActionRequest(declared('import_sso_users'), { params: { csv: 'x' }, ec: { userId: 'u_admin' } });
         expect((none as any).body).toEqual({ csv: 'x' });
+    });
+});
+
+// [#37273] The forward-unavailable 503 answers in the caller's language: the
+// operation-message catalog's `action_forward_unavailable`, through the
+// request's execution context, which the dispatcher resolves from the request's
+// top `Accept-Language` tag. Driven through the REAL `dispatch()`, so the
+// header is what the door reads, not a locale planted on a context.
+describe('[#37273] the forward-unavailable 503 follows the request\'s language', () => {
+    const viaWire = async (headers: Record<string, string>) => {
+        // A signed-in member: the session the `auth` service resolves from the cookie.
+        const auth = { api: { getSession: async () => ({ user: { id: 'u_member' } }) } };
+        const { dispatcher } = boot({ noServer: true, services: { auth } });
+        const result: any = await dispatcher.dispatch(
+            'POST', `/actions/${OBJECT}/${BAN_LEAD.name}`, { recordId: 'u_target' }, {},
+            { request: { headers: { host: 'app.example.test', 'content-type': 'application/json', cookie: 'os.session=member', ...headers } } } as any,
+        );
+        return result;
+    };
+
+    it('under accept-language zh-CN: 503 SERVICE_UNAVAILABLE, the zh-CN sentence naming the action and its target', async () => {
+        const res = await viaWire({ 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8' });
+
+        expect({ status: statusOf(res), code: codeOf(res) }).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+        expect(messageOf(res)).toBe(
+            `动作 '${BAN_LEAD.name}' 是同源的 \`type: 'api'\` 动作，本接口会在进程内将其转发到它的 \`target\`（'${BAN_LEAD.target}'），`
+            + '但此部署的 HTTP 服务器未提供进程内请求通道（IHttpServer.getRawApp）。运维人员：请运行实现了 getRawApp 的 HTTP 服务器插件；该动作不会绕过本接口执行。',
+        );
+        expect(res.response?.body?.error?.userMessage).toBeUndefined();
+    });
+
+    it('the control — an English or absent accept-language keeps today\'s English sentence, byte for byte', async () => {
+        const english =
+            `Action '${BAN_LEAD.name}' is a same-origin \`type: 'api'\` action whose \`target\` ('${BAN_LEAD.target}') this door forwards to in-process, `
+            + 'but this deployment\'s HTTP server exposes no in-process request path (IHttpServer.getRawApp). '
+            + 'Operator: run an HTTP server plugin that implements getRawApp; the action is not dispatched around the door.';
+        for (const headers of [{ 'accept-language': 'en-US,en;q=0.9' }, {}] as Array<Record<string, string>>) {
+            const res = await viaWire(headers);
+            expect({ status: statusOf(res), code: codeOf(res) }, JSON.stringify(headers)).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+            expect(messageOf(res), JSON.stringify(headers)).toBe(english);
+        }
     });
 });
