@@ -20,19 +20,17 @@
  * ## Where an item opens
  *
  * Through the one Studio address builder (`studioAddress.ts`, #36895), never a
- * hand-built path: a type a pillar still designs opens that pillar through
- * {@link studioItemPath}, and every other type opens its page in the "All
- * metadata" area with the owning package on `?package=`, the address the
- * type's list links the row to (ADR-0048). A designer card that moves its type
- * to a full-screen page deletes the type's `STUDIO_ITEM_PILLAR` row, and the
- * palette follows with no edit here.
+ * hand-built path: every type opens its page in the "All metadata" area with
+ * the owning package on `?package=`, the address the type's list links the row
+ * to (ADR-0048), where an object, a flow and a permission set open their
+ * designers full-screen.
  */
 
 import { customizationPackageId } from '@objectstack/spec/kernel';
 import { COMMAND_PALETTE_PARAM } from '../../urlParams.js';
 import { confirmUnsavedLeave } from '../../chrome/unsavedEdits.js';
 import { scopeListRows } from '../metadata-admin/metadataListState.js';
-import { studioItemPath, studioItemPillar, studioMetadataItemAddress } from './studioAddress.js';
+import { studioMetadataItemAddress } from './studioAddress.js';
 import type { StudioMenuEntry, StudioMenuGroup, StudioMenuGroupModel } from './studioMenuModel.js';
 
 /** One item a package's palette lists. */
@@ -114,11 +112,9 @@ export function studioPaletteItemsOf(
 
 /**
  * Where an item the palette lists opens, from the `/studio/:segment` it was
- * listed on: its pillar while one designs its type, else its page in the
- * area, scoped to the package that owns it.
+ * listed on: its page in the area, scoped to the package that owns it.
  */
 export function studioPaletteItemAddress(segment: string, item: Pick<StudioPaletteItem, 'type' | 'name' | 'packageId'>): string {
-  if (studioItemPillar(item.type)) return studioItemPath(segment, item.type, item.name);
   return studioMetadataItemAddress(segment, item.type, item.name, {
     query: `package=${encodeURIComponent(item.packageId)}`,
   });
@@ -176,11 +172,6 @@ export function studioPaletteDeparture(
   const path = cut < 0 ? to : to.slice(0, cut);
   if (path !== at.pathname) return 'leave';
   return pageQuery(cut < 0 ? '' : to.slice(cut + 1)) === pageQuery(at.search) ? 'stay' : 'reenter';
-}
-
-/** Whether two searches (`?` optional) name the same page, the palette's own keys and the order aside. */
-export function studioSamePageSearch(a: string, b: string): boolean {
-  return pageQuery(a) === pageQuery(b);
 }
 
 /**

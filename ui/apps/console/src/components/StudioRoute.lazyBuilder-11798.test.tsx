@@ -88,18 +88,20 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   LoadingFallback: () => <div data-testid="loading" />,
   LoadingScreen: () => <div data-testid="error-screen" />,
   STUDIO_ORG_SCOPE_SEGMENT: '~org',
-  STUDIO_ORG_SCOPE_PILLAR: 'automations',
   getProductName: () => 'ObjectOS',
   useHomePath: () => '/home',
 }));
 
 const { builderModuleLoads } = vi.hoisted(() => ({ builderModuleLoads: { count: 0 } }));
 
-vi.mock('./studioBuilder', () => {
+vi.mock('./studioBuilder', async () => {
   builderModuleLoads.count += 1;
   return {
     StudioEntryRedirect: () => <div data-testid="studio-entry">entry</div>,
     StudioDesignSurface: () => <div data-testid="studio-pillar-builder">pillars</div>,
+    // objectstack#36909 — the retired pillar addresses' redirect rides in the same module.
+    StudioPillarRedirect: (await vi.importActual<typeof import('@object-ui/app-shell')>('@object-ui/app-shell'))
+      .StudioPillarRedirect,
   };
 });
 

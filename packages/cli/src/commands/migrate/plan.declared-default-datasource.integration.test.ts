@@ -82,7 +82,7 @@ let port: number;
  */
 function writeConfig(fields: Record<string, unknown>): void {
   const stack = {
-    manifest: { id: 'com.example.fx24120', name: 'fx24120', version: '0.0.0', type: 'app', engines: { protocol: '^18' } },
+    manifest: { id: 'com.example.fx24120', name: 'fx24120', version: '0.0.0', type: 'app', engines: { protocol: '^19' } },
     datasources: [{ name: 'qa_main', driver: 'sqlite', config: { filename: `./${DATABASE}` } }],
     datasourceMapping: [{ default: true, datasource: 'qa_main' }],
     objects: [{ name: APP_OBJECT, sharingModel: 'private', fields }],

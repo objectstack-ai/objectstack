@@ -4,7 +4,8 @@
  * [ADR-0150 D3/D4/D5] Which row slot the history and rollback doors address
  * (`historySlotOf`), judged against a fake host so each arm is pinned on its
  * own: the served row's slot for `?package=P` (P's own, or the package-less
- * row the read falls back to, whether or not P ships the name), the bare
+ * row the read falls back to when P ships the name; [#37130] a P that neither
+ * holds nor ships the name is refused, never addressed at that row), the bare
  * plain read's refusal counting holders in code, `?package=` refused on a
  * type not stored per package, and whether the addressed slot holds a row.
  */
@@ -67,12 +68,33 @@ describe('historySlotOf: ?package=P addresses the slot of the row a read naming 
         expect(slot).toEqual({ owner: { packageId: null, sole: true }, addressed: true, held: true });
     });
 
-    it('P does not ship the name and the read falls back to the package-less row: the environment slot', async () => {
-        const slot = await historySlotOf(
+    it('[#37130] P neither holds nor ships the name and the read falls back to the package-less row: refused not-held-by-qualifier, never that row (BASE: the environment slot)', async () => {
+        const refused = await historySlotOf(
             fakeHost({ unbound: true, served: { package_id: null }, shippers: [] }),
             { type: 'flow', name: 'n', packageId: 'com.a' },
+        ).catch((error) => error);
+        expect(refused).toBeInstanceOf(PackageScopedNameRefusedError);
+        expect(refused.refusal.reason).toBe('not-held-by-qualifier');
+        expect(refused.refusal.callerPackageId).toBe('com.a');
+        expect(refused.refusal.candidates).toEqual([{ kind: 'environment' }]);
+    });
+
+    it('[#37130] beside another package\'s row too: a P that neither holds nor ships the name is refused naming both holders (BASE: the environment slot)', async () => {
+        const refused = await historySlotOf(
+            fakeHost({ candidates: ['com.b'], unbound: true, served: { package_id: null }, shippers: ['com.b'] }),
+            { type: 'flow', name: 'n', packageId: 'com.a' },
+        ).catch((error) => error);
+        expect(refused).toBeInstanceOf(PackageScopedNameRefusedError);
+        expect(refused.refusal.reason).toBe('not-held-by-qualifier');
+        expect(refused.refusal.candidates).toEqual([{ kind: 'package', packageId: 'com.b' }, { kind: 'environment' }]);
+    });
+
+    it('CONTROL: P\'s .custom pair row that declares the override of P is P\'s address: that row\'s slot', async () => {
+        const slot = await historySlotOf(
+            fakeHost({ candidates: ['com.a.custom'], unbound: true, served: { package_id: 'com.a.custom' }, shippers: [] }),
+            { type: 'flow', name: 'n', packageId: 'com.a' },
         );
-        expect(slot).toEqual({ owner: { packageId: null, sole: true }, addressed: true, held: true });
+        expect(slot).toEqual({ owner: { packageId: 'com.a.custom', sole: false }, addressed: true, held: true });
     });
 
     it("P's own row: P's slot, not sole beside the package-less row", async () => {

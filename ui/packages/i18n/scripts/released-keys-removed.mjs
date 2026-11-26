@@ -52,6 +52,20 @@ const opt = (name, fallback) => {
   }
   return v;
 };
+// A closed argument set: an argument this script does not know (a typo such as
+// `--refs`, or a bare positional) is refused rather than ignored, because an
+// ignored `--ref` would answer for the default ref and look like the answer asked for.
+const VALUED = new Set(['--tag', '--ref']);
+for (let i = 0; i < args.length; i++) {
+  if (VALUED.has(args[i])) {
+    i++;
+    continue;
+  }
+  if (args[i] !== '--json') {
+    console.error(`released-keys-removed: unknown argument '${args[i]}' (known: --tag REF, --ref REF, --json)`);
+    process.exit(2);
+  }
+}
 const TAG = opt('--tag', '@object-ui/i18n@18.6.0');
 const REF = opt('--ref', 'origin/main');
 const AS_JSON = args.includes('--json');
@@ -81,6 +95,13 @@ for (const ref of [TAG, REF]) {
     process.exit(2);
   }
 }
+
+// The commits both refs name. `^{commit}` peels an annotated tag to the commit it
+// tags: a bare `rev-parse` of an annotated tag answers the tag OBJECT's id, which
+// names no commit anyone can check out or compare against.
+const commitOf = (ref) => git('rev-parse', `${ref}^{commit}`).trim();
+const TAG_SHA = commitOf(TAG);
+const REF_SHA = commitOf(REF);
 
 const tmp = mkdtempSync(join(tmpdir(), 'released-keys-removed-'));
 process.on('exit', () => rmSync(tmp, { recursive: true, force: true }));
@@ -225,8 +246,9 @@ const groups = [...removed.keys()].sort();
 if (AS_JSON) {
   const body = {
     tag: TAG,
+    tagSha: TAG_SHA,
     ref: REF,
-    refSha: git('rev-parse', REF).trim(),
+    refSha: REF_SHA,
     total,
     movedBetweenModules: moved,
     groups: Object.fromEntries(
@@ -238,7 +260,7 @@ if (AS_JSON) {
   };
   console.log(JSON.stringify(body, null, 2));
 } else {
-  console.log(`Keys in ${TAG} absent at ${REF} (${git('rev-parse', '--short', REF).trim()}): ${total}`);
+  console.log(`Keys in ${TAG} (${TAG_SHA.slice(0, 10)}) absent at ${REF} (${REF_SHA.slice(0, 10)}): ${total}`);
   for (const g of groups) {
     const space = before.has(g) ? g : 'translation';
     const all = tagLangs(space);

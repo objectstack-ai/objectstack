@@ -383,6 +383,66 @@ describe('saveAndPublishRuntimeMetadata — a confirmed save everyone sees at on
 });
 
 /**
+ * objectstack#36350 (ruling 7168616260) — "Save to this view" pins its publish
+ * to the draft its own draft write returned (`draftVersion`, the receipt's
+ * version), and the draft bar's Publish to the draft it showed. Another
+ * writer's draft write landing in between moves the draft; the door refuses
+ * the publish `409 METADATA_CONFLICT`, nothing is published, and the moved
+ * draft — no longer this call's own — is never discarded.
+ */
+describe('the publish is pinned to the draft it means (objectstack#36350)', () => {
+  const RECEIPT = { success: true, version: 'hmac-sha256:draft-v1' };
+  const refusal = (currentVersion: string | null) =>
+    Object.assign(new Error('draft changed'), {
+      status: 409,
+      code: 'METADATA_CONFLICT',
+      body: { error: 'view/task.all draft changed', code: 'METADATA_CONFLICT', currentVersion },
+    });
+  const moved = () => refusal('hmac-sha256:moved');
+
+  it('Save to this view sends its own draft receipt\'s version as `draftVersion`', async () => {
+    const metadataClient = makeMetadataClient();
+    metadataClient.save.mockResolvedValue(RECEIPT);
+    await expect(saveAndPublishRuntimeMetadata('view', 'task.all', {}, { metadataClient })).resolves.toBe('published');
+    expect(metadataClient.publish).toHaveBeenCalledWith('view', 'task.all', { draftVersion: 'hmac-sha256:draft-v1' });
+  });
+
+  it('a draft moved inside the window is refused: nothing published, the moved draft left pending, `pending-draft`', async () => {
+    const metadataClient = makeMetadataClient();
+    metadataClient.save.mockResolvedValue(RECEIPT);
+    metadataClient.publish.mockRejectedValue(moved());
+    await expect(saveAndPublishRuntimeMetadata('view', 'task.all', {}, { metadataClient })).resolves.toBe('pending-draft');
+    // The draft now holds the other writer's change: ⛔ never discarded on their behalf.
+    expect(metadataClient.reset).not.toHaveBeenCalled();
+  });
+
+  it('a pinned draft no longer pending (`currentVersion: null`) rethrows the refusal: there is no draft to review', async () => {
+    const metadataClient = makeMetadataClient();
+    metadataClient.save.mockResolvedValue(RECEIPT);
+    const gone = refusal(null);
+    metadataClient.publish.mockRejectedValue(gone);
+    await expect(saveAndPublishRuntimeMetadata('view', 'task.all', {}, { metadataClient })).rejects.toBe(gone);
+    // Nothing of this call's is left to take back: the draft is no longer there.
+    expect(metadataClient.reset).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: a receipt that carries no version publishes unpinned, as before', async () => {
+    const metadataClient = makeMetadataClient();
+    metadataClient.save.mockResolvedValue({ success: true });
+    await saveAndPublishRuntimeMetadata('view', 'task.all', {}, { metadataClient });
+    expect(metadataClient.publish).toHaveBeenCalledWith('view', 'task.all');
+  });
+
+  it('the draft bar\'s publish passes the version it showed; without one it is unpinned', async () => {
+    const metadataClient = makeMetadataClient();
+    await publishRuntimeMetadata('report', 'pipeline', { metadataClient }, 'hmac-sha256:shown');
+    expect(metadataClient.publish).toHaveBeenLastCalledWith('report', 'pipeline', { draftVersion: 'hmac-sha256:shown' });
+    await publishRuntimeMetadata('report', 'pipeline', { metadataClient });
+    expect(metadataClient.publish).toHaveBeenLastCalledWith('report', 'pipeline');
+  });
+});
+
+/**
  * objectstack#36372 — a dashboard edited on its own page saves where Studio's
  * Customize would: the owning package when writable, else the app's
  * customization package (ADR-0146), declaring the override of its base. The

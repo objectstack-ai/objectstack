@@ -128,6 +128,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { translateMetadataDomain } from '../metadata-admin/i18n';
 // The source under test reaches dynamic imports of `@objectstack/lint`; their first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
@@ -196,7 +197,7 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
       </Routes>
       <LocationProbe />

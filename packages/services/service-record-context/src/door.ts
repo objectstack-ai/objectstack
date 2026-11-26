@@ -51,7 +51,9 @@ export interface RecordContextDoor {
    * A list read as the caller, `query_records`' read (with its one-level
    * `expand`). A related list with a `where` is read with the link filter and
    * that `where` joined under `$and`, and with its `orderBy` (ADR-0160 D3,
-   * second amendment): still one query.
+   * second amendment): still one query. The door decides each expansion
+   * target's API exposure: a target it does not expose is left unexpanded,
+   * so the lookup carries no id and no name (ADR-0160 D3 "Object level").
    */
   query(
     objectName: string,
@@ -83,6 +85,15 @@ export interface RecordContextDoor {
    * probe states no narrowing.
    */
   diagnoseDelegation?(objectName: string): Promise<{ narrowed: boolean; statement?: string } | undefined>;
+  /**
+   * [ADR-0160 D3] The most rows one `query` of this door may ask for: the
+   * deployment's page limits where the door refuses (or cuts) a larger page.
+   * The executor never asks a related list for more: a list whose cut plus
+   * its probe row is above the cap is read with at most the cap and cut one
+   * row under it, and the cut is stated. OPTIONAL: absent, or `undefined`,
+   * the door caps nothing below the executor's own cut.
+   */
+  pageCap?(): number | undefined | Promise<number | undefined>;
   /** The caller's locale ladder for the executor's sentences. OPTIONAL: `en`. */
   userTextLocales?(): Promise<readonly string[]>;
   /**

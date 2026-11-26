@@ -46,6 +46,8 @@ interface Harness {
   saveItem: ReturnType<typeof vi.fn>;
   /** Draft-addressed writes: `[url, parsedBody]` per `PUT ...?mode=draft`. */
   draftPuts: Array<[string, any]>;
+  /** objectstack#36350 — the request headers of each draft-addressed write, in order. */
+  draftPutHeaders: Array<Record<string, string>>;
   /** Every metadata URL the adapter fetched, in order. */
   urls: string[];
 }
@@ -71,8 +73,13 @@ function makeDS(opts: {
   published: any | Error;
   packages?: Record<string, unknown>;
   layers?: Record<string, unknown>;
+  /** objectstack#36350 — the `version` the draft read's envelope carries (`undefined`: none). */
+  draftVersion?: string;
+  /** objectstack#36350 — the status the draft-addressed write answers (default 200). */
+  draftPutStatus?: number;
 }): Harness {
   const draftPuts: Array<[string, any]> = [];
+  const draftPutHeaders: Array<Record<string, string>> = [];
   const urls: string[] = [];
 
   const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -82,10 +89,19 @@ function makeDS(opts: {
         status,
         headers: { 'Content-Type': 'application/json' },
       });
+    // The pending-drafts ledger `MetadataClient.getDraft` asks first (objectui#11799).
+    if (/\/meta\/_drafts(\?|$)/.test(url)) {
+      urls.push(url);
+      return json({ drafts: opts.draft == null ? [] : [{ type: 'view', name: opts.draft.name }] });
+    }
     if (url.includes('/meta/view/')) {
       urls.push(url);
       if ((init?.method ?? 'GET') === 'PUT') {
         draftPuts.push([url, JSON.parse(String(init?.body ?? '{}'))]);
+        draftPutHeaders.push({ ...((init?.headers ?? {}) as Record<string, string>) });
+        if (opts.draftPutStatus && opts.draftPutStatus !== 200) {
+          return json({ code: 'METADATA_CONFLICT', message: 'draft moved', currentVersion: 'hmac-sha256:moved' }, opts.draftPutStatus);
+        }
         return json({ success: true, version: 2 });
       }
       if (/\/layers(\?|$)/.test(url)) {
@@ -98,7 +114,12 @@ function makeDS(opts: {
         if (opts.draft == null) return json({ error: 'not found' }, 404);
         // Draft reads answer the `{type,name,item}` envelope (unlike the
         // bare-body published read) — the asymmetry `unwrapDraftBody` exists for.
-        return json({ type: 'view', name: opts.draft.name, item: opts.draft });
+        return json({
+          type: 'view',
+          name: opts.draft.name,
+          item: opts.draft,
+          ...(opts.draftVersion !== undefined ? { version: opts.draftVersion } : {}),
+        });
       }
       return json({ error: 'not found' }, 404);
     }
@@ -119,7 +140,7 @@ function makeDS(opts: {
     },
     ...(opts.packages ? { packages: opts.packages } : {}),
   };
-  return { ds, saveItem, draftPuts, urls };
+  return { ds, saveItem, draftPuts, draftPutHeaders, urls };
 }
 
 /** A published read that 404s, decorated the way the SDK client decorates. */
@@ -235,6 +256,13 @@ describe('ObjectStackDataSource.updateView — draft addressing (#4139)', () => 
     // would write the published overlay while a draft may still shadow it.
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      // The ledger lists the draft, so the strict draft read is sent (objectui#11799).
+      if (url.includes('/meta/_drafts')) {
+        return new Response(JSON.stringify({ drafts: [{ type: 'view', name: DRAFT_VIEW.name }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       if (url.includes('/meta/view/') && url.includes('state=draft')) {
         return new Response(JSON.stringify({ error: 'boom' }), {
           status: 503,
@@ -545,5 +573,77 @@ describe('ObjectStackDataSource.updateView — the stored view is the base (obje
     );
     expect(saveItem).not.toHaveBeenCalled();
     expect(draftPuts).toHaveLength(0);
+  });
+});
+
+/**
+ * objectstack#36350 (ruling 7168616260) — the draft branch writes pinned to the
+ * draft it read. A draft write by someone else landing between this read and
+ * this write (another author, or "Save to this view" in flight between its
+ * draft write and its publish) is refused `409 METADATA_CONFLICT` by the save
+ * door instead of being merged over: the edit never lands on a body it did not
+ * read. The read that pins is the strict draft read (`getDraft`, whose envelope
+ * carries `version`), taken before the layered read the body is merged from.
+ */
+describe('ObjectStackDataSource.updateView — the draft write is pinned to the draft it read (objectstack#36350)', () => {
+  it('pins `If-Match` to the draft read\'s version, read before the layers', async () => {
+    const { ds, draftPuts, draftPutHeaders, urls } = makeDS({
+      draft: DRAFT_VIEW,
+      published: notFound(),
+      draftVersion: 'hmac-sha256:draft-v1',
+    });
+
+    await ds.updateView('crm_activity', DRAFT_VIEW.name, { label: 'Pipeline Board' });
+
+    expect(draftPuts).toHaveLength(1);
+    expect(draftPutHeaders[0]['If-Match']).toBe('hmac-sha256:draft-v1');
+    expect(draftPutHeaders[0]).not.toHaveProperty('If-None-Match');
+    // The version is read first: a write landing between the two reads leaves
+    // the pin older than the body, so the write is refused rather than merged.
+    const draftRead = urls.findIndex((u) => u.includes('state=draft'));
+    const layersRead = urls.findIndex((u) => /\/layers(\?|$)/.test(u));
+    expect(draftRead).toBeGreaterThanOrEqual(0);
+    expect(layersRead).toBeGreaterThan(draftRead);
+  });
+
+  it('a draft that appeared after the read saw none is pinned "no draft" (`If-None-Match: *`)', async () => {
+    const { ds, draftPutHeaders } = makeDS({
+      draft: null,
+      published: notFound(),
+      // The layered read, sent after, sees a draft the strict read did not.
+      layers: { code: null, overlay: null, overlayScope: null, effective: null, draft: DRAFT_VIEW },
+    });
+
+    await ds.updateView('crm_activity', DRAFT_VIEW.name, { label: 'Pipeline Board' });
+
+    expect(draftPutHeaders).toHaveLength(1);
+    expect(draftPutHeaders[0]['If-None-Match']).toBe('*');
+    expect(draftPutHeaders[0]).not.toHaveProperty('If-Match');
+  });
+
+  it('a moved draft is refused 409 and the refusal reaches the caller', async () => {
+    const { ds, draftPuts } = makeDS({
+      draft: DRAFT_VIEW,
+      published: notFound(),
+      draftVersion: 'hmac-sha256:draft-v1',
+      draftPutStatus: 409,
+    });
+
+    const refusal = await ds.updateView('crm_activity', DRAFT_VIEW.name, { label: 'Pipeline Board' }).then(
+      () => null,
+      (err: unknown) => err,
+    );
+    expect(draftPuts).toHaveLength(1);
+    expect((refusal as { status?: number } | null)?.status).toBe(409);
+  });
+
+  it('CONTROL — a draft read that serves no version pins nothing, as before', async () => {
+    const { ds, draftPutHeaders } = makeDS({ draft: DRAFT_VIEW, published: notFound() });
+
+    await ds.updateView('crm_activity', DRAFT_VIEW.name, { label: 'Pipeline Board' });
+
+    expect(draftPutHeaders).toHaveLength(1);
+    expect(draftPutHeaders[0]).not.toHaveProperty('If-Match');
+    expect(draftPutHeaders[0]).not.toHaveProperty('If-None-Match');
   });
 });

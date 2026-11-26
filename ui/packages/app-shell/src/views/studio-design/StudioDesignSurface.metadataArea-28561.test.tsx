@@ -112,6 +112,7 @@ vi.mock('./StudioBundleItemEditor.js', () => ({
 }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 // The source under test reaches dynamic imports of `@objectstack/lint`; their first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
@@ -171,7 +172,7 @@ function renderAt(path: string) {
       <Routes>
         <Route path="/studio" element={<div data-testid="studio-entry" />} />
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );

@@ -617,6 +617,12 @@ export {
 // author was last in, else the package list. A host that declares the
 // `/studio` routes mounts it as their index.
 export { StudioEntryRedirect } from './views/studio-design/StudioEntryRedirect.js';
+// objectstack#36909 — a retired pillar address (`/studio/<package>`,
+// `/studio/<package>/data`, `/automations`, `/access`, `/interfaces`,
+// `/studio/~org/...`) lands on the page that replaced it in one redirect. A
+// host that declares the `/studio` routes mounts it on `:packageId` and
+// `:packageId/:tab`, with the builder as its children.
+export { StudioPillarRedirect } from './views/studio-design/StudioPillarRedirect.js';
 // The capability set that host's Studio entry gate read, provided around the
 // `/studio` subtree so every Studio exit that names no package lands where the
 // principal may go (Setup → Packages, else the "All metadata" area).
@@ -631,11 +637,10 @@ export {
 // `/studio` routes reads the reserved segment from here.
 export {
   STUDIO_ORG_SCOPE_SEGMENT,
-  STUDIO_ORG_SCOPE_PILLAR,
   studioOrgScopePath,
 } from './views/studio-design/studioScope.js';
-// Studio's "All metadata" area (objectstack ADR-0146 D1): per package beside
-// the pillars, at `/studio/<package>/metadata/*`, and across packages at the
+// Studio's "All metadata" area (objectstack ADR-0146 D1): per package, at
+// `/studio/<package>/metadata/*`, and across packages at the
 // reserved `/studio/~all/metadata/*`. A host that declares the `/studio` routes
 // reads the segments from here, and mounts the cross-package leg's area.
 export {
@@ -657,7 +662,6 @@ export { SETUP_PACKAGES_PATH } from './views/metadata-admin/packageSource.js';
 // through these, never by hand (`studioAddress.guard.test.ts`).
 export {
   STUDIO_ROOT_PATH,
-  STUDIO_HOME_PILLAR,
   studioLandingPath,
   studioPackagePath,
 } from './views/studio-design/studioAddress.js';

@@ -56,6 +56,10 @@ const dashboard = (name: string, refresh: Record<string, number>) => ({ name, la
 /**
  * The shape `os build` writes for a two-package project: the artifact's own
  * `manifest` is its last package's, every collection sits in a body.
+ *
+ * The boot fixtures pass `'>=18.0.0'`, not `'^19'`: it keeps the floor `'^18'`
+ * read as (18.0.0), which opens the conversion window this file is about, and
+ * admits protocol 19 at the handshake. `'^19'` reads as the floor 19.0.0.
  */
 function optionB(range: string, ordersBody: Bag, coreBody: Bag = {}): Bag {
     return {
@@ -142,7 +146,7 @@ afterAll(() => {
 
 describe('[#23027] the runtime\'s artifact load converts every package body once', () => {
     it('loadArtifactBundle hands back the converted body, and a second conversion (the metadata door\'s) finds nothing left', async () => {
-        const { artifactPath } = writeArtifact('loader', optionB('^18', { dashboards: [dashboard('ob_overview', { refreshInterval: 300 })] }));
+        const { artifactPath } = writeArtifact('loader', optionB('>=18.0.0', { dashboards: [dashboard('ob_overview', { refreshInterval: 300 })] }));
         const loaded = (await loadArtifactBundle(artifactPath, { unwrapEnvelope: true })) as Bag;
 
         expect(loaded.packages[0].manifest.dashboards).toEqual([dashboard('ob_overview', { refreshIntervalSeconds: 300 })]);
@@ -157,7 +161,7 @@ describe('[#23027] the runtime\'s artifact load converts every package body once
     describe('boots: the body\'s dashboard is served as `refreshIntervalSeconds: 300` under its own package', () => {
         let kernel: any;
         beforeAll(async () => {
-            kernel = await bootArtifact('subject', optionB('^18', { dashboards: [dashboard('ob_overview', { refreshInterval: 300 })] }));
+            kernel = await bootArtifact('subject', optionB('>=18.0.0', { dashboards: [dashboard('ob_overview', { refreshInterval: 300 })] }));
         }, BOOT_TIMEOUT);
         afterAll(async () => { try { await kernel?.shutdown(); } catch { /* noop */ } });
 
@@ -170,7 +174,7 @@ describe('[#23027] the runtime\'s artifact load converts every package body once
         let kernel: any;
         beforeAll(async () => {
             kernel = await bootArtifact('multi', optionB(
-                '^18',
+                '>=18.0.0',
                 { dashboards: [dashboard('ob_overview', { refreshInterval: 300 })] },
                 { dashboards: [dashboard('ob_core_overview', { refreshInterval: 120 })] },
             ));
@@ -187,7 +191,7 @@ describe('[#23027] the runtime\'s artifact load converts every package body once
         let kernel: any;
         beforeAll(async () => {
             kernel = await bootArtifact('control', {
-                manifest: core('^18'),
+                manifest: core('>=18.0.0'),
                 dashboards: [dashboard('ob_overview', { refreshInterval: 300 })],
             });
         }, BOOT_TIMEOUT);
@@ -225,7 +229,7 @@ describe('[#23027] the runtime\'s artifact load converts every package body once
         };
         const refreshes: Record<string, number>[] = [{ refreshInterval: 300 }, { refreshIntervalSeconds: 300 }];
         for (const refresh of refreshes) {
-            const { dir, artifactPath } = writeArtifact('db', optionB('^18', { ...declared, dashboards: [dashboard('ob_overview', refresh)] }));
+            const { dir, artifactPath } = writeArtifact('db', optionB('>=18.0.0', { ...declared, dashboards: [dashboard('ob_overview', refresh)] }));
             const resolved = resolveProjectDatabaseUrl({ artifactPath, projectRoot: dir, env: {} });
             expect([resolved.source, resolved.url, resolved.datasourceName], JSON.stringify(refresh))
                 .toEqual(['config-datasource', `file:${join(dir, 'ob.db')}`, 'ob_db']);

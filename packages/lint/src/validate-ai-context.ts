@@ -15,7 +15,9 @@
  *
  * - `ai-context-field-unknown`: a name in `fields`, a `related` entry's
  *   `fields`, `where` or `orderBy`, or `body.field` that the object does not
- *   define (a `where` or `orderBy` field the child lacks leaves the whole list
+ *   define — neither declares nor carries as an injected system column, which
+ *   the published definition the tool reads carries and the tool serves like
+ *   any field (a `where` or `orderBy` field the child lacks leaves the whole list
  *   out of every answer, ADR-0160 D1/D3 second amendment — the tool never
  *   runs a filter with one of its conditions removed);
  * - `ai-context-sort-field-unsortable`: a `related` entry's `orderBy` field
@@ -52,6 +54,7 @@ import { AI_CONTEXT_BODY_FIELD_TYPES, aiContextWhereFields } from '@objectstack/
 import { resolveObjectSortability } from '@objectstack/spec/api';
 import { REFERENCE_VALUE_TYPES, referenceTargetOf } from '@objectstack/spec/data';
 import { closureDependencyRemedy, recordsOf } from './object-graph.js';
+import { injectedColumnDefsFor } from './system-fields.js';
 
 export type AiContextSeverity = 'warning';
 
@@ -77,11 +80,23 @@ type AnyRec = Record<string, unknown>;
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
-/** An object's fields as a name → definition map, or `undefined` when it declares no readable map. */
+/**
+ * An object's fields as a name → definition map, or `undefined` when it declares no readable map.
+ *
+ * The EFFECTIVE map: the declared fields plus the system columns the registry
+ * injects without the author declaring them (`owner_id`, `created_at`, …;
+ * {@link injectedColumnDefsFor}, the tables `applySystemFields` and the served
+ * read's `applyInjectedSystemColumns` spread), a declared field winning over
+ * the injected one of its name. `get_record_context` judges a pack against
+ * the published definition, which carries those columns, and reads them: a
+ * verdict over the declared fields alone warns on a name the tool serves.
+ */
 function fieldMapOf(object: AnyRec): Map<string, AnyRec> | undefined {
   const raw = object.fields;
   if (!raw || typeof raw !== 'object') return undefined;
-  return new Map(recordsOf(raw).map((f) => [str(f.name), f] as const).filter(([name]) => name !== ''));
+  const fields = new Map(recordsOf(raw).map((f) => [str(f.name), f] as const).filter(([name]) => name !== ''));
+  for (const [name, def] of injectedColumnDefsFor(object)) if (!fields.has(name)) fields.set(name, { ...def });
+  return fields;
 }
 
 /** The object a reference field points at, or `undefined` for any other field. */
@@ -218,7 +233,7 @@ export function validateAiContext(
       }
       const orderBy = Array.isArray(entry.orderBy) ? (entry.orderBy as unknown[]) : [];
       // Judged by the projection the doors refuse by, never by a second reading of `type` or `sortable`.
-      const sortability = orderBy.length > 0 ? resolveObjectSortability({ fields: objects.get(child)?.fields }).fields : {};
+      const sortability = orderBy.length > 0 ? resolveObjectSortability({ fields: Object.fromEntries(childFields) }).fields : {};
       orderBy.forEach((node, k) => {
         const name = node && typeof node === 'object' ? str((node as AnyRec).field) : '';
         if (!name) return;
