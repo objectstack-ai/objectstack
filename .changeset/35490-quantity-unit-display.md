@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/platform-objects': patch
 '@object-ui/core': patch
 '@object-ui/fields': patch
