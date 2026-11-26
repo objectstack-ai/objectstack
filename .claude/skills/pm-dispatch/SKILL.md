@@ -158,7 +158,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 
 ## 车道与域
 
-- 车道两种:座位与专题(`epic:#<n>` 父单子树);全仓席的车道 = 座位贴接卡行的 `area:*` 与 epic。
+- 车道两种:座位与专题(`epic:#<n>` 父单子树);全仓席的车道 = 座位贴点名的 `area:*` 与 epic。
 - 取卡按专题与级(`references/execution-duties.md`);区租约只防同文件并发,⛔ 不定取哪张卡。
 - 锚定规则:每个包恰属一个域;`domain:*` = 修复落地包的域;`Seam:` 卡默认纵向派发。
 - `domain:*` 只决定文件归属:锚定、单认领路径;⛔ 不是队列或优先级单位。域席 server、spec、ui、devx、skills 已退役;脚本仍读或印它处行为未改,读作文件归属或既往席名。
@@ -174,7 +174,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 | `domain:ui` | `ui/**` 全部代码:`@object-ui/*` 库与 `ui/apps/*`、`ui/packages/types` 与 schema 语料、`ui/scripts` 与门禁工具、文档随所记录的面走;`packages/console`(dist 由 `pnpm console:build` 生成 ⛔ 不手改);协议恒归 `domain:spec`,受管面归 `domain:skills`;详见 `references/lanes/ui.md` |
 | `domain:cloud` | 涉 cloud(专题打 `area:cloud`)即整卡归 cloud PM(`repo:cloud` 席):读或改 cloud 代码、生产方或带 cloud 半边;本仓车道 ⛔ 不认领;只缺事实读数者留车道敲信箱;cloud PM 跟到关卡,余下本仓活写明 cloud 事实后另立卡;判据见 `references/cross-repo-coordination.md` |
 | `security` · `l2-review` · `eval`(车道,无 `domain:*` 标签) | 本仓安全公告(私有仓卡归该仓车道,cloud 即上行);席位 `security#N` 见 `references/lanes/security.md`;永不公开的规则只住 `references/security-findings.md`。L2 席、AI 评测席见 `references/lanes/l2-review.md`、`references/lanes/eval.md` |
-| `repo:objectstack`(全仓调度,无 `domain:*` 标签) | 跨各域按接卡行的专题认领本仓卡;cloud 与安全公告除外;见 `references/lanes/objectstack.md` |
+| `repo:objectstack`(全仓调度,无 `domain:*` 标签) | 跨各域按座位贴点名的专题认领本仓卡;cloud 与安全公告除外;见 `references/lanes/objectstack.md` |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`examples/*`(归它演练的子系统,测试基建见 devx 行)、`docs/audits/**` |
 
 - 表未覆盖的包首次分诊时归类并走 PR 更新本表;新增或退役 `domain:*` 必须同批改本表。
