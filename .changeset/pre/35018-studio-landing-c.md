@@ -2,6 +2,8 @@
 '@object-ui/app-shell': patch
 ---
 
+**Shipped in 18.6.0**, whose CHANGELOG missed this entry; listed here one release late.
+
 fix(studio): the Studio landing's own-app cards and 最近访问 entries show the app, not its package id, and 最近访问 is left out when it only repeats the cards
 
 Clause-②: no

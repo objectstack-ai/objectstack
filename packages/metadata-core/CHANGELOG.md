@@ -1,5 +1,434 @@
 # @objectstack/metadata-core
 
+## 19.0.0-next.0
+
+### Minor Changes
+
+- 2495486: feat(spec): `userActions.transfer`, the per-object switch for the Change Owner action, and its structural eligibility
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  An object can now say whether it offers the Change Owner action. The action is not meant for every record that happens to carry an `owner_id`: line items, invoices and other details get one injected too, and an admin holding `modifyAllRecords` would otherwise see the action everywhere.
+  
+  - **Structural eligibility (derived, never overridable).** `isTransferEligible(def)` from `@objectstack/spec/data` answers true only when the platform injects the object's reassignable `owner_id` (`resolveInjectedSystemColumns(def).owner`), an owner is provable for it, and the object does not declare that field `readonly: true` (in either `fields` shape, record or array). So `ownership: 'business_unit' | 'org' | 'none'`, every `managedBy` object, every `sys_*` object and `systemFields: false` never offer the action, and neither does an `external` object whose owner is unprovable (`isOwnerAnchorUnprovable`: it neither declares `owner_id` nor maps a remote column onto it in `external.columnMap`). `transferIneligibilityReason(def)` names the structural fact when the answer is no, and, where the object can be made eligible, the change that does it (drop `readonly` from `owner_id`, set `ownership` to `user`, declare or map the external owner).
+  - **The switch.** `userActions.transfer` takes the same shape as the CRUD entries beside it: a boolean, or `{ enabled, visibleWhen, disabledWhen }` whose CEL predicates read the record the action acts on. Omitted, it is on for `sharingModel` `private`, `public_read` and `public_read_write`, and for an object that declares no `sharingModel` (a custom object then resolves to `private`); it is off for a `controlled_by_parent` detail. Authors override both ways: `transfer: true` on a detail with a real owner, `transfer: false` where the owner is the actor by rule.
+  - **The one resolution.** `resolveUserActionTransfer(def)` returns `{ enabled, predicates? }`: structural eligibility first, then the switch, then the `sharingModel` default. It is the answer the Change Owner endpoint and the console action will read once they ship, each still asking the caller's own transfer verdict per record; neither exists in this release.
+  - **Refused at parse.** `transfer: true` or `{ enabled: true }` on an object that is not eligible is refused at `userActions.transfer`, with the structural reason and its remedy in the message. Closing the switch there (`false`) is accepted. `changeOwner` and `reassign` under `userActions` are refused with a pointer to `transfer`.
+  
+  The switch gates the dedicated action, not the raw write: a plain `owner_id` update stays governed by `allowTransfer` alone, so import mappings and hooks are unaffected. To block every change of owner, declare `owner_id` `readonly`.
+  
+  The Studio object form gains a Change Owner row under User Actions, with its label and help text translated in every shipped locale.
+  
+  The served object document classifies `userActions.transfer` beside the four CRUD entries: for a caller who cannot read a field, a `transfer` predicate that names it is removed and the switch with its other predicate stays, as for `edit` and `delete`, instead of the whole entry being dropped.
+  
+  Nothing reads the switch at runtime yet. The Change Owner endpoint and the console action come in follow-up changes, so the liveness ledger grades `userActions.transfer` `planned` and `os lint` / `os validate` warn an author who sets it to `true` or uses the object form that nothing honours it yet. The key is new, so no stored object carries it and nothing needs migrating.
+  
+  **Existing objects that set `userActions.exportCsv: true` get a new warning.** Drilling `userActions` showed that no export menu reads `exportCsv`: setting it to `false` does not hide CSV export, which follows the view's `exportOptions` and the object's effective API operations. The ledger now grades it `dead`, so `exportCsv: true` raises a `liveness-dead-property` warning at `os lint` / `os validate`, and the hint says to remove it (`exportCsv: false` is not flagged). It is a warning, not a refusal: every stored object still loads. A follow-up (#35619) either makes the export menus honour the key or removes it.
+- e114324: feat(units): a number field declares its unit with `unitConfig`, and the engine checks every unit code it stores
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  ADR-0158 R1, the membership card (#35489).
+  
+  **`unitConfig` on a field** (`@objectstack/spec`, `UnitConfigSchema`):
+  
+  - `{ unitMode: 'fixed', unit: 'KGM' }` on a `number`: the quantity is always in one standard UN/ECE Recommendation 20 unit, checked at parse against the standard unit table (exact uppercase; `C62` and `EA` are answered with the piece, `H87`).
+  - `{ unitMode: 'record', unitField: 'uom', unitDimension?: 'mass' }` on a `number`: each record names its unit by code in the sibling `text` field `unitField` names. The object refuses a pointer into nothing, into a non-`text` field, through a parent (`PARENT_FIELD.UNIT_FIELD` is reserved: a child cannot follow its parent's unit yet), or into a field carrying its own marker, and two quantities sharing one unit field with different `unitDimension` values.
+  - `{ unitMode: 'code', unitDimension?: 'count' }` on a `text`: a field holding a unit code with no quantity beside it, such as a material's base unit (Open item 8, ruled A). It is a unit marker, not a value domain, and is refused beside a `valueDomain`.
+  - `unitMode` is required and has no default. The key is refused on every other field type (`currency`, `formula`, `summary` included). A quantity stays a bare number, and needs no `scale`.
+  
+  **The write check** (`@objectstack/objectql`): at every insert, by-id update, predicate update and `validate()` preview, a unit code the row stores must be a standard code or one of the organization's own non-retired units (`sys_unit`), in exact uppercase and of the declared `unitDimension`, and a quantity may not stand beside a blank code. The row image is judged whenever the write touches the quantity or its unit field (Open item 9). Refusals, each 400, registered in the error-code ledger: `ERR_UNIT_CODE_REQUIRED`, `ERR_UNIT_CODE_UNKNOWN`, `ERR_UNIT_CODE_RETIRED`, `ERR_UNIT_DIMENSION_MISMATCH`. A row resting on a code that is no longer a member stays editable in its other fields; a quantity edit beside it is refused until the row moves to a member unit.
+  
+  **A unit is retired, never deleted**: the engine refuses a delete of a `sys_unit` row for every caller, a system writer and an automation run included, by id and batched (405 `ERR_UNIT_DELETE_REFUSED`), and `organization_admin` names `sys_unit` explicitly with no delete (`@objectstack/plugin-security`).
+  
+  `@objectstack/metadata-core` and `@objectstack/driver-sql` classify the new field key (field-level security keeps it; the DDL does not read it). `@objectstack/platform-objects`: the `sys_unit` docblock names its readers.
+- 170ca48: feat(spec): a field group lists its own members and their order (`fieldGroups[].fields`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A field group may now list which fields it shows and in what order:
+  
+  ```ts
+  fieldGroups: [
+    { key: 'basic', label: 'Basic', fields: ['account', 'name', 'valid_until'] },
+    { key: 'terms', label: 'Terms', fields: ['terms'] },
+  ]
+  ```
+  
+  The record page, the create and edit forms and the drawer show the group's fields in the list's order, whatever order the object's `fields` declares them in, so a group can be reordered without moving any field (and without changing a list view's default column order).
+  
+  Nothing changes for an object that writes no `fields` on its groups: a group without the list still holds the fields whose `group` names it, in field declaration order. `Field.group` is the older spelling and is still read; it is not deprecated for removal.
+  
+  The two spellings must agree. The object parse refuses a field one group lists while its own `group` names another declared group (reported at both places; a `group` naming no declared key is not another group, so the list wins), a field two groups list, a name one list repeats, and `fields` on a group that places a related list (`relatedList`). A field whose `group` names a listing group that leaves it out is shown after the listed fields, never dropped. A listed name the object does not declare is skipped, so removing a field never makes the object unparseable; `os lint` warns about it (`field-group-member-unknown`).
+  
+  New export: `readFieldGroupMembership` (`@objectstack/spec/data`), the membership `deriveFieldGroupLayout` places sections from, for editors that also show hidden fields.
+  
+  Studio: dragging a field inside a group, or into another group, now writes those groups' `fields` lists and leaves the object's field declaration order alone. Only the ungrouped bucket, which has no list, still reorders by declaration order. Moving a field to another group from the field inspector does the same once a list is involved.
+  
+  Field-level security: the object document served to a caller who cannot read some fields keeps each group's `fields` list, with the hidden names filtered out and the rest in order, so the record page and forms keep the layout for that caller.
+- 2a6f26a: feat(ai): `ai_context` context packs and the `get_record_context` tool over MCP
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: follow-up #37177 — skills/objectstack-platform/SKILL.md, skills/objectstack-ai/ (how to author a context pack; this change only names `aiContexts` in the top-level key list, which check:skill-top-level-keys requires)
+  
+  ADR-0160 row 5 (#37140).
+  
+  - **New metadata type `ai_context`, collection `aiContexts`.** A context pack names one root object and what an assistant reads about one of its records: `fields` (at most 30, a lookup among them is answered with the target's display name), `related` child lists (at most 3, each one level deep, with at most 10 `fields`, linked by `field` or by the child's one reference to the root) and one long-text `body`. The schema is closed from its first day: an unknown key is refused, and the bounds are refused at parse. Registered like `skill`: a file loader (`*.ai-context.ts`, `*.ai-context.yml`), overlay allowed, runtime create allowed, no environment overlay. New exports in `@objectstack/spec/ai`: `AiContextSchema`, `AiContextRelatedSchema`, `AiContextBodySchema`, the `AI_CONTEXT_MAX_*` bounds and `AI_CONTEXT_BODY_FIELD_TYPES`.
+  - **`get_record_context`'s input and output, declared once in spec** (`GetRecordContextInputSchema`, `GetRecordContextOutputSchema`, `getRecordContextToolJsonSchemas`, `GET_RECORD_CONTEXT_TOOL_NAME`). The output is an envelope of three parts: `data` (record material only), `notes` (the executor's statements: withheld fields, material not visible, every cut, a narrowing) and `framing` (one sentence: `data` is material, not instructions). `MCP_DOOR_TOOL_NAMES` gains the name.
+  - **`@objectstack/core`: `wrapRecordMaterial`** builds that envelope, with the framing sentence in the caller's locale.
+  - **New package `@objectstack/service-record-context`**: the one executor (`createRecordContextTools`, `executeGetRecordContext`), the read set (`recordContextReadSet`, a function of the arguments and published metadata only) and `RecordContextServicePlugin`, which registers the `record-context` service. Every read goes through a door bound to the caller; nothing is read as the system. Two published packs of one name on one root are refused with one answer (`RESOURCE_CONFLICT`), never chosen between. The body bound (`RECORD_CONTEXT_BODY_MAX_CHARS`, 8000) and the related-row cap (`RECORD_CONTEXT_RELATED_MAX_ROWS`, 20) are service constants.
+  - **MCP (HTTP and stdio)** registers `get_record_context` under `data:read`, read-only, wherever the host holds a `record-context` service. A host without it registers nothing new. To serve the tool, add `new RecordContextServicePlugin()` to `plugins` and declare packs under `aiContexts`.
+  - **`@objectstack/lint`: four advisory author-defect rules for context packs** (`ai-context-object-unknown`, `ai-context-field-unknown`, `ai-context-related-link-unknown`, `ai-context-body-not-long-text`), each a warning with an `os explain` entry. `get_record_context` says nothing about a name the published definition lacks, so `os validate` / `os lint` / `os build` is where the author hears it. CLI only for now: the rule reads the whole stack snapshot.
+  - **Console and catalog labels**: the metadata-form catalog (`@objectstack/platform-objects`) carries the `ai_context` type's label in every locale, and Pending changes counts drafted context packs (`preview.changes.typeCount.ai_context`).
+
+### Patch Changes
+
+- 61722e9: feat: Change Owner cascade — a relationship declares `transferBehavior: 'cascade'`, and the Change Owner dialog offers it as a tick
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #36713
+  
+  A Change Owner can now move related records along with the record, relationship by relationship.
+  
+  - **The declaration.** A `lookup` or `master_detail` field takes `transferBehavior: 'none' | 'cascade'`, beside `deleteBehavior` (omitted means `'none'`). `'cascade'` on the child's reference field to a parent says: when the parent's owner changes, the child records that point at it and are owned by the parent's previous owner may move to the new owner too. No other child records move; there is no filter key.
+  - **Refused where it could never act.** The key is refused on any other field type, `'cascade'` is refused on a reference to a `sys_` object and on a multi-value reference (`multiple: true`), and `'cascade'` is refused on a field of an object that does not offer Change Owner itself: one that is not structurally eligible (no reassignable owner), a `controlled_by_parent` detail (its access already follows its master), or one whose `userActions.transfer` is off. Each refusal names the field and the fix.
+  - **The request.** `POST /api/v1/data/:object/:id/change-owner` and `POST /api/v1/data/:object/change-owner` take an optional `cascade: [{ object, field }]` naming the relationships to move along (`data.changeOwner` / `data.changeOwnerMany` in `@objectstack/client`). A relationship that does not declare `'cascade'`, or whose child does not offer Change Owner, is refused `400 VALIDATION_ERROR` before anything is written; so is a cascade with a queue target. Each cascaded record is updated as the caller, so it needs the caller's own transfer grant on the child object. Each relationship's outcome in the answer's `cascade[]` lists every record the caller's write refused, with its id, code and sentence: a related record whose `owner_id` is locked on it (read-only, or under a `readonlyWhen` that holds) is refused `FIELD_NOT_ACCESSIBLE` and keeps its owner, as the record itself would be, while the record's own move stands. One call moves at most 500 related records; the records past that limit are counted in `remaining`, still with the previous owner, not listed. When a relationship's records could not be read, its outcome carries `readFailure` and none of them moved.
+  - **The candidates.** `GET /api/v1/data/:object/change-owner/cascades` (`data.changeOwnerCascades`) lists the relationships declared to an object whose child offers Change Owner. A child whose declared API exposure does not serve `update` is left out, and so is a child of a disabled package.
+  - **The Studio.** The field form and the object form's field rows offer `transferBehavior` beside `deleteBehavior`, on `lookup` and `master_detail` fields; the row's label and help text ship in the metadata-forms locale packs of `@objectstack/platform-objects`.
+  - **The dialog.** For a person target, the Change Owner dialog lists those relationships on which the explain engine allows the caller the `transfer` operation, one tick each, sends the ticked ones, and draws each relationship's outcome, every record it did not move included.
+  
+  A plain `owner_id` update is unchanged: the declaration is read only by the Change Owner action.
+- a23164e: feat(spec, ui): an object takes a colour from a fixed palette, and its icon is drawn as a white glyph on a square of that colour
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **`ObjectSchema.color` (new, optional).** One name from a closed palette of nine: `gray`, `blue`, `teal`, `green`, `amber`, `orange`, `red`, `pink`, `purple` (exported as `OBJECT_COLORS` and the `ObjectColor` type from `@objectstack/spec/data`). No free colour values: `color: '#ff0000'` is refused, and the refusal lists the nine names. An object without a `color` is drawn in the neutral `gray`. Nothing to migrate: every existing object stays valid and simply has no colour.
+  - **The AI blueprint carries it too.** `BlueprintObjectSchema.color` is the same leaf (required-but-nullable on `SolutionBlueprintStrictSchema`, like `icon`), and its rule asks the model to colour every object and give each object of one solution a different colour while the palette lasts. A producer of the STRICT shape must now send `color` on each object, `null` when it has none; the lenient shape a stored blueprint is read with keeps it optional.
+  - **`ObjectIconTile` (new, `@object-ui/components`).** Draws an icon name as a white glyph on a rounded square of a palette colour, in four sizes. Each name has a light-theme and a dark-theme value chosen so the white glyph keeps at least 3:1 contrast. `OBJECT_COLOR_TILE_CLASS` and `objectColorOrDefault` are exported with it.
+  - **Navigation draws objects as tiles.** In the sidebar, the app-home menu and the phone menu, every entry that opens an object is drawn as that object's tile: the entry's own `icon` when it names one, else the object's, on the object's colour. Dashboards, pages and links keep their line icons. `NavigationRenderer` takes a new `resolveTargetColor` resolver (`NavTargetColorResolver`) beside `resolveTargetIcon`; the console answers it from the object metadata it already holds (`useNavTargetColor`). A host that passes no `resolveTargetColor` gets its object entries as gray tiles where it had line icons.
+  - **The designer picks icon and colour together.** In the object's settings, the icon picker shows the nine colour swatches, and the trigger and every icon in the grid are previewed as the tile they become. The picker elsewhere (pages, apps, navigation entries) is unchanged: only objects carry a colour.
+  - The other places that draw an object's icon (list and record headers, search, related-record chips, the designer's object lists) switch to the tile in a follow-up release.
+  
+  `@objectstack/metadata-core`: the field-level-security reference table classifies the new `color` key as `keep` (a palette name names no field).
+  
+  `@objectstack/platform-objects`: the generic object form's metadata-form packs ship the new `color` row's label and help text in all 10 locales.
+- 6db1dc2: feat: the form's line-item table edits people, multi-select, tags, check and rating cells the way the main list does
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  `InlineGridColumnSchema.type` (a relationship field's `inlineColumns`, a form view's `subforms[].columns`, and the page blocks that carry the same column) accepts five more cell types, each spelled as its namesake field type: `user` (people), `multiselect`, `tags`, `boolean` (check) and `rating`. The column also takes an optional `max`, the star count of a `rating` cell (default 5).
+  
+  In the line-item table:
+  
+  - A `user` cell opens the main list's person picker under the cell: a searchable list with recent people and Clear; a pick writes and closes. `multiple` holds several people.
+  - A `multiselect` cell holds several of its options and a `tags` cell holds free-form tags. Each opens its searchable list under the cell; a click outside or Tab writes what was picked, Esc writes nothing. A list emptied in the cell writes `null`, as a cleared multi-value field stores, so a line whose only value was removed is still a blank line. A `tags` cell takes no `options`.
+  - A `boolean` cell is a checkbox: a click or Space toggles it and writes `true` / `false`.
+  - A `rating` cell draws its stars; a click on a star, or a digit key on the cell, sets it, and 0 clears it.
+  - Read-only and list-mode cells show people by name, a rating as its stars, a multi-select's option labels, and a check cell as the session's yes/no word.
+  
+  Visible change on existing forms: a column the table derives from a child field (no `type` written) now follows that field. A `boolean` / `toggle` field becomes a checkbox instead of the yes/no select, and it writes `true` / `false` instead of the strings `'true'` / `'false'` (the server reads both the same). A `rating` field becomes stars instead of a number box. `user`, `multiselect`, `checkboxes` and `tags` fields get their own cells instead of a plain text box that took a typed user id or a single option. A column that writes its `type` is unchanged, a `type: 'select'` column over a boolean field included. Which derived columns are visible by default is unchanged.
+  
+  The field-level security scrubber classifies the column's new `max` key as kept (a number, never a field name).
+- 70194ff: feat(audit): a record's activity stream shows each changed field's old → new values by default, with a new `fieldHistory` off switch on the object and the field, and a reader is served only the changes of fields they may read
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  A record's activity stream now shows `Field: old → new` for every changed field, on every object, unless the object or the field turns it off. Before, values showed only for a field that declared `trackHistory: true`. Every other change was named by its field label alone.
+  
+  - **New `enable.fieldHistory`, with no default.** Absent: values show. `false`: off for the object, and a change names its fields only. It has no default so that a parsed body never writes one. A built artifact or a stored definition therefore gets values when it is upgraded, with no rebuild.
+  - **`enable.trackHistory: false` alone no longer turns values off.** The flag keeps its meaning: with `true`, the default record page shows the compliance ledger's field changes to a reader the ledger serves, and the derived `history` API verb is served. To keep an object's activity free of values, write `enable: { fieldHistory: false }`. Every platform object that wrote `trackHistory: false` now also writes `fieldHistory: false`.
+  - **New field `fieldHistory`, with no default: the field's off switch.** Absent shows the values, `false` names the change without them, `true` shows them (a media or JSON type included). Under an object with `enable.fieldHistory: false`, values stay off whatever a field says.
+  - **Field `trackHistory: false` no longer means anything: it reads like absent, so the values show.** The field designer wrote it on every save while the key meant nothing, so a stored `false` cannot be told from a choice. `trackHistory: true` keeps one job: it opts a media or JSON field in. A credential field (`secret`, and `password` off better-auth objects) never shows values, because both sides are the same mask. A media or structured-JSON field (`image`, `file`, `avatar`, `video`, `audio`, `signature`, `composite`, `repeater`, `record`, `location`, `address`, `code`, `json`, `vector`) shows them only with an explicit `true` (`fieldHistory` or `trackHistory`).
+  - **The new field key is classified where every `FieldSchema` key is.** The SQL driver counts `fieldHistory` as a presentation key, so creating a column never reads it. The field-level-security scrub keeps it as written, because a boolean names no field.
+  - **Who reads a value:** the field-change code (`metadata.summary_message`) is now served to readers. It is narrowed change by change with the same field answer as `metadata.old` and `metadata.new`. A reference field's change is kept only for a reader served the referenced record's title. When a reader is not served some of a summary's changes, the summary is rebuilt from the changes they are served instead of being dropped whole. The full audit ledger is not widened.
+  - **A long value no longer fails the activity insert.** The stored summary is fitted to `sys_activity.summary`'s `maxLength` (500): each side is cut first, then trailing changes are left out. The code keeps every change, with each side capped at 1,000 characters.
+  
+  To keep an object's activity free of values, set `enable: { fieldHistory: false }` on it. For one field, set `fieldHistory: false` on that field; `trackHistory: false` does not turn values off.
+- 70d07fd: feat: an object arranges its actions per scope (`actionLayout`: pinned buttons and the 「More」 order), and the design mode sets it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #36630
+  
+  A page header draws at most three of its actions as buttons and puts the rest in its 「More」 menu. An object now arranges them itself with the new optional key `actionLayout` on `ObjectSchema` and `ObjectExtensionSchema`: `{ list?: Arm, record?: Arm }`, where `Arm = { pinned: string[], more?: string[] }`. `pinned` names the buttons in the order drawn, at most three (`[]` pins none); `more` orders the 「More」 menu; an action the scope places that neither part names goes to the end of 「More」 in its default order. A pinned action that is hidden leaves its button out, and no other action takes its place.
+  
+  - `list` arranges the actions placed at `list_toolbar` and the list page's built-ins `$import` and `$export`. A built-in is only ever pinned: one named in `more` is refused with its reason, since not pinned the list page draws it in its own Import / Export menu.
+  - `record` arranges the actions placed at `record_header` or `record_more`. It is a scope, not a page: the record page header, the side preview and a phone's bottom action bar all read it. A `page:header` that authors its own `actions` list keeps that list.
+  - An arm left out (or the key left out) draws that scope exactly as before.
+  
+  What each package gains:
+  
+  - `@objectstack/spec`: the key and its shape refusals at every door (more than three pinned, a name given twice in one part or in both, a malformed name, a built-in the scope does not have, a built-in in `more`, since a built-in is only ever pinned), each with its reason. New exports `OBJECT_ACTION_LAYOUT_PINNED_LIMIT`, `OBJECT_ACTION_LAYOUT_SCOPES`, `OBJECT_ACTION_LAYOUT_BUILTINS` and the types `ObjectActionLayoutScope`, `ObjectActionLayout`, `ObjectActionLayoutArm`. The object form offers it under Advanced, one JSON row per arm.
+  - `@objectstack/objectql`: `actionLayout` joins `fieldGroups` and `relatedLists` as a key only the base's paired `.custom` package writes on an `object_extension` (ADR-0146 D10). It is applied last, after every other layer, arm by arm: each arm it writes replaces the served arm for that scope whole, and an arm it leaves out stays. A manifest's `objectExtensions` entry now carries the key to the fold.
+  - `@objectstack/metadata-protocol`: the one judge refuses `actionLayout` from any other package, naming the action's own `locations` and `order` as the way to place an action the package brings. Each door says it its own way: publish, restore and draft promotion of an `object_extension` answer `VALIDATION_ERROR` / 400; marketplace install refuses the package body with `VALIDATION_ERROR` / 422; `os validate` and `os build` exit non-zero and print the row; the registry fold skips the key and leaves a note.
+  - `@objectstack/lint`: `validateObjectActionLayout` (`object-action-layout-unknown`, `object-action-layout-not-placed`, at `error`) refuses in `os validate`, `os build` and `os lint` a name, in either part, that is no action of the object or is not placed in the scope its arm arranges.
+  - `@object-ui/types`: `arrangedHeaderActions(actions, arm, scope)`, the one reader both record headers and the list header apply, and `readActionLayoutArm`.
+  - The console: both record headers (the default page's and an authored `page:header` with `placedActions: true`) and the list header draw the arrangement. In the design mode, 「Header buttons」 at the end of the page header lists the scope's actions under 「Pinned to header」 and 「Other」 (the 「More」 menu), each dragged into order; a dot moves an action between them, a fourth pin is refused with a toast, the header shows the change at once, and 「Save」 writes only the arms that changed: into the object's own package when it is writable, else into the installed object's customization package as an `object_extension`, through the one writer of an installed object's arrangement (`saveObjectExtensionArrangement`, whose patch type now takes the object-shaped `actionLayout`), which refuses a customization package the server does not list writable. A name the scope no longer offers is listed in the panel as left out. A name the header cannot draw is refused at save with its reason. New `@object-ui/i18n` keys under `designMode.pins`.
+- 28588d0: feat(spec): a field can say it is not asked for when a record is created (`showOnCreate`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #36455
+  
+  `FieldSchema` gains `showOnCreate`, an optional boolean. Absent or `true`, the field is asked for when a record is created, as today. `false` says the business does not ask for it at creation: every create surface (the create dialog, the full-page create, an action-opened create) leaves it out, while editing, the record page and lists keep showing it, so the value is filled in after the record exists.
+  
+  - The one pair refused is `showOnCreate: false` on a `required: true` field, at the field's `showOnCreate` key, at every door that parses a field (`defineStack`, `os validate`, the metadata save): a required field is always asked for when a record is created, so the person creating it sees every value the record must have. The message names both fixes (keep the field on create, or drop `required`). A declared `defaultValue` makes no exception: the field is still asked for, with its default filled in. A `requiredWhen` field is accepted, since its gate is a predicate the parse cannot judge; the write door still refuses a create born inside it.
+  - No create surface reads the key yet: it is `planned` in the liveness ledger, and the Console's create surfaces read it in the change that follows. Nothing that parses today is refused, and no parsed field's output changes (the key has no default).
+  - `@objectstack/driver-sql` and `@objectstack/metadata-core` classify the new key in their every-field-key ledgers: `FIELD_KEY_STORAGE_CLASS` marks `showOnCreate` `presentation` (the DDL never reads it), and `FIELD_REFERENCE_POSITIONS` keeps it, since it is a boolean that names no field. Neither changes what it does with any field.
+- c45dd80: feat(setup): Setup → Configuration → Public forms lists every public form of the environment and switches it on or off
+  
+  Clause-②: yes (widening) — a new Setup navigation id `nav_public_forms`, a new component id `forms:public-forms`, new language-pack keys (the `publicFormsSetup` block and the nav label) in every shipped locale, and `anonymousFormIntakeWithdrawnIn` newly exported from `@objectstack/spec/ui` (moved from `@objectstack/metadata-core`, which re-exports the same binding)
+  Metadata-protocol: none
+  
+  A system administrator (`manage_platform_settings`, the capability the Setup entry asks) now has one page for the operations side of public forms. It lists every public form of the environment: its name, the object a submission creates a record of, its address, and whether it is on. Per row: switch it on or off, copy its address, or open it in a new tab. A form is designed (created, deleted, its fields and title changed) in Studio, not here.
+  
+  - **Which forms are listed.** A form view whose `sharing` opens it to anonymous intake once switched on (`allowAnonymous: true` and a `publicLink`), read by the same rule the anonymous form routes use (`anonymousFormIntakeCandidates`). A switched-off form stays listed and can be switched back on. A form with no public address or no anonymous access is an internal form and is not listed. The list is the effective one (`GET /meta/view`), so an installed app's form switched off in this environment lists as off.
+  - **Where a switch is saved.** The switch is the form's `sharing.enabled`, saved and published at once. A form of a writable package is saved in that package. A form of an installed (read-only) app is saved as this environment's customization, an override in the app's `.custom` package (ADR-0146), never an edit of the app's own package, so the app upgrades as before. Switching such a form back on removes the override when it held nothing but the switch, so the app's own form is served again; an override that also carries design changes keeps them, with the switch on.
+  - **A form its installed app ships switched off** (its address kept, `enabled` or `allowAnonymous` set to `false`, or `enabled` omitted, which the stack schema reads as `false`) stays closed whatever the environment saves: the anonymous routes treat the app's own document as a withdrawal that no override re-opens. The page judges this with the routes' own function, `anonymousFormIntakeWithdrawnIn`, now declared in `@objectstack/spec/ui` beside the rest of the intake rule; `@objectstack/metadata-core` re-exports the same binding, so the server's import is unchanged. The page lists such a form as "Off (switched off by its app)" with its switch disabled, also when an override already switches it on, and a switch-on writes nothing and says the app ships it switched off. A form whose app's document cannot be read is shown as status unknown, never as on.
+  - **After an app upgrade**, switching back on an override taken from an earlier version restores the app's own form when the form is otherwise unchanged. When it is not, the override is kept with the switch on and the page says the form stays on the app's earlier version, which Studio's "Restore package original" undoes.
+  - A switch over a draft already pending where it would save writes nothing and says so: that draft is its saver's and is never published on their behalf.
+  - A switch writes the form's metadata, which the server lets only a `manage_metadata` holder do. Without it the page still lists the forms but disables the switches and says why. A refused switch, and a list read that fails, are told in business words, never the server's raw message.
+  - A switched-off form keeps answering as it does today: `404 FORM_NOT_FOUND` at its address. No route, error code or stored key is added.
+  
+  New Setup navigation entry `nav_public_forms` in `group_configuration` (label "Public Forms", in every shipped locale) opening the component `forms:public-forms`; the Setup navigation now carries 35 entries. New locale block `publicFormsSetup` in every console locale. Not shown: when a form last took a submission, since a submission is an ordinary record of the form's object and records no form.
+- 021524c: feat(spec,ui): a field can be read-only by hand at the console while actions, imports, the API and flows keep writing it (`uiReadonly` / `uiReadonlyWhen`)
+  
+  Clause-②: yes (widening: two new optional authorable keys `Field.uiReadonly` and `Field.uiReadonlyWhen`)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37405
+  
+  A status column that only moves through actions, or a field an integration fills, used to have no honest declaration: `readonly: true` also strips every client write, so the action, the import and the API lost the field too. Fields now carry two lock tiers:
+  
+  | | server lock: no client writes | hand lock: no person edits at the console |
+  |:--|:--|:--|
+  | always | `readonly` | `uiReadonly` |
+  | conditional | `readonlyWhen` | `uiReadonlyWhen` (CEL, the same scope as `readonlyWhen`) |
+  
+  - **`uiReadonly: true` / `uiReadonlyWhen`.** These console surfaces lock the field: the create and edit dialogs (the field is left off them and out of the payload they submit, so a create from the console lands on the field's `defaultValue`, and a `required` field therefore needs one), the record page's inline edit and stage path, the highlight-strip chip, grid inline edit and its multi-row save, kanban drag between columns grouped by the field, calendar drag, and the line-item grid (a `uiReadonly` child field is not a derived column, and an authored column over it is locked; a `uiReadonlyWhen` one locks its cell per row). The Gantt, the timesheet cell, the kanban swimlane drag and the in-app assistant do not read the keys yet. The engine never reads either key, so REST, import, declarative and script actions, and flows write the field, and the object's validations (a `state_machine`, for one) judge each write.
+  - **`uiReadonlyWhen` is judged on an existing record only** (the create dialog does not read it, nor does a new line-item row), over the host's predicate scope on every surface. Grids and list views fetch the operands of a shown or dragged field's lock predicates. A predicate that cannot be evaluated LOCKS the field (no server judges the hand lock), the edit dialog refuses to submit until it is fixed, and `os validate` checks it as it checks `readonlyWhen`.
+  - **Refused: `uiReadonly: true` beside `readonly: true`** (at `['uiReadonly']`, at every door that parses a field: `defineStack`, `os validate`, metadata save). Keep one: `readonly` when no client may write the field, `uiReadonly` when people at the console may not. `uiReadonlyWhen` beside `readonlyWhen` is accepted.
+  - **Kanban: a `readonly` lane field no longer drags.** The board read no field lock before, so a card grouped by a `readonly` field could be dragged and its PATCH was silently stripped. The board now reads both locks.
+  - **`@object-ui/core` exports the one verdict:** `fieldReadOnlyByHand(def, record?, context?)`, `fieldStaticallyReadOnlyByHand(def)`, `fieldHasConditionalHandLock(def)`. `resolveFieldRuleState` takes `uiReadonlyWhen` in its rules and `uiReadonly` in its statics. The import wizard's target mapping and the Studio/designer reads stay on the raw `readonly`.
+  - **MCP `describe_object`** reports `uiReadonly` and `uiReadonlyWhen` as their own keys where set (never folded into `readonly`, which tells an agent to leave the field out of a write), on the HTTP and the stdio transport, and the tool description names them.
+  - **Censuses and Studio.** The FLS reference scrub classifies both keys (`@objectstack/metadata-core`: `uiReadonly` kept, `uiReadonlyWhen` an expression position). A caller denied a field the `uiReadonlyWhen` reads is served the field with `uiReadonly: true` in place of the predicate, so the lock never opens for them. The Studio field form offers both rows beside Read-only and Read-only when, with their labels and help translated in every metadata-forms locale pack (`@objectstack/platform-objects`).
+- 66452df: feat(platform-objects,services,plugins): platform select options declare the colours they render with
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  The renderer now colours a select option only when its author declared a colour. Every platform-shipped option that took its colour from the renderer's value table now declares that colour itself, in the same palette family, so no platform badge turns neutral: `sys_notification.severity` and `inbox_message.severity` (info blue, warning yellow, critical red), and the status and state options of jobs, imports, emails, flow and sync runs, credentials, deliveries, receipts, uploads, files, invitations, signing and trusted keys, tasks, approval requests, metadata rows and audience-binding suggestions, and the `completed` activity type. Stored values and labels are unchanged.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [52a2398]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

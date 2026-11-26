@@ -1,5 +1,158 @@
 # @object-ui/plugin-markdown
 
+## 19.0.0-next.0
+
+### Patch Changes
+
+- 141a826: feat(console): an app's docs page has one navigation — the docs column — with the path to its book and the previous and next article
+  
+  Clause-②: yes (widening) — @object-ui/plugin-markdown exports MermaidEnlargeContext and MermaidEnlargeText; @object-ui/i18n adds 12 help.* keys; nothing removed
+  Metadata-protocol: none
+  
+  Inside an app, the documentation pages (`/apps/<app>/docs/…`) no longer draw the app menu beside the docs: the left column is the docs' own, with 「← Back to <app>」 at its top, a title filter, every book of the app's package (the current book open, the others folded, each with its article count; long titles wrap instead of truncating) and 「All documentation →」 at its foot. Every other docs page inside an app (the app's docs index, a book with no articles, a book or doc not found) carries the same 「← Back to <app>」 at its top. The app bar stays, and reads 「<app> / Documentation」; the separate 「Documentation / <title>」 bar under it is gone, and the path above the article names the book (Documentation › <book>). 「On this page」 marks the section being read as the page scrolls, and the article ends with its book's previous and next article. The article column is 720 px wide at 15 px, and a diagram carries an 「Enlarge」 control that opens it full size.
+  
+  `@object-ui/plugin-markdown` adds `MermaidEnlargeContext`: a host that provides its words gets the enlarge control on every rendered diagram; with no provider a diagram renders exactly as before. `@object-ui/app-shell` exports `matchAppBySegment` and `useServedAppLabel`, and `isAppDocsPath` beside `isRecordPagePath` from its `ConsoleLayout` module. New `help.*` keys in every shipped locale. No doc content, doc metadata, route or API changes.
+- 9ed18a5: fix(ui): danger colours render red in both themes, and light danger text clears 4.5:1
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - The grid and list views' export-error line, and the Markdown caution alert's border and title, set their colour to a bare `var(--destructive)`. That variable holds an HSL triplet, not a colour, so the browser dropped the declaration and the text rendered in the inherited colour. The export-error line now uses the `text-destructive` utility and the caution alert reads `hsl(var(--destructive-text, var(--destructive)))`. The Markdown theme's heading anchors, quote and meta tokens and blockquote border and background had the same defect with other theme variables and now wrap them in `hsl()` too.
+  - The flow preview's invalid-edge stroke and arrowhead paint with the danger text colour, so they stay readable on the dark theme.
+  - The light theme now sets its own `--destructive-text`, red-700 (`#b91c1c`, `0 73.7% 41.8%`), so `text-destructive` reads at 6.47:1 on white instead of 3.76:1. `--destructive`, the brand red used for button and badge fills, is unchanged. The same value is in the stylesheet that `objectui init` generates.
+  - A theme's `error` colour applied through the theme engine still sets `--destructive`, and now also derives a danger text colour for each mode from it (same hue, lightness moved until it reads at 4.5:1 on that mode's surfaces), written as `--destructive-text-light` and `--destructive-text-dark`. The shipped stylesheets read those into `--destructive-text` in their light and dark blocks, so a custom red drives danger text and stays readable in both modes. A host stylesheet that overrides `--destructive` by hand should set `--destructive-text` beside it in each mode.
+- 23d61fa: fix(plugin-markdown): bold that ends in full-width punctuation renders bold before a CJK letter
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The markdown renderer the console's manual reader uses (`@object-ui/plugin-markdown`) left a `**bold**` run as literal asterisks when the run ended in full-width punctuation and a CJK letter followed it, as in `**解决耗时（小时）**会被清空`, `**每个项目一张报销单。**每个项目` or `**它跳过和拒绝什么：**已经`. CommonMark counts full-width punctuation as punctuation, so such a closer is not right-flanking; a Chinese or Japanese sentence puts no space there.
+  
+  The renderer now runs `remark-cjk-friendly` (its `parseOnly` entry, a new MIT dependency at `^2.3.4`) ahead of remark-gfm, the rule the chat surface already runs. It reads a CJK character beside a `**` run the way it reads the whitespace an English sentence would have there. ASCII emphasis, code spans, backslash escapes, GFM tables and GitHub-style alerts render as before, and the output still passes the same sanitize schema.
+  
+  `@object-ui/plugin-chatbot` changes a comment only: its CJK rule now names the renderer's copy, since neither package depends on the other and each imports the plugin itself. No props or exports change in either package; nothing to migrate.
+- Updated dependencies [1c05546]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [89364b4]
+- Updated dependencies [eed422e]
+- Updated dependencies [2df9691]
+- Updated dependencies [55020c3]
+- Updated dependencies [6f2bd4f]
+- Updated dependencies [99a0e4f]
+- Updated dependencies [1b2cd80]
+- Updated dependencies [3819afe]
+- Updated dependencies [3d6dea2]
+- Updated dependencies [285ad8d]
+- Updated dependencies [9212119]
+- Updated dependencies [cda16d4]
+- Updated dependencies [dda665f]
+- Updated dependencies [98b3f87]
+- Updated dependencies [f71d488]
+- Updated dependencies [ccded86]
+- Updated dependencies [e01b8be]
+- Updated dependencies [d96c878]
+- Updated dependencies [72d19c4]
+- Updated dependencies [b0c624a]
+- Updated dependencies [f98f18c]
+- Updated dependencies [227a16a]
+- Updated dependencies [598a34d]
+- Updated dependencies [0585797]
+- Updated dependencies [811858c]
+- Updated dependencies [fac1e7d]
+- Updated dependencies [8500ee7]
+- Updated dependencies [a6607c7]
+- Updated dependencies [c00be39]
+- Updated dependencies [1c87956]
+- Updated dependencies [5345905]
+- Updated dependencies [c9b0a23]
+- Updated dependencies [6b360ab]
+- Updated dependencies [c7174c3]
+- Updated dependencies [78f7160]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [7de1bad]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [dea68e9]
+- Updated dependencies [6b51822]
+- Updated dependencies [52fb30c]
+- Updated dependencies [8807dcb]
+- Updated dependencies [9ed18a5]
+- Updated dependencies [f548bdc]
+- Updated dependencies [9f6f306]
+- Updated dependencies [8c8ff0f]
+- Updated dependencies [dda5e74]
+- Updated dependencies [f2a990b]
+- Updated dependencies [035a12c]
+- Updated dependencies [33d0169]
+- Updated dependencies [a23164e]
+- Updated dependencies [f3d0a9f]
+- Updated dependencies [8aed508]
+- Updated dependencies [a60740a]
+- Updated dependencies [dc10b3b]
+- Updated dependencies [dca608a]
+- Updated dependencies [baf2678]
+- Updated dependencies [13d1e95]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [3ae62ac]
+- Updated dependencies [6c7c6db]
+- Updated dependencies [493ad09]
+- Updated dependencies [4ab2c82]
+- Updated dependencies [04f9861]
+- Updated dependencies [e605773]
+- Updated dependencies [713545f]
+- Updated dependencies [a2dc858]
+- Updated dependencies [b3bcfef]
+- Updated dependencies [aad35e6]
+- Updated dependencies [0b2118f]
+- Updated dependencies [d12ac84]
+- Updated dependencies [4099ef2]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [740720c]
+- Updated dependencies [6e643cc]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [bbc7e03]
+- Updated dependencies [543585d]
+- Updated dependencies [7e89bc6]
+- Updated dependencies [1a2a8a9]
+- Updated dependencies [f2ef7d8]
+- Updated dependencies [70d07fd]
+- Updated dependencies [8a741ab]
+- Updated dependencies [6cfa758]
+- Updated dependencies [ad50d61]
+- Updated dependencies [d7411fa]
+- Updated dependencies [c6075a7]
+- Updated dependencies [fed637c]
+- Updated dependencies [1948c5f]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [368deee]
+- Updated dependencies [08bf7d2]
+- Updated dependencies [021524c]
+- Updated dependencies [49c6bf3]
+- Updated dependencies [4ed453d]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [a68b475]
+- Updated dependencies [57445a6]
+- Updated dependencies [0212714]
+- Updated dependencies [1f3e9f6]
+- Updated dependencies [c0dd417]
+- Updated dependencies [517e415]
+- Updated dependencies [6ddb97b]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [5f34d65]
+- Updated dependencies [7939732]
+- Updated dependencies [dbc1765]
+- Updated dependencies [2d18ba8]
+- Updated dependencies [c2f8bff]
+- Updated dependencies [c385d3b]
+- Updated dependencies [3aa008d]
+- Updated dependencies [378c955]
+- Updated dependencies [56fa31b]
+- Updated dependencies [9c5fb3e]
+  - @object-ui/types@19.0.0-next.0
+  - @object-ui/core@19.0.0-next.0
+  - @object-ui/components@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

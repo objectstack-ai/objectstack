@@ -351,8 +351,13 @@ The `master_detail` rule has no counterpart in the picker, which narrows by `dep
 and `lookupFilters`, never by an inferred master: for a lookup without `dependsOn`, the
 import is stricter than the form.
 
-Inside that scope a tie is `reference_ambiguous` and a name that only another master
-carries is `reference_not_found`; it never resolves to another master's record. A row
+Inside that scope a tie is `reference_ambiguous`, and a name or id that only another
+master carries is `reference_out_of_scope`: it never resolves to another master's record.
+The row's sentence names the scoping columns and the cells the row gave them
+(`Contract: no record matches "CTR-0006" (Account = "Acme")`), and the cell error carries
+the same columns as data, `scope: [{ field, value }]`, so a client can say so in its own
+words. A name that no record carries anywhere stays `reference_not_found`. Only a record
+the importing caller can read is ever counted as "under another master". A row
 that leaves the master blank is resolved across the whole target as before. When two
 columns of the row point at the master object (a bill-to and a ship-to account), neither
 is taken as the master; declare `dependsOn` on the lookup to say which one is. A master
