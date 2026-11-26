@@ -254,8 +254,11 @@ function refuseHookBodyMailGrant(
  * parse — so the author meets the refusal before any write does. One issue per
  * code. A code that arrives any other way is the run-time refusal's. The same
  * holds for a reason under a code that declares `reasons` (#33214,
- * `hookRefusalReasonsThrownIn`); under a code that declares none, a thrown
- * `reason` is not read at all, as before.
+ * `hookRefusalReasonsThrownIn`); under a code that declares none, a single
+ * thrown `reason` is not read at all, as before. A reason inside a `reasons`
+ * list (#36877, ruling 7178348458) is read under every code: under one that
+ * declares no `reasons`, every listed reason is undeclared and the save
+ * refuses it (`isUndeclaredThrownReason`).
  *
  * [#33214, ruling 6879477573 letter A] The catalogue is answered on every path
  * a hook runs on: a sandboxed `js` body, and an in-process `handler` — an

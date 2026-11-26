@@ -306,6 +306,14 @@ describe('Action.refusals — a listed reason is refused at save where the body 
     expect(issue?.message).toBe(undeclaredActionRefusalReasonAtSave('NOT_DRAFT', 'closed', []));
   });
 
+  it('CONTROL: a `reasons` list nested under `params` is not a thrown list, so it saves under a code with no reasons', () => {
+    expect(ActionSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'NOT_DRAFT', params: { reasons: [{ reason: 'closed' }] } };"),
+      refusals,
+    }).success).toBe(true);
+  });
+
   it('the run-time list fault names the action', () => {
     expect(unreadableActionRefusalListAtRun('submit_signoff', 'STAGE_LOCKED', 'empty')).toContain(
       "action 'submit_signoff' threw code 'STAGE_LOCKED' with a `reasons` list that names no reason",

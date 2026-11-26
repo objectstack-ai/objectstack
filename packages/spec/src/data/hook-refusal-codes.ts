@@ -42,9 +42,11 @@ const CODE_LITERAL = String.raw`(?<quote>['"\x60])(?<code>[A-Z][A-Z0-9]*(?:_[A-Z
 
 /**
  * The spelling of a declared refusal reason (#33214): snake_case, a machine
- * name like every other key an author declares under a code. A reason never
- * reaches the wire — the code does — so it is spelled as a data value, not as
- * an error code, and the literal reading can tell the two apart.
+ * name like every other key an author declares under a code. A client
+ * branches on the code, not on a reason: a reason reaches the wire only as the
+ * label of a rendered line (`details.refusals[].reason`, #36877), beside the
+ * sentence it picked. So it is spelled as a data value, not as an error code,
+ * and the literal reading can tell the two apart.
  */
 export const HOOK_REFUSAL_REASON_PATTERN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
 
@@ -69,7 +71,8 @@ const REASON_ASSIGNMENT = new RegExp(
 /**
  * [#36877] `reasons: [` — the opening of the list a `throw`'s object literal
  * carries (`{ code, reasons: [{ reason, params? }, …] }`); the reasons inside
- * the bracket are the listed ones.
+ * the bracket are the listed ones. Read only as a direct member of the thrown
+ * object literal ({@link listedSpans}).
  */
 const REASONS_LIST_PROPERTY = /(?<![\w$.])reasons\s*:\s*\[/g;
 
@@ -193,12 +196,45 @@ function closeOfBracket(masked: string, open: number): number {
   return masked.length;
 }
 
-/** [#36877] The `[from, to)` spans of every `reasons: [ … ]` list in `text`. */
-function listedSpans(text: string): Array<[number, number]> {
+/**
+ * [#36877] The brackets still open at `at` in `text` (a masked source or a
+ * `throw` statement of one), outermost first, strings skipped.
+ */
+function openBracketsAt(text: string, at: number): string[] {
+  const open: string[] = [];
+  for (let i = 0; i < at && i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'" || ch === '`') {
+      i = skipString(text, i);
+      continue;
+    }
+    if (ch === '(' || ch === '[' || ch === '{') open.push(ch);
+    else if (ch === ')' || ch === ']' || ch === '}') open.pop();
+  }
+  return open;
+}
+
+/**
+ * [#36877] The `[from, to)` spans of every `reasons: [ … ]` list in a `throw`
+ * statement that is a DIRECT member of the thrown object literal — the one key
+ * the run-time address reads (`e.reasons`). The member's enclosing brackets
+ * hold exactly one `{`, innermost, and no `[`: `throw { code, reasons: [ … ] }`
+ * and `throw Object.assign(new Error(), { code, reasons: [ … ] })` qualify;
+ * `throw { code, params: { reasons: [ … ] } }` does not, because the run never
+ * answers that nested key as a list.
+ */
+function listedSpans(statement: string): Array<[number, number]> {
   const spans: Array<[number, number]> = [];
-  for (const m of text.matchAll(REASONS_LIST_PROPERTY)) {
-    const open = (m.index ?? 0) + m[0].length - 1;
-    spans.push([open, closeOfBracket(text, open)]);
+  for (const m of statement.matchAll(REASONS_LIST_PROPERTY)) {
+    const at = m.index ?? 0;
+    const enclosing = openBracketsAt(statement, at);
+    const direct =
+      enclosing[enclosing.length - 1] === '{' &&
+      enclosing.filter((ch) => ch === '{').length === 1 &&
+      !enclosing.includes('[');
+    if (!direct) continue;
+    const open = at + m[0].length - 1;
+    spans.push([open, closeOfBracket(statement, open)]);
   }
   return spans;
 }

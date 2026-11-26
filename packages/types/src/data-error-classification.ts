@@ -611,10 +611,12 @@ function withDeclaredUserMessage(
  * [#36877, ruling 7178348458 term 3] A declared refusal thrown as a `reasons`
  * list carries its sentences as `details.refusals` on this door too, riding
  * with the `userMessage` that joins them ({@link declaredRefusalLines}, the
- * one recogniser the dispatcher's composition reads). Every sentence is kept
- * whole: `userMessage` is bounded at {@link CLIENT_MESSAGE_MAX} (#5423), and a
- * long list read off the structured member loses no line. `details` is
- * merged, so a member another arm set is kept; a body with no list is
+ * one recogniser the dispatcher's composition reads). `userMessage` is bounded
+ * at {@link CLIENT_MESSAGE_MAX} (#5423) and the list is not: each listed
+ * reason's line stays whole on `details.refusals`. The closing line — the
+ * code's own `message`, the last line of `userMessage` — is not on the list,
+ * so on a list long enough to cut it, this door carries it nowhere. `details`
+ * is merged, so a member another arm set is kept; a body with no list is
  * returned as it was.
  */
 function withDeclaredRefusalLines(error: unknown, body: Record<string, unknown>): Record<string, unknown> {

@@ -494,6 +494,18 @@ describe('hookRefusalReasonsThrownIn — the reasons of a thrown list (#36877)',
       "throw { code: 'C', reason: 'r', reasons: [{ reason: 'l' }] };",
       [{ code: 'C', reason: 'r' }, { code: 'C', reason: 'l', listed: true }],
     ],
+    [
+      // the list as a direct member of the object Object.assign stamps
+      "throw Object.assign(new Error('x'), { code: 'C', reasons: [{ reason: 'l' }] });",
+      [{ code: 'C', reason: 'l', listed: true }],
+    ],
+    [
+      // CONTROL: a `reasons` key nested under `params` is not the thrown list
+      // (the run reads `e.reasons` only), so its reason is read as main reads
+      // any `reason: 'x'` in the statement: a single, unlisted pair
+      "throw { code: 'C', params: { reasons: [{ reason: 'late' }] } };",
+      [{ code: 'C', reason: 'late' }],
+    ],
   ])('reads %j', (source, pairs) => {
     expect(hookRefusalReasonsThrownIn(source)).toEqual(pairs);
   });
@@ -564,6 +576,15 @@ describe('Hook.refusals — a listed reason is refused at save where the body na
     });
     expect(r.success).toBe(false);
     expect(r.error!.issues[0]!.message).toContain('(declared: none)');
+  });
+
+  it('CONTROL: a `reasons` list nested under `params` is not a thrown list, so it saves under a code with no reasons', () => {
+    const r = HookSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'PLAIN', params: { reasons: [{ reason: 'late' }] } };"),
+      refusals,
+    });
+    expect(r.success).toBe(true);
   });
 
   it('CONTROL: a single reason under a code that declares no reasons still saves, as before', () => {
