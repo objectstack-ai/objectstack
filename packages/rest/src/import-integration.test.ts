@@ -1579,8 +1579,9 @@ describe('import route — a scoped lookup miss whose value exists under another
     await engine.insert('xp_project', { id: 'p2', name: 'Gemini' });
     await engine.insert('xp_task', { id: 't1', name: 'Design review', project: 'p1' });
 
+    expect(route).toBeDefined();
     const res = makeRes();
-    await route.handler({
+    await route!.handler({
       params: { object: 'xp_timesheet' },
       body: {
         format: 'json',
