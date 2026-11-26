@@ -147,7 +147,7 @@ function renderPanel(server: Server): void {
 function anotherAdminPublishes(server: Server, name: string, sharingModel: string): string {
   server.seq += 1;
   const version = `hmac-sha256:theirs${server.seq}`;
-  server.published.set(name, { ...server.published.get(name)!, sharingModel });
+  server.published.set(name, { ...(server.published.get(name) ?? server.drafts.get(name))!, sharingModel });
   server.versions.set(name, version);
   return version;
 }
@@ -160,6 +160,18 @@ async function pick(name: string, option: string): Promise<void> {
 }
 
 const sharingOf = (server: Server, name: string) => server.published.get(name)?.sharingModel;
+const UNPUBLISHED_DRAFT = L('engine.studio.unpublishedDraft');
+
+/** Answer the open conflict dialog, and wait for it to close. */
+async function answer(choice: 'reload' | 'cancel'): Promise<void> {
+  fireEvent.click(screen.getByTestId(`draft-conflict-${choice}`));
+  await waitFor(() => expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull(), WAIT);
+}
+
+/** The next conflict dialog, once the pass reaches it. */
+async function nextDialog(): Promise<void> {
+  await screen.findByTestId('draft-conflict-dialog', undefined, WAIT);
+}
 
 /** The race: the overview loaded, another admin published Alpha, then this overview's Save. */
 async function raceAlpha(server: Server): Promise<string> {
@@ -283,5 +295,101 @@ describe('the OWD overview — two Saves over one object are not last-writer-win
     await waitFor(() => expect(sharingOf(server, 'a_alpha')).toBe('public_read_write'), WAIT);
     expect(server.publishes.map((p) => [p.ifMatch, p.ifNoneMatch])).toEqual([[undefined, undefined]]);
     expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull();
+  });
+});
+
+describe('the OWD overview — a reload in a pass of several rows (objectstack#36962)', () => {
+  it('reload on the first row: the row after it is still published over its own load\'s row, and is asked', async () => {
+    renderPanel(server);
+    await pick('a_alpha', PUBLIC_READ_WRITE);
+    await pick('b_beta', PUBLIC_READ_WRITE);
+    anotherAdminPublishes(server, 'a_alpha', 'public_read');
+    anotherAdminPublishes(server, 'b_beta', 'public_read');
+    await pressStudioSave({ settle: false });
+    await nextDialog();
+    expect(screen.getByTestId('draft-conflict-dialog')).toHaveTextContent('a_alpha');
+    await answer('reload');
+
+    // Beta, after the reloaded Alpha in the same pass: pinned to its own load, refused, asked.
+    await nextDialog();
+    expect(screen.getByTestId('draft-conflict-dialog')).toHaveTextContent('b_beta');
+    expect(server.publishes.map((p) => [p.name, p.ifMatch, p.ifNoneMatch])).toEqual([
+      ['a_alpha', 'hmac-sha256:alpha0', undefined],
+      ['b_beta', 'hmac-sha256:beta0', undefined],
+    ]);
+    expect(sharingOf(server, 'b_beta')).toBe('public_read');
+    await answer('cancel');
+
+    // Alpha reads back the other admin's value; Beta keeps its edit, unsaved.
+    await waitFor(() => expect(screen.queryByTestId('owd-dirty-a_alpha')).toBeNull(), WAIT);
+    expect(screen.getByTestId('owd-internal-a_alpha')).toHaveTextContent(PUBLIC_READ);
+    expect(screen.getByTestId('owd-dirty-b_beta')).toBeInTheDocument();
+    expect(sharingOf(server, 'a_alpha')).toBe('public_read');
+    expect(sharingOf(server, 'b_beta')).toBe('public_read');
+  });
+
+  it('the first row refused and kept, the second reloaded: the kept edit is still pinned to its own load on the next Save', async () => {
+    renderPanel(server);
+    await pick('a_alpha', PUBLIC_READ_WRITE);
+    await pick('b_beta', PUBLIC_READ_WRITE);
+    anotherAdminPublishes(server, 'a_alpha', 'public_read');
+    anotherAdminPublishes(server, 'b_beta', 'public_read');
+    await pressStudioSave({ settle: false });
+    await nextDialog();
+    await answer('cancel');
+    await nextDialog();
+    expect(screen.getByTestId('draft-conflict-dialog')).toHaveTextContent('b_beta');
+    await answer('reload');
+
+    await waitFor(() => expect(screen.queryByTestId('owd-dirty-b_beta')).toBeNull(), WAIT);
+    expect(screen.getByTestId('owd-internal-b_beta')).toHaveTextContent(PUBLIC_READ);
+    expect(screen.getByTestId('owd-dirty-a_alpha')).toBeInTheDocument();
+
+    // Beta's reload cleared every pin the guard held; Alpha's next publish is still its own load's.
+    const before = server.publishes.length;
+    await pressStudioSave({ settle: false });
+    await nextDialog();
+    expect(server.publishes.slice(before).map((p) => [p.name, p.ifMatch])).toEqual([['a_alpha', 'hmac-sha256:alpha0']]);
+    expect(sharingOf(server, 'a_alpha')).toBe('public_read');
+  });
+
+  it('a row with a draft pending before the Save: reload keeps that draft, now carrying the edit, and the next Save is asked again', async () => {
+    server.drafts.set('a_alpha', { ...server.published.get('a_alpha')!, label: 'Alpha' });
+    renderPanel(server);
+    await pick('a_alpha', PUBLIC_READ_WRITE);
+    anotherAdminPublishes(server, 'a_alpha', 'public_read');
+    await pressStudioSave({ settle: false });
+    await nextDialog();
+    await answer('reload');
+
+    // The pending draft is not taken back: it carries the edit, shown as the row's
+    // value under the unpublished-draft mark, while the live row is the other admin's.
+    expect(server.resets).toEqual([]);
+    expect(server.drafts.get('a_alpha')?.sharingModel).toBe('public_read_write');
+    await waitFor(() => expect(screen.queryByTestId('owd-dirty-a_alpha')).toBeNull(), WAIT);
+    expect(screen.getByTestId('owd-internal-a_alpha')).toHaveTextContent(PUBLIC_READ_WRITE);
+    expect(within(screen.getByTestId('owd-row-a_alpha')).getByText(UNPUBLISHED_DRAFT)).toBeInTheDocument();
+    expect(sharingOf(server, 'a_alpha')).toBe('public_read');
+
+    // Its next Save stays pinned to the version the conflict was raised on, never the re-read's: asked again.
+    await pick('a_alpha', PUBLIC_READ);
+    const before = server.publishes.length;
+    await pressStudioSave({ settle: false });
+    await nextDialog();
+    expect(server.publishes.slice(before).map((p) => [p.name, p.ifMatch])).toEqual([['a_alpha', 'hmac-sha256:alpha0']]);
+    expect(server.versions.get('a_alpha')).toMatch(/theirs/);
+  });
+
+  it('control: a draft-only row whose name another writer published since is refused, not published over', async () => {
+    server.drafts.set('c_gamma', { name: 'c_gamma', label: 'Gamma', sharingModel: 'private', fields: {} });
+    renderPanel(server);
+    await pick('c_gamma', PUBLIC_READ_WRITE);
+    anotherAdminPublishes(server, 'c_gamma', 'public_read');
+    await pressStudioSave({ settle: false });
+    await nextDialog();
+    expect(server.publishes).toEqual([{ name: 'c_gamma', packageId: PACKAGE, ifMatch: undefined, ifNoneMatch: '*' }]);
+    await answer('cancel');
+    expect(sharingOf(server, 'c_gamma')).toBe('public_read');
+    expect(screen.getByTestId('owd-dirty-c_gamma')).toBeInTheDocument();
   });
 });

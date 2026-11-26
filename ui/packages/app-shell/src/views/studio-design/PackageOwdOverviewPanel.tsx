@@ -297,6 +297,9 @@ export function PackageOwdOverviewPanel({
   const { recordPublished, publish: publishPinned, dialog: conflictDialog } = useDraftSaveGuard(client, keepPageOnReload);
   // The pin each row's edit was made against: a load that keeps a row's edit
   // keeps that row pinned to the read the edit was made on, never the fresh one.
+  // It is the panel's own record, sent to the guard again before each row's
+  // publish: a conflict's reload clears every pin the guard holds, for every
+  // row, while this pass goes on with the rows after it.
   const editPinsRef = React.useRef(new Map<string, DraftPin | null>());
   // The master a `controlled_by_parent` row derives under is named by its
   // label (`ux-conventions.labels-over-machine-names`): this package's own
@@ -378,8 +381,7 @@ export function PackageOwdOverviewPanel({
       );
       built.sort((a, b) => a.label.localeCompare(b.label) || a.name.localeCompare(b.name));
       // objectstack#36962 — each row's publish is pinned to what this load read;
-      // a kept edit stays pinned to the read it was made on (re-sent here, as a
-      // conflict's reload clears every pin the guard holds).
+      // a kept edit stays pinned to the read it was made on.
       for (const r of built) {
         const kept = keep?.has(r.name) && editPinsRef.current.has(r.name);
         const pin = kept ? (editPinsRef.current.get(r.name) ?? null) : r.published;
@@ -461,7 +463,7 @@ export function PackageOwdOverviewPanel({
     let saved = 0;
     const savedNames = new Set<string>();
     // objectstack#36962 — rows whose publish met a newer published row and
-    // whose author chose to reload it: their edit goes, the row is read back.
+    // whose author chose to reload it: the row is read back, not kept as edited.
     const reloadedNames = new Set<string>();
     const unsavedOf = (rowsChanged: typeof changed) =>
       rowsChanged.filter((c) => !savedNames.has(c.row.name) && !reloadedNames.has(c.row.name));
@@ -543,15 +545,22 @@ export function PackageOwdOverviewPanel({
         }
         // A draft that was pending before this save (a copilot's) is published
         // with it; a refused publish takes back only the draft this save wrote.
-        // objectstack#36962 — pinned to the published row this row was loaded at.
+        // objectstack#36962 — pinned to the published row this row was loaded at,
+        // sent again here because an earlier row's reload in this pass cleared
+        // the guard's pins (and a re-read that failed sent none back).
+        recordPublished('object', s.row.name, packageId, editPinsRef.current.get(s.row.name) ?? null);
         const live = await publishSavedItem(
           client,
           { type: 'object', name: s.row.name, packageId },
           s.row.hasDraft,
           publishPinned,
         );
-        // The published row moved and the author chose to reload it: this
-        // row's edit goes, and the pass goes on with the other rows.
+        // The published row moved and the author chose to reload it: the row
+        // is read back once the pass ends, and the pass goes on with the other
+        // rows, each still pinned to its own load. The draft this Save wrote is
+        // taken back first, unless a draft was pending before the Save: that
+        // draft is kept, now carrying the edit, and its next publish stays
+        // pinned to the version the conflict was raised on (the guard's rule 9).
         if (!live.ok && 'reloaded' in live) {
           reloadedNames.add(s.row.name);
           continue;
@@ -577,7 +586,7 @@ export function PackageOwdOverviewPanel({
     } finally {
       setSaving(false);
     }
-  }, [rowState, client, packageId, load, locale, publishPinned]);
+  }, [rowState, client, packageId, load, locale, publishPinned, recordPublished]);
 
   // Cancel: every dial back at what the server holds, nothing sent.
   const doCancel = React.useCallback(() => {
