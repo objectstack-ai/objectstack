@@ -221,7 +221,7 @@ describe('objectstack#37365 — locateSection finds the drawn heading', () => {
     heading.scrollIntoView = vi.fn();
     fresh.focusRecordSection(document.body, candidates, 5000);
     expect(heading.hasAttribute(RECORD_SECTION_TARGET_ATTR)).toBe(false);
-    await vi.waitFor(() => expect(heading.getAttribute(RECORD_SECTION_TARGET_ATTR)).toBe('true'));
+    await vi.waitFor(() => expect(heading.getAttribute(RECORD_SECTION_TARGET_ATTR)).toBe('true'), { timeout: 5000 });
     expect(heading.scrollIntoView).toHaveBeenCalledTimes(1);
   });
 

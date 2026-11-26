@@ -200,8 +200,10 @@ const pendingUnlisted = new WeakMap<SectionCandidate, () => number | undefined>(
 
 /** `candidate`, with its unlisted count read now when it was pending. */
 function withUnlistedCount(candidate: SectionCandidate): SectionCandidate {
-  const count = candidate.unlisted === undefined ? pendingUnlisted.get(candidate) : undefined;
-  return count ? { ...candidate, unlisted: count() } : candidate;
+  if (candidate.unlisted !== undefined) return candidate;
+  const unlisted = pendingUnlisted.get(candidate)?.();
+  // Still unread (the reader did not load): the same candidate, so a later read finds its count.
+  return unlisted === undefined ? candidate : { ...candidate, unlisted };
 }
 
 /**
