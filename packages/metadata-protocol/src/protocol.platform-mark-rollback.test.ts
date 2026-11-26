@@ -222,3 +222,63 @@ describe('[#37130] the protocol\'s restore doors refuse a restore whose row is t
         expect(((await primed.getPlatformItem('skill', 'helper')) as { label?: string } | undefined)?.label).toBe('platform v2');
     });
 });
+
+/**
+ * [#37604 item 1] After the platform withdraws its own record of a name (its
+ * package-less row is gone, its versions stay in history attributed to the
+ * environment), the name's one remaining holder is a package, and a version
+ * attributed to the environment is that sole slot's (`isVersionOf`). A
+ * version the platform registered is still never restored into the
+ * package's row: `409 RESOURCE_CONFLICT`, nothing written.
+ *
+ * BASE (main 4e10d4bf): the rollback wrote the platform's v1 into the
+ * package's row, so a read naming the package answered the platform's body.
+ */
+describe('[#37604] a version the platform registered is never restored into a package\'s row', () => {
+    const PKG = 'com.acme.crm';
+
+    /** The platform's record (v1, v2), the package's own row (v3), then the platform's withdrawal. */
+    async function withdrawnPlatformRecord() {
+        const harness = makeEngine();
+        const protocol = new ObjectStackProtocolImplementation(harness.engine);
+        await protocol.saveMetaItem({ type: 'skill', name: 'helper', item: skill('platform v1') });
+        await protocol.saveMetaItem({ type: 'skill', name: 'helper', item: skill('platform v2') });
+        const mark = (row: Row) => { row.metadata = JSON.stringify({ ...JSON.parse(String(row.metadata)), _provenance: 'platform' }); };
+        for (const row of harness.historyRows.filter((r) => r.name === 'helper')) mark(row);
+        // The withdrawal: the platform's package-less row is deleted, its history stays.
+        harness.rows.splice(harness.rows.findIndex((r) => r.name === 'helper'), 1);
+        const pkgBody = JSON.stringify({ ...skill('package rules'), _packageId: PKG });
+        harness.rows.push({
+            id: 'row_pkg', type: 'skill', name: 'helper', state: 'active', organization_id: null, package_id: PKG,
+            version: 3, checksum: 'pkg', source: 'database', metadata: pkgBody,
+        });
+        harness.historyRows.push({
+            id: 'hist_pkg', type: 'skill', name: 'helper', version: 3, organization_id: null, package_id: PKG,
+            operation_type: 'update', checksum: 'pkg', metadata: pkgBody,
+        });
+        return { ...harness, protocol };
+    }
+
+    for (const [door, request] of [
+        ['naming the package', { packageId: PKG }],
+        ['naming no package (the name\'s one holder)', {}],
+    ] as const) {
+        it(`rollbackMetaItem ${door}: refused 409 RESOURCE_CONFLICT, the package's row byte-identical (BASE: the platform's v1 written into it)`, async () => {
+            const { protocol, rows } = await withdrawnPlatformRecord();
+            const before = JSON.stringify(rows);
+
+            const refused = await protocol.rollbackMetaItem({ type: 'skill', name: 'helper', toVersion: 1, ...request }).catch((error) => error);
+
+            expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+            expect(String(refused.message)).toContain('the platform registered');
+            expect(JSON.stringify(rows)).toBe(before);
+        });
+    }
+
+    it('control: the package\'s own version is restored into its row', async () => {
+        const { protocol, rows } = await withdrawnPlatformRecord();
+        await protocol.rollbackMetaItem({ type: 'skill', name: 'helper', toVersion: 3, packageId: PKG });
+        const stored = JSON.parse(String(rows.find((r) => r.package_id === PKG)!.metadata));
+        expect(stored.label).toBe('package rules');
+    });
+});
