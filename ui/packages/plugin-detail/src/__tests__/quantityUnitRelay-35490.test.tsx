@@ -64,7 +64,7 @@ function unitSource(rows: Record<string, unknown>[] = [RECORD]) {
   };
 }
 
-const flat = (s: string | null | undefined) => (s ?? '').replace(/ /g, ' ');
+const flat = (s: string | null | undefined) => (s ?? '').replace(/\u00a0/g, ' ');
 
 describe('the declared unitConfig reaches the detail cells (objectstack#35490)', () => {
   it('DetailSection: a record-mode and a fixed-mode quantity, with their unit labels', async () => {

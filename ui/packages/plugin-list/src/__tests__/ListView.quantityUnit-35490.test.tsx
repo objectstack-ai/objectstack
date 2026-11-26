@@ -71,7 +71,7 @@ describe('list view: a quantity with its unit column not shown (objectstack#3549
     );
     await waitFor(() => expect(screen.getByText('L1')).toBeInTheDocument(), { timeout: 8000 });
     await waitFor(() => {
-      const rows = [...document.querySelectorAll('tbody tr')].map((tr) => (tr.textContent ?? '').replace(/ /g, ' '));
+      const rows = [...document.querySelectorAll('tbody tr')].map((tr) => (tr.textContent ?? '').replace(/\u00a0/g, ' '));
       expect(rows[0]).toContain('4.0 Box of 12');
       // The row of organization B: B's setting of 0 places, not A's of 3.
       expect(rows[1]).toContain('2 gram');

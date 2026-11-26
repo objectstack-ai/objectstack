@@ -31,7 +31,7 @@ import { formatQuantity, quantityDisplayPlaces } from '../widgets/quantity-forma
 
 afterEach(cleanup);
 
-const text = (s: string | null | undefined) => (s ?? '').replace(/ /g, ' ');
+const text = (s: string | null | undefined) => (s ?? '').replace(/\u00a0/g, ' ');
 
 const ORG_UNITS = [
   { code: 'BOX_12', label: 'Box of 12', decimal_places: 1, retired: false, organization_id: 'org_a' },
@@ -173,13 +173,13 @@ describe('formatQuantity — the one formatter', () => {
   it('marks a stored value with more places than shown, and changes nothing stored', () => {
     const value = 1.5;
     const out = formatQuantity(value, field, { code: 'H87', standard: true, label: 'pc', decimals: 0 }, 'en-US');
-    expect(out).toEqual({ text: '2 pc', number: '2', unit: 'pc', hidden: true });
+    expect(out).toEqual({ text: '2\u00a0pc', number: '2', unit: 'pc', hidden: true });
     expect(value).toBe(1.5);
     expect(formatQuantity(1.5, field, { code: 'GRM', standard: true, label: 'g', decimals: 3 }, 'en-US').hidden).toBe(false);
   });
 
   it('keeps the field width when the unit has no decimal places of its own', () => {
-    expect(formatQuantity(1.25, { ...field, scale: 2 }, { code: 'KGM', standard: true, label: 'kg' }, 'en-US').text).toBe('1.25 kg');
+    expect(formatQuantity(1.25, { ...field, scale: 2 }, { code: 'KGM', standard: true, label: 'kg' }, 'en-US').text).toBe('1.25\u00a0kg');
     expect(quantityDisplayPlaces(undefined, field)).toBeUndefined();
     expect(quantityDisplayPlaces(5, { ...field, scale: 2 })).toBe(2);
     expect(quantityDisplayPlaces(1, { ...field, scale: 2 })).toBe(1);

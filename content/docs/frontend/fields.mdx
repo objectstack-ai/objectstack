@@ -88,11 +88,8 @@ ObjectUI comes with built-in support for the standard [ObjectStack Protocol](htt
 
 A `number` field that declares `unitConfig` is a quantity, and every face draws it with its unit: grid and
 list cells, the record page, the quick-look panel, related lists, and the form (read-only, and beside the
-edited box).
-
-```json
-{ "name": "qty", "type": "number", "unitConfig": { "unitMode": "record", "unitField": "unit_code" } }
-```
+edited box). A record-mode quantity, for example, declares
+`unitConfig: { unitMode: 'record', unitField: 'unit_code' }` on its `number` field.
 
 - **Which unit.** `unitMode: 'fixed'` shows its one `unit`. `unitMode: 'record'` shows the code the row's
   `unitField` holds; the list, grid and related-list reads fetch that field, and the row's

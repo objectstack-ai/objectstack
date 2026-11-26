@@ -65,7 +65,7 @@ function source() {
   return { ds, calls };
 }
 
-const rowTexts = () => [...document.querySelectorAll('tbody tr')].map((tr) => (tr.textContent ?? '').replace(/ /g, ' '));
+const rowTexts = () => [...document.querySelectorAll('tbody tr')].map((tr) => (tr.textContent ?? '').replace(/\u00a0/g, ' '));
 
 describe('object grid: a quantity with its unit (objectstack#35490)', () => {
   it("draws each row in its own unit, with the unit column not shown", async () => {
