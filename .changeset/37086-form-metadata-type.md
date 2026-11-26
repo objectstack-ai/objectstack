@@ -8,6 +8,7 @@
 '@objectstack/objectql': minor
 '@objectstack/runtime': minor
 '@objectstack/cli': minor
+'@objectstack/platform-objects': minor
 ---
 
 feat(spec)!: `form` is a metadata type of its own — `defineForm`, `*.form.ts` and a stack's `forms:` — and the anonymous form doors read a form over both types (ADR-0159 card ②)
@@ -16,6 +17,8 @@ Clause-②: yes (narrowing)
 Metadata-protocol: narrowed
 
 ADR-0159 makes a public form a `form` item: `name` (`OBJECT.KEY`, the name it is served under), `object` (its one binding) and a form view's body at the top level, its keys taken from `FormViewSchema` by reference. A stack lists them under `forms:`, one per `*.form.ts` module built with `defineForm`. The three old `view` shapes that carry a form (a container's `form`, a `formViews` entry, a `viewKind: 'form'` item) keep loading and serving exactly as before: one projection reads them as `form` items, under the names they are served as today, and nothing an author wrote stops loading.
+
+`@objectstack/platform-objects` ships the `form` type's display label in its metadata-form bundles, translated in every bundled locale.
 
 <!-- adr-0087: registered form-type-define-form-and-packageless-list-at-form-name -->
 
