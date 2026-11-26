@@ -34,6 +34,7 @@ import {
   HOOK_TEXT_KEY_PATTERN,
   hookRefusalCodesThrownIn,
   hookRefusalReasonsThrownIn,
+  isUndeclaredThrownReason,
   hookRefusalsWithoutSandboxedBody,
   hookTextKeysAskedIn,
   hookTextsWithoutRunnableCode,
@@ -253,8 +254,11 @@ function refuseHookBodyMailGrant(
  * parse — so the author meets the refusal before any write does. One issue per
  * code. A code that arrives any other way is the run-time refusal's. The same
  * holds for a reason under a code that declares `reasons` (#33214,
- * `hookRefusalReasonsThrownIn`); under a code that declares none, a thrown
- * `reason` is not read at all, as before.
+ * `hookRefusalReasonsThrownIn`); under a code that declares none, a single
+ * thrown `reason` is not read at all, as before. A reason inside a `reasons`
+ * list (#36877, ruling 7178348458) is read under every code: under one that
+ * declares no `reasons`, every listed reason is undeclared and the save
+ * refuses it (`isUndeclaredThrownReason`).
  *
  * [#33214, ruling 6879477573 letter A] The catalogue is answered on every path
  * a hook runs on: a sandboxed `js` body, and an in-process `handler` — an
@@ -319,17 +323,19 @@ function refuseUndeclaredLiteralRefusalCode(
     if (Object.prototype.hasOwnProperty.call(hook.refusals, code)) continue;
     ctx.addIssue({ code: 'custom', path, message: undeclaredHookRefusalCodeAtSave(code, declared, read.at) });
   }
-  for (const { code, reason } of hookRefusalReasonsThrownIn(read.source)) {
+  for (const pair of hookRefusalReasonsThrownIn(read.source)) {
+    const { code, reason } = pair;
     if (!Object.prototype.hasOwnProperty.call(hook.refusals, code)) continue;
-    // A `reason` is read only under a code that declares `reasons`: under any
-    // other code it is not part of the refusal, exactly as before `reasons`
-    // existed, so a hook that already throws one is answered as it was.
+    // A single `reason` is read only under a code that declares `reasons`:
+    // under any other code it is not part of the refusal, exactly as before
+    // `reasons` existed, so a hook that already throws one is answered as it
+    // was. A reason in a `reasons` list (#36877) is judged under every code.
     const reasons = hook.refusals[code]?.reasons;
-    if (!reasons || Object.prototype.hasOwnProperty.call(reasons, reason)) continue;
+    if (!isUndeclaredThrownReason(pair, reasons)) continue;
     ctx.addIssue({
       code: 'custom',
       path,
-      message: undeclaredHookRefusalReasonAtSave(code, reason, Object.keys(reasons), read.at),
+      message: undeclaredHookRefusalReasonAtSave(code, reason, Object.keys(reasons ?? {}), read.at),
     });
   }
 }

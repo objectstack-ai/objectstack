@@ -96,10 +96,15 @@ describe('residual jobs under `preserve` are judged as one package', () => {
     expect(composed.jobs.map((j) => j.name)).toEqual(['crm_nightly']);
   });
 
+  // Each body's job under a name of its own: one name enabled in two bodies is refused across the
+  // packages (`stack-composed-job-name-across-holders.test.ts`), not as a residual pair.
   it('CONTROL: a job each body declares stays each body\'s, not a residual pair', () => {
     expect(refusalOf(() =>
       composeStacks(
-        [defineStack({ manifest: sales, objects: [line], jobs: [job('Sales')] }), defineStack({ manifest: billing, jobs: [job('Billing')] })],
+        [
+          defineStack({ manifest: sales, objects: [line], jobs: [{ ...job('Sales'), name: 'crm_sales_nightly' }] }),
+          defineStack({ manifest: billing, jobs: [{ ...job('Billing'), name: 'crm_billing_nightly' }] }),
+        ],
         { manifest: 'preserve' },
       ),
     )).toBeNull();

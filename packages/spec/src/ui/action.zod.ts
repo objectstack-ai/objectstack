@@ -65,6 +65,7 @@ import {
   actionTextsWithoutRunnableCode,
   hookRefusalCodesThrownIn,
   hookRefusalReasonsThrownIn,
+  isUndeclaredThrownReason,
   hookTextKeysAskedIn,
   undeclaredActionRefusalCodeAtSave,
   undeclaredActionRefusalReasonAtSave,
@@ -2779,15 +2780,17 @@ function refuseUndeclaredLiteralActionRefusalCode(
     if (Object.prototype.hasOwnProperty.call(data.refusals, code)) continue;
     ctx.addIssue({ code: 'custom', path: ['body', 'source'], message: undeclaredActionRefusalCodeAtSave(code, declared) });
   }
-  for (const { code, reason } of hookRefusalReasonsThrownIn(source)) {
+  for (const pair of hookRefusalReasonsThrownIn(source)) {
+    const { code, reason } = pair;
     if (!Object.prototype.hasOwnProperty.call(data.refusals, code)) continue;
-    // Read only under a code that declares `reasons`, as on a hook.
+    // A single reason is read only under a code that declares `reasons`, a
+    // listed one (#36877) under every code, as on a hook.
     const reasons = data.refusals[code]?.reasons;
-    if (!reasons || Object.prototype.hasOwnProperty.call(reasons, reason)) continue;
+    if (!isUndeclaredThrownReason(pair, reasons)) continue;
     ctx.addIssue({
       code: 'custom',
       path: ['body', 'source'],
-      message: undeclaredActionRefusalReasonAtSave(code, reason, Object.keys(reasons)),
+      message: undeclaredActionRefusalReasonAtSave(code, reason, Object.keys(reasons ?? {})),
     });
   }
 }

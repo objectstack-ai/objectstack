@@ -2281,6 +2281,24 @@ describe('PublishMetaItemRequestSchema mirrors the implementation parameter type
     }
   });
 
+  it('draftVersion is an optional string, PRESERVED through parse, absent stays absent — the draft pin', () => {
+    // Ruling 7168616260 (A1): the publish door's own pin on the DRAFT it
+    // promotes, beside `parentVersion` (the active row's). Absent is unpinned,
+    // so the parse must keep absent apart from any value.
+    const pinned = PublishMetaItemRequestSchema.safeParse({ ...base, draftVersion: 'hmac-sha256:abc', parentVersion: 'hmac-sha256:def' });
+    expect(pinned.success).toBe(true);
+    if (pinned.success) {
+      expect(pinned.data).toEqual({ ...base, draftVersion: 'hmac-sha256:abc', parentVersion: 'hmac-sha256:def' });
+    }
+    const absent = PublishMetaItemRequestSchema.safeParse(base);
+    expect(absent.success).toBe(true);
+    if (absent.success) {
+      expect('draftVersion' in (absent.data as object)).toBe(false);
+    }
+    expect(PublishMetaItemRequestSchema.safeParse({ ...base, draftVersion: null }).success).toBe(false);
+    expect(PublishMetaItemRequestSchema.safeParse({ ...base, draftVersion: 42 }).success).toBe(false);
+  });
+
   it('does not declare environmentId — transport-level by ruling, stripped and shape-absent', () => {
     // Same regression guard as the meta-read block above: if someone declares
     // the member, the parse stops stripping it and this test names the ruling

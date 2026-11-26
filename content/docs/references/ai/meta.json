@@ -20,6 +20,7 @@
     "build-progress",
     "dataset-tools",
     "object-query-source",
+    "record-citation",
     "record-context-tools"
   ]
 }
