@@ -52,6 +52,7 @@ export {
 export {
   SysStandardUnitSetting,
   STANDARD_UNIT_SETTING_CODES,
+  STANDARD_UNIT_SETTING_CODE_PATTERN,
 } from './sys-standard-unit-setting.object.js';
 // [ADR-0157 D1] Working calendars and their dated exceptions, read by the
 // calendar service (`@objectstack/objectql`).

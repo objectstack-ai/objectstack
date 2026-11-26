@@ -6,10 +6,17 @@ import { UNIT_DECIMAL_PLACES_MAX } from './sys-unit.object.js';
 /**
  * The codes a row may name: every key of the standard unit table (ADR-0158
  * U1), in its order. Read from the table, so a code the table gains is
- * selectable here with no second edit, and a code it never held is refused
- * by the select's closed option set.
+ * admitted here with no second edit.
  */
 export const STANDARD_UNIT_SETTING_CODES: readonly string[] = Object.freeze(Object.keys(STANDARD_UNITS));
+
+/**
+ * The format rule's pattern: exactly one standard code, in exact uppercase, as
+ * a quantity stores it (U4). A `text` column with this rule, not a `select`:
+ * a select's option values are stored lowercase, and a unit code is stored in
+ * exact uppercase everywhere it appears.
+ */
+export const STANDARD_UNIT_SETTING_CODE_PATTERN = `^(?:${STANDARD_UNIT_SETTING_CODES.join('|')})$`;
 
 /**
  * sys_standard_unit_setting — Standard Unit Setting (ADR-0158 U6, its Open
@@ -23,10 +30,11 @@ export const STANDARD_UNIT_SETTING_CODES: readonly string[] = Object.freeze(Obje
  * platform ships zero rows: a standard unit with no row has no display
  * default of its own (U1 names none).
  *
- * - **Code** — one of the standard table's codes
- *   ({@link STANDARD_UNIT_SETTING_CODES}). Unique within the organization and
- *   immutable after create: a row is the setting OF that code, so a wrong code
- *   is corrected by deleting the row and adding the right one.
+ * - **Code** — one of the standard table's codes in exact uppercase
+ *   ({@link STANDARD_UNIT_SETTING_CODE_PATTERN}), as a quantity stores it.
+ *   Unique within the organization and immutable after create: a row is the
+ *   setting OF that code, so a wrong code is corrected by deleting the row
+ *   and adding the right one.
  * - **Decimal places** — the unit's display default (U6), a whole number from
  *   0 to {@link UNIT_DECIMAL_PLACES_MAX}, the same range as `sys_unit`'s
  *   column. Never a storage rule (L4): the field's own `scale` is the ceiling,
@@ -72,20 +80,18 @@ export const SysStandardUnitSetting = ObjectSchema.create({
   fields: {
     id: Field.text({ label: 'ID', required: true, readonly: true, group: 'System' }),
 
-    code: Field.select(
-      STANDARD_UNIT_SETTING_CODES.map((value) => ({ value, label: value })),
-      {
-        label: 'Standard Unit',
-        required: true,
-        searchable: true,
-        trackHistory: true,
-        description:
-          'The standard unit code (UN/ECE Recommendation 20), for example KGM for kilogram or H87 for piece. ' +
-          "The organization's own units carry their decimal places on the unit itself, under Units of Measure. " +
-          'The code cannot be changed after the setting is created.',
-        group: 'Unit',
-      },
-    ),
+    code: Field.text({
+      label: 'Standard Unit',
+      required: true,
+      searchable: true,
+      maxLength: 3,
+      trackHistory: true,
+      description:
+        'The standard unit code (UN/ECE Recommendation 20) in exact uppercase, for example KGM for kilogram, GRM for gram or H87 for piece. ' +
+        "The organization's own units carry their decimal places on the unit itself, under Units of Measure. " +
+        'The code cannot be changed after the setting is created.',
+      group: 'Unit',
+    }),
 
     decimal_places: Field.number({
       label: 'Decimal Places',
@@ -108,6 +114,18 @@ export const SysStandardUnitSetting = ObjectSchema.create({
   // `validations` is the server-enforced channel: objectql's rule validator runs
   // it on insert, by-id update and bulk update (ADR-0049 declared = enforced).
   validations: [
+    {
+      // U1: one of the standard table's codes, in exact uppercase. An absent
+      // value is left to `required`.
+      type: 'format',
+      name: 'standard_unit_setting_code_standard',
+      field: 'code',
+      regex: STANDARD_UNIT_SETTING_CODE_PATTERN,
+      severity: 'error',
+      message:
+        'Enter a standard unit code in exact uppercase, for example KGM or H87. ' +
+        "An organization's own unit carries its decimal places on the unit itself, under Units of Measure.",
+    },
     {
       // A row is the setting of its code: the code is immutable after create.
       // `cross_field` so the refusal is attached to the field it is about.

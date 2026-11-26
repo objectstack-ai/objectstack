@@ -11,7 +11,11 @@ import {
   resolveInjectedSystemColumns,
 } from '@objectstack/spec/data';
 import { PLATFORM_OBJECTS_BY_PACKAGE } from '@objectstack/spec/system';
-import { SysStandardUnitSetting, STANDARD_UNIT_SETTING_CODES } from './sys-standard-unit-setting.object.js';
+import {
+  SysStandardUnitSetting,
+  STANDARD_UNIT_SETTING_CODES,
+  STANDARD_UNIT_SETTING_CODE_PATTERN,
+} from './sys-standard-unit-setting.object.js';
 import { SysUnit, UNIT_DECIMAL_PLACES_MAX } from './sys-unit.object.js';
 import { SETUP_NAV_CONTRIBUTIONS } from '../apps/setup-nav.contributions.js';
 import { PlatformObjectsPlugin } from '../plugin.js';
@@ -43,12 +47,17 @@ describe('sys_standard_unit_setting — declaration (ADR-0158 U6, Open item 10)'
   });
 
   describe('values', () => {
-    it("code is a select over exactly the standard unit table's codes, in its order (U1)", () => {
-      expect(fields.code.type).toBe('select');
-      expect(fields.code.options.map((o: any) => o.value)).toEqual(Object.keys(STANDARD_UNITS));
+    it("code is text admitted only by a format rule over exactly the standard unit table's codes (U1)", () => {
+      expect(fields.code.type).toBe('text');
+      expect(fields.code.maxLength).toBe(3);
       expect(STANDARD_UNIT_SETTING_CODES).toEqual(Object.keys(STANDARD_UNITS));
-      // An organization's own unit carries its decimal places on its own row (U3, U6).
-      expect(fields.code.options.map((o: any) => o.value)).not.toContain('BOX_12');
+      const format = rules.find((r) => r.name === 'standard_unit_setting_code_standard');
+      expect(format).toMatchObject({ type: 'format', field: 'code', severity: 'error', regex: STANDARD_UNIT_SETTING_CODE_PATTERN });
+      const re = new RegExp(format!.regex);
+      for (const code of Object.keys(STANDARD_UNITS)) expect(re.test(code), code).toBe(true);
+      // Exact uppercase (U4), no near-synonym of piece (U2), and no
+      // organization code: an org unit carries its decimal places on its own row.
+      for (const code of ['kgm', 'Kgm', 'C62', 'EA', 'BOX_12', 'JIN1', 'KGMX', ' KGM', '']) expect(re.test(code), code).toBe(false);
     });
 
     it("decimal_places is a whole number from 0 to 12, sys_unit's range, with no default (U6, L4)", () => {
@@ -124,8 +133,8 @@ describe('sys_standard_unit_setting — declaration (ADR-0158 U6, Open item 10)'
     };
     const ROW = { code: 'GRM', decimal_places: 3 };
 
-    it('is the one rule, update-only, attached to code', () => {
-      expect(rules.map((r) => r.name)).toEqual(['standard_unit_setting_code_immutable']);
+    it('is an update-only rule attached to code, beside the format rule', () => {
+      expect(rules.map((r) => r.name)).toEqual(['standard_unit_setting_code_standard', 'standard_unit_setting_code_immutable']);
       expect(rule).toMatchObject({ type: 'cross_field', events: ['update'], fields: ['code'], severity: 'error' });
     });
 
