@@ -1,6 +1,6 @@
 # ADR-0084: Application-builder information architecture — six domain groups in a left menu (was: four content pillars)
 
-**Status**: Accepted (2026-07-01) · **Amended in place** (2026-11-24, card [#36891](https://github.com/objectstack-ai/objectstack/issues/36891) of epic [#36890](https://github.com/objectstack-ai/objectstack/issues/36890), maintainer, verbatim: 「元数据列表如果全部改成点击之后弹出全屏的详情页呢？是不是对象流程这些可以用同一种风格，顶部的导航也不需要了。」, 「studio 不是一个应用，是某个应用的开发界面，点击左上角还是返回应用，」, 「我们说的弹出窗口全屏，应该是右侧全屏对吧，左侧菜单和前端一样可以折叠。」, and on the epic's fifteen numbered decisions, twice, 「全部按建议」): the four content pillars are no longer a navigation — Studio is the development surface of one app, its one navigation is a collapsible left menu of six groups that follow the spec's registered domains, and every registered metadata type has a group ([Amendment](#amendment-2026-11-24)). It lands by the hand-merge or authorized approval of the PR cut from #36891. · **Amended in place** (2026-11-25, card [#37199](https://github.com/objectstack-ai/objectstack/issues/37199) of the same epic, on decision card [#37192](https://github.com/objectstack-ai/objectstack/issues/37192)'s ruling record, [comment 7151834490](https://github.com/objectstack-ai/objectstack/issues/37192#issuecomment-7151834490), maintainer, verbatim: 「同意」, with the adjustments 「选项列表 5也放到高级」 and 「AI 应该提到第一层分类，放在最下面」): on a package the menu draws its six groups in two tiers — the ten **常用 Common** types, always listed, and one collapsed **高级 Advanced** fold that holds every other type and entry under its group's label; this replaces the 2026-11-24 line "the menu draws no audience tier", and the type-to-group table gains an order column and a tier column ([Amendment](#amendment-2026-11-25)). It lands by the hand-merge or authorized approval of the PR cut from #37199.
+**Status**: Accepted (2026-07-01) · **Amended in place** (2026-11-24, card [#36891](https://github.com/objectstack-ai/objectstack/issues/36891) of epic [#36890](https://github.com/objectstack-ai/objectstack/issues/36890), maintainer, verbatim: 「元数据列表如果全部改成点击之后弹出全屏的详情页呢？是不是对象流程这些可以用同一种风格，顶部的导航也不需要了。」, 「studio 不是一个应用，是某个应用的开发界面，点击左上角还是返回应用，」, 「我们说的弹出窗口全屏，应该是右侧全屏对吧，左侧菜单和前端一样可以折叠。」, and on the epic's fifteen numbered decisions, twice, 「全部按建议」): the four content pillars are no longer a navigation — Studio is the development surface of one app, its one navigation is a collapsible left menu of six groups that follow the spec's registered domains, and every registered metadata type has a group ([Amendment](#amendment-2026-11-24)). It lands by the hand-merge or authorized approval of the PR cut from #36891. · **Amended in place** (2026-11-25, card [#37199](https://github.com/objectstack-ai/objectstack/issues/37199) of the same epic, on decision card [#37192](https://github.com/objectstack-ai/objectstack/issues/37192)'s ruling record, [comment 7151834490](https://github.com/objectstack-ai/objectstack/issues/37192#issuecomment-7151834490), maintainer, verbatim: 「同意」, with the adjustments 「选项列表 5也放到高级」 and 「AI 应该提到第一层分类，放在最下面」): on a package the menu draws its six groups in two tiers — the ten **常用 Common** types, always listed, and one collapsed **高级 Advanced** fold that holds every other type and entry under its group's label; this replaces the 2026-11-24 line "the menu draws no audience tier", and the type-to-group table gains an order column and a tier column ([Amendment](#amendment-2026-11-25)). It lands by the hand-merge or authorized approval of the PR cut from #37199. · **Amended in place** (2026-11-26, card [#37451](https://github.com/objectstack-ai/objectstack/issues/37451) of epic [#37424](https://github.com/objectstack-ai/objectstack/issues/37424), maintainer, verbatim, as that epic records them: 「App Studio 就是开发软件包的入口吧」, 「现在你软件包的下拉菜单就只剩切换了，还不如做成切换，加上一个新建按钮」, 「Studio 应该是一个专用的企业色，不需要和应用的企业色一致。防止晕了」 and 「或者叫概览？」, and, on the decision card that carried the phase plan, the pick 「按推荐启动」): Studio — App Studio, 应用搭建 — is the entry for developing a package; its frame is two columns with no top bar, the package switcher returns to the top left with 新建软件包, 概览 Overview is the menu's first entry, Studio's accent is its own graphite, and each control the top bar held has a named home; the five questions the maintainer has not answered are written as open ([Amendment](#amendment-2026-11-26)). It lands by the hand-merge or authorized approval of the PR cut from #37451.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0077](./0077-authoring-surface-boundary-hook-flow-validation.md) (route authoring by intent + audience + verifiability — the hook/flow/validation boundary), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (draft-gated authoring), [ADR-0063](./0063-two-kernel-agents-skills-are-the-extension-primitive.md)/[ADR-0064](./0064-tool-scoping-to-agent.md) (two kernel agents — AI is a platform capability, not app metadata), [ADR-0080](./0080-ai-authored-ui-jsx-source.md)/[ADR-0081](./0081-trusted-react-page-tier.md) (the Interface pillar's page-authoring depth).
 **Consumers**: `studio.app.ts` (the builder navigation), the Studio UI, `packages/cli/src/utils/format.ts` (`os` stats grouping), and the build agent (which surface authors which type).
@@ -23,6 +23,14 @@
 > stands, each sentence it narrows is marked, and all of them point to
 > [Amendment (2026-11-25)](#amendment-2026-11-25); everything not marked stands.
 
+> **Amendment (2026-11-26) — App Studio is the entry for developing a package: two columns, no top bar.** The six
+> groups and the two tiers stand. The top bar goes. The top left holds two rows: Studio's own, and under it the way
+> back to the app beside a package switcher that ends in 新建软件包. The menu's first entry is 概览 Overview, the open
+> package's own page. Studio has its own accent, graphite. Each control the top bar held has a named home. Five
+> questions the maintainer has not answered are written as open and decide nothing. Each sentence this replaces or
+> narrows is marked where it stands and points to [Amendment (2026-11-26)](#amendment-2026-11-26); everything not
+> marked stands.
+
 ---
 
 ## TL;DR
@@ -30,7 +38,7 @@
 1. **The app builder is for *building an application* — nothing else.** Running it (Operate) and the platform's own machinery (Platform) are different surfaces, different personas; they are **out of the builder entirely**, not deferred. *(Amended 2026-11-24: this stands for Operate. The Platform and AI **types** are in Studio, each in a menu group — see [Amendment](#amendment-2026-11-24).)*
 2. **~~Four visual content pillars (Airtable's three plus the one it lacks): Data · Automation · Interface · Access. This is what a builder navigates.~~** *(Replaced by the 2026-11-24 amendment.)* A builder navigates **one left menu of six groups** — 数据 Data · 界面 UI · 自动化 Automation · 平台 Platform · 访问 Access · AI. What the four pillars held is found in the groups of their names (Interface's in 界面 UI).
 3. **Each pillar's editor matches the pillar's natural shape**: Data = grid, Automation = canvas, Interface = builder/source, Access = matrix.
-4. **Dashboards live in Interface** (Airtable-style: a dashboard is an interface surface of inline chart blocks). A separate **Analytics** pillar is a *future* split, gated on the reusable dataset/cube layer maturing — not a v1 concern.
+4. **Dashboards live in Interface** (Airtable-style: a dashboard is an interface surface of inline chart blocks). A separate **Analytics** pillar is a *future* split, gated on the reusable dataset/cube layer maturing — not a v1 concern. *(Amended 2026-11-26: a `dataset` is no longer counted with them. It is to be registered a `data` type and found under 数据 Data; dashboards and reports stay under 界面 UI, and no Analytics group is made — [Amendment](#amendment-2026-11-26-moves).)*
 5. **~~A Settings area (distinct from the content pillars) holds General (the app's own basic info) and Advanced — the technical tier for developers.~~** *(Replaced by the 2026-11-24 amendment: the menu has no Settings group; see [item 2](#amendment-silent) there.)*
 6. **~~Advanced is unified by audience, not by "is it code."~~** ~~It holds both **Code** (hooks now; functions, custom components, custom field types later) and **Connections** (datasources, connectors, webhooks, mappings — external data/systems). What unites them: technical, beyond visual authoring, developer audience. There is **no separate Integration tier** — connections are Advanced.~~ *(Replaced by the 2026-11-24 amendment: each of these types is found in the group of its registered domain.)*
 7. **v1 ships**: the four pillars + Settings(General + Advanced/**Hooks**). Everything else (the rest of Advanced, Analytics, Operate, Platform) is later or out-of-builder.
@@ -117,8 +125,8 @@ Related issues: #2501 (dashboard-level filters), #2502 (inline-vs-dataset expres
 
 ### What Studio is
 
-- **Studio is the development surface of one app, not an app of its own** (maintainer, above). It is opened on one package, and the scope unit is still the package, its paired `.custom` included (decision 5; ADR-0146 D3).
-- **The top-left control returns to the app** (maintainer, above), and the name it shows is the **current package's app**, not the app the person happened to come from (decision 5).
+- **Studio is the development surface of one app, not an app of its own** (maintainer, above). It is opened on one package, and the scope unit is still the package, its paired `.custom` included (decision 5; ADR-0146 D3). *(Amended 2026-11-26: reworded — Studio is **the entry for developing a package**. The unit was the package already, so a package with no app is developed there like any other. It is still not an app of its own: [Amendment (2026-11-26)](#amendment-2026-11-26-position).)*
+- **The top-left control returns to the app** (maintainer, above), and the name it shows is the **current package's app**, not the app the person happened to come from (decision 5). *(Amended 2026-11-26: both stand, and the control moves — it is the first control of the top left's second row, and the name is shown beside it by the package switcher: [Amendment (2026-11-26)](#amendment-2026-11-26-frame).)*
 - **Studio has no page of its own above a package.** The landing page — the package cards at `/studio` — is removed by its own card once Setup's package list has landed, each entry it carries moved first (decision 9; [#36908](https://github.com/objectstack-ai/objectstack/issues/36908), [#36834](https://github.com/objectstack-ai/objectstack/issues/36834)).
 
 ### The menu
@@ -138,6 +146,8 @@ left menu (collapsible)        content pane
 ```
 
 *(Amended 2026-11-25: the drawing lists the six groups and their order, which stand. On a package they are drawn in two tiers — the 常用 Common types under their groups, then one 高级 Advanced fold — as [Amendment (2026-11-25)](#amendment-2026-11-25) sets out.)*
+
+*(Amended 2026-11-26: the drawing's first line is the top bar, which goes. The frame in force is the drawing in [Amendment (2026-11-26)](#amendment-2026-11-26-frame): two columns, the way back in the left column's second row, and 概览 Overview above the groups. The six groups and their order stand.)*
 
 The menu has six groups, one for each domain the spec registers a metadata type under (decision 11):
 
@@ -202,7 +212,7 @@ The table is the registry read at one commit. **The rule above is what binds**: 
 
 Three readings the table needs:
 
-- **A group is where a type is found, not where its item is edited.** Where an item opens is ADR-0146 D1's. A `datasource` is found under 平台 Platform and its row opens Setup's Datasources page, as its tile does today: runtime configuration is Setup's (ADR-0146 D1).
+- **A group is where a type is found, not where its item is edited.** Where an item opens is ADR-0146 D1's. A `datasource` is found under 平台 Platform and its row opens Setup's Datasources page, as its tile does today: runtime configuration is Setup's (ADR-0146 D1). *(Amended 2026-11-26: the first sentence stands. The example moves again — the menu is to draw no `datasource` row at all, because a connection is managed in Setup alone; the type stays registered `system`: [Amendment (2026-11-26)](#amendment-2026-11-26-moves).)*
 - **Not every type draws a row.** `field` is a 数据 Data type and is edited inside its object; it has no list of its own today, and the amendment gives it none. Which rows the menu draws stays the area's existing rule; the table says where a row goes when there is one. *(Amended 2026-11-25: narrowed for the 常用 Common types — on a package each is drawn whether the package holds one or not. The area's rule stays for the 高级 Advanced types, and `field` still draws no row.)*
 - **The 2026-07-01 pillar table holds working names, not registry names.** "trigger", "schedule", "validation", "form", "role" and "sharing" are not registered types. `action`, the registered type, is a button on an object or a standalone action, and a `ui` type; the pillar table's "action" was a step of a flow. Where the two tables differ, this one decides.
 
@@ -219,6 +229,8 @@ The menu also holds four entries that open no type's list. Each sits in the grou
 
 *(Amended 2026-11-25, card [#37360](https://github.com/objectstack-ai/objectstack/issues/37360), ruling record [comment 7177310364](https://github.com/objectstack-ai/objectstack/issues/37360#issuecomment-7177310364), maintainer, verbatim: 「37360 同意」: on a package the menu holds a fifth entry, **全部类型 All types**, the last row of the 高级 Advanced fold, below its groups — the one entry that sits under no group. It opens the type directory, which lists every type of the six groups: the ones the package holds, and the ones it holds none of yet, each marked so with what can be done there. The fold's rule stands — a 高级 type is drawn when the package holds one.)*
 
+*(Amended 2026-11-26, card [#37451](https://github.com/objectstack-ai/objectstack/issues/37451): on a package the menu holds one more entry that opens no type's list — **概览 Overview**, the open package's own page, the menu's first row, above the groups, under no group and in no tier ([Amendment (2026-11-26)](#amendment-2026-11-26-overview)). Two rows of the table above leave the menu for Setup: Diagnostics, and the cross-package environment directory, whose Setup group is open. The other two, and 全部类型 All types, stay ([Amendment (2026-11-26)](#amendment-2026-11-26-moves)).)*
+
 ### What stands, and what the amendment replaces {#amendment-stands}
 
 | The 2026-07-01 text | Since the amendment |
@@ -226,7 +238,7 @@ The menu also holds four entries that open no type's list. Each sits in the grou
 | TL;DR 1, "Two altitudes" — the builder is for building an app; Operate and Platform are out of it | Stands for Operate: running an app and administering a deployment are Setup's (ADR-0146 D1). The Platform and AI **types** are in Studio — ADR-0146 D1 gave Studio every type on 2026-10-31 — and now have groups. |
 | TL;DR 2 — four pillars are what a builder navigates | Replaced: one left menu, six groups. What each pillar held is in the group of its name (Interface's in 界面 UI). |
 | TL;DR 3, the pillar table, "Shape → editor", "Same renderer" | Stand: grid, canvas, builder or source, matrix. A designer now opens as its item's page (ADR-0146 D1). "Same renderer" goes further: a dashboard or a report opens in the app's own edit state (ADR-0146 D1). |
-| TL;DR 4 — dashboards live in Interface; Analytics is a future split | Stands: `dashboard`, `report` and `dataset` are `ui` types, found under 界面 UI. A split is a new `domain` value. |
+| TL;DR 4 — dashboards live in Interface; Analytics is a future split | Stands: `dashboard`, `report` and `dataset` are `ui` types, found under 界面 UI. A split is a new `domain` value. *(Amended 2026-11-26: `dataset` is to be registered `data` and found under 数据 Data, directly after `object`. `dashboard` and `report` stay `ui` types. This is one type changing domain, not the Analytics split: no `domain` value is added — [Amendment (2026-11-26)](#amendment-2026-11-26-moves).)* |
 | TL;DR 5 and 6, "Settings" — a Settings area holding General and Advanced | Replaced as navigation: the menu has no Settings group ([item 2](#amendment-silent) below). |
 | TL;DR 7 — what v1 ships | History. |
 | "Audience routing" — builders in the pillars, developers in Advanced, AI not in the builder | Replaced: ~~the menu draws no audience tier.~~ *(Amended 2026-11-25.)* The menu draws two tiers, **常用 Common** and **高级 Advanced** — a second axis beside the six groups, not a seventh group ([Amendment (2026-11-25)](#amendment-2026-11-25)); maintainer, verbatim: 「同意」, to the seat's question "同意整体加「常用 / 高级」这一层吗？同意的话，ADR-0084 里「菜单不分受众层级」那句，就以你的话为依据改掉。" The line between audiences has run between the two surfaces since ADR-0146 D1 — maintainer, verbatim: 「studio 是给开发人员用的， setup 时给管理员用的」. ADR-0077 is read, not amended. |
@@ -238,7 +250,7 @@ The menu also holds four entries that open no type's list. Each sits in the grou
 
 Merging accepts them; an objection names the number.
 
-1. **The cross-package environment directory (`~all`) is entered from the 访问 Access group.** Decision 11 places the three other entries of [the table above](#entries-not-a-type) and is silent on this one. The leg's directory lists four types — positions, capabilities, permission sets and sharing rules (the console's `ENVIRONMENT_AREA_TYPES`) — each registered `security`, and the leg's one visible entry today, on the landing page decision 9 removes, is named for exactly that. Decision 11 puts every other such entry in the group of what it holds; this follows it. On that leg the same menu is drawn (the menu card decides whether that is one shell or two frames). Weighed and not taken: an entry of its own outside the six groups, which gives a catalog of four Access types a second place beside the group that already lists them.
+1. **The cross-package environment directory (`~all`) is entered from the 访问 Access group.** Decision 11 places the three other entries of [the table above](#entries-not-a-type) and is silent on this one. The leg's directory lists four types — positions, capabilities, permission sets and sharing rules (the console's `ENVIRONMENT_AREA_TYPES`) — each registered `security`, and the leg's one visible entry today, on the landing page decision 9 removes, is named for exactly that. Decision 11 puts every other such entry in the group of what it holds; this follows it. On that leg the same menu is drawn (the menu card decides whether that is one shell or two frames). Weighed and not taken: an entry of its own outside the six groups, which gives a catalog of four Access types a second place beside the group that already lists them. *(Amended 2026-11-26: ruled since, and differently — the directory leaves Studio's menu for Setup. Which Setup group holds it is open, and until it moves it is entered from 访问 Access as this item says: [Amendment (2026-11-26)](#amendment-2026-11-26-moves).)*
 2. **The Settings area is not a group.** Decision 11 names six groups and Settings is not one of them, and no ruling speaks of TL;DR 5 and 6. The types those two items placed are found by the rule like every other type: `app` (General) under 界面 UI, `hook` and `mapping` under 数据 Data, `datasource` under 平台 Platform (connectors and webhooks are not registered types). A Settings group would list those types a second time, which the "one type, one group" rule forbids.
 3. **The order of the groups and their English names.** Decision 11 lists the six in the order of the table above and names them in Chinese. This record takes that order as the menu's, and writes the English names Data, UI, Automation, Platform, Access and AI.
 4. **The title of this record.** It named the four pillars as the decision; it now names the menu and keeps the old words after "was:". The number and the file name do not move (Prime Directive #13).
@@ -275,6 +287,8 @@ A group's label is drawn in a tier only where the group has an entry in that tie
 The four [entries that are not a type](#entries-not-a-type) are 高级 on a package. Each is drawn after the types of its group, the default sharing overview before the cross-package directory — where the menu adds them today (§3.4).
 
 The tiers belong to a package's menu. The package-less scope (`~org`) and the cross-package leg (`~all`) draw no fold: the same labels and the same order, flat (§3.8).
+
+*(Amended 2026-11-26: the two tiers, the ten 常用 types and the rule below stand. 概览 Overview is drawn above the tiers and belongs to neither. Of the four entries that are not a type, Diagnostics and the cross-package directory are to leave the menu. Whether `dataset` and `position` join the 常用 types, placed by name, is open — question 4 on [#37424](https://github.com/objectstack-ai/objectstack/issues/37424). See [Amendment (2026-11-26)](#amendment-2026-11-26-moves).)*
 
 ### The rule that sorts a type
 
@@ -314,3 +328,164 @@ Merging accepts them; an objection names the number.
 The ruling also carries, as proposed and not restated here: the menu's visual hierarchy (§3.3), the placement list and its two pins (§3.4), how the fold is opened, remembered and searched (§3.5), and that no address changes (§3.9). Those are the work of #37200 and #37201.
 
 Refs: decision card [#37192](https://github.com/objectstack-ai/objectstack/issues/37192) (the ruling record, comment 7151834490; the proposal, comment 7151777190; the adjustments, comment 7151811337); epic [#36890](https://github.com/objectstack-ai/objectstack/issues/36890) (decision 11: the six groups stand); card [#37199](https://github.com/objectstack-ai/objectstack/issues/37199) (this amendment); [#37200](https://github.com/objectstack-ai/objectstack/issues/37200) (the placement list and its pins), [#37201](https://github.com/objectstack-ai/objectstack/issues/37201) (the menu).
+
+---
+
+## Amendment (2026-11-26) — App Studio is the entry for developing a package; two columns, no top bar {#amendment-2026-11-26}
+
+**Decided by** the maintainer on 2026-11-26, on epic [#37424](https://github.com/objectstack-ai/objectstack/issues/37424) (the App Studio redesign). The words were given in the session of the seat that filed the epic and are on the epic's body as that seat recorded them, verbatim and untranslated:
+
+- **The position**: 「App Studio 就是开发软件包的入口吧」
+- **The switcher**: 「现在你软件包的下拉菜单就只剩切换了，还不如做成切换，加上一个新建按钮」
+- **The colour**: 「Studio 应该是一个专用的企业色，不需要和应用的企业色一致。防止晕了」
+- **The menu's look**: 「左侧菜单的分类效果也参考前端」 · 「左侧菜单选中效果也和前端保持一致」 · 「可以不要背景」
+- **The overview**: 「或者叫概览？」 · 「是不是技术元素太重」 · 「最近发布，我们的修改，都不要放在首页。」 · 「包含的内容，左侧菜单已经有了。」 · 「软件包概览页，是不是就是软件包元数据的详情页？现在没有嘛？」
+- **The dataset**: 「数据集 是AI 也要用的吧？不能算界面吧」
+- **The plan**: 「同意，立专题，不派发」, and on what Setup takes over (the epic's decision 12), 「同意」.
+- **The first phase, and the top bar's controls**, the same day, on the decision card of the area that took the epic up: the pick 「按推荐启动」, whose recommended option read, as card [#37451](https://github.com/objectstack-ai/objectstack/issues/37451) records it: 「返回放左上第二行，⋯和发布进概览页，保存/取消放详情页头，AI放标题行右端。」
+
+The discussion has **no GitHub record** beyond three places, and they are what a repository reader can reach: the epic's body (the quotations above and its decisions 1–12); the epic's phase table and its five open questions ([comment 7184108099](https://github.com/objectstack-ai/objectstack/issues/37424#issuecomment-7184108099)); and card #37451 (the pick, the five homes it gives, and that the name 应用搭建 / App Studio was kept when a rename was put to the maintainer). This section cites a decision by its number in the epic's body, and a question by its number in that comment.
+
+**The amendment declares; it implements nothing.** It is written once for all five phases of the epic, so that a later phase changes code and not this record. The first phase is four cards: [#37452](https://github.com/objectstack-ai/objectstack/issues/37452) (the menu's look and the graphite tokens), [#37454](https://github.com/objectstack-ai/objectstack/issues/37454) (概览, built thin), [#37455](https://github.com/objectstack-ai/objectstack/issues/37455) (Save, Cancel, the AI button and the panel toggle in their new homes) and [#37456](https://github.com/objectstack-ai/objectstack/issues/37456) (the top bar removed; the two rows, the switcher, the lock, the rail). The later phases are rows of the epic's phase table, not yet filed. Until those cards land the code still draws the top bar. What a later phase cannot do without a ruling is under [Open](#amendment-2026-11-26-open).
+
+### What Studio is {#amendment-2026-11-26-position}
+
+- **Studio is the entry for developing a package** (maintainer, above; decision 1). Work on one package is done in Studio, opened on that package. Setup → Packages is the list of all packages — where one is installed or imported — and each row there opens that package's 概览 Overview in Studio (decisions 10 and 12).
+- **This rewords the 2026-11-24 sentence "the development surface of one app". It does not change the unit**, which was the package already, its paired `.custom` included (ADR-0146 D3). What follows from the new words: a package with no app is developed in Studio like any other, and no part of the frame waits for an app.
+- **Studio is still not an app of its own**, and the way back to the app stands ([the frame](#amendment-2026-11-26-frame)).
+- **Its name is App Studio, and 应用搭建 in a Chinese interface** (decision 2). The label today is "Studio" (`packages/platform-objects/src/apps/studio.app.ts#STUDIO_APP`), so the English name changes as well. Only display text changes: the `/studio` address, the registered app name `studio` and every identifier stay. A Chinese interface shows 应用搭建 and not the English name. The epic's mockups draw "App Studio" on a Chinese screen, and the [North Star](../NORTH-STAR.md)'s `area:ux` row — a Chinese interface shows no stray English — decides against them. The name says 应用 and the unit is a 软件包: the name is for the person who comes to build an app, and the package is what that app ships in. Elsewhere in this record "Studio" still means this surface.
+
+### The frame {#amendment-2026-11-26-frame}
+
+Studio's frame is two columns — the left column and the content pane — and **no top bar** (decision 3). It is the shape the app's own shell has from 768 px up (ADR-0146 D5's note). The 2026-11-24 ruling took the pillars off the top; this takes the bar.
+
+```
+left column (collapsible)                      content pane
+  应用搭建 App Studio             [collapse]      the open page: 概览, a type's list, or an item
+  ‹  <app logo> <package> <lock>   [switch]       └ the right end of its title row holds the
+                                                     page's own buttons (the table below)
+  概览 Overview            <pending count>
+  数据 Data
+  界面 UI
+  自动化 Automation
+  访问 Access
+  AI
+  高级 Advanced
+```
+
+The top left has two rows.
+
+1. **Studio's row**: Studio's mark and name, and the control that collapses the left column.
+2. **The package row**: the way back, then the open package — its app's logo, its name, a lock when it is read-only — which is the package switcher.
+
+**The way back stands** (2026-11-24, maintainer: 「点击左上角还是返回应用」). It is the first control of the package row. Where it leads is unchanged — `ui/packages/app-shell/src/views/studio-design/StudioBackToApp.tsx#studioBackTarget`: the app page the person came from when that app is the package's, else the package's own app, else the apps home.
+
+**The package switcher is restored** (maintainer, above; decision 3). This reverses its removal by [#36501](https://github.com/objectstack-ai/objectstack/issues/36501). It lists the packages the person may open, and picking one opens it. Its last row is **新建软件包 New package**, which opens the dialog Setup's package list already uses (`ui/packages/app-shell/src/views/metadata-admin/PackageFormDialog.tsx#PackageFormDialog`). A pair is not a row: `<base>.custom` is folded under its base. That is ADR-0146 D3's sentence on the switcher, in force again.
+
+**Read-only** (decision 8). A package the person cannot write to shows a lock beside its name in the package row, and a "New" button there says why it is off in its tooltip. No list carries a banner for it.
+
+**Collapsed**, the left column is a rail that keeps the app's logo and the way back (decision 3).
+
+**The menu looks like the app's sidebar** (maintainer, above; decision 5). A group's header is the front end's, and it collapses. An icon is a line icon with no tile behind it. The selected row is the front end's pill with its bar, inset from the edge. Decision 5 changes how the menu is drawn and nothing about what it holds: the six groups, their order, the two tiers, the fold and 全部类型 All types stand.
+
+**Studio has its own accent, graphite, and never takes the app's theme colour** (maintainer, above; decision 4). A person who steps from an app into Studio sees by the colour that they have left the app. The one thing in the frame that keeps the app's colour is the app's logo.
+
+### Where the top bar's controls go {#amendment-2026-11-26-homes}
+
+The top bar is drawn by `ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx`. Read at `origin/main` `a46efa8c`, it holds seven things. Five have a home by the maintainer's pick, one by decision 3, and one is given none.
+
+| What the top bar holds | Its home | By |
+|---|---|---|
+| The way back to the app, with the app's name | The first control of the package row; the name is shown by the switcher beside it | the pick |
+| The ⋯ package menu (`ui/packages/app-shell/src/views/studio-design/StudioPackageMenu.tsx#STUDIO_PACKAGE_MENU_ITEMS`) | The header of 概览 Overview, moved as it is | the pick |
+| The pending-changes button with its count, and Publish | The Pending tab of 概览 Overview. The count is a badge on the menu's 概览 row, and one click on it opens that tab | the pick |
+| Save and Cancel, drawn while a page has unsaved edits | The action slot of the item's header (`ui/packages/app-shell/src/views/studio-design/StudioItemHeader.tsx#StudioItemHeader`) | the pick |
+| The AI assistant button, and the toggle of the right-hand panel | The right end of each page's title row — a list's title row, an item's header — where an app's page carries its own (`ui/packages/app-shell/src/layout/ShellPageActions.tsx#ShellPageActions`) | the pick |
+| The control that shows and hides the menu | Studio's row | decision 3 |
+| For a package with no app: the "create app" button, or the label that says its app waits for a publish | None — [item 5](#amendment-2026-11-26-silent) | not ruled |
+
+Decision 3 says the ⋯ menu "is removed". It is read with decision 9 and the pick: the menu leaves the top left, and its rows live on in 概览's header.
+
+### 概览 Overview {#amendment-2026-11-26-overview}
+
+**概览 Overview is the menu's first entry and the open package's own page** (maintainer, above; decisions 6 and 9). It opens no type's list, and **there is no `package` metadata type**: the page reads and writes through the package REST surface. It is drawn in the frame an item's page has — the item header and its row of tabs — so that a package opens like anything else Studio opens (maintainer: 「软件包概览页，是不是就是软件包元数据的详情页？」).
+
+- **The header**: the package's name; a chip that reads 系统自带 or 可写, and one that reads 使用中 or 已停用; the description; then 导出 Export and ⋯.
+- **信息 Info**: the business fields, with the technical ones (id, namespace, type) folded away (maintainer: 「是不是技术元素太重」).
+- **待发布 Pending**: the changes that wait for a publish, and Publish. It is the changes panel that exists, in its new home.
+- **发布历史 Publish history**: the list of publishes, and "revert to last publish".
+
+It is not a page of news: no recent publishes, no "our changes", no list of what the package contains (maintainer: 「最近发布，我们的修改，都不要放在首页。」 · 「包含的内容，左侧菜单已经有了。」).
+
+**What Pending counts.** The save rule of epic [#36510](https://github.com/objectstack-ai/objectstack/issues/36510) stands (ADR-0146 D1, *One save model*): a person's Save takes effect at once, and a draft with a whole-package publish is how an AI's changes arrive. So Pending counts the open package's drafts — an AI's changes, and any human draft left from before that rule, which ADR-0146 D1 has a person publish or discard. For a pair it acts on the pair (ADR-0146 D3). The count is the badge on the menu's 概览 row, drawn only while something is pending. Publish is the last step of building an app, and the badge is what keeps it one click away once the top bar is gone.
+
+**The first phase builds it thin** (#37454): Info, read-only; Pending; and the ⋯ menu moved from the top bar with the six rows it has today — edit info, export, duplicate, revert to last publish, adopt loose items, manage in Setup. The header's final layout belongs to a later phase: Export as its own button, the ⋯ rows of decision 9, and revert on the Publish history tab. What each kind of package may do — kernel, code, marketplace, authored — follows the rules that exist, and every action reuses its existing dialog and confirmation (decision 9).
+
+### Placements, and what moves to Setup {#amendment-2026-11-26-moves}
+
+Decision 12 draws the line: **Studio develops one package; Setup runs the organization and holds what is global** (maintainer: 「同意」). Five places follow from it and from decision 6.
+
+- **`dataset` is a 数据 Data type, placed directly after `object`** (maintainer: 「数据集 是AI 也要用的吧？不能算界面吧」; decision 6). A dataset is the semantic layer that charts and an AI's data questions both read (`packages/spec/src/ui/dataset.zod.ts#DatasetSchema`), so it is data and not interface. It moves the way this record says a type moves: its registered `domain` changes from `ui` to `data` in `packages/spec/src/kernel/metadata-plugin.zod.ts#DEFAULT_METADATA_TYPE_REGISTRY`. That is a change to the spec's contract, and it owes a contract review in its own card. No special case is written into the menu for it.
+- **`position` stays where it is in 访问 Access, directly after `permission`.** Decision 6 also places it in the 常用 tier; that is question 4.
+- **Diagnostics leaves the menu for Setup → Diagnostics**, beside Audit Log and Sessions (decision 12). It is the page that lists, across types, every metadata item that fails validation. [Item 7](#amendment-2026-11-26-silent) sets this beside an earlier ruling.
+- **The cross-package environment directory (`~all`) leaves the menu for Setup** (decision 12). Decision 12 names Setup → Diagnostics as its group. What the directory lists is access metadata — positions, permission sets, capabilities and sharing rules — and which Setup group holds it is question 5.
+- **The menu draws no `datasource` row** (decision 12). A connection is configuration bound to an environment, and it is managed in Setup → Integrations alone. The type stays registered `system`; like `field`, it is a type that draws no row.
+
+Two entries do not move here. The organization's own flows (`~org`) stay in 自动化 Automation until questions 2 and 3 are answered. The organization-wide default sharing overview stays in 访问 Access.
+
+Decision 12 also says how the two surfaces speak of each other: whose sharing rules, queues and assignment rules each side shows; a position defined in Studio and assigned in Setup, linked both ways; one vocabulary for a package's source and state. None of that changes a place in the menu, and it is left to its cards.
+
+When the registry and the placement list change, the two groups `dataset` touches read, in order:
+
+- 数据 Data: `object` · `dataset` · `picklist` · `hook` · `mapping` · `object_extension` · `seed`
+- 界面 UI: `app` · `page` · `dashboard` · `report` · `view` · `action`
+
+**The [type → group table](#type-to-group) is not redrawn today.** A test pins it, row by row, to the registry and to the placement list (`ui/packages/app-shell/src/views/studio-design/studioMenuPlacement.test.ts`), and both still hold `dataset` under `ui`, `datasource` with a row, and every tier as ruled on 2026-11-25. Its rows are rewritten in the change that moves them — the same pull request, since the pin fails otherwise. That rewrite carries out this section and needs no further ruling. Until then the table is what the menu draws.
+
+### What the amendment replaces, and what stands {#amendment-2026-11-26-stands}
+
+| The text before | Since the amendment |
+|---|---|
+| 2026-11-24: "Studio is the development surface of one app, not an app of its own" | Reworded: the entry for developing a package. The unit was the package already. Still not an app of its own. |
+| 2026-11-24: "The top-left control returns to the app", and names the current package's app | Stands, and moves: the first control of the package row, with the name shown by the switcher beside it. Where it leads is unchanged. |
+| 2026-11-24: "Studio has no page of its own above a package" | Stands. 概览 is a page of one package, not a page above packages; the list of all packages is Setup's. |
+| The menu's drawing: a bar above the menu | Replaced: no top bar; two rows at the top left. |
+| The six groups and their order; "a type's group is its registered `domain`"; one type, one group | Stand. `dataset` changes group by changing its registered domain, which is the rule applied. |
+| 2026-11-25: the two tiers, the rule that sorts a type, the ten 常用 types | Stand. 概览 is in neither tier. Whether `dataset` and `position` join the 常用 types by name is open (question 4). |
+| "Entries that are not a type": four, and 全部类型 All types | 概览 is added, first. Diagnostics and the cross-package directory leave for Setup. The organization's own flows and the default sharing overview stay, and 全部类型 stays the fold's last row. |
+| The first reading of the table: a `datasource` row opens Setup's Datasources page | Replaced: the menu draws no `datasource` row. |
+| TL;DR 4 and its row in the 2026-11-24 table: `dataset` is a `ui` type | Replaced for `dataset`. `dashboard` and `report` stay `ui` types; the Analytics split is still not made. |
+| Item 1 of the 2026-11-24 list: the cross-package directory is entered from 访问 Access | Replaced by decision 12: it leaves the menu. In force until it moves. |
+| [#36501](https://github.com/objectstack-ai/objectstack/issues/36501): the package switcher removed | Reversed. |
+| [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) D1 | Marked the same day, in two places: its scope sentence, and what it gave Studio that decision 12 moves to Setup. The rest of D1 stands — Studio owns the metadata, Setup administers, the item tools are Studio's, one save model. |
+| ADR-0146 D3: a pair is folded under its base in the switcher; pending changes and publish act on the pair | Stands. Not edited. |
+| [ADR-0070](./0070-package-first-authoring.md) D1–D6 | Not edited ([Open](#amendment-2026-11-26-open), questions 1 to 3). |
+
+### Open on #37424 — not decided here {#amendment-2026-11-26-open}
+
+Five questions are before the maintainer on the epic ([comment 7184108099](https://github.com/objectstack-ai/objectstack/issues/37424#issuecomment-7184108099)). None blocks the first phase. This record takes no side on any of them. Each line says what is asked and what is in force until the answer; the answer is recorded on #37424 and marked on its line here by the card that carries it out.
+
+1. **Disable, enable and delete of a package: Setup's, or Studio's?** Decision 1 gives Studio the work on one package, and decision 9 lists these three in 概览's ⋯. They are done in Setup → Packages today, where the maintainer's ruling of 2026-10-30 put the module switch (「大包 + 设置里启用模块」, [#28117](https://github.com/objectstack-ai/objectstack/issues/28117); ADR-0070 D2 as amended). Until the answer they stay in Setup, the ⋯ menu keeps its "Manage in Setup…" row, and ADR-0146's split is not edited on this point. Asked before phase 2.
+2. **Is a create with no package closed in the kernel, or only in the interface?** Decision 11 has a create ask for a package when none resolves. ADR-0070 D1 already has the kernel refuse such a write, and the kernel still accepts one: the refusal text of `packages/metadata-protocol/src/protocol-package-scope.ts#uninstalledNamedBaseRefusal`, written for another case, itself offers a save "without naming a package". The readings are on [#37453](https://github.com/objectstack-ai/objectstack/issues/37453). ADR-0070 is not edited. Asked before phase 4.
+3. **Loose items: one migration with the bulk adopt that exists, or a page that sorts them one by one?** Either way the `~org` entry retires once no loose item is left (decision 11; ADR-0070 D5). Until then the organization's own flows keep their entry, and the ⋯ menu keeps "adopt loose items". Asked before phase 4.
+4. **Do `dataset` and `position` join the 常用 types?** Decision 6 places both there. Each sits ill with a test of the 2026-11-25 rule: a dataset's schema requires one object (the first test), and a position is one slot per name in the environment, not in the package (ADR-0150 D7; the third). The rule allows the answer — "where the maintainer places a type by name, the name decides" — so a yes is two named placements beside `picklist` and the three AI types, and the rule stands. Until the answer both are 高级. Asked before phase 3.
+5. **Which Setup group holds the cross-package environment directory?** Decision 12 says Setup → Diagnostics. What it lists is access metadata, which an administrator looks for with access and not beside the audit log. Until the answer it stays where it is, entered from 访问 Access. Asked before phase 3.
+
+Also not decided here, and not yet a question: on 概览 of a read-only package with a pair, which of the two Export, revert and the history act on; where a person lands after disabling or deleting the package they have open; and 概览's address, which is not a metadata address because a package is not an item. The card that builds each brings a ruling if it needs one.
+
+### Written here where the rulings were silent (for the approver's merge) {#amendment-2026-11-26-silent}
+
+Merging accepts them; an objection names the number.
+
+1. **Where 概览 sits.** Decision 6 says it is the first entry. Written here: above the six groups, under no group and in no tier, drawn on every package and never folded. The package-less scope (`~org`) and the cross-package leg (`~all`) open no package and draw no 概览.
+2. **What the package row names.** The 2026-11-24 ruling stands: the open package is named by its app where it publishes one, and by its own name where it does not. The switcher's rows are named the same way. Decision 8 speaks of "the app name in the switcher row", which agrees.
+3. **What the switcher lists, and where it lands.** It lists packages and nothing else: a pair is folded under its base, and `~org` and `~all` are not rows of it. Picking a package opens that package's 概览. Weighed and not taken: the list of the type the person was on, which the other package may not hold.
+4. **Below 768 px.** The menu is a drawer there, and something must open it. "No top bar" is read as from 768 px up, the way ADR-0146 D5's note reads the app's shell. Below that width the frame keeps what the app's shell keeps: a strip that holds the control which opens the drawer.
+5. **The top bar's seventh tenant.** For a package with no app, the bar draws a "create app" button, or a label that says the app waits for a publish. No ruling gives them a home, and this record gives them none. 应用 `app` is a 常用 row, drawn "whether the package holds one or not, so a package without one still shows where the first is made" (2026-11-25), and an app that waits for a publish is counted on Pending. They go with the bar.
+6. **Save and Cancel on a page that saves and is not an item.** The pick puts them in the item's header. A page with unsaved edits and no item header — the default sharing overview is one — carries them at the right end of its own title row.
+7. **Diagnostics, set beside the ruling of 2026-10-30.** ADR-0146 D1 gives Studio "diagnostics", on the maintainer's words of that day about the catalog, source, layers, history and diagnostics: 「我认为还是应该在 studio」. Decision 12 moves the Diagnostics page to Setup, on 「同意」, and the epic does not set the two side by side. This record takes the later word, for that page alone: what an item's own list row and page say about its validation stays in Studio. If the earlier ruling is meant to hold, Diagnostics keeps its row in 平台 Platform, and the words to change are its line under [Placements](#amendment-2026-11-26-moves) and ADR-0146 D1's mark. The same care applies to the cross-package directory, against D1's "Setup carries no metadata editor and no metadata catalog": decision 12 moves it, its group is question 5, and that answer can weigh this too.
+8. **The order around `dataset`.** Decision 6 says "directly after object". Written here: second in 数据 Data, each type after it one place later, and 界面 UI closed up behind it. The order holds whichever tier question 4 gives it.
+9. **Decisions written here beyond the card's list.** Card #37451 names decisions 1–6 and 9–10 as ruled inputs. This record also writes decision 8, because the lock is part of the row #37456 builds, and decision 12's moves, because the card asks for every phase to be written once. Decision 7, the list page's look, is not information architecture and is left to its card. Decision 11 is open (questions 2 and 3).
+10. **English names.** The maintainer's words are Chinese: 概览, 新建软件包, and the tabs 信息 · 待发布 · 发布历史. This record writes Overview, New package, and Info · Pending · Publish history.
+
+Refs: epic [#37424](https://github.com/objectstack-ai/objectstack/issues/37424) (the quotations, decisions 1–12; the phase table and questions 1–5, comment 7184108099; the mockups, [comment 7181963746](https://github.com/objectstack-ai/objectstack/issues/37424#issuecomment-7181963746)); card [#37451](https://github.com/objectstack-ai/objectstack/issues/37451) (this amendment; the pick and the five homes); [#37452](https://github.com/objectstack-ai/objectstack/issues/37452), [#37454](https://github.com/objectstack-ai/objectstack/issues/37454), [#37455](https://github.com/objectstack-ai/objectstack/issues/37455), [#37456](https://github.com/objectstack-ai/objectstack/issues/37456) (the first phase); [#37453](https://github.com/objectstack-ai/objectstack/issues/37453) (the readings on package-less writes); [#36501](https://github.com/objectstack-ai/objectstack/issues/36501) (the switcher's removal, reversed); epic [#36510](https://github.com/objectstack-ai/objectstack/issues/36510) (the save rule); [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) D1, D3 and D5; [ADR-0070](./0070-package-first-authoring.md) D1, D2 and D5; [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md) D7.
