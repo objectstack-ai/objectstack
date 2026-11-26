@@ -147,6 +147,17 @@ export interface MetaReadGateAudienceSources {
      */
     resolveSecurityService(): Promise<MetaReadGatePermissionSetResolver | undefined>;
     /**
+     * [ADR-0046 §6.7] The capabilities a `{ systemPermission }` book audience
+     * reads, when the transport's holdings caller is NOT the request's own
+     * caller (the MCP docs door's delegated agent envelope, whose audience
+     * reads the delegating person's grants). Absent: the caller's own
+     * `systemPermissions` ({@link resolveCaller}), the list every
+     * `requiredPermissions` arm of this gate reads. A rejection, or an answer
+     * that is not a list, is read as "holdings unresolvable", so those
+     * audiences DENY (ADR-0049).
+     */
+    resolveAudienceSystemPermissions?(): Promise<unknown>;
+    /**
      * [#30126 row 12] The deployment's `errors.*` override lookup (an
      * `II18nService.t`-compatible function), or `undefined` when there is none —
      * the hook `renderOperationMessage` reads first, as plugin-security's
@@ -412,11 +423,11 @@ export type NavServabilityGate = (objectName: string, entry: any, appName: strin
  * cannot drift apart — there is no second resolver to drift.
  */
 export interface DocsAudience {
-    /** The caller as the audience helpers see it (holdings resolved only when a `{ permissionSet }` book exists). */
+    /** The caller as the audience helpers see it (holdings resolved only when a `{ permissionSet }` or `{ systemPermission }` book exists). */
     readonly caller: AudienceCaller;
     /**
-     * The fast path: an authenticated caller and no `{ permissionSet }` book
-     * anywhere, so every doc's effective audience (`org` / `public`) admits
+     * The fast path: an authenticated caller and no `{ permissionSet }` or
+     * `{ systemPermission }` book anywhere, so every doc's effective audience (`org` / `public`) admits
      * them and no doc corpus is needed to say so.
      */
     readonly allReadable: boolean;
@@ -570,6 +581,14 @@ export function anyPermissionSetAudience(books: readonly any[]): boolean {
     );
 }
 
+/** Whether any of these books carries a `{ systemPermission }` audience (ADR-0046 §6.7). */
+export function anySystemPermissionAudience(books: readonly any[]): boolean {
+    return books.some(
+        (b) => b && typeof b === 'object' && b.audience && typeof b.audience === 'object'
+            && typeof b.audience.systemPermission === 'string',
+    );
+}
+
 /** Coerce a getMetaItems result (array | {items}) into an array. */
 export function metaItemsArray(raw: unknown): any[] {
     if (Array.isArray(raw)) return raw;
@@ -687,24 +706,45 @@ export async function fetchAudienceBooks(source: MetaReadGateListSource): Promis
  * permission-set-gated audiences (fail closed, ADR-0049). Resolution is
  * skipped unless `needPermissionSets` — callers pass true only when a
  * `{ permissionSet }` audience is actually in play.
+ *
+ * `systemPermissions` (asked only with `needSystemPermissions`, when a
+ * `{ systemPermission }` audience is in play) is the caller's own
+ * capability list — the one {@link holdsRequiredPermissions} reads for an
+ * app's `requiredPermissions`, so a manual gated on `setup.access` opens for
+ * exactly the callers the Setup app opens for — unless the transport names
+ * other holdings ({@link MetaReadGateAudienceSources.resolveAudienceSystemPermissions}).
+ * Not a list, or a rejecting read: undefined, and those audiences deny.
  */
 export async function resolveAudienceCaller(
     sources: MetaReadGateAudienceSources,
-    opts: { needPermissionSets: boolean },
-): Promise<{ authenticated: boolean; permissionSets?: string[] }> {
+    opts: { needPermissionSets: boolean; needSystemPermissions?: boolean },
+): Promise<{ authenticated: boolean; permissionSets?: string[]; systemPermissions?: string[] }> {
     const ctx = await sources.resolveCaller();
     const authenticated = !!ctx?.userId;
-    if (!authenticated || !opts.needPermissionSets) {
-        return { authenticated };
+    if (!authenticated) return { authenticated };
+    const caller: { authenticated: boolean; permissionSets?: string[]; systemPermissions?: string[] } = { authenticated };
+    if (opts.needSystemPermissions) {
+        try {
+            const held = sources.resolveAudienceSystemPermissions
+                ? await sources.resolveAudienceSystemPermissions()
+                : ctx?.systemPermissions;
+            if (Array.isArray(held)) {
+                caller.systemPermissions = held.filter((p): p is string => typeof p === 'string');
+            }
+        } catch {
+            // unresolved holdings → `{ systemPermission }` audiences deny
+        }
     }
+    if (!opts.needPermissionSets) return caller;
     try {
         const svc = await sources.resolveSecurityService();
-        if (!svc || typeof svc.resolvePermissionSetNames !== 'function') return { authenticated };
+        if (!svc || typeof svc.resolvePermissionSetNames !== 'function') return caller;
         const names = await svc.resolvePermissionSetNames(ctx);
-        return { authenticated, permissionSets: Array.isArray(names) ? names : [] };
+        caller.permissionSets = Array.isArray(names) ? names : [];
     } catch {
-        return { authenticated }; // unresolved holdings → gated audiences deny
+        // unresolved holdings → gated audiences deny
     }
+    return caller;
 }
 
 /**
@@ -718,11 +758,12 @@ export async function resolveAudienceCaller(
  * `resolveDocAudiences`, `docAudienceAllows`, `resolveBookTree`,
  * `deriveImplicitPackageBook`).
  *
- * Holdings are resolved only when a `{ permissionSet }` book exists, and
- * unresolvable holdings deny those audiences ({@link resolveAudienceCaller},
- * fail closed per ADR-0049). The fast path is the doc list's own: with no
- * such book, an authenticated caller reads every doc, so `docReader` needs
- * no corpus and `readableTree` filters nothing.
+ * Holdings are resolved only when a `{ permissionSet }` or
+ * `{ systemPermission }` book exists, and unresolvable holdings deny those
+ * audiences ({@link resolveAudienceCaller}, fail closed per ADR-0049). The
+ * fast path is the doc list's own: with no such book, an authenticated caller
+ * reads every doc, so `docReader` needs no corpus and `readableTree` filters
+ * nothing.
  */
 export async function resolveDocsAudience(
     sources: MetaReadGateAudienceSources,
@@ -732,8 +773,13 @@ export async function resolveDocsAudience(
         audienceAllows, docAudienceAllows, resolveDocAudiences, resolveBookTree, resolveBookClaimedDocs,
         deriveImplicitPackageBook,
     } = await import('@objectstack/spec/system');
-    const gated = anyPermissionSetAudience(books);
-    const caller = await resolveAudienceCaller(sources, { needPermissionSets: gated });
+    const setGated = anyPermissionSetAudience(books);
+    const capabilityGated = anySystemPermissionAudience(books);
+    const gated = setGated || capabilityGated;
+    const caller = await resolveAudienceCaller(sources, {
+        needPermissionSets: setGated,
+        needSystemPermissions: capabilityGated,
+    });
     const allReadable = caller.authenticated && !gated;
     const docReader = (corpus: ResolverDoc[]): ((docName: unknown) => boolean) => {
         if (allReadable) return () => true;

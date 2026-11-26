@@ -18,10 +18,11 @@
  * found.
  *
  * The caller is the request's execution context as the door received it. Its
- * permission-set holdings, which a `{ permissionSet }` audience reads, are its
+ * permission-set holdings, which a `{ permissionSet }` audience reads, and its
+ * capabilities, which a `{ systemPermission }` audience reads, are its
  * own, with one exception ({@link packageDocsReadGate}): on a delegated agent
  * envelope (an OAuth grant: `principalKind: 'agent'` acting `onBehalfOf` a
- * person) they are the delegating person's own sets, resolved by grant
+ * person) they are the delegating person's own sets and capabilities, resolved by grant
  * resolution in the organization the request runs in (ADR-0090 D10: the
  * token's ceiling decides whether the docs tools are reached at all, and the
  * person's holdings decide which manuals open). Never the envelope's
@@ -441,8 +442,8 @@ export function createPackageDocMembers(getSources: () => Promise<PackageDocsSou
  * The `/meta` read gates' ports over `protocol`, with `caller` as the caller:
  * I/O only. On a delegated agent envelope ({@link delegatingPersonOf}) the
  * holdings the audience reads are the person's ({@link delegatorHoldingsCaller}),
- * resolved once per gate and only when a `{ permissionSet }` audience is in
- * play; `resolveEngine` is the data engine their grants are read through.
+ * resolved once per gate and only when a `{ permissionSet }` or
+ * `{ systemPermission }` audience is in play; `resolveEngine` is the data engine their grants are read through.
  */
 export function packageDocsReadGate(
     protocol: PackageDocsProtocol,
@@ -456,6 +457,17 @@ export function packageDocsReadGate(
     let holdings: Promise<MetaReadGateCaller> | undefined;
     return {
         resolveCaller: async () => caller,
+        // A `{ systemPermission }` audience reads the same holder as a
+        // `{ permissionSet }` one: on a delegated envelope the person's own
+        // capabilities, never the envelope's scope-derived ceiling; otherwise
+        // (no override) the caller's own `systemPermissions`.
+        ...(personId === undefined
+            ? {}
+            : {
+                resolveAudienceSystemPermissions: async () =>
+                    (await (holdings ??= delegatorHoldingsCaller(resolveEngine, personId, caller?.tenantId)))
+                        .systemPermissions,
+            }),
         resolveSecurityService: personId === undefined
             ? security
             : async () => {

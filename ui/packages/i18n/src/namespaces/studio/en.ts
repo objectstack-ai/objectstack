@@ -4432,6 +4432,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.bookPreview.tree': 'Resolved tree',
   'engine.bookPreview.audience.public': 'Public',
   'engine.bookPreview.audience.permissionSet': 'Permission set: {name}',
+  'engine.bookPreview.audience.systemPermission': 'Capability: {name}',
   'engine.bookPreview.audience.org': 'Org',
   'engine.bookPreview.slug': 'Slug: {slug}',
   'engine.bookPreview.noGroups': 'No groups yet',
