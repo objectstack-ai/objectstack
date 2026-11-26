@@ -40,9 +40,9 @@ is cut silently at call time. `name`, `label` and `object` are required.
 | `name` | snake_case; what the tool's `context` argument names |
 | `label` | The answer's header, and how the pack is listed when its object has several. Say the audience here: there is no `description` key |
 | `object` | The root object. A call reads one record of it |
-| `fields` | Up to 30 root fields, in order, none twice: the record's own facts. A lookup is answered with the name of the record it points at |
-| `related` | Up to 3 child lists, one level deep: rows of another object that hang on the record |
-| `body` | `{ field }`: the one long text the record is about, a `textarea`, `markdown`, `html` or `richtext` field of the root |
+| `fields` | Up to 30 root fields, in order, none twice. A lookup is answered with the name of the record it points at |
+| `related` | Up to 3 child lists, one level deep |
+| `body` | `{ field }`: a `textarea`, `markdown`, `html` or `richtext` field of the root |
 
 A `related` entry:
 
@@ -56,7 +56,7 @@ A `related` entry:
 | `limit` | 1 to 20 rows; 20 is the default and the cap. A cut list says so in the answer |
 
 Give a list its `where`, `orderBy` and `limit`, so the model gets the rows that
-matter (the open ones, soonest first) and not the first 20.
+matter and not the first 20.
 
 **The body.** Up to 8,000 characters it is carried whole. A longer body comes
 back as an outline of its headings, each with an `anchor`, and the model reads
@@ -93,14 +93,16 @@ The call is `{ objectName, recordId, context?, anchor? }`; the answer is
 ## What the caller is not shown, and what `os validate` reports
 
 Read as the caller: a field the caller cannot read carries no value, and a
-related list is left out when the caller cannot read its link field or cannot
-query on a field its `where` / `orderBy` names. `notes` then state that some
-material is not visible. A `related` object the caller cannot read at all
-refuses the whole call (`403 PERMISSION_DENIED`), so list only child objects
-the pack's audience can read.
+related list is left out when the caller cannot read its object or link field,
+or cannot query on a field its `where` / `orderBy` names. `notes` then state
+that some material is not visible: for a list, one `not_visible` note naming
+nothing. The whole call is refused (`403 PERMISSION_DENIED`) for a `related`
+object nobody is served (a system object the record tools refuse, one closed
+to API list reads or in a disabled package), and for a lookup shown to the
+caller whose target is such a system object.
 
-An author's mistake is silent at the tool, so a caller never learns it.
-`os validate` reports it as a warning:
+An author's mistake is silent at the tool. `os validate` reports it as a
+warning:
 
 | Rule | The pack names |
 |:--|:--|
