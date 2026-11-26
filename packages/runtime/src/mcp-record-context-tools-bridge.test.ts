@@ -116,12 +116,19 @@ describe('[ADR-0160 D4] the MCP bridge\'s record-context members', () => {
             'get',
             'listContextPacks',
             'packageNamespace',
+            'pageCap',
             'publishedObjectDefinitionOf',
             'query',
+            'queryableFieldsOf',
             'readGuard',
             'servedObjectDefinitionOf',
             'userTextLocales',
         ]);
+        // [ADR-0160 D3, second amendment] The queryable fields: this request's security service's own
+        // answer, for this request's caller; none (no service, or one without the method) is `undefined`.
+        expect(await door.queryableFieldsOf('policy')).toBeUndefined();
+        // [ADR-0160 D3] The page cap: the deployment's read limits, unset here.
+        expect(door.pageCap()).toBeUndefined();
         // The published packs: the protocol's merged listing, as `/meta/ai_context` reads it.
         expect(await door.listContextPacks()).toEqual([PACK]);
         expect(protocol.getMetaItems).toHaveBeenCalledWith({ type: 'ai_context' });
@@ -133,6 +140,23 @@ describe('[ADR-0160 D4] the MCP bridge\'s record-context members', () => {
         expect(get).toHaveBeenCalledWith('policy', 'p1');
         expect(query).toHaveBeenCalledWith('policy_revision', { where: { policy: 'p1' }, limit: 21 });
         expect(await door.userTextLocales()).toEqual(await bridge.userTextLocales());
+    });
+
+    it('[ADR-0160 D3] the door\'s queryable fields are the security service\'s answer for the caller, and its page cap the deployment\'s smaller read limit', async () => {
+        const getQueryableFields = vi.fn(async () => ['title', 'status']);
+        const { ctx, deps, service, doors } = harness({ security: { getQueryableFields } });
+        const bridge = buildMcpBridge(deps, ctx, { recordContextTools: service });
+        await bridge.getRecordContext({ objectName: 'policy', recordId: 'p1' }, { readGuard: vi.fn(async () => undefined) });
+        const [door] = doors;
+        expect(await door.queryableFieldsOf('policy')).toEqual(['title', 'status']);
+        expect(getQueryableFields).toHaveBeenCalledWith('policy', expect.objectContaining({ userId: EC.userId, tenantId: EC.tenantId }));
+        vi.stubEnv('OS_DATA_MAX_PAGE_SIZE', '40');
+        vi.stubEnv('OS_DATA_QUERY_ROW_BUDGET', '12');
+        try {
+            expect(door.pageCap()).toBe(12);
+        } finally {
+            vi.unstubAllEnvs();
+        }
     });
 });
 
@@ -368,6 +392,8 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
     let dispatcher: HttpDispatcher;
     let caller: ExecutionContext;
     let rpc: (method: string, params?: unknown) => Promise<any>;
+    /** The real `security` service both doors resolve. */
+    let securityService: any;
     /** The execution context the stdio door handed the engine, per object read. */
     const stdioReads: Array<{ object: string; context: any }> = [];
 
@@ -401,6 +427,18 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
                     },
                 },
                 child('rc_revision', 'Revision'),
+                {
+                    name: 'rc_step', label: 'Step', nameField: 'label', sharingModel: 'public_read_write',
+                    fields: {
+                        label: { name: 'label', type: 'text', label: 'Label' },
+                        stage: { name: 'stage', type: 'text', label: 'Stage' },
+                        rank: { name: 'rank', type: 'number', label: 'Rank' },
+                        policy: { name: 'policy', type: 'lookup', reference: 'rc_policy', label: 'Policy' },
+                        // A masking rule the caller's capability lifts: the security service lists it as
+                        // queryable for this caller, where the contract's fallback never would.
+                        serial: { name: 'serial', type: 'text', label: 'Serial', maskingRule: { keepHead: 1, keepTail: 1 }, requiredPermissions: ['rc_unmask'] },
+                    },
+                },
                 child('rc_closed', 'Closed', { enable: { apiEnabled: false } }),
                 child('rc_hidden', 'Hidden'),
                 {
@@ -415,7 +453,33 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
                     related: [{ object: 'rc_revision', fields: ['version'] }],
                     body: { field: 'content' },
                 },
-                { name: 'rc_unserved_child', label: 'Unserved child', object: 'rc_policy', fields: ['title'], related: [{ object: 'rc_hidden', fields: ['version'] }] },
+                {
+                    name: 'rc_unserved_child', label: 'Unserved child', object: 'rc_policy', fields: ['title'],
+                    related: [{ object: 'rc_hidden', fields: ['version'] }, { object: 'rc_revision', fields: ['version'] }],
+                },
+                {
+                    name: 'rc_filtered', label: 'Filtered steps', object: 'rc_policy', fields: ['title'],
+                    related: [{ object: 'rc_step', fields: ['label', 'rank'], where: { stage: { $eq: 'open' } }, orderBy: [{ field: 'rank', order: 'desc' }], limit: 2 }],
+                },
+                {
+                    name: 'rc_unqueryable_where', label: 'Unqueryable where', object: 'rc_policy', fields: ['title'],
+                    related: [
+                        { object: 'rc_step', fields: ['label'], where: { stage: { $ne: 'closed' } } },
+                        { object: 'rc_revision', fields: ['version'] },
+                    ],
+                },
+                {
+                    name: 'rc_unmasked_order', label: 'Steps by serial', object: 'rc_policy', fields: ['title'],
+                    related: [{ object: 'rc_step', fields: ['label'], orderBy: [{ field: 'serial', order: 'desc' }] }],
+                },
+                {
+                    name: 'rc_created_order', label: 'Steps by creation', object: 'rc_policy', fields: ['title'],
+                    related: [{ object: 'rc_step', fields: ['label'], orderBy: [{ field: 'created_at', order: 'desc' }] }],
+                },
+                {
+                    name: 'rc_steps', label: 'Steps', object: 'rc_policy', fields: ['title'],
+                    related: [{ object: 'rc_step', fields: ['label'], orderBy: [{ field: 'rank', order: 'asc' }] }],
+                },
                 { name: 'rc_exposure_child', label: 'Exposure child', object: 'rc_policy', fields: ['title'], related: [{ object: 'rc_closed', fields: ['version'] }] },
                 { name: 'rc_disabled_child', label: 'Disabled child', object: 'rc_policy', fields: ['title'], related: [{ object: 'rc_off', fields: ['version'] }] },
             ],
@@ -434,10 +498,20 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         await engine.insert('rc_revision', { id: 'r1', version: 'v1', policy: 'p1', owner_id: 'usr_member', organization_id: 'org_1' }, sys);
         await engine.insert('rc_revision', { id: 'r2', version: 'v2', policy: 'p1', owner_id: 'usr_other', organization_id: 'org_1' }, sys);
         await engine.insert('rc_hidden', { id: 'h1', version: 'h', policy: 'p1', organization_id: 'org_1' }, sys);
+        for (const [id, stage, rank, at] of [
+            ['s1', 'open', 1, '2026-11-01T00:00:00.000Z'],
+            ['s2', 'open', 3, '2026-11-02T00:00:00.000Z'],
+            ['s3', 'open', 2, '2026-11-03T00:00:00.000Z'],
+            ['s4', 'closed', 5, '2026-11-04T00:00:00.000Z'],
+        ] as const) {
+            await engine.insert('rc_step', {
+                id, label: `Step ${id}`, stage, rank, policy: 'p1', serial: `N-${rank}`, created_at: at, organization_id: 'org_1',
+            }, sys);
+        }
         engine.registry.disablePackage(OFF_PKG);
 
         const sets = [PermissionSetSchema.parse({
-            name: 'rc_member', label: 'Member', isDefault: true,
+            name: 'rc_member', label: 'Member', isDefault: true, systemPermissions: ['rc_unmask'],
             objects: { '*': READ_ALL, rc_hidden: READ_NONE },
             fields: { 'rc_policy.secret_note': { readable: false, editable: false } },
             rowLevelSecurity: [{ name: 'rc_own_revisions', object: 'rc_revision', operation: 'select', using: 'owner_id == current_user.id' }],
@@ -462,6 +536,7 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         const security = new SecurityPlugin({ fallbackPermissionSet: 'rc_member' });
         await security.init(ctx as never);
         await security.start(ctx as never);
+        securityService = services.security;
         await new RecordContextServicePlugin().init(ctx as never);
         protocol = new ObjectStackProtocolImplementation(engine as any);
 
@@ -627,11 +702,17 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         expect(answer.payload.error).toEqual(record.payload.error);
     });
 
-    it('[today; ADR-0160 as amended says left out and stated] a related child this caller is not served refuses the call, unnamed', async () => {
+    it('[ADR-0160 D3 as amended] a related child this caller is not served is left out: the root and the served child, one not-visible statement, the child named nowhere', async () => {
         const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_unserved_child' });
-        expect(answer.isError).toBe(true);
-        expect(answer.payload.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+        expect(answer.isError).toBe(false);
+        const { data, notes } = answer.payload;
+        expect(data.fields.map((f: { name: string }) => f.name)).toEqual(['title']);
+        // The served control: its section answers as the caller reads it.
+        expect(data.related.map((l: { object: string }) => l.object)).toEqual(['rc_revision']);
+        expect(data.related[0].rows.map((r: { id: string }) => r.id)).toEqual(['r1']);
+        expect(notes.map((n: { kind: string }) => n.kind)).toEqual(['not_visible']);
         expect(answer.text).not.toContain('rc_hidden');
+        expect(answer.text).not.toContain('Hidden');
     });
 
     it('a related child its API exposure refuses refuses the call, named (the caller\'s schema shows it)', async () => {
@@ -647,6 +728,78 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         expect(answer.isError).toBe(true);
         expect(answer.payload.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
         expect(answer.text).not.toContain('rc_off');
+    });
+
+    it('[ADR-0160 D3, second amendment] where, orderBy and limit on a related list answer the same bytes on both doors: filtered, ordered, cut at the limit and stated', async () => {
+        const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_filtered' });
+        expect(answer.isError).toBe(false);
+        const { data, notes } = answer.payload;
+        expect(data.related).toHaveLength(1);
+        expect(data.related[0]).toMatchObject({ object: 'rc_step', field: 'policy', truncated: true });
+        expect(data.related[0].rows.map((r: { id: string }) => r.id)).toEqual(['s2', 's3']);
+        expect(notes).toEqual([{ kind: 'related_truncated', object: 'rc_step', text: expect.stringContaining('2') }]);
+    });
+
+    it('[ADR-0160 D3, second amendment] a where field outside the security service\'s queryable answer drops the section with the statement on both doors, never refusing, though the fallback would admit it', async () => {
+        // plugin-security's read projection already leaves out what its queryable answer leaves out,
+        // bar masked fields (which the fallback refuses for everyone), so the answer is narrowed here by
+        // one field the fallback admits: served, readable, declaring no masking rule.
+        expect(await securityService.getReadableFields('rc_step', caller)).toContain('stage');
+        expect((engine.getSchema('rc_step') as any)?.fields?.stage?.maskingRule).toBeUndefined();
+        const real = securityService.getQueryableFields.bind(securityService);
+        const narrowed = vi.spyOn(securityService, 'getQueryableFields').mockImplementation(async (object: any, ctx: any) => {
+            const fields = await real(object, ctx);
+            return object === 'rc_step' ? fields?.filter((f: string) => f !== 'stage') : fields;
+        });
+        try {
+            const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_unqueryable_where' });
+            expect(answer.isError).toBe(false);
+            const { data, notes } = answer.payload;
+            // The served control beside it still answers.
+            expect(data.related.map((l: { object: string }) => l.object)).toEqual(['rc_revision']);
+            expect(notes.map((n: { kind: string }) => n.kind)).toEqual(['not_visible']);
+            expect(answer.text).not.toContain('stage');
+            expect(answer.text).not.toContain('rc_step');
+            // Asked on both doors, for the caller each resolved.
+            const asked = narrowed.mock.calls.filter(([object]) => object === 'rc_step');
+            expect(asked.length).toBeGreaterThanOrEqual(2);
+            for (const [, ctx] of asked) expect(ctx).toMatchObject({ userId: caller.userId, tenantId: caller.tenantId });
+        } finally {
+            narrowed.mockRestore();
+        }
+    });
+
+    it('[ADR-0160 D3, second amendment] an orderBy on a masked field this caller is served whole is read on both doors: the doors hand over the security service\'s answer, not the fallback', async () => {
+        expect(await securityService.getQueryableFields('rc_step', caller)).toContain('serial');
+        const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_unmasked_order' });
+        expect(answer.isError).toBe(false);
+        expect(answer.payload.notes).toEqual([]);
+        expect(answer.payload.data.related[0].rows.map((r: { id: string }) => r.id)).toEqual(['s4', 's2', 's3', 's1']);
+    });
+
+    it('[ADR-0160 D3] an orderBy on a registry-injected field (created_at) is accepted by the own-field check and by both doors', async () => {
+        const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_created_order' });
+        expect(answer.isError).toBe(false);
+        expect(answer.payload.notes).toEqual([]);
+        expect(answer.payload.data.related[0].rows.map((r: { id: string }) => r.id)).toEqual(['s4', 's3', 's2', 's1']);
+    });
+
+    it('[ADR-0160 D3: every cut is stated] under a deployment page cap below the cut plus its probe row, both doors cut one row under the cap and state it', async () => {
+        const plain = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_steps' });
+        expect(plain.payload.data.related[0].rows.map((r: { id: string }) => r.id)).toEqual(['s1', 's3', 's2', 's4']);
+        const saved = process.env.OS_DATA_MAX_PAGE_SIZE;
+        process.env.OS_DATA_MAX_PAGE_SIZE = '3';
+        try {
+            const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_steps' });
+            expect(answer.isError).toBe(false);
+            const { data, notes } = answer.payload;
+            expect(data.related[0].truncated).toBe(true);
+            expect(data.related[0].rows.map((r: { id: string }) => r.id)).toEqual(['s1', 's3']);
+            expect(notes).toEqual([{ kind: 'related_truncated', object: 'rc_step', text: expect.stringContaining('2') }]);
+        } finally {
+            if (saved === undefined) delete process.env.OS_DATA_MAX_PAGE_SIZE;
+            else process.env.OS_DATA_MAX_PAGE_SIZE = saved;
+        }
     });
 
     it('an anchor the body does not resolve is one coded answer', async () => {
