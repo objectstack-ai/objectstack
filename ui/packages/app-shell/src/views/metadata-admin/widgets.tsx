@@ -52,6 +52,7 @@ import { AlertTriangle, ChevronDown, ChevronsUpDown, ChevronUp, Eye, EyeOff, Plu
 import { iconNames } from 'lucide-react/dynamic.mjs';
 import { toast } from 'sonner';
 import { useObjectTranslation } from '@object-ui/i18n';
+import { createAuthenticatedFetch } from '@object-ui/auth';
 import { useMetadataLocale, t, tFormat } from './i18n.js';
 import { fieldHistoryChoiceOf, fieldHistoryOptions, fieldHistoryValueOf } from './fieldHistoryChoice.js';
 import { isKnownViewType, viewTypeLabel } from './viewTypeLabels.js';
@@ -1198,9 +1199,17 @@ const EMPTY_FIELD_SELECTOR_OPTIONS: FieldSelectorOption[] = [];
  * other raw-`fetch` callers in this package already use (`useRecordApprovals`,
  * `suggestedBindingsApi`, `studio-design/packages-io`): the server's own
  * message when it sent one, otherwise the status.
+ *
+ * The read goes through the console's authenticated fetch, built per call, with
+ * `credentials: 'include'`: a bare `fetch` with no init sends the session cookie
+ * alone (the default `same-origin` credentials), so a session held by its bearer
+ * token alone was answered as anonymous and a `401` never reached the console's
+ * session-ended check.
  */
 async function fetchFieldSelectorOptions(objectName: string): Promise<FieldSelectorOption[]> {
-  const res = await fetch(`/api/v1/objects/${objectName}/fields`);
+  const res = await createAuthenticatedFetch()(`/api/v1/objects/${objectName}/fields`, {
+    credentials: 'include',
+  });
   // Read the body BEFORE branching on `ok`: a refusal usually carries the more
   // useful sentence, and a non-JSON body must not be mistaken for a refusal
   // that said nothing (it still throws below — it just cannot add a cause).

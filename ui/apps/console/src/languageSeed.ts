@@ -109,6 +109,23 @@
  * `sharedGetJson` call, so the race, the in-flight sharing with
  * `LocalizationFetchProvider` and the hand-off of the settled answer are
  * unchanged.
+ *
+ * ## The stored Bearer rides it (objectstack#37225)
+ *
+ * A session held by its bearer token alone (no session cookie: a cross-site
+ * embed, a blocked third-party cookie) was answered `{ authenticated: false }`
+ * by a cookie-only read, so its seed and its regional defaults were never the
+ * user's. Every read of this endpoint states the stored Bearer, through
+ * {@link meLocalizationInit}: the parse-time request (`index.html` reads the
+ * same `localStorage` key), the seed and `LocalizationFetchProvider`.
+ *
+ * In the init, by hand, and not through `createAuthenticatedFetch`: the
+ * in-flight key is built from the init, so a header the transport adds would
+ * not be part of it, and that transport also stamps `<html lang>` as
+ * `Accept-Language` on a read that deliberately states none (objectstack#34392).
+ * The endpoint answers a caller it cannot see `{ authenticated: false }`, never
+ * `401`, so no session-ended signal is lost. `early-discovery.ts` carries the
+ * Bearer the same way, for the same parse-time hand-off.
  */
 import { cacheLanguageSeed, readCachedLanguageSeed, readStoredLanguage } from '@object-ui/i18n';
 import { getSessionOwnerChangeCount } from '@object-ui/auth';
@@ -127,6 +144,41 @@ export const SEED_RACE_TIMEOUT_MS = 500;
 interface MeLocalizationResponse {
   authenticated?: boolean;
   locale?: string | null;
+}
+
+/**
+ * The Bearer every console request carries, `''` when there is none or storage
+ * is blocked: the key `createAuthenticatedFetch` reads (`TokenStorage`), read
+ * here as `index.html` and `early-discovery.ts` read it.
+ */
+const TOKEN_KEY = 'auth-session-token';
+
+function storedToken(): string {
+  try {
+    return localStorage.getItem(TOKEN_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * The init every read of `GET /api/v1/auth/me/localization` sends: the cookie
+ * (`credentials: 'include'`), `Accept`, the stated language when there is one,
+ * and the stored Bearer when there is one. The seed, `LocalizationFetchProvider`
+ * and `index.html`'s parse-time request share a request only while their inits
+ * match (`inflightGetKey`: URL, credentials and headers), so this is the one
+ * spelling of it in the bundle; `index.html` spells it again by hand.
+ */
+export function meLocalizationInit(preferred: string | undefined): RequestInit {
+  const token = storedToken();
+  return {
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+      ...(preferred ? { 'Accept-Language': preferred } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  };
 }
 
 /** This page-load's read of the language a choice-less read states, once started. */
@@ -304,17 +356,11 @@ async function fetchAndCacheSeed(serverBase: string): Promise<void> {
     // the provider mounts as soon as the race resolves. Sharing is in-flight
     // only, so on the boots where they do NOT overlap each still fetches.
     const url = `${serverBase}/api/v1/auth/me/localization`;
-    const init: RequestInit = {
-      credentials: 'include',
-      headers: {
-        Accept: 'application/json',
-        // A supported browser language decides the rung below the user's
-        // own locale (objectstack#33985); otherwise the browser's own header
-        // goes, and the server's deployment default decides
-        // (objectstack#34392).
-        ...(preferred ? { 'Accept-Language': preferred } : {}),
-      },
-    };
+    // A supported browser language decides the rung below the user's own
+    // locale (objectstack#33985); otherwise the browser's own header goes, and
+    // the server's deployment default decides (objectstack#34392). The stored
+    // Bearer rides along (objectstack#37225).
+    const init = meLocalizationInit(preferred);
     // `index.html` usually sent this very request at parse time
     // (objectstack#35534): it is taken here as this read's transport, so the
     // provider still joins it in flight and a failure is this read's own.
