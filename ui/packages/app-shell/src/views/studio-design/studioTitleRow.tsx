@@ -37,33 +37,37 @@ export interface StudioTitleRowControls {
   assistant: React.ReactNode;
 }
 
+/** One title row's identity in the registry: an object of its own, for its life. */
+type TitleRowToken = object;
+
 /** The rows that registered, and which of them draws the controls. */
 interface TitleRowRegistry {
-  add: (row: Element) => () => void;
+  add: (token: TitleRowToken, row: Element) => () => void;
   subscribe: (listener: () => void) => () => void;
-  owner: () => Element | null;
+  owner: () => TitleRowToken | null;
 }
 
 function createTitleRowRegistry(): TitleRowRegistry {
-  const rows = new Set<Element>();
+  const rows = new Map<TitleRowToken, Element>();
   const listeners = new Set<() => void>();
-  let owner: Element | null = null;
+  let owner: TitleRowToken | null = null;
   const settle = () => {
-    let first: Element | null = null;
-    for (const row of rows) {
-      // `DOCUMENT_POSITION_PRECEDING`: `row` comes before `first`.
-      if (!first || first.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_PRECEDING) first = row;
+    let first: [TitleRowToken, Element] | null = null;
+    for (const entry of rows) {
+      // `DOCUMENT_POSITION_PRECEDING`: this row comes before `first`.
+      if (!first || first[1].compareDocumentPosition(entry[1]) & Node.DOCUMENT_POSITION_PRECEDING) first = entry;
     }
-    if (first === owner) return;
-    owner = first;
+    const next = first?.[0] ?? null;
+    if (next === owner) return;
+    owner = next;
     listeners.forEach((listener) => listener());
   };
   return {
-    add: (row) => {
-      rows.add(row);
+    add: (token, row) => {
+      rows.set(token, row);
       settle();
       return () => {
-        rows.delete(row);
+        rows.delete(token);
         settle();
       };
     },
@@ -103,15 +107,14 @@ const noOwner = () => null;
 export function useStudioTitleRowControls(row: React.RefObject<Element | null>): StudioTitleRowControls | null {
   const value = React.useContext(StudioTitleRowContext);
   const registry = value?.registry ?? null;
-  const [element, setElement] = React.useState<Element | null>(null);
+  const [token] = React.useState<TitleRowToken>(() => ({}));
   React.useLayoutEffect(() => {
     const el = row.current;
     if (!registry || !el) return;
-    setElement(el);
-    return registry.add(el);
-  }, [registry, row]);
+    return registry.add(token, el);
+  }, [registry, row, token]);
   const owner = React.useSyncExternalStore(registry?.subscribe ?? noSubscription, registry?.owner ?? noOwner, noOwner);
-  if (!value || !element || owner !== element) return null;
+  if (!value || owner !== token) return null;
   return { save: value.save, assistant: value.assistant };
 }
 
