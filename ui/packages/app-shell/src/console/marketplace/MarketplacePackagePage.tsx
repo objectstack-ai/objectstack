@@ -1486,6 +1486,16 @@ function MarketplacePackagePageBody() {
   const latestServedVersion = pkg.latest_version ?? data.versions[0] ?? null;
   // PD4 (ADR-0025 §3.11): code-bearing packages must disclose + be acknowledged.
   const containsCode = !!pkg.latest_version?.contains_code;
+  // cloud#4305 — which code-plugin versions to mark as refused. With no
+  // install-local surface (`supportsLocal`, the read `primaryAction` branches
+  // on) this page installs through the control plane's install door: from a
+  // hosted environment's console via the same-origin cloud-connection proxy,
+  // from the control plane's own console into the environment picked. That
+  // door installs into hosted environments only and refuses every code-plugin
+  // version (`artifact_kind: 'plugin'`, served as `contains_code`) with 422
+  // CODE_PLUGIN_UNSUPPORTED. A self-hosted runtime installs through its own
+  // install-local door and marks none.
+  const codePluginsRefused = !supportsLocal;
   // ADR-0010 version lifecycle: installed cloud env is on an OLDER version than
   // the package's latest published → surface an update affordance. OLDER is
   // SemVer precedence, not inequality (objectui#10899): an env holding a newer
@@ -1826,11 +1836,21 @@ function MarketplacePackagePageBody() {
                           <Package className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
                           <code className="font-mono">v{v.version}</code>
                           {v.is_prerelease && <Badge variant="outline" className="text-xs">{t('marketplace.detail.prerelease')}</Badge>}
+                          {codePluginsRefused && v.contains_code && (
+                            <Badge variant="outline" className="text-xs font-normal text-muted-foreground">
+                              {t('marketplace.detail.notInstallableHosted')}
+                            </Badge>
+                          )}
                         </span>
                         <span className="text-xs text-muted-foreground">
                           {v.published_at ? new Date(v.published_at).toLocaleDateString(displayLocale) : '\u2014'}
                         </span>
                       </div>
+                      {codePluginsRefused && v.contains_code && (
+                        <p className="pl-5 text-xs text-muted-foreground">
+                          {t('marketplace.detail.notInstallableHostedReason')}
+                        </p>
+                      )}
                       {v.release_notes && v.release_notes.trim() && (
                         <MarkdownText source={v.release_notes.trim()} size="compact" className="pl-5" />
                       )}

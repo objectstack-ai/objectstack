@@ -572,6 +572,12 @@ object's cascade candidates (see the route below) is refused `400
 VALIDATION_ERROR` before anything is written. `'cascade'` on a multi-value
 reference (`multiple: true`) is refused when the metadata is saved: a record
 there points at several parents, so no single Change Owner decides its owner.
+`os validate`, `os build` and `os lint` also refuse a `'cascade'` that Change
+Owner could never offer: one pointing at a parent in the stack that does not
+offer Change Owner, one an object extension adds to an object that cannot take
+a cascade, and one on a child whose `enable` block does not serve `update`
+(`os explain transfer-cascade-parent-without-change-owner` and its two
+siblings say why).
 
 The answer gains one outcome per named relationship:
 

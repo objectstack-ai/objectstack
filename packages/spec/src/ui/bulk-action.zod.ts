@@ -221,7 +221,7 @@ export type BulkActionResultParsed = z.infer<typeof BulkActionResultSchema>;
  * to name it beside min/max/step, and the sweep found no FORM widget reading it
  * at all.
  *
- * ⚠️ The prescription refuses the obvious-sounding remedy for all but six of
+ * ⚠️ The prescription refuses the obvious-sounding remedy for all but seven of
  * these keys. An AUTHORED def's params reach the dialog as written: nothing on
  * that path consults the object's field definitions. The bulk surface's
  * field-backed route is the PROMOTED def, an action the object declares, named
@@ -235,13 +235,16 @@ export type BulkActionResultParsed = z.infer<typeof BulkActionResultSchema>;
  * `description` (as the help text), `placeholder`, `defaultValue`, `multiple`,
  * `accept` and `maxSize`, plus a reference-bearing field's `reference`,
  * `displayField` and `dependsOn`, and that field's lookup settings
- * `lookupFilters` / `lookupColumns` / `lookupPageSize` / `descriptionField`,
- * which reach the selection bar's picker as they reach the single-record
- * dialog's. From THIS list only those four and `accept` / `maxSize` make the
+ * `lookupFilters` / `lookupColumns` / `lookupPageSize` / `descriptionField` /
+ * `allowCreate`, which reach the selection bar's picker as they reach the
+ * single-record dialog's (`allowCreate` since objectstack#36919: the resolver
+ * copies it and `toBulkParam` carries it, so `allowCreate: false` on the field
+ * keeps the picker's create entry out). From THIS list only those five and
+ * `accept` / `maxSize` make the
  * trip, and the rest are never read off the field (`idField` has no
  * `FieldSchema` spelling to declare; the resolver's snake `id_field` read is
  * still not carried onto the bulk param). So
- * "declare it on the field and let the dialog inherit" is right for those six
+ * "declare it on the field and let the dialog inherit" is right for those seven
  * keys on a promoted def, and a confidently wrong answer for every other key
  * here, the shape this campaign has already shipped more than once.
  */
@@ -336,10 +339,10 @@ export const BulkActionParamSchema = lazySchema(() => strictObject(
         + 'carries the field\'s `type`, `label`, `options`, `required`, `description` (as the help '
         + 'text), `placeholder`, `defaultValue`, `multiple`, `accept` and `maxSize`, plus a '
         + 'reference field\'s `reference`, `displayField` and `dependsOn` and its picker settings '
-        + '`lookupFilters` / `lookupColumns` / `lookupPageSize` / `descriptionField`, which reach '
-        + 'the selection bar\'s picker as they reach the single-record dialog\'s. ⛔ So of these '
-        + 'keys only `accept` / `maxSize` and those four picker settings arrive that way, and the '
-        + 'rest are never read off the field. Remove the key, or for one of those six move the '
+        + '`lookupFilters` / `lookupColumns` / `lookupPageSize` / `descriptionField` / `allowCreate`, '
+        + 'which reach the selection bar\'s picker as they reach the single-record dialog\'s. ⛔ So '
+        + 'of these keys only `accept` / `maxSize` and those five picker settings arrive that way, '
+        + 'and the rest are never read off the field. Remove the key, or for one of those seven move the '
         + 'param onto a promoted action; open an issue if a bulk param genuinely needs a key '
         + 'declared here.',
     }],

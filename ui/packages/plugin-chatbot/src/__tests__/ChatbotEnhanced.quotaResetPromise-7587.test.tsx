@@ -32,6 +32,7 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { I18nProvider } from '@object-ui/i18n';
 import { ChatbotEnhanced } from '../ChatbotEnhanced';
 import { parseAiQuotaError } from '../tool-display';
 
@@ -123,5 +124,76 @@ describe('free-plan 429 banner — the reset promise nobody makes (objectui#7587
     // existence to record — and the assertion that turns red the day the flag
     // alone starts driving copy, which is the failure the card feared.
     expect(withTrue).toBe(withFalse);
+  });
+});
+
+/**
+ * cloud#4853 — the banner's title and action follow the refusal's own
+ * next-step flags. The usage door (`GET /api/v1/ai/usage`) names a paid
+ * team's five-hour wall `{planType:'paid', resetKind:'fiveHour', upgrade:false,
+ * topUp:false}`; the 429 the composer actually receives carries no
+ * planType/resetKind, only the flags in `error.details` beside the server's
+ * sentence. Each fixture below is the cloud guardrail's body for that plan and
+ * window, so the card's acceptance reads 1:1 against what reaches the banner.
+ */
+describe('quota banner — title and action follow upgrade / topUp (cloud#4853)', () => {
+  const FIVE_HOUR_ZH = '近五小时的 AI 用量已达上限，五小时内恢复后即可继续。';
+  const FIVE_HOUR_EN =
+    "You've hit the five-hour AI usage limit. It resets within five hours — then you're good to go.";
+
+  function refusal(details: Record<string, unknown>, message = FIVE_HOUR_ZH): Error {
+    const e = new Error(
+      JSON.stringify({
+        success: false,
+        error: { code: 'AI_ALLOWANCE_EXHAUSTED', message, category: 'rate_limit', details },
+      }),
+    ) as Error & { notSent?: boolean; status?: number };
+    e.notSent = true;
+    e.status = 429;
+    return e;
+  }
+
+  function renderZh(error: Error, onUpgrade = vi.fn()) {
+    render(
+      <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }}>
+        <ChatbotEnhanced placeholder="Ask…" messages={[]} onSendMessage={vi.fn()} onUpgrade={onUpgrade} error={error} />
+      </I18nProvider>,
+    );
+    return screen.getByRole('alert');
+  }
+
+  it("paid plan, resetKind fiveHour ({planType:'paid', resetKind:'fiveHour', upgrade:false, topUp:false}): no 「需要升级」 heading, no 「升级方案」 button", () => {
+    const banner = renderZh(
+      refusal({ messageEn: FIVE_HOUR_EN, upgrade: false, topUp: false, resetsTonight: false, resetsAt: RESETS_AT }),
+    );
+    expect(banner).not.toHaveTextContent('需要升级');
+    expect(screen.queryByRole('button', { name: '升级方案' })).toBeNull();
+    expect(banner.querySelectorAll('button')).toHaveLength(0);
+    // The notice still says when it frees up: the server's sentence, verbatim.
+    expect(banner.textContent).toBe(`AI 额度已用尽${FIVE_HOUR_ZH}`);
+  });
+
+  it('developer plan (upgrade:false, no topUp key): neutral title and no action', () => {
+    const banner = renderZh(refusal({ messageEn: FIVE_HOUR_EN, upgrade: false, resetsTonight: false, resetsAt: RESETS_AT }));
+    expect(banner).not.toHaveTextContent('需要升级');
+    expect(banner.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  it('paid plan, weekly allowance (topUp:true): a top-up action, not an upgrade', () => {
+    const onUpgrade = vi.fn();
+    const banner = renderZh(
+      refusal({ messageEn: 'Weekly allowance used up.', upgrade: false, topUp: true }, '本周的 AI 额度已用完。'),
+      onUpgrade,
+    );
+    expect(banner).not.toHaveTextContent('需要升级');
+    expect(screen.queryByRole('button', { name: '升级方案' })).toBeNull();
+    screen.getByRole('button', { name: '购买额度包' }).click();
+    expect(onUpgrade).toHaveBeenCalledTimes(1);
+  });
+
+  it('free plan (upgrade:true): the upgrade heading and button stay', () => {
+    const banner = renderZh(refusal({ messageEn: FREE_PLAN_EN, upgrade: true }, FREE_PLAN_ZH));
+    expect(banner).toHaveTextContent('需要升级');
+    expect(screen.getByRole('button', { name: '升级方案' })).toBeInTheDocument();
   });
 });

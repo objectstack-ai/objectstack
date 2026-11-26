@@ -78,7 +78,7 @@ describe('BulkActionDefSchema — the def shape is typed, not `z.any()`', () => 
       // ⛔ The prescription must NOT send this author to the field: a key
       // declared there reaches the bulk dialog only through a PROMOTED action
       // (`bulkActions`), and of this family only `accept` / `maxSize` and the
-      // four lookup picker settings make that trip. They are named by subject,
+      // five lookup picker settings (`allowCreate` among them since #36919) make that trip. They are named by subject,
       // so the rejection says which route and which keys rather than implying
       // `min` would follow.
       expect(issues).toContain('`bulkActions`');

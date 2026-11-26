@@ -317,6 +317,11 @@ const CALLERS: Record<string, Classification> = {
     kind: 'not-a-served-read',
     reason: 'authoring-time static analysis of metadata; reads no record',
   },
+  // [#36714] A `transferBehavior: 'cascade'` judged against the parent's declared Change Owner switch.
+  'packages/lint/src/validate-transfer-cascades.ts': {
+    kind: 'not-a-served-read',
+    reason: 'authoring-time static analysis of metadata; reads no record',
+  },
   // [#35146] The post-publish build probes' two landed-data checks.
   'packages/metadata-protocol/src/build-probes.ts': {
     kind: 'not-a-served-read',

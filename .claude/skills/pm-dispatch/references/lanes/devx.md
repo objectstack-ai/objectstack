@@ -1,6 +1,6 @@
-# 车道岗位说明:domain:devx
+# 域参考:domain:devx
 
-见 seat-lifecycle.md;本文是本车道岗位说明,现值状态恒在座位贴,⛔ 不迁入本文。
+域席已退役:本文作域参考,「本席」「本车道」读作接卡席,去留待车道文件重组。
 
 ## 范围
 
@@ -8,13 +8,13 @@
 - 度量六项:PR CI 墙钟、队列等待 p50/p90、级联重建、PR runner 分钟、flaky 率、报告假绿数。
 - 报告假绿 = dev 报告称绿而 CI 红。
 - 规则与知识(告诉 agent 什么)归 `domain:skills`;工具与流水线(agent 的活跑多快)归本席。
-- 本席路径面全量在 SKILL.md 域车道表 `domain:devx` 行,⛔ 不另抄。
+- 本席路径面全量在 SKILL.md 域表 `domain:devx` 行,⛔ 不另抄。
 - 车道按包判,⛔ 不按触发:只记录一个包的 `content/docs` 页随该包车道,同 `domain:ui` 行。
 - 本席留 `apps/docs`、导航 `meta.json`、references 管线,及横跨两条及以上车道的 sweep。
 - `.github/workflows/**` 按路径归本席;产品卡要改 workflow ⇒ 另立本席卡并回链该产品卡。
 - `examples/**` 的 `vitest.config.ts`、fixtures、共享 harness 归本席;产品行为 pin 归所演练子系统。
 - 边界:守护 skills 的门禁脚本在 `scripts/` 下时归本席,判据是被改文件的路径。
-- SUBJECT 例外与 spec 三面切分在 SKILL.md 域车道表;`.claude/workflows/` 不是 `.claude/skills/`。
+- SUBJECT 例外与 spec 三面切分在 SKILL.md 域表;`.claude/workflows/` 不是 `.claude/skills/`。
 - 范围内的文件不等于范围内的卡:归属按卡的 `domain:*` 判,反向亦然。
 - 本席卡的落点溢进他席文件面时,由此产生的人工合并等后果照单接受。
 

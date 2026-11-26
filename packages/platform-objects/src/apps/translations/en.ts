@@ -131,6 +131,7 @@ export const en: TranslationData = {
         nav_settings_localization: { label: 'Localization' },
         nav_exchange_rates: { label: 'Exchange Rates' },
         nav_units_of_measure: { label: 'Units of Measure' },
+        nav_standard_unit_settings: { label: 'Standard Unit Settings' },
         nav_work_calendars: { label: 'Working Calendars' },
         nav_work_calendar_exceptions: { label: 'Calendar Exceptions' },
         nav_settings_company: { label: 'Company' },

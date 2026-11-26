@@ -97,6 +97,7 @@ export const de: TranslationData = {
         nav_settings_localization: { label: 'Lokalisierung' },
         nav_exchange_rates: { label: 'Wechselkurse' },
         nav_units_of_measure: { label: 'Maßeinheiten' },
+        nav_standard_unit_settings: { label: 'Standardeinheiten-Einstellungen' },
         nav_work_calendars: { label: 'Arbeitskalender' },
         nav_work_calendar_exceptions: { label: 'Kalenderausnahmen' },
         nav_settings_company: { label: 'Unternehmen' },

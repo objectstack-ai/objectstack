@@ -15,7 +15,9 @@
  * page to page of that app, and goes off when the app changes. It is never on
  * a phone, which draws no 「Design layout」.
  *
- * It holds the changes made under it, and nothing else. Each change is staged
+ * It holds the changes made under it, and nothing else but one thing: the
+ * surface an arrival asked to open first ({@link DesignModeOpening},
+ * objectstack#36907), held until that surface takes it. Each change is staged
  * under a key by the surface that makes it ({@link useDesignModeChange}): the
  * menu editor, the page header's pinned actions, a record page's tabs (its
  * tab row is their editor while the mode is on, objectstack#36737, as Twenty
@@ -72,7 +74,11 @@
  * (installed) package's app enters too, and what the mode saves goes to that
  * package's customization package, as Studio's edits do, except where the
  * customization door is walled off for the caller. The mode has no address:
- * no URL enters it. Each
+ * no URL enters it. A Studio dashboard list's 「New」 enters it by a one-time
+ * arrival in the navigation state instead (`useDesignModeArrival`,
+ * objectstack#36907), which asks {@link DesignModeValue.enterOpening}: the
+ * same entry, refused the same way, with the 「Add menu item」 picker opened
+ * on its dashboards once the menu's editor is drawn. Each
  * change's `commit` is a write the server judges again.
  *
  * @module
@@ -93,6 +99,17 @@ type StagedChanges = ReadonlyMap<string, DesignModeChange<unknown>>;
 
 const NO_CHANGES: StagedChanges = new Map();
 
+/**
+ * What an arrival asks the mode to open first (objectstack#36907): the
+ * 「Add menu item」 picker, on its dashboards, at the end of the menu's top
+ * level. `studioReturn` is the Studio list the arrival came from, which the
+ * dashboard created there goes back to (`?studio=`), or `null`.
+ */
+export interface DesignModeOpening {
+  readonly column: 'dashboard';
+  readonly studioReturn: string | null;
+}
+
 /** The mode as the shell holds it, for the app it is on. */
 export interface DesignModeValue {
   /** On, for the app on screen. */
@@ -106,6 +123,12 @@ export interface DesignModeValue {
    * while a dashboard or report editor holds the mode out.
    */
   readonly enter: () => boolean;
+  /**
+   * {@link DesignModeValue.enter}, then hold `opening` for the surface that
+   * opens it ({@link useDesignModeOpening}); `false`, nothing held and the
+   * reason said, where `enter` refuses.
+   */
+  readonly enterOpening: (opening: DesignModeOpening) => boolean;
   /** Drop every staged change and leave the mode. */
   readonly cancel: () => void;
   /** Commit every staged change, then leave the mode; `false` when one failed. */
@@ -114,6 +137,10 @@ export interface DesignModeValue {
 
 interface DesignModeStore extends DesignModeValue {
   readonly changes: StagedChanges;
+  /** What an arrival asked to open first, until that surface takes it. */
+  readonly opening: DesignModeOpening | null;
+  /** Take {@link DesignModeStore.opening}: it is answered once. */
+  readonly takeOpening: () => DesignModeOpening | null;
   readonly stage: (key: string, change: DesignModeChange<unknown>) => void;
   readonly unstage: (key: string) => void;
   /** Save every staged change with `change` in `key`'s place; `false` when one failed. */
@@ -128,9 +155,11 @@ interface HeldMode {
   /** The app the mode was entered in; `null` while the mode is off. */
   readonly app: string | null;
   readonly changes: StagedChanges;
+  /** What an arrival asked to open first, not yet taken. */
+  readonly opening: DesignModeOpening | null;
 }
 
-const OFF: HeldMode = { app: null, changes: NO_CHANGES };
+const OFF: HeldMode = { app: null, changes: NO_CHANGES, opening: null };
 
 /**
  * Whether `url` is a page of the app at `appBasePath` (`/apps/SEGMENT`), read
@@ -160,7 +189,10 @@ export function useDesignModeController({
   const [held, setHeld] = React.useState<HeldMode>(OFF);
   const [saving, setSaving] = React.useState(false);
   /** How many editors of their own hold the mode out. */
-  const [heldOut, setHeldOut] = React.useState(0);
+  // Counted in a ref, not state: an editor that opens in the same commit as
+  // an arrival asks to enter (objectstack#36907) holds the mode out before
+  // that entry is judged.
+  const heldOut = React.useRef(0);
 
   // Another app: the mode and what it held were the previous app's.
   if (held.app !== null && held.app !== appName) setHeld(OFF);
@@ -168,6 +200,7 @@ export function useDesignModeController({
   const on = held.app !== null && held.app === appName;
   const active = on && enabled;
   const changes = on ? held.changes : NO_CHANGES;
+  const opening = active ? held.opening : null;
   const dirty = changes.size > 0;
 
   const heldRef = React.useRef(held);
@@ -175,26 +208,43 @@ export function useDesignModeController({
     heldRef.current = held;
   });
 
-  const enter = React.useCallback((): boolean => {
-    if (heldOut > 0) {
-      toast.error(
-        t('designMode.editorOpen', {
-          defaultValue: 'Save or cancel your dashboard or report changes before designing the layout.',
-        }),
-      );
-      return false;
-    }
-    setHeld((prev) => (prev.app === appName ? prev : { app: appName, changes: NO_CHANGES }));
-    return true;
-  }, [appName, heldOut, t]);
+  const enterWith = React.useCallback(
+    (asked: DesignModeOpening | null): boolean => {
+      if (heldOut.current > 0) {
+        toast.error(
+          t('designMode.editorOpen', {
+            defaultValue: 'Save or cancel your dashboard or report changes before designing the layout.',
+          }),
+        );
+        return false;
+      }
+      setHeld((prev) => {
+        const entered = prev.app === appName ? prev : { app: appName, changes: NO_CHANGES, opening: null };
+        return asked ? { ...entered, opening: asked } : entered;
+      });
+      return true;
+    },
+    [appName, t],
+  );
+  // `enter` takes no argument: a button's click event is never an opening.
+  const enter = React.useCallback((): boolean => enterWith(null), [enterWith]);
+  const enterOpening = React.useCallback(
+    (asked: DesignModeOpening): boolean => enterWith(asked.column === 'dashboard' ? asked : null),
+    [enterWith],
+  );
+  const takeOpening = React.useCallback((): DesignModeOpening | null => {
+    const taken = heldRef.current.opening;
+    if (taken) setHeld((prev) => (prev.opening ? { ...prev, opening: null } : prev));
+    return taken;
+  }, []);
 
   const holdOut = React.useCallback(() => {
-    setHeldOut((n) => n + 1);
+    heldOut.current += 1;
     let released = false;
     return () => {
       if (released) return;
       released = true;
-      setHeldOut((n) => n - 1);
+      heldOut.current -= 1;
     };
   }, []);
 
@@ -207,7 +257,7 @@ export function useDesignModeController({
       if (prev.app === null) return prev;
       const next = new Map(prev.changes);
       next.set(key, change);
-      return { app: prev.app, changes: next };
+      return { ...prev, changes: next };
     });
   }, []);
 
@@ -216,7 +266,7 @@ export function useDesignModeController({
       if (prev.app === null || !prev.changes.has(key)) return prev;
       const next = new Map(prev.changes);
       next.delete(key);
-      return { app: prev.app, changes: next };
+      return { ...prev, changes: next };
     });
   }, []);
 
@@ -249,7 +299,7 @@ export function useDesignModeController({
           if (now === undefined || (now !== change && now !== was)) return prev;
           const next = new Map(prev.changes);
           next.delete(key);
-          return { app: prev.app, changes: next };
+          return { ...prev, changes: next };
         });
       }
       setHeld((prev) => (prev.changes.size === 0 ? OFF : prev));
@@ -277,8 +327,23 @@ export function useDesignModeController({
   }, [dirty, leaveMessage, appBasePath]);
 
   return React.useMemo(
-    () => ({ active, dirty, saving, enter, cancel, save, changes, stage, unstage, saveWith, holdOut }),
-    [active, dirty, saving, enter, cancel, save, changes, stage, unstage, saveWith, holdOut],
+    () => ({
+      active,
+      dirty,
+      saving,
+      enter,
+      enterOpening,
+      cancel,
+      save,
+      changes,
+      opening,
+      takeOpening,
+      stage,
+      unstage,
+      saveWith,
+      holdOut,
+    }),
+    [active, dirty, saving, enter, enterOpening, cancel, save, changes, opening, takeOpening, stage, unstage, saveWith, holdOut],
   );
 }
 
@@ -295,6 +360,21 @@ export function useDesignMode(): DesignModeValue | null {
 /** Whether the mode is on for the app on screen; `false` outside a shell that holds one. */
 export function useDesignModeActive(): boolean {
   return React.useContext(DesignModeContext)?.active ?? false;
+}
+
+/**
+ * What an arrival asked the mode to open first (objectstack#36907), for the
+ * surface that opens it: `opening` while it is held and the mode is on,
+ * `take` to answer it once. Outside a shell that holds the mode, nothing.
+ */
+export function useDesignModeOpening(): {
+  readonly opening: DesignModeOpening | null;
+  readonly take: () => DesignModeOpening | null;
+} {
+  const store = React.useContext(DesignModeContext);
+  const takeOpening = store?.takeOpening;
+  const take = React.useCallback(() => takeOpening?.() ?? null, [takeOpening]);
+  return { opening: store?.opening ?? null, take };
 }
 
 /**

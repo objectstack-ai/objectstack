@@ -244,3 +244,52 @@ describe('confirm card — transient not-sent failure keeps the retry path', () 
     await waitFor(() => expect(textarea.value).toBe('add a status field'));
   });
 });
+
+describe('confirm card — a refusal that names no upgrade offers none (cloud#4853)', () => {
+  /** The cloud guardrail's paid-plan five-hour 429: upgrade:false, topUp:false. */
+  function paidFiveHourRefusal(): Error {
+    const e = new Error(
+      JSON.stringify({
+        success: false,
+        error: {
+          code: 'AI_ALLOWANCE_EXHAUSTED',
+          message: '近五小时的 AI 用量已达上限，五小时内恢复后即可继续。',
+          category: 'rate_limit',
+          details: {
+            messageEn: "You've hit the five-hour AI usage limit. It resets within five hours — then you're good to go.",
+            upgrade: false,
+            topUp: false,
+          },
+        },
+      }),
+    ) as Error & { notSent?: boolean; status?: number };
+    e.notSent = true;
+    e.status = 429;
+    return e;
+  }
+
+  it('paid plan, resetKind fiveHour: the reason shows, the upgrade action does not', async () => {
+    const onSendMessage = vi.fn();
+    const onUpgrade = vi.fn();
+    const { rerender } = render(
+      <ChatbotEnhanced placeholder="Ask…" messages={changesMessage()} onSendMessage={onSendMessage} onUpgrade={onUpgrade} />,
+    );
+    fireEvent.click(screen.getByTestId('proposed-changes-confirm'));
+    rerender(
+      <ChatbotEnhanced
+        placeholder="Ask…"
+        messages={changesMessage()}
+        onSendMessage={onSendMessage}
+        onUpgrade={onUpgrade}
+        error={paidFiveHourRefusal()}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('proposed-changes-quota-blocked')).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('proposed-changes-quota-reason')).toHaveTextContent(/five-hour AI usage limit/);
+    expect(screen.queryByTestId('proposed-changes-quota-upgrade')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Upgrade plan' })).toBeNull();
+  });
+});
