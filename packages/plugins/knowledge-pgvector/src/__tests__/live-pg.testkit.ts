@@ -68,13 +68,15 @@ export class FakeEmbedder implements IEmbedder {
 }
 
 /**
- * One pool per file, and a fresh schema per adapter it makes; `dropAll` drops
- * every schema it made.
+ * One pool per file, and a fresh schema per adapter it makes; `dropAll` lets
+ * go of every builder lock its adapters hold (each on a session of its own),
+ * then drops every schema it made.
  */
 export function liveStore(prefix: string) {
   let pool: pg.Pool | undefined;
   let n = 0;
   const schemas: string[] = [];
+  const adapters: PgvectorKnowledgeAdapter[] = [];
   const run = `${process.pid}_${Date.now().toString(36)}`;
   return {
     pool(): pg.Pool {
@@ -88,15 +90,18 @@ export function liveStore(prefix: string) {
       return name;
     },
     adapter(opts: Partial<PgvectorKnowledgeAdapterOptions> & { embedder?: PgvectorKnowledgeAdapterOptions['embedder'] } = {}) {
-      return new PgvectorKnowledgeAdapter({
+      const adapter = new PgvectorKnowledgeAdapter({
         id: 'under_test',
         pool: poolFromPg(this.pool()),
         schema: this.schema(),
         embedder: new FakeEmbedder(),
         ...opts,
       });
+      adapters.push(adapter);
+      return adapter;
     },
     async dropAll(): Promise<void> {
+      for (const adapter of adapters.splice(0)) await adapter.close();
       if (!pool) return;
       for (const schema of schemas) await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
       await pool.end();

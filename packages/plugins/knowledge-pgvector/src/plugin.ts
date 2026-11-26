@@ -81,6 +81,24 @@ export function poolFromPg(pool: pg.Pool): PgPoolLike {
         release: (err?: Error | boolean) => client.release(err),
       };
     },
+    // A connection of its own, outside the pool, for a build's builder lock:
+    // the pool's settings, one client, closed by `release`.
+    connectSession: async () => {
+      const client = new pg.Client(pool.options);
+      // A session that drops lets go of its advisory lock in the server; its
+      // error must not end the process, and the next query on it fails.
+      client.on('error', () => undefined);
+      await client.connect();
+      return {
+        query: async <R>(text: string, params?: unknown[]) => {
+          const result = await client.query(text, params as unknown[] | undefined);
+          return { rows: result.rows as R[] };
+        },
+        release: () => {
+          void client.end().catch(() => undefined);
+        },
+      };
+    },
   };
 }
 
@@ -109,6 +127,7 @@ export class KnowledgePgvectorPlugin implements Plugin {
 
   private readonly opts: KnowledgePgvectorPluginOptions;
   private pool?: pg.Pool;
+  private adapter?: PgvectorKnowledgeAdapter;
 
   constructor(opts: KnowledgePgvectorPluginOptions = {}) {
     this.opts = opts;
@@ -158,7 +177,9 @@ export class KnowledgePgvectorPlugin implements Plugin {
       embedder,
       schema: this.opts.schema,
       queryPrefix: this.opts.queryPrefix,
+      logger: ctx.logger,
     });
+    this.adapter = adapter;
     svc.registerAdapter(adapter.id, adapter);
 
     const health = await adapter.healthCheck();
@@ -173,6 +194,9 @@ export class KnowledgePgvectorPlugin implements Plugin {
   }
 
   async destroy(): Promise<void> {
+    // The builder locks first: each is held on a session of its own.
+    await this.adapter?.close();
+    this.adapter = undefined;
     const pool = this.pool;
     this.pool = undefined;
     await pool?.end();
