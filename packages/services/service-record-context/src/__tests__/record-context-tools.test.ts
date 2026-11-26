@@ -443,10 +443,10 @@ describe('get_record_context — a read of a related object that fails is a fail
     for (const word of ['policy_revision', 'secret_note', 'acme_private', 'store down']) {
       expect(failed.message).not.toContain(word);
     }
-    // The original is the host's, on `cause` (which no door puts on the wire), and at the foot of the
-    // stack, which the doors' fault line prints where it prints no `cause`.
+    // The original is the host's, on `cause` (which no door puts on the wire and the doors' fault line
+    // prints). The failure's own stack does not repeat it: the fault line renders the `cause` chain.
     expect(failed.cause).toBe(original);
-    expect(failed.stack).toContain(`Caused by: ${original instanceof Error ? original.stack : String(original)}`);
+    expect(failed.stack ?? '').not.toContain('Caused by:');
   };
 
   it.each([

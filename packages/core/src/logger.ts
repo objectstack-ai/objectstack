@@ -183,6 +183,67 @@ function colorEnabled(stream: { isTTY?: boolean } | undefined): boolean {
     return Boolean(stream?.isTTY);
 }
 
+/** How many `cause` links an error record prints before it says it stopped. */
+const CAUSE_DEPTH_LIMIT = 5;
+
+/**
+ * An error as a log record carries it: message and stack, and the `cause`
+ * chain under it, outermost first.
+ *
+ * A wrapper thrown with the original on `cause` (`new Error(say, { cause })`)
+ * used to log as the wrapper alone, so the root cause of a wrapped fault was
+ * missing from the line. Each link is its message and stack. Bounded both
+ * ways: a cycle stops at the first repeat, a chain past
+ * {@link CAUSE_DEPTH_LIMIT} stops there, and either says so in a last link.
+ *
+ * The same shape as `faultCauseChain` in `@objectstack/types`, which the 5xx
+ * fault log prints on its console fallback. A copy rather than an import:
+ * this entry is browser-safe and `@objectstack/client` bundles it without
+ * depending on `@objectstack/types`, whose root entry would come along with
+ * `@objectstack/spec` behind it. `logger.test.ts` pins the two to one output.
+ */
+function renderError(error: Error): { message: string; stack?: string; causes?: Array<{ message: string; stack?: string }> } {
+    const causes: Array<{ message: string; stack?: string }> = [];
+    const seen = new Set<unknown>([error]);
+    let current = causeOf(error);
+    while (current !== undefined && current !== null) {
+        if (seen.has(current)) {
+            causes.push({ message: '[cause chain cycle: this link repeats an earlier one]' });
+            break;
+        }
+        if (causes.length >= CAUSE_DEPTH_LIMIT) {
+            causes.push({ message: `[cause chain truncated after ${CAUSE_DEPTH_LIMIT} links]` });
+            break;
+        }
+        seen.add(current);
+        causes.push(causeLine(current));
+        current = causeOf(current);
+    }
+    return { message: error.message, stack: error.stack, ...(causes.length > 0 ? { causes } : {}) };
+}
+
+function causeOf(value: unknown): unknown {
+    if (typeof value !== 'object' || value === null) return undefined;
+    try {
+        return (value as { cause?: unknown }).cause;
+    } catch {
+        // A throwing `cause` getter ends the chain; it must not cost the record.
+        return undefined;
+    }
+}
+
+function causeLine(cause: unknown): { message: string; stack?: string } {
+    if (cause instanceof Error) {
+        return { message: `${cause.name}: ${cause.message}`, ...(cause.stack ? { stack: cause.stack } : {}) };
+    }
+    if (typeof cause === 'string') return { message: cause };
+    try {
+        return { message: JSON.stringify(cause) ?? String(cause) };
+    } catch {
+        return { message: String(cause) };
+    }
+}
+
 /**
  * Resolve a Node builtin without putting it in this module's import graph.
  *
@@ -340,7 +401,7 @@ export class ObjectLogger implements Logger {
         const context = this.redactSensitive({
             ...this.bindings,
             ...meta,
-            ...(error ? { error: { message: error.message, stack: error.stack } } : {}),
+            ...(error ? { error: renderError(error) } : {}),
         });
 
         const hasContext = Object.keys(context).length > 0;

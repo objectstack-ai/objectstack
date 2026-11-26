@@ -797,13 +797,19 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
             expect(faults).toHaveLength(4);
             for (const [, meta] of faults) {
                 expect(meta).toMatchObject({ status: 500, code: 'INTERNAL_ERROR' });
-                expect(String((meta as { stack?: unknown }).stack)).toContain(`Caused by: Error: ${OUTAGE}`);
+                // The original reaches the line through the fault log's own `cause` rendering,
+                // not through a suffix on the failure's stack.
+                const { causes, stack } = meta as { causes?: Array<{ message: string; stack?: string }>; stack?: unknown };
+                expect(causes?.[0]?.message).toBe(`Error: ${OUTAGE}`);
+                expect(causes?.[0]?.stack).toContain(OUTAGE);
+                expect(String(stack)).not.toContain('Caused by:');
             }
             // Reached through each door, so the answer is the outage's on both.
             expect(failing.mock.calls.filter(([object]) => object === 'rc_revision').length).toBeGreaterThanOrEqual(4);
             expect(answer.isError).toBe(true);
             expect(answer.payload.error).toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
-            for (const word of ['rc_revision', 'disk I/O', 'version']) expect(answer.text).not.toContain(word);
+            // The wire carries no cause text: the fault line is the operator's alone.
+            for (const word of ['rc_revision', 'disk I/O', 'version', 'causes', 'Caused by']) expect(answer.text).not.toContain(word);
         } finally {
             failing.mockRestore();
             errorLines.mockRestore();

@@ -275,6 +275,83 @@ function safeStringify(value: unknown): string {
     }
 }
 
+/** One link of an error's `cause` chain, as an operator's fault line prints it. */
+export interface FaultCauseLine {
+    message: string;
+    /** Absent when the cause was not an `Error`, or carried none. */
+    stack?: string;
+}
+
+/**
+ * How many `cause` links a fault line prints before it says it stopped. A
+ * wrapper around a wrapper around a driver error is three; past five the
+ * chain is a loop in all but name, and the line must stay one line.
+ */
+export const FAULT_CAUSE_DEPTH_LIMIT = 5;
+
+/**
+ * The `cause` chain under a thrown value, outermost first, for the fault log.
+ *
+ * A producer that wraps an original on `cause` (`new Error(say, { cause })`)
+ * hands the door a sentence the caller may read; the original is the
+ * operator's. The line used to print the wrapper's message and stack only, so
+ * the root cause of every wrapped fault was missing from the one place an
+ * operator looks. Each link is its message and stack, so the line reads the
+ * way Node's own `Caused by:` rendering does, as data a JSON sink can index.
+ *
+ * Bounded both ways: a cycle (`a.cause = b; b.cause = a`) stops at the first
+ * repeat, and a chain deeper than {@link FAULT_CAUSE_DEPTH_LIMIT} stops there;
+ * either says so in a last link, so a cut chain never reads as a whole one.
+ *
+ * ⛔ Operator-only. It feeds the log line; no door puts it on the wire, and a
+ * 5xx answer withholds even the wrapper's own sentence.
+ *
+ * `@objectstack/core`'s `ObjectLogger` renders the same shape for every
+ * `logger.error(message, err)`. It keeps its own copy because its `./logger`
+ * entry is browser-safe and bundled by `@objectstack/client`, which does not
+ * depend on this package; `logger.test.ts` there pins the two to the same
+ * output.
+ */
+export function faultCauseChain(thrown: unknown, limit: number = FAULT_CAUSE_DEPTH_LIMIT): FaultCauseLine[] {
+    const lines: FaultCauseLine[] = [];
+    const seen = new Set<unknown>([thrown]);
+    let current = causeOf(thrown);
+    while (current !== undefined && current !== null) {
+        if (seen.has(current)) {
+            lines.push({ message: '[cause chain cycle: this link repeats an earlier one]' });
+            break;
+        }
+        if (lines.length >= limit) {
+            lines.push({ message: `[cause chain truncated after ${limit} links]` });
+            break;
+        }
+        seen.add(current);
+        lines.push(causeLine(current));
+        current = causeOf(current);
+    }
+    return lines;
+}
+
+function causeOf(value: unknown): unknown {
+    if (typeof value !== 'object' || value === null) return undefined;
+    try {
+        return (value as { cause?: unknown }).cause;
+    } catch {
+        // A throwing `cause` getter ends the chain; it must not cost the line.
+        return undefined;
+    }
+}
+
+function causeLine(cause: unknown): FaultCauseLine {
+    if (cause instanceof Error) {
+        return {
+            message: `${cause.name}: ${cause.message}`,
+            ...(cause.stack ? { stack: cause.stack } : {}),
+        };
+    }
+    return { message: typeof cause === 'string' ? cause : safeStringify(cause) };
+}
+
 /**
  * The human half of the line: `[5xx] 500 GET /api/v1/packages — <message>`.
  * Split out so both the emitted record and a test can name the same string.
@@ -321,6 +398,11 @@ export function serverFaultLogMeta(input: ServerFaultLogInput): Record<string, u
  * because a declared absence is an envelope a door COMPOSED and never a throw,
  * so there is no stack to carry. Emission never throws — a logging failure must
  * not become a second fault on top of the one being reported.
+ *
+ * The thrown value's `cause` chain rides the line too ({@link faultCauseChain}):
+ * as `causes` beside `stack` on the console fallback, and through the logger's
+ * own error rendering when one is injected (`ObjectLogger` prints it under
+ * `error.causes`), so a wrapped fault never logs without its root cause.
  */
 export function logServerFault(
     input: ServerFaultLogInput,
@@ -350,7 +432,14 @@ export function logServerFault(
             };
         }).console;
         if (absence) sink?.warn?.(message, meta);
-        else sink?.error?.(message, { ...meta, ...(err?.stack ? { stack: err.stack } : {}) });
+        else {
+            const causes = faultCauseChain(input.error);
+            sink?.error?.(message, {
+                ...meta,
+                ...(err?.stack ? { stack: err.stack } : {}),
+                ...(causes.length > 0 ? { causes } : {}),
+            });
+        }
         return true;
     } catch {
         // Log emission must never throw — the original fault is still answered.
