@@ -161,7 +161,12 @@ export const SysMetadataObject = ObjectSchema.create({
     }),
 
     /** Lifecycle state */
-    state: Field.select(['draft', 'active', 'archived', 'deprecated'], {
+    state: Field.select([
+      { label: 'draft', value: 'draft', color: 'gray' },
+      { label: 'active', value: 'active', color: 'green' },
+      { label: 'archived', value: 'archived', color: 'indigo' },
+      'deprecated',
+    ], {
       label: 'State',
       required: false,
       defaultValue: 'active',

@@ -1568,94 +1568,6 @@ export function DateTimeCellRenderer({ value, field, deadlineSettled, alwaysShow
   );
 }
 
-// Semantic color mapping (auto-detect from value text for priority & status fields)
-// Keys use underscore notation; lookup normalizes spaces/hyphens to underscores automatically.
-// Chinese keys are stored as-is and matched directly (no normalization side-effects).
-const SEMANTIC_COLOR_MAP: Record<string, string> = {
-  // Priority values (en)
-  critical: 'red',
-  urgent: 'red',
-  high: 'orange',
-  medium: 'yellow',
-  normal: 'blue',
-  low: 'gray',
-  none: 'gray',
-  // Severity values (en): info is the quiet level, not an alarm colour
-  info: 'blue',
-  warning: 'yellow',
-  // Status values (en)
-  paid: 'green',
-  completed: 'green',
-  done: 'green',
-  active: 'green',
-  approved: 'green',
-  resolved: 'green',
-  pending: 'yellow',
-  waiting: 'yellow',
-  on_hold: 'yellow',
-  shipped: 'blue',
-  in_progress: 'blue',
-  open: 'blue',
-  processing: 'blue',
-  draft: 'gray',
-  new: 'gray',
-  inactive: 'gray',
-  closed: 'gray',
-  cancelled: 'red',
-  canceled: 'red',
-  rejected: 'red',
-  failed: 'red',
-  overdue: 'red',
-  delivered: 'purple',
-  archived: 'indigo',
-  // CRM lifecycle values (en)
-  contacted: 'blue',
-  qualified: 'purple',
-  converted: 'green',
-  won: 'green',
-  lost: 'red',
-  // Priority values (zh)
-  紧急: 'red',
-  严重: 'red',
-  高: 'orange',
-  中: 'yellow',
-  普通: 'blue',
-  低: 'gray',
-  无: 'gray',
-  // Status values (zh)
-  新建: 'gray',
-  草稿: 'gray',
-  待处理: 'yellow',
-  待审核: 'yellow',
-  待联系: 'yellow',
-  挂起: 'yellow',
-  进行中: 'blue',
-  处理中: 'blue',
-  已联系: 'blue',
-  跟进中: 'blue',
-  已发货: 'blue',
-  打开: 'blue',
-  已确认: 'green',
-  已审核: 'green',
-  已通过: 'green',
-  已完成: 'green',
-  已支付: 'green',
-  已签收: 'green',
-  已转化: 'green',
-  成单: 'green',
-  赢得: 'green',
-  已签约: 'green',
-  已交付: 'purple',
-  已归档: 'indigo',
-  已关闭: 'gray',
-  已取消: 'red',
-  已拒绝: 'red',
-  失败: 'red',
-  逾期: 'red',
-  流失: 'red',
-  丢失: 'red',
-};
-
 // Color to Tailwind class mapping for custom Badge styling
 // Color → Tailwind class mapping for status-style badges.
 // Uses the modern "soft pill" pattern (Tailwind UI style): -50 background,
@@ -1690,30 +1602,10 @@ const DOT_COLOR_MAP: Record<string, string> = {
   pink: 'bg-pink-500',
 };
 
-// Color palette used by the deterministic fallback when no schema/semantic
-// color matches. Excludes 'gray' to ensure visual contrast between values.
-const BADGE_FALLBACK_PALETTE: readonly string[] = [
-  'blue', 'green', 'purple', 'orange', 'pink', 'indigo', 'yellow', 'red',
-];
-
-/**
- * Stable string hash (djb2-ish) → palette index.
- * Same value always yields the same color across renders/sessions.
- */
-function hashToColor(value: string): string {
-  let h = 5381;
-  for (let i = 0; i < value.length; i++) {
-    h = ((h << 5) + h) ^ value.charCodeAt(i);
-  }
-  const idx = Math.abs(h) % BADGE_FALLBACK_PALETTE.length;
-  return BADGE_FALLBACK_PALETTE[idx];
-}
-
 /**
  * Map a hex color (e.g. '#8B5CF6') to the nearest named palette color the
  * badge/dot maps understand. Object field options almost always declare colors
- * as HEX, so without this the explicit author color is ignored and a semantic/
- * hash heuristic takes over (e.g. a purple 'In Review' rendered alarming-red).
+ * as HEX, so without this the explicit author color would be ignored.
  * Low-saturation hexes resolve to 'gray'; otherwise bucket by hue.
  */
 function hexToPaletteName(hex: string): string | undefined {
@@ -1782,8 +1674,8 @@ function resolveColorName(color?: string): string | undefined {
  *      unreadable under a label; honoring the declaration must not turn that
  *      into a legibility bug across every list view.
  *
- * Non-hex declarations (family names, the semantic value map, the hash
- * fallback) are untouched and keep resolving exactly as before.
+ * Family-name declarations are untouched and keep resolving exactly as
+ * before; an option with no declared colour renders neutral.
  * -------------------------------------------------------------------------*/
 
 // The colour math (contrast floors, HSL/RGB conversion, `deriveHexBadgePalette`)
@@ -1842,35 +1734,51 @@ export function getDotHexAppearance(color?: string): HexColorAppearance | undefi
   };
 }
 
-export function getBadgeColorClasses(color?: string, val?: unknown): string {
+/**
+ * The badge an option with no declared colour renders: the theme's muted
+ * surface, the same classes an empty value has always received. Its tokens
+ * are theme variables, so light and dark need no `dark:` variant.
+ */
+const NEUTRAL_BADGE_CLASSES = 'bg-muted text-muted-foreground border-border';
+
+/**
+ * Badge classes for a select option: the colour its author declared (a
+ * palette family name, or a hex snapped to the nearest family; callers that
+ * honour a hex exactly ask `getBadgeHexAppearance` first), else the neutral
+ * badge.
+ *
+ * A colour on a badge means exactly one thing: the author declared it. No
+ * colour is derived from the option's value, by a lookup table or by a hash.
+ * Ruled on objectstack#36882 (option A, comment 7178358629): undeclared
+ * options render neutral on every surface, and declaring `color` on the
+ * option is the only way to colour one.
+ *
+ * @param color the option's declared `color`
+ * @param _value the option's value. Not consulted: kept so existing call
+ *   sites keep compiling, because no colour is derived from it.
+ */
+export function getBadgeColorClasses(color?: string, _value?: unknown): string {
   const named = resolveColorName(color);
   if (named && BADGE_COLOR_MAP[named]) return BADGE_COLOR_MAP[named];
-  if (val == null || val === '') return 'bg-muted text-muted-foreground border-border';
-  const key = String(val).toLowerCase().replace(/[\s-]/g, '_');
-  const semantic = SEMANTIC_COLOR_MAP[key];
-  if (semantic && BADGE_COLOR_MAP[semantic]) return BADGE_COLOR_MAP[semantic];
-  // Deterministic fallback so distinct values are visually distinguishable
-  // even when metadata declares no colors.
-  return BADGE_COLOR_MAP[hashToColor(key)];
+  return NEUTRAL_BADGE_CLASSES;
 }
 
 /**
- * Resolve a semantic color name (e.g. "red", "green") for a value, suitable
- * for callers that need a raw color token rather than CSS classes (for
- * example, the Gantt renderer paints bars via inline styles).
+ * Palette family name (e.g. "red", "green") of a declared option colour, for
+ * callers that need a raw colour token rather than CSS classes (inline-style
+ * painters). A family name passes through, a hex resolves to its nearest
+ * family; anything else, including no declaration at all, answers
+ * `undefined` so the caller paints its own default. The value is never
+ * consulted (objectstack#36882, see `getBadgeColorClasses`).
  *
- * Resolution order: explicit option color → semantic value mapping →
- * deterministic hash fallback. Returns `undefined` only when no value is
- * supplied so the caller can fall back to its own default.
+ * @param color the option's declared `color`
+ * @param _value the option's value. Not consulted: kept so existing call
+ *   sites keep compiling.
  */
-export function getSemanticColorName(color?: string, val?: unknown): string | undefined {
+export function getSemanticColorName(color?: string, _value?: unknown): string | undefined {
   const named = resolveColorName(color);
   if (named && BADGE_COLOR_MAP[named]) return named;
-  if (val == null || val === '') return undefined;
-  const key = String(val).toLowerCase().replace(/[\s-]/g, '_');
-  const semantic = SEMANTIC_COLOR_MAP[key];
-  if (semantic) return semantic;
-  return hashToColor(key);
+  return undefined;
 }
 
 // Resolved hex values for the -500 shade of each palette color. Mirrors
@@ -1896,7 +1804,9 @@ const COLOR_NAME_HEX: Record<string, string> = {
  */
 export function getSemanticHex(name?: string, fallback: string = '#3b82f6'): string {
   if (!name) return fallback;
-  return COLOR_NAME_HEX[name] ?? fallback;
+  // Own keys only: a name spelled like an inherited key (`constructor`,
+  // `toString`) is no palette family and takes the fallback, never a function.
+  return Object.prototype.hasOwnProperty.call(COLOR_NAME_HEX, name) ? COLOR_NAME_HEX[name] : fallback;
 }
 
 /**
@@ -1948,15 +1858,15 @@ export function SelectCellRenderer({ value, field }: CellRendererProps): React.R
       || (isPlainObjectValue(val) ? String(coerceToSafeValue(val)) : humanizeLabel(String(val)));
 
     if (appearance === 'dot') {
-      // Resolve a real CSS color for the dot. Prefer explicit option color,
-      // then semantic mapping for the value, then deterministic palette.
-      // An explicitly declared hex is painted as declared (objectui#5141);
-      // every other declaration keeps resolving to a palette family below.
+      // The dot's colour is the option's declared colour and nothing else
+      // (objectstack#36882): an explicitly declared hex is painted as
+      // declared (objectui#5141), a family name resolves to its palette dot,
+      // and an option that declares no colour gets the gray dot.
       const hexDot = getDotHexAppearance(option?.color);
-      const colorName = resolveColorName(option?.color)
-        || SEMANTIC_COLOR_MAP[String(val).toLowerCase().replace(/[\s-]/g, '_')]
-        || hashToColor(String(val).toLowerCase().replace(/[\s-]/g, '_'));
-      const dotClass = hexDot ? hexDot.className : (DOT_COLOR_MAP[colorName] || DOT_COLOR_MAP.gray);
+      const colorName = resolveColorName(option?.color);
+      const dotClass = hexDot
+        ? hexDot.className
+        : (colorName && DOT_COLOR_MAP[colorName]) || DOT_COLOR_MAP.gray;
       // max-w-full bounds the (otherwise content-sized) inline-flex box so the
       // inner truncate can engage; title keeps the full label on hover
       // (objectui#3466, same class of bug as the badge branch below).
@@ -1972,8 +1882,8 @@ export function SelectCellRenderer({ value, field }: CellRendererProps): React.R
       );
     }
 
-    // An explicitly declared hex renders as declared (objectui#5141); family
-    // names, the semantic value map and the hash fallback are unchanged.
+    // An explicitly declared hex renders as declared (objectui#5141); a family
+    // name resolves to its palette badge, no declaration to the neutral one.
     const hexBadge = getBadgeHexAppearance(option?.color);
     const colorClasses = hexBadge ? hexBadge.className : getBadgeColorClasses(option?.color, val);
     // max-w-full + inner truncate: in bounded containers (detail highlight
