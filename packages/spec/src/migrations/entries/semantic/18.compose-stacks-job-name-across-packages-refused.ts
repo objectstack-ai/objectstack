@@ -17,7 +17,10 @@ export const entry: SemanticMigration = {
     + "body and the residual (a top-level job no body declares: under manifest 'preserve' an input with no manifest, "
     + "under 'first', 'last' or an index any top-level job beside an input that is itself a multi-package artifact). "
     + 'Before this release the pair composed: two bodies were never read against each other, and a residual job '
-    + "sharing a body job's name was read as that body's copy.",
+    + "sharing a body job's name was read as that body's copy. Also refused now: two residual jobs of one name beside "
+    + 'a package body job of that name (the one-package finding, a disabled job counted too; before, both were read '
+    + "as that body's copies), and one job object a composition reaches twice (a built stack shared by two "
+    + 'compositions, or passed twice), counted per place as the binder binds each copy.',
   replacement:
     'Give each job its own name across the composed artifact, or disable all but one of the jobs that share a name '
     + '(enabled: false). A disabled job is scheduled by nothing, so a disabled twin still composes.',
@@ -31,6 +34,7 @@ export const entry: SemanticMigration = {
     + 'binder still refuses the name at boot.',
   acceptanceCriteria:
     'objectstack validate and objectstack build load the composed stack without a STACK_CROSS_REFERENCE_INVALID '
-    + 'finding "Job \'NAME\' is declared enabled twice across the packages of one composed artifact", and the boot '
-    + 'log carries no NOT SCHEDULED error for a job name.',
+    + 'finding "Job \'NAME\' is declared enabled twice across the packages of one composed artifact" or "Job \'NAME\' '
+    + 'is declared twice in jobs", and the boot log carries no NOT SCHEDULED error for a job name: composition counts '
+    + 'each job once per place it is reached, as the binder binds it.',
 };

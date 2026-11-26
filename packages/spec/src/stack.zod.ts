@@ -3885,8 +3885,8 @@ function composedJobDeclarations(
  * judge at composition, over {@link composedJobDeclarations}, so a composition
  * never builds an artifact whose boot silently schedules none of the name.
  * Its reading is the binder's: enabled jobs only (a disabled job is scheduled
- * by nothing, so a disabled twin composes), counted by name, the residual by
- * count beyond the bodies' copies. Cross-package reuse of a name (ADR-0048
+ * by nothing, so a disabled twin composes), counted by name and per place
+ * reached, the residual by count beyond the bodies' copies. Cross-package reuse of a name (ADR-0048
  * §3.4) does not reach jobs: nothing resolves a bare job name to a package.
  *
  * Only names that span two holders: two jobs of one name in one holder are

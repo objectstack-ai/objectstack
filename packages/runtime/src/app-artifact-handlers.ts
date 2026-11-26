@@ -1393,14 +1393,16 @@ function describeJobRunForm(job: unknown): string {
  * The holders the refusal names are every body declaring the name, and — when the artifact holds more jobs
  * of the name than its bodies declare (the residual's own: a top-level job of an input with no `manifest`) —
  * the artifact's top level outside every package body, as {@link jobNameRefusal} names it; an artifact
- * without `packages[]` is its app's alone.
+ * without `packages[]` is its app's alone. The refusal's `candidates` are every declaring body as a
+ * `package`, then the residual as `{ kind: 'residual', ownerId }` (the artifact's id), or the app itself for
+ * an artifact without `packages[]`. Each job is named by its run form. Counted by name, never by content: a
+ * conversion replays a body under its own version window.
  *
- * `composeStacks` refuses the same set by the same reading (enabled jobs only, by name, the residual by count
- * beyond the bodies' copies), so an artifact it built never reaches this refusal. This stays the backstop for
- * an artifact no composition built: hand-written, or built before composition judged a shared job name. The refusal's
- * `candidates` are every declaring body as a `package`, then the residual as `{ kind: 'residual', ownerId }`
- * (the artifact's id), or the app itself for an artifact without `packages[]`. Each job is named by
- * its run form. Counted by name, never by content: a conversion replays a body under its own version window.
+ * `composeStacks` refuses the same names by the same reading (enabled jobs only, by name, each job counted
+ * per place it is reached — one job object two bodies carry is two jobs here — and the residual by count
+ * beyond the bodies' copies), so a composition does not build an artifact this refuses. This stays the
+ * backstop for an artifact no composition built: hand-written, or built before composition judged a shared
+ * job name.
  *
  * A disabled job is scheduled by nothing, so it collides with nothing and is not counted: its enabled twin
  * keeps the run-time attribution refusal {@link jobDeclaringPackages} gives it.
