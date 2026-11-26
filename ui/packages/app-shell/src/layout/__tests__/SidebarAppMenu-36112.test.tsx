@@ -21,7 +21,7 @@
  * objectstack#36758 — the design mode edits the layout only, so its door reads
  * 「Design layout」 (zh 「设计布局」), the bar's own word; 「Edit app」 beside
  * it opens this app's package in Studio on the app switcher's target and
- * posture, and reads 「View in Studio」 (zh 「在 Studio 中查看」) for an
+ * posture, and reads 「View in App Studio」 (zh 「在应用搭建中查看」) for an
  * installed (read-only) package. Real subject added: the built-in en and
  * zh-Hans packs, for the words.
  *
@@ -532,11 +532,11 @@ describe('the words: the door and the bar share one name (objectstack#36758)', (
   const EN = builtInLocales.en as unknown as Pack;
   const ZH = builtInLocales['zh-Hans'] as unknown as Pack;
 
-  it('zh-Hans: 「设计布局」 for the door and the bar, 「编辑应用」 and 「在 Studio 中查看」 for Studio', () => {
+  it('zh-Hans: 「设计布局」 for the door and the bar, 「编辑应用」 and 「在应用搭建中查看」 for Studio', () => {
     expect(ZH.topbar.designLayout).toBe('设计布局');
     expect(ZH.designMode.title).toBe('设计布局');
     expect(ZH.topbar.editApp).toBe('编辑应用');
-    expect(ZH.topbar.viewInStudio).toBe('在 Studio 中查看');
+    expect(ZH.topbar.viewInStudio).toBe('在应用搭建中查看');
   });
 
   it('every built-in pack names the door as its bar', () => {
