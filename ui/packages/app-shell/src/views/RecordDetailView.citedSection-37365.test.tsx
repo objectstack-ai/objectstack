@@ -20,14 +20,16 @@
  * - objectstack#37487 (S5): a navigation that DROPS the state is no new click
  *   either: a state-dropping `replace` (how `useUrlOverlay` opens the command
  *   palette) and a pushed form overlay followed by Back leave the page where
- *   it is. CONTROL: a new string value after them scrolls again.
+ *   it is. CONTROL: a new string value after them scrolls again. The same
+ *   holds when the overlay redraws the page from scratch (a remount without
+ *   the state): the section is marked again and nothing scrolls.
  */
 
 import * as React from 'react';
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, within, act, waitFor } from '@testing-library/react';
-import { MemoryRouter, useNavigate, type NavigateFunction } from 'react-router-dom';
+import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -131,20 +133,30 @@ function NavigateProbe({ onNavigate }: { onNavigate: (navigate: NavigateFunction
   return null;
 }
 
-async function mount(search: string, content = BODY) {
+/** Draws the page again from scratch whenever the query string changes, the way an overlay redraw can. */
+function RemountOnSearch({ children }: { children: (key: string) => React.ReactElement }) {
+  const { search } = useLocation();
+  return children(search);
+}
+
+async function mount(search: string, content = BODY, opts: { remountOnSearch?: boolean } = {}) {
+  const view = (key?: string) => (
+    <RecordDetailView
+      key={key}
+      dataSource={makeDataSource(content)}
+      objects={OBJECTS}
+      onEdit={() => {}}
+      objectNameOverride={OBJECT_NAME}
+      recordIdOverride={RECORD_ID}
+    />
+  );
   const rendered = render(
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>
       <MePermissionsProvider initialPermissions={PERMS}>
         <MemoryRouter initialEntries={[`/apps/compliance/${OBJECT_NAME}/record/${RECORD_ID}${search}`]}>
           <NavigateProbe onNavigate={keepNavigate} />
           <MetadataCtx.Provider value={metadata()}>
-            <RecordDetailView
-              dataSource={makeDataSource(content)}
-              objects={OBJECTS}
-              onEdit={() => {}}
-              objectNameOverride={OBJECT_NAME}
-              recordIdOverride={RECORD_ID}
-            />
+            {opts.remountOnSearch ? <RemountOnSearch>{(key) => view(key)}</RemountOnSearch> : view()}
           </MetadataCtx.Provider>
         </MemoryRouter>
       </MePermissionsProvider>
@@ -171,8 +183,10 @@ beforeEach(() => {
   );
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // The page forgets the section it opened once it has stayed unmounted (objectstack#37487 S5).
+  await new Promise((resolve) => setTimeout(resolve, 0));
   HTMLElement.prototype.scrollIntoView = originalScroll;
   vi.unstubAllGlobals();
   vi.clearAllMocks();
@@ -213,6 +227,7 @@ describe('a record opened at a cited section (objectstack#37365)', () => {
     expect(scrolled).toEqual([]);
     expect(marked(stale.container)).toHaveLength(0);
     cleanup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     const live = await mount('?section=intro');
     await waitFor(() => expect(marked(live.container)).toHaveLength(1), { timeout: 4000 });
     expect(marked(live.container)[0].textContent).toBe('Intro');
@@ -230,6 +245,7 @@ describe('a record opened at a cited section (objectstack#37365)', () => {
     await waitFor(() => expect(scrolled).toEqual([field()]), { timeout: 7000 });
     expect(marked(dup.container)).toHaveLength(0);
     cleanup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     scrolled = [];
     const control = await mount('?section=scope', SETEXT_CONTROL);
     await waitFor(() => expect(marked(control.container)).toHaveLength(1), { timeout: 4000 });
@@ -296,5 +312,31 @@ describe('a record opened at a cited section (objectstack#37365)', () => {
       navigateTo!(`${path}?section=scope-2`, { state: { [RECORD_SECTION_OPENED_STATE]: 'click-2' } });
     });
     await waitFor(() => expect(scrolled).toEqual([first, second, second]), { timeout: 4000 });
+  });
+
+  it('a remount by a pushed overlay, and Back, marks the section again and does not scroll (objectstack#37487 S5); CONTROL: a new click scrolls', async () => {
+    const { container } = await mount('?section=scope', BODY, { remountOnSearch: true });
+    await waitFor(() => expect(marked(container)).toHaveLength(1), { timeout: 4000 });
+    const path = `/apps/compliance/${OBJECT_NAME}/record/${RECORD_ID}`;
+    await act(async () => {
+      navigateTo!(`${path}?section=scope-2`, { state: { [RECORD_SECTION_OPENED_STATE]: 'click-1' } });
+    });
+    await waitFor(() => expect(scrolled).toHaveLength(2), { timeout: 4000 });
+    // The pushed form redraws the page from scratch, without the click's state.
+    await act(async () => {
+      navigateTo!(`${path}?section=scope-2&form=edit`);
+    });
+    const second = () => headingsNamed(container, 'Scope')[1];
+    await waitFor(() => expect(marked(container)).toEqual([second()]), { timeout: 4000 });
+    await act(async () => {
+      navigateTo!(-1);
+    });
+    await waitFor(() => expect(marked(container)).toEqual([second()]), { timeout: 4000 });
+    expect(scrolled).toHaveLength(2);
+    // CONTROL: a new click after them scrolls.
+    await act(async () => {
+      navigateTo!(`${path}?section=scope-2`, { state: { [RECORD_SECTION_OPENED_STATE]: 'click-2' } });
+    });
+    await waitFor(() => expect(scrolled).toHaveLength(3), { timeout: 4000 });
   });
 });

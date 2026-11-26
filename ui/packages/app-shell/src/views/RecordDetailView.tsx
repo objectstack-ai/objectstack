@@ -914,6 +914,25 @@ function ApprovalGroupBeacon({ onHosted }: { onHosted: (update: (n: number) => n
 /** The reader's arrangement is not written while the design mode's tab editor previews the default (objectstack#36499, objectstack#36737). */
 const ignoreArrangementChange = (): void => {};
 
+/**
+ * objectstack#37487 (S5) — the cited section the record page last opened, as
+ * `{ target: RECORD\nANCHOR, opened: CLICK }`, kept beside the component so it
+ * outlives a remount or a swapped page root: a record-form overlay pushed over
+ * the page (and Back after it) redraws the page without the click's history
+ * state, and that redraw is no new click. It is dropped once no record page is
+ * mounted any more, so a later visit to the same link opens its section again.
+ */
+let lastCitedSectionOpen: { target: string; opened: string } | null = null;
+let mountedRecordPages = 0;
+
+/** Whether a cited-section open is a new one, and record it when it is. */
+function claimCitedSectionOpen(target: string, opened: string): boolean {
+  const last = lastCitedSectionOpen;
+  if (last && last.target === target && (opened === '' || opened === last.opened)) return false;
+  lastCitedSectionOpen = { target, opened };
+  return true;
+}
+
 export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverride, recordIdOverride, embedded }: RecordDetailViewProps) {
 
   const params = useParams<{
@@ -4950,7 +4969,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // objectstack#37487 (S5) — the click is the last string value the state
   // carried, kept until a NEW one arrives: a navigation that drops the history
   // state (an overlay's `replace`, a pushed form and Back) is no new click, so
-  // it neither re-runs the effect nor scrolls the page back to the heading.
+  // it neither re-runs the effect nor scrolls the page back to the heading;
+  // `claimCitedSectionOpen` carries the same judgement across a redraw of the
+  // page itself (the record-form overlay remounts it without the state).
   const sectionAnchor = tabSearchParams.get(RECORD_SECTION_PARAM) || null;
   const sectionOpenedState = (location.state as Record<string, unknown> | null)?.[RECORD_SECTION_OPENED_STATE];
   const [sectionOpened, setSectionOpened] = useState('');
@@ -4972,8 +4993,26 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   citedSectionCandidatesRef.current = citedSectionCandidates;
   useEffect(() => {
     if (!pageRootEl || !citedSectionKey) return undefined;
-    return focusRecordSection(pageRootEl, citedSectionCandidatesRef.current);
+    // Claimed when the page would move, so a re-run before that does not spend
+    // it; a redraw at a section already opened marks it again and scrolls nothing.
+    const target = `${routeRecordKey}\n${sectionAnchor}`;
+    const opened = sectionOpened;
+    return focusRecordSection(pageRootEl, citedSectionCandidatesRef.current, undefined, () =>
+      claimCitedSectionOpen(target, opened),
+    );
+    // The key spells the record, anchor and click; the effect reads them through it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageRootEl, citedSectionKey]);
+  useEffect(() => {
+    mountedRecordPages += 1;
+    return () => {
+      mountedRecordPages -= 1;
+      // A remount mounts the next page in the same commit, before this runs.
+      setTimeout(() => {
+        if (mountedRecordPages === 0) lastCitedSectionOpen = null;
+      }, 0);
+    };
+  }, []);
   const landedRecordName = holdsRouteRecord && !recordTitle && objectDef
     ? getRecordDisplayName(objectDef, readablePageRecord)
     : undefined;
