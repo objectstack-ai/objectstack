@@ -433,22 +433,33 @@ Be precise, data-driven, and clear in your explanations.`,
       expect(agent.planning?.maxIterations).toBe(10);
     });
 
-    it('should enforce maxIterations constraints', () => {
-      expect(() => AgentSchema.parse({
-        name: 'test',
-        label: 'Test',
-        role: 'Test',
-        instructions: 'Test',
-        planning: { maxIterations: 0 },
-      })).toThrow();
+    // `planning.maxIterations` is a runaway fuse counted in model calls. The
+    // ceiling is 1000, so a few-hundred-round fuse (300) declares; 0 and
+    // anything above 1000 are refused at the key.
+    const withIterations = (maxIterations: unknown) => AgentSchema.safeParse({
+      name: 'test',
+      label: 'Test',
+      role: 'Test',
+      instructions: 'Test',
+      planning: { maxIterations },
+    });
 
-      expect(() => AgentSchema.parse({
-        name: 'test',
-        label: 'Test',
-        role: 'Test',
-        instructions: 'Test',
-        planning: { maxIterations: 101 },
-      })).toThrow();
+    it.each([1, 101, 300, 1000])('accepts planning.maxIterations %i', (n) => {
+      const result = withIterations(n);
+      expect(result.success).toBe(true);
+      expect(result.data?.planning?.maxIterations).toBe(n);
+    });
+
+    it.each([
+      [0, 'too_small'],
+      [1001, 'too_big'],
+      [2.5, 'invalid_type'],
+    ])('refuses planning.maxIterations %s at its own path with %s', (n, code) => {
+      const result = withIterations(n);
+      expect(result.success).toBe(false);
+      expect(result.error!.issues).toHaveLength(1);
+      expect(result.error!.issues[0]!.path).toEqual(['planning', 'maxIterations']);
+      expect(result.error!.issues[0]!.code).toBe(code);
     });
   });
 

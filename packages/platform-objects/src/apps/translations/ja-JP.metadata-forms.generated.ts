@@ -3038,7 +3038,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       planning: {
         label: "計画",
-        helpText: "自律推論設定: エージェントが停止するまでの最大推論反復回数（1〜100、既定値 10）。"
+        helpText: "自律推論設定: 暴走ループを止めるヒューズで、モデル呼び出し回数（1 回のモデル呼び出しとそれが要求するツール呼び出しの一括）で数え、達するとエージェントは停止します（1〜1000、既定値 10）。"
       },
       memory: {
         label: "メモリ",

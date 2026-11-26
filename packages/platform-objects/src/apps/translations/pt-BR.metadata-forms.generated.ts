@@ -3038,7 +3038,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       planning: {
         label: "Planejamento",
-        helpText: "Configuração de raciocínio autônomo: o número máximo de iterações de raciocínio antes de o agente parar (1–100, padrão 10)."
+        helpText: "Configuração de raciocínio autônomo: um fusível contra loops descontrolados, contado em chamadas ao modelo (cada uma, uma chamada ao modelo mais seu lote de ferramentas), após o qual o agente para (1–1000, padrão 10)."
       },
       memory: {
         label: "Memória",

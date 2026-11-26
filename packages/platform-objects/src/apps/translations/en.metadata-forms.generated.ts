@@ -3038,7 +3038,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       planning: {
         label: "Planning",
-        helpText: "Autonomous reasoning configuration: the maximum number of reasoning iterations before the agent stops (1–100, default 10)."
+        helpText: "Autonomous reasoning configuration: a runaway fuse counted in model calls, each one model call plus its tool batch, after which the agent stops (1–1000, default 10)."
       },
       memory: {
         label: "Memory",

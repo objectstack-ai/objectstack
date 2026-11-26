@@ -3038,7 +3038,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       planning: {
         label: "规划",
-        helpText: "自主推理配置：代理停止前的最大推理迭代次数（1–100，默认 10）。"
+        helpText: "自主推理配置：防止失控循环的保险丝，按模型调用次数计（一次模型调用加上它发起的一批工具调用），达到后代理停止（1–1000，默认 10）。"
       },
       memory: {
         label: "记忆",
