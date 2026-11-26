@@ -82,6 +82,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
+// check:test-source-alias — the protocol's lazy `@objectstack/lint` load is paid at collection, not in a case's window.
+import '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import {
     bumpWriteEpoch,
