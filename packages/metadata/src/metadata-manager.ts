@@ -1355,7 +1355,7 @@ export class MetadataManager implements IMetadataService {
     // Captured before the write so the event distinguishes a first
     // registration from an overwrite, matching the repo-watch path's
     // 'added' vs 'changed' split.
-    const existed = this.writeRegistryEntry(type, name, data);
+    const existed = this.writeRegistryEntry(type, name, data, this.primedRowSlot(type, name, data, options));
     this.invalidateListCache(type);
 
     // [#33003] An environment row the boot pass stamped is stored as the
@@ -1878,6 +1878,29 @@ export class MetadataManager implements IMetadataService {
     const origin = stampedCopyOrigins.get(data);
     const direct = loader.rowPackageIdOf(data);
     return direct !== undefined ? direct : origin !== undefined ? loader.rowPackageIdOf(origin) : undefined;
+  }
+
+  /**
+   * [#37130] The slot a stored row's body the boot priming pass re-registers
+   * (`skipSourceLoader`, a body a loader of rows handed out) is filed under,
+   * for a type stored per `(package, name)`: the slot of the row's package
+   * column ({@link readRowColumnOf}) when the body carries a package stamp of
+   * its own and it names another package. That is the key the row loader keys the row by
+   * (`loadManySlots`, the column first), so {@link list} lists the row once
+   * and a read naming the column's package answers it, as on a process that
+   * never primed it; ⛔ never the stamp's slot, under which {@link list} listed
+   * the row a second time. `undefined` (the write rule's key) for every other
+   * write, for a row with an empty column (a legacy row the loader keys by
+   * its body's package, `bindReadRowPackage`), and for an unstamped body (the
+   * plural read stamps a row's body with its column when the body names its
+   * row's key, so one left unstamped is not that row's item by its name).
+   */
+  private primedRowSlot(type: string, name: string, data: unknown, options?: MetadataRegisterOptions): string | undefined {
+    if (options?.skipSourceLoader !== true || !PACKAGE_SLOTTED_STORE_TYPES.has(type)) return undefined;
+    const column = this.readRowColumnOf(data);
+    const stamp = indexedItemPackageId(data);
+    if (typeof column !== 'string' || column === '' || stamp === undefined || stamp === column) return undefined;
+    return storeSlotKey(type, name, column, data);
   }
 
   /**

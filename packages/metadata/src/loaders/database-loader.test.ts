@@ -4800,12 +4800,11 @@ describe('[#37039] a stored row\'s package binding is read from its package colu
     await manager.register('skill', 'code_only', { name: 'code_only', label: 'code_only', instructions: 'x', _packageId: ALPHA }, { notify: false });
     await manager.register('skill', 'platform_only', { name: 'platform_only', label: 'p', instructions: 'p' }, { notify: false, origin: 'platform' });
     // `code_only` and `platform_only` were written through to the row loader by their register: the store
-    // recorded each one's column. `differs` is listed twice, as `list` lists it: the registry's primed copy
-    // (keyed by its body's BETA stamp) and the row (keyed by its ALPHA column). Both are the row's item and
-    // answer its column (BEFORE: the copy's only readable binding was BETA).
+    // recorded each one's column. [#37130] `differs` is listed once, as `list` lists it: the registry's primed
+    // copy is filed under the row's ALPHA column, the key the row loader lists it by (BEFORE #37130: twice,
+    // the copy keyed by its body's BETA stamp beside the row; before #37039 the copy answered BETA).
     expect(await bindingsOf(manager)).toEqual([
       ['code_only', ALPHA, 'row'],
-      ['differs', ALPHA, 'row'],
       ['differs', ALPHA, 'row'],
       ['legacy', null, 'row'],
       ['neither', null, 'row'],
@@ -4817,6 +4816,19 @@ describe('[#37039] a stored row\'s package binding is read from its package colu
     expect(read.items.map((entry) => entry.data)).toEqual(listed);
     expect(read.degraded).toBe(false);
     expect((read.items.find((entry) => entry.name === 'legacy')!.data as { _packageId?: string })._packageId).toBe(BETA);
+  });
+
+  it('[#37130] list() after the boot pass lists a row whose body stamp differs from its column once, under its column: a read naming the column\'s package answers it, the stamp\'s answers nothing (BASE: listed twice, the primed copy under the stamp)', async () => {
+    await seed('differs', ALPHA, BETA);
+    const manager = await booted();
+    const listed = (await manager.list('skill')) as Array<{ name?: string; _packageId?: string }>;
+    expect(listed.map((item) => [item.name, item._packageId])).toEqual([['differs', BETA]]);
+    expect(((await manager.get('skill', 'differs', ALPHA)) as { label?: string } | undefined)?.label).toBe('differs');
+    expect(await manager.get('skill', 'differs', BETA)).toBeUndefined();
+    // CONTROL: an unprimed process over the same rows answers the same: the loader keys the row by its column.
+    const cold = new MetadataManager({ formats: ['json'], loaders: [new DatabaseLoader({ driver })] });
+    expect(((await cold.list('skill')) as unknown[])).toHaveLength(1);
+    expect(await cold.get('skill', 'differs', BETA)).toBeUndefined();
   });
 
   it('listPackageBindings: an item no stored row holds answers its registration\'s binding, marked `registration`', async () => {
