@@ -2176,18 +2176,27 @@ export class RemoteTransport {
         const populated = addsRowSensitiveColumn(objectDef.fields, existingColumns)
           && (await this.sendStatement(populatedTableProbe(tableName))).rows.length > 0;
 
+        const addColumns: string[] = [];
         for (const [name, field] of Object.entries(objectDef.fields)) {
           if (existingColumns.has(name)) continue;
           const type = (field as any).type || 'string';
           if (type === 'formula') continue; // Virtual — no column
           this.assertSafeIdentifier(name);
-          await this.executeAddColumn(`ALTER TABLE "${tableName}" ADD COLUMN "${name}" ${this.columnDeclarationSQL(field, false, populated)}`);
+          addColumns.push(`ALTER TABLE "${tableName}" ADD COLUMN "${name}" ${this.columnDeclarationSQL(field, false, populated)}`);
           materialized.add(name);
         }
         // [#37413] The rows of a populated table take the instant a withheld
-        // `NOW()` DEFAULT would have given them, in one statement.
+        // `NOW()` DEFAULT would have given them, in one statement sent in ONE
+        // `write` batch (one transaction) with this table's `ADD COLUMN`s, as
+        // {@link syncSchemasBatch} sends it: a column is never left added with
+        // its rows unfilled, which the next sync (finding it present) would
+        // never repair. With nothing to fill, each `ADD COLUMN` goes alone.
         const backfill = populated ? this.withheldNowBackfill(tableName, objectDef.fields, existingColumns) : null;
-        if (backfill !== null) await this.sendStatement(backfill);
+        if (backfill === null) {
+          for (const ddl of addColumns) await this.executeAddColumn(ddl);
+        } else {
+          await this.executeAddColumns([...addColumns, backfill]);
+        }
       }
       // [#8413 · #17609] The retrofit leg — this table may already hold the
       // duplicates a missing UNIQUE admitted, so it is isolated and reported,
@@ -2718,6 +2727,19 @@ export class RemoteTransport {
       await this.sendStatement(ddl);
     } catch (e) {
       if (e instanceof Error) e.message = `${ddl} - ${e.message}`;
+      throw e;
+    }
+  }
+
+  /**
+   * [#37413] {@link executeAddColumn} for statements that must land together:
+   * one `write` batch, and a refusal names every statement it carried.
+   */
+  private async executeAddColumns(statements: string[]): Promise<void> {
+    try {
+      await this.sendBatch(statements, 'write');
+    } catch (e) {
+      if (e instanceof Error) e.message = `${statements.join('; ')} - ${e.message}`;
       throw e;
     }
   }

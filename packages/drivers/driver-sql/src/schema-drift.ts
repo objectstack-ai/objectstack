@@ -1598,7 +1598,11 @@ export function diffManagedTable(args: {
     // Reported so the ceremony's table rebuild, which re-emits every declared
     // DEFAULT, imposes it. Only a column with NO DEFAULT is judged: whatever
     // expression a column carries is left alone, as above. `safe`, as the
-    // literal arm's restatement is: the DEFAULT rewrites no stored row.
+    // literal arm's restatement is: the DEFAULT rewrites no stored row — so
+    // `autoMigrate: 'safe'`, the publish and the artifact-pinned boot apply it
+    // unattended on local SQLite, by a table rebuild. The remedy is stated in
+    // the message itself rather than `SAFE_COLUMN_REMEDY`, which would promise
+    // `os migrate apply` on the Turso remote face, where it is skipped.
     if (
       dialect === 'sqlite'
       && isNowDefaultToken(field.defaultValue)
@@ -1619,7 +1623,9 @@ export function diffManagedTable(args: {
           `${table}.${fieldName}: the field declares the NOW() default, but the column carries no DEFAULT — every ` +
           `insert that omits the field stores NULL here, where a new database stores the current instant. A column ` +
           `added to a table that already held rows is added without it, because SQLite refuses a non-constant ` +
-          `DEFAULT there. Restating the default rebuilds the table and rewrites no stored value. ${SAFE_COLUMN_REMEDY}`,
+          `DEFAULT there. On a local SQLite database the table rebuild that restates it rewrites no stored value: ` +
+          `publishing the object applies it, or run "os migrate apply" for an object a package provides. A Turso ` +
+          `remote database cannot apply it yet — that face does not run the table rebuild it needs.`,
       });
     }
 

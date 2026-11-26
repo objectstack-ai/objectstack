@@ -48,14 +48,15 @@ import { declaresSqliteNowColumnDefault, sqliteNowBackfillSql } from './sql-driv
 import type { Knex } from 'knex';
 
 /**
- * [#37258] Whether an `ALTER TABLE … ADD COLUMN` about to run adds a
- * `storage.notNull` column to a table that already holds a row — the case in
- * which `createColumn` adds that column nullable. [#37413] On SQLite, also a
- * column whose DEFAULT is the `NOW()` expression, which `createColumn` adds
- * with no DEFAULT on a populated table ({@link backfillWithheldNowDefaults}
- * fills its rows). `false` without a read when no column to be added asks it.
+ * [#37258] Whether an `ALTER TABLE … ADD COLUMN` about to run adds a column
+ * whose statement depends on the table holding a row, to a table that does:
+ * a `storage.notNull` column, which `createColumn` then adds nullable, or
+ * [#37413] on SQLite a column whose DEFAULT is the `NOW()` expression, which
+ * `createColumn` then adds with no DEFAULT ({@link addColumnsThenBackfill}
+ * fills its rows). The remote face's twin is `addsRowSensitiveColumn`. `false`
+ * without a read when no column to be added asks it.
  */
-async function addsNotNullToPopulatedTable(
+async function addsRowSensitiveColumnToPopulatedTable(
   knex: Knex,
   table: string,
   fields: Record<string, unknown> | undefined,
@@ -72,21 +73,34 @@ async function addsNotNullToPopulatedTable(
 }
 
 /**
- * [#37413] After an `ADD COLUMN` to a populated SQLite table, fill the existing
- * rows of every column `createColumn` added without its `NOW()` DEFAULT, in one
- * statement ({@link sqliteNowBackfillSql}): each row takes the sync instant, the
- * value the DEFAULT would have given. The DEFAULT itself (and a declared NOT
- * NULL) is then owed drift, which the differ reports and the ceremony applies.
+ * [#37413] Run the `ALTER TABLE … ADD COLUMN`s `addColumns` builds and, on a
+ * populated SQLite table, the one statement that fills the existing rows of
+ * every column `createColumn` added without its `NOW()` DEFAULT
+ * ({@link sqliteNowBackfillSql}) — in ONE transaction, so a column is never
+ * left added with its rows unfilled (the next sync finds it present and would
+ * send no backfill). With nothing to fill, the `ALTER` runs exactly as before.
+ * The DEFAULT itself (and a declared NOT NULL) is then owed drift, which the
+ * differ reports and the ceremony applies.
  */
-async function backfillWithheldNowDefaults(
+async function addColumnsThenBackfill(
   knex: Knex,
   table: string,
+  addColumns: (t: Knex.AlterTableBuilder) => void,
   fields: Record<string, unknown> | undefined,
   existingColumns: readonly string[],
+  fillRows: boolean,
 ): Promise<void> {
-  const added = Object.entries(fields ?? {}).filter(([name]) => !existingColumns.includes(name));
-  const sql = sqliteNowBackfillSql(table, added);
-  if (sql !== null) await knex.raw(sql);
+  const backfill = fillRows
+    ? sqliteNowBackfillSql(table, Object.entries(fields ?? {}).filter(([name]) => !existingColumns.includes(name)))
+    : null;
+  if (backfill === null) {
+    await knex.schema.alterTable(table, addColumns);
+    return;
+  }
+  await knex.transaction(async (trx) => {
+    await trx.schema.alterTable(table, addColumns);
+    await trx.raw(backfill);
+  });
 }
 
 /**
@@ -225,15 +239,15 @@ export class RotationFacet {
       const columnInfo = await this.knex(shardName).columnInfo();
       const existingColumns = Object.keys(columnInfo);
       // [#37258] Same question as the managed path below.
-      const populated = await addsNotNullToPopulatedTable(this.knex, shardName, obj.fields, existingColumns, this.dialectName === 'sqlite');
-      await this.knex.schema.alterTable(shardName, (table) => {
+      const sqlite = this.dialectName === 'sqlite';
+      const populated = await addsRowSensitiveColumnToPopulatedTable(this.knex, shardName, obj.fields, existingColumns, sqlite);
+      await addColumnsThenBackfill(this.knex, shardName, (table) => {
         for (const [name, field] of Object.entries(obj.fields ?? {})) {
           if (!existingColumns.includes(name)) {
             this.createColumn(table, name, field, keyedColumns.get(name), false, populated);
           }
         }
-      });
-      if (populated && this.dialectName === 'sqlite') await backfillWithheldNowDefaults(this.knex, shardName, obj.fields, existingColumns);
+      }, obj.fields, existingColumns, populated && sqlite);
     }
 
     // Declared indexes per shard. Auto-derived names already embed the shard
@@ -644,9 +658,10 @@ export class RotationFacet {
         // left to the `tighten_not_null` ceremony — see `createColumn`. Asked
         // only when an added column declares the constraint, so no other sync
         // pays the read.
-        const populated = await addsNotNullToPopulatedTable(this.knex, tableName, obj.fields, existingColumns, this.dialectName === 'sqlite');
+        const sqlite = this.dialectName === 'sqlite';
+        const populated = await addsRowSensitiveColumnToPopulatedTable(this.knex, tableName, obj.fields, existingColumns, sqlite);
         try {
-          await this.knex.schema.alterTable(tableName, (table) => {
+          await addColumnsThenBackfill(this.knex, tableName, (table) => {
             if (obj.fields) {
               for (const [name, field] of Object.entries(obj.fields)) {
                 if (!existingColumns.includes(name)) {
@@ -654,11 +669,10 @@ export class RotationFacet {
                 }
               }
             }
-          });
+          }, obj.fields, existingColumns, populated && sqlite);
         } catch (e: any) {
           await this.rethrowWithRowSizeExplanation(tableName, obj.fields, keyedColumns, addedColumns, e);
         }
-        if (populated && this.dialectName === 'sqlite') await backfillWithheldNowDefaults(this.knex, tableName, obj.fields, existingColumns);
       }
 
       // Materialize the table's index set: field-level `unique` (tenancy-aware

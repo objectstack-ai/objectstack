@@ -26,7 +26,7 @@ export { FLAT_GROUP_MAX_MEMBERS, joinBalancedGroup } from './sql-driver-balanced
 // [#37345] Which declared fields get a column DEFAULT, and that DEFAULT's SQLite
 // text. Exported because the Turso remote face writes its DDL as text, and must
 // give a column the DEFAULT the knex path gives it from the same rule.
-export { declaresSqliteNowColumnDefault, emitsDeclaredColumnDefault, sqliteDeclaredColumnDefaultSql, sqliteNowBackfillSql, sqliteNowColumnDefaultSql } from './sql-driver-schema-sync.js';
+export { declaresSqliteNowColumnDefault, emitsDeclaredColumnDefault, quoteSqliteIdentifier, sqliteDeclaredColumnDefaultSql, sqliteNowBackfillSql, sqliteNowColumnDefaultSql } from './sql-driver-schema-sync.js';
 // [ADR-0155 D2, D4] Where a fixed-read leaf compiles and the predicates of its
 // fixed inner read. Exported because the Turso remote face compiles the leaf
 // with its own compiler, from the same walk and the same predicates.
