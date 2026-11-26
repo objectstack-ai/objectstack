@@ -169,7 +169,7 @@ import {
   type OutboundAgentTextKey,
 } from './outboundAgentText.js';
 import { resolveApiBase } from './resolveApiBase.js';
-import { RECORD_SECTION_PARAM } from '../../urlParams.js';
+import { RECORD_SECTION_OPENED_STATE, RECORD_SECTION_PARAM } from '../../urlParams.js';
 import { AiUnavailable } from './AiUnavailable.js';
 import { recordWriteFormTarget } from '../../utils/recordFormAiDraft.js';
 import { useUpload } from '@object-ui/fields';
@@ -231,6 +231,14 @@ export function recordOpenTarget(
   const path = `/apps/${encodeURIComponent(app)}/${encodeURIComponent(target.objectName)}/record/${encodeURIComponent(target.recordId)}`;
   if (!target.anchor) return path;
   return `${path}?${new URLSearchParams({ [RECORD_SECTION_PARAM]: target.anchor }).toString()}`;
+}
+
+let sectionOpenings = 0;
+
+/** A history-state value no earlier chip click of this page load carried. */
+function nextSectionOpening(): string {
+  sectionOpenings += 1;
+  return `${Date.now().toString(36)}.${sectionOpenings}`;
 }
 
 function partString(part: HydratedUIMessagePart, key: string): string | undefined {
@@ -1938,11 +1946,16 @@ export function ChatPane({
   // ADR-0160 D9 — a record citation's chip passes the `anchor` of the body
   // section it cites; it rides as `?section=` (`RECORD_SECTION_PARAM`), and
   // the record page opens at that heading. The record opened is always the
-  // citation's own `object`/`id`, the pack's root record.
+  // citation's own `object`/`id`, the pack's root record. Each click carries a
+  // fresh `RECORD_SECTION_OPENED_STATE`, so clicking the same chip again opens
+  // the section again.
   const openRecord = useCallback(
     async (handoff: { objectName: string; recordId: string; anchor?: string }) => {
       const app = await appOfObject(handoff.objectName);
-      navigate(recordOpenTarget(app, handoff));
+      navigate(
+        recordOpenTarget(app, handoff),
+        handoff.anchor ? { state: { [RECORD_SECTION_OPENED_STATE]: nextSectionOpening() } } : undefined,
+      );
     },
     [navigate],
   );

@@ -20,13 +20,19 @@
  * The heading element is then found in that field's drawn face: among the
  * field's heading elements, the ones whose letters and digits read the same as
  * the outline's heading, counted in document order. Counting by reading rather
- * than by bare position keeps a heading the outline does not list (a setext
- * heading, an empty one, one inside a quote) from shifting every later one onto
- * the wrong section.
+ * than by bare position keeps a heading of another title that the outline does
+ * not list (a setext heading, an empty one, one inside a quote) from shifting
+ * every later one onto the wrong section. The count is trusted only when the
+ * face draws exactly as many headings of that reading as the outline lists: a
+ * same-titled heading the outline does not list, or a listed one the face does
+ * not draw, would move the index onto another heading, so then the field is
+ * opened instead.
  *
  * - A `textarea` body draws no heading elements, so the field is scrolled to.
- * - A heading that is not drawn (the face has not rendered it, or reads it
- *   differently) also scrolls to the field, with no error.
+ * - A heading that is not drawn (the face has not rendered it, reads it
+ *   differently, or draws a different number of same-titled headings than the
+ *   outline lists) also scrolls to the field, with no error. So does a heading
+ *   with no letter or digit, which no reading tells apart.
  * - An anchor no field resolves (a stale one: the heading was renamed or
  *   removed) opens the record at its top, as if no section were named.
  *
@@ -75,6 +81,8 @@ export interface SectionCandidate {
   reading: string;
   /** How many of the field's earlier headings read the same. */
   ordinal: number;
+  /** How many of the field's headings, in all, read the same: what the drawn face must match. */
+  count: number;
 }
 
 /** What a drawn section resolved to: the field's row, and the heading when it is drawn. */
@@ -108,19 +116,23 @@ export function sectionCandidates(
     const at = headings.findIndex((h) => h.anchor === anchor);
     if (at < 0) continue;
     const reading = headingReading(headings[at].heading);
-    const ordinal = headings.slice(0, at).filter((h) => headingReading(h.heading) === reading).length;
-    out.push({ field, face, reading, ordinal });
+    const readings = headings.map((h) => headingReading(h.heading));
+    const ordinal = readings.slice(0, at).filter((r) => r === reading).length;
+    const count = readings.filter((r) => r === reading).length;
+    out.push({ field, face, reading, ordinal, count });
   }
   return out;
 }
 
 function escapeAttr(value: string): string {
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') return CSS.escape(value);
   return value.replace(/["\\]/g, '\\$&');
 }
 
 /**
  * The drawn place of the first candidate whose field is on the page: the
- * field's row, with the heading when the face draws it. `undefined` when no
+ * field's row, with the heading when the face draws it, and draws as many
+ * headings of its reading as the outline lists. `undefined` when no
  * candidate's field is drawn.
  */
 export function locateSection(root: ParentNode, candidates: readonly SectionCandidate[]): SectionTarget | undefined {
@@ -128,19 +140,28 @@ export function locateSection(root: ParentNode, candidates: readonly SectionCand
     const field = root.querySelector<HTMLElement>(`[${DETAIL_FIELD_ATTR}="${escapeAttr(candidate.field)}"]`);
     if (!field) continue;
     const { face } = candidate;
-    if (face === 'text') return { field, face };
-    const heading = Array.from(field.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6')).filter(
+    if (face === 'text' || candidate.reading === '') return { field, face };
+    const drawn = Array.from(field.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6')).filter(
       (el) => headingReading(el.textContent ?? '') === candidate.reading,
-    )[candidate.ordinal];
+    );
+    const heading = drawn.length === candidate.count ? drawn[candidate.ordinal] : undefined;
     return heading ? { field, face, heading } : { field, face };
   }
   return undefined;
 }
 
-/** Marks `heading` as the cited section. */
-export function markSection(heading: HTMLElement): void {
+/**
+ * Marks `heading` as the cited section. Answers the unmark, which takes off
+ * the attribute and only the classes the mark added.
+ */
+export function markSection(heading: HTMLElement): () => void {
+  const added = RECORD_SECTION_MARK_CLASSES.filter((c) => !heading.classList.contains(c));
   heading.setAttribute(RECORD_SECTION_TARGET_ATTR, 'true');
-  heading.classList.add(...RECORD_SECTION_MARK_CLASSES);
+  heading.classList.add(...added);
+  return () => {
+    heading.removeAttribute(RECORD_SECTION_TARGET_ATTR);
+    heading.classList.remove(...added);
+  };
 }
 
 function scrollTo(el: HTMLElement): void {
@@ -152,7 +173,8 @@ function scrollTo(el: HTMLElement): void {
  * to and marked, or the field scrolled to (a `textarea` body at once, any
  * other once {@link RECORD_SECTION_SETTLE_MS} pass without the heading). With
  * no candidate, or no candidate field drawn by then, nothing moves. Answers
- * the cleanup.
+ * the cleanup, which also takes the mark off: a page opened at another
+ * section, or at the same one again, marks only the section it opens.
  */
 export function focusRecordSection(
   root: HTMLElement,
@@ -162,18 +184,23 @@ export function focusRecordSection(
   if (candidates.length === 0) return () => {};
   let done = false;
   let observer: MutationObserver | undefined;
-  const pending: { timer?: ReturnType<typeof setTimeout> } = {};
+  const pending: { timer?: ReturnType<typeof setTimeout>; unmark?: () => void } = {};
   const finish = (): void => {
     done = true;
     observer?.disconnect();
     if (pending.timer !== undefined) clearTimeout(pending.timer);
+  };
+  const cleanup = (): void => {
+    finish();
+    pending.unmark?.();
+    pending.unmark = undefined;
   };
   const attempt = (): void => {
     if (done) return;
     const target = locateSection(root, candidates);
     if (target?.heading) {
       finish();
-      markSection(target.heading);
+      pending.unmark = markSection(target.heading);
       scrollTo(target.heading);
     } else if (target?.face === 'text') {
       finish();
@@ -181,7 +208,7 @@ export function focusRecordSection(
     }
   };
   attempt();
-  if (done) return finish;
+  if (done) return cleanup;
   if (typeof MutationObserver === 'function') {
     observer = new MutationObserver(attempt);
     observer.observe(root, { childList: true, subtree: true, characterData: true });
@@ -191,11 +218,11 @@ export function focusRecordSection(
     const target = locateSection(root, candidates);
     finish();
     if (target?.heading) {
-      markSection(target.heading);
+      pending.unmark = markSection(target.heading);
       scrollTo(target.heading);
     } else if (target) {
       scrollTo(target.field);
     }
   }, settleMs);
-  return finish;
+  return cleanup;
 }

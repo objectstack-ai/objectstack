@@ -9,14 +9,21 @@
  *   issued it) is scrolled to and marked, a repeated heading by its `-2`;
  * - a `textarea` body is scrolled to as a field, and nothing is marked;
  * - a stale anchor opens the record at its top: nothing scrolls, nothing is
- *   marked. CONTROL: the same record with a live anchor scrolls and marks.
+ *   marked. CONTROL: the same record with a live anchor scrolls and marks;
+ * - a setext `Scope` drawn above the cited `# Scope` (a same-titled heading the
+ *   outline does not list) opens the field and marks nothing. CONTROL: the
+ *   setext heading titled otherwise; the cited heading is marked;
+ * - a second chip on the open record moves the mark (only the new section is
+ *   marked), and the same chip clicked again (a fresh opened-state value)
+ *   scrolls again. CONTROL: a navigation that keeps the state (a tab switch)
+ *   does not scroll.
  */
 
 import * as React from 'react';
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, within, act, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useNavigate, type NavigateFunction } from 'react-router-dom';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -54,12 +61,15 @@ import { MetadataCtx } from '@object-ui/react';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { RecordDetailView } from './RecordDetailView';
 import { RECORD_SECTION_TARGET_ATTR } from './recordSectionAnchor';
+import { RECORD_SECTION_OPENED_STATE } from '../urlParams';
 
 const OBJECT_NAME = 'policy';
 const RECORD_ID = 'pol_7';
 
 const BODY = ['# Intro', '', 'Hello.', '', '## Scope', '', 'Everyone.', '', '## Scope', '', 'Contractors too.'].join('\n');
 const NOTES = ['# Steps', '', 'Sign the sheet.'].join('\n');
+const SETEXT_BODY = ['Scope', '=====', '', 'Lead.', '', '# Scope', '', 'Everyone.'].join('\n');
+const SETEXT_CONTROL = ['Preface', '=======', '', 'Lead.', '', '# Scope', '', 'Everyone.'].join('\n');
 
 const FIELDS = {
   id: { type: 'text', label: 'Id' },
@@ -69,10 +79,10 @@ const FIELDS = {
 };
 const OBJECTS = [{ name: OBJECT_NAME, label: 'Policy', fields: FIELDS, enable: { feeds: false } }];
 
-function makeDataSource() {
+function makeDataSource(content = BODY) {
   return {
     find: vi.fn(async () => ({ data: [] })),
-    findOne: vi.fn(async (_o: string, id: string) => ({ id, title: `Policy ${id}`, content: BODY, notes: NOTES })),
+    findOne: vi.fn(async (_o: string, id: string) => ({ id, title: `Policy ${id}`, content, notes: NOTES })),
     create: vi.fn(async (_o: string, data: any) => ({ id: 'x', ...data })),
     update: vi.fn(async (_o: string, id: string, patch: any) => ({ id, ...patch })),
     delete: vi.fn(async () => true),
@@ -107,14 +117,25 @@ const PERMS = {
   fields: {},
 } as MePermissionsAuthenticatedResponse;
 
-async function mount(search: string) {
+let navigateTo: NavigateFunction | undefined;
+const keepNavigate = (navigate: NavigateFunction) => {
+  navigateTo = navigate;
+};
+function NavigateProbe({ onNavigate }: { onNavigate: (navigate: NavigateFunction) => void }) {
+  const navigate = useNavigate();
+  React.useEffect(() => onNavigate(navigate), [navigate, onNavigate]);
+  return null;
+}
+
+async function mount(search: string, content = BODY) {
   const rendered = render(
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>
       <MePermissionsProvider initialPermissions={PERMS}>
         <MemoryRouter initialEntries={[`/apps/compliance/${OBJECT_NAME}/record/${RECORD_ID}${search}`]}>
+          <NavigateProbe onNavigate={keepNavigate} />
           <MetadataCtx.Provider value={metadata()}>
             <RecordDetailView
-              dataSource={makeDataSource()}
+              dataSource={makeDataSource(content)}
               objects={OBJECTS}
               onEdit={() => {}}
               objectNameOverride={OBJECT_NAME}
@@ -192,5 +213,51 @@ describe('a record opened at a cited section (objectstack#37365)', () => {
     await waitFor(() => expect(marked(live.container)).toHaveLength(1), { timeout: 4000 });
     expect(marked(live.container)[0].textContent).toBe('Intro');
     expect(scrolled).toHaveLength(1);
+  });
+
+  it('a same-titled heading the outline does not list opens the field, never that heading; CONTROL: titled otherwise, the cited heading is marked', async () => {
+    const dup = await mount('?section=scope', SETEXT_BODY);
+    const field = () => dup.container.querySelector<HTMLElement>('[data-detail-field="content"]');
+    await waitFor(() => expect(field()?.querySelectorAll('h1')).toHaveLength(2), { timeout: 4000 });
+    // Both drawn headings read `Scope`; the outline lists one. Nothing is
+    // marked, and once the settle (RECORD_SECTION_SETTLE_MS) passes the field
+    // is scrolled to.
+    expect(marked(dup.container)).toHaveLength(0);
+    await waitFor(() => expect(scrolled).toEqual([field()]), { timeout: 7000 });
+    expect(marked(dup.container)).toHaveLength(0);
+    cleanup();
+    scrolled = [];
+    const control = await mount('?section=scope', SETEXT_CONTROL);
+    await waitFor(() => expect(marked(control.container)).toHaveLength(1), { timeout: 4000 });
+    expect(marked(control.container)[0].textContent).toBe('Scope');
+    expect(marked(control.container)[0].tagName).toBe('H1');
+    expect(scrolled).toEqual([marked(control.container)[0]]);
+  }, 20000);
+
+  it('a second chip moves the mark, and the same chip clicked again scrolls again; CONTROL: a navigation keeping the state does not', async () => {
+    const { container } = await mount('?section=scope');
+    await waitFor(() => expect(marked(container)).toHaveLength(1), { timeout: 4000 });
+    const [first, second] = headingsNamed(container, 'Scope');
+    const path = `/apps/compliance/${OBJECT_NAME}/record/${RECORD_ID}`;
+    // A second chip on the open record: only its section is marked.
+    await act(async () => {
+      navigateTo!(`${path}?section=scope-2`, { state: { [RECORD_SECTION_OPENED_STATE]: 'click-2' } });
+    });
+    await waitFor(() => expect(marked(container)).toEqual([second]), { timeout: 4000 });
+    expect(first.hasAttribute(RECORD_SECTION_TARGET_ATTR)).toBe(false);
+    expect(scrolled).toEqual([first, second]);
+    // The same chip again: same URL, a fresh state value.
+    await act(async () => {
+      navigateTo!(`${path}?section=scope-2`, { state: { [RECORD_SECTION_OPENED_STATE]: 'click-3' } });
+    });
+    await waitFor(() => expect(scrolled).toEqual([first, second, second]), { timeout: 4000 });
+    expect(marked(container)).toEqual([second]);
+    // CONTROL: a replace that keeps the state (how a tab switch writes the URL).
+    await act(async () => {
+      navigateTo!(`${path}?section=scope-2`, { replace: true, state: { [RECORD_SECTION_OPENED_STATE]: 'click-3' } });
+    });
+    await act(async () => {});
+    expect(scrolled).toEqual([first, second, second]);
+    expect(marked(container)).toEqual([second]);
   });
 });

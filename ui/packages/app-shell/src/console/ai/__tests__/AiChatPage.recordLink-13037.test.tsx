@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import React from 'react';
+import { RECORD_SECTION_OPENED_STATE } from '../../../urlParams';
 
 const ANSWER = 'Top customer: [Wayne Enterprises](/record/account/acc_42).';
 
@@ -205,6 +206,27 @@ describe('objectstack#37365 — a record citation opens the record at the cited 
       expect(window.location.search).toBe('?section=scope');
     });
   }
+
+  it('each click of a chip carries a fresh opened-state value, so the same chip opens the section again', async () => {
+    answerNow.recordCitations = CITATIONS;
+    renderPane('/');
+    const opened = () => (window.history.state?.usr as Record<string, unknown> | undefined)?.[RECORD_SECTION_OPENED_STATE];
+    const click = async () => {
+      await act(async () => {
+        fireEvent.click(await screen.findByRole('button', { name: 'Applies to every contractor.' }));
+      });
+      await waitFor(() => expect(typeof opened()).toBe('string'));
+      return opened();
+    };
+    const first = await click();
+    expect(window.location.search).toBe('?section=scope');
+    await act(async () => {
+      window.history.replaceState(null, '', window.location.href);
+    });
+    const second = await click();
+    expect(window.location.search).toBe('?section=scope');
+    expect(second).not.toBe(first);
+  });
 
   it('a quote from a related row opens the root record, with no section', async () => {
     answerNow.recordCitations = CITATIONS;

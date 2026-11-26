@@ -180,6 +180,14 @@ export const RECORD_COMMENT_PARAM = 'comment';
 export const RECORD_SECTION_PARAM = 'section';
 
 /**
+ * History-state value beside {@link RECORD_SECTION_PARAM}: a distinct value per
+ * chip click, so a second click of the same citation (the same URL) opens the
+ * section again. Not a URL parameter; an entry reached by a reload or a shared
+ * link carries none and opens the section once.
+ */
+export const RECORD_SECTION_OPENED_STATE = '__sectionOpened';
+
+/**
  * History-state flag beside {@link RECORD_COMMENTS_PARAM}: the record view
  * pushed this `?comments=` entry, so 「‹」 pops it. Not a URL parameter; an
  * entry reached by a reload or a shared link carries none, and 「‹」 replaces.

@@ -7,8 +7,10 @@
  * element among the field's drawn headings by reading, counting repeats.
  *
  * The DOM here is written by hand, so the matching is pinned apart from any
- * renderer: a heading the outline does not list (a setext heading) must not
- * shift a later one onto the wrong section.
+ * renderer: a heading of another title the outline does not list (a setext
+ * heading) must not shift a later one onto the wrong section, and when the face
+ * draws a different number of same-titled headings than the outline lists, the
+ * field is opened rather than a heading that may be another one.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { headingsOf } from '@objectstack/spec/ai';
@@ -58,24 +60,24 @@ describe('objectstack#37365 — sectionCandidates derives the anchor as the serv
     const server = headingsOf(MARKDOWN, false).map((h) => h.anchor);
     expect(server).toEqual(['intro', 'scope', 'scope-2']);
     expect(sectionCandidates(FIELDS, RECORD, 'scope')).toEqual([
-      { field: 'content', face: 'markdown', reading: 'scope', ordinal: 0 },
+      { field: 'content', face: 'markdown', reading: 'scope', ordinal: 0, count: 2 },
     ]);
     expect(sectionCandidates(FIELDS, RECORD, 'scope-2')).toEqual([
-      { field: 'content', face: 'markdown', reading: 'scope', ordinal: 1 },
+      { field: 'content', face: 'markdown', reading: 'scope', ordinal: 1, count: 2 },
     ]);
   });
 
   it('reads an html body as html', () => {
     expect(headingsOf(HTML, true).map((h) => h.anchor)).toContain('data-privacy');
     expect(sectionCandidates(FIELDS, RECORD, 'data-privacy')).toEqual([
-      { field: 'legal', face: 'html', reading: 'dataprivacy', ordinal: 0 },
+      { field: 'legal', face: 'html', reading: 'dataprivacy', ordinal: 0, count: 1 },
     ]);
   });
 
   it('a `textarea` body is a candidate drawn as text', () => {
     const record = { ...RECORD, summary: '# Steps\n\nDo it.' };
     expect(sectionCandidates(FIELDS, record, 'steps')).toEqual([
-      { field: 'summary', face: 'text', reading: 'steps', ordinal: 0 },
+      { field: 'summary', face: 'text', reading: 'steps', ordinal: 0, count: 1 },
     ]);
   });
 
@@ -100,6 +102,50 @@ describe('objectstack#37365 — locateSection finds the drawn heading', () => {
     expect(target?.heading?.id).toBe('second');
   });
 
+  it('a same-titled heading the outline does not list opens the field, never that heading; CONTROL: titled otherwise, the cited heading is marked', () => {
+    // A setext `Scope` above `# Scope`: the outline lists only the ATX one
+    // (`scope`), the face draws both. Index 0 of the drawn `Scope`s would be
+    // the setext heading.
+    const body = ['Scope', '=====', '', 'x', '', '# Scope', '', 'y'].join('\n');
+    expect(headingsOf(body, false).map((h) => h.anchor)).toEqual(['scope']);
+    const candidates = sectionCandidates(FIELDS, { content: body }, 'scope');
+    expect(candidates).toEqual([{ field: 'content', face: 'markdown', reading: 'scope', ordinal: 0, count: 1 }]);
+    document.body.innerHTML = row('content', '<h1 id="setext">Scope</h1><p>x</p><h1 id="atx">Scope</h1><p>y</p>');
+    const target = locateSection(document.body, candidates);
+    expect(target?.field.getAttribute('data-detail-field')).toBe('content');
+    expect(target?.heading).toBeUndefined();
+    // CONTROL: the setext heading titled otherwise; the ATX `Scope` is found.
+    const control = ['Preface', '=======', '', 'x', '', '# Scope', '', 'y'].join('\n');
+    document.body.innerHTML = row('content', '<h1>Preface</h1><p>x</p><h1 id="atx">Scope</h1><p>y</p>');
+    expect(locateSection(document.body, sectionCandidates(FIELDS, { content: control }, 'scope'))?.heading?.id).toBe('atx');
+  });
+
+  it('a listed heading the face does not draw opens the field, for either anchor; CONTROL: without it, the heading is marked', () => {
+    // `# Scope` inside a raw HTML block: the outline lists it (`scope`) and the
+    // real heading after it (`scope-2`); the face draws only the real one.
+    const body = ['<div>', '# Scope', '</div>', '', '# Scope', '', 'y'].join('\n');
+    expect(headingsOf(body, false).map((h) => h.anchor)).toEqual(['scope', 'scope-2']);
+    document.body.innerHTML = row('content', '<div># Scope</div><h1 id="real">Scope</h1><p>y</p>');
+    for (const anchor of ['scope', 'scope-2']) {
+      const target = locateSection(document.body, sectionCandidates(FIELDS, { content: body }, anchor));
+      expect(target?.field.getAttribute('data-detail-field')).toBe('content');
+      expect(target?.heading).toBeUndefined();
+    }
+    // CONTROL: the body without the HTML block; `scope` is the drawn heading.
+    const control = ['# Scope', '', 'y'].join('\n');
+    expect(locateSection(document.body, sectionCandidates(FIELDS, { content: control }, 'scope'))?.heading?.id).toBe('real');
+  });
+
+  it('a heading with no letter or digit opens the field; CONTROL: a titled heading beside it is marked', () => {
+    const body = ['# ???', '', 'x', '', '# Intro', '', 'y'].join('\n');
+    const [blank, intro] = headingsOf(body, false);
+    document.body.innerHTML = row('content', '<h1>???</h1><h1></h1><p>x</p><h1 id="intro">Intro</h1>');
+    const target = locateSection(document.body, sectionCandidates(FIELDS, { content: body }, blank.anchor));
+    expect(target?.field.getAttribute('data-detail-field')).toBe('content');
+    expect(target?.heading).toBeUndefined();
+    expect(locateSection(document.body, sectionCandidates(FIELDS, { content: body }, intro.anchor))?.heading?.id).toBe('intro');
+  });
+
   it('matches an html heading by its drawn text', () => {
     document.body.innerHTML = row('legal', '<h1>Intro</h1><h2 id="dp">Data &amp; <em>privacy</em></h2>');
     expect(locateSection(document.body, sectionCandidates(FIELDS, RECORD, 'data-privacy'))?.heading?.id).toBe('dp');
@@ -118,7 +164,7 @@ describe('objectstack#37365 — locateSection finds the drawn heading', () => {
 
 describe('objectstack#37365 — focusRecordSection', () => {
   it('scrolls to the heading and marks it', () => {
-    document.body.innerHTML = row('content', '<h1>Intro</h1><h2 id="s">Scope</h2>');
+    document.body.innerHTML = row('content', '<h1>Intro</h1><h2 id="s">Scope</h2><h2>Scope</h2>');
     const scroll = vi.fn();
     const heading = document.getElementById('s')!;
     heading.scrollIntoView = scroll;
@@ -136,7 +182,9 @@ describe('objectstack#37365 — focusRecordSection', () => {
     heading.textContent = 'Scope';
     const scroll = vi.fn();
     heading.scrollIntoView = scroll;
-    field.appendChild(heading);
+    const second = document.createElement('h2');
+    second.textContent = 'Scope';
+    field.append(heading, second);
     await new Promise((r) => setTimeout(r, 0));
     expect(scroll).toHaveBeenCalledTimes(1);
     expect(heading.getAttribute(RECORD_SECTION_TARGET_ATTR)).toBe('true');
@@ -167,7 +215,7 @@ describe('objectstack#37365 — focusRecordSection', () => {
 
   it('a stale anchor moves nothing; CONTROL: the live anchor on the same page does', () => {
     vi.useFakeTimers();
-    document.body.innerHTML = row('content', '<h1>Intro</h1><h2 id="s">Scope</h2>');
+    document.body.innerHTML = row('content', '<h1>Intro</h1><h2 id="s">Scope</h2><h2>Scope</h2>');
     const heading = document.getElementById('s')!;
     const field = document.querySelector<HTMLElement>('[data-detail-field="content"]')!;
     const scroll = vi.fn();
@@ -180,5 +228,34 @@ describe('objectstack#37365 — focusRecordSection', () => {
     focusRecordSection(document.body, sectionCandidates(FIELDS, RECORD, 'scope'), 50);
     expect(scroll).toHaveBeenCalledTimes(1);
     expect(heading.getAttribute(RECORD_SECTION_TARGET_ATTR)).toBe('true');
+  });
+
+  it('the cleanup takes the mark off, so a second section leaves only itself marked', () => {
+    document.body.innerHTML = row('content', '<h1>Intro</h1><h2 id="a" class="rounded-md">Scope</h2><h2 id="b">Scope</h2>');
+    const [a, b] = [document.getElementById('a')!, document.getElementById('b')!];
+    a.scrollIntoView = vi.fn();
+    b.scrollIntoView = vi.fn();
+    const first = focusRecordSection(document.body, sectionCandidates(FIELDS, RECORD, 'scope'));
+    expect(a.getAttribute(RECORD_SECTION_TARGET_ATTR)).toBe('true');
+    expect(a.classList.contains('ring-4')).toBe(true);
+    first();
+    focusRecordSection(document.body, sectionCandidates(FIELDS, RECORD, 'scope-2'));
+    expect(Array.from(document.querySelectorAll(`[${RECORD_SECTION_TARGET_ATTR}]`))).toEqual([b]);
+    expect(a.classList.contains('ring-4')).toBe(false);
+    // A class the heading carried before the mark is left on it.
+    expect(a.classList.contains('rounded-md')).toBe(true);
+  });
+
+  it('the same section opened again scrolls and marks again', () => {
+    document.body.innerHTML = row('content', '<h1>Intro</h1><h2 id="a">Scope</h2><h2>Scope</h2>');
+    const a = document.getElementById('a')!;
+    const scroll = vi.fn();
+    a.scrollIntoView = scroll;
+    const candidates = sectionCandidates(FIELDS, RECORD, 'scope');
+    focusRecordSection(document.body, candidates)();
+    expect(a.hasAttribute(RECORD_SECTION_TARGET_ATTR)).toBe(false);
+    focusRecordSection(document.body, candidates);
+    expect(scroll).toHaveBeenCalledTimes(2);
+    expect(a.getAttribute(RECORD_SECTION_TARGET_ATTR)).toBe('true');
   });
 });
