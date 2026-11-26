@@ -28,7 +28,10 @@ import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenar
 import { buildDeniesWrite, gradeCardAnswer, truthFigures } from '../../src/score/index.js';
 import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../src/runner/app.js';
 import { reseedDoorAnswer, seedDoorAnswer, type SeedDoorRecord } from './seed-door.js';
-import { RecordedDriver, RecordingDriver, ReplayNotFaithfulError, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
+import { RecordedDriver, RecordingDriver, ReplayNotFaithfulError, stepKey, type AgentDriver, type AskTask, type AuthorResult, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
+import { ExternalDriver } from '../../src/runner/drivers/external.js';
+import { exportGallery } from '../../src/export/exporter.js';
+import { writeRecord as writeGalleryRecord } from '../export/fixture.js';
 import { loadedCardStamp, main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../../src/runner/cli.js';
 import { citationLabels, namespacedScenario } from '../../src/runner/namespace.js';
 import { askModeRefusal, buildPassed, doorHarnessGap, confirmationAmbiguous, confirmationNotRecorded, hiddenValues, readRollupSourceFinding, restoreObjects, restoreSeededRows, rollupSourceCharges, runCard, runHalf, seededRows, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
@@ -4600,6 +4603,101 @@ describe('runCard — `--modes door` builds through the MCP draft door with no p
     expect(unfaithful.modes[0]!.build!.notMeasured).toMatch(/`save_metadata_draft` on object democrm_account was applied in the recorded run and refused VALIDATION_FAILED on replay/);
     expect(unfaithful.modes[0]!.door!.publish).toBeUndefined();
   });
+});
+
+/** The external driver's stand-in command (`fixtures/fake-external-driver.mjs`), on contract `/2`. */
+const FAKE_EXTERNAL = `${process.execPath} ${fileURLToPath(new URL('./fixtures/fake-external-driver.mjs', import.meta.url))}`;
+
+/** FNV-1a (32-bit) as hex: the stand-in's fingerprint of the secret it read, never the secret. */
+const fnvPrint = (s: string) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
+  return h.toString(16).padStart(8, '0');
+};
+
+/**
+ * The scripted door model, its turns sent through the external command: the
+ * double still saves its drafts through the task's door, and the turn the run
+ * records is the one the command printed.
+ */
+class DoorThroughCommand implements AgentDriver {
+  constructor(
+    private readonly scripted: AgentDriver,
+    private readonly external: ExternalDriver,
+    private readonly script: string,
+  ) {}
+  info(): DriverInfo {
+    return this.external.info();
+  }
+  private write(task: AuthorTask | AskTask, t: ParsedTurn) {
+    const answer = { replyText: t.replyText, toolCalls: t.toolCalls.map((c) => ({ name: c.rawName ?? c.name, input: c.input, output: c.output, ...(c.isError ? { isError: true } : {}) })) };
+    const { confirmation: _confirmation, ...step } = task;
+    writeFileSync(join(this.script, `${encodeURIComponent(stepKey(step))}.json`), JSON.stringify(answer));
+  }
+  async author(task: AuthorTask): Promise<AuthorResult> {
+    this.write(task, (await this.scripted.author(task)).turn);
+    return this.external.author(task);
+  }
+  async ask(task: AskTask): Promise<ParsedTurn> {
+    this.write(task, await this.scripted.ask(task));
+    return this.external.ask(task);
+  }
+}
+
+describe('runCard — door mode through an external command on contract `/2`: the token reaches the command in a 0600 file only, and no written artifact holds it', () => {
+  it('the card is built through the door by the command, published and graded; the record, the recording, the scorecard and the gallery export never carry the token', async () => {
+    const script = mkdtempSync(join(tmpdir(), 'scenario-door-ext-script-'));
+    const log = join(mkdtempSync(join(tmpdir(), 'scenario-door-ext-log-')), 'calls.jsonl');
+    vi.stubEnv('FAKE_DRIVER_SCRIPT', script);
+    vi.stubEnv('FAKE_DRIVER_LOG', log);
+    try {
+      const { scenario, ops, apps, driver } = doorSetup();
+      const recorder = new RecordingDriver(new DoorThroughCommand(driver, new ExternalDriver({ command: FAKE_EXTERNAL }), script));
+      const run = await runCard(scenario, recorder, ops, { modes: ['door'], admin: ADMIN });
+      const app = apps[0] as DoorApp;
+      const token = app.tokens[0]!;
+
+      // Built through the door, published as a person, graded as a scratch build is.
+      expect(run.modes[0]!.door!.publish).toMatchObject({ ok: true, outcome: 'published', publishedCount: 4 });
+      expect(run.modes[0]!.findings).toEqual([]);
+      const build = cardScorecard(run).modes[0]!.first.build!;
+      expect(build.passed).toBe(build.total);
+
+      // ⛔ The command read the token from a 0600 file, and only there; it was sent the door, and nothing of a project.
+      const calls = readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { kind: string; step: { mode: string }; seen?: Record<string, unknown> });
+      const doorCalls = calls.filter((c) => c.kind === 'author');
+      expect(doorCalls).toHaveLength(1);
+      expect(doorCalls[0]!.step.mode).toBe('door');
+      expect(doorCalls[0]!.seen).toMatchObject({ fileMode: '600', runsInCwd: true, keyPrint: fnvPrint(token), keyOnArgv: false, keyInEnv: false, keyOnStdin: false, skills: [] });
+      expect(existsSync(doorCalls[0]!.seen!.configFile as string)).toBe(false);
+
+      // What the run writes: the record, the recording, the scorecard and the gallery export. None holds the token.
+      const record = runRecord({ run: '2026-11-26-scenario-crm_account_with_contacts', date: '2026-11-26', packages: PUBLISHED, driver: recorder.info(), runner: 'test', evidenceDir: '/tmp' }, run);
+      expect((record.env as { driver: DriverInfo }).driver).toMatchObject({ driver: 'external:fake-agent', version: '1.2.3' });
+      const runs = mkdtempSync(join(tmpdir(), 'scenario-door-ext-runs-'));
+      writeGalleryRecord(runs, record);
+      writeFileSync(join(runs, 'recording.json'), JSON.stringify(recorder.recording, null, 2));
+      writeFileSync(join(runs, 'scorecard.md'), renderScorecard(cardScorecard(run)));
+      const out = mkdtempSync(join(tmpdir(), 'scenario-door-ext-gallery-'));
+      await exportGallery({ runsDir: runs, outDir: out, cards: [scenario], recordings: [recorder.recording], guard: () => ({ eligible: true, reasons: [] }), screenshots: false });
+      const written: string[] = [];
+      const walk = (d: string) => {
+        for (const e of readdirSync(d, { withFileTypes: true })) {
+          const p = join(d, e.name);
+          if (e.isDirectory()) walk(p);
+          else written.push(p);
+        }
+      };
+      walk(runs);
+      walk(out);
+      expect(written.length).toBeGreaterThan(3);
+      expect(written.filter((f) => readFileSync(f, 'latin1').includes(token))).toEqual([]);
+      expect(recorder.recording.turns['crm_account_with_contacts/door/build/author/-']!.toolCalls.map((c) => c.name)).toEqual(Array(4).fill('save_metadata_draft'));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    // One stand-in start per turn (the info call, the door turn, the Run half's asks), as the external driver's own e2e cases budget.
+  }, 30_000);
 });
 
 describe('runCard — a masking-off round grades every question turn under its masking (`schemaMasking`)', () => {

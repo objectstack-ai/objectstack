@@ -9,7 +9,7 @@
  * in a 0600 file only, and no written artifact carrying it.
  */
 
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { exportGallery } from '../../src/export/exporter.js';
 import { makeDriver, parseArgs } from '../../src/runner/cli.js';
 import { RecordedDriver, stepKey, type AgentDriver, type AskTask, type AuthorResult, type AuthorTask, type DriverInfo } from '../../src/runner/driver.js';
-import { EXTERNAL_DRIVER_CONTRACT, ExternalDriver, parseExternalCommand } from '../../src/runner/drivers/external.js';
+import { EXTERNAL_DRIVER_CONTRACT, EXTERNAL_DRIVER_CONTRACT_V1, ExternalDriver, parseExternalCommand } from '../../src/runner/drivers/external.js';
 import { authorNotMeasured } from '../../src/runner/orchestrate.js';
 import { cardScorecard, renderScorecard } from '../../src/runner/scorecard.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
@@ -186,6 +186,137 @@ describe('the external driver contract — one process per call, JSON in on stdi
     const plain = makeDriver(`external:${COMMAND}`, parseArgs([]));
     const none = await plain.ask(ask('ECHO'));
     expect(['effort' in limitsOf(none), none.meta.process!.requestedEffort, plain.info().askEffort]).toEqual([false, undefined, undefined]);
+  });
+});
+
+/** A token no other text in a run could hold by chance. */
+const TOKEN = 'tok-scenario-door-7c41e0aa';
+
+/** A door mode authoring task: an empty directory of its own, the door's endpoint and token. */
+const doorAuthor = (prompt: string): AuthorTask => ({
+  card: 'c',
+  mode: 'door',
+  phase: 'build',
+  step: 'author',
+  cwd: tempDir('ext-door-client'),
+  prompt,
+  tier: 'control',
+  door: { mcp: { url: 'http://127.0.0.1:9/api/v1/mcp', token: TOKEN } },
+});
+
+/** A directory of two skills, `build-app` and `other`. */
+function doorSkills(): string {
+  const dir = tempDir('ext-door-skills');
+  for (const name of ['build-app', 'other']) {
+    mkdirSync(join(dir, name));
+    writeFileSync(join(dir, name, 'SKILL.md'), `---\nname: ${name}\ndescription: An invented skill.\nversion: 1.0.0\n---\nStep one.\n`);
+  }
+  return dir;
+}
+
+describe('door mode over the external driver — contract `objectstack-scenario-driver/2`', () => {
+  it('`info` always carries `/1`, the one input every version shares; the contract a command answers is the one every later input carries', async () => {
+    const log = join(tempDir('ext-log'), 'calls.jsonl');
+    vi.stubEnv('FAKE_DRIVER_LOG', log);
+    const current = new ExternalDriver({ command: COMMAND });
+    expect([current.contract, current.speaksDoor]).toEqual([EXTERNAL_DRIVER_CONTRACT, true]);
+    expect(EXTERNAL_DRIVER_CONTRACT).toBe('objectstack-scenario-driver/2');
+    expect(echoed((await current.author(author('ECHO'))).turn).input.contract).toBe(EXTERNAL_DRIVER_CONTRACT);
+    expect(echoed(await current.ask(ask('ECHO'))).input.contract).toBe(EXTERNAL_DRIVER_CONTRACT);
+
+    // A `/1` command answers `info` with no contract, and is still sent `/1` inputs: scratch, template and ask run as before.
+    vi.stubEnv('FAKE_DRIVER_CONTRACT', '1');
+    const first = new ExternalDriver({ command: COMMAND });
+    expect([first.contract, first.speaksDoor]).toEqual([EXTERNAL_DRIVER_CONTRACT_V1, false]);
+    const built = (await first.author(author('ECHO'))).turn;
+    expect([built.meta.resultSubtype, echoed(built).input.contract]).toEqual(['success', EXTERNAL_DRIVER_CONTRACT_V1]);
+    expect(echoed(await first.ask(ask('ECHO'))).input.contract).toBe(EXTERNAL_DRIVER_CONTRACT_V1);
+    expect('door' in echoed(built).input).toBe(false);
+  });
+
+  it('⛔ an `info` answer naming a contract this runner does not speak is refused before any card runs, naming it', () => {
+    vi.stubEnv('FAKE_DRIVER_CONTRACT', 'objectstack-scenario-driver/9');
+    expect(() => new ExternalDriver({ command: COMMAND })).toThrow(
+      /the command's `info` answer names the contract `objectstack-scenario-driver\/9`, which this runner does not speak \(it speaks `objectstack-scenario-driver\/1`, `objectstack-scenario-driver\/2`\)/,
+    );
+  });
+
+  it('a door author call: the door on stdin, its token in a 0600 file outside the call’s directory only, gone after; the skills in `door.skillsDir`; no files recorded', async () => {
+    const skills = doorSkills();
+    const d = new ExternalDriver({ command: COMMAND, doorSkillsDir: skills, doorSkillOmit: ['other'] });
+    const task = doorAuthor('ECHO build it through the door');
+    const result = await d.author(task);
+    const { input, argv, cwd, seen } = echoed(result.turn);
+    const door = input.door as { mcp: { url: string; configFile: string }; skillsDir: string };
+    expect(input).toMatchObject({
+      contract: EXTERNAL_DRIVER_CONTRACT,
+      kind: 'author',
+      step: { card: 'c', mode: 'door', phase: 'build', step: 'author' },
+      prompt: 'ECHO build it through the door',
+      cwd: task.cwd,
+      tier: 'control',
+      limits: { timeoutMs: 60 * 60_000 },
+    });
+    expect(Object.keys(door).sort()).toEqual(['mcp', 'skillsDir']);
+    expect(Object.keys(door.mcp).sort()).toEqual(['configFile', 'url']);
+    expect(door.mcp.url).toBe('http://127.0.0.1:9/api/v1/mcp');
+    expect(door.skillsDir).toBe(join(task.cwd, '.claude', 'skills'));
+    expect(cwd).toBe(task.cwd);
+    // ⛔ The token reached the command in the 0600 file only, and that file lies outside the directory the call runs in.
+    expect(seen).toMatchObject({ fileMode: '600', urlMatches: true, runsInCwd: true, keyPrint: keyPrint(TOKEN), keyOnArgv: false, keyInEnv: false, keyOnStdin: false });
+    expect(door.mcp.configFile.startsWith(task.cwd)).toBe(false);
+    expect(argv.join(' ')).not.toContain(TOKEN);
+    expect(JSON.stringify(input)).not.toContain(TOKEN);
+    expect(existsSync(door.mcp.configFile)).toBe(false);
+    expect(existsSync(dirname(door.mcp.configFile))).toBe(false);
+    // The arm's skills, less the omission, each with its SKILL.md.
+    expect([seen!.skills, seen!.skillMdOf]).toEqual([['build-app'], [true]]);
+    // There is no project: nothing of the directory is recorded, and the turn is read as any other.
+    expect(result.files).toBeUndefined();
+    expect(result.turn.meta).toMatchObject({ resultSubtype: 'success', isError: false, model: 'fake-model-1' });
+    expect(authorNotMeasured(result.turn)).toBeUndefined();
+    // The record states the arm: the skill given with its sha256 and version, the skill left out.
+    expect(d.info().door).toEqual({
+      skills: { dir: resolve(skills), skills: [{ name: 'build-app', sha256: expect.stringMatching(/^[0-9a-f]{64}$/), version: '1.0.0' }] },
+      skillsOmitted: ['other'],
+    });
+  });
+
+  it('a door author call with no skills carries no `skillsDir`, its directory stays empty, and the record states no arm', async () => {
+    const d = new ExternalDriver({ command: COMMAND });
+    const task = doorAuthor('ECHO');
+    const { input, seen } = echoed((await d.author(task)).turn);
+    expect(Object.keys(input.door as object)).toEqual(['mcp']);
+    expect(seen!.skills).toEqual([]);
+    expect(readdirSync(task.cwd)).toEqual([]);
+    expect('door' in d.info()).toBe(false);
+  });
+
+  it('⛔ a `/1` command in door mode: refused before any card runs, naming the contract, and never handed a door', async () => {
+    const log = join(tempDir('ext-log'), 'calls.jsonl');
+    vi.stubEnv('FAKE_DRIVER_LOG', log);
+    vi.stubEnv('FAKE_DRIVER_CONTRACT', '1');
+    const d = new ExternalDriver({ command: COMMAND });
+    const why = /`fake-agent` speaks `objectstack-scenario-driver\/1`, which has no door; door mode hands an external command the app's MCP draft door on `objectstack-scenario-driver\/2` only/;
+    // The run's own check, before any card runs (`main` calls it once the driver is made).
+    expect(() => d.assertDoor()).toThrow(why);
+    // And the driver's own, should a door task reach it anyway: a named failure, not a silent pass, and no process started.
+    await expect(d.author(doorAuthor('ECHO'))).rejects.toThrow(why);
+    expect(existsSync(log)).toBe(false);
+    // A `/2` command passes the same check.
+    vi.unstubAllEnvs();
+    expect(() => new ExternalDriver({ command: COMMAND }).assertDoor()).not.toThrow();
+  });
+
+  it('the command line: `--door-skills` reaches an external command, the rules arm is refused naming why, and an omission names a skill the directory holds', () => {
+    const skills = doorSkills();
+    expect(makeDriver(`external:${COMMAND}`, { doorSkills: skills }).info().door).toMatchObject({ skills: { dir: resolve(skills) } });
+    expect(() => makeDriver(`external:${COMMAND}`, { doorRules: '/r.json' })).toThrow(
+      /--door-rules applies to the live `claude` driver only: the rules reach its client as the `CLAUDE.md` a Claude Code session reads, and the external driver contract carries no rules/,
+    );
+    expect(() => makeDriver(`external:${COMMAND}`, { doorRules: '/r.json', doorRulesOmit: 'x' })).toThrow(/--door-rules, --door-rules-omit apply to the live `claude` driver only/);
+    expect(() => makeDriver(`external:${COMMAND}`, { doorSkills: skills, doorSkillOmit: ['nope'] })).toThrow(/--door-skill-omit names `nope`/);
+    expect(() => makeDriver('codex', { doorSkills: skills })).toThrow(/door mode is driven by the live `claude` driver or an external command that speaks `objectstack-scenario-driver\/2`/);
   });
 });
 
