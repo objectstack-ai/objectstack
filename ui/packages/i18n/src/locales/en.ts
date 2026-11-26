@@ -6475,6 +6475,13 @@ const en = {
     alreadySubmitted: 'Your previous submission went through. The flow has moved on to this step.',
     // ...or the run waits on no screen any more, so Submit is withdrawn.
     noLongerWaiting: 'This step may already have been processed. Close this dialog and check the record before trying again.',
+    // The engine refused this step's values (objectstack#37526): the banner,
+    // beside a message under each field it names. The engine's own sentence
+    // names API field names and is never shown.
+    invalidScreenInput: "Some values on this step weren't accepted. Check them and try again.",
+    // Under a field the engine refused for a reason other than `required` or a
+    // declared bound (a wrong value type, a value the field takes none of).
+    fieldNotAccepted: "{{field}}: this value isn't accepted",
   },
   // Console › System › Applications (objectui#4307). The page's OWN chrome —
   // headings, controls, badges and the frames of its toasts.

@@ -5777,6 +5777,8 @@ const pt = {
     completed: 'Fluxo "{{flow}}" concluído',
     alreadySubmitted: 'Seu envio anterior foi concluído. O fluxo avançou para esta etapa.',
     noLongerWaiting: 'Esta etapa pode já ter sido processada. Feche esta caixa de diálogo e verifique o registro antes de tentar novamente.',
+    invalidScreenInput: 'Alguns valores desta etapa não foram aceitos. Verifique-os e tente novamente.',
+    fieldNotAccepted: '{{field}}: este valor não é aceito',
   },
   appManagement: {
     title: "Aplicativos",

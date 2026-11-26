@@ -249,12 +249,13 @@ describe('with no agent in the catalog (objectstack#26614)', () => {
     expect(SETUP_NEW_PACKAGE_PATH).toBe('/apps/setup/component/developer/packages?face=admin&new=package');
   });
 
-  it('an author who may enter Studio but not Setup → Packages is sent to the "All metadata" area, never Setup (objectstack#36908)', async () => {
+  // objectstack#37565 — the package-less scope: the "All metadata" area across packages it went to is Setup's now.
+  it('an author who may enter Studio but not Setup → Packages is sent to the package-less scope, never Setup (objectstack#36908)', async () => {
     state.setupPair = false;
     const user = userEvent.setup();
     render(<HomePage />);
     await user.click(await screen.findByTestId('home-build-in-studio'));
-    expect(navigateMock).toHaveBeenCalledWith('/studio/~all/metadata');
+    expect(navigateMock).toHaveBeenCalledWith('/studio/~org/metadata/flow?source=runtime');
     expect(navigateMock).not.toHaveBeenCalledWith(SETUP_NEW_PACKAGE_PATH);
   });
 
@@ -268,7 +269,7 @@ describe('with no agent in the catalog (objectstack#26614)', () => {
    */
   it.each([
     ['an unreported set (no `systemPermissions`) fails open, to Setup\'s New Package', undefined, SETUP_NEW_PACKAGE_PATH],
-    ['control: a reported set without the pair goes to the "All metadata" area', ['manage_metadata'], '/studio/~all/metadata'],
+    ['control: a reported set without the pair goes to the package-less scope', ['manage_metadata'], '/studio/~org/metadata/flow?source=runtime'],
   ])('%s', async (_case, systemPermissions, to) => {
     state.setupPair = 'unreported';
     const answer: MePermissionsAuthenticatedResponse = {

@@ -3153,6 +3153,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Werkzeuge",
         helpText: "Werkzeugnamen (unterstützt Platzhalter: action_*)"
       },
+      context: {
+        label: "Kontextpaket",
+        helpText: "Kontextpaket, mit dem dieser Skill arbeitet (sein Name). Erfordert get_record_context unter Tools. Über MCP nimmt der Prompt dann eine optionale Datensatz-ID an"
+      },
       triggerConditions: {
         label: "Auslösebedingungen",
         helpText: "Programmatische Bedingungen (z. B. objectName == \"case\")"

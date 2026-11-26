@@ -74,9 +74,11 @@
  */
 
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
+import { operationUserMessage } from '@objectstack/core';
 import type { ICommentDoorsService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRequest, DomainRoute } from '../domain-handler-registry.js';
+import { requestLocaleOf } from './own-door-bridge.js';
 
 /** The prefix the domain claims (a segment claim, narrowed by the handler). */
 export const COMMENTS_DOMAIN_PREFIX = '/comments';
@@ -158,12 +160,13 @@ export async function handleCommentsRequest(
 
     const service = await deps.resolveService(context, COMMENTS_SLOT, context.environmentId) as
         Pick<ICommentDoorsService, 'handleCommentDoor'> | undefined;
+    // [#37610] The `501` is the operation-message catalog's, in the request's
+    // top `Accept-Language` tag, as the own-door bridge answers its own.
     if (!service) {
         return {
             handled: true,
             response: deps.error(
-                'The comment doors are not available: no comments service is registered. '
-                + '@objectstack/plugin-audit registers it; compose AuditPlugin on this kernel.',
+                operationUserMessage('comment_doors_service_unregistered', { locale: requestLocaleOf(context) }),
                 501,
             ),
         };
@@ -172,8 +175,7 @@ export async function handleCommentsRequest(
         return {
             handled: true,
             response: deps.error(
-                'The comment doors are not available: the registered comments service '
-                + 'does not implement handleCommentDoor.',
+                operationUserMessage('comment_doors_member_missing', { locale: requestLocaleOf(context) }),
                 501,
             ),
         };

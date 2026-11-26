@@ -5621,6 +5621,8 @@ const ja = {
     completed: 'フロー「{{flow}}」が完了しました',
     alreadySubmitted: '前回の送信は完了しています。フローはこのステップに進みました。',
     noLongerWaiting: 'このステップはすでに処理された可能性があります。ダイアログを閉じ、レコードを確認してから再試行してください。',
+    invalidScreenInput: 'このステップの一部の値が受け付けられませんでした。確認してから再試行してください。',
+    fieldNotAccepted: '{{field}}：この値は受け付けられません',
   },
   appManagement: {
     title: "アプリケーション",

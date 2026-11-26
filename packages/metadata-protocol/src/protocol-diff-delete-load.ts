@@ -67,7 +67,7 @@ import { captureStoredExpressionChange, fillStoredExpressionChange } from './pro
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import type { ProtocolHost } from './protocol-host.js';
 import { packagelessHolderRefusal, packagelessRowHeldBaseAddress } from './protocol-save.js';
-import { isPlatformOrigin } from '@objectstack/metadata';
+import { isPlatformRecordRow } from '@objectstack/metadata';
 
 /**
  * [#33308] The row slot a `sys_metadata` row is: its bound package, or `null`
@@ -1856,23 +1856,4 @@ export class ProtocolDiffDeleteLoadFacet {
 
         return { references: out };
     }
-}
-
-/**
- * [#37013] Whether a stored `sys_metadata` row is the platform's own record:
- * bound to no package by its column, and its body carries the platform's mark
- * where the metadata service reads it (`isPlatformOrigin`,
- * `@objectstack/metadata`). A body that does not parse is not.
- */
-function isPlatformRecordRow(record: { package_id?: unknown; metadata?: unknown }): boolean {
-    if (typeof record.package_id === 'string' && record.package_id !== '') return false;
-    let body: unknown = record.metadata;
-    if (typeof body === 'string') {
-        try {
-            body = JSON.parse(body);
-        } catch {
-            return false;
-        }
-    }
-    return isPlatformOrigin(body);
 }

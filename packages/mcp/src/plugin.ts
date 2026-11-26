@@ -36,7 +36,12 @@ import { MCPServerRuntime, setRuntimeObjectView, setRuntimeStdioPrincipal } from
 import { PACKAGE_VERSION, DEFAULT_SERVER_VERSION } from './package-version.js';
 import type { MCPServerRuntimeConfig, McpMergedMetadataRead } from './mcp-server-runtime.js';
 import type { ToolRegistry } from './types.js';
-import { objectSchemaReadDelegateSource, type ObjectSchemaMaskSecuritySurface } from '@objectstack/metadata-core';
+import {
+  objectSchemaReadDelegateSource,
+  packageResolutionClosure,
+  type ObjectSchemaMaskSecuritySurface,
+  type PackageClosureRegistry,
+} from '@objectstack/metadata-core';
 import {
   callerObjectView,
   createStdioDataBridge,
@@ -246,6 +251,26 @@ function installedPackageNamespace(ctx: PluginContext): (packageId: string) => s
     }
     const manifest = (registry?.getPackage?.(packageId) as { manifest?: { namespace?: unknown } } | undefined)?.manifest;
     return typeof manifest?.namespace === 'string' && manifest.namespace !== '' ? manifest.namespace : undefined;
+  };
+}
+
+/**
+ * [ADR-0150 D3 step 2, ADR-0160 D8] A package's resolution closure — its
+ * declared dependency closure plus every `sys` package — walked by the one
+ * walk (`packageResolutionClosure`) over the engine's registry when a
+ * package-held skill's `context` names no pack of its own package. A host with
+ * no engine answers the empty closure: the skill then resolves only its own
+ * package's pack.
+ */
+function installedPackageResolutionClosure(ctx: PluginContext): (packageId: string) => ReadonlySet<string> {
+  return (packageId) => {
+    let registry: PackageClosureRegistry | undefined;
+    try {
+      registry = ctx.getService<{ registry?: PackageClosureRegistry }>('objectql')?.registry;
+    } catch {
+      return new Set<string>();
+    }
+    return registry ? packageResolutionClosure(registry, packageId) : new Set<string>();
   };
 }
 
@@ -932,6 +957,17 @@ export class MCPServerPlugin implements Plugin {
       );
     }
 
+    // [#8034] BEFORE `start()`, with the resources and prompts: registering a
+    // tool is also what declares the `tools` capability, and the SDK refuses to
+    // register capabilities once a transport is attached. Every bridge on this
+    // server is complete before the transport claims stdin/stdout.
+    // [ADR-0160 D8] …and before the prompts: the prompt bridge offers a skill's
+    // record argument only where this server registers `get_record_context`,
+    // which it reads from the tools registered by then.
+    if (dataBridge) {
+      this.runtime.bridgeDataTools(dataBridge);
+    }
+
     if (metadataService) {
       // [#25245] The object resources read the view `list_objects` /
       // `describe_object` answer from (`stdioObjectView`), never the metadata
@@ -963,15 +999,14 @@ export class MCPServerPlugin implements Plugin {
       // so a runtime `PUT /api/v1/meta/skill/<name>` reaches this surface.
       // [ADR-0150 D6] …and each package-held skill and agent named by its face
       // (`NS-NAME`), its package's namespace read from the engine's registry.
-      await this.runtime.bridgePrompts(metadataService, mergedRead, installedPackageNamespace(ctx));
-    }
-
-    // [#8034] BEFORE `start()`, with the resources and prompts: registering a
-    // tool is also what declares the `tools` capability, and the SDK refuses to
-    // register capabilities once a transport is attached. Every bridge on this
-    // server is complete before the transport claims stdin/stdout.
-    if (dataBridge) {
-      this.runtime.bridgeDataTools(dataBridge);
+      // [ADR-0160 D8] …and a skill's `context` resolved from its package
+      // through that package's closure, read from the same registry.
+      await this.runtime.bridgePrompts(
+        metadataService,
+        mergedRead,
+        installedPackageNamespace(ctx),
+        installedPackageResolutionClosure(ctx),
+      );
     }
 
     if (shouldStart) {

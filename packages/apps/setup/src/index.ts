@@ -18,6 +18,7 @@
 import { SETUP_APP, SETUP_NAV_CONTRIBUTIONS } from '@objectstack/platform-objects/apps';
 
 import { SETUP_OVERVIEW_DOC } from './setup-overview.doc.js';
+import { SETUP_MANUAL_BOOK } from './setup-manual.book.js';
 
 export const SETUP_APP_PACKAGE_ID = 'com.objectstack.setup';
 export const SETUP_APP_NAMESPACE = 'setup';
@@ -60,6 +61,9 @@ export class SetupAppPlugin {
       navigationContributions: SETUP_NAV_CONTRIBUTIONS,
       // ADR-0046 package docs — grouped under "Setup" at /_console/docs.
       docs: [SETUP_OVERVIEW_DOC],
+      // ADR-0046 §6.7 — the manual claiming those docs, read only by the
+      // callers who may open the Setup app (its `audience`).
+      books: [SETUP_MANUAL_BOOK],
     });
   }
 }
@@ -71,3 +75,4 @@ export function createSetupAppPlugin(): SetupAppPlugin {
 
 export { SETUP_APP, SETUP_NAV_CONTRIBUTIONS };
 export { SETUP_OVERVIEW_DOC };
+export { SETUP_MANUAL_BOOK };
