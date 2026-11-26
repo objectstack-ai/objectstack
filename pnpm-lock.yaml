@@ -1497,6 +1497,9 @@ importers:
       '@objectstack/service-analytics':
         specifier: workspace:*
         version: link:../services/service-analytics
+      '@objectstack/service-knowledge':
+        specifier: workspace:*
+        version: link:../services/service-knowledge
       '@objectstack/service-record-context':
         specifier: workspace:*
         version: link:../services/service-record-context
