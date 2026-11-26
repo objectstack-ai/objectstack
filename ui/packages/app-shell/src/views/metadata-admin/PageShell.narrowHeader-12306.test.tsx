@@ -187,6 +187,23 @@ describe('PageShell under Studio: the page controls end its rows (objectstack#37
     expect(ai.previousElementSibling).toHaveAttribute('data-testid', 'studio-title-row-divider');
   });
 
+  // ResourceEditPage's embedded frame passes actions without `embedded`: the
+  // actions alone, with no stats and nothing unsaved, bring the hairline.
+  it.each([
+    ['compact', { itemName: 'showcase_contributor' }],
+    ['list', {}],
+  ] as const)('N3 CONTROL — a %s row with actions of its own and no stats: the hairline before the assistant', (_row, shell) => {
+    renderUnderStudio({ ...shell, actions: ACTION });
+    const ai = screen.getByTestId('topbar-ai-assistant');
+    expect(screen.queryByTestId('studio-save')).toBeNull();
+    expect(ai.previousElementSibling).toHaveAttribute('data-testid', 'studio-title-row-divider');
+    expect(testIds(screen.getByTestId('page-action').parentElement as HTMLElement)).toEqual([
+      'page-action',
+      'studio-title-row-divider',
+      'topbar-ai-assistant',
+    ]);
+  });
+
   it('N3 CONTROL — no actions but unsaved edits: Save, then the hairline, then the assistant', () => {
     renderUnderStudio({ itemName: 'showcase_contributor' }, SAVE);
     const ai = screen.getByTestId('topbar-ai-assistant');
