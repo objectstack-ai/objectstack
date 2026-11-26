@@ -102,7 +102,7 @@ describe('the menu groups (objectstack#36899, ADR-0084 amended)', () => {
       { type: 'permission', domain: 'security' },
     ];
     const menu = buildStudioMenu({ scope: studioMenuScope(segment), types, counts: {}, setupDirectory: true });
-    // objectstack#37201 — the table's order, not the served one: permission set (常用) before position (高级).
+    // objectstack#37201 — the table's order, not the served one: permission set, then position.
     expect(keysOf(menu)).toEqual({
       automation: ['orgFlows'],
       security: ['type:permission', 'type:position'],
@@ -132,6 +132,7 @@ describe('the menu groups (objectstack#36899, ADR-0084 amended)', () => {
 
 /** A package's served types in the server's order: by domain, then alphabetically by type. */
 const SERVED = [
+  { type: 'dataset', domain: 'data' },
   { type: 'hook', domain: 'data' },
   { type: 'mapping', domain: 'data' },
   { type: 'object', domain: 'data' },
@@ -162,7 +163,7 @@ describe('the menu reads the placement table (objectstack#37201, ADR-0084 amende
 
   it("orders each group by the table, an unplaced type after the placed ones, then the entries that are not a type", () => {
     expect(keysOf(menu)).toEqual({
-      data: ['type:object', 'type:picklist', 'type:hook', 'type:mapping', 'type:zz_unplaced'],
+      data: ['type:object', 'type:dataset', 'type:picklist', 'type:hook', 'type:mapping', 'type:zz_unplaced'],
       ui: ['type:app', 'type:page', 'type:dashboard', 'type:report', 'type:view', 'type:action'],
       automation: ['type:flow', 'type:job', 'orgFlows'],
       system: ['type:doc', 'type:book', 'type:email_template', 'diagnostics'],
@@ -178,6 +179,9 @@ describe('the menu reads the placement table (objectstack#37201, ADR-0084 amende
     }
     expect(entries.find((e) => e.key === 'type:object')!.tier).toBe('common');
     expect(entries.find((e) => e.key === 'type:picklist')!.tier).toBe('advanced');
+    // objectstack#37564 — placed by name (ADR-0084, amended 2026-11-26).
+    expect(entries.find((e) => e.key === 'type:dataset')!.tier).toBe('common');
+    expect(entries.find((e) => e.key === 'type:position')!.tier).toBe('common');
   });
 
   it('the three entries that are not a type are 高级 on a package', () => {
@@ -189,17 +193,17 @@ describe('the menu reads the placement table (objectstack#37201, ADR-0084 amende
   it('splits into the 常用 groups and the 高级 fold, a group in a tier only where it holds an entry of that tier', () => {
     const tiers = studioMenuTiers(menu);
     expect(Object.fromEntries(tiers.common.map((g) => [g.group, g.entries.map((e) => e.key)]))).toEqual({
-      data: ['type:object'],
+      // objectstack#37564 — dataset directly after object, position directly after permission set, both above the fold.
+      data: ['type:object', 'type:dataset'],
       ui: ['type:app', 'type:page', 'type:dashboard', 'type:report'],
       automation: ['type:flow'],
-      security: ['type:permission'],
+      security: ['type:permission', 'type:position'],
       ai: ['type:agent', 'type:tool', 'type:skill'],
     });
     // 平台 Platform holds no 常用 entry: its label is drawn inside the fold alone; AI holds no 高级 one here.
     expect(tiers.common.map((g) => g.group)).not.toContain('system');
     expect(tiers.advanced.map((g) => g.group)).toEqual(['data', 'ui', 'automation', 'system', 'security']);
     expect(tiers.advanced.find((g) => g.group === 'security')!.entries.map((e) => e.key)).toEqual([
-      'type:position',
       'type:assignment_rule',
       'owd',
     ]);
@@ -216,7 +220,13 @@ describe('the menu reads the placement table (objectstack#37201, ADR-0084 amende
 describe('the 常用 types are always listed on a package (objectstack#37201)', () => {
   it('the list the directory rule keeps regardless of the sweep is the table\'s 常用 rows, in order', () => {
     expect(STUDIO_MENU_ALWAYS_TYPES).toEqual(STUDIO_MENU_PLACEMENT.filter((r) => r.tier === 'common').map((r) => r.type));
-    expect(STUDIO_MENU_ALWAYS_TYPES).toEqual(['object', 'app', 'page', 'dashboard', 'report', 'flow', 'permission', 'agent', 'tool', 'skill']);
+    expect(STUDIO_MENU_ALWAYS_TYPES).toEqual([
+      'object', 'dataset',
+      'app', 'page', 'dashboard', 'report',
+      'flow',
+      'permission', 'position',
+      'agent', 'tool', 'skill',
+    ]);
   });
 
   it("a new package's directory rule lists them though the sweep has none of them", async () => {
@@ -227,7 +237,9 @@ describe('the 常用 types are always listed on a package (objectstack#37201)', 
       packagesByType: {},
       always: STUDIO_MENU_ALWAYS_TYPES,
     }).map((e) => e.type);
-    expect(listed.sort()).toEqual(['agent', 'app', 'dashboard', 'flow', 'object', 'page', 'permission', 'report', 'skill', 'tool']);
+    expect(listed.sort()).toEqual([
+      'agent', 'app', 'dashboard', 'dataset', 'flow', 'object', 'page', 'permission', 'position', 'report', 'skill', 'tool',
+    ]);
   });
 });
 
