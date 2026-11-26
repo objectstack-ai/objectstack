@@ -17,11 +17,14 @@ import {
 } from '@objectstack/embedder-openai';
 import { aiTestEmbedderActionHandler } from '@objectstack/service-settings';
 import { RECORD_RESTORED_EVENT } from '@objectstack/spec/data';
+import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { KnowledgeService } from './knowledge-service.js';
 import type { KnowledgeLogger } from './knowledge-service.js';
 import type { KnowledgeBuildLock } from './knowledge-build.js';
 import type { KnowledgeFieldSecurity } from './knowledge-source-admission.js';
 import { createKnowledgeReapGuard, guardedObjectsFor } from './knowledge-reap-guard.js';
+import { KnowledgeSourceLoader } from './knowledge-source-loader.js';
+import { KNOWLEDGE_SOURCE_TYPE } from './knowledge-source-registry.js';
 import { contributeKnowledgeSettings } from './knowledge-settings-contribution.js';
 import { UnknownKeyError, UnknownNamespaceError } from '@objectstack/service-settings';
 
@@ -364,8 +367,8 @@ export interface KnowledgeServicePluginOptions {
  * const kernel = new ObjectKernel();
  * kernel.use(new KnowledgeServicePlugin({
  *   sources: [{
- *     id: 'task_notes', label: 'Task notes', adapter: 'memory',
- *     source: { kind: 'object', object: 'task', contentFields: ['notes'] },
+ *     name: 'task_notes', label: 'Task notes', adapter: 'memory',
+ *     source: { kind: 'object', object: 'task', content: ['notes'] },
  *   }],
  * }));
  * await kernel.bootstrap();
@@ -404,6 +407,13 @@ export class KnowledgeServicePlugin implements Plugin {
    */
   private realtime: IRealtimeService | undefined;
   private logger: KnowledgeLogger | undefined;
+  /** The loader of the published `knowledge_source` items (`knowledge-source-loader.ts`). */
+  private loader: KnowledgeSourceLoader | undefined;
+  /** Dropped at destroy: the protocol's mutation signal and the service's source-change signal. */
+  private unsubscribes: Array<() => void> = [];
+  /** The one reap guard, and the objects it is registered for so far ({@link syncReapGuards}). */
+  private reapGuard: ReturnType<typeof createKnowledgeReapGuard> | undefined;
+  private readonly guardedObjects = new Set<string>();
 
   constructor(private readonly options: KnowledgeServicePluginOptions = {}) {}
 
@@ -412,9 +422,9 @@ export class KnowledgeServicePlugin implements Plugin {
     try {
       engine = ctx.getService<IDataEngine>('objectql');
     } catch {
-      // Data engine not wired — service still works in pure-search mode
-      // but RLS re-checks will be conservative (drop object-source hits
-      // when caller is non-system).
+      // Data engine not wired — the service still mounts, and serves a
+      // caller that is not the system identity no source at all: no hit can
+      // be re-checked without an engine.
     }
 
     const logger: KnowledgeLogger = {
@@ -535,12 +545,18 @@ export class KnowledgeServicePlugin implements Plugin {
   }
 
   async start(ctx: PluginContext): Promise<void> {
+    this.loadPublishedSources(ctx);
+
     // The embedder is provided at `kernel:bootstrapped`, after every
     // `kernel:ready` handler has settled: an embedder another plugin registers
     // in its init(), start() or `kernel:ready` (cloud `service-ai` reads its
     // settings there) is seen and kept, never doubled. A consumer resolves
     // `EMBEDDER_SERVICE` where it embeds, not at boot.
     ctx.hook('kernel:bootstrapped', async () => {
+      // The published sources once more: a package another plugin registers
+      // in its own `kernel:ready` handler (the install-local rehydrate) is
+      // listed only now, and the first build below must see its sources.
+      await this.reconcileSources(ctx, 'boot');
       await this.provideEmbedder(ctx);
       // [ADR-0161 K7] The first build: every source a build is due for is
       // built once, in the background — after the embedder is provided,
@@ -562,10 +578,15 @@ export class KnowledgeServicePlugin implements Plugin {
     const service = this.service;
     if (!service) return;
 
+    // [ADR-0161 K3, item 2] The guarded object set follows the sources: a
+    // source registered or loaded after boot for an object no source indexed
+    // before gets its guard when it arrives.
+    this.unsubscribes.push(service.onSourcesChanged(() => this.syncReapGuards(ctx, service)));
+
     ctx.hook('kernel:ready', async () => {
       // Reap-path de-indexing first: it is independent of the realtime service,
       // and the branch below returns early when that one is absent.
-      this.installReapGuards(ctx, service);
+      this.syncReapGuards(ctx, service);
 
       let realtime: IRealtimeService | null = null;
       try {
@@ -638,10 +659,10 @@ export class KnowledgeServicePlugin implements Plugin {
         // stale index at all: `installReapGuards` de-indexes those rows before
         // they are deleted. What is left is APPLICATION-level predicate writes
         // — a caller's own `multi: true` update/delete — which no guard sits in
-        // front of. That half is honestly uncovered rather than quietly
-        // half-claimed, and stays so until a real object source justifies the
-        // adapter-enumeration surface it would need (#4606's enforced-first
-        // rule). Reporting it accurately is the whole job of this branch.
+        // front of. The event stream cannot repair that half (it names no
+        // record); a complete reindex does, by the purge ADR-0161 K8 items 1
+        // and 2 gave it. Reporting it accurately is the whole job of this
+        // branch.
         // A complete reindexSource refreshes the rows that still exist and
         // match and, over an adapter that lists its documents, purges the
         // documents of rows that are gone or no longer match — the warning
@@ -724,8 +745,79 @@ export class KnowledgeServicePlugin implements Plugin {
   }
 
   /**
+   * Load the published `knowledge_source` items (ADR-0161 K4, clause 3) and
+   * keep the service's sources in step with them.
+   *
+   * - **At boot**: one pass at `kernel:ready`, when every plugin has started
+   *   and the apps' packages are registered, and one more at
+   *   `kernel:bootstrapped`, before the first build (see `start`).
+   * - **While the process runs**: one pass on each signal that a published
+   *   item may have changed — the metadata protocol's mutation signal
+   *   (`onMetadataMutation`: a save, a publish, a delete, a revert, a
+   *   rollback, and on a cluster the same write converging on a peer), for a
+   *   `knowledge_source` item that is not a draft; and the kernel's
+   *   `metadata:reloaded` (a package published, installed or removed, a dev
+   *   artifact recompiled). A draft is not a published item and loads nothing.
+   *
+   * The listing is the protocol's execution read of the type
+   * (`getMetaItemsForExecution`, else `getMetaItems`): the stored bodies with
+   * each row's package, the merge every `/meta` read serves. With no
+   * `protocol` service there is no metadata store, and the sources are the
+   * ones registered in code.
+   */
+  private loadPublishedSources(ctx: PluginContext): void {
+    const service = this.service;
+    if (!service) return;
+    this.loader = new KnowledgeSourceLoader({
+      service,
+      logger: this.logger,
+      buildOnReload: this.options.buildAtBoot !== false,
+      readItems: () => readPublishedSources(ctx),
+      namespaceOf: (packageId) => packageNamespaceOf(ctx, packageId),
+    });
+
+    ctx.hook('kernel:ready', async () => {
+      await this.reconcileSources(ctx, 'boot');
+      // Resolved here, once every plugin has started, so a protocol that
+      // registers after this plugin is seen.
+      const protocol = protocolOf(ctx);
+      if (typeof protocol?.onMetadataMutation === 'function') {
+        const unsubscribe = protocol.onMetadataMutation((evt) => {
+          if (!evt || evt.type !== KNOWLEDGE_SOURCE_TYPE || evt.state === 'draft') return;
+          void this.reconcileSources(ctx, 'reload');
+        });
+        if (typeof unsubscribe === 'function') this.unsubscribes.push(unsubscribe);
+      }
+    });
+    ctx.hook('metadata:reloaded', async () => {
+      await this.reconcileSources(ctx, 'reload');
+    });
+  }
+
+  /** One loader pass; never throws — a failed pass is reported and changes nothing further. */
+  private async reconcileSources(ctx: PluginContext, reason: 'boot' | 'reload'): Promise<void> {
+    if (!this.loader) return;
+    try {
+      const result = await this.loader.reconcile(reason);
+      const total = result.added.length + result.changed.length + result.removed.length;
+      if (total === 0) return;
+      const part = (label: string, faces: string[]): string => (faces.length === 0 ? '' : ` ${label}: ${faces.join(', ')}.`);
+      ctx.logger.info?.(
+        `KnowledgeServicePlugin: knowledge_source items loaded.${part('Added', result.added)}` +
+          `${part('Changed', result.changed)}${part('Removed, index dropped', result.removed)}`,
+      );
+    } catch (err) {
+      ctx.logger.warn?.(
+        `KnowledgeServicePlugin: loading the knowledge_source items failed (${err instanceof Error ? err.message : String(err)}); ` +
+          'the sources stay as they were. The next change to a knowledge source, or a restart, loads them again.',
+      );
+    }
+  }
+
+  /**
    * Register the lifecycle reap guard (#4672, ADR-0057 amendment) for every
-   * object an `object` source projects.
+   * object a source projects — at `kernel:ready`, and again each time the set
+   * of sources changes (ADR-0161 K3, item 2: the set is dynamic).
    *
    * ## Why the guard rather than an event
    *
@@ -737,37 +829,32 @@ export class KnowledgeServicePlugin implements Plugin {
    * and it arrives batched and interruptible for free (500 rows a batch, 20
    * batches a sweep), which is the cost bound this work would otherwise owe.
    *
-   * ## Seams, all pre-existing
+   * ## Seams
    *
    * Reached exactly as `service-storage` reaches it for `sys_file` byte
    * reclaim: duck-typed `ctx.getService('lifecycle')` +
-   * `registerReapGuard(object, guard)`. No spec key, no `IKnowledgeAdapter`
-   * member, no `packages/objectql` change (#4606's zero-addition boundary).
-   * Guards compose by intersection (#5535), so registering here cannot displace
-   * storage's byte-reclaim guard, nor it ours.
+   * `registerReapGuard(object, guard)`. Guards compose by intersection
+   * (#5535), so registering here cannot displace storage's byte-reclaim
+   * guard, nor it ours.
    *
    * Silent when there is no lifecycle service (a bare kernel): the sweep is
-   * what deletes rows, so no sweeper means no orphans to prevent. Nothing is
-   * concluded about the registry either — this runs at `kernel:ready`, and the
-   * absence is neither cached nor asserted.
+   * what deletes rows, so no sweeper means no orphans to prevent. The absence
+   * is not cached: the next change of the sources asks again.
+   *
+   * ## The object set follows the sources
    *
    * One guard instance serves every object (it resolves its targets from the
-   * `object` it is called with), and re-registering the identical function is a
-   * documented no-op, so re-run wiring cannot double a de-index.
-   *
-   * ## Boundary, stated rather than implied
-   *
-   * The OBJECT SET is read once, here — every object declared by boot time,
-   * which is every object the sources a host composes can name. A source
-   * registered later through `registerSource` for an object that had none at
-   * boot is therefore unguarded, while one for an already-guarded object is
-   * picked up (the guard re-resolves its targets on each call). Making the set
-   * itself dynamic would mean a new notification surface on the service, which
-   * is precisely the addition #4606 rules out until a real `object` source
-   * exists to justify it.
+   * `object` it is called with, each call). The objects it is registered for
+   * are remembered, and each pass registers it for the objects that have a
+   * source now and had none before — a source loaded from a
+   * `knowledge_source` item saved after boot, or registered in code after
+   * boot, is guarded from that moment. An object whose last source was
+   * removed keeps its registration: the lifecycle service has no unregister,
+   * and the guard, finding no source for the object, confirms every row and
+   * de-indexes nothing.
    */
-  private installReapGuards(ctx: PluginContext, service: KnowledgeService): void {
-    const objects = guardedObjectsFor(service.listSources());
+  private syncReapGuards(ctx: PluginContext, service: KnowledgeService): void {
+    const objects = guardedObjectsFor(service.indexedSources()).filter((object) => !this.guardedObjects.has(object));
     if (objects.length === 0) return;
 
     type LifecycleLike = {
@@ -781,11 +868,14 @@ export class KnowledgeServicePlugin implements Plugin {
     }
     if (!lifecycle || typeof lifecycle.registerReapGuard !== 'function') return;
 
-    const guard = createKnowledgeReapGuard(service, this.logger);
+    const guard = (this.reapGuard ??= createKnowledgeReapGuard(service, this.logger));
     // Called AS A METHOD, never through a detached reference: the real
     // `LifecycleService.registerReapGuard` reads `this.reapGuards`, so
     // `const register = lifecycle.registerReapGuard` throws on the first call.
-    for (const object of objects) lifecycle.registerReapGuard(object, guard);
+    for (const object of objects) {
+      lifecycle.registerReapGuard(object, guard);
+      this.guardedObjects.add(object);
+    }
     ctx.logger.info?.(
       `KnowledgeServicePlugin: reap guards registered with the lifecycle service for [${objects.join(', ')}] — ` +
         'rows are de-indexed before the retention sweep deletes them.',
@@ -812,6 +902,13 @@ export class KnowledgeServicePlugin implements Plugin {
     // The boot's first-build pass starts no further build; one already
     // walking runs to its end (a walk cannot be cancelled part-way).
     this.service?.stopBuilds();
+    for (const unsubscribe of this.unsubscribes.splice(0)) {
+      try {
+        unsubscribe();
+      } catch {
+        // best-effort
+      }
+    }
     if (!this.subscriptionId) return;
     try {
       await this.realtime?.unsubscribe(this.subscriptionId);
@@ -833,4 +930,75 @@ export class KnowledgeServicePlugin implements Plugin {
   async stop(_ctx?: PluginContext): Promise<void> {
     await this.destroy();
   }
+}
+
+/** The slice of the metadata protocol the loader reads, reached duck-typed. */
+interface KnowledgeSourceProtocol {
+  getMetaItemsForExecution?(request: { type: string }): Promise<unknown>;
+  getMetaItems?(request: { type: string }): Promise<unknown>;
+  onMetadataMutation?(listener: (evt: { type?: string; name?: string; state?: string } | undefined) => void): (() => void) | void;
+}
+
+function protocolOf(ctx: PluginContext): KnowledgeSourceProtocol | undefined {
+  try {
+    return ctx.getService<KnowledgeSourceProtocol | undefined>('protocol') ?? undefined;
+  } catch {
+    return undefined; // no protocol service: no metadata store to read.
+  }
+}
+
+/**
+ * The published `knowledge_source` items, or `null` when they cannot be read
+ * (the loader then changes nothing). No `protocol` service, or one with no
+ * list read, is a composition with no metadata store: it holds no item, which
+ * is an empty list, not a failed read.
+ */
+async function readPublishedSources(ctx: PluginContext): Promise<unknown[] | null> {
+  const protocol = protocolOf(ctx);
+  const read = typeof protocol?.getMetaItemsForExecution === 'function'
+    ? protocol.getMetaItemsForExecution.bind(protocol)
+    : typeof protocol?.getMetaItems === 'function'
+      ? protocol.getMetaItems.bind(protocol)
+      : undefined;
+  if (!read) return [];
+  let raw: unknown;
+  try {
+    raw = await read({ type: KNOWLEDGE_SOURCE_TYPE });
+  } catch (err) {
+    ctx.logger.warn?.(
+      `KnowledgeServicePlugin: the knowledge_source items could not be read (${err instanceof Error ? err.message : String(err)}); ` +
+        'the sources stay as they were.',
+    );
+    return null;
+  }
+  // The read hands back a bare array or an `{ items: [...] }` envelope, and
+  // each entry is the document itself or an `{ item }` wrapper.
+  const list = Array.isArray(raw) ? raw : (raw as { items?: unknown } | null | undefined)?.items;
+  if (!Array.isArray(list)) return [];
+  return list.map((entry) => {
+    const doc = entry && typeof entry === 'object' && 'item' in entry ? (entry as { item: unknown }).item : entry;
+    return stripReadDecorations(doc);
+  });
+}
+
+/**
+ * [ADR-0150 D2/D6] The manifest namespace of a package, from the engine's
+ * registry, or `undefined`: no engine, or an id with no package record. A
+ * source's face is then its bare name.
+ */
+function packageNamespaceOf(ctx: PluginContext, packageId: string): string | undefined {
+  type RegistryLike = { registry?: { getPackage?(id: string): { manifest?: { namespace?: unknown } } | undefined } };
+  let engine: RegistryLike | undefined;
+  try {
+    engine = ctx.getService<RegistryLike | undefined>('objectql') ?? undefined;
+  } catch {
+    return undefined;
+  }
+  let namespace: unknown;
+  try {
+    namespace = engine?.registry?.getPackage?.(packageId)?.manifest?.namespace;
+  } catch {
+    return undefined;
+  }
+  return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
 }

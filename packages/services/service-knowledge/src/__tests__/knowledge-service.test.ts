@@ -49,13 +49,13 @@ function makeAdapter(id: string, hits: KnowledgeHit[] = []): IKnowledgeAdapter &
 
 function objectSource(id: string, object: string, adapter = 'memory'): KnowledgeSource {
   return {
-    id,
+    name: id,
     label: id,
     adapter,
     source: {
       kind: 'object',
       object,
-      contentFields: ['title', 'notes'],
+      content: ['title', 'notes'],
       metadataFields: ['status'],
     } as ObjectKnowledgeSource,
   };
@@ -75,44 +75,13 @@ describe('KnowledgeService — adapter & source registry', () => {
     const svc = new KnowledgeService();
     const s = objectSource('s1', 'task');
     svc.registerSource(s);
-    expect(svc.getSource('s1')).toEqual(s);
+    // The source as parsed: what the author wrote, with the schema's defaults stated.
+    expect(svc.getSource('s1')).toEqual({ ...s, refresh: {}, aiExposed: true });
     expect(svc.listSources()).toHaveLength(1);
     svc.unregisterSource('s1');
     expect(svc.getSource('s1')).toBeUndefined();
   });
 
-  it('indexDocument / deleteDocument route to the right adapter', async () => {
-    const svc = new KnowledgeService();
-    const a = makeAdapter('memory');
-    svc.registerAdapter('memory', a);
-    svc.registerSource(objectSource('s1', 'task'));
-    const doc: KnowledgeDocument = { id: 'd1', sourceId: 's1', content: 'hello' };
-    await svc.indexDocument('s1', doc);
-    // The service computes `docHash` and stamps it on the document it hands the adapter.
-    expect(a.upsertSpy).toHaveBeenCalledWith(
-      [{ ...doc, docHash: computeDocHash(doc) }],
-      expect.objectContaining({ reason: 'manual' }),
-    );
-    await svc.deleteDocument('s1', 'd1');
-    expect(a.deleteSpy).toHaveBeenCalledWith(['d1'], expect.objectContaining({ reason: 'manual' }));
-  });
-
-  it('indexDocument refuses a caller-supplied docHash, naming it, and writes nothing', async () => {
-    const svc = new KnowledgeService();
-    const a = makeAdapter('memory');
-    svc.registerAdapter('memory', a);
-    svc.registerSource(objectSource('s1', 'task'));
-    const doc: KnowledgeDocument = { id: 'd1', sourceId: 's1', content: 'hello', docHash: 'v1:caller-supplied' };
-    await expect(svc.indexDocument('s1', doc)).rejects.toThrow(
-      /indexDocument refused document 'd1': docHash is computed by the knowledge service/,
-    );
-    expect(a.upsertSpy).not.toHaveBeenCalled();
-  });
-
-  it('indexDocument throws on unknown source', async () => {
-    const svc = new KnowledgeService();
-    await expect(svc.indexDocument('nope', { id: 'd', sourceId: 'nope', content: '' })).rejects.toThrow(/unknown source/);
-  });
 });
 
 describe('KnowledgeService — permission-aware search', () => {
@@ -145,24 +114,6 @@ describe('KnowledgeService — permission-aware search', () => {
     expect(findSpy).not.toHaveBeenCalled(); // dropped without a lookup
   });
 
-  it('keeps file/http hits but drops object hits when no executionContext (#2981)', async () => {
-    // The fail-closed drop is scoped to record-backed hits; ACL-less
-    // file/http hits still flow (their adapter owns any enforcement).
-    const hits: KnowledgeHit[] = [
-      { chunkId: 'c1', documentId: 'd1', sourceId: 's1', sourceRecordId: 'rec_1', score: 0.9, snippet: '' },
-      { chunkId: 'c2', documentId: 'd2', sourceId: 'http_src', score: 0.5, snippet: 'web' },
-    ];
-    const { svc } = buildSetup(hits);
-    // The fixture's http hit names a source, so the source is registered: a
-    // hit is served only as a registered source it was searched for.
-    svc.registerSource({
-      id: 'http_src', label: 'HTTP', adapter: 'memory',
-      source: { kind: 'http', urls: ['https://x.test'] } as KnowledgeSource['source'],
-    });
-    const out = await svc.search('q');
-    expect(out.map((h) => h.documentId)).toEqual(['d2']);
-  });
-
   it('passes through every hit when context is isSystem:true', async () => {
     const hits: KnowledgeHit[] = [
       { chunkId: 'c1', documentId: 'd1', sourceId: 's1', sourceRecordId: 'rec_1', score: 0.9, snippet: '' },
@@ -190,43 +141,6 @@ describe('KnowledgeService — permission-aware search', () => {
     expect(opts.where).toEqual({ id: { $in: ['rec_1', 'rec_2'] } });
   });
 
-  it('keeps hits without sourceRecordId (file/http) regardless of RLS', async () => {
-    const hits: KnowledgeHit[] = [
-      { chunkId: 'c1', documentId: 'd1', sourceId: 'http_src', score: 0.5, snippet: 'web' },
-    ];
-    const adapter = makeAdapter('memory', hits);
-    const engine = { find: vi.fn(async () => []) } as unknown as IDataEngine;
-    const svc = new KnowledgeService({ dataEngine: engine });
-    svc.registerAdapter('memory', adapter);
-    svc.registerSource({
-      id: 'http_src', label: 'HTTP', adapter: 'memory',
-      source: { kind: 'http', urls: ['https://x.test'] } as KnowledgeSource['source'],
-    });
-    const out = await svc.search('q', {
-      executionContext: { userId: 'u1', positions: [], permissions: [], isSystem: false },
-    });
-    expect(out).toHaveLength(1);
-  });
-
-  it('without dataEngine, drops object-source hits but keeps file/http hits', async () => {
-    const adapter = makeAdapter('memory');
-    adapter.search = vi.fn(async (_q, opts) => {
-      if (opts.source.id === 's1') {
-        return [{ chunkId: 'c1', documentId: 'd1', sourceId: 's1', sourceRecordId: 'rec_1', score: 0.9, snippet: '' }];
-      }
-      return [{ chunkId: 'c2', documentId: 'd2', sourceId: 'http', score: 0.5, snippet: 'web' }];
-    });
-    const svc = new KnowledgeService();
-    svc.registerAdapter('memory', adapter);
-    svc.registerSource(objectSource('s1', 'task'));
-    svc.registerSource({
-      id: 'http', label: 'HTTP', adapter: 'memory',
-      source: { kind: 'http', urls: ['https://x.test'] } as KnowledgeSource['source'],
-    });
-    const out = await svc.search('q', { executionContext: { userId: 'u', positions: [], permissions: [], isSystem: false } });
-    expect(out.map((h) => h.documentId)).toEqual(['d2']);
-  });
-
   it('topK honoured + hits sorted by score desc', async () => {
     const adapter = makeAdapter('memory', [
       { chunkId: 'c1', documentId: 'd1', sourceId: 's1', score: 0.3, snippet: '' },
@@ -250,7 +164,7 @@ describe('KnowledgeService — permission-aware search', () => {
     await svc.search('q', { sourceIds: ['s2'], executionContext: { positions: [], permissions: [], isSystem: true } });
     expect(a.searchSpy).toHaveBeenCalledOnce();
     const callArg = a.searchSpy.mock.calls[0][1] as { source: KnowledgeSource };
-    expect(callArg.source.id).toBe('s2');
+    expect(callArg.source.name).toBe('s2');
   });
 });
 
@@ -333,9 +247,9 @@ describe('KnowledgeService — reindex', () => {
   });
 
   it("a refusal's remedy (operator text) reaches the warn log, never refused[].message or the thrown message", async () => {
-    const http = (id: string, adapter: string): KnowledgeSource => ({
-      id, label: id, adapter, source: { kind: 'http', urls: ['https://x.test'] } as KnowledgeSource['source'],
-    });
+    const over = (name: string, adapter: string): KnowledgeSource => objectSource(name, 'task', adapter);
+    // The system identity: a source is searched for it with no engine to re-check with.
+    const asSystem = { positions: [], permissions: [], isSystem: true };
     const remedy = 'Run as a database owner:\nDELETE FROM "os_knowledge"."knowledge_generation" WHERE source_id = \'refusing\';';
     const refusing = Object.assign(makeAdapter('refusing'), {
       search: vi.fn(async () => {
@@ -349,11 +263,11 @@ describe('KnowledgeService — reindex', () => {
     const svc = new KnowledgeService({ logger: { warn } as never });
     svc.registerAdapter('refusing', refusing);
     svc.registerAdapter('answering', answering);
-    svc.registerSource(http('refusing', 'refusing'));
-    svc.registerSource(http('answering', 'answering'));
+    svc.registerSource(over('refusing', 'refusing'));
+    svc.registerSource(over('answering', 'answering'));
 
     // Some sources answer: the refused one is named, its message alone.
-    const report = await svc.searchWithRefusals('q');
+    const report = await svc.searchWithRefusals('q', { executionContext: asSystem });
     expect(report.hits.map((h) => h.documentId)).toEqual(['d1']);
     expect(report.refused).toEqual([
       { sourceId: 'refusing', code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409, message: "Knowledge source 'refusing' needs a rebuild." },
@@ -361,7 +275,7 @@ describe('KnowledgeService — reindex', () => {
     expect(warn.mock.calls.some(([line]) => String(line).includes('DELETE FROM'))).toBe(true);
 
     // None answers: the thrown refusal carries no remedy either.
-    const thrown = await svc.searchWithRefusals('q', { sourceIds: ['refusing'] }).then(
+    const thrown = await svc.searchWithRefusals('q', { sourceIds: ['refusing'], executionContext: asSystem }).then(
       () => undefined,
       (e: unknown) => e as { code?: string; message: string; refused?: Array<{ message: string }> },
     );
@@ -429,17 +343,6 @@ describe('KnowledgeService — reindex', () => {
     expect(res.message).toMatch(/IDataEngine/);
   });
 
-  it('returns ok:false for non-object sources (delegates to adapter)', async () => {
-    const svc = new KnowledgeService({ dataEngine: { find: vi.fn() } as unknown as IDataEngine });
-    svc.registerAdapter('memory', makeAdapter('memory'));
-    svc.registerSource({
-      id: 'http', label: 'HTTP', adapter: 'memory',
-      source: { kind: 'http', urls: ['https://x.test'] } as KnowledgeSource['source'],
-    });
-    const res = await svc.reindexSource('http');
-    expect(res.ok).toBe(false);
-    expect(res.message).toMatch(/adapter/);
-  });
 });
 
 describe('Pure helpers', () => {
@@ -447,7 +350,7 @@ describe('Pure helpers', () => {
     expect(documentIdFor('s', 'r')).toBe('s:r');
   });
 
-  it('recordToDocument concatenates contentFields and projects metadataFields', () => {
+  it('recordToDocument concatenates content and projects metadataFields', () => {
     const src = objectSource('s1', 'task');
     const objSrc = src.source as ObjectKnowledgeSource;
     const doc = recordToDocument(src, objSrc, { id: 'r1', title: 'Hello', notes: 'World', status: 'open' });
@@ -457,23 +360,21 @@ describe('Pure helpers', () => {
     expect(doc.metadata?.status).toBe('open');
   });
 
-  it('recordToDocument supports * for contentFields', () => {
+  it('recordToDocument reads the listed fields, in the listed order, and no other field', () => {
     const src: KnowledgeSource = {
-      id: 's1', label: 'all', adapter: 'memory',
-      source: { kind: 'object', object: 'task', contentFields: ['*'] } as ObjectKnowledgeSource,
+      name: 's1', label: 'listed', adapter: 'memory',
+      source: { kind: 'object', object: 'task', content: ['notes', 'title'] },
     };
-    const objSrc = src.source as ObjectKnowledgeSource;
-    const doc = recordToDocument(src, objSrc, { id: 'r1', title: 'A', notes: 'B', count: 7 });
-    expect(doc.content).toContain('A');
-    expect(doc.content).toContain('B');
-    expect(doc.content).not.toContain('r1'); // id excluded
+    const doc = recordToDocument(src, src.source, { id: 'r1', title: 'A', notes: 'B', private_note: 'C', count: 7 });
+    expect(doc.content).toBe('B\n\nA');
+    expect(JSON.stringify(doc)).not.toContain('C');
   });
 });
 
 // An index document is searchable text served to every reader its source
 // admits, so it never carries a credential-class field (the set the engine
-// masks on read) or an `internal: true` field (the set it omits) — under `*`,
-// or when a source names one explicitly. The field sets come from the same
+// masks on read) or an `internal: true` field (the set it omits), even when a
+// source names one. The field sets come from the same
 // collectors the write-response helper uses. Synthetic values.
 describe('recordToDocument withholds credential-class and internal fields', () => {
   const CREDENTIAL = 'synthetic-credential-a27f';
@@ -493,17 +394,9 @@ describe('recordToDocument withholds credential-class and internal fields', () =
     id: 'r1', title: 'Visible', notes: 'Body',
     api_token: CREDENTIAL, passphrase: `${CREDENTIAL}-p`, lookup_digest: INTERNAL,
   });
-  const source = (contentFields: string[], metadataFields: string[] = []): KnowledgeSource => ({
-    id: 's1', label: 's1', adapter: 'memory',
-    source: { kind: 'object', object: 'probe_doc', contentFields, metadataFields } as ObjectKnowledgeSource,
-  });
-
-  it("skips them under '*'", () => {
-    const src = source(['*']);
-    const doc = recordToDocument(src, src.source as ObjectKnowledgeSource, record(), schema);
-    expect(doc.content).toBe('Visible\n\nBody');
-    expect(JSON.stringify(doc)).not.toContain(CREDENTIAL);
-    expect(JSON.stringify(doc)).not.toContain(INTERNAL);
+  const source = (content: string[], metadataFields: string[] = []): KnowledgeSource => ({
+    name: 's1', label: 's1', adapter: 'memory',
+    source: { kind: 'object', object: 'probe_doc', content, metadataFields } as ObjectKnowledgeSource,
   });
 
   it('skips them when named explicitly as content or metadata', () => {
@@ -519,9 +412,9 @@ describe('recordToDocument withholds credential-class and internal fields', () =
   // source's `where` decides membership), and that row carries every column —
   // the payload here carries only the id. The re-read row goes through the same
   // gate as the reindex walk, so a withheld field stays out of the document
-  // whether the source takes `'*'` or names it.
+  // when the source names it.
   it.each([
-    ["'*'", ['*'], [] as string[], 'Visible\n\nBody', {}],
+    ['named as content only', ['title', 'notes', 'api_token'], [] as string[], 'Visible\n\nBody', {}],
     ['named explicitly', ['title', 'api_token', 'lookup_digest'], ['passphrase', 'notes'], 'Visible', { notes: 'Body' }],
   ])('the event-sync path withholds them from the re-read row (%s)', async (_label, content, meta, text, metadata) => {
     const getSchema = vi.fn((name: string) => (name === 'probe_doc' ? schema : undefined));
@@ -547,7 +440,7 @@ describe('recordToDocument withholds credential-class and internal fields', () =
     const svc = new KnowledgeService({ dataEngine: { find, getSchema } as unknown as IDataEngine });
     const adapter = makeAdapter('memory');
     svc.registerAdapter('memory', adapter);
-    svc.registerSource(source(['*']));
+    svc.registerSource(source(['title', 'notes', 'api_token', 'lookup_digest']));
     const res = await svc.reindexSource('s1');
     expect(res).toMatchObject({ ok: true, indexed: 1 });
     const [docs] = adapter.upsertSpy.mock.calls[0] as unknown as [KnowledgeDocument[]];
@@ -1319,17 +1212,6 @@ describe('KnowledgeService — documents carry their organization (ADR-0161 K8, 
     expect(computeDocHash({ ...body, organizationId: 'org_a' })).not.toBe(computeDocHash({ ...body, organizationId: 'org_b' }));
   });
 
-  it('indexDocument refuses a caller-supplied organizationId, and writes nothing', async () => {
-    const adapter = makeAdapter('memory');
-    const svc = new KnowledgeService();
-    svc.registerAdapter('memory', adapter);
-    svc.registerSource(src);
-    await expect(
-      svc.indexDocument('s1', { id: 'd1', sourceId: 's1', content: 'x', organizationId: 'org_b' }),
-    ).rejects.toThrow(/organizationId/);
-    expect(adapter.upsertSpy).not.toHaveBeenCalled();
-  });
-
   it('the reindex walk and the event sync stamp the organization under a walled posture', async () => {
     const adapter = makeAdapter('memory');
     const find = vi.fn(async (_o: string, q: { where?: Record<string, unknown> }) =>
@@ -1385,12 +1267,8 @@ describe('KnowledgeService — search hands the adapter the caller\'s organizati
     const svc = new KnowledgeService(options);
     svc.registerAdapter('memory', adapter);
     svc.registerSource(objectSource('s1', 'task'));
-    svc.registerSource({
-      id: 'web', label: 'Web', adapter: 'memory',
-      source: { kind: 'http', urls: ['https://x.test'] } as KnowledgeSource['source'],
-    });
     const handed = (sourceId: string) =>
-      adapter.searchSpy.mock.calls.find(([, o]) => (o as { source: KnowledgeSource }).source.id === sourceId)?.[1] as
+      adapter.searchSpy.mock.calls.find(([, o]) => (o as { source: KnowledgeSource }).source.name === sourceId)?.[1] as
         | Record<string, unknown>
         | undefined;
     return { svc, adapter, handed };
@@ -1428,12 +1306,6 @@ describe('KnowledgeService — search hands the adapter the caller\'s organizati
     expect(h.handed('s1')).not.toHaveProperty('organizationIds');
   });
 
-  it('a file / http source is never handed a filter: its documents carry no organization', async () => {
-    const h = searchSetup({ posture: async () => 'isolated' });
-    await h.svc.search('q', { executionContext: person({ tenantId: 'org_a', accessible_org_ids: ['org_a'] }) });
-    expect(h.handed('web')).not.toHaveProperty('organizationIds');
-  });
-
   it.each([
     ['tenancy disabled', { name: 'task', tenancy: { enabled: false }, fields: { organization_id: {}, notes: {} } }],
     ['no organization column', { name: 'task', fields: { notes: {}, title: {}, status: {} } }],
@@ -1453,7 +1325,7 @@ describe('KnowledgeService — search hands the adapter the caller\'s organizati
     expect(h.handed('s1')?.organizationIds).toEqual(['org_a']);
   });
 
-  it('a posture that cannot be read leaves every object source unsearched, says so at error, and still searches file / http', async () => {
+  it('a posture that cannot be read leaves every source unsearched and says so at error', async () => {
     const logger = { warn: vi.fn(), error: vi.fn() };
     const h = searchSetup({
       posture: async () => {
@@ -1463,7 +1335,7 @@ describe('KnowledgeService — search hands the adapter the caller\'s organizati
     });
     await h.svc.search('q', { executionContext: person({ tenantId: 'org_a', accessible_org_ids: ['org_a'] }) });
     expect(h.handed('s1')).toBeUndefined();
-    expect(h.handed('web')).toBeDefined();
+    expect(h.adapter.searchSpy).not.toHaveBeenCalled();
     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('tenancy posture could not be read'));
   });
 });
@@ -1576,7 +1448,7 @@ describe('KnowledgeService — search refills after the permission filter', () =
   /** An adapter that ranks like a real one: the best `min(topK, cap)` of `corpus` for the source asked. */
   function rankingAdapter(corpus: Record<string, KnowledgeHit[]>, cap = Infinity) {
     const searchSpy = vi.fn(async (_q: string, opts: { source: KnowledgeSource; topK: number }) =>
-      (corpus[opts.source.id] ?? []).slice(0, Math.min(opts.topK, cap)));
+      (corpus[opts.source.name] ?? []).slice(0, Math.min(opts.topK, cap)));
     return { id: 'memory', upsert: vi.fn(async () => undefined), delete: vi.fn(async () => undefined), search: searchSpy, searchSpy };
   }
 
@@ -1594,7 +1466,7 @@ describe('KnowledgeService — search refills after the permission filter', () =
     const svc = new KnowledgeService({ dataEngine: engine, logger: { debug, warn: vi.fn(), error: vi.fn() } });
     svc.registerAdapter('memory', adapter);
     for (const id of opts.sources ?? ['s1']) svc.registerSource(objectSource(id, 'task'));
-    const asked = () => adapter.searchSpy.mock.calls.map((c) => [(c[1] as { source: KnowledgeSource }).source.id, (c[1] as { topK: number }).topK]);
+    const asked = () => adapter.searchSpy.mock.calls.map((c) => [(c[1] as { source: KnowledgeSource }).source.name, (c[1] as { topK: number }).topK]);
     return { svc, adapter, engine, debug, asked };
   }
 
@@ -1675,22 +1547,11 @@ describe('KnowledgeService — search refills after the permission filter', () =
     expect(engine.find).not.toHaveBeenCalled();
   });
 
-  it('no context: object sources stay unsearched (fail closed), a file source is asked topK once', async () => {
-    const { svc, adapter } = setup({ s1: rankedHits('s1', 100), f1: rankedHits('f1', 100) }, []);
-    svc.registerSource({ id: 'f1', label: 'f1', adapter: 'memory', source: { kind: 'file', prefix: 'docs/' } });
+  it('no context: no source is searched (fail closed)', async () => {
+    const { svc, adapter } = setup({ s1: rankedHits('s1', 100) }, []);
     const out = await svc.search('q', { topK: 5 });
-    expect(out.every((h) => h.sourceId === 'f1')).toBe(true);
-    expect(adapter.searchSpy.mock.calls.map((c) => [(c[1] as { source: KnowledgeSource }).source.id, (c[1] as { topK: number }).topK]))
-      .toEqual([['f1', 5]]);
-  });
-
-  it('a file source beside an object source is asked topK once; only the object source is refilled', async () => {
-    // The file source answers all 5 it is asked, but only 2 exist; the object source's rows are unreadable.
-    const { svc, asked } = setup({ s1: rankedHits('s1', 100), f1: rankedHits('f1', 2) }, []);
-    svc.registerSource({ id: 'f1', label: 'f1', adapter: 'memory', source: { kind: 'file', prefix: 'docs/' } });
-    const out = await svc.search('q', { topK: 5, executionContext: MEMBER });
-    expect(out.map((h) => h.sourceId)).toEqual(['f1', 'f1']);
-    expect(asked()).toEqual([['s1', 25], ['f1', 5], ['s1', 100]]);
+    expect(out).toEqual([]);
+    expect(adapter.searchSpy).not.toHaveBeenCalled();
   });
 
   it('the count the re-check removed goes to the debug log only; the answer and its type are unchanged', async () => {
@@ -1737,7 +1598,7 @@ describe('KnowledgeService — search scope (ADR-0161 K8, item 17)', () => {
   /** An adapter that ranks `hits` of the source asked; `honours` applies the scope before ranking, else ignores it. */
   function adapterOver(hits: Record<string, KnowledgeHit[]>, honours: boolean) {
     const searchSpy = vi.fn(async (_q: string, opts: { source: KnowledgeSource; topK: number; scope?: Term[] }) => {
-      const all = hits[opts.source.id] ?? [];
+      const all = hits[opts.source.name] ?? [];
       const ranked = honours && opts.scope !== undefined ? all.filter((h) => holds(h, opts.scope!)) : all;
       return ranked.slice(0, opts.topK);
     });
@@ -1762,8 +1623,8 @@ describe('KnowledgeService — search scope (ADR-0161 K8, item 17)', () => {
 
   function taskSource(id: string, metadataFields: string[] = ['status', 'policy'], object = 'task'): KnowledgeSource {
     return {
-      id, label: id, adapter: 'memory',
-      source: { kind: 'object', object, contentFields: ['title', 'notes'], metadataFields } as ObjectKnowledgeSource,
+      name: id, label: id, adapter: 'memory',
+      source: { kind: 'object', object, content: ['title', 'notes'], metadataFields } as ObjectKnowledgeSource,
     };
   }
 
@@ -1776,8 +1637,8 @@ describe('KnowledgeService — search scope (ADR-0161 K8, item 17)', () => {
   } = {}) {
     const sources = opts.sources ?? [taskSource('s1')];
     const hits = Object.fromEntries(sources.map((s, i) => [
-      s.id,
-      [...corpus(s.id), ...(i === 0 ? opts.extra ?? [] : [])].sort((a, b) => b.score - a.score),
+      s.name,
+      [...corpus(s.name), ...(i === 0 ? opts.extra ?? [] : [])].sort((a, b) => b.score - a.score),
     ]));
     const adapter = adapterOver(hits, opts.honours ?? true);
     const engine = engineOver(opts.readable ?? (() => true), { task: TASK_SCHEMA });
@@ -1904,7 +1765,7 @@ describe('KnowledgeService — search scope (ADR-0161 K8, item 17)', () => {
   it('a source the scope reaches is searched; one it does not reach is not', async () => {
     const { svc, adapter } = setup({ sources: [taskSource('s1'), taskSource('s2', ['status'], 'note')] });
     const out = await svc.search('q', { topK: 5, scope: [{ object: 'policy', ids: ['p1'] }], executionContext: MEMBER });
-    expect(adapter.searchSpy.mock.calls.map((c) => (c[1] as { source: KnowledgeSource }).source.id)).toEqual(['s1']);
+    expect(adapter.searchSpy.mock.calls.map((c) => (c[1] as { source: KnowledgeSource }).source.name)).toEqual(['s1']);
     expect(new Set(out.map((h) => h.sourceId))).toEqual(new Set(['s1']));
   });
 
@@ -1941,8 +1802,8 @@ describe('KnowledgeService — search scope (ADR-0161 K8, item 17)', () => {
 
 describe('recordToDocument reads the title from the object\'s display field', () => {
   const src: KnowledgeSource = {
-    id: 's1', label: 's1', adapter: 'memory',
-    source: { kind: 'object', object: 'invoice', contentFields: ['body'] } as ObjectKnowledgeSource,
+    name: 's1', label: 's1', adapter: 'memory',
+    source: { kind: 'object', object: 'invoice', content: ['body'] } as ObjectKnowledgeSource,
   };
   const title = (record: Record<string, unknown>, schema?: unknown) =>
     recordToDocument(src, src.source as ObjectKnowledgeSource, { id: 'r1', body: 'B', ...record }, schema).title;
@@ -2016,8 +1877,8 @@ describe('KnowledgeService — record-level search (granularity, groupBy, freshn
   /** A clause source: content `body`, metadata `policy`, over object `clause`. */
   function clauseSource(id: string, extra: Partial<ObjectKnowledgeSource> = {}): KnowledgeSource {
     return {
-      id, label: id, adapter: 'memory',
-      source: { kind: 'object', object: 'clause', contentFields: ['body'], metadataFields: ['policy'], ...extra } as ObjectKnowledgeSource,
+      name: id, label: id, adapter: 'memory',
+      source: { kind: 'object', object: 'clause', content: ['body'], metadataFields: ['policy'], ...extra } as ObjectKnowledgeSource,
     };
   }
 
@@ -2025,7 +1886,7 @@ describe('KnowledgeService — record-level search (granularity, groupBy, freshn
   function hitOf(source: KnowledgeSource, row: Row, n: number, score: number, schema?: unknown): KnowledgeHit {
     const doc = recordToDocument(source, source.source as ObjectKnowledgeSource, row, schema);
     return {
-      chunkId: `${doc.id}#${n}`, documentId: doc.id, sourceId: source.id, sourceRecordId: row.id,
+      chunkId: `${doc.id}#${n}`, documentId: doc.id, sourceId: source.name, sourceRecordId: row.id,
       score, snippet: `${row.body as string} (${n})`, metadata: doc.metadata, docHash: doc.docHash,
     };
   }
@@ -2033,7 +1894,7 @@ describe('KnowledgeService — record-level search (granularity, groupBy, freshn
   /** An adapter answering the best `topK` of `corpus[sourceId]`. */
   function rankingAdapter(corpus: Record<string, KnowledgeHit[]>) {
     const searchSpy = vi.fn(async (_q: string, opts: { source: KnowledgeSource; topK: number }) =>
-      [...(corpus[opts.source.id] ?? [])].sort((a, b) => b.score - a.score).slice(0, opts.topK));
+      [...(corpus[opts.source.name] ?? [])].sort((a, b) => b.score - a.score).slice(0, opts.topK));
     return {
       id: 'memory', upsert: vi.fn(async () => undefined), delete: vi.fn(async () => undefined),
       search: searchSpy, searchSpy,
@@ -2083,14 +1944,14 @@ describe('KnowledgeService — record-level search (granularity, groupBy, freshn
     readable?: string[];
     engine?: boolean;
   }) {
-    const byId = Object.fromEntries(opts.sources.map((s) => [s.id, s]));
+    const byId = Object.fromEntries(opts.sources.map((s) => [s.name, s]));
     const adapter = rankingAdapter(opts.corpus(byId));
     const engine = opts.engine === false ? undefined : tableEngine(opts.table, opts.readable);
     const logger = { debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const svc = new KnowledgeService({ ...(engine ? { dataEngine: engine } : {}), logger });
     svc.registerAdapter('memory', adapter);
     for (const s of opts.sources) svc.registerSource(s);
-    const asked = () => adapter.searchSpy.mock.calls.map((c) => [(c[1] as { source: KnowledgeSource }).source.id, (c[1] as { topK: number }).topK]);
+    const asked = () => adapter.searchSpy.mock.calls.map((c) => [(c[1] as { source: KnowledgeSource }).source.name, (c[1] as { topK: number }).topK]);
     const systemReads = () => (engine?.find.mock.calls ?? []).filter((c) => isSystemCall(c));
     /** The freshness check's reads: system reads that pin ids with `$in` (the repair's re-read pins one id, `limit: 1`). */
     const freshnessReads = () => systemReads().filter((c) => JSON.stringify((c[1] as { where?: unknown }).where ?? {}).includes('"$in"'));
@@ -2172,21 +2033,17 @@ describe('KnowledgeService — record-level search (granularity, groupBy, freshn
     expect(h.asked().map(([id]) => id)).not.toContain('s2');
   });
 
-  it('groupBy across several sources: the same value is one group, the best hit of either source; a file source groups by document', async () => {
+  it('groupBy across several sources: the same value is one group, the best hit of either source', async () => {
     const table = policyRows();
-    const file: KnowledgeSource = { id: 'f1', label: 'f1', adapter: 'memory', source: { kind: 'file', prefix: 'docs/' } as KnowledgeSource['source'] };
-    const fileHit = (doc: string, n: number, score: number): KnowledgeHit =>
-      ({ chunkId: `${doc}#${n}`, documentId: doc, sourceId: 'f1', score, snippet: doc });
     const h = setup({
-      table, sources: [clauseSource('s1'), clauseSource('s2'), file],
+      table, sources: [clauseSource('s1'), clauseSource('s2')],
       corpus: ({ s1, s2 }) => ({
         s1: [hitOf(s1, table[0], 0, 0.6)],
         s2: [hitOf(s2, table[1], 0, 0.8), hitOf(s2, table[2], 0, 0.3)],
-        f1: [fileHit('handbook.md', 0, 0.7), fileHit('handbook.md', 1, 0.65), fileHit('faq.md', 0, 0.2)],
       }),
     });
     const out = await h.svc.search('q', { groupBy: 'policy', topK: 5, executionContext: MEMBER });
-    expect(out.map((x) => x.chunkId)).toEqual(['s2:c2#0', 'handbook.md#0', 's2:c3#0', 'faq.md#0']);
+    expect(out.map((x) => x.chunkId)).toEqual(['s2:c2#0', 's2:c3#0']);
   });
 
   it("groupBy with granularity 'chunk', an empty groupBy and an unknown granularity are refused, coded VALIDATION_ERROR / 400", async () => {

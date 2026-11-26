@@ -1,14 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Which `object` knowledge sources a caller's search may reach — the exposure
+ * Which knowledge sources a caller's search may reach — the exposure
  * decision and the field-level read rules, asked at SOURCE granularity before
  * a source is searched.
  *
  * ## Why the knowledge service owes them
  *
  * A knowledge passage is built at index time, under a system context, from
- * every `contentFields` member of its source (plus the object's display field
+ * every `content` member of its source (plus the object's display field
  * as the title, and the source's `metadataFields`). The row re-check in `applyPermissionFilter` asks
  * only "may this caller read the row?". Every other door that serves object
  * rows outside the data routes also asks the spec's one exposure decision
@@ -34,7 +34,7 @@
  *    the stored-metadata family never) — the posture the MCP record tools take.
  *
  * Then, per source, the **field gate**: every field the source serves (each
- * `contentFields` member — `'*'` meaning every field the object declares — each
+ * `content` member, each
  * `metadataFields` member, the title field — `documentTitleField` — and,
  * while the index may hold documents assembled under the earlier title rule, a
  * declared `title`), less the credential-class and `internal` fields the index
@@ -101,7 +101,6 @@ export type KnowledgeSourceRefusal =
   | 'object-api-not-served'
   | 'system-object-not-ai-readable'
   | 'field-not-queryable'
-  | 'fields-not-enumerable'
   | 'field-answer-unavailable';
 
 export type KnowledgeSourceAdmission =
@@ -131,7 +130,7 @@ type FieldAnswer =
 export interface ObjectAdmission {
   readonly object: string;
   readonly schema: unknown;
-  readonly refused?: Exclude<KnowledgeSourceRefusal, 'field-not-queryable' | 'fields-not-enumerable' | 'field-answer-unavailable'>;
+  readonly refused?: Exclude<KnowledgeSourceRefusal, 'field-not-queryable' | 'field-answer-unavailable'>;
   readonly fields?: FieldAnswer;
 }
 
@@ -240,24 +239,17 @@ export async function admitObject(
 /**
  * The fields a source serves in a passage, a hit's `title` or its `metadata`,
  * less the ones the index never carries (`recordToDocument`'s withheld set).
- * `undefined` when `'*'` is declared and the object's fields cannot be
- * enumerated.
+ * A source lists every field it serves (ADR-0161 K5: `content` takes no
+ * wildcard), so the set never depends on what else the object declares.
  */
-export function servedFieldsOf(objSource: ObjectKnowledgeSource, schema: unknown): Set<string> | undefined {
+export function servedFieldsOf(objSource: ObjectKnowledgeSource, schema: unknown): Set<string> {
   const withheld = new Set<string>([
     ...collectCredentialWriteResponseFields(schema),
     ...collectInternalWriteResponseFields(schema),
   ]);
   const declared = declaredFields(schema);
   const served = new Set<string>();
-  for (const field of objSource.contentFields) {
-    if (field === '*') {
-      if (!declared) return undefined;
-      for (const [name] of declared) if (name !== 'id') served.add(name);
-    } else {
-      served.add(field);
-    }
-  }
+  for (const field of objSource.content) served.add(field);
   for (const field of objSource.metadataFields ?? []) served.add(field);
   // `recordToDocument` serves the title field's value whatever the source names.
   const titleField = documentTitleField(schema);
@@ -285,13 +277,11 @@ export function admitSourceFields(
   }
   const served = servedFieldsOf(objSource, admission.schema);
   if (fields.kind === 'masked-only') {
-    // No declaration known ⇒ nothing is masked, so an unenumerable `'*'` serves nothing masked either.
-    for (const field of served ?? []) {
+    for (const field of served) {
       if (fields.masked.has(field)) return { admitted: false, reason: 'field-not-queryable', object, field };
     }
     return { admitted: true };
   }
-  if (!served) return { admitted: false, reason: 'fields-not-enumerable', object };
   for (const field of served) {
     if (!fields.queryable.has(field)) return { admitted: false, reason: 'field-not-queryable', object, field };
   }

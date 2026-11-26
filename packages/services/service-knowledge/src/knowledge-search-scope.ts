@@ -113,8 +113,7 @@ export function scopeTermsFor(
   schemaOf: (object: string) => unknown,
 ): SourceScope {
   const out: SourceScope = { terms: [], ambiguous: [] };
-  if (source.source.kind !== 'object') return out;
-  const objSource = source.source as ObjectKnowledgeSource;
+  const objSource = source.source;
   let links: Map<string, string[]> | undefined;
   for (const entry of scope) {
     if (entry.ids.length === 0) continue;

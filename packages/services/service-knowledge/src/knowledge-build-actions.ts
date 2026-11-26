@@ -5,7 +5,9 @@
  * the operator's rebuild), on the `knowledge` settings namespace beside its
  * `test` action:
  *
- * - `rebuild` — payload `{ "source": "ID" }`. Starts one complete build of
+ * - `rebuild` — payload `{ "source": "ID" }`, where `ID` names a source the
+ *   way `search_knowledge` lists it (`NAMESPACE-NAME` for a package's source,
+ *   the bare name otherwise; a bare name one source has is read too). Starts one complete build of
  *   that source (`KnowledgeService.rebuildSource`, trigger `operator`) in the
  *   background and answers at once with the build's record; a build of the
  *   source already running on the node that answers is refused, not doubled.
@@ -26,9 +28,8 @@
  */
 
 import type { SettingsActionHandler } from '@objectstack/service-settings';
-import type { KnowledgeSource } from '@objectstack/spec/ai';
 import type { KnowledgeBuildRecord, KnowledgeIndexReading } from './knowledge-build.js';
-import type { KnowledgeService } from './knowledge-service.js';
+import type { KnowledgeService, KnowledgeSourceDescription } from './knowledge-service.js';
 
 /** The `knowledge` settings action that starts a rebuild of one source. */
 export const KNOWLEDGE_REBUILD_ACTION = 'rebuild';
@@ -39,15 +40,17 @@ export const KNOWLEDGE_INDEX_STATUS_ACTION = 'index_status';
 /** The part of `KnowledgeService` the two actions use. */
 export type KnowledgeBuildActionsService = Pick<
   KnowledgeService,
-  'listSources' | 'getSource' | 'readIndexState' | 'rebuildSource' | 'buildRecord'
+  'describeSources' | 'describeSource' | 'readIndexState' | 'rebuildSource' | 'buildRecord'
 >;
 
 /** One source in an `index_status` answer. */
 export interface KnowledgeIndexStatusEntry {
+  /** The source, as `search_knowledge` lists it: `NAMESPACE-NAME` for a package's source, the bare name otherwise. */
   id: string;
   label: string;
   adapter: string;
-  kind: KnowledgeSource['source']['kind'];
+  /** The package that holds the source; absent for a source no package holds. */
+  packageId?: string;
   /** What the adapter holds against what the service expects. */
   index: KnowledgeIndexReading;
   /** The last build this node ran of the source, or `null`. */
@@ -76,8 +79,27 @@ function readSourcePayload(payload: unknown): { source?: string } | { refused: s
 }
 
 function sourceIds(service: KnowledgeBuildActionsService): string {
-  const ids = service.listSources().map((s) => s.id);
+  const ids = service.describeSources().map((s) => s.id);
   return ids.length === 0 ? 'none is registered' : ids.join(', ');
+}
+
+/**
+ * The source a payload's `source` names, read by the service's one rule, or
+ * why it names none: no source has the name, or several do (the service's
+ * `409`, whose sentence lists each by the spelling that names it alone).
+ */
+function describe(
+  service: KnowledgeBuildActionsService,
+  ref: string,
+): { source: KnowledgeSourceDescription } | { refused: string } {
+  let source: KnowledgeSourceDescription | undefined;
+  try {
+    source = service.describeSource(ref);
+  } catch (err) {
+    return { refused: err instanceof Error ? err.message : String(err) };
+  }
+  if (!source) return { refused: `No knowledge source '${ref}' is registered (${sourceIds(service)}).` };
+  return { source };
 }
 
 /** The `rebuild` action, bound to `service`. */
@@ -88,17 +110,9 @@ export function knowledgeRebuildActionHandler(service: KnowledgeBuildActionsServ
     if (read.source === undefined) {
       return { ok: false, severity: 'error', message: `Name the source to rebuild: { "source": "ID" } (${sourceIds(service)}).` };
     }
-    const source = service.getSource(read.source);
-    if (!source) {
-      return { ok: false, severity: 'error', message: `No knowledge source '${read.source}' is registered (${sourceIds(service)}).` };
-    }
-    if (source.source.kind !== 'object') {
-      return {
-        ok: false,
-        severity: 'error',
-        message: `Source '${source.id}' is a ${source.source.kind} source: its adapter (${source.adapter}) ingests it, and the knowledge service does not build it.`,
-      };
-    }
+    const named = describe(service, read.source);
+    if ('refused' in named) return { ok: false, severity: 'error', message: named.refused };
+    const source = named.source;
     const running = service.buildRecord(source.id);
     if (running?.status === 'running') {
       return {
@@ -131,23 +145,21 @@ export function knowledgeIndexStatusActionHandler(service: KnowledgeBuildActions
   return async ({ payload }) => {
     const read = readSourcePayload(payload);
     if ('refused' in read) return { ok: false, severity: 'error', message: read.refused };
-    let targets: KnowledgeSource[];
+    let targets: KnowledgeSourceDescription[];
     if (read.source !== undefined) {
-      const source = service.getSource(read.source);
-      if (!source) {
-        return { ok: false, severity: 'error', message: `No knowledge source '${read.source}' is registered (${sourceIds(service)}).` };
-      }
-      targets = [source];
+      const named = describe(service, read.source);
+      if ('refused' in named) return { ok: false, severity: 'error', message: named.refused };
+      targets = [named.source];
     } else {
-      targets = service.listSources();
+      targets = service.describeSources();
     }
     const sources: KnowledgeIndexStatusEntry[] = [];
     for (const source of targets) {
       sources.push({
         id: source.id,
-        label: source.label,
-        adapter: source.adapter,
-        kind: source.source.kind,
+        label: source.source.label,
+        adapter: source.source.adapter,
+        ...(source.packageId === undefined ? {} : { packageId: source.packageId }),
         index: await service.readIndexState(source.id),
         build: service.buildRecord(source.id) ?? null,
       });

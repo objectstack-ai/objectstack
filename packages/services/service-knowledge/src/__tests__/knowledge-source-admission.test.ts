@@ -49,16 +49,16 @@ function hitFor(sourceId: string, recordId = 'rec_1'): KnowledgeHit {
 }
 
 function makeAdapter(): IKnowledgeAdapter & { searchSpy: ReturnType<typeof vi.fn> } {
-  const searchSpy = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) => [hitFor(opts.source.id)]);
+  const searchSpy = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) => [hitFor(opts.source.name)]);
   return { id: 'memory', upsert: vi.fn(async () => undefined), delete: vi.fn(async () => undefined), search: searchSpy, searchSpy };
 }
 
-function objectSource(id: string, object: string, contentFields: string[], metadataFields?: string[]): KnowledgeSource {
+function objectSource(id: string, object: string, content: string[], metadataFields?: string[]): KnowledgeSource {
   return {
-    id,
+    name: id,
     label: id,
     adapter: 'memory',
-    source: { kind: 'object', object, contentFields, ...(metadataFields ? { metadataFields } : {}) } as ObjectKnowledgeSource,
+    source: { kind: 'object', object, content, ...(metadataFields ? { metadataFields } : {}) } as ObjectKnowledgeSource,
   };
 }
 
@@ -109,7 +109,7 @@ function setup(options: {
   });
   svc.registerAdapter('memory', adapter);
   for (const s of options.sources) svc.registerSource(s);
-  const searched = () => adapter.searchSpy.mock.calls.map((c) => (c[1] as { source: KnowledgeSource }).source.id);
+  const searched = () => adapter.searchSpy.mock.calls.map((c) => (c[1] as { source: KnowledgeSource }).source.name);
   return { svc, adapter, engine, searched };
 }
 
@@ -148,16 +148,17 @@ describe('field gate — a source serving a field the caller may not query is no
     expect(ids(await plain.svc.search('q', { executionContext: MEMBER }))).toEqual(['s']);
   });
 
-  it("`'*'` serves every declared field: one hidden field refuses it, while the fields the index never carries are not asked", async () => {
+  it('a source that lists every field: one hidden field refuses it, while the fields the index never carries are not asked', async () => {
     const withSecret: ObjectDef = {
       name: 'ticket',
       fields: { ...TICKET.fields, api_token: { type: 'password' }, internal_score: { type: 'number', internal: true } },
     };
     const allButSecrets = makeSecurity(() => Object.keys(TICKET.fields));
-    const admitted = setup({ objects: [withSecret], sources: [objectSource('all', 'ticket', ['*'])], security: allButSecrets });
+    const every = Object.keys(withSecret.fields).filter((f) => f !== 'id');
+    const admitted = setup({ objects: [withSecret], sources: [objectSource('all', 'ticket', every)], security: allButSecrets });
     expect(ids(await admitted.svc.search('q', { executionContext: MEMBER }))).toEqual(['all']);
 
-    const refused = setup({ objects: [withSecret], sources: [objectSource('all', 'ticket', ['*'])], security: salaryHiddenFromMembers });
+    const refused = setup({ objects: [withSecret], sources: [objectSource('all', 'ticket', every)], security: salaryHiddenFromMembers });
     expect(await refused.svc.search('q', { executionContext: MEMBER })).toEqual([]);
   });
 
@@ -245,36 +246,27 @@ describe('exposure gate — an object the caller\'s exposure decision refuses is
     expect(await svc.search('q', { executionContext: MANAGER })).toEqual([]);
     expect(searched()).toEqual([]);
   });
-
-  it('a file / http source is untouched by either gate', async () => {
-    const { svc } = setup({
-      objects: [sealed],
-      sources: [objectSource('sealed', 'sealed', ['body']), { id: 'web', label: 'web', adapter: 'memory', source: { kind: 'http', urls: ['https://x.test'] } as KnowledgeSource['source'] }],
-    });
-    expect(ids(await svc.search('q', { executionContext: MEMBER }))).toEqual(['web']);
-  });
 });
 
 describe('no context, no engine, foreign hits — an object source no gate can judge is never served', () => {
   it('no context: an object source is not searched, even when its hits carry no `sourceRecordId`', async () => {
     const adapter = makeAdapter();
     adapter.search = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) => [
-      { chunkId: 'c', documentId: 'd', sourceId: opts.source.id, score: 0.9, snippet: 'passage' },
+      { chunkId: 'c', documentId: 'd', sourceId: opts.source.name, score: 0.9, snippet: 'passage' },
     ]);
     const svc = new KnowledgeService({ dataEngine: makeEngine([TICKET]) });
     svc.registerAdapter('memory', adapter);
     svc.registerSource(objectSource('notes', 'ticket', ['body']));
-    svc.registerSource({ id: 'web', label: 'web', adapter: 'memory', source: { kind: 'http', urls: ['https://x.test'] } as KnowledgeSource['source'] });
-    expect(ids(await svc.search('q'))).toEqual(['web']);
-    expect((adapter.search as ReturnType<typeof vi.fn>).mock.calls.map((c) => (c[1] as { source: KnowledgeSource }).source.id)).toEqual(['web']);
-    // Preservation: the system context still reaches the object source.
-    expect(ids(await svc.search('q', { executionContext: SYSTEM }))).toEqual(['notes', 'web']);
+    expect(ids(await svc.search('q'))).toEqual([]);
+    expect(adapter.search).not.toHaveBeenCalled();
+    // Preservation: the system context still reaches the source.
+    expect(ids(await svc.search('q', { executionContext: SYSTEM }))).toEqual(['notes']);
   });
 
   it('no data engine: an object source is not searched for an end-user context', async () => {
     const adapter = makeAdapter();
     adapter.search = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) => [
-      { chunkId: 'c', documentId: 'd', sourceId: opts.source.id, score: 0.9, snippet: 'passage' },
+      { chunkId: 'c', documentId: 'd', sourceId: opts.source.name, score: 0.9, snippet: 'passage' },
     ]);
     const svc = new KnowledgeService();
     svc.registerAdapter('memory', adapter);
@@ -286,8 +278,8 @@ describe('no context, no engine, foreign hits — an object source no gate can j
   it('an admitted object source\'s hit with no `sourceRecordId` cannot be re-checked and is dropped', async () => {
     const adapter = makeAdapter();
     adapter.search = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) => [
-      { chunkId: 'a', documentId: 'a', sourceId: opts.source.id, sourceRecordId: 'rec_1', score: 0.9, snippet: 'row' },
-      { chunkId: 'b', documentId: 'b', sourceId: opts.source.id, score: 0.8, snippet: 'unplaced' },
+      { chunkId: 'a', documentId: 'a', sourceId: opts.source.name, sourceRecordId: 'rec_1', score: 0.9, snippet: 'row' },
+      { chunkId: 'b', documentId: 'b', sourceId: opts.source.name, score: 0.8, snippet: 'unplaced' },
     ]);
     const svc = new KnowledgeService({ dataEngine: makeEngine([TICKET]) });
     svc.registerAdapter('memory', adapter);
@@ -299,7 +291,7 @@ describe('no context, no engine, foreign hits — an object source no gate can j
     const adapter = makeAdapter();
     // Every search answers the refused source's passage as well as its own.
     adapter.search = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) =>
-      opts.source.id === 'notes' ? [hitFor('notes')] : [hitFor(opts.source.id), hitFor('notes')]);
+      opts.source.name === 'notes' ? [hitFor('notes')] : [hitFor(opts.source.name), hitFor('notes')]);
     const warn = vi.fn();
     const svc = new KnowledgeService({ dataEngine: makeEngine([TICKET]), resolveSecurity: () => salaryHiddenFromMembers, logger: { warn } });
     svc.registerAdapter('memory', adapter);

@@ -1,9 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { IKnowledgeService } from '@objectstack/spec/contracts';
 import type { KnowledgeSource } from '@objectstack/spec/ai';
 import { documentIdFor, objectSourcesFor } from './knowledge-service.js';
-import type { KnowledgeLogger } from './knowledge-service.js';
+import type { KnowledgeLogger, KnowledgeService } from './knowledge-service.js';
 
 /**
  * Structural shape of a `LifecycleReapGuard` (ADR-0057 amendment).
@@ -21,8 +20,12 @@ type ReapGuard = (
   rows: Array<Record<string, unknown>>,
 ) => Promise<Array<string | number>>;
 
-/** The slice of `IKnowledgeService` the guard consumes — existing members only. */
-type KnowledgeReapGuardService = Pick<IKnowledgeService, 'listSources' | 'getAdapter'>;
+/**
+ * The slice of `KnowledgeService` the guard consumes. `indexedSources` answers
+ * each source as its adapter is handed it — `name` is its index key — which
+ * is what a document id is built from and what the adapter's context carries.
+ */
+type KnowledgeReapGuardService = Pick<KnowledgeService, 'indexedSources' | 'getAdapter'>;
 
 /**
  * Reap guard that DE-INDEXES a row before the platform lifecycle sweep deletes
@@ -30,7 +33,7 @@ type KnowledgeReapGuardService = Pick<IKnowledgeService, 'listSources' | 'getAda
  *
  * ## Why this exists
  *
- * A knowledge index built from an `object` source is a per-record projection
+ * A knowledge index is a per-record projection
  * keyed by `sourceRecordId`. The sweep's retention reap (`LifecycleService`)
  * deletes rows by predicate, and ADR-0057 §3.3 forbids fanning that out as N
  * per-record events (cleanup must not re-feed the tables it is draining). So
@@ -68,7 +71,7 @@ export function createKnowledgeReapGuard(
     // registered or unregistered while the process runs, and a stale snapshot
     // would de-index against a source that no longer exists (or miss one that
     // now does) for the life of the kernel.
-    const targets = objectSourcesFor(service.listSources(), object);
+    const targets = objectSourcesFor(service.indexedSources(), object);
 
     for (const row of rows) {
       const id = row?.id as string | number | undefined | null;
@@ -82,7 +85,7 @@ export function createKnowledgeReapGuard(
       for (const source of targets) {
         try {
           const adapter = service.getAdapter(source.adapter);
-          await adapter.delete([documentIdFor(source.id, recordId)], {
+          await adapter.delete([documentIdFor(source.name, recordId)], {
             source,
             // Declared free-form diagnostics tag on the EXISTING
             // `AdapterContext.reason` union — an adapter that logs by reason
@@ -92,7 +95,7 @@ export function createKnowledgeReapGuard(
         } catch (err) {
           deIndexed = false;
           logger?.warn?.(
-            `[knowledge] reap guard: de-index failed for source '${source.id}' ` +
+            `[knowledge] reap guard: de-index failed for source '${source.name}' ` +
               `(object='${object}', record='${recordId}'): ${(err as Error)?.message ?? err}. ` +
               'Row kept this sweep and retried on the next one — deleting it now would ' +
               'orphan the index entry.',
@@ -107,8 +110,8 @@ export function createKnowledgeReapGuard(
 }
 
 /**
- * Objects this service must guard: every distinct object named by an `object`
- * source whose row-change sync is on.
+ * Objects this service must guard: every distinct object named by a source
+ * whose row-change sync is on.
  *
  * Same predicate as the guard's own target resolution, so an object is guarded
  * exactly when the guard would have work to do for it.
@@ -116,7 +119,6 @@ export function createKnowledgeReapGuard(
 export function guardedObjectsFor(sources: KnowledgeSource[]): string[] {
   const objects = new Set<string>();
   for (const source of sources) {
-    if (source.source.kind !== 'object') continue;
     const object = source.source.object;
     // Asked through the SAME predicate the guard uses, never a second copy of
     // it: "is this object guarded?" and "what would the guard de-index for it?"
