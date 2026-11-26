@@ -44,7 +44,13 @@ export const SysImportJob = ObjectSchema.create({
     }),
 
     status: Field.select(
-      ['pending', 'running', 'succeeded', 'failed', 'cancelled'],
+      [
+        { label: 'pending', value: 'pending', color: 'yellow' },
+        'running',
+        'succeeded',
+        { label: 'failed', value: 'failed', color: 'red' },
+        { label: 'cancelled', value: 'cancelled', color: 'red' },
+      ],
       { label: 'Status', required: true, defaultValue: 'pending', group: 'State' },
     ),
 

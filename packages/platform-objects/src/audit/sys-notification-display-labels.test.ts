@@ -16,12 +16,15 @@ import { SysNotification } from './sys-notification.object.js';
  *    stays text: the hint changes how the value is drawn, never what is stored.
  */
 describe('sys_notification display labels', () => {
-  it('severity options are labelled Info / Warning / Critical over the same stored codes', () => {
-    const options = (SysNotification.fields.severity as { options?: Array<{ label: string; value: string }> }).options;
+  // objectstack#36882 — the renderer colours a select option only when its
+  // author declares a colour, so the severity colours (info blue, warning
+  // yellow, critical red: the #27521 row 4 remedy) live on the options.
+  it('severity options are labelled Info / Warning / Critical over the same stored codes, and declare their colours', () => {
+    const options = (SysNotification.fields.severity as { options?: Array<{ label: string; value: string; color?: string }> }).options;
     expect(options).toEqual([
-      { label: 'Info', value: 'info' },
-      { label: 'Warning', value: 'warning' },
-      { label: 'Critical', value: 'critical' },
+      { label: 'Info', value: 'info', color: 'blue' },
+      { label: 'Warning', value: 'warning', color: 'yellow' },
+      { label: 'Critical', value: 'critical', color: 'red' },
     ]);
   });
 

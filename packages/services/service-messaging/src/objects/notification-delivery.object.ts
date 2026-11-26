@@ -192,7 +192,14 @@ export const NotificationDelivery = ObjectSchema.create({
             description: 'Snapshot of the rendered notification content for dispatch.',
         }),
 
-        status: Field.select(['pending', 'in_flight', 'success', 'failed', 'dead', 'suppressed'], {
+        status: Field.select([
+            { label: 'pending', value: 'pending', color: 'yellow' },
+            'in_flight',
+            'success',
+            { label: 'failed', value: 'failed', color: 'red' },
+            'dead',
+            'suppressed',
+        ], {
             label: 'Status',
             required: true,
             defaultValue: 'pending',
