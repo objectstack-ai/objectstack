@@ -1748,12 +1748,18 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
    * `summarizeField` the header totals, and is asked whether or not the view
    * draws a statistic (`hostLaneRead`): a page cannot say how many records a
    * lane holds, nor which lanes exist past it.
+   *
+   * objectstack#37326 — a board drawn in swimlanes asks the same one read,
+   * grouped by the lane field alone: its foot statistic and its column counts
+   * are a whole lane's, across every swimlane, as on the flat board. No read
+   * groups by the swimlane field, so a swimlane row's own count stays the
+   * page's (`KanbanImpl.tsx`, `swimlaneCountIsWhole`).
    */
   const boardQueriesItself = !hasExternalData && !boundData && !schema.data && !!schema.objectName && !!dataSource;
   const hostHandsQuery = hasExternalData && laneStatisticQuery !== undefined && !lanePagingAsked && !!schema.objectName && !!dataSource;
   const laneReadAsked = boardQueriesItself || hostHandsQuery;
   const flatLanes = !!schema.groupBy && !schema.swimlaneField && !schema.grouping?.fields?.[0]?.field;
-  const hostLaneRead = hostHandsQuery && flatLanes;
+  const hostLaneRead = hostHandsQuery && !!schema.groupBy;
   // The header total is drawn when the view draws no lane statistic of the
   // closed set (see `columnSummary` below).
   const headerTotalField =
@@ -1761,7 +1767,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       ? summarizeField
       : undefined;
   const laneStatisticQuestion = useMemo((): string => {
-    if (!laneReadAsked || !flatLanes || !schema.groupBy) return '';
+    if (!laneReadAsked || !schema.groupBy) return '';
     // Asked once the definition settles: what it asks (the statistic, the
     // header total) is gated on the definition, and an earlier ask would be a
     // second read the moment it settles.
@@ -1779,7 +1785,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       searchFields: hostSearch.$searchFields,
     });
     return query ? JSON.stringify([schema.objectName, query]) : '';
-  }, [laneReadAsked, flatLanes, objectDefReady, hostLaneRead, headerTotalField, statisticFieldDrawable, statisticType, statisticField, schema.groupBy, schema.objectName, dataSource, hostSearchKey, queryFilter]);
+  }, [laneReadAsked, objectDefReady, hostLaneRead, headerTotalField, statisticFieldDrawable, statisticType, statisticField, schema.groupBy, schema.objectName, dataSource, hostSearchKey, queryFilter]);
   type LaneReadAnswer = {
     question: string;
     figures: Record<string, LaneFigure> | null;
@@ -1851,14 +1857,16 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
    * value `laneKeyOf` keys a card by. Any other lane field without options (a
    * text, number, boolean or date field) draws the page's lanes only, since
    * the aggregate need not spell its key as a `find` row spells the value.
+   * A board drawn in swimlanes draws the page's lanes only (objectstack#37326):
+   * a lane past the page would be an empty column in every swimlane.
    */
   const lanesFromData = JSON.parse(statisticLanesKey).ids === null;
   const extraLaneIds = useMemo((): string[] => {
     const keys = laneReadHeld?.keys;
-    if (!hostLaneRead || !lanesFromData || !keys || !laneTargetObject) return [];
+    if (!hostLaneRead || !flatLanes || !lanesFromData || !keys || !laneTargetObject) return [];
     const drawn = new Set((effectiveColumns as Array<{ id: unknown }>).map((col) => String(col.id)));
     return keys.filter((key) => !drawn.has(key));
-  }, [hostLaneRead, lanesFromData, laneReadHeld, effectiveColumns, laneTargetObject]);
+  }, [hostLaneRead, flatLanes, lanesFromData, laneReadHeld, effectiveColumns, laneTargetObject]);
   const extraLaneIdsKey = JSON.stringify(extraLaneIds);
   const [extraLaneTitles, setExtraLaneTitles] = useState<{ key: string; titles: Record<string, string> } | null>(null);
   useEffect(() => {
