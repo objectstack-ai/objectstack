@@ -612,8 +612,10 @@ jobs:
       # artifact with this checkout's CLI and boots it under `os start` inside
       # the official image's user, entrypoint, environment and healthcheck.
       #
-      # Before it boots, the built image is asked which `os` its CMD resolves:
-      # it must be the candidate CLI step 2 placed, never the global one.
+      # Before it boots, the step right below builds the image and asks which
+      # `os` its CMD resolves: it must be the candidate CLI step 2 placed, never
+      # the global one. That assertion is a step of its own so the boot block
+      # keeps the shape scaffold-e2e-boot-probe.test.ts runs against stubs.
       #
       # DOES NOT PROVE: the image a user pulls, whose CLI is the published one
       # (step 1). Nor the template Dockerfile's `npm ci` branch: this job
@@ -628,16 +630,21 @@ jobs:
       # by exactly one FROM tag — asserted by the pinned-shape step above rather
       # than built a second time here, since the layers below the tag are the
       # ones this build already proves (#9117).
-      - name: Docker build and run (scaffolded Dockerfile)
+      - name: Assert the scaffolded image runs the candidate CLI
         run: |
           cd "$RUNNER_TEMP/e2e-app"
           docker build --pull=false -t e2e-app .
           RESOLVED=$(docker run --rm e2e-app sh -c 'command -v os')
           echo "os in the image that boots resolves to: $RESOLVED"
           if [ -z "${CANDIDATE_OS:-}" ] || [ "$RESOLVED" != "$CANDIDATE_OS" ]; then
-            echo "::error::os in the e2e-app image resolves to '$RESOLVED', not the candidate CLI '${CANDIDATE_OS:-<unset>}' — the boot below would run a CLI this checkout did not build"
+            echo "::error::os in the e2e-app image resolves to '$RESOLVED', not the candidate CLI '${CANDIDATE_OS:-<unset>}' — the boot in the next step would run a CLI this checkout did not build"
             exit 1
           fi
+
+      - name: Docker build and run (scaffolded Dockerfile)
+        run: |
+          cd "$RUNNER_TEMP/e2e-app"
+          docker build --pull=false -t e2e-app .
           # The fixed container NAME and the fixed HOST PORT below both stay,
           # and they are a different animal from the in-process port shift the
           # two `os start` blocks guard against (#9779). Docker declines both
