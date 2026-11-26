@@ -461,6 +461,7 @@
     "ai/Skill:_packageVersion",
     "ai/Skill:_provenance",
     "ai/Skill:active",
+    "ai/Skill:context",
     "ai/Skill:description",
     "ai/Skill:instructions",
     "ai/Skill:label",

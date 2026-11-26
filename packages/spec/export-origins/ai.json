@@ -285,6 +285,7 @@
     "getRecordContextToolJsonSchemas": "src/ai/record-context-tools.zod.ts#getRecordContextToolJsonSchemas (function)",
     "headingsOf": "src/ai/record-body-anchor.ts#headingsOf (function)",
     "scopesToAgentPermissionSets": "src/ai/mcp.zod.ts#scopesToAgentPermissionSets (function)",
+    "skillBindsRecordContextTool": "src/ai/skill.zod.ts#skillBindsRecordContextTool (function)",
     "skillForm": "src/ai/skill.form.ts#skillForm (const)",
     "stripBodyTags": "src/ai/record-body-anchor.ts#stripBodyTags (function)",
     "toolForm": "src/ai/tool.form.ts#toolForm (const)"
