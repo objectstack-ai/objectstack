@@ -168,7 +168,9 @@ const schema: ChatbotSchema = {
   the composer shows a model picker. A model whose entry carries a
   `costMultiplier` shows it as `×N` beside its label; with the allowance usage
   served (`GET /api/v1/ai/usage`) the list notes the share left; a pick at
-  `×20` or above asks once before it applies
+  `×20` or above asks once before it applies. Closed, the picker shows the
+  model's `tierLabel` (its tier name alone) when the entry carries one, and
+  its `label` otherwise; the open list always shows the `label`
 - **Lightweight**: Pure React components with minimal dependencies
 
 ## Schema API
