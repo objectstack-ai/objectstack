@@ -1916,6 +1916,14 @@ export interface FormField {
    */
   readonlyWhen?: string | { dialect?: string; source: string };
   /**
+   * CEL predicate: when TRUE the field is read-only BY HAND — the form draws it
+   * and a person cannot edit it, while API, import, action and flow writes keep
+   * it (no server strip). Aligns with @objectstack/spec Field.uiReadonlyWhen
+   * and folds into the same read-only verdict as `readonlyWhen`. Fails open.
+   * @example "record.status != 'draft'"
+   */
+  uiReadonlyWhen?: string | { dialect?: string; source: string };
+  /**
    * CEL predicate: when TRUE the field is required (the server enforces the
    * same rule in its rule-validator). Aligns with @objectstack/spec
    * Field.requiredWhen. Fails open (field is not required).

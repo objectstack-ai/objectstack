@@ -652,3 +652,48 @@ describe('people, multi-select, tags, check and rating columns take their extras
     expect(cols[1]).toEqual({ name: 'stars', type: 'rating', max: 3 });
   });
 });
+
+describe('line-item columns and the hand lock (#36806)', () => {
+  it('skips a uiReadonly child field and carries a uiReadonlyWhen one onto its column', () => {
+    const schema = {
+      name: 'line',
+      fields: {
+        parent: { type: 'master_detail', reference: 'order' },
+        product: { type: 'text', label: 'Product' },
+        status: { type: 'text', label: 'Status', uiReadonly: true },
+        qty: { type: 'number', label: 'Qty', uiReadonlyWhen: "parent.status != 'draft'" },
+      },
+    };
+    const cols = deriveColumns(schema, { booleanLabel, relationshipField: 'parent' });
+    const byName = Object.fromEntries(cols.map((c) => [c.name, c]));
+    expect(byName.status).toBeUndefined();
+    expect((byName.qty as { uiReadonlyWhen?: unknown }).uiReadonlyWhen).toBe("parent.status != 'draft'");
+    expect((byName.product as { uiReadonlyWhen?: unknown }).uiReadonlyWhen).toBeUndefined();
+    // An authored column list keeps the predicate too (the hydrate path).
+    const hydrated = hydrateColumns([{ name: 'qty' }], schema, { booleanLabel });
+    expect((hydrated[0] as { uiReadonlyWhen?: unknown }).uiReadonlyWhen).toBe("parent.status != 'draft'");
+  });
+
+  // REWORK S3(a): an AUTHORED column over a `uiReadonly` child field, typed
+  // or not, carries the lock — no server strip stands behind the hand lock.
+  it('an authored column over a uiReadonly child field carries the lock, typed or untyped', () => {
+    const schema = {
+      name: 'line',
+      fields: {
+        status: { type: 'text', label: 'Status', uiReadonly: true },
+        qty: { type: 'number', label: 'Qty', uiReadonlyWhen: "record.status != 'draft'" },
+        note: { type: 'text', label: 'Note' },
+      },
+    };
+    const [untyped, typed, typedWhen, plain] = hydrateColumns(
+      [{ name: 'status' }, { name: 'status', type: 'text' }, { name: 'qty', type: 'number' }, { name: 'note' }],
+      schema,
+      { booleanLabel },
+    ) as Array<{ uiReadonly?: boolean; uiReadonlyWhen?: unknown }>;
+    expect(untyped!.uiReadonly).toBe(true);
+    expect(typed!.uiReadonly).toBe(true);
+    expect(typedWhen!.uiReadonlyWhen).toBe("record.status != 'draft'");
+    expect(plain!.uiReadonly).toBeUndefined();
+    expect(plain!.uiReadonlyWhen).toBeUndefined();
+  });
+});

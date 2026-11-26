@@ -204,6 +204,7 @@ const zh = {
     uploadInFlight: '请等待上传完成后再保存。',
     clearedOnHide: '已清空不再适用于当前取值的字段：{{fields}}',
     visibleWhenFaulted: '无法提交：{{fields}} 的 visibleWhen 规则无法求值。需先修正该规则，才能提交此表单。',
+    uiReadonlyWhenFaulted: '无法提交：{{fields}} 的 uiReadonlyWhen 规则无法求值。需先修正该规则，才能提交此表单。',
     fieldRequired: '此字段为必填项',
     saveError: '保存失败',
     unsavedChanges: '您有未保存的更改，确定要离开吗？',

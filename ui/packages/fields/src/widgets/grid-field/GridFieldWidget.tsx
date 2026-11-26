@@ -15,7 +15,7 @@ import {
   TooltipTrigger,
 } from '@object-ui/components';
 import { Plus, Trash2, SlidersHorizontal, Maximize2, Copy, GripVertical, Info } from 'lucide-react';
-import { formatDate, formatDateTime, resolveFieldRuleState, toDisplayDate } from '@object-ui/core';
+import { formatDate, formatDateTime, resolveFieldRuleState, toDisplayDate, type FieldRulePredicate } from '@object-ui/core';
 import { useDisplayLocale, useLocalization, formatDisplayNumber } from '@object-ui/i18n';
 import { currencySymbol } from '../../currency.js';
 import { LookupField } from '../LookupField.js';
@@ -839,11 +839,26 @@ function GridFieldBody({
   );
   const cellRules = useCallback(
     (c: GridColumn, row: Row): { readonly: boolean; required: boolean } => {
-      if (!c.readonlyWhen && !c.requiredWhen) {
+      // The child FIELD's hand-lock predicate, carried onto the column in memory
+      // by `@object-ui/plugin-form`'s column derivation (never an authored
+      // `inlineColumns` key), folds into the same per-row verdict.
+      // A child field's static `uiReadonly` rides the same in-memory carry
+      // when an AUTHORED column names it (objectstack#36806): locked on every
+      // row, no predicate to judge.
+      const uiReadonly = (c as { uiReadonly?: boolean }).uiReadonly === true;
+      if (uiReadonly) return { readonly: true, required: !!c.required };
+      // The hand lock's predicate judges a STORED line only (objectstack#36806,
+      // S5): a create is not judged, as the create dialog does not judge it,
+      // and a new line seeds only the grid's columns, so an operand that is not
+      // a column is an absent key the fail-closed verdict would lock on.
+      const uiReadonlyWhen = rowHasId(row)
+        ? (c as { uiReadonlyWhen?: FieldRulePredicate }).uiReadonlyWhen
+        : undefined;
+      if (!c.readonlyWhen && !uiReadonlyWhen && !c.requiredWhen) {
         return { readonly: false, required: !!c.required };
       }
       const s = resolveFieldRuleState(
-        { readonlyWhen: c.readonlyWhen, requiredWhen: c.requiredWhen },
+        { readonlyWhen: c.readonlyWhen, uiReadonlyWhen, requiredWhen: c.requiredWhen },
         ruleRecordOf(booleanColumns, row),
         { required: !!c.required, readonly: false },
         undefined,
