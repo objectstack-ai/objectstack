@@ -549,6 +549,11 @@ describe('a lookup-laned board under a list view counts and totals each whole la
     await waitFor(() => expect(screen.getByRole('group', { name: 'Cyan Corp' })).toBeInTheDocument());
     expect(within(lane('Cyan Corp')).queryAllByRole('listitem')).toHaveLength(0);
     expect(laneBadge('Cyan Corp')).toBe('10');
+    // ONE `id IN (…)` read of the referenced records, projecting the id and
+    // the field the title is read from.
+    const titleReads = ds.find.mock.calls.filter((call: any[]) => call[0] === ACCOUNT);
+    expect(titleReads).toHaveLength(1);
+    expect(titleReads[0][1]).toEqual({ $filter: { id: { $in: ['acc-c'] } }, $top: 1, $select: ['id', 'name'] });
   });
 
   it('CONTROL: over a source with no grouped door no lane past the page is drawn', async () => {
