@@ -643,7 +643,7 @@ describe('the comment doors announce their writes on the data-invalidation bus (
 
   it('a refused door delete is not announced', async () => {
     // Every DELETE the doors answer is refused.
-    doorFetch.mockImplementation(async (url: unknown, init?: { method?: string }) =>
+    doorFetch.mockImplementation(async (_url: unknown, init?: { method?: string }) =>
       init?.method === 'DELETE'
         ? new Response(JSON.stringify({ success: false }), { status: 409 })
         : new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'content-type': 'application/json' } }),
