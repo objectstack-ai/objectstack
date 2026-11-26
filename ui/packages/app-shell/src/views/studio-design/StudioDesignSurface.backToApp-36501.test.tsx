@@ -58,6 +58,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { studioBackTarget } from './StudioBackToApp';
 import { rememberAppReturnPage, resetAppReturnPageForTests } from '../../utils/appReturnPage';
 import { parsePackages } from './packages-io';
@@ -145,7 +146,7 @@ function renderAt(entry: string) {
     <MemoryRouter initialEntries={[entry]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
         <Route path="/apps/*" element={<RunningApp />} />
         <Route path="*" element={<Elsewhere />} />
       </Routes>
@@ -163,8 +164,8 @@ describe('「‹ Back to app」 returns to the app page the author came from (ob
     const link = await backLink();
     expect(link).toHaveAccessibleName('Back to app');
     expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent('Sales');
-    expect(within(header()).getByTestId('studio-mark')).toHaveTextContent('Studio');
-    expect(within(header()).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Sales·Studio$/);
+    expect(within(header()).getByTestId('studio-mark')).toHaveTextContent(/^App Studio$/);
+    expect(within(header()).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Sales·App Studio$/);
     fireEvent.click(link);
     expect(await screen.findByTestId('running-app')).toHaveTextContent(`/apps/${OWN}/opportunity?view=open`);
   });
@@ -213,7 +214,7 @@ describe('a package with no app: 「‹ Back to app」 names the package and goe
     // objectstack#36748 — the name slot names the open package, by its label.
     const name = await within(header()).findByTestId('studio-back-app-name', undefined, { timeout: 8000 });
     expect(name).toHaveAttribute('data-names', 'package');
-    expect(within(header()).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Sales·Studio$/);
+    expect(within(header()).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Sales·App Studio$/);
     fireEvent.click(link);
     expect(await screen.findByTestId('elsewhere')).toHaveTextContent('/home');
   });

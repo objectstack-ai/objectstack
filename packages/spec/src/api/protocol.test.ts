@@ -390,6 +390,16 @@ describe('ObjectStack Protocol', () => {
         `costMultiplier ${String(bad)} is refused`,
       ).toBe(false);
     }
+    // objectstack#35578 — the optional tier display name the closed picker shows in place of `label`
+    const withTier = AiModelsResponseSchema.safeParse({ models: [{ ...entry, tierLabel: '快速' }] });
+    expect(withTier.success).toBe(true);
+    expect(withTier.data?.models[0]).toEqual({ ...entry, tierLabel: '快速' });
+    for (const bad of ['', 3, null]) {
+      expect(
+        AiModelsResponseSchema.safeParse({ models: [{ ...entry, tierLabel: bad }] }).success,
+        `tierLabel ${JSON.stringify(bad)} is refused`,
+      ).toBe(false);
+    }
 
     // conversations
     expect(CreateAiConversationRequestSchema.safeParse({ title: 'Q3 pipeline', metadata: { source: 'sdk' } }).success).toBe(true);

@@ -154,6 +154,11 @@ export const FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR = 'flow-node-write-unprovision
  * run. `error`, at the certainty the unknown-field verdict gates on: a
  * literal value against the literal options of a literal object. The options
  * read is `flow-select-options.ts`'s, shared with the start-condition rule.
+ *
+ * [#36964] A label in the same node's `filter` is not this id's: a filter
+ * operand is refused by nothing, it matches no row and the step succeeds on
+ * nothing. That is `flow-condition-option-label` (`validate-flow-trigger-readiness.ts`),
+ * the id for a label compared where the row holds the value.
  */
 export const FLOW_NODE_WRITE_UNKNOWN_OPTION = 'flow-node-write-unknown-option';
 

@@ -155,7 +155,26 @@ export class SqliteWasmDriver extends SqlDriver {
     }
   }
 
-  override async disconnect(): Promise<void> {
+  /**
+   * The disconnect in flight, shared by every caller that arrives during it.
+   * A second call made while the first is destroying the pool would otherwise
+   * see the connection still in the pool's free list, try to flush it, and
+   * wait on an acquire from a pool that is being destroyed, until Knex's
+   * acquire timeout (60 s). Cleared once that disconnect settles, so a later
+   * call takes the path a disconnected driver takes.
+   */
+  private disconnecting: Promise<void> | null = null;
+
+  override disconnect(): Promise<void> {
+    if (!this.disconnecting) {
+      this.disconnecting = this.disconnectOnce().finally(() => {
+        this.disconnecting = null;
+      });
+    }
+    return this.disconnecting;
+  }
+
+  private async disconnectOnce(): Promise<void> {
     if (this.beforeExitHandler && typeof process !== 'undefined') {
       try {
         process.removeListener('beforeExit', this.beforeExitHandler);
@@ -164,7 +183,36 @@ export class SqliteWasmDriver extends SqlDriver {
       }
       this.beforeExitHandler = null;
     }
-    await super.disconnect();
+    // `disconnect()` is the durability boundary (`BootOptions.databaseFile` in
+    // `@objectstack/verify`, a kernel's `stop()`, a refused boot's rollback):
+    // when it returns, everything committed is on disk. The connection's own
+    // `close()` flushes too, but it runs as the Knex pool's destroyer, and tarn
+    // bounds a destroyer by `destroyTimeoutMillis` (5 s by default). When that
+    // time runs out, tarn logs the rejection to its event handlers and resolves
+    // anyway. So a final flush slower than that (a whole-image fsync on a
+    // loaded disk) was still running when `disconnect()` returned, and a reader
+    // of the file met the bytes from before it. The flush is awaited HERE, with
+    // no timeout of its own. What bounds it is the caller: a kernel's graceful
+    // `shutdown()` is capped by its `shutdownTimeout`, while a failed boot's
+    // rollback has no cap, deliberately, because returning before the data is
+    // on disk is the defect this closes. A flush that fails is thrown once the
+    // pool is gone.
+    try {
+      if (this.hasLiveConnection()) await this.flush();
+    } finally {
+      await super.disconnect();
+    }
+  }
+
+  /**
+   * Whether the pool holds a connection. A driver that never opened one has
+   * nothing to flush, and acquiring a connection just to flush it would open
+   * (and create) the file.
+   */
+  private hasLiveConnection(): boolean {
+    const pool = (this as any).knex?.client?.pool;
+    if (!pool || typeof pool.numFree !== 'function' || typeof pool.numUsed !== 'function') return false;
+    return pool.numFree() + pool.numUsed() > 0;
   }
 
   /**

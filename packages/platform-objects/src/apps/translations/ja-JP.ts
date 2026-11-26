@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { jaJPObjects } from './ja-JP.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * 日本語 (ja-JP) — Setup App Translations
  */
 export const jaJP: TranslationData = {
   objects: jaJPObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('ja-JP'),
   apps: {
     account: {
       label: 'アカウント',
@@ -121,7 +124,7 @@ export const jaJP: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: '開発者・アナリスト・実装担当者向けのメタデータワークベンチ',
       navigation: {
         group_overview: { label: '概要' },

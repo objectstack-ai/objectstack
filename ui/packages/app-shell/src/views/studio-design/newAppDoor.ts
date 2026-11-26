@@ -29,6 +29,7 @@ import type { MetadataClient } from '@object-ui/data-objectstack';
 import { findTakenIdentifier } from './StudioPillarKit.js';
 import { buildAppSkeleton } from './skeletons.js';
 import { publishSavedItem } from './studioSaveBar.js';
+import { draftReceiptVersion } from '../metadata-admin/DraftConflictDialog.js';
 
 /** What `reserve` answers: a free app name, or the app holding the first candidate. */
 export type AppNameReservation = { name: string } | { taken: { name: string; label: string } };
@@ -63,13 +64,18 @@ export function newAppStep(
     },
     async create(packageId, name, label) {
       // The first-write pin refuses a draft that landed since `reserve`.
-      await client.save('app', name, buildAppSkeleton(name, label), {
+      const receipt = await client.save('app', name, buildAppSkeleton(name, label), {
         mode: 'draft',
         packageId,
         ifNoneMatch: '*',
         surface: 'studio',
       });
-      const live = await publishSavedItem(client, { type: 'app', name, packageId }, false);
+      // objectstack#37440 — the publish is pinned to the draft this create wrote (its receipt).
+      const live = await publishSavedItem(
+        client,
+        { type: 'app', name, packageId, draftVersion: draftReceiptVersion(receipt) },
+        false,
+      );
       if (!live.ok) throw live.error;
     },
   };

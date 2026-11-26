@@ -15,6 +15,7 @@ import {
   saveObjectExtensionArrangement,
   type ExtensionArrangementDoors,
 } from '../objectExtensionArrangementSave';
+import { draftPublishDoor } from './draftPublishDoor-37440';
 
 const BASE = 'app.hotcrm';
 const PAIR = 'app.hotcrm.custom';
@@ -174,5 +175,41 @@ describe("writing an installed object's arrangement into its pair (objectstack#3
     ).rejects.toThrow('refused');
     expect(refused.calls.at(-1)).toEqual(['reset', 'object_extension', 'lead', { state: 'draft', packageId: PAIR }]);
     expect(refused.refreshed).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the arrangement Save publishes only the draft it wrote (objectstack#37440)', () => {
+  const TYPE = 'object_extension';
+  function doorDoors() {
+    const door = draftPublishDoor();
+    const refreshed = vi.fn();
+    const d: ExtensionArrangementDoors = {
+      listPackages: async () => new Map([[BASE, { writable: false }]]),
+      ensureCustomization: async () => ({ packageId: PAIR, writable: true }),
+      client: {
+        ...door.client,
+        get: async () => null,
+        layered: async () => ({ code: { name: 'lead' }, effective: { name: 'lead' } }),
+      },
+      refreshed,
+    };
+    return { door, d };
+  }
+  const input = { objectName: 'lead', basePackageId: BASE, arrange: () => ({ relatedLists: ['task'] }) };
+
+  it("PIN: another writer's draft write between the save and its publish is refused, published by nobody, and kept", async () => {
+    const { door, d } = doorDoors();
+    door.interleave(TYPE, 'lead', PAIR, { extend: 'lead', label: 'theirs' });
+    await expect(saveObjectExtensionArrangement(input, TEXTS, d)).rejects.toThrow('pending draft');
+    expect(door.liveOf(TYPE, 'lead', PAIR)).toBeUndefined();
+    expect(door.draftOf(TYPE, 'lead', PAIR)).toEqual({ extend: 'lead', label: 'theirs' });
+    expect(door.calls.find(([c]) => c === 'publish')?.[3]).toMatchObject({ packageId: PAIR, draftVersion: expect.any(String) });
+  });
+
+  it('CONTROL: with no write in between, the same pinned publish takes the arrangement live', async () => {
+    const { door, d } = doorDoors();
+    await saveObjectExtensionArrangement(input, TEXTS, d);
+    expect(door.liveOf(TYPE, 'lead', PAIR)).toEqual({ extend: 'lead', relatedLists: ['task'] });
+    expect(door.draftOf(TYPE, 'lead', PAIR)).toBeUndefined();
   });
 });

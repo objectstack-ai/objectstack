@@ -1786,6 +1786,11 @@ export class ProtocolPackageCommitsFacet {
                         // [ADR-0146 D2] …and, for the pair's row, the override write gate.
                         deriveRestoredBody,
                         ...memberOption(member),
+                        // [#37130] The platform's own record is never restored:
+                        // refused into `failed[]` as {@link rollbackMetaItem}
+                        // refuses it, nothing written; the commit's other items
+                        // still revert (ADR-0067 D3).
+                        refusePlatformRecord: true,
                     });
                     rowWritten = `its row was restored to the body of version ${restoreToVersion}`;
                     revertPlan.push({
@@ -2319,6 +2324,9 @@ export class ProtocolPackageCommitsFacet {
                 packageId: rollbackPackageId,
                 // [#32905] …and only a version of that row's slot.
                 ...(slot?.addressed ? { versionOf: slot.owner } : {}),
+                // [#37130] The platform's own record is never restored: refused
+                // as the metadata service's `rollback` refuses it, nothing written.
+                refusePlatformRecord: true,
             });
             // #4521 — a rollback is a live write like any other: the restored
             // body must be the one the runtime dispatches on immediately, not

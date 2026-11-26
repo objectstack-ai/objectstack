@@ -1790,6 +1790,17 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/cli/src/commands/serve.ts',
       'scripts/publish-smoke.sh',
       'packages/cli/src/commands/init.ts',
+      // The platform's Starter app, READ by src/blank-template-starter-parity.test.ts
+      // (#36945). The blank template ships the Starter's companies, contacts,
+      // their views and its menu entries as source, and that test holds each
+      // template file equal to the Starter's, modulo the namespace. A
+      // Starter-only diff is exactly the drift it exists to catch, and without
+      // this declaration `create-objectstack#test` would hash the same across
+      // it and replay a cached green over the divergence (#7802's Layer B).
+      // `src/**`, not the whole example: the test reads its objects, views and
+      // app, and nothing outside `src/` but the config's namespace line.
+      'examples/app-starter/src/**',
+      'examples/app-starter/objectstack.config.ts',
     ],
     heldBy: {
       // Read through `git grep -- content/docs` and `git ls-files`, so the
@@ -1803,6 +1814,10 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // flat literal collector can see" while a change to it really does break
       // that test (measured there).
       'scripts/invoked-as.mjs': ['packages/create-objectstack/src/template-version-stamps.test.ts'],
+      // A walked root: the parity test resolves `examples/app-starter/src` once
+      // and joins each object, view and app file onto it, so the paths it reads
+      // are built from a variable this scan cannot fold — the witness names it.
+      'examples/app-starter/src/**': ['packages/create-objectstack/src/blank-template-starter-parity.test.ts'],
     },
   },
 };

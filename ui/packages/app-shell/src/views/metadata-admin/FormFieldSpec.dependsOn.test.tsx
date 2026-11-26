@@ -51,6 +51,10 @@
  * reader can consume — both index `[0]` and use it as a field NAME).
  */
 
+// The field picker's module graph reaches two dynamic imports (`celAuthoring.ts`);
+// their first load is paid at collection, never inside a clocked case (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
@@ -181,6 +185,8 @@ describe('objectui#5040 — a spec typed as `FormFieldSpec` configures its widge
       return {
         ok: true,
         status: 200,
+        // The authenticated fetch reads a rotated token off every answer (objectstack#37225).
+        headers: new Headers(),
         json: async () => ({ fields: [{ name: 'amount', label: 'Amount' }] }),
       } as unknown as Response;
     });

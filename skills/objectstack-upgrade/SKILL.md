@@ -16,7 +16,7 @@ license: Apache-2.0
 compatibility: Requires `@objectstack/spec` and `@objectstack/cli` at the TARGET major; the chain replays from the spec's `MIGRATION_SUPPORT_FLOOR`. No network access required.
 metadata:
   author: objectstack-ai
-  version: "18.6.0"
+  version: "19.0.0-next.0"
   domain: process
   tags: upgrade, migration, protocol, major, retired-keys, tombstone, conversions, validate, report
 ---
@@ -86,7 +86,7 @@ one installed. Three sources, in order of authority:
 
 1. **`manifest.engines.protocol`** in the stack config — the declared answer,
    checked by the boot handshake. It is a **range**, not a version: every
-   scaffold and example writes the caret form (`engines: { protocol: '^18' }`),
+   scaffold and example writes the caret form (`engines: { protocol: '^19' }`),
    and an exact `'16.0.0'` is only a range of one. Take the major it *targets* —
    the floor: `'^17'` → `--from 17`, `'>=15 <18'` → `--from 15`, never the
    upper bound.

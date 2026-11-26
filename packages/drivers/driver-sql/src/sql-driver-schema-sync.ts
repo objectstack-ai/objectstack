@@ -2811,21 +2811,69 @@ export function nowColumnDefault(this: Pick<SchemaSyncHost, 'isMysql' | 'isPostg
     if (type === 'datetime' && this.isMysql) return this.knex.fn.now(MYSQL_DATETIME_PRECISION);
     return this.knex.fn.now();
   }
+  return this.knex.raw(sqliteNowColumnDefaultSql(type));
+}
+
+/**
+ * [#37345] The SQLite `NOW()` column DEFAULT for a column of `type`, as SQL
+ * text: the SQLite branch of {@link nowColumnDefault}, which wraps it in
+ * `knex.raw`, and the one the Turso REMOTE face renders through
+ * {@link sqliteDeclaredColumnDefaultSql}. One string per type, so the two
+ * faces of that driver cannot write different `NOW()` defaults.
+ */
+export function sqliteNowColumnDefaultSql(type: string): string {
   switch (type) {
-    case 'date': return this.knex.raw("(strftime('%Y-%m-%d', 'now'))");
+    case 'date': return "(strftime('%Y-%m-%d', 'now'))";
     // The CASE trims a zero-millisecond `.000` so a defaulted row is
     // byte-canonical ({@link canonicalTimeOfDay}) — `%f` alone would store
     // `'01:55:08.000'` once in a thousand inserts, and that row would then
     // miss an equality filter against the canonical `'01:55:08'`. SQLite
     // fixes `'now'` per statement, so the three calls cannot straddle a
     // millisecond boundary.
-    case 'time': return this.knex.raw(
+    case 'time': return (
       "(case when strftime('%H:%M:%f', 'now') like '%.000' " +
-      "then strftime('%H:%M:%S', 'now') else strftime('%H:%M:%f', 'now') end)",
+      "then strftime('%H:%M:%S', 'now') else strftime('%H:%M:%f', 'now') end)"
     );
     // datetime (and any non-temporal field that opts into NOW()): canonical instant.
-    default:     return this.knex.raw("(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))");
+    default:     return "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
   }
+}
+
+/** [#37345] The field types `createColumn` builds through knex's `table.boolean`, whose DEFAULT knex spells `'1'` / `'0'`. */
+const KNEX_BOOLEAN_COLUMN_TYPES: ReadonlySet<string> = new Set(['boolean', 'toggle']);
+
+/**
+ * [#37345] The column DEFAULT {@link applyDeclaredColumnDefault} gives this
+ * field's column on SQLite, as the SQL text that follows `DEFAULT` — or
+ * `null` when it gives none. The Turso REMOTE face, which writes its DDL as
+ * text rather than through knex, renders a declared field's DEFAULT with this,
+ * so a remote table and a local one carry the same `dflt_value` for the same
+ * declaration and the shared drift differ reads them alike.
+ *
+ * Which fields get one is not decided here: {@link emitsDeclaredColumnDefault}
+ * (a literal or `NOW()`, never another runtime token, never an object) and the
+ * multi-value short-circuit `createColumn` takes before it reaches the
+ * emitter (a JSON column, no scalar DEFAULT) — the same two questions, asked
+ * in the same order. A `NOW()` default is {@link sqliteNowColumnDefaultSql},
+ * the string the local face's {@link nowColumnDefault} wraps.
+ *
+ * The literal is the one place this mirrors knex rather than sharing a
+ * function with it: the local face hands the value to `col.defaultTo`, and
+ * knex's SQLite column compiler renders it — `'1'` / `'0'` on a boolean
+ * column (the string `'false'` reading false), otherwise the value's
+ * `toString()` single-quoted with an embedded quote doubled (so a number is
+ * the quoted `'5'`). `turso-remote-default-parity.test.ts` holds the two
+ * faces to one `dflt_value` for each kind of default, so a knex upgrade that
+ * renders differently goes red there instead of forking the faces.
+ */
+export function sqliteDeclaredColumnDefaultSql(field: any): string | null {
+  if (!emitsDeclaredColumnDefault(field)) return null;
+  const type = String(field?.type || 'string');
+  if (isMultiValuedColumn(type, field)) return null;
+  const dv = field.defaultValue;
+  if (isNowDefaultValue(dv)) return sqliteNowColumnDefaultSql(type);
+  if (KNEX_BOOLEAN_COLUMN_TYPES.has(type)) return `'${dv === 'false' ? 0 : dv ? 1 : 0}'`;
+  return `'${String(dv).replace(/'/g, "''")}'`;
 }
 
 /**
@@ -2841,6 +2889,54 @@ export function emitsDeclaredColumnDefault(field: any): boolean {
   if (dv === undefined || dv === null) return false;
   if (isNowDefaultValue(dv)) return true;
   return !isRuntimeDefaultToken(dv) && typeof dv !== 'object';
+}
+
+/**
+ * [#37413] Whether this field's SQLite column DEFAULT is the `NOW()`
+ * expression ({@link sqliteNowColumnDefaultSql}) — the DEFAULT SQLite refuses
+ * on `ALTER TABLE … ADD COLUMN` to a table that holds a row (`Cannot add a
+ * column with non-constant default`). Both faces of the SQLite schema sync ask
+ * it: the local `createColumn` and the Turso remote face's
+ * `columnDeclarationSQL`. On such an `ADD COLUMN` the column is added nullable
+ * with no DEFAULT, the existing rows are filled by
+ * {@link sqliteNowBackfillSql}, and the drift differ reports what is still
+ * owed (`set_column_default`, and `tighten_not_null` under `storage.notNull`)
+ * for the schema-drift ceremony — never a table rebuild inside the sync.
+ */
+export function declaresSqliteNowColumnDefault(field: any): boolean {
+  if (String(field?.type || 'string') === 'formula') return false;
+  return isNowDefaultValue(field?.defaultValue) && sqliteDeclaredColumnDefaultSql(field) !== null;
+}
+
+/**
+ * [#37413] A SQLite identifier, double-quoted with an embedded `"` doubled —
+ * the one spelling {@link sqliteNowBackfillSql} and the Turso remote face's
+ * hand-written DDL both write.
+ */
+export function quoteSqliteIdentifier(name: string): string {
+  return `"${String(name).replace(/"/g, '""')}"`;
+}
+
+/**
+ * [#37413] The one statement that fills the existing rows of a populated SQLite
+ * table in the columns an `ADD COLUMN` just added without their `NOW()` DEFAULT
+ * ({@link declaresSqliteNowColumnDefault}): each column takes the expression
+ * the DEFAULT would have given ({@link sqliteNowColumnDefaultSql}). SQLite
+ * fixes `'now'` once per statement, so every row takes the same instant — the
+ * instant of the sync. Only a NULL is filled (`COALESCE`, and the `WHERE` names
+ * the rows holding one), so a value a writer stored in the column is never
+ * overwritten. Both faces send it in the same transaction as the `ADD COLUMN`.
+ * `null` when no such column was added.
+ */
+export function sqliteNowBackfillSql(table: string, added: ReadonlyArray<readonly [string, any]>): string | null {
+  const columns = added.filter(([, field]) => declaresSqliteNowColumnDefault(field));
+  if (columns.length === 0) return null;
+  const sets = columns.map(([name, field]) => {
+    const col = quoteSqliteIdentifier(name);
+    return `${col} = COALESCE(${col}, ${sqliteNowColumnDefaultSql(String(field?.type || 'string'))})`;
+  });
+  const holdsNull = columns.map(([name]) => `${quoteSqliteIdentifier(name)} IS NULL`);
+  return `UPDATE ${quoteSqliteIdentifier(table)} SET ${sets.join(', ')} WHERE ${holdsNull.join(' OR ')}`;
 }
 
 /**

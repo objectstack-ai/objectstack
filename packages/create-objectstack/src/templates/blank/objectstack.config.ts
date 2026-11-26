@@ -27,7 +27,7 @@ export default defineStack({
     version: '0.1.0',
     type: 'app',
     name: 'Blank Starter',
-    description: 'Minimal ObjectStack environment — a clean slate for building.',
+    description: 'Companies and contacts, with tasks and notes from the platform in the menu.',
     // Protocol compatibility range: the metadata-protocol major this app is
     // authored against. The runtime checks it before it loads anything, so a
     // runtime outside the range refuses this app at the boundary with the exact
@@ -35,7 +35,7 @@ export default defineStack({
     // match the ObjectStack version you installed — change it when you
     // deliberately move to a new protocol major, not to silence a mismatch.
     // Guide: https://objectstack.ai/docs/upgrading
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
   },
 
   // `automation` backs flow execution and materializes any declarative

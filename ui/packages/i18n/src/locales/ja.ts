@@ -195,6 +195,7 @@ const ja = {
     uploadInFlight: "アップロードが完了してから保存してください。",
     clearedOnHide: "現在の値に該当しなくなった項目をクリアしました: {{fields}}",
     visibleWhenFaulted: "送信できません: {{fields}} の visibleWhen ルールを評価できませんでした。このフォームを送信するには、先にルールを修正する必要があります。",
+    uiReadonlyWhenFaulted: "送信できません: {{fields}} の uiReadonlyWhen ルールを評価できませんでした。このフォームを送信するには、先にルールを修正する必要があります。",
     discardTitle: "変更を破棄しますか？",
     discardMessage: "保存されていない変更があります。このままフォームを閉じると編集内容は失われます。",
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
@@ -1121,6 +1122,7 @@ const ja = {
     addColumn: "カラムを追加",
     moveCard: "カードを移動",
     noCards: "カードがありません",
+    notLoaded: "未読み込みのカード: {{count}}",
     columnCards: "{{column}} のカード",
     laneCards: "{{column}} - {{lane}} のカード",
     dropBlocked: "{{from}} のカードは {{to}} に移動できません。",
@@ -2141,7 +2143,7 @@ const ja = {
   },
   console: {
     studio: {
-      title: "Studio",
+      title: "App Studio",
       accessRequired: "Studio を開くには Studio へのアクセス権限が必要です。管理者が「設定 → 権限セットの割り当て」で権限セットを使って付与できます。",
     },
     saveAdvisoryTitle: "保存しました — 編集チェックで {{count}} 件の推奨事項が見つかりました",
@@ -2589,6 +2591,7 @@ const ja = {
       savedCleared: "保存された値をクリアしました",
       deprecatedBadge: "非推奨",
       deprecatedBadgeReplacedBy: "非推奨 → {{replacedBy}}",
+      selectValueRetired: "{{value}}（現在は利用できません）",
       unsupportedSpecifierType: "サポートされていない設定項目の種類: {{type}}",
       mapAddRow: "行を追加",
       mapRemoveRow: "{{key}} を削除",
@@ -3729,11 +3732,11 @@ const ja = {
       tooltip: "このプラットフォームはプレビュー版です — 機能は変更される可能性があります。",
     },
     aiAssistant: "AI アシスタント",
-    designInStudio: "Studio でデザイン",
+    designInStudio: "App Studio でデザイン",
     designLayout: "レイアウトをデザイン",
     editApp: "アプリを編集",
-    openAppInStudio: "Studio で {{app}} を表示",
-    viewInStudio: "Studio で表示",
+    openAppInStudio: "App Studio で {{app}} を表示",
+    viewInStudio: "App Studio で表示",
   },
   home: {
     build: {
@@ -3873,8 +3876,8 @@ const ja = {
       backToAppHome: "アプリのメニューに戻る",
       appsAvailable: "{{count}} 個のアプリが利用可能",
       allApps: "すべてのアプリ",
-      editAppInStudio: "Studio で {{app}} を編集",
-      openAppInStudio: "Studio で {{app}} を表示",
+      editAppInStudio: "App Studio で {{app}} を編集",
+      openAppInStudio: "App Studio で {{app}} を表示",
       backToHome: "アプリのスタートページに戻る",
       settings: "システム設定",
       productHome: "{{product}} ホーム",
@@ -4683,6 +4686,9 @@ const ja = {
       dataset: 'データセット',
       metrics: '指標',
       noAddedFilter: 'データセットの定義に追加されたフィルターなし',
+    },
+    recordCitations: {
+      title: 'レコードからの引用',
     },
     tool: {
       aggregate_data: "関連データを集計する",

@@ -121,7 +121,7 @@ function renderGrid(perms: MePermissionsResponse | null) {
   const grid = (
     <ActionProvider>
       <SchemaRendererProvider dataSource={ds}>
-        <ObjectGrid cellSelection={false} schema={schema} dataSource={ds} onEdit={() => {}} onDelete={() => {}} />
+        <ObjectGrid schema={schema} dataSource={ds} onEdit={() => {}} onDelete={() => {}} />
       </SchemaRendererProvider>
     </ActionProvider>
   );
@@ -140,11 +140,13 @@ async function cell(text: string): Promise<HTMLElement> {
 /** Click the cell and report whether an in-cell editor opened. */
 async function opensEditor(text: string): Promise<boolean> {
   const td = await cell(text);
-  // `data-table` draws the editable cursor only on a column it will open.
-  const offered = td.className.includes('cursor-text');
+  // Select-first (objectstack#35827): a click selects the cell, which then
+  // says whether it will open (`aria-readonly`); a double-click edits.
   fireEvent.click(td);
+  const offered = !td.hasAttribute('aria-readonly');
+  fireEvent.doubleClick(td);
   await new Promise((r) => setTimeout(r, 50));
-  const opened = td.querySelector('input') != null;
+  const opened = td.hasAttribute('data-editing-cell') && td.querySelector('input') != null;
   // The two observables agree, or the probe cannot tell the shapes apart.
   expect(opened, `${text}: cursor and editor disagree`).toBe(offered);
   return opened;

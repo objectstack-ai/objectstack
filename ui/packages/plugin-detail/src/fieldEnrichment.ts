@@ -237,6 +237,10 @@ export const ENRICHED_FIELD_METADATA_KEYS = [
   // cell: `currency` draws through the currency cell with the
   // `currencyConfig` above. Without it a money formula read as a bare number.
   'returnType',
+  // A quantity's unit (ADR-0158 U4): the number cell draws the unit's label
+  // and display decimal places from it. Without it a quantity read as a bare
+  // number on the record page.
+  'unitConfig',
   'precision',
   'scale',
   // The author's digit-grouping hint, which overrides `scale`'s scale-0

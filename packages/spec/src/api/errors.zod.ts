@@ -285,6 +285,13 @@ export const FieldErrorCode = z.enum([
   'invalid_value',              // rejected for a reason no other member names
   'reference_not_found',        // a lookup target that does not exist
   'reference_ambiguous',        // a lookup that matched more than one record
+  // a SCOPED lookup that matched nothing within its scope while the same value
+  // does match a record outside it: the row names a record that lives under
+  // another parent (a `dependsOn` column, or the master the row also sets).
+  // Split from `reference_not_found` so a client keyed on the code can say
+  // "under another parent" rather than "no such record"; a value matching
+  // nothing anywhere keeps `reference_not_found`.
+  'reference_out_of_scope',
   // a lookup to `sys_user` that names a user whose ban is in force: the write
   // ADDS work for someone who cannot sign in, so it is refused (a value the
   // row already stores is not the write's, as for `reference_not_found`).

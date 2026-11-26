@@ -7,6 +7,8 @@ import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 import { CurrencyCodeField, isCurrencyCodeField } from './CurrencyCodeField.js';
 import { ScanFieldButton, useFieldScanOffered } from './ScanFieldButton.js';
 import { InCellTextInput } from './InCellTextInput.js';
+import { declaresUnitCode } from '@object-ui/core';
+import { UnitCodeField } from './UnitCodeField.js';
 
 /**
  * TextField - Standard single-line or multi-line text input
@@ -23,6 +25,13 @@ export function TextField({ value, onChange, field, readonly, error, inCell, onC
   // text field (form, inline edit, action dialog) gets the select.
   if (isCurrencyCodeField(fieldData)) {
     return <CurrencyCodeField value={value} onChange={onChange} field={field} readonly={readonly} error={error} {...props} />;
+  }
+
+  // A unit code field (ADR-0158 Open item 8): declared `unitMode: 'code'`, or
+  // the `unitField` a quantity points at (stamped by the form). Chosen from
+  // the units the server accepts and shown by name, never typed.
+  if (declaresUnitCode(fieldData as { type?: string; unitConfig?: unknown })) {
+    return <UnitCodeField value={value} onChange={onChange} field={field} readonly={readonly} error={error} {...props} />;
   }
 
   if (readonly) {

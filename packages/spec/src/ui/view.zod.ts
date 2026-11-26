@@ -2659,7 +2659,7 @@ export const CalendarConfigSchema = lazySchema(() => strictObject({
   startDateField: z.string().describe('Field providing the event start date/time'),
   endDateField: z.string().optional().describe('Field providing the event end date/time (defaults to a single-day event)'),
   titleField: z.string().optional().describe('Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain)'),
-  colorField: z.string().optional().describe('Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value'),
+  colorField: z.string().optional().describe('Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()) or a Tailwind color utility class (bg-…, text-…), else the default event color: a value that is no color is never turned into one'),
   /**
    * [#17054] The fifth binding, and the one this schema was missing while two
    * other faces of this same package already published it as a member: the
@@ -2789,7 +2789,7 @@ export const GanttConfigSchema = lazySchema(() => strictObject({
   titleField: z.string().describe('Field displayed as the task title'),
   progressField: z.string().optional().describe('Field providing the task completion percentage'),
   dependenciesField: z.string().optional().describe("Field listing the task's predecessor (dependency) record ids"),
-  colorField: z.string().optional().describe('Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else a semantic color token derived from the value'),
+  colorField: z.string().optional().describe('Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the default bar color: a value that is no color is never turned into one'),
   // Two-level hierarchy: a parent task id (summary bar) and a row type.
   parentField: z.string().optional().describe('Field holding the parent task id (builds the summary → step tree)'),
   typeField: z.string().optional().describe('Field whose value maps to task/summary/milestone'),
@@ -3498,7 +3498,7 @@ export function checkListViewTimesheetBinding(
  * migration command — the author deletes the key by hand.
  */
 const VIEW_LIST_COLUMN_STATE_RETIRED =
-  '`listView.columnState` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — it was '
+  '`listView.columnState` was removed in @objectstack/spec 19.0.0 (ADR-0049 enforce-or-remove) — it was '
   + 'never a list view key: it held one column order and set of widths the console once stored on a view '
   + 'row, and that layout is no longer applied. Delete the key. To ship a column order, list `columns` in that '
   + 'order (or set `fieldOrder`); to ship a width, set `width` on the column.';
@@ -6401,7 +6401,7 @@ type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
  * the measured incident).
  */
 const VIEW_COLUMN_STATE_RETIRED =
-  '`view.columnState` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — it held one '
+  '`view.columnState` was removed in @objectstack/spec 19.0.0 (ADR-0049 enforce-or-remove) — it held one '
   + 'column order and set of widths on a shared view row; nothing writes it any more, and a stored layout is '
   + 'no longer applied, so every reader sees the view\'s own column order and widths. The console keeps '
   + 'column widths in each reader\'s browser and saves a column order into the view itself. '

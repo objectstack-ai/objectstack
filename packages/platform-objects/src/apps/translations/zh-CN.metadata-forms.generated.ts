@@ -893,6 +893,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "只读",
         helpText: "在表单中只读"
       },
+      uiReadonly: {
+        label: "界面只读",
+        helpText: "用户无法在控制台中编辑此字段（对话框、记录页、表格、看板和日历拖动），而动作、导入、API 和流程仍可写入，每次写入都由对象的校验规则裁决。已开启“只读”时请保持关闭：只读已经阻止所有客户端写入。"
+      },
       hidden: {
         label: "隐藏",
         helpText: "在默认界面视图中隐藏"
@@ -916,6 +920,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       readonlyWhen: {
         label: "只读条件",
         helpText: "基于记录的 CEL 谓词（例如 record.status == 'paid'）——为 TRUE 时字段只读，并在服务器端强制执行：更新中对已锁定字段的修改会被丢弃，保留已存储的值。只读取记录自身的列；objectstack validate 会拒绝经由引用字段的读取。"
+      },
+      uiReadonlyWhen: {
+        label: "界面只读条件",
+        helpText: "基于记录的 CEL 谓词（例如 record.status != 'draft'）——为 TRUE 时，用户无法在控制台中编辑已有记录的该字段（编辑对话框、记录页、表格、看板和日历拖动）；新建记录的创建对话框不做判断。动作、导入、API 和流程仍可写入，并由对象的校验规则裁决。与“只读条件”一样读取记录自身的列。"
       },
       requiredWhen: {
         label: "必填条件",
@@ -1282,7 +1290,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       compactToolbar: {
         label: "紧凑工具栏",
-        helpText: "将分组 / 颜色 / 密度 / 隐藏字段收进同一个“视图设置”弹出框"
+        helpText: "将分组 / 颜色 / 密度 / 隐藏字段收进同一个“视图设置”弹出框。默认开启：省略或为 `true` 时，渲染器绘制这个紧凑工具栏；为 `false` 时绘制宽工具栏，每个控件一个按钮。紧凑工具栏不绘制刷新按钮，因此 `userActions.refresh` 只作用于宽工具栏；下拉刷新不受这两个键影响。"
       },
       rowHeight: {
         label: "行高",
@@ -2239,7 +2247,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       joined_blocks: {
         label: "joined 报表分块",
-        description: "叠加进同一张报表的其他数据集分块（仅 joined 报表）"
+        description: "叠加进同一张报表的其他分块，各有自己的数据来源（仅 joined 报表）"
       },
       filter_and_chart: {
         label: "筛选与图表",
@@ -2280,11 +2288,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       columns: {
         label: "列分组",
-        helpText: "横向展开的维度名（仅 matrix 报表）"
+        helpText: "横向展开的分组（仅 matrix 报表）"
       },
       order: {
         label: "排序",
-        helpText: "排序键，最重要的在前（rows/columns 维度或 values 度量）。时间维度默认按时间顺序排列。"
+        helpText: "排序依据，最重要的在前（某个分组或指标）。时间分组默认按时间先后排列。"
       },
       "order.by": {
         label: "排序依据"
@@ -2298,7 +2306,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       blocks: {
         label: "分块",
-        helpText: "绑定数据集的子报表（仅 joined 报表）"
+        helpText: "子报表，各有自己的数据来源（仅 joined 报表）"
       },
       "blocks.name": {
         label: "名称"
@@ -2340,7 +2348,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       dateRange: {
         label: "日期范围",
-        helpText: "默认时间段与自定义范围开关。维度必须是数据集的日期维度；数据集只有一个日期维度时可留空"
+        helpText: "打开报表时显示的时间段，以及使用者能否自己选择范围"
       },
       "dateRange.dimension": {
         label: "日期字段",
@@ -2356,7 +2364,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       exportOptions: {
         label: "导出选项",
-        helpText: "下载格式（csv、xlsx）与文件名。谁可以下载由数据集对象上的导出权限决定"
+        helpText: "下载格式（csv、xlsx）与文件名。谁可以下载由数据来源对象上的导出权限决定"
       },
       "exportOptions.formats": {
         label: "格式",

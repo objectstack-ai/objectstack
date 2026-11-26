@@ -142,6 +142,9 @@ export function collectRequiredWhenPromptFields(
       {
         visibleWhen: def.visibleWhen as never,
         readonlyWhen: def.readonlyWhen as never,
+        // The hand lock folds into the same read-only verdict: a person is
+        // never asked to fill a field they may not edit (`uiReadonlyWhen`).
+        uiReadonlyWhen: def.uiReadonlyWhen as never,
         requiredWhen: def.requiredWhen as never,
       },
       next,
@@ -150,7 +153,7 @@ export function collectRequiredWhenPromptFields(
       // gate (objectstack#30220). A record already inside the gate without
       // the value rests there, the engine lets the write through, and nothing
       // is asked.
-      { required: def.required === true, readonly: def.readonly === true, name },
+      { required: def.required === true, readonly: def.readonly === true, uiReadonly: def.uiReadonly === true, name },
       // The stored record, so a predicate reading `previous.*` sees what the
       // form would show it.
       record,

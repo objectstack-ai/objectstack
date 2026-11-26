@@ -501,6 +501,13 @@ export const ShowcaseTranslationBundle = {
         _validations: {
           task_status_flow: { message: '任务状态流转无效。' },
         },
+        // The object's one activity milestone (`status` → `done`), keyed by
+        // the pair that fires it; `{title}` is the authored template's token.
+        // A zh-CN reader's timeline row reads this; the stored row keeps the
+        // authored English sentence for every other reader.
+        _milestones: {
+          status: { done: { summary: '✅ 任务已完成：{title}' } },
+        },
         _views: {
           // The default list — keyed `default`, see showcase_project above.
           default: { label: '全部任务' },

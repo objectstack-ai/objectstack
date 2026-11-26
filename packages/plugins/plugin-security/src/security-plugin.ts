@@ -2392,7 +2392,8 @@ export class SecurityPlugin implements Plugin {
       const readLogger = () => this.logger;
       const readPermissionEvaluator = () => this.permissionEvaluator;
       const readQl = () => this.ql;
-      const host: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeTenantLayer0Only' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveHopWithheldFields' | 'resolveOperationPrincipals' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'> = {
+      const readResolveKernelService = () => this.resolveKernelService;
+      const host: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeTenantLayer0Only' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveHopWithheldFields' | 'resolveKernelService' | 'resolveOperationPrincipals' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'resolveWriteScopeForSharing' | 'writeCheckFieldOptions'> = {
         addressedByIdWriteId: (...a) => this.addressedByIdWriteId(...a),
         addressedPredicateWrite: (...a) => this.addressedPredicateWrite(...a),
         assertControlledByParentWrite: (...a) => this.assertControlledByParentWrite(...a),
@@ -2426,8 +2427,10 @@ export class SecurityPlugin implements Plugin {
         resolveOperationPrincipals: (...a) => this.resolveOperationPrincipals(...a),
         resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
         resolveHopWithheldFields: (...a) => this.resolveHopWithheldFields(...a),
+        get resolveKernelService() { return readResolveKernelService(); },
         resolvePreImageFloorDrop: (...a) => this.resolvePreImageFloorDrop(...a),
         resolveSharingWriteVerdict: (...a) => this.resolveSharingWriteVerdict(...a),
+        resolveWriteScopeForSharing: (...a) => this.resolveWriteScopeForSharing(...a),
         writeCheckFieldOptions: (...a) => this.writeCheckFieldOptions(...a),
       };
       this.authzMiddleware = registerAuthzMiddleware.call(host, ctx, ql, metadata);

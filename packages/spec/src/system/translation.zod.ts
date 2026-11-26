@@ -594,6 +594,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
     // and the un-prefixed spelling is the one an author reaches for first.
     views: '_views', actions: '_actions', sections: '_sections', validations: '_validations',
     validationRules: '_validations', rules: '_validations', relatedLists: '_relatedLists',
+    milestones: '_milestones', activityMilestones: '_milestones',
     plural: 'pluralLabel', labelPlural: 'pluralLabel', name: 'label', title: 'label',
     columns: 'fields', properties: 'fields', attributes: 'fields',
   },
@@ -978,6 +979,28 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
     message: z.string().optional()
       .describe("Translated rejection message — overlays the rule's authored `message` on every rejected write"),
   })).optional().describe('Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`)'),
+
+  /**
+   * Activity-milestone summaries (ADR-0052 §5b.2), keyed by the milestone's
+   * watched `field`, then by the `value` it fires on:
+   *
+   *   objects.<object>._milestones.<field>.<value>.summary
+   *
+   * A milestone declares no name, and `field` + `value` is what fires it (the
+   * first declared milestone for the pair wins), so the pair is its address.
+   * The translated template carries the same `{field}` tokens as the authored
+   * `summary`; the record timeline composes it in the reader's language, and a
+   * token naming a select value is rendered with that option's label in the
+   * same language. A milestone with no entry keeps its authored `summary`.
+   */
+  _milestones: z.record(z.string(), z.record(z.string(), strictObject({
+    surface: 'this activity milestone translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { message: 'summary', template: 'summary', text: 'summary', title: 'summary' },
+  }, {
+    summary: z.string().optional()
+      .describe("Translated milestone summary template — the same `{field}` tokens as the milestone's authored `summary`"),
+  }))).optional().describe('Activity-milestone summary translations keyed by the watched field, then by the value the milestone fires on'),
 }).describe('Translation data for a single object'));
 
 export type ObjectTranslationData = z.input<typeof ObjectTranslationDataSchema>;

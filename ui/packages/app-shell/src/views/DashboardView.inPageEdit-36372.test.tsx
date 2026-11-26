@@ -79,7 +79,7 @@ vi.mock('./studio-design/packages-io', async (importOriginal) => ({
     return packages.ensure!(base);
   },
 }));
-vi.mock('./studio-design/StudioCustomizeControls', async (importOriginal) => ({
+vi.mock('./studio-design/customizeOverride', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useCustomizeDoorWalled: () => gate.walled,
 }));

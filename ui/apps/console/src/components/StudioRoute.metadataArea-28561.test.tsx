@@ -23,7 +23,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter, Routes, Route, useLocation, useParams } from 'react-router-dom';
 
@@ -80,23 +80,34 @@ function SurfaceMarker({ area }: { area?: string }) {
   );
 }
 
-vi.mock('./studioBuilder', () => ({
+vi.mock('./studioBuilder', async () => ({
   StudioEntryRedirect: () => <div data-testid="studio-entry" />,
   StudioDesignSurface: SurfaceMarker,
   StudioMetadataArea: ({ packageId }: { packageId: string | null }) => (
     <div data-testid="studio-metadata-area" data-package={String(packageId)} />
   ),
+  // objectstack#36909 — the retired pillar addresses' redirect, real: its table is what the last describe walks.
+  StudioPillarRedirect: (await vi.importActual<typeof import('@object-ui/app-shell')>('@object-ui/app-shell'))
+    .StudioPillarRedirect,
 }));
 
 import { STUDIO_ENTRY_CAPABILITY } from './studioEntry';
 import { studioRoutes } from './StudioRoute';
 
+/** Every location the router showed, in order: one redirect is two entries. */
+let seen: string[] = [];
+
 function LocationProbe() {
   const { pathname, search } = useLocation();
-  return <div data-testid="pathname">{`${pathname}${search}`}</div>;
+  const here = `${pathname}${search}`;
+  React.useEffect(() => {
+    seen.push(here);
+  }, [here]);
+  return <div data-testid="pathname">{here}</div>;
 }
 
 function renderStudio(url: string) {
+  seen = [];
   return render(
     <MemoryRouter initialEntries={[url]}>
       <LocationProbe />
@@ -134,10 +145,10 @@ describe('/studio — the "All metadata" area\'s routes (objectstack#28561)', ()
     expect(screen.queryByTestId('barrel-builder')).toBeNull();
   });
 
-  it('CONTROL — a pillar is the pillar builder with no area', async () => {
-    renderStudio('/studio/com.example.crm/data');
+  it('CONTROL — the sharing overview\'s own route is the builder with no area', async () => {
+    renderStudio('/studio/com.example.crm/owd');
     const surface = await screen.findByTestId('studio-pillar-builder');
-    expect(surface).toHaveAttribute('data-tab', 'data');
+    expect(surface).toHaveAttribute('data-tab', 'owd');
     expect(surface).toHaveAttribute('data-area', '');
   });
 
@@ -187,4 +198,57 @@ describe('/studio — the "All metadata" area\'s routes (objectstack#28561)', ()
       expect(location()).toBe(url);
     },
   );
+});
+
+/**
+ * objectstack#36909 — the retired pillar addresses, on the REAL routes and the
+ * real redirect: every old address reaches the page that replaced it in ONE
+ * redirect (the probe sees the old address and the new one, nothing between),
+ * and a current address is not redirected at all. The redirect's full table,
+ * every query spelling included, is `studioPillarRedirectModel.test.ts`.
+ */
+describe('/studio — every retired pillar address redirects once, to its new address (objectstack#36909)', () => {
+  const PKG = 'com.example.crm';
+  const PAIR = 'com.example.crm.custom';
+
+  it.each([
+    [`/studio/${PKG}`, `/studio/${PKG}/metadata/object?package=${PKG}`],
+    [`/studio/${PKG}/data`, `/studio/${PKG}/metadata/object?package=${PKG}`],
+    [`/studio/${PKG}/data?surface=object%3Aaccount`, `/studio/${PKG}/metadata/object/account?package=${PKG}`],
+    // The server's draft review link (`studioChangesReviewLink`).
+    [`/studio/${PKG}/data?changes=review`, `/studio/${PKG}/metadata/object?changes=review&package=${PKG}`],
+    [`/studio/${PKG}/automations`, `/studio/${PKG}/metadata/flow?package=${PKG}`],
+    [`/studio/${PKG}/automations?surface=flow%3Anotify`, `/studio/${PKG}/metadata/flow/notify?package=${PKG}`],
+    // A package with no pair names its sets without a read.
+    [`/studio/${PKG}/access`, `/studio/${PKG}/metadata/permission?package=${PKG}`],
+    [`/studio/${PKG}/access?surface=owd%3Aoverview`, `/studio/${PKG}/owd`],
+    // A pair's Access pillar is its base's (a set the pair holds is read for:
+    // `StudioDesignSurface.accessPairCopy-29674.test.tsx`).
+    [`/studio/${PAIR}/access`, `/studio/${PKG}/metadata/permission?package=${PKG}`],
+    [`/studio/${PKG}/interfaces?surface=page%3Ahome`, `/studio/${PKG}/metadata/object?package=${PKG}`],
+    [`/studio/${PAIR}/interfaces`, `/studio/${PKG}/metadata/object?package=${PKG}`],
+    // The package-less scope: its bare leg and its one pillar.
+    ['/studio/~org', '/studio/~org/metadata/flow?source=runtime'],
+    ['/studio/~org/automations', '/studio/~org/metadata/flow?source=runtime'],
+    ['/studio/~org/automations?surface=flow%3Aclone_1', '/studio/~org/metadata/flow/clone_1?source=runtime'],
+  ])('%s → %s, in one redirect', async (from, to) => {
+    renderStudio(from);
+    await waitFor(() => expect(location()).toBe(to));
+    await screen.findByTestId('studio-pillar-builder');
+    expect(seen).toEqual([from, to]);
+  });
+
+  it.each([
+    `/studio/${PKG}/owd`,
+    `/studio/${PKG}/owd?object=account`,
+    `/studio/${PKG}/metadata/object?package=${PKG}`,
+    `/studio/${PKG}/metadata/flow/notify?package=${PKG}`,
+    // A segment no page has: the builder, which draws its not-found state.
+    `/studio/${PKG}/bogus_pillar`,
+  ])('CONTROL — the current address %s is not redirected', async (url) => {
+    renderStudio(url);
+    await screen.findByTestId('studio-pillar-builder');
+    expect(location()).toBe(url);
+    expect(seen).toEqual([url]);
+  });
 });

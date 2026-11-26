@@ -128,6 +128,7 @@ import '@objectstack/lint';
 // record preview's `lazy()` detail entry: its first load is paid at collection too.
 import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { subscribeMetadataRefresh } from '../../assistant/assistantBus';
 
 window.matchMedia = ((query: string) => ({
@@ -256,7 +257,7 @@ function renderStudio() {
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/owd`]}>
       <LocationProbe />
       <Routes>
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );

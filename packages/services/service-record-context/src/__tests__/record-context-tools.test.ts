@@ -1,11 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, expect, it } from 'vitest';
+import { mapDataError } from '@objectstack/types';
 import {
   AI_CONTEXT_MAX_FIELDS,
   AI_CONTEXT_MAX_RELATED,
   AI_CONTEXT_MAX_RELATED_FIELDS,
   GET_RECORD_CONTEXT_TOOL_NAME,
+  GetRecordContextInputSchema,
   GetRecordContextOutputSchema,
 } from '@objectstack/spec/ai';
 import {
@@ -18,6 +20,7 @@ import {
   getRecordContextToolDefinitions,
   recordContextReadSet,
 } from '../index.js';
+import { headingsOf } from '../body-outline.js';
 import { sentencesFor } from '../sentences.js';
 import { fakeDoor, policyApp, type FakeApp } from './fake-door.js';
 
@@ -55,7 +58,7 @@ describe('get_record_context — the service constants (ADR-0160 D3: pinned by t
     expect(rest).toEqual([]);
     expect(definition.name).toBe(GET_RECORD_CONTEXT_TOOL_NAME);
     expect(Object.keys((definition.parameters as { properties: object }).properties)).toEqual(
-      expect.arrayContaining(['objectName', 'recordId', 'context', 'anchor']),
+      expect.arrayContaining(['objectName', 'recordId', 'context', 'anchor', 'outlineFrom']),
     );
     expect(definition.outputSchema).toBeDefined();
   });
@@ -242,13 +245,89 @@ describe('get_record_context — the order of judgement (ADR-0160 D4)', () => {
   });
 });
 
-describe('get_record_context — object level: one refusal is the whole call\'s, within the naming bound (ADR-0160 D3/D4)', () => {
-  it('a child the caller is not served is refused PERMISSION_DENIED without naming it', async () => {
-    const refused = await refusalOf(run(policyApp({ unservedObjects: ['policy_revision'] })));
+describe('get_record_context — object level: a gate that refuses everyone refuses the whole call, within the naming bound (ADR-0160 D3/D4)', () => {
+  /** The fixture pack with a second, served related child (`claim`) beside `policy_revision`. */
+  const twoChildren = (overrides: Partial<FakeApp> = {}): FakeApp => {
+    const app = policyApp(overrides);
+    app.packs = [{
+      name: 'policy_document',
+      label: 'Policy document',
+      object: 'policy',
+      fields: ['title'],
+      related: [
+        { object: 'policy_revision', field: 'policy', fields: ['version'] },
+        { object: 'claim', field: 'policy', fields: ['number'] },
+      ],
+    }];
+    return app;
+  };
+
+  it('[as amended] a child this caller is not served is left out: the root and the served child, ONE not-visible statement, the child named nowhere', async () => {
+    const door = fakeDoor(twoChildren({ unservedObjects: ['policy_revision'] }));
+    const out = await executeGetRecordContext(CALL, door);
+    expect(out.data.fields.map((f) => f.name)).toEqual(['title']);
+    expect(out.data.related!.map((l) => l.object)).toEqual(['claim']);
+    expect(out.data.related![0].rows.map((r) => r.id)).toEqual(['c1']);
+    expect(out.notes).toEqual([{ kind: 'not_visible', text: sentencesFor([]).notVisible }]);
+    const text = JSON.stringify(out);
+    expect(text).not.toContain('policy_revision');
+    expect(text).not.toContain('Policy revision');
+    // Nothing of the child is read after its object-level judgement, its published definition included.
+    expect(door.asked.filter((a) => a.object === 'policy_revision').map((a) => a.member))
+      .toEqual(['readGuard', 'assertApiExposed', 'servedObjectDefinitionOf']);
+    // Control: served, both children answer and nothing is stated.
+    const control = await run(twoChildren());
+    expect(control.data.related!.map((l) => l.object)).toEqual(['policy_revision', 'claim']);
+    expect(control.notes).toEqual([]);
+  });
+
+  it('[as amended] a lookup target reached only through a left-out child is not judged: it refuses nothing', async () => {
+    const app = twoChildren({ unservedObjects: ['policy_revision'], guardedObjects: ['account'] });
+    (app.packs[0] as { related: Array<{ fields: string[] }> }).related[0].fields = ['version', 'reviewer'];
+    const door = fakeDoor(app);
+    const out = await executeGetRecordContext(CALL, door);
+    expect(out.data.related!.map((l) => l.object)).toEqual(['claim']);
+    expect(door.asked).not.toContainEqual({ member: 'readGuard', object: 'account' });
+  });
+
+  it('a child API exposure refuses whose caller is not served it either is refused unnamed (the naming bound)', async () => {
+    const refused = await refusalOf(run(twoChildren({ unexposedObjects: ['policy_revision'], unservedObjects: ['policy_revision'] })));
     expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
     expect(refused.message).toContain('policy_document');
-    expect(refused.message).toContain('policy');
     expect(refused.message).not.toContain('policy_revision');
+  });
+
+  it('a disabled-package child is refused whole, before its served definition is asked: a disabled package serves its object to nobody', async () => {
+    const door = fakeDoor(twoChildren({ unservedObjects: ['policy_revision'] }));
+    const exposedOf = door.assertApiExposed.bind(door);
+    door.assertApiExposed = async (object, action) => {
+      if (object === 'policy_revision') {
+        door.asked.push({ member: 'assertApiExposed', object });
+        throw Object.assign(new Error(`Object '${object}' belongs to a disabled package`), { code: 'OBJECT_PACKAGE_DISABLED', status: 404 });
+      }
+      return exposedOf(object, action);
+    };
+    const refused = await refusalOf(executeGetRecordContext(CALL, door));
+    expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(refused.message).not.toContain('policy_revision');
+    expect(refused.message).not.toContain('disabled package');
+    expect(door.asked).not.toContainEqual({ member: 'servedObjectDefinitionOf', object: 'policy_revision' });
+    expect(door.reads).toEqual([]);
+  });
+
+  it('a served-definition read that throws a coded refusal refuses the call unnamed, never left out', async () => {
+    const door = fakeDoor(twoChildren());
+    const servedOf = door.servedObjectDefinitionOf.bind(door);
+    door.servedObjectDefinitionOf = async (object) => {
+      if (object === 'policy_revision') {
+        throw Object.assign(new Error(`Object '${object}' not found`), { code: 'OBJECT_NOT_FOUND', status: 404 });
+      }
+      return servedOf(object);
+    };
+    const refused = await refusalOf(executeGetRecordContext(CALL, door));
+    expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(refused.message).not.toContain('policy_revision');
+    expect(door.reads).toEqual([]);
   });
 
   it('a child the read guard refuses is refused with the same code, unnamed', async () => {
@@ -272,13 +351,16 @@ describe('get_record_context — object level: one refusal is the whole call\'s,
   it('a child\'s gates are judged before ANY read of its definition, the published one included', async () => {
     for (const app of [
       policyApp({ guardedObjects: ['policy_revision'] }),
-      policyApp({ unservedObjects: ['policy_revision'] }),
       policyApp({ unexposedObjects: ['policy_revision'] }),
     ]) {
       const door = fakeDoor(app);
       await refusalOf(executeGetRecordContext(CALL, door));
       expect(door.asked).not.toContainEqual({ member: 'publishedObjectDefinitionOf', object: 'policy_revision' });
     }
+    // [as amended] A child left out for this caller is not read either.
+    const leftOut = fakeDoor(policyApp({ unservedObjects: ['policy_revision'] }));
+    await executeGetRecordContext(CALL, leftOut);
+    expect(leftOut.asked).not.toContainEqual({ member: 'publishedObjectDefinitionOf', object: 'policy_revision' });
     const door = fakeDoor(policyApp());
     await executeGetRecordContext(CALL, door);
     const at = (member: string) => door.asked.findIndex((a) => a.member === member && a.object === 'policy_revision');
@@ -320,6 +402,144 @@ describe('get_record_context — object level: one refusal is the whole call\'s,
     expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
     expect(refused.message).not.toContain('claim');
     expect(door.reads).toEqual([]);
+  });
+});
+
+describe('get_record_context — a read of a related object that fails is a failure, not a refusal (ADR-0112, ADR-0160 D3 "Object level")', () => {
+  /** What the outage says: every name in it is one the caller is not shown. */
+  const OUTAGE = 'store down: policy_revision.secret_note in package acme_private';
+  const outage = () => new Error(OUTAGE);
+
+  /** The thrown failure, with what it must not carry. */
+  async function failureOf(promise: Promise<unknown>): Promise<{ code: string; status: number; message: string; cause: unknown; stack?: string }> {
+    try {
+      await promise;
+    } catch (err) {
+      const e = err as { code: string; status: number; message: string; cause: unknown; stack?: string };
+      return { code: e.code, status: e.status, message: e.message, cause: e.cause, stack: e.stack };
+    }
+    throw new Error('expected a failure');
+  }
+
+  /** A door whose `member` throws `thrown()` for `policy_revision`, and answers as the fixture otherwise. */
+  const throwingAt = (
+    member: 'assertApiExposed' | 'servedObjectDefinitionOf' | 'publishedObjectDefinitionOf' | 'query',
+    thrown: () => unknown,
+    app: FakeApp = policyApp(),
+  ) => {
+    const door = fakeDoor(app);
+    const real = (door[member] as (...a: unknown[]) => Promise<unknown>).bind(door);
+    (door as unknown as Record<string, unknown>)[member] = async (object: string, ...rest: unknown[]) => {
+      if (object === 'policy_revision') throw thrown();
+      return real(object, ...rest);
+    };
+    return door;
+  };
+
+  /** The failure's answer: `INTERNAL_ERROR` 500, naming the pack and the root and nothing the outage said. */
+  const expectFailureNamingNothing = (failed: Awaited<ReturnType<typeof failureOf>>, original: unknown) => {
+    expect(failed).toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
+    expect(failed.message).toBe(sentencesFor([]).readFailed('policy_document', 'policy'));
+    for (const word of ['policy_revision', 'secret_note', 'acme_private', 'store down']) {
+      expect(failed.message).not.toContain(word);
+    }
+    // The original is the host's, on `cause` (which no door puts on the wire), and at the foot of the
+    // stack, which the doors' fault line prints where it prints no `cause`.
+    expect(failed.cause).toBe(original);
+    expect(failed.stack).toContain(`Caused by: ${original instanceof Error ? original.stack : String(original)}`);
+  };
+
+  it.each([
+    ['step 4a: the API-exposure check', 'assertApiExposed'],
+    ['step 4a: the served-definition read', 'servedObjectDefinitionOf'],
+    ['publishedOf: the published-definition read', 'publishedObjectDefinitionOf'],
+    ['the child list query', 'query'],
+  ] as const)('%s throwing an uncoded error fails the call INTERNAL_ERROR, naming nothing', async (_site, member) => {
+    const thrown = outage();
+    const door = throwingAt(member, () => thrown);
+    expectFailureNamingNothing(await failureOf(executeGetRecordContext(CALL, door)), thrown);
+  });
+
+  it.each([
+    ['step 4a: the API-exposure check', 'assertApiExposed'],
+    ['step 4a: the served-definition read', 'servedObjectDefinitionOf'],
+    ['publishedOf: the published-definition read', 'publishedObjectDefinitionOf'],
+  ] as const)('control, %s: a coded refusal (a disabled package\'s 404) stays PERMISSION_DENIED 403, unnamed', async (_site, member) => {
+    const door = throwingAt(member, () =>
+      Object.assign(new Error("Object 'policy_revision' belongs to a disabled package"), { code: 'OBJECT_PACKAGE_DISABLED', status: 404 }));
+    const refused = await refusalOf(executeGetRecordContext(CALL, door));
+    expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(refused.message).toBe(sentencesFor([]).objectRefusedUnnamed('policy_document', 'policy'));
+  });
+
+  it('control, the child list query: the door\'s own coded refusal of a served child is answered as the door wrote it', async () => {
+    const refusal = Object.assign(new Error("Field 'version' cannot be filtered or sorted on"), { code: 'PERMISSION_DENIED', status: 403 });
+    const door = throwingAt('query', () => refusal);
+    await expect(executeGetRecordContext(CALL, door)).rejects.toBe(refusal);
+  });
+
+  it.each<[string, () => unknown]>([
+    ['a sandboxed beforeFind hook\'s plain throw (no code; the door answers 400 HOOK_ABORTED)', () =>
+      Object.assign(new Error("beforeFind hook 'step_gate' threw: Steps are closed for review"), { innerMessage: 'Steps are closed for review' })],
+    ['a PERMISSION_DENIED with no status (the door answers 403)', () => Object.assign(new Error('denied'), { code: 'PERMISSION_DENIED' })],
+  ])('the child list query: %s stays the door\'s refusal, rethrown as main left it', async (_label, thrown) => {
+    const refusal = thrown();
+    const door = throwingAt('query', () => refusal);
+    await expect(executeGetRecordContext(CALL, door)).rejects.toBe(refusal);
+    // Control: at an object-level read, the same throw is no coded refusal, so it fails the call.
+    expectFailureNamingNothing(await failureOf(executeGetRecordContext(CALL, throwingAt('servedObjectDefinitionOf', () => refusal))), refusal);
+  });
+
+  it('the child list query: a sandboxed body that CRASHED (a native error name) is a fault at the door, so it fails the call', async () => {
+    const crash = Object.assign(new Error("beforeFind hook 'step_gate' threw: TypeError: x is not a function"), { innerMessage: 'TypeError: x is not a function' });
+    expectFailureNamingNothing(await failureOf(executeGetRecordContext(CALL, throwingAt('query', () => crash))), crash);
+  });
+
+  it.each<[string, () => unknown, number, string]>([
+    ['an unavailable datasource: ERR_DATASOURCE_UNAVAILABLE 503 with its sentence', () =>
+      Object.assign(new Error('The datasource for this object is not available'), { code: 'ERR_DATASOURCE_UNAVAILABLE' }), 503, 'ERR_DATASOURCE_UNAVAILABLE'],
+    ['a driver error the door recognises: DATABASE_ERROR', () =>
+      Object.assign(new Error('SQLITE_BUSY: database is locked'), { code: 'SQLITE_BUSY' }), 500, 'DATABASE_ERROR'],
+    ['a driver\'s declared NOT_IMPLEMENTED 501', () =>
+      Object.assign(new Error('Full-text search is not supported by this driver'), { code: 'NOT_IMPLEMENTED', status: 501 }), 501, 'NOT_IMPLEMENTED'],
+    ['a declared 5xx with its sentence', () =>
+      Object.assign(new Error('Revisions are being archived; retry in a minute'), { code: 'SERVICE_UNAVAILABLE', status: 503, refusal: true }), 503, 'SERVICE_UNAVAILABLE'],
+    ['a declared 5xx with a userMessage', () =>
+      Object.assign(new Error('archiving'), { code: 'SERVICE_UNAVAILABLE', status: 503, userMessage: 'Revisions are being archived; retry in a minute' }), 503, 'SERVICE_UNAVAILABLE'],
+  ])('the child list query: a fault the door codes (%s) is rethrown as the door reads it, with its own code and sentence', async (_label, thrown, status, code) => {
+    const fault = thrown();
+    // The case is one the door codes, asked of the door's own classifier.
+    expect(mapDataError(fault, 'policy_revision')).toMatchObject({ status, body: { code } });
+    await expect(executeGetRecordContext(CALL, throwingAt('query', () => fault))).rejects.toBe(fault);
+  });
+
+  it.each<[string, () => unknown]>([
+    ['a status with no code, at 500', () => Object.assign(new Error(OUTAGE), { status: 500 })],
+    ['a coded INTERNAL_ERROR 500', () => Object.assign(new Error(OUTAGE), { code: 'INTERNAL_ERROR', status: 500 })],
+    ['a driver errno the door does not recognise', () => Object.assign(new Error(OUTAGE), { code: 'ECONNREFUSED' })],
+    ['a thrown value that is not an object', () => OUTAGE],
+  ])('control, the child list query: %s, which the door answers with nothing of its own, fails the call INTERNAL_ERROR', async (_label, thrown) => {
+    const failed = thrown();
+    expect(mapDataError(failed, 'policy_revision')).toEqual({ status: 500, body: expect.objectContaining({ error: 'Internal server error' }) });
+    expectFailureNamingNothing(await failureOf(executeGetRecordContext(CALL, throwingAt('query', () => failed))), failed);
+  });
+
+  it.each<[string, () => unknown]>([
+    ['a driver errno on `.code` with no status',() => Object.assign(new Error(OUTAGE), { code: 'SQLITE_BUSY' })],
+    ['a coded 5xx', () => Object.assign(new Error(OUTAGE), { code: 'SERVICE_UNAVAILABLE', status: 503 })],
+    ['a status with no code', () => Object.assign(new Error(OUTAGE), { status: 404 })],
+    ['a thrown value that is not an object', () => OUTAGE],
+  ])('%s is a failure too, not a refusal', async (_label, thrown) => {
+    let original: unknown;
+    const door = throwingAt('servedObjectDefinitionOf', () => (original = thrown()));
+    expectFailureNamingNothing(await failureOf(executeGetRecordContext(CALL, door)), original);
+  });
+
+  it('the failure sentence is written in the caller\'s locale', async () => {
+    const door = throwingAt('publishedObjectDefinitionOf', outage, policyApp({ locales: ['zh-CN'] }));
+    const failed = await failureOf(executeGetRecordContext(CALL, door));
+    expect(failed.message).toBe(sentencesFor(['zh-CN']).readFailed('policy_document', 'policy'));
+    expect(failed.message).not.toBe(sentencesFor([]).readFailed('policy_document', 'policy'));
   });
 });
 
@@ -416,6 +636,55 @@ describe('get_record_context — row level (ADR-0160 D3)', () => {
     expect(out.notes.map((n) => n.kind)).toEqual(['related_truncated']);
     const listRead = door.reads.find((r) => r.member === 'query' && r.object === 'policy_revision');
     expect((listRead?.opts as { limit: number }).limit).toBe(RECORD_CONTEXT_RELATED_MAX_ROWS + 1);
+  });
+
+  /**
+   * [ADR-0160 D3: every cut is stated] A door whose page cap is below the cut
+   * plus its probe row: this fake cuts a larger page silently, the way a door
+   * that clamps would, so without its cap the executor would carry a cut list
+   * as whole.
+   */
+  const cappedDoor = (app: FakeApp, cap: number | undefined) => {
+    const door = fakeDoor(app);
+    const queryOf = door.query.bind(door);
+    door.query = async (object, opts) =>
+      queryOf(object, { ...opts, ...(cap !== undefined && typeof opts.limit === 'number' ? { limit: Math.min(opts.limit, cap) } : {}) });
+    door.pageCap = () => cap;
+    return door;
+  };
+  const longApp = (rows: number) => {
+    const app = policyApp();
+    app.records.policy_revision = Array.from({ length: rows }, (_, i) => ({ id: `r${i}`, version: `v${i}`, policy: 'p1', reviewer: 'a1', note: 'n' }));
+    return app;
+  };
+
+  it('a door whose page cap is below the cut plus its probe row is asked for at most its cap; the list is cut one row under it, and stated', async () => {
+    const door = cappedDoor(longApp(25), 5);
+    const out = await executeGetRecordContext(CALL, door);
+    const list = out.data.related![0];
+    expect(list.rows).toHaveLength(4);
+    expect(list.truncated).toBe(true);
+    expect(out.notes).toEqual([
+      { kind: 'related_truncated', object: 'policy_revision', text: sentencesFor([]).relatedTruncated('policy_revision', 4) },
+    ]);
+    const listRead = door.reads.find((r) => r.member === 'query' && r.object === 'policy_revision');
+    expect((listRead?.opts as { limit: number }).limit).toBe(5);
+    // A list that fits under the door's cap is carried whole, with nothing stated.
+    const short = await executeGetRecordContext(CALL, cappedDoor(longApp(4), 5));
+    expect(short.data.related![0].rows).toHaveLength(4);
+    expect(short.data.related![0].truncated).toBeUndefined();
+    expect(short.notes).toEqual([]);
+  });
+
+  it('a door cap at or above the cut plus its probe row, or no answer, changes nothing', async () => {
+    for (const cap of [RECORD_CONTEXT_RELATED_MAX_ROWS + 1, 500, undefined, 0, 2.5]) {
+      const door = fakeDoor(longApp(25));
+      door.pageCap = () => cap;
+      const out = await executeGetRecordContext(CALL, door);
+      expect(out.data.related![0].rows).toHaveLength(RECORD_CONTEXT_RELATED_MAX_ROWS);
+      const listRead = door.reads.find((r) => r.member === 'query' && r.object === 'policy_revision');
+      expect((listRead?.opts as { limit: number }).limit).toBe(RECORD_CONTEXT_RELATED_MAX_ROWS + 1);
+    }
   });
 
   it('a list the agent ceiling narrowed carries the security service\'s own sentence', async () => {
@@ -581,6 +850,19 @@ describe('get_record_context — a related list\'s where, orderBy and limit (ADR
     expect(out.notes).toEqual([]);
   });
 
+  it('an orderBy on a registry-injected field (`created_at`) that both definitions carry reads the list in that order', async () => {
+    const app = filteredApp({ orderBy: [{ field: 'created_at', order: 'desc' }] });
+    (app.objects.policy_revision as { fields: Record<string, unknown> }).fields.created_at = {
+      name: 'created_at', type: 'datetime', label: 'Created at', readonly: true,
+    };
+    app.records.policy_revision = app.records.policy_revision.map((r, i) => ({ ...r, created_at: `2026-11-0${i + 1}T00:00:00Z` }));
+    const door = fakeDoor(app);
+    const out = await executeGetRecordContext(CALL, door);
+    expect(out.data.related![0].rows.map((r) => r.id)).toEqual(['r3', 'r2', 'r1']);
+    expect(out.notes).toEqual([]);
+    expect(listReads(door)[0].opts).toMatchObject({ orderBy: [{ field: 'created_at', order: 'desc' }] });
+  });
+
   it('the read set is the same with and without the three keys', async () => {
     const metadataOf = (app: FakeApp) => ({
       listContextPacks: async () => app.packs,
@@ -700,6 +982,167 @@ describe('get_record_context — the outline bound (ADR-0160 D3: every cut is st
     expect(out.data.body?.text).toHaveLength(RECORD_CONTEXT_BODY_MAX_CHARS);
     expect(out.data.body?.truncated).toBe(true);
     expect(out.notes.map((n) => n.kind)).toEqual(['body_truncated']);
+  });
+});
+
+describe('get_record_context — the outline in pages (ADR-0160 D3: every section reachable, every answer bounded)', () => {
+  const HEADINGS = 300;
+  /** A long body of `n` short headings at one level, each over a short clause. */
+  const flat = (n = HEADINGS) => Array.from({ length: n }, (_, i) => `## Clause ${i + 1}\nThe insurer pays clause ${i + 1}.\n`).join('');
+  /** One top heading over `n` second-level ones: a nested cut whose top section passes the body bound. */
+  const nested = (n = HEADINGS) => `# Terms\n${flat(n)}`;
+  const withBody = (content: string, overrides: Partial<FakeApp> = {}) => {
+    const app = policyApp(overrides);
+    app.records.policy[0].content = content;
+    return app;
+  };
+  /** The answer's one JSON, held to the bounds a single answer keeps. */
+  const assertBounded = (out: Awaited<ReturnType<typeof run>>) => {
+    expect(GetRecordContextOutputSchema.safeParse(out).success).toBe(true);
+    const body = out.data.body!;
+    if (body.outline) {
+      expect(body.outline.length).toBeLessThanOrEqual(RECORD_CONTEXT_OUTLINE_MAX_ENTRIES);
+      expect(JSON.stringify(body.outline).length).toBeLessThanOrEqual(RECORD_CONTEXT_BODY_MAX_CHARS);
+    }
+    if (body.text !== undefined) expect(body.text.length).toBeLessThanOrEqual(RECORD_CONTEXT_BODY_MAX_CHARS);
+  };
+  /** Every page, from the first, by the `outlineNext` each answer gave. */
+  const walk = async (app: FakeApp) => {
+    const pages: Array<Awaited<ReturnType<typeof run>>> = [];
+    let from: number | undefined;
+    do {
+      const out = await run(app, from === undefined ? CALL : { ...CALL, outlineFrom: from });
+      assertBounded(out);
+      pages.push(out);
+      from = out.data.body?.outlineNext;
+    } while (from !== undefined && pages.length <= HEADINGS);
+    return pages;
+  };
+
+  it('a body of 300 headings at one level: every section is read by an anchor the tool issued, each answer within the bounds', async () => {
+    const content = flat();
+    expect(content.length).toBeGreaterThan(RECORD_CONTEXT_BODY_MAX_CHARS);
+    const app = withBody(content);
+    const pages = await walk(app);
+    expect(pages.length).toBeGreaterThan(1);
+    const issued = pages.flatMap((p) => p.data.body?.outline ?? []).map((h) => h.anchor);
+    expect(issued).toHaveLength(HEADINGS);
+    expect(new Set(issued).size).toBe(HEADINGS);
+    for (const [i, anchor] of issued.entries()) {
+      const section = await run(app, { ...CALL, anchor });
+      assertBounded(section);
+      expect(section.data.body?.text).toBe(`## Clause ${i + 1}\nThe insurer pays clause ${i + 1}.\n`);
+    }
+  });
+
+  it('a nested body whose top section passes the bound: the deeper headings are listed on later pages, each read by its anchor', async () => {
+    const app = withBody(nested());
+    const pages = await walk(app);
+    expect(pages[0].data.body?.outline?.[0]).toEqual({ anchor: 'terms', heading: 'Terms', level: 1 });
+    const issued = pages.flatMap((p) => p.data.body?.outline ?? []).map((h) => h.anchor);
+    expect(issued).toHaveLength(HEADINGS + 1);
+    // The top section is cut at the bound, so its clauses past the cut are reached by their own anchors only.
+    const top = await run(app, { ...CALL, anchor: 'terms' });
+    expect(top.data.body?.truncated).toBe(true);
+    expect(top.data.body?.text).not.toContain(`Clause ${HEADINGS}\n`);
+    const last = await run(app, { ...CALL, anchor: `clause-${HEADINGS}` });
+    expect(last.data.body?.text).toBe(`## Clause ${HEADINGS}\nThe insurer pays clause ${HEADINGS}.\n`);
+  });
+
+  it('the cut note is true for a flat cut and for a nested cut, in en and zh-Hans: it names the page to list next, not the headings under a section', async () => {
+    for (const content of [flat(), nested()]) {
+      const total = headingsOf(content, false).length;
+      for (const locales of [undefined, ['zh-CN']]) {
+        const out = await run(withBody(content, locales ? { locales } : {}));
+        const listed = out.data.body?.outline?.length ?? 0;
+        expect(out.data.body?.outlineNext).toBe(listed);
+        const notes = out.notes.filter((n) => n.kind === 'outline_truncated');
+        expect(notes).toHaveLength(1);
+        const text = notes[0].text;
+        for (const n of [listed, total, total - listed]) expect(text).toContain(String(n));
+        expect(text).toContain(`outlineFrom ${listed}`);
+        expect(text).not.toContain('insurer');
+        // The sentence the flat cut made false: nothing it leaves out is under a listed section there.
+        expect(text).not.toMatch(/includes the headings under it|它下面的标题包含在该章节的文本中/);
+        if (locales) expect(text).toMatch(/大纲/);
+      }
+    }
+  });
+
+  it('the last page states that no later page lists more, and gives no outlineNext', async () => {
+    const app = withBody(flat());
+    const pages = await walk(app);
+    const last = pages[pages.length - 1];
+    expect(last.data.body).not.toHaveProperty('outlineNext');
+    const cut = last.notes.find((n) => n.kind === 'outline_truncated');
+    expect(cut?.text).toContain(String(HEADINGS - (last.data.body?.outline?.length ?? 0)));
+    expect(cut?.text).not.toContain('outlineFrom');
+  });
+
+  it('a section listed on page 2 is read exactly as that page\'s body_outline note says, in en and zh-Hans; the same arguments plus the anchor are the control, refused', async () => {
+    for (const locales of [undefined, ['zh-CN']]) {
+      const app = withBody(flat(), locales ? { locales } : {});
+      const first = await run(app);
+      const page2Args = { ...CALL, outlineFrom: first.data.body!.outlineNext! };
+      const page2 = await run(app, page2Args);
+      const note = page2.notes.find((n) => n.kind === 'body_outline')!.text;
+      // The note names what to repeat and that outlineFrom is left out.
+      for (const word of ['objectName', 'recordId', 'context', 'anchor', 'outlineFrom']) expect(note).toContain(word);
+      const anchor = page2.data.body!.outline![0].anchor;
+      // As the note says: the record's arguments, the anchor, no outlineFrom.
+      const { outlineFrom: _dropped, ...asTheNoteSays } = page2Args;
+      const section = await run(app, { ...asTheNoteSays, anchor });
+      expect(section.data.body).toMatchObject({ anchor, text: expect.stringMatching(/^## Clause \d+\n/) });
+      // Control: "the same arguments" of page 2 plus the anchor is the refused pair.
+      expect(await refusalOf(run(app, { ...page2Args, anchor }))).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    }
+  });
+
+  it('a count of headings too long to list reads in the singular for one and the plural for more', async () => {
+    const tooLong = (n: number) => Array.from({ length: n }, (_, i) => `## ${'x'.repeat(RECORD_CONTEXT_BODY_MAX_CHARS)}${i}\n`).join('');
+    const one = await run(withBody(tooLong(1) + flat()));
+    expect(one.notes.find((n) => n.kind === 'outline_truncated')?.text).toContain('1 heading is too long for any page to list, so its anchor is not given.');
+    const two = await run(withBody(tooLong(2) + flat()));
+    expect(two.notes.find((n) => n.kind === 'outline_truncated')?.text).toContain('2 headings are too long for any page to list, so their anchors are not given.');
+  });
+
+  it('outlineFrom 0 is the first page', async () => {
+    const app = withBody(flat());
+    expect(await run(app, { ...CALL, outlineFrom: 0 })).toEqual(await run(app));
+  });
+
+  it('an outline page that does not start where outlineFrom says is ONE answer: past the end, a body carried whole, no body in the pack, or a body the caller cannot see', async () => {
+    const past = await refusalOf(run(withBody(flat()), { ...CALL, outlineFrom: HEADINGS }));
+    const whole = await refusalOf(run(policyApp(), { ...CALL, outlineFrom: HEADINGS }));
+    const noBody = await refusalOf(
+      run(policyApp({ packs: [{ name: 'policy_document', label: 'Policy document', object: 'policy', fields: ['title'] }] }), {
+        ...CALL,
+        outlineFrom: HEADINGS,
+      }),
+    );
+    const hiddenBody = await refusalOf(run(policyApp({ hiddenFields: { policy: ['content'] } }), { ...CALL, outlineFrom: HEADINGS }));
+    expect(past).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+    expect(past.message).toContain(String(HEADINGS));
+    expect(whole).toEqual(past);
+    expect(noBody).toEqual(past);
+    expect(hiddenBody).toEqual(past);
+  });
+
+  it('a call naming both anchor and outlineFrom is refused before anything is read', async () => {
+    const app = withBody(flat());
+    const door = fakeDoor(app);
+    const pair = { ...CALL, anchor: 'clause-1', outlineFrom: 80 };
+    // The spec's schema admits the pair (record-context-tools.zod.test.ts); the executor refuses it.
+    expect(GetRecordContextInputSchema.safeParse(pair).success).toBe(true);
+    const refused = await refusalOf(executeGetRecordContext(pair, door));
+    expect(refused).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(door.reads).toEqual([]);
+  });
+
+  it('a negative or fractional outlineFrom is refused at parse', async () => {
+    for (const outlineFrom of [-1, 1.5, '80']) {
+      expect(await refusalOf(run(withBody(flat()), { ...CALL, outlineFrom }))).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    }
   });
 });
 

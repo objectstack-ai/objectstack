@@ -284,7 +284,8 @@ describe('Studio adds an action to an installed app’s object, in its customiza
     expect(opts).toMatchObject({ mode: 'draft', packageId: PAIR, ifNoneMatch: '*' });
     // Then that one action is published at the pair: live at once, asserting
     // no published action of its name (objectstack#36726).
-    expect(mockClient.publish).toHaveBeenCalledWith('action', name, { packageId: PAIR, ifNoneMatch: '*' });
+    // objectstack#37440 — pinned to the draft this Save wrote (its receipt), too.
+    expect(mockClient.publish).toHaveBeenCalledWith('action', name, { packageId: PAIR, ifNoneMatch: '*', draftVersion: expect.any(String) });
     expect(mockClient.save.mock.invocationCallOrder[0]).toBeLessThan(mockClient.publish.mock.invocationCallOrder[0]);
     expect(ensure).toHaveBeenCalledTimes(1);
     expect(saves().filter(([type]) => type === 'object')).toHaveLength(0);
@@ -323,7 +324,7 @@ describe('Studio adds an action to an installed app’s object, in its customiza
     // The read's decorations are not written back.
     expect(body).not.toHaveProperty('_packageId');
     expect(opts).toMatchObject({ mode: 'draft', packageId: PAIR });
-    expect(mockClient.publish).toHaveBeenCalledWith('action', KEPT.name, { packageId: PAIR });
+    expect(mockClient.publish).toHaveBeenCalledWith('action', KEPT.name, { packageId: PAIR, draftVersion: expect.any(String) });
     expect(saves().filter(([type]) => type === 'object')).toHaveLength(0);
 
     fireEvent.click(screen.getByRole('button', { name: L('engine.studio.actions.delete') }));

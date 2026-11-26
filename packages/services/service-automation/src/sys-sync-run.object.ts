@@ -202,7 +202,12 @@ export const SysSyncRun = ObjectSchema.create({
       description: "Why the job run started: 'schedule', on its schedule; 'manual', when someone ran the job now. Empty when no job started the pull, or the job service sent no trigger.",
     }),
 
-    status: Field.select(['running', 'completed', 'degraded', 'failed'], {
+    status: Field.select([
+      'running',
+      { label: 'completed', value: 'completed', color: 'green' },
+      'degraded',
+      { label: 'failed', value: 'failed', color: 'red' },
+    ], {
       label: 'Status',
       required: true,
       defaultValue: 'running',

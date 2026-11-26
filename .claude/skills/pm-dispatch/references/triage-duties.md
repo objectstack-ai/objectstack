@@ -7,7 +7,7 @@
 - 查重缓存住席内:新会话全量拉,其后 `since` 增量;⛔ 不建分支、不共享、不依赖备份。
 - 每日一 fire 跑两仓全量对账(`objectstack-ai/objectstack`、`objectstack-ai/cloud`)并归集日频职责;
 - 选层按 fire 时刻 ⛔ 不用计数器,简报写明层;cloud 卡首触与逾 4 h 兜底照 `lanes/cloud.md`。
-- 每日看板的车道一节展示 devx 六项度量;清单住 `lanes/devx.md` 范围节度量行,⛔ 不另抄。
+- 每日看板的车道一节展示 devx 六项度量;清单住 `domains/devx.md` 范围节度量行,⛔ 不另抄。
 - 每条枚举比对返回数与 `totalCount`,不等 ⇒ 报 `sweep INCOMPLETE` 点名缺口,⛔ 永不报干净。
 - 轮次记录按车道计欠 L2 逾一轮的 head 数并点名车道(`check-owed-reviews.mjs`),只报 ⛔ 不接审。
 - 每日看板与轮次记录列「待维护者」:当前里程碑已清的专题,注小结贴否;读数非门禁。

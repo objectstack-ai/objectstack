@@ -1,5 +1,70 @@
 # @objectstack/hono
 
+## 19.0.0-next.0
+
+### Patch Changes
+
+- Updated dependencies [8236d9b]
+- Updated dependencies [9abc732]
+- Updated dependencies [4c2d8d7]
+- Updated dependencies [a998964]
+- Updated dependencies [cceb5c6]
+- Updated dependencies [d558de0]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [f796089]
+- Updated dependencies [2d33205]
+- Updated dependencies [78f3ab2]
+- Updated dependencies [3c038eb]
+- Updated dependencies [5ecf937]
+- Updated dependencies [96faf44]
+- Updated dependencies [961f474]
+- Updated dependencies [8596c80]
+- Updated dependencies [ec227fc]
+- Updated dependencies [8856afc]
+- Updated dependencies [65b67be]
+- Updated dependencies [1caee8c]
+- Updated dependencies [dbb2f68]
+- Updated dependencies [467b13b]
+- Updated dependencies [53c9575]
+- Updated dependencies [fcbebf2]
+- Updated dependencies [ea58563]
+- Updated dependencies [7c122ff]
+- Updated dependencies [fe19096]
+- Updated dependencies [c4d6acc]
+- Updated dependencies [c261a7c]
+- Updated dependencies [ddceb22]
+- Updated dependencies [d463c46]
+- Updated dependencies [ac43336]
+- Updated dependencies [a3ee862]
+- Updated dependencies [3f568c1]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [e343ab7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [76eea0f]
+- Updated dependencies [6cfb782]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [51b67f1]
+- Updated dependencies [9c57bd2]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [f131c83]
+- Updated dependencies [ebac615]
+- Updated dependencies [8d60333]
+- Updated dependencies [c448c61]
+- Updated dependencies [c059e60]
+- Updated dependencies [595e9cb]
+- Updated dependencies [64b278e]
+- Updated dependencies [d2bc1ff]
+  - @objectstack/runtime@19.0.0-next.0
+  - @objectstack/types@19.0.0-next.0
+  - @objectstack/plugin-hono-server@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

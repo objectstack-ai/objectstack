@@ -893,6 +893,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Lecture seule",
         helpText: "Le champ est en lecture seule dans les formulaires"
       },
+      uiReadonly: {
+        label: "Lecture seule dans l'interface",
+        helpText: "Personne ne peut modifier ce champ à la main dans la console (boîtes de dialogue, page de l'enregistrement, grilles, glisser-déposer du kanban et du calendrier), tandis que les actions, les imports, l'API et les flux continuent de l'écrire, chaque écriture étant jugée par les validations de l'objet. Laissez-le désactivé lorsque Lecture seule est activé : celui-ci bloque déjà toute écriture client."
+      },
       hidden: {
         label: "Masqué",
         helpText: "Masquer le champ dans les vues d’interface par défaut"
@@ -916,6 +920,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       readonlyWhen: {
         label: "Lecture seule si",
         helpText: "Prédicat CEL sur l’enregistrement (par ex. record.status == 'paid') — le champ est en lecture seule tant qu’il est TRUE, ce qui est appliqué côté serveur : la modification d’un champ verrouillé par une mise à jour est ignorée et la valeur stockée est conservée. Lit les colonnes propres de l’enregistrement ; objectstack validate refuse une lecture via un champ de référence."
+      },
+      uiReadonlyWhen: {
+        label: "Lecture seule dans l'interface si",
+        helpText: "Prédicat CEL sur l'enregistrement (p. ex. record.status != 'draft') : tant qu'il vaut TRUE, personne ne peut modifier le champ d'un enregistrement existant dans la console (la boîte d'édition, la page de l'enregistrement, les grilles, le glisser-déposer du kanban et du calendrier) ; la boîte de création d'un nouvel enregistrement ne l'évalue pas. Les actions, les imports, l'API et les flux continuent de l'écrire, jugés par les validations de l'objet. Lit les colonnes propres de l'enregistrement, comme Lecture seule si."
       },
       requiredWhen: {
         label: "Obligatoire si",
@@ -1282,7 +1290,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       compactToolbar: {
         label: "Barre d’outils compacte",
-        helpText: "Regrouper Groupe/Couleur/Densité/Masquer les champs dans une seule fenêtre de paramètres de la vue"
+        helpText: "Regrouper Groupe/Couleur/Densité/Masquer les champs dans une seule fenêtre « Paramètres de la vue ». Activé par défaut : absent ou `true`, le moteur de rendu dessine cette barre d’outils compacte ; `false` dessine la barre d’outils large, avec un bouton par contrôle. La barre compacte ne dessine pas de bouton Actualiser, donc `userActions.refresh` ne régit que la barre large ; le tirer pour actualiser n’est affecté par aucune des deux clés."
       },
       rowHeight: {
         label: "Hauteur de ligne",

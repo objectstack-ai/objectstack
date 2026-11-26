@@ -186,6 +186,8 @@ function stubFetch(mode: 'failed' | 'loaded') {
       : vi.fn().mockResolvedValue({
           ok: true,
           status: 200,
+          // The authenticated fetch reads a rotated token off every answer (objectstack#37225).
+          headers: new Headers(),
           json: async () => ({ fields: [{ name: 'status', label: 'Status', type: 'text' }] }),
         } as unknown as Response),
   );

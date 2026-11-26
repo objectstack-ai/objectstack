@@ -280,6 +280,7 @@ const en = {
     // `validation.formInvalidJoiner` — because the fix is to the metadata, not
     // to anything the person filling the form can type.
     visibleWhenFaulted: "Can't submit: the visibleWhen rule of {{fields}} could not be evaluated. The rule must be fixed before this form can be submitted.",
+    uiReadonlyWhenFaulted: "Can't submit: the uiReadonlyWhen rule of {{fields}} could not be evaluated. The rule must be fixed before this form can be submitted.",
     fieldRequired: 'This field is required',
     saveError: 'Failed to save',
     unsavedChanges: 'You have unsaved changes. Are you sure you want to leave?',
@@ -1424,6 +1425,7 @@ const en = {
     addColumn: 'Add column',
     moveCard: 'Move card',
     noCards: 'No cards',
+    notLoaded: 'Cards not loaded: {{count}}',
     columnCards: '{{column}} cards',
     laneCards: '{{column}} - {{lane}} cards',
     dropBlocked: 'A card in {{from}} cannot be moved to {{to}}.',
@@ -2645,9 +2647,10 @@ const en = {
   console: {
     // The fixed crumb `AppHeader`'s `studio` variant draws on the Studio front
     // door (objectui#11863), as `organizations.title` is the `orgs` variant's.
-    // A product name, which every pack writes as is.
+    // A product name (ADR-0084): App Studio, which a Chinese pack writes as
+    // 应用搭建 and every other pack writes as is.
     studio: {
-      title: 'Studio',
+      title: 'App Studio',
       // What a principal without `studio.access` reads at the Studio URL they
       // opened (objectui#12035), in place of the silent redirect home.
       accessRequired: 'You need Studio access to open Studio. An administrator can grant it with a permission set in Setup → Permission Set Assignment.',
@@ -2810,6 +2813,9 @@ const en = {
       savedCleared: 'Saved value cleared',
       deprecatedBadge: 'Deprecated',
       deprecatedBadgeReplacedBy: 'Deprecated → {{replacedBy}}',
+      // `selectValueRetired` names a stored select value the setting no longer offers
+      // (an option removed in a later release); `{{value}}` is the stored code.
+      selectValueRetired: '{{value}} (no longer available)',
       unsupportedSpecifierType: 'Unsupported specifier type: {{type}}',
       // The `map` control (objectstack#31391): keyed rows over the keys the server
       // serves. `mapAddRow` is the picker that adds a row by its key, `{{key}}` in
@@ -4468,11 +4474,11 @@ const en = {
   },
   topbar: {
     aiAssistant: 'AI Assistant',
-    designInStudio: 'Design in Studio',
+    designInStudio: 'Design in App Studio',
     designLayout: 'Design layout',
     editApp: 'Edit app',
-    openAppInStudio: 'Open {{app}} in Studio',
-    viewInStudio: 'View in Studio',
+    openAppInStudio: 'Open {{app}} in App Studio',
+    viewInStudio: 'View in App Studio',
     openAssistant: 'Open {{name}} assistant',
     offline: 'Offline',
     usersOnline: 'Users currently online',
@@ -4632,8 +4638,8 @@ const en = {
       backToAppHome: 'Back to the app menu',
       appsAvailable: '{{count}} apps available',
       allApps: 'All apps',
-      editAppInStudio: 'Edit {{app}} in Studio',
-      openAppInStudio: 'Open {{app}} in Studio',
+      editAppInStudio: 'Edit {{app}} in App Studio',
+      openAppInStudio: 'Open {{app}} in App Studio',
       backToHome: 'Back to app start page',
       settings: 'Settings',
       productHome: '{{product}} home',
@@ -5655,6 +5661,9 @@ const en = {
       dataset: 'Dataset',
       metrics: 'Metrics',
       noAddedFilter: 'No filter added to the dataset definition',
+    },
+    recordCitations: {
+      title: 'Cited from records',
     },
     tool: {
       aggregate_data: 'Aggregate the data',

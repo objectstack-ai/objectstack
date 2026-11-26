@@ -4705,6 +4705,39 @@ export function objectValidationMessageKey(objectName: string, ruleName: string)
 }
 
 /**
+ * The translated summary TEMPLATE of an object's activity milestone (ADR-0052
+ * §5b.2) — `objects.<object>._milestones.<field>.<value>.summary` — along the
+ * locale chain, or `undefined` when no locale of the chain carries a non-empty
+ * entry.
+ *
+ * A milestone declares no name: the watched `field` and the `value` it fires
+ * on are what fire it, so the pair is its address. `field` and `value` are each
+ * ONE key (a value is never split on a dot). The answer is a template with the
+ * authored `{field}` tokens; the caller interpolates it.
+ *
+ * Deliberately not overlaid by {@link translateObject}: a served object that
+ * carried the translated template would round-trip it into the authored
+ * declaration on the next Studio save. The one reader is the activity timeline,
+ * which composes a fired milestone's row in its reader's language.
+ */
+export function resolveObjectMilestoneSummary(
+  bundle: TranslationBundle | undefined,
+  objectName: string,
+  field: string,
+  value: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const objects = asRecord(asRecord(pickData(bundle, code))?.objects);
+    const milestones = asRecord(asRecord(objects?.[objectName])?._milestones);
+    const candidate = asRecord(asRecord(milestones?.[field])?.[value])?.summary;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
  * Dot-notation i18n key for a refused `end` node's message —
  * `flows.<flow>.refusals.<node_id>.message` (#22450).
  *
@@ -5066,10 +5099,17 @@ function builtinSystemFieldLabel(
  * rewrite is judged by one comparison on both readers and the two keep
  * answering one sentence. The key is the only thing it adds: the three edges
  * above hold for it unchanged.
+ *
+ * ## `summary` — an activity milestone's, judged on the feed reader
+ *
+ * The audit plugin's feed translates a packaged milestone's `summary` only
+ * while the served milestone's still equals the packaged one of the same
+ * `field` + `value` pair (ADR-0029 D9.2a), asking through this export with the
+ * packaged MILESTONE as `base`, as the evaluator asks with the packaged rule.
  */
 export function scalarOverridesPackagedBase(
   base: unknown,
-  key: 'label' | 'pluralLabel' | 'description' | 'message',
+  key: 'label' | 'pluralLabel' | 'description' | 'message' | 'summary',
   value: unknown,
 ): boolean {
   return valueOverridesPackagedBase(base, key, value);

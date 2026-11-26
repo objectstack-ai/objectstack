@@ -77,6 +77,7 @@ import { t, useMetadataLocale } from './i18n';
 import { newAppStep } from '../studio-design/newAppDoor';
 import { studioHomePath } from '../studio-design/studioAddress';
 import { StudioDesignSurface } from '../studio-design/StudioDesignSurface';
+import { StudioPillarRedirect } from '../studio-design/StudioPillarRedirect';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -201,7 +202,7 @@ function renderDoor() {
       <Routes>
         <Route path="/host" element={<NewAppHost />} />
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
         <Route path="/apps/*" element={<RunningApp />} />
       </Routes>
     </MemoryRouter>,
@@ -272,7 +273,7 @@ describe('PackageFormDialog with a new-app step: one confirm creates the package
       () => expect(within(header).getByTestId('studio-back-app-name')).toHaveAttribute('data-names', 'app'),
       { timeout: 8000 },
     );
-    expect(within(header).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Visits·Studio$/);
+    expect(within(header).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Visits·App Studio$/);
     // The app is live: no Create app is offered, and the back link opens it.
     expect(within(header).queryByRole('button', { name: /Create app/ })).toBeNull();
     fireEvent.click(within(header).getByTestId('studio-back-to-app'));
@@ -324,7 +325,7 @@ function renderCreatePackage() {
       <Routes>
         <Route path="/host" element={<CreatePackageHost />} />
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
         <Route path="/apps/*" element={<RunningApp />} />
       </Routes>
     </MemoryRouter>,
@@ -384,7 +385,7 @@ describe('CreatePackageDialog: ticked creates the package and its app; unticked 
       () => expect(within(header).getByTestId('studio-back-app-name')).toHaveAttribute('data-names', 'app'),
       { timeout: 8000 },
     );
-    expect(within(header).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Visits·Studio$/);
+    expect(within(header).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Visits·App Studio$/);
   });
 
   it('unticked: only the package is created, as before', async () => {

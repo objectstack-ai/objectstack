@@ -26,6 +26,11 @@
  * `DraftChangesPanel`, reduced to the button that fires `onPublish` (the sheet
  * has its own tests, `../../preview/__tests__/`).
  *
+ * objectstack#37454 — the package's publish has a second door, 概览
+ * Overview's Pending tab (the panel drawn in place, `embedded`), wired to the
+ * same publish: every package-batch case below runs through both doors, the
+ * top bar's and the Pending tab's, with the same expectations.
+ *
  * The expected sentences are read from the string table through the same
  * `tFormat` the surface calls, so what is pinned is which row and which count,
  * never the prose.
@@ -70,9 +75,13 @@ vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPan
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({
-  DraftChangesPanel: ({ onPublish }: { onPublish?: () => void | Promise<void> }) =>
+  DraftChangesPanel: ({ onPublish, embedded }: { onPublish?: () => void | Promise<void>; embedded?: boolean }) =>
     onPublish ? (
-      <button type="button" data-testid="publish-all-drafts" onClick={() => void onPublish()}>
+      <button
+        type="button"
+        data-testid={embedded ? 'publish-all-drafts-pending-tab' : 'publish-all-drafts'}
+        onClick={() => void onPublish()}
+      >
         publish
       </button>
     ) : null,
@@ -85,6 +94,7 @@ import { toast } from 'sonner';
 import '@objectstack/lint';
 import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { t, tFormat } from '../metadata-admin/i18n';
 // The source under test reaches these dynamic imports (the command palette's
 // record preview, the drafts panel's lint, the code editor): their first load
@@ -158,18 +168,27 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function publishAt(path: string, expectPosts: number): Promise<void> {
+async function publishAt(path: string, expectPosts: number, button = 'publish-all-drafts'): Promise<void> {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
-  fireEvent.click(await screen.findByTestId('publish-all-drafts'));
+  fireEvent.click(await screen.findByTestId(button));
   await waitFor(() => expect(posts).toHaveLength(expectPosts));
 }
+
+/**
+ * objectstack#37454 — the two doors of the package's publish: the top bar's
+ * Publish (its review sheet's button), and 概览 Overview's Pending tab.
+ */
+const PACKAGE_DOORS = [
+  { door: 'the top bar', path: `/studio/${PACKAGE_ID}/interfaces`, button: 'publish-all-drafts' },
+  { door: 'the overview\'s Pending tab', path: `/studio/${PACKAGE_ID}/overview?tab=pending`, button: 'publish-all-drafts-pending-tab' },
+] as const;
 
 /** Every toast the publish raised, by kind. */
 function toasts() {
@@ -180,7 +199,7 @@ function toasts() {
   };
 }
 
-describe('the package publish names how many items went live, and what was refused (objectui#11807)', () => {
+describe.each(PACKAGE_DOORS)('the package publish names how many items went live, and what was refused (objectui#11807) — from $door', ({ path, button }) => {
   it('two published items: the count row, with 2', async () => {
     batchBody = batch({
       outcome: 'published',
@@ -189,7 +208,7 @@ describe('the package publish names how many items went live, and what was refus
       published: published('repairs_repair_ticket', 'visit'),
       failed: [],
     });
-    await publishAt(`/studio/${PACKAGE_ID}/interfaces`, 1);
+    await publishAt(path, 1, button);
     await waitFor(() => expect(toast.success).toHaveBeenCalled());
     expect(toasts().success).toEqual([tFormat('engine.studio.publishedAllCount', 'en', { count: 2 })]);
     expect(toasts().error).toEqual([]);
@@ -203,7 +222,7 @@ describe('the package publish names how many items went live, and what was refus
       published: published('visit'),
       failed: [],
     });
-    await publishAt(`/studio/${PACKAGE_ID}/interfaces`, 1);
+    await publishAt(path, 1, button);
     await waitFor(() => expect(toast.success).toHaveBeenCalled());
     expect(toasts().success).toEqual([tFormat('engine.studio.publishedAllCountOne', 'en', { count: 1 })]);
   });
@@ -221,7 +240,7 @@ describe('the package publish names how many items went live, and what was refus
       failed: [],
       unregistered: [{ type: 'object', name: 'visit', rule: 'object-registry-refused' }],
     });
-    await publishAt(`/studio/${PACKAGE_ID}/interfaces`, 1);
+    await publishAt(path, 1, button);
     await waitFor(() => expect(toast.success).toHaveBeenCalled());
     expect(toasts().success).toEqual([tFormat('engine.studio.publishedAllCount', 'en', { count: 2 })]);
     expect(toasts().error).toEqual([]);
@@ -229,7 +248,7 @@ describe('the package publish names how many items went live, and what was refus
 
   it('nothing to publish: said as such, neither a success nor a failure', async () => {
     batchBody = batch({ outcome: 'nothing_to_publish', publishedCount: 0, failedCount: 0, published: [], failed: [] });
-    await publishAt(`/studio/${PACKAGE_ID}/interfaces`, 1);
+    await publishAt(path, 1, button);
     await waitFor(() => expect(toast.info).toHaveBeenCalled());
     expect(toasts()).toEqual({ success: [], info: [t('engine.studio.publishNoneTitle', 'en')], error: [] });
   });
@@ -246,7 +265,7 @@ describe('the package publish names how many items went live, and what was refus
       published: [],
       failed: [{ type: 'object', name: 'visit', error: reason, code: 'SECURITY_OWD_UNSET' }],
     });
-    await publishAt(`/studio/${PACKAGE_ID}/interfaces`, 1);
+    await publishAt(path, 1, button);
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(toasts().success).toEqual([]);
     expect(toasts().info).toEqual([]);
@@ -304,10 +323,11 @@ describe('the package-less publish names its count, and its zero is no success (
 // the way to Access.
 describe('a publish that put an app or object live points the author to Access (objectstack#27521)', () => {
   function LocationProbe() {
-    return <div data-testid="location">{useLocation().pathname}</div>;
+    const { pathname, search } = useLocation();
+    return <div data-testid="location">{`${pathname}${search}`}</div>;
   }
 
-  it('an object went live: the hint, and "Open Access" leads to the Access pillar', async () => {
+  it('an object went live: the hint, and "Open Access" leads to the package\'s permission sets', async () => {
     batchBody = batch({
       outcome: 'published',
       publishedCount: 1,
@@ -319,7 +339,7 @@ describe('a publish that put an app or object live points the author to Access (
       <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data`]}>
         <Routes>
           <Route path="/studio/:packageId/metadata/*" element={<><StudioDesignSurface area="metadata" /><LocationProbe /></>} />
-          <Route path="/studio/:packageId/:tab" element={<><StudioDesignSurface /><LocationProbe /></>} />
+          <Route path="/studio/:packageId/:tab" element={<><StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect><LocationProbe /></>} />
         </Routes>
       </MemoryRouter>,
     );
@@ -333,7 +353,10 @@ describe('a publish that put an app or object live points the author to Access (
     expect(options.description).toBe(t('engine.studio.publishedAccessHint', 'en'));
     expect(options.action?.label).toBe(t('engine.studio.publishedOpenAccess', 'en'));
     options.action!.onClick();
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${PACKAGE_ID}/access`));
+    // objectstack#36909 — the package's permission sets, in one hop: not the retired Access pillar's address.
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${PACKAGE_ID}/metadata/permission?package=${PACKAGE_ID}`),
+    );
   });
 
   it('CONTROL — only a flow went live: the plain toast, no Access hint', async () => {

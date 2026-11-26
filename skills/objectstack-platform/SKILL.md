@@ -14,10 +14,10 @@ description: >
   objectstack-query); data lifecycle hooks (beforeInsert / afterUpdate)
   belong in objectstack-data — only kernel / service-level events live here.
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 18.x and @objectstack/core 18.x (Zod v4 schemas), Node 22+
+compatibility: Requires @objectstack/spec 19.x and @objectstack/core 19.x (Zod v4 schemas), Node 22+
 metadata:
   author: objectstack-ai
-  version: "18.6.0"
+  version: "19.0.0-next.0"
   domain: platform
   tags: project, defineStack, driver, hono, plugin, kernel, service, requires, capability, DI, lifecycle, cli, deploy, ops
 ---
@@ -108,7 +108,7 @@ export default defineStack({ manifest: {
   type: 'app', // app | plugin | driver | module | ...
   name: 'Acme CRM', // Human-readable display name
   description: 'CRM system', // Optional
-  engines: { protocol: '^18' },
+  engines: { protocol: '^19' },
 } });
 ```
 
@@ -118,15 +118,15 @@ checks it **before it loads anything** and refuses an out-of-range app at the
 boundary with the exact migration command. Change it when you deliberately move
 to a new protocol major — never to silence a mismatch.
 
-**Object naming:** The object `name` is the canonical identifier and equals the physical table name. Embed any domain prefix directly in the name (e.g. `name: 'crm_account'`); the object-level `namespace` *field* is retired (ADR-0129 D3) and refused at load. Never set `tableName`, and never add a `sys_metadata` object to a runtime manifest.
+**Object naming:** The object `name` is the canonical identifier and equals the physical table name. The object-level `namespace` *field* is retired (ADR-0129 D3) and refused at load. Never set `tableName`, and never add a `sys_metadata` object to a runtime manifest.
 
 **`manifest.namespace` (ADR-0048):** Optional, but **enforced once set**. When a package declares `manifest.namespace: 'crm'`, every `object.name` must start with `crm_` or `defineStack` errors (`validateNamespacePrefix` in `@objectstack/spec`); the legacy `<ns>__<short>` double-underscore form is rejected, and `sys_`-prefixed names are platform-reserved and exempt. The namespace is also a package-ownership key — installing two packages that both claim `crm` fails with `NamespaceConflictError` (downgrade to a warning with `OS_METADATA_COLLISION=warn`). Never `actions`, `connectors`, `global`, `hooks`, `oauth`, `runs`, `trigger` (route literals; `os validate` and build refuse).
 
-**Which names carry the namespace (ADR-0150):** object and doc names, capabilities (`crm.export_data`) and positions (one slot per environment). Every other name stays short (`send_email`): flows, actions, hooks, apps, pages, dashboards, reports, datasets, permission sets, tools, skills, agents are identified by package and name. A prefixed name stays valid; no name starts with `_`, which the router reserves. `os lint`'s `naming/namespace-prefix` warns on a bare capability or position name, and when one package declares an app, page, dashboard, flow, report or dataset name twice, or an action name twice on one object.
+**Which names carry the namespace (ADR-0150):** object and doc names, capabilities (`crm.export_data`) and positions (one slot per environment). Every other name stays short (`send_email`): flows, actions, hooks, apps, pages, dashboards, reports, datasets, permission sets, tools, skills, agents, context packs are identified by package and name. A prefixed name stays valid; no name starts with `_`, which the router reserves. `os lint`'s `naming/namespace-prefix` warns on a bare capability or position name, and when one package declares an app, page, dashboard, flow, report or dataset name twice, or an action name twice on one object.
 
 **Customizing an installed package (ADR-0146):** Customize an installed base `hotcrm` in its paired writable `hotcrm.custom`, which depends on it: a same-named item there with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (its `manifest.id`/`manifest.version`) replaces the base's document whole. Reads honour it only from the pair (the row's `package_id`), for a view, dashboard, report, email_template, translation, flow, action, page, app, dataset, doc, book or mapping, never judging `basedOn`. An email template is one item per (name, locale): an override names a locale the base ships; one it does not ship is added without `overrides`. Then no `?package`, `?package=hotcrm`, the layered read and both lists serve it, and removing the pair's item (`DELETE …?package=hotcrm.custom`) serves the base's again; the env-wide list holds one item per name one code package ships (a dependent's stays under its own `?package=`); a pre-D11 unbound Setup row wins over the base's until `os migrate packageless-overlays` moves it, and once movable as a declared override, its package-less save, publish, reset and rollback are refused (D11); an email-template row at a locale the base does not ship moves as the pair's own member and keeps that write. The base's address serves the pair's added locale too (both lists, the layered read with `code` null and `effective` the pair's, the execution list, a send in that locale); one a dependent adds under the base's name is served only under its own `?package=`. An undeclared pair row or a dependent's row at a base-shipped locale is an orphan in the layered read's `overlay`, `effective` = the base's. An override may narrow a public form's anonymous intake, never re-open one any honoured body withdrew. `GET /packages/hotcrm.custom/export` carries it with `overrides`.
 
-The pair comes from `POST /api/v1/packages/hotcrm/ensure-customization`: `namespace` = the base's + `_custom`, `dependencies: { hotcrm: '^<major>' }`; `GET /packages/hotcrm/customizations` lists its overrides, extensions and switched-off items, and uninstalling the base is refused (`409`) while the pair exists. Only the pair declares: the save, publish and install doors, `os validate` and `os build` refuse `overrides` from any other package, and a dependent's item under a base item's name — its one fix is a new name. A permission set, position or capability is never overridden: copy it under a new name ("new similar", landing in the pair). An object is extended (`__c` fields, **objectstack-data**); a flow is overridden or copied (**objectstack-automation**). An action override keeps the base's `objectName` (keyed `OBJECT:NAME`; another object is refused `declared_package_ships_no_such_item`) and replaces its behaviour (`type`, `body`, `label`, `visible`, …) whole, for whoever could already run the base: dropping a `requiredPermissions` entry, turning `ai.exposed` on or `ai.requiresConfirmation` off is refused `declared_action_widens_access`, both `403 NOT_OVERRIDABLE`.
+The pair comes from `POST /api/v1/packages/hotcrm/ensure-customization`: `namespace` = the base's + `_custom`, `dependencies: { hotcrm: '^<major>' }`; `GET /packages/hotcrm/customizations` lists its overrides, extensions, switched-off items and `arrangements` (`{ object, key }` per `fieldGroups`, `relatedLists` or `actionLayout` its object extension writes; no content, no diff), and uninstalling the base is refused (`409`) while the pair exists. Only the pair declares: the save, publish and install doors, `os validate` and `os build` refuse `overrides` from any other package, and a dependent's item under a base item's name — its one fix is a new name. A permission set, position or capability is never overridden: copy it under a new name ("new similar", landing in the pair). An object is extended (`__c` fields, **objectstack-data**); a flow is overridden or copied (**objectstack-automation**). An action override keeps the base's `objectName` (keyed `OBJECT:NAME`; another object is refused `declared_package_ships_no_such_item`) and replaces its behaviour (`type`, `body`, `label`, `visible`, …) whole, for whoever could already run the base: dropping a `requiredPermissions` entry, turning `ai.exposed` on or `ai.requiresConfirmation` off is refused `declared_action_widens_access`, both `403 NOT_OVERRIDABLE`.
 
 That read's `contributions` lists what other packages add to the base, one entry per item with its `packageId`: a `field` or `flow` names the base's `object` it is on, a `nav` item the base's `app`, its `group` if any, and its id as `name`; `counts.contributions` counts items, not packages.
 
@@ -159,9 +159,9 @@ with the `os` commands ([Verify your work](./references/operations.md#verify-you
 
 ## The Template
 
-`blank` is the only template `create-objectstack` offers, and it is the default:
+`blank` is the only template `create-objectstack` offers:
 
-- Bundled with `create-objectstack` — no network fetch
+- Bundled — no network fetch
 - One example object; `requires: ['automation', 'triggers']` plus the three
   generic connector executors in `plugins:`; and the eight generator barrels
   (`objects`, `views`, `actions`, `flows`, `dashboards`, `apps`, `skills`, `picklists`),
@@ -179,10 +179,10 @@ The five retired remote templates (`todo`, `compliance`, `content`,
 
 `objectstack.config.ts` at the root is THE entry point (`defineStack()`), beside
 `package.json` and `tsconfig.json`. Metadata lives under `src/<collection>/` —
-`objects/` (one `task.object.ts` per object), then the optional `views/`, `apps/`,
+`objects/`, then the optional `views/`, `apps/`,
 `flows/`, `actions/`, `dashboards/`, `reports/`, `datasets/`, `i18n/` and
 `handlers/` (runtime hook handlers) — each with a barrel `index.ts`
-(`export * from './task.object'`) handed to the stack key of its name.
+(`export * from './task.object'`).
 
 ### Naming Conventions
 
@@ -245,8 +245,7 @@ export default createHonoApp({ kernel });
 ```
 
 ⚠️ **`prefix` does not move auth.** The `/auth/*` mount follows the auth
-service's `basePath` (`AuthPlugin` default `/api/v1/auth`), not `prefix` —
-`createHonoApp({ kernel })` reaches better-auth at `/api/v1/auth/*`. A `prefix`
+service's `basePath` (`AuthPlugin` default `/api/v1/auth`), not `prefix`. A `prefix`
 that `basePath` is not inside **refuses at boot**, naming both values.
 
 ### Architecture
@@ -275,7 +274,7 @@ CLI: `os serve` / `os dev`
      ├── HonoServerPlugin (registered BEFORE AuthPlugin — the server must
      │     exist for plugins that mount routes during init/start)
      ├── AuthPlugin
-     ├── Split platform-app plugins (ADR-0048, optional/best-effort, after AuthPlugin):
+     ├── Split platform-app plugins (ADR-0048, optional/best-effort):
      │     @objectstack/setup → createSetupAppPlugin   (first-run wizard)
      │     @objectstack/account → createAccountAppPlugin
      │     (@objectstack/studio is intentionally NOT default-loaded — the
@@ -301,7 +300,7 @@ token through the `CAPABILITY_PROVIDERS` registry in
 | Token | Provider package |
 |:--|:--|
 | `automation` | `@objectstack/service-automation` — flows, and any declarative `connectors:` entry |
-| `analytics`° `cache`° `storage`° `queue`° `job`° `messaging`° `realtime` `settings`° `sms`° `push` `record-context` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)) |
+| `analytics`° `cache`° `storage`° `queue`° `job`° `messaging`° `realtime` `settings`° `sms`° `push` `record-context` `knowledge` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)); `record-context` serves `get_record_context`, **objectstack-ai** [context packs](../objectstack-ai/references/context-packs.md) |
 | `mailbox` | `@objectstack/service-mailbox` — inbound mail |
 | `marketplace` `package-registry`° | `@objectstack/service-package` |
 | `audit` `email`° `sharing`° `approvals` `webhooks` | `@objectstack/plugin-` + the token |

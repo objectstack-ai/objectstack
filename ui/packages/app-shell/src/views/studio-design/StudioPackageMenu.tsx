@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The 「⋯」 package menu beside the app or package name at the Studio top
- * bar's left end (objectstack#37139). With the Studio home gone
+ * The 「⋯」 package menu (objectstack#37139), at the end of 概览 Overview's
+ * header (objectstack#37454; ADR-0084, amended 2026-11-26), moved there from
+ * the Studio top bar's left end with its rows unchanged. With the Studio home gone
  * (objectstack#36908), it is the door to the Packages page's development-face
  * actions on the open package — the maintainer's table, in its order:
  *
@@ -24,8 +25,10 @@
  * Every request, dialog and form is the development face's own, imported from
  * `metadata-admin/packageActions.tsx`; ⛔ never a second copy. What differs is
  * where the answer goes: a toast, as everywhere else in Studio, instead of the
- * sheet's message line. Publishing every draft is not here: the top bar's
- * Changes and Publish already do it.
+ * sheet's message line. Publishing every draft is not here: 概览's Pending tab
+ * and the top bar's Changes and Publish already do it. Disabling, enabling
+ * and deleting stay in Setup → Packages (question 1 on the amendment, ruled
+ * B), reached by Manage in Setup….
  *
  * The host draws the menu only where there is a current package (never on
  * `~org` or `~all`) and only for a `manage_metadata` holder
@@ -199,7 +202,7 @@ export function StudioPackageMenu({
             <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" data-testid="studio-package-menu-content">
+        <DropdownMenuContent align="end" data-testid="studio-package-menu-content">
           {item(
             'edit',
             <Pencil className={iconClass} aria-hidden="true" />,

@@ -1,5 +1,512 @@
 # @objectstack/verify
 
+## 19.0.0-next.0
+
+### Minor Changes
+
+- efaafe3: feat(capabilities): `requires: ['record-context']` mounts the record-context service, so `get_record_context` is served over MCP without host code
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: follow-up #37177
+  
+  An app that ships `aiContexts` packs can now serve `get_record_context` by declaring one token. Before this, the tool existed only where the host composed `RecordContextServicePlugin` in code, so an app booted from its stack file or a compiled artifact had packs that no tool read.
+  
+  - **`@objectstack/spec`: the `record-context` capability token.** `record-context` joins `PLATFORM_CAPABILITY_TOKENS`, provided by `@objectstack/service-record-context` in the open edition (`PLATFORM_CAPABILITY_PROVIDERS`). `defineStack` accepts `requires: ['record-context']`; near misses (`record_context`, `recordContext`) are still refused as unknown capabilities. The token is requested, never on the always-on slate: whether an app exposes a read tool is the app's own declaration, not a side effect of shipping packs. The `aiContexts` description names the token.
+  - **`@objectstack/core`: the provider row.** `CAPABILITY_PROVIDERS['record-context']` names `RecordContextServicePlugin` (identities `com.objectstack.service.record-context` and the class name). `objectstack serve` and `@objectstack/verify`'s `bootStack` both read this table, so an app's tests get the service its server gets. A host that already mounts the plugin in `plugins[]` keeps its own instance; no second one is mounted.
+  - **`@objectstack/cli` and `@objectstack/verify`** depend on `@objectstack/service-record-context`, so the provider the token names resolves out of the box.
+  
+  Without the token nothing changes: no service and no `get_record_context` tool. To turn it on:
+  
+  ```ts
+  export default defineStack({
+    // …
+    aiContexts: [policyBrief],
+    requires: ['record-context'],
+  });
+  ```
+  
+  The hosted runtime is not covered by this change.
+
+### Patch Changes
+
+- 00110fd: feat(verify): run a flow locally and report its node trace before it is submitted
+  
+  Clause-②: yes (widening: a new `os verify --flow` option, and new `@objectstack/verify` exports)
+  Metadata-protocol: none
+  
+  `os verify --flow <name>` runs one flow once on a fresh in-memory boot of the app and reports what the engine did: each node's status as the run's log records it, the first failure with its code and the node named, and every write the run made.
+  
+  - The run starts the way production starts it. A record-change flow is fired by its own trigger: the run writes the record `--flow-record '{"field":"value"}'` names as the dev admin (inserted for a create or write leg; seeded and saved unchanged for an update leg; seeded and deleted for a delete leg). A flow its own trigger starts is started with no caller, with the context that trigger builds: an API-triggered flow gets `--flow-input '{...}'` as its record and its params (the request body); a time-relative flow gets the `--flow-record` row, seeded first, as its record (the acting organization a sweep can set is not reproduced); a schedule or another `runAs: 'system'` flow gets `--flow-input` as its params. Any other flow goes through the trigger route as the dev admin, with `--flow-input` as its params.
+  - A node whose type no installed plugin runs is named, whether the run reached it or not. A flow whose trigger never binds is reported with the trigger and the engine's reason, and is not run. A schedule or time-relative trigger left unarmed by the deployment's scheduled-work switch (the default) is not a defect: it is reported as not armed and the flow is still run.
+  - The run writes to the in-memory database the boot creates and nowhere else: a write to an object bound to any other datasource is refused before that datasource's driver is called, and the node that made it fails naming the object and the datasource. Four outbound node types are not executed: `http`, `connector_action` (with every connector a plugin contributes behind it), `notify` and `script`; a plugin's own node type that calls out under another name is not stood in and runs for real. A run that ends at one of them stops there and the report names it (`outbound_not_run`), in a child flow too; every node before it ran for real. A stop a `try_catch` catches is listed in `outboundStops`, and a later node that fails is still the first failure.
+  - A failed run, a missing executor, an unbound trigger, a record-change or time-relative flow given no record, and a write refused outside the ephemeral stack each fail `os verify`. A run its start condition skipped, one that paused at a screen, wait or approval, and one stopped at an outbound node are reported and do not.
+  - `--json` carries the report as `flowRun`.
+  
+  New exports from `@objectstack/verify`: `runFlowProof`, `formatFlowRunReport`, and the `FlowRunRequest`, `FlowRunVerdict`, `FlowRunStart`, `FlowRunStep`, `FlowRunWrite`, `FlowRunFailureKind`, `FlowRunFailure`, `FlowRunTrigger` and `FlowRunReport` types. Nothing that ran before changes.
+- cf6bb70: fix(verify): `os verify` writes nothing to an object on an external datasource, even one whose write gate is open
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The harness connects every datasource an app declares, the way `os dev` does. An object on an external datasource whose write gate was open (`external.allowWrites` on the datasource and `external.writable` on the object) was let into the CRUD round trip and every write family built on it, so a verify run could insert, update and delete test rows in the real database behind that datasource.
+  
+  Now `deriveCrudCases` blocks every object on an external datasource, whatever its write gate says, and the reason names the gate's state: `external datasource "NAME" (writes allowed): not exercised — verify writes only to its ephemeral store`, or `(read-only)` for a closed gate. The CRUD stage reports the object `skipped` with that reason, which does not fail the run; the RLS, reference-shape, delete-behaviour, unique-scope, parent-write-reach and dashboard-window families, which build their records from the same case, leave it out with the same reason. An object that requires a reference to it is skipped too. An object counts as on an external datasource when it carries an `external` block (verify's existing trigger) or when its datasource declares a `schemaMode` other than `managed` (the engine's write gate's own test). An object bound to a declared managed datasource, or one that declares no `schemaMode`, is still written through that datasource, as under `os dev`.
+  
+  A write the app itself makes to an external object (its seed, or a hook or flow that one of verify's writes fires) still goes where the app sends it, as under `os dev`; the `--flow` run already refuses every write routed away from the in-memory database. The package README and the harness header now say exactly this instead of "never touches a real database".
+- 9a3a500: fix(verify)!: a managed `mongodb` datasource runs on verify's in-memory stand-in, and a managed datasource on a plugin's driver id refuses the boot
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or export is added, removed, renamed or re-shaped, and no stored row changes. What moves is what `os verify` (and `bootStack`) does with a datasource an app already declares: a managed `mongodb` one is built in memory instead of on its real connection, and a managed one on a driver id the platform does not ship refuses the boot. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  Verify writes only to stores it creates. Until now that held for a managed datasource on a SQL engine or `memory`, but not for one on `mongodb` or on a driver id a plugin supplies: those kept their real driver, verify withheld only its own writes from their objects, and the app's seed, hooks and flows still wrote to the real database during the run, where verify could neither identify nor undo the rows it changed.
+  
+  - **`mongodb`, and every other engine the platform ships.** A declared managed datasource (`schemaMode: 'managed'`, or none declared) on any driver id the platform ships, `mongodb` included, now runs on verify's ephemeral in-memory stand-in, the same store verify builds for the SQL engines: nothing of its declared connection is used, every write to its objects (verify's and the app's seed, hooks and flows) stays in memory, and its objects are exercised by every derived family. The CRUD report no longer lists them as `managed datasource "NAME" (driver "mongodb"): not exercised`.
+  - **BREAKING: a managed datasource on a plugin's driver id refuses the boot.** Such a datasource cannot be stood in: the plugin builds and registers its own driver, and the boot would write through it. `os verify` now refuses to boot while one is declared (any name other than `default`), before anything is composed. The refusal names each such datasource and its driver id, says why, and `os verify` exits 1 with it.
+    - FROM: `os verify` booted the app, left the datasource's objects out of its own write families, and let the app's seed, hooks and flows write to the real database behind the plugin's driver.
+    - TO: `os verify` refuses to boot, naming the datasource and the driver id. There is no flag, boot option or metadata key around the refusal.
+    - The fix for an app author: correct the driver id if it is a misspelling, or verify a configuration that does not declare that datasource.
+  - **BREAKING: a plugin driver registered under a managed datasource's name refuses the boot.** The datasource connection service keeps a driver already registered under a datasource's name, whatever driver id the datasource declares, so a plugin that registers a driver under a managed datasource's name on a shipped id (`mongodb`, `postgres`, …) would have run it on the plugin's driver. `os verify` now refuses that boot, naming the datasource and its declared driver id, when the driver is registered before verify's stand-in holds the name: as a `driver.*` service (matched by its key and by the driver's own name, before any plugin starts), or into the engine from an `objectql:drivers-ready` handler or anywhere else (refused at the engine's `registerDriver`, before the engine holds it). Either way no connect, schema sync or write reaches the plugin's driver. A driver registered under the name once the stand-in holds it (an app plugin's `start()`, a `runtime.onEnable` bridge) is discarded by the engine, as before, and that boot runs on the stand-in.
+    - FROM: when the plugin's driver took the datasource's name before verify's stand-in did, `os verify` booted on it, and the app's seed, hooks and flows (and, for a SQL id, verify's own writes) reached the store behind it.
+    - TO: `os verify` refuses that boot, even when the plugin catches the refusal and carries on. No flag, boot option or metadata key around it.
+    - The fix for an app author: verify a configuration whose plugins do not register a driver under a managed datasource's name. An external datasource (`schemaMode: 'external'` or `'validate-only'`) on a plugin's driver is not affected: verify keeps its real driver and withholds its own writes from its objects, as before.
+  
+  This supersedes what two earlier notes in this release say about a managed datasource "with no faithful stand-in": neither `mongodb` nor a plugin's driver keeps its real driver under `os verify` any more.
+- c03a8a3: fix(verify): the skip reason for a managed datasource with no stand-in no longer says verify never writes to it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  For an object on a managed datasource whose engine has no ephemeral stand-in (`mongodb`, or a driver a plugin supplies), the CRUD report said `not exercised — verify has no ephemeral stand-in for this engine and never writes through to the real one`. That was not true: verify withholds only its own derived writes there, while the app's seed and the hooks and flows that verify's writes fire still write to that real database during the run. The reason now reads `… verify has no ephemeral stand-in for this engine, so it withholds its own writes; the app's seed, hooks and flows still write to the real database`, and the README says the same. Nothing else changes: which objects are skipped, and what reaches which store, are as before.
+- 1104ee5: Clause-②: no
+  Metadata-protocol: none
+  
+  `os verify` no longer writes test rows into a declared managed datasource's real database. A datasource the app declares with `schemaMode: 'managed'` (or none) is now built as a fresh in-memory store of the same kind as verify's own default store, so its objects are still exercised (CRUD, reference shapes, delete behaviours, unique scopes) and nothing reaches the database the datasource names. A managed datasource whose engine has no faithful in-memory stand-in (`mongodb`, or a driver a plugin supplies) keeps its real driver, and verify leaves its objects out, reported as `managed datasource "NAME" (driver "DRIVER"): not exercised`. An object that requires a reference to a withheld object (external, or one of those) is now reported as withheld on purpose with the target's reason, instead of "required relational target X is not synthesizable".
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [8c629b2]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [9abc732]
+- Updated dependencies [52a2398]
+- Updated dependencies [4c2d8d7]
+- Updated dependencies [cc03bdc]
+- Updated dependencies [ef39b2c]
+- Updated dependencies [a73edb3]
+- Updated dependencies [7878cf0]
+- Updated dependencies [93fa4f9]
+- Updated dependencies [37e7fdf]
+- Updated dependencies [2a0cd20]
+- Updated dependencies [a998964]
+- Updated dependencies [1c05546]
+- Updated dependencies [9fea316]
+- Updated dependencies [cceb5c6]
+- Updated dependencies [d558de0]
+- Updated dependencies [7f4970a]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [5f18b9b]
+- Updated dependencies [e6e5224]
+- Updated dependencies [94a2d8b]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c4a73be]
+- Updated dependencies [806bba8]
+- Updated dependencies [4db08d5]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [d5ece3e]
+- Updated dependencies [2d33205]
+- Updated dependencies [78f3ab2]
+- Updated dependencies [3c038eb]
+- Updated dependencies [f5cfdd2]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [1950f07]
+- Updated dependencies [d17adf5]
+- Updated dependencies [9c29d73]
+- Updated dependencies [e22502c]
+- Updated dependencies [e100a37]
+- Updated dependencies [f848e37]
+- Updated dependencies [bf69cb4]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [f54fc93]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [96faf44]
+- Updated dependencies [e25207d]
+- Updated dependencies [d6ce9ba]
+- Updated dependencies [7ed18b5]
+- Updated dependencies [2df9691]
+- Updated dependencies [bfd6b6b]
+- Updated dependencies [961f474]
+- Updated dependencies [a6cf988]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [338448e]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [9e65474]
+- Updated dependencies [8596c80]
+- Updated dependencies [ba304e0]
+- Updated dependencies [fd471d3]
+- Updated dependencies [4a1919d]
+- Updated dependencies [ec227fc]
+- Updated dependencies [ba6556c]
+- Updated dependencies [8856afc]
+- Updated dependencies [96a1f2b]
+- Updated dependencies [c787255]
+- Updated dependencies [c480f33]
+- Updated dependencies [9062756]
+- Updated dependencies [65b67be]
+- Updated dependencies [1caee8c]
+- Updated dependencies [dbb2f68]
+- Updated dependencies [cdb327f]
+- Updated dependencies [5cd2b54]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [43639a6]
+- Updated dependencies [d99b746]
+- Updated dependencies [467b13b]
+- Updated dependencies [338ef35]
+- Updated dependencies [abb40ae]
+- Updated dependencies [b863d2b]
+- Updated dependencies [068a0f9]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [c321914]
+- Updated dependencies [61722e9]
+- Updated dependencies [03865ae]
+- Updated dependencies [37f7814]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [d76d57a]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [3d6dea2]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3ce6b65]
+- Updated dependencies [aff34ba]
+- Updated dependencies [6d0089c]
+- Updated dependencies [99ece3c]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [cda16d4]
+- Updated dependencies [fe75349]
+- Updated dependencies [f4de1de]
+- Updated dependencies [ec92c7c]
+- Updated dependencies [4890cd0]
+- Updated dependencies [c9aad65]
+- Updated dependencies [53c9575]
+- Updated dependencies [7eaa3f5]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [c59ee99]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [fcbebf2]
+- Updated dependencies [eb9f8ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [ea58563]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [1e018d6]
+- Updated dependencies [7c122ff]
+- Updated dependencies [50d6da8]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [61831d2]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [03bce5c]
+- Updated dependencies [de25d58]
+- Updated dependencies [7dd1a2f]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [d9be915]
+- Updated dependencies [65ee4b7]
+- Updated dependencies [a03c3d4]
+- Updated dependencies [c9b0a23]
+- Updated dependencies [a8126d2]
+- Updated dependencies [c4d6acc]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [80da086]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [ed33f8a]
+- Updated dependencies [1c4db09]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [cf7e443]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [a7292a5]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [a98c077]
+- Updated dependencies [4dbee9f]
+- Updated dependencies [236c804]
+- Updated dependencies [d71fe59]
+- Updated dependencies [c261a7c]
+- Updated dependencies [0e91213]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [62daf7d]
+- Updated dependencies [a5a5312]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6943af1]
+- Updated dependencies [83e545a]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [5827212]
+- Updated dependencies [00ae570]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [011635f]
+- Updated dependencies [0b2118f]
+- Updated dependencies [81eae2b]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [7376505]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [03dbbe4]
+- Updated dependencies [9a82465]
+- Updated dependencies [0d4f190]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [ec545de]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0fc430a]
+- Updated dependencies [a3381cc]
+- Updated dependencies [0a49be3]
+- Updated dependencies [0002eaf]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [d24a502]
+- Updated dependencies [70d07fd]
+- Updated dependencies [0ab9b15]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [ddceb22]
+- Updated dependencies [595844b]
+- Updated dependencies [53733c1]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [76bff41]
+- Updated dependencies [6bc775f]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [ac43336]
+- Updated dependencies [a3ee862]
+- Updated dependencies [7501d0c]
+- Updated dependencies [756df0a]
+- Updated dependencies [45ef94e]
+- Updated dependencies [3f568c1]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [e17c2ae]
+- Updated dependencies [24ff03c]
+- Updated dependencies [24ff03c]
+- Updated dependencies [24ff03c]
+- Updated dependencies [24ff03c]
+- Updated dependencies [24ff03c]
+- Updated dependencies [24ff03c]
+- Updated dependencies [24ff03c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [e343ab7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [c8d4b90]
+- Updated dependencies [00aa574]
+- Updated dependencies [15e80d2]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [6cfb782]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [9c57bd2]
+- Updated dependencies [fbb62e1]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [586c3a2]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [30778f3]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [b8c8c88]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [8e1e15b]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [f131c83]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [088852b]
+- Updated dependencies [66452df]
+- Updated dependencies [b0505c0]
+- Updated dependencies [2776e88]
+- Updated dependencies [1af67b2]
+- Updated dependencies [083e040]
+- Updated dependencies [c448c61]
+- Updated dependencies [ae97480]
+- Updated dependencies [66c854d]
+- Updated dependencies [92ab056]
+- Updated dependencies [b3247dd]
+- Updated dependencies [372ce7c]
+- Updated dependencies [c059e60]
+- Updated dependencies [084156d]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [59a53a6]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [d59d875]
+- Updated dependencies [8e415bd]
+- Updated dependencies [852270a]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [bc2aaf1]
+- Updated dependencies [4e55e4e]
+- Updated dependencies [64b278e]
+- Updated dependencies [4101f1f]
+- Updated dependencies [99bd6d1]
+- Updated dependencies [695b9db]
+- Updated dependencies [7751753]
+- Updated dependencies [d2bc1ff]
+- Updated dependencies [6927c3f]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [1e692d1]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/service-automation@19.0.0-next.0
+  - @objectstack/runtime@19.0.0-next.0
+  - @objectstack/objectql@19.0.0-next.0
+  - @objectstack/plugin-auth@19.0.0-next.0
+  - @objectstack/plugin-security@19.0.0-next.0
+  - @objectstack/types@19.0.0-next.0
+  - @objectstack/plugin-sharing@19.0.0-next.0
+  - @objectstack/plugin-audit@19.0.0-next.0
+  - @objectstack/service-settings@19.0.0-next.0
+  - @objectstack/platform-objects@19.0.0-next.0
+  - @objectstack/service-storage@19.0.0-next.0
+  - @objectstack/mcp@19.0.0-next.0
+  - @objectstack/service-analytics@19.0.0-next.0
+  - @objectstack/metadata@19.0.0-next.0
+  - @objectstack/plugin-approvals@19.0.0-next.0
+  - @objectstack/service-messaging@19.0.0-next.0
+  - @objectstack/rest@19.0.0-next.0
+  - @objectstack/core@19.0.0-next.0
+  - @objectstack/plugin-hono-server@19.0.0-next.0
+  - @objectstack/trigger-record-change@19.0.0-next.0
+  - @objectstack/service-realtime@19.0.0-next.0
+  - @objectstack/plugin-webhooks@19.0.0-next.0
+  - @objectstack/trigger-schedule@19.0.0-next.0
+  - @objectstack/service-record-context@19.0.0-next.0
+  - @objectstack/plugin-email@19.0.0-next.0
+  - @objectstack/plugin-pinyin-search@19.0.0-next.0
+  - @objectstack/service-cache@19.0.0-next.0
+  - @objectstack/service-datasource@19.0.0-next.0
+  - @objectstack/service-job@19.0.0-next.0
+  - @objectstack/service-mailbox@19.0.0-next.0
+  - @objectstack/service-package@19.0.0-next.0
+  - @objectstack/service-push@19.0.0-next.0
+  - @objectstack/service-queue@19.0.0-next.0
+  - @objectstack/service-sms@19.0.0-next.0
+  - @objectstack/trigger-api@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

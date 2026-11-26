@@ -106,6 +106,31 @@ correct". User-facing wording lives in
 [the fields guide](https://objectstack.ai/docs/frontend/fields). The measured browser vs
 happy-dom matrix is in `src/__tests__/numberInputBrowserReadings.ts`.
 
+### Quantities with a unit (`unitConfig`)
+
+A `number` field declaring `unitConfig` (ADR-0158) is drawn as a quantity by `NumberCellRenderer` and by
+`NumberField`'s read-only branch, through one component, `QuantityText`, so a cell and a read-only form show
+one quantity identically. The pieces:
+
+- `useQuantityUnit(field, record, value?)` resolves the unit: the code (`fixed`, the row's `unitField`, or a
+  `code`-mode field's own value), its label and its display decimal places, reading `sys_unit` and
+  `sys_standard_unit_setting` through the `SchemaRendererContext` data source once per adapter. A refused
+  read leaves the code bare.
+- `formatQuantity(value, field, unit, locale)` is the one formatter. It returns `{ text, number, unit,
+  hidden }`; `hidden` says the stored value has more places than are shown. The field's `scale` caps the
+  unit's places.
+- The resolution itself (`resolveQuantityUnit`, `pickRowForOrganization`, `shownQuantityUnitReads`) is
+  pure and lives in `@object-ui/core`.
+
+A cell or widget only sees a `record`-mode quantity's code when its host hands it the row
+(`dependentValues`). The grid, list, detail and form hosts do.
+
+A unit code field is chosen, not typed: `TextField` draws `UnitCodeField`, a searchable picker over
+`unitPickerOptions` (the organization's non-retired units, then the standard codes, by name and limited to
+the `unitDimension`), for a `text` field declaring `unitMode: 'code'` and for the `unitField` a quantity on
+the same form points at (the form stamps that pointer with `withUnitCodePointer`). It stores the code; read-only,
+it shows the unit's name.
+
 ### Rendering form field widgets outside the form
 
 The full widget surface is exported for consumers that render field widgets

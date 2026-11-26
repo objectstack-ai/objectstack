@@ -20,6 +20,7 @@ import {
   AGGREGATE_FIELD_TYPE_COMPATIBILITY,
   BOOLEAN_VALUE_TYPES,
   NUMERIC_VALUE_TYPES,
+  REFERENCE_VALUE_TYPES,
   isAggregateCompatibleWithFieldType,
   isApiOperationAllowed,
   fieldGroupsPlaceRelationship,
@@ -30,6 +31,7 @@ import {
   type AggregationFunction,
 } from '@objectstack/spec/data';
 import { VALUE_DOMAIN_FIELD_NAMES, type ValueDomain } from '@objectstack/spec/shared';
+import { injectedColumnDefsFor } from './system-fields.js';
 
 export type Severity = 'error' | 'warning' | 'suggestion';
 
@@ -899,6 +901,26 @@ function acceptedChildTypesOf(fn: AggregationFunction): string {
  * package's object. A child that never arrives reads nothing — the roll-up
  * stays 0 / null — but nothing fails.
  *
+ * ## The child's reference back to the parent — judged once the child resolves
+ *
+ * A child the walk DOES hold is asked one more question first
+ * ({@link ROLLUP_CHILD_WITHOUT_PARENT_REFERENCE}): does the roll-up have a
+ * column to match a child row to its parent by? `ObjectQL.buildSummaryIndex`
+ * (`engine-summaries-and-expansion.ts`) takes `summaryOperations.relationshipField`
+ * when it is written, and otherwise the first `lookup` / `master_detail` field
+ * of the child whose `reference` names the parent. With neither, the index
+ * build `continue`s past the summary with nothing logged: it is never seeded
+ * and never recomputed, so it reads 0 / null on every parent while every child
+ * write reports success. Refused at `error`, mirroring that scan exactly — the
+ * same two types, the same comparison, the child's injected columns included
+ * (an `owner_id` / `created_by` back to `sys_user` is a real foreign key there)
+ * and its fields as served (an object extension may add the foreign key). A
+ * written `relationshipField` naming no field the child has is the same
+ * defect by another road: the summary is indexed, but no child row yields a
+ * parent id, so it is never recomputed and reads the same. One naming a field
+ * that exists is not second-guessed (a text column holding the parent id
+ * matches by equality all the same).
+ *
  * ## Silence, never a guess
  *
  * A child field that resolves to no declaration, or declares no type, is not
@@ -911,6 +933,45 @@ function acceptedChildTypesOf(fn: AggregationFunction): string {
  * so `os lint` reports each finding exactly once.
  */
 export function lintSummaryRollups(objects: any[]): LocatedLintIssue[] {
+  return summaryRollupFindings(objects);
+}
+
+/**
+ * The rule id the roll-up's relation arm reports under: a summary whose child
+ * object holds no `lookup` / `master_detail` field naming the parent, or whose
+ * `summaryOperations.relationshipField` names no field of the child (see
+ * {@link lintSummaryRollups}, "The child's reference back to the parent").
+ */
+const ROLLUP_CHILD_WITHOUT_PARENT_REFERENCE = 'rollup/child-without-parent-reference';
+
+/**
+ * Does the engine's foreign-key scan take this child field as the parent's
+ * foreign key? A `reference` that is not a string makes `refOf` throw; the
+ * engine's scan catches exactly that and moves on to the next field, so one
+ * unreadable sibling hides no readable foreign key, and so does this: such a
+ * field does not point back. (A served child can carry one — a raw
+ * registration, or a row stored before the parse tightened.)
+ */
+function pointsBackTo(def: any, parent: string): boolean {
+  if (def?.type !== 'master_detail' && def?.type !== 'lookup') return false;
+  try {
+    return refOf(def) === parent;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * {@link lintSummaryRollups}, with the child's fields AS SERVED when the
+ * caller holds them: `servedFieldsOf(child)` answers the child's fields with
+ * every object extension folded in (the registry's merge), or `undefined` to
+ * read the declaration. Only the relation arm reads it; the aggregand arms
+ * keep judging the declared child field, as they always did.
+ */
+export function summaryRollupFindings(
+  objects: any[],
+  servedFieldsOf?: (childName: string) => readonly { name: string; def: any }[] | undefined,
+): LocatedLintIssue[] {
   const issues: LocatedLintIssue[] = [];
   if (!Array.isArray(objects) || objects.length === 0) return issues;
 
@@ -933,6 +994,54 @@ export function lintSummaryRollups(objects: any[]): LocatedLintIssue[] {
 
       // Not judged — see the docblock's "The child object" section.
       if (!child) continue;
+
+      // The relation arm — see the docblock's "The child's reference back"
+      // section. It reports beside the aggregand arms, not instead of them:
+      // each is a fix of its own.
+      const childFields = servedFieldsOf?.(childName) ?? fieldEntries(child.fields);
+      const injected = injectedColumnDefsFor(child);
+      const relationshipField: unknown = ops?.relationshipField;
+      if (typeof relationshipField === 'string' && relationshipField !== '') {
+        const known =
+          relationshipField === 'id' ||
+          childFields.some((f) => f.name === relationshipField) ||
+          injected.has(relationshipField);
+        if (!known) {
+          issues.push({
+            severity: 'error',
+            rule: ROLLUP_CHILD_WITHOUT_PARENT_REFERENCE,
+            where: fieldWhere(obj, fieldName),
+            message:
+              `summary field "${obj.name}.${fieldName}" rolls up ${childName} through ` +
+              `relationshipField '${relationshipField}', which is not a field of ${childName}: no child row ` +
+              `is matched to its parent, so the summary is never computed`,
+            path: `${fieldPath}.summaryOperations.relationshipField`,
+            fix:
+              `Name the ${childName} field that holds the ${obj.name} id in summaryOperations.relationshipField, ` +
+              `or add a lookup or master_detail field to ${childName} with reference: '${obj.name}'.`,
+          });
+        }
+      } else {
+        const hasForeignKey =
+          childFields.some((f) => pointsBackTo(f.def, obj.name)) ||
+          [...injected.values()].some((def) => pointsBackTo(def, obj.name));
+        if (!hasForeignKey) {
+          issues.push({
+            severity: 'error',
+            rule: ROLLUP_CHILD_WITHOUT_PARENT_REFERENCE,
+            where: fieldWhere(obj, fieldName),
+            // One verdict: why the engine skips it is the docblock's text.
+            message:
+              `summary field "${obj.name}.${fieldName}" rolls up ${childName}, which has no lookup or ` +
+              `master_detail field referencing ${obj.name}: the engine finds no child rows of a ${obj.name}, ` +
+              `so the summary is never computed and reads 0 or empty`,
+            path: `${fieldPath}.summaryOperations.object`,
+            fix:
+              `Add a field to ${childName} that points back: { type: 'master_detail', reference: '${obj.name}' } ` +
+              `(or a lookup), or roll up a child object that already references ${obj.name}.`,
+          });
+        }
+      }
 
       const childFieldName = ops?.field;
       if (typeof childFieldName !== 'string' || childFieldName === '') continue;
@@ -971,6 +1080,157 @@ export function lintSummaryRollups(objects: any[]): LocatedLintIssue[] {
           fix: `Aggregate a child field of type ${acceptedChildTypesOf(fn)}, or use function: 'count'.`,
         });
       }
+    }
+  }
+  return issues;
+}
+
+// ─── Field shapes that save and do not work ─────────────────────────
+
+/** The rule id a `reference` on a type that reads none reports under. */
+const FIELD_REFERENCE_ON_NON_REFERENCE_TYPE = 'field/reference-on-non-reference-type';
+
+/** The rule id a count- or total-named relationship field reports under. */
+const FIELD_COUNT_NAMED_LOOKUP = 'field/count-named-lookup';
+
+/**
+ * Types whose stray `reference` the record page's inline editor never reads:
+ * the computed types it hands no editor (`formula`, `autonumber`), and the
+ * types it routes to their own widget before it looks at `reference`
+ * (`InlineFieldInput`: a `select` / `multiselect` with options — a `select`
+ * parses only with options or a picklist, whose options are served onto the
+ * field — `boolean`, the file-backed types, `markdown` and `textarea`). On
+ * these the key is merely inert. Every other non-reference type (`text`,
+ * `number`, `currency`, `percent`, the date types, …) falls through to the
+ * reference branch (`!!field.reference` routes the field to the record picker).
+ */
+const TYPES_EDITED_WITHOUT_REFERENCE: ReadonlySet<string> = new Set([
+  'formula',
+  'autonumber',
+  'select',
+  'multiselect',
+  'boolean',
+  'image',
+  'avatar',
+  'signature',
+  'file',
+  'video',
+  'audio',
+  'markdown',
+  'textarea',
+]);
+
+/**
+ * Non-reference types on which `reference` is still read, so it is not judged
+ * there: a `summary`'s `reference` names its child object to the roll-up
+ * nudge of this file (R7 reads `summaryOperations.object` first, then it) and
+ * to a blueprint builder that derives `summaryOperations` from a bare
+ * summary's `reference`. The engine reads `summaryOperations.object`.
+ */
+const REFERENCE_READ_OFF_TYPE: ReadonlySet<string> = new Set(['summary']);
+
+/** Name tokens that say a field holds a quantity of records, not a link to one. */
+const QUANTITY_NAME_TOKENS: ReadonlySet<string> = new Set(['count', 'counts', 'total', 'totals']);
+
+/** Is `name` (snake_case) a count or a total — one of its `_`-separated words says so? */
+function isQuantityName(name: string): boolean {
+  return name.toLowerCase().split('_').some((token) => QUANTITY_NAME_TOKENS.has(token));
+}
+
+/** One object extension's fields, located, as {@link lintFieldReferenceShapes} reads them. */
+export interface FieldShapeExtension {
+  /** The object it extends. */
+  readonly target: string;
+  /** Its config path, e.g. `objectExtensions[0]`. */
+  readonly path: string;
+  /** Its field records, each carrying `name`. */
+  readonly fields: readonly Record<string, unknown>[];
+}
+
+/**
+ * Two field shapes that parse, publish and then do not do what the name or the
+ * key says:
+ *
+ * - {@link FIELD_REFERENCE_ON_NON_REFERENCE_TYPE} (`error`): `reference` on a
+ *   type that points at no record. Only `lookup`, `master_detail`, `user` and
+ *   `tree` read it (`REFERENCE_VALUE_TYPES`, the set `referenceTargetOf` — the
+ *   one arbiter `$expand` and the expand gate ask — answers for); the parse
+ *   judges those four (a missing target, a foreign `user` target, a foreign
+ *   `tree` target) and lets the key ride on every other type (`summary` aside,
+ *   see {@link REFERENCE_READ_OFF_TYPE}). There the engine
+ *   links nothing, and on a text, number or date field the record page's
+ *   inline editor still reads it: such a field is edited with the record
+ *   picker, which writes a record id into the column (the types the editor
+ *   routes elsewhere first, see {@link TYPES_EDITED_WITHOUT_REFERENCE}, are
+ *   told only that the key links nothing). One parse-free rule, so the CLI and the save door refuse it alike.
+ * - {@link FIELD_COUNT_NAMED_LOOKUP} (`warning`): a `lookup` / `master_detail`
+ *   whose name says it holds a count or a total (`contact_count`,
+ *   `total_amount`). A relationship stores the id of ONE record; the author
+ *   (often an AI generator) meant a number or a roll-up. Advisory: a field can
+ *   be named so on purpose, and nothing at run time refuses it.
+ *
+ * Reads the objects' own fields and the fields object extensions add, each
+ * located where it is written. Pure and total: a field with no string type is
+ * not judged.
+ */
+export function lintFieldReferenceShapes(
+  objects: any[],
+  extensions: readonly FieldShapeExtension[] = [],
+): LocatedLintIssue[] {
+  const issues: LocatedLintIssue[] = [];
+  const judge = (ownerName: string, fieldName: string, def: any, fieldPath: string, where: string) => {
+    if (!def || typeof def !== 'object') return;
+    const type = def.type;
+    if (typeof type !== 'string') return;
+    const reference = typeof def.reference === 'string' ? def.reference.trim() : '';
+    if (reference !== '' && !REFERENCE_VALUE_TYPES.has(type) && !REFERENCE_READ_OFF_TYPE.has(type)) {
+      const editor = TYPES_EDITED_WITHOUT_REFERENCE.has(type)
+        ? ''
+        : ', and the record page edits it with a record picker that writes a record id into it';
+      issues.push({
+        severity: 'error',
+        rule: FIELD_REFERENCE_ON_NON_REFERENCE_TYPE,
+        where,
+        message:
+          `${type} field "${ownerName}.${fieldName}" declares reference: '${reference}', which only lookup, ` +
+          `master_detail, user and tree fields read: it links no record${editor}`,
+        path: `${fieldPath}.reference`,
+        fix:
+          `To link a ${reference} record, make it { type: 'lookup', reference: '${reference}' }; ` +
+          `otherwise remove reference.`,
+      });
+    }
+    if ((type === 'lookup' || type === 'master_detail') && isQuantityName(fieldName)) {
+      const target = reference !== '' ? reference : 'another object';
+      issues.push({
+        severity: 'warning',
+        rule: FIELD_COUNT_NAMED_LOOKUP,
+        where,
+        message:
+          `${type} field "${ownerName}.${fieldName}" is named like a count or a total, but a ${type} stores ` +
+          `the id of one ${target} record, never a number`,
+        path: `${fieldPath}.type`,
+        fix:
+          `For a quantity use type: 'number', or a summary with summaryOperations ` +
+          `{ object, function: 'count' | 'sum' } over the child records; if it links one record, rename it ` +
+          `to say which.`,
+      });
+    }
+  };
+
+  if (Array.isArray(objects)) {
+    objects.forEach((obj, i) => {
+      if (!obj?.name) return;
+      for (const { name, def } of fieldEntries(obj.fields)) {
+        judge(obj.name, name, def, `objects[${i}].fields.${name}`, fieldWhere(obj, name));
+      }
+    });
+  }
+  for (const ext of extensions) {
+    for (const def of ext.fields) {
+      const name = typeof def?.name === 'string' ? def.name : '';
+      if (!name) continue;
+      judge(ext.target, name, def, `${ext.path}.fields.${name}`, `object extension of "${ext.target}" · field '${name}'`);
     }
   }
   return issues;

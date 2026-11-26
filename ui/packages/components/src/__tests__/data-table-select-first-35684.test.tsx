@@ -97,7 +97,7 @@ function renderTable({
     ],
     data: ROWS,
     editable: true,
-    singleClickEdit: true,
+    onRowSave: () => Promise.resolve(),
     searchable: false,
     pagination: false,
     onRowClick,
@@ -132,12 +132,20 @@ describe('data-table select-first — a click selects (objectstack#35684)', () =
     expect(t.cell(1, 1)).toHaveAttribute('data-selected-cell');
   });
 
-  it('control: without the provider the same click still opens the editor', () => {
-    // `keyboardNavigation` only addresses the cells (`data-grid-cell`) the probe reads.
-    const t = renderTable({ selection: null, extra: { keyboardNavigation: true } });
-    fireEvent.click(t.cell(0, 0));
-    expect(t.editor()).not.toBeNull();
-    expect(t.cell(0, 0)).not.toHaveAttribute('data-selected-cell');
+  it('without the provider the table is read-only: a click opens no editor (objectstack#35827)', () => {
+    // The staged click-to-edit fallback is retired; an editable table with no
+    // select-first host renders read-only and says so in the console.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // `keyboardNavigation` only addresses the cells (`data-grid-cell`) the probe reads.
+      const t = renderTable({ selection: null, extra: { keyboardNavigation: true } });
+      fireEvent.click(t.cell(0, 0));
+      fireEvent.doubleClick(t.cell(0, 0));
+      expect(t.editor()).toBeNull();
+      expect(t.cell(0, 0)).not.toHaveAttribute('data-selected-cell');
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
@@ -347,11 +355,10 @@ describe('data-table select-first — no edit-only column, ever (objectstack#355
     expect(onRowSave).toHaveBeenCalledTimes(1);
   });
 
-  it('control: without the provider the column is drawn at rest, as before', () => {
-    const t = renderTable({ selection: null, extra: EDIT_ONLY });
-    expect(editHeader(t.container)).not.toBeNull();
-    expect(lastHeader(t.container)).toBe(editHeader(t.container));
-  });
+  // The staged control that drew the edit-only column without the provider is
+  // gone with the column itself (objectstack#35827); a table with no
+  // select-first host is read-only, pinned in data-table-autosave-35685
+  // "no staged fallback".
 });
 
 describe('data-table select-first — a touch tap opens the record', () => {
@@ -405,7 +412,7 @@ describe('data-table select-first — a reference chip opens its record in place
       ],
       data: ACCOUNTS,
       editable: true,
-      singleClickEdit: true,
+      onRowSave: () => Promise.resolve(),
       searchable: false,
       pagination: false,
     };
@@ -582,6 +589,7 @@ describe('data-table select-first — a read-only cell says so in the grid (obje
       editable: true,
       searchable: false,
       pagination: false,
+      onRowSave: () => Promise.resolve(),
     });
     const Host = ({ value, schema }: { value: GridCellSelection; schema: Record<string, unknown> }) => (
       <GridCellSelectionProvider value={value}><DataTable schema={schema} /></GridCellSelectionProvider>

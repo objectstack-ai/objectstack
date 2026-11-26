@@ -29,7 +29,7 @@
  * on that projection too, not only on a save that drops the token.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup, within } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, within, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
@@ -166,8 +166,7 @@ function renderGrid(server: ReturnType<typeof makeServer>) {
   return render(
     <ActionProvider>
       <SchemaRendererProvider dataSource={server.dataSource}>
-        {/* Row Edit/Delete handlers: the per-row save button exists. */}
-        <ObjectGrid cellSelection={false} schema={schema} dataSource={server.dataSource} onEdit={() => {}} onDelete={() => {}} />
+        <ObjectGrid schema={schema} dataSource={server.dataSource} onEdit={() => {}} onDelete={() => {}} />
       </SchemaRendererProvider>
     </ActionProvider>,
   );
@@ -175,7 +174,11 @@ function renderGrid(server: ReturnType<typeof makeServer>) {
 
 const rowOf = (title: string) => screen.getByText(title).closest('tr') as HTMLElement;
 
-/** Stage a new Estimate on the row titled `title`, the way a user types it. */
+/**
+ * Type a new Estimate on the row titled `title` and commit it with Enter, the
+ * way a user does on the select-first grid: a click selects, a double-click
+ * edits, and the commit is the save (objectstack#35827).
+ */
 async function editEstimate(title: string, from: string, to: string) {
   const td = await waitFor(() => {
     const cell = Array.from(rowOf(title).querySelectorAll('td')).find(
@@ -185,19 +188,18 @@ async function editEstimate(title: string, from: string, to: string) {
     return cell as HTMLElement;
   });
   fireEvent.click(td);
-  const input = await waitFor(() => {
-    const el = td.querySelector('input') as HTMLInputElement | null;
-    if (!el) throw new Error('editor not open');
-    return el;
-  });
+  fireEvent.doubleClick(td);
+  // The editor mounts on the cell's overlay layer (objectstack#35688): let it
+  // settle, then read the input it holds.
+  await waitFor(() => expect(td.querySelector('[data-slot="cell-editor-overlay"] input')).toBeTruthy());
+  await act(async () => {});
+  const input = td.querySelector('[data-slot="cell-editor-overlay"] input') as HTMLInputElement;
   fireEvent.change(input, { target: { value: to } });
   fireEvent.keyDown(input, { key: 'Enter' });
   await waitFor(() => expect(within(rowOf(title)).getByText(to)).toBeInTheDocument());
 }
 
 const conflictDialog = () => screen.findByRole('alertdialog');
-const clickSaveAll = () =>
-  fireEvent.click(screen.getByRole('button', { name: /Save All/ }));
 
 async function loaded(server: ReturnType<typeof makeServer>) {
   renderGrid(server);
@@ -212,7 +214,6 @@ describe('ObjectGrid inline edit carries the row token (objectui#12292)', () => 
 
     server.writeAsOtherUser('t1', { estimate_hours: 77 });
     await editEstimate('Ingest pipeline', '60', '61');
-    fireEvent.click(within(rowOf('Ingest pipeline')).getByTitle('Save row'));
 
     const dialog = await conflictDialog();
     expect(server.patches).toEqual([
@@ -224,13 +225,13 @@ describe('ObjectGrid inline edit carries the row token (objectui#12292)', () => 
     expect(within(dialog).getByText('61')).toBeInTheDocument();
     expect(within(dialog).getByText('77')).toBeInTheDocument();
 
-    // Cancel: nothing is written, the edit is kept and the row reads unsaved.
+    // Cancel: nothing is written, the edit is kept on its cell and says why.
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent('Record was modified by another user'),
     );
     expect(server.store.t1.estimate_hours).toBe(77);
-    expect(screen.getByText(/1 row modified/)).toBeInTheDocument();
+    expect(within(rowOf('Ingest pipeline')).getByText('61')).toBeInTheDocument();
     expect(server.patches).toHaveLength(1);
   });
 
@@ -241,7 +242,6 @@ describe('ObjectGrid inline edit carries the row token (objectui#12292)', () => 
     server.writeAsOtherUser('t1', { estimate_hours: 77 });
     const theirVersion = server.store.t1.updated_at;
     await editEstimate('Ingest pipeline', '60', '61');
-    clickSaveAll();
 
     fireEvent.click(within(await conflictDialog()).getByRole('button', { name: 'Overwrite anyway' }));
     await waitFor(() => expect(server.store.t1.estimate_hours).toBe(61));
@@ -249,7 +249,7 @@ describe('ObjectGrid inline edit carries the row token (objectui#12292)', () => 
       [expect.any(String), 409],
       [theirVersion, 200],
     ]);
-    await waitFor(() => expect(screen.queryByText(/row modified/)).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
   });
 
   it('Reload latest writes nothing and re-reads the record', async () => {
@@ -258,70 +258,37 @@ describe('ObjectGrid inline edit carries the row token (objectui#12292)', () => 
 
     server.writeAsOtherUser('t1', { estimate_hours: 77 });
     await editEstimate('Ingest pipeline', '60', '61');
-    clickSaveAll();
 
     fireEvent.click(within(await conflictDialog()).getByRole('button', { name: 'Reload latest' }));
     await waitFor(() => expect(within(rowOf('Ingest pipeline')).getByText('77')).toBeInTheDocument());
     expect(server.store.t1.estimate_hours).toBe(77);
     expect(server.patches).toHaveLength(1);
-    expect(screen.queryByText(/row modified/)).toBeNull();
   });
 
   it('a fresh save succeeds, and the next save sends the token the server answered with', async () => {
     const server = makeServer([{ id: 't1', title: 'Ingest pipeline', estimate_hours: 60 }]);
     await loaded(server);
     const readVersion = server.store.t1.updated_at;
-    // The grid's re-read after the save has not landed: reads keep answering
-    // the row as it was loaded, token and all.
+    // Reads keep answering the row as it was loaded, token and all: the next
+    // save's token can only come from the write's own answer.
     server.freezeReads();
 
     await editEstimate('Ingest pipeline', '60', '61');
-    clickSaveAll();
     await waitFor(() => expect(server.store.t1.estimate_hours).toBe(61));
     const answeredVersion = server.store.t1.updated_at;
     expect(server.patches[0]).toEqual({ id: 't1', ifMatch: readVersion, body: { estimate_hours: 61 }, status: 200 });
-    await waitFor(() => expect(screen.queryByText(/row modified/)).toBeNull());
 
-    // The row still shows the stale read; the second save must not 409 over
-    // the user's own first save.
-    await editEstimate('Ingest pipeline', '60', '62');
-    clickSaveAll();
+    // The row draws the write's answer in place; the second save must not 409
+    // over the user's own first save.
+    await editEstimate('Ingest pipeline', '61', '62');
     await waitFor(() => expect(server.store.t1.estimate_hours).toBe(62));
     expect(server.patches[1]).toEqual({ id: 't1', ifMatch: answeredVersion, body: { estimate_hours: 62 }, status: 200 });
     expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 
-  it('a batch with one stale row reports that row and keeps the row that saved', async () => {
-    const server = makeServer([
-      { id: 't1', title: 'Ingest pipeline', estimate_hours: 60 },
-      { id: 't2', title: 'Warehouse schema', estimate_hours: 33 },
-    ]);
-    await loaded(server);
-
-    server.writeAsOtherUser('t1', { estimate_hours: 77 });
-    await editEstimate('Ingest pipeline', '60', '61');
-    await editEstimate('Warehouse schema', '33', '31');
-    expect(screen.getByRole('button', { name: /Save All \(2\)/ })).toBeInTheDocument();
-    clickSaveAll();
-
-    const dialog = await conflictDialog();
-    // Both rows were sent with their own token; only the stale one was refused.
-    expect(server.patches.map((p) => [p.id, p.status]).sort()).toEqual([['t1', 409], ['t2', 200]]);
-    expect(server.patches.every((p) => typeof p.ifMatch === 'string')).toBe(true);
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
-
-    // The stale row alone stays pending and flagged; the saved row is not
-    // rolled back and is not reported as failed.
-    await waitFor(() => expect(screen.getByText(/1 row modified/)).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: /Save All \(1\)/ })).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('Record was modified by another user');
-    expect(within(rowOf('Ingest pipeline')).getByText('61')).toBeInTheDocument();
-    await waitFor(() => expect(within(rowOf('Warehouse schema')).getByText('31')).toBeInTheDocument());
-    expect(server.store.t2.estimate_hours).toBe(31);
-    expect(server.store.t1.estimate_hours).toBe(77);
-    // No silent retry.
-    expect(server.patches).toHaveLength(2);
-  });
+  // "a batch with one stale row" pinned Save All's per-row outcome; each
+  // commit is its own save now (objectstack#35827), and a stale one is the
+  // first case above.
 
   it('asks the server for the token even though no column shows it', async () => {
     const server = makeServer([{ id: 't1', title: 'Ingest pipeline', estimate_hours: 60 }]);

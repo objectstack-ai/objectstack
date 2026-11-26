@@ -27,23 +27,22 @@ describe('resolveEventColor', () => {
     expect(resolveEventColor('bg-emerald-600')).toEqual({ className: 'bg-emerald-600' });
   });
 
-  it('maps arbitrary category labels deterministically to the palette', () => {
-    const email1 = resolveEventColor('email');
-    const email2 = resolveEventColor('email');
-    const digital = resolveEventColor('digital');
-    expect(email1.className).toBe(email2.className);
-    // Same input → same color
-    expect(email1.className).toMatch(/^bg-/);
-    // Distinct inputs are very likely to map to different palette stops
-    // (collision rate ~1/8 — but `email` and `digital` are known to differ)
-    expect(email1.className).not.toBe(digital.className);
+  // objectstack#36882 (option A): an event is coloured if and only if a
+  // colour was declared for it; no colour is derived from a value.
+  it('paints the default event colour for a category label no option colours', () => {
+    const expected = 'bg-blue-100 text-blue-900 border border-blue-200';
+    for (const c of ['email', 'digital', 'Email', 'Webinar', 'Trade Show', 'Partner', 'Direct Mail', 'Social', '中文', 'open', 'won', 'critical']) {
+      expect(resolveEventColor(c)).toEqual({ className: expected });
+    }
   });
 
-  it('always returns a Tailwind bg-* class for categorical inputs', () => {
-    for (const c of ['Email', 'Webinar', 'Trade Show', 'Partner', 'Direct Mail', 'Social', '中文']) {
-      const r = resolveEventColor(c);
-      expect(r.className.startsWith('bg-')).toBe(true);
-      expect(r.inlineColor).toBeUndefined();
-    }
+  it('paints a declared palette family with that family tint', () => {
+    expect(resolveEventColor('green')).toEqual({ className: 'bg-green-100 text-green-900 border border-green-200' });
+    expect(resolveEventColor('red')).toEqual({ className: 'bg-red-100 text-red-900 border border-red-200' });
+    expect(resolveEventColor('blue')).toEqual({ className: 'bg-blue-100 text-blue-900 border border-blue-200' });
+  });
+
+  it('an inherited object key is not a palette family', () => {
+    expect(resolveEventColor('constructor')).toEqual({ className: 'bg-blue-100 text-blue-900 border border-blue-200' });
   });
 });

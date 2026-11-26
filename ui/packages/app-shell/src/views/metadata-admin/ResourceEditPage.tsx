@@ -117,7 +117,13 @@ import {
   type RichMetadataTypeEntry,
 } from './useMetadata.js';
 // objectui#11773 — the draft save's optimistic-concurrency guard and its dialog.
-import { isPublishConflictKeptEditing, publishedPinOf, readDraftForSave, useDraftSaveGuard } from './DraftConflictDialog.js';
+import {
+  draftReceiptVersion,
+  isPublishConflictKeptEditing,
+  publishedPinOf,
+  readDraftForSave,
+  useDraftSaveGuard,
+} from './DraftConflictDialog.js';
 // objectstack#36902 — Save takes effect at once; the AI draft's notice is the designers'.
 import { isAiDraft, publishDetailSave } from './detailSaveAtOnce.js';
 import { StudioAiDraftNotice } from '../studio-design/StudioAiDraftNotice.js';
@@ -1070,6 +1076,8 @@ function MetadataResourceEditPageImpl({
     forget: forgetDraftVersion,
     recordPublished: recordPublishedVersion,
     publish: publishPinned,
+    // objectstack#37440 — the version the page's own Save wrote, which pins its publish.
+    heldDraftVersion,
     dialog: draftConflictDialog,
   } = useDraftSaveGuard(client, reloadFromServer);
   // objectstack#36902 — the pending draft's per-key provenance (`draftChanges`),
@@ -2115,15 +2123,20 @@ function MetadataResourceEditPageImpl({
       // a draft instead of writing over it, and reads it as a create. A save of
       // the item this editor loaded sends the pin its load or last save held.
       let wroteDraft = true;
+      // objectstack#37440 — the version this Save's own draft write returned, which pins its publish.
+      let draftVersion: string | undefined;
       if (createMode) {
         // objectui#7611 — a type whose edit page writes the live item creates
         // it live too (`createLive`): nothing is left in the draft to publish.
         const live = !!config.createLive && !activePackage;
-        await client.save<any>(type, savedName, itemToSave, { ...(live ? { force } : saveOptions), ifNoneMatch: '*' });
+        const receipt = await client.save<any>(type, savedName, itemToSave, { ...(live ? { force } : saveOptions), ifNoneMatch: '*' });
         wroteDraft = !live;
+        draftVersion = draftReceiptVersion(receipt);
       } else if ((await saveDraftVersioned(type, savedName, itemToSave, saveOptions)) === 'reloaded') {
         // The author chose the saved version; the load effect replaces the draft.
         return;
+      } else {
+        draftVersion = heldDraftVersion(type, savedName, activePackage);
       }
       if (wroteDraft) {
         // objectstack#34818 — a flow whose Problems tab lists the draft's
@@ -2134,7 +2147,13 @@ function MetadataResourceEditPageImpl({
         try {
           live = await publishDetailSave(
             client,
-            { type, name: savedName, ...(activePackage ? { packageId: activePackage } : {}), ...memberScope },
+            {
+              type,
+              name: savedName,
+              ...(activePackage ? { packageId: activePackage } : {}),
+              ...memberScope,
+              ...(draftVersion ? { draftVersion } : {}),
+            },
             hadDraft,
             // objectstack#36601 — pinned to the published row the load read; a
             // create read nothing, and its draft's first-write pin stands.

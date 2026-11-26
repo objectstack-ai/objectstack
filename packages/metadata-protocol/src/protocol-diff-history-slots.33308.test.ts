@@ -13,9 +13,10 @@
  *    a named version another holder owns (or one attributed to no package,
  *    while two hold the name) is refused `404 VERSION_NOT_FOUND` saying whose;
  *  - `?package=` naming a package that neither holds nor ships the name is
- *    refused `409 not-held-by-qualifier`; the environment's slot addressed
- *    through a package (the read falls back to the package-less row) takes
- *    that row as its `to` side;
+ *    refused `409 not-held-by-qualifier`, [#37130] beside the package-less row
+ *    too; the environment's slot addressed through a package that ships the
+ *    name (the read falls back to the package-less row) takes that row as its
+ *    `to` side;
  *  - CONTROL: a name one slot holds diffs bare as before, its whole log;
  *  - `?package=` on a type not stored per package is refused `400`.
  *
@@ -48,7 +49,7 @@ const ACTIVE = [
     { package_id: ALPHA, version: 3, state: 'active', metadata: JSON.stringify(body('alpha r2')) },
 ];
 
-function fakeHost(options: { candidates: string[]; unbound?: boolean; history?: unknown[]; active?: unknown[] }) {
+function fakeHost(options: { candidates: string[]; unbound?: boolean; history?: unknown[]; active?: unknown[]; shippers?: string[] }) {
     const reads: string[] = [];
     const host: any = {
         engine: { registry: { readsByPackage: () => true, resolveItem: () => ({ status: 'resolved' }) } },
@@ -59,7 +60,7 @@ function fakeHost(options: { candidates: string[]; unbound?: boolean; history?: 
             const row = active.find((r) => r.package_id === q.packageId) ?? active.find((r) => r.package_id === undefined);
             return row === undefined ? undefined : { row };
         },
-        shippedArtifactsOf: () => [],
+        shippedArtifactsOf: () => (options.shippers ?? []).map((id) => ({ _packageId: id })),
         resolveRowlessExpandedView: async () => undefined,
         rethrowUnlessMetadataStoreUnprovisioned: (error: unknown) => { throw error; },
         findEnvironmentRows: async (table: string) => {
@@ -157,7 +158,7 @@ describe('diffMetaItem reads one holder\'s versions of a by-package name (#33308
         expect(reads).toEqual([]);
     });
 
-    it('the environment\'s slot addressed through a package: the package-less row is the to side, never the bound one', async () => {
+    it('the environment\'s slot addressed through a package that ships the name: the package-less row is the to side, never the bound one; [#37130] one that neither holds nor ships it is refused', async () => {
         // Alpha's row first, so a read that picks the name's first active row picks the wrong slot.
         const active = [
             { package_id: ALPHA, version: 3, state: 'active', metadata: JSON.stringify(body('alpha r1')) },
@@ -168,7 +169,12 @@ describe('diffMetaItem reads one holder\'s versions of a by-package name (#33308
             { version: 2, package_id: ENVIRONMENT_HISTORY_MARK, metadata: JSON.stringify(body('env r2')) },
             { version: 3, package_id: ALPHA, metadata: JSON.stringify(body('alpha r1')) },
         ];
-        const { host } = fakeHost({ candidates: [ALPHA], unbound: true, history, active });
+        // [#37130] A package that neither holds nor ships the name never addresses the package-less row.
+        const unshipped = await refusalOf(fakeHost({ candidates: [ALPHA], unbound: true, history, active }).host
+            .diffMetaItem({ type: 'flow', name: 'shared_flow', packageId: BETA }));
+        expect(unshipped).toBeInstanceOf(PackageScopedNameRefusedError);
+        expect(unshipped.refusal.reason).toBe('not-held-by-qualifier');
+        const { host } = fakeHost({ candidates: [ALPHA], unbound: true, history, active, shippers: [BETA] });
         const bare = await refusalOf(host.diffMetaItem({ type: 'flow', name: 'shared_flow' }));
         expect(bare.refusal.candidates).toEqual([{ kind: 'package', packageId: ALPHA }, { kind: 'environment' }]);
         const env = await host.diffMetaItem({ type: 'flow', name: 'shared_flow', packageId: BETA });

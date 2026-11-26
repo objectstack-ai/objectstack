@@ -202,6 +202,7 @@ const ru = {
     uploadInFlight: "Дождитесь завершения загрузки, прежде чем сохранять.",
     clearedOnHide: "Очищено то, что больше не применимо к текущим значениям: {{fields}}",
     visibleWhenFaulted: "Невозможно отправить: не удалось вычислить правило visibleWhen для {{fields}}. Правило нужно исправить, прежде чем эту форму можно будет отправить.",
+    uiReadonlyWhenFaulted: "Невозможно отправить: не удалось вычислить правило uiReadonlyWhen для {{fields}}. Правило нужно исправить, прежде чем эту форму можно будет отправить.",
     discardTitle: "Отменить изменения?",
     discardMessage: "Есть несохранённые изменения. Если закрыть форму сейчас, правки будут потеряны.",
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
@@ -1185,6 +1186,7 @@ const ru = {
     addColumn: "Добавить колонку",
     moveCard: "Переместить карточку",
     noCards: "Нет карточек",
+    notLoaded: "Не загружено карточек: {{count}}",
     columnCards: "Карточки в колонке {{column}}",
     laneCards: "Карточки: {{column}} - {{lane}}",
     dropBlocked: "Карточку из {{from}} нельзя переместить в {{to}}.",
@@ -2261,7 +2263,7 @@ const ru = {
   },
   console: {
     studio: {
-      title: "Studio",
+      title: "App Studio",
       accessRequired: "Чтобы открыть Studio, нужен доступ к Studio. Администратор может выдать его набором разрешений в разделе «Настройка → Назначение наборов разрешений».",
     },
     saveAdvisoryTitle: "Сохранено — проверка авторинга выдала рекомендаций: {{count}}",
@@ -2737,6 +2739,7 @@ const ru = {
       savedCleared: "Сохранённое значение очищено",
       deprecatedBadge: "Устарело",
       deprecatedBadgeReplacedBy: "Устарело → {{replacedBy}}",
+      selectValueRetired: "{{value}} (больше недоступно)",
       unsupportedSpecifierType: "Неподдерживаемый тип настройки: {{type}}",
       mapAddRow: "Добавить строку",
       mapRemoveRow: "Удалить {{key}}",
@@ -3896,11 +3899,11 @@ const ru = {
       tooltip: "Платформа в предварительной версии — функции могут измениться.",
     },
     aiAssistant: "ИИ-ассистент",
-    designInStudio: "Дизайн в Studio",
+    designInStudio: "Дизайн в App Studio",
     designLayout: "Дизайн макета",
     editApp: "Редактировать приложение",
-    openAppInStudio: "Открыть {{app}} в Studio",
-    viewInStudio: "Открыть в Studio",
+    openAppInStudio: "Открыть {{app}} в App Studio",
+    viewInStudio: "Открыть в App Studio",
   },
   home: {
     build: {
@@ -4045,8 +4048,8 @@ const ru = {
       backToAppHome: "Назад к меню приложения",
       appsAvailable: "Доступно приложений: {{count}}",
       allApps: "Все приложения",
-      editAppInStudio: "Редактировать {{app}} в Studio",
-      openAppInStudio: "Открыть {{app}} в Studio",
+      editAppInStudio: "Редактировать {{app}} в App Studio",
+      openAppInStudio: "Открыть {{app}} в App Studio",
       backToHome: "Вернуться на стартовую страницу приложения",
       settings: "Настройки",
       productHome: "Главная {{product}}",
@@ -4884,6 +4887,9 @@ const ru = {
       dataset: 'Набор данных',
       metrics: 'Метрики',
       noAddedFilter: 'Без фильтров сверх определения набора данных',
+    },
+    recordCitations: {
+      title: 'Цитаты из записей',
     },
     tool: {
       aggregate_data: "Агрегировать данные",

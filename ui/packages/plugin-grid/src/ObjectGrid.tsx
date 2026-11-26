@@ -24,7 +24,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectGridSchema, DataSource, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
 import { isSystemManagedField, detectStatusField } from '@object-ui/types';
-import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useDrawsAction, useRelatedRecordActions, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, useOwnWrites, createOwnWrites, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
+import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useDrawsAction, useRelatedRecordActions, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, useOwnWrites, createOwnWrites } from '@object-ui/react';
 // objectui#8920 — the grid reaches a cell renderer through THIS module and
 // nowhere else. `getCellRenderer` / `resolveCellRendererType` are deliberately
 // NOT imported here: six sites spelling the resolve three different ways is
@@ -107,7 +107,7 @@ import { rowRecordId } from './objectGridLinkCell';
 import { useGridTranslation } from './objectGridTranslations';
 import { inlineEditRuleRefusals, inlineRuleRefusalError } from './objectGridInlineRules';
 import { DEFAULT_DISPLAY_PAGE_SIZE, DEFAULT_SELECTION_TYPE, type RowHeightMode, resolvePageSize, resolveRowHeightMode } from './objectGridDefaults';
-import { type BatchSaveOutcome, type RowConflictChoice, type WrittenRowVersion, rowVersionOf, rowVersionToSend } from './objectGridRowVersion';
+import { type RowConflictChoice, type WrittenRowVersion, rowVersionOf, rowVersionToSend } from './objectGridRowVersion';
 import { type RowPatch, mergeSavedRow, rowsAsSaved } from './objectGridRowPatch';
 import { usableGroupingFields } from './useGroupedData';
 import { type CellSaveUndo, createCellUndoStack, isCellUndoKey, undoKeyCellOf } from './objectGridCellUndo';
@@ -437,15 +437,19 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * cell and never edits it or opens the record; double-click, Enter, F2 or
    * typing edits (Space included); each committed cell saves at once and
    * updates its own row (objectstack#35685); a cell that opens no editor says
-   * why (`describeCell`, `./objectGridCellFacts`). `false` ⇒ the table keeps
-   * its staged click-to-edit / click-to-open behaviour. Absent ⇒ the model
-   * follows whether the grid renders editable (objectstack#36270): an editable
-   * grid is select-first, a read-only one keeps click-to-open.
+   * why (`describeCell`, `./objectGridCellFacts`). Absent ⇒ the model follows
+   * whether the grid renders editable (objectstack#36270): an editable grid is
+   * select-first, a read-only one keeps click-to-open.
+   *
+   * Only `true`: the staged opt-out `cellSelection={false}` (click-to-edit, a
+   * pending-changes bar and "Save All") is retired (objectstack#35827). An
+   * editable grid has one editing model; a read-only grid keeps click-to-open
+   * without the prop.
    *
    * A RUNTIME prop, never authored metadata: the host decides it, and no node
    * key reaches it.
    */
-  cellSelection?: boolean;
+  cellSelection?: true;
   /**
    * [objectstack#35876] The column header opens the column menu (sort
    * ascending, sort descending, hide) instead of sorting on a click, as the
@@ -535,19 +539,6 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
   bulkChangeOwnerOffered?: boolean;
   onCellChange?: (rowIndex: number, columnKey: string, newValue: any, row: any) => void;
   onRowSave?: (rowIndex: number, changes: Record<string, any>, row: any) => void | Promise<void>;
-  /**
-   * Called by "Save All" with every staged row — the staged model only.
-   *
-   * @deprecated objectstack#36270 — a grid that renders editable is
-   * select-first by default, and there each edited cell saves on its own
-   * through {@link ObjectGridComponentProps.onRowSave} (or, when the host
-   * passes none, the grid's own write through `dataSource.update`). No
-   * "Save All" is drawn, so this handler is never called and no runtime
-   * notice says so.
-   * Pass `onRowSave` to own the write per cell, or pass `cellSelection={false}`
-   * to keep the staged model, where this handler is still called.
-   */
-  onBatchSave?: (changes: Array<{ rowIndex: number; changes: Record<string, any>; row: any }>) => void | Promise<void>;
   onRowSelect?: (selectedRows: any[]) => void;
   onAddRecord?: () => void;
 }
@@ -677,9 +668,9 @@ function getDataConfig(schema: ObjectGridSchema): ViewData | null {
  *   - the card's speculative list (`pagination`, `manualPagination`, `rowCount`,
  *     `frozenColumns`, `singleClickEdit`, `selectionResetKey`,
  *     `disableInnerScroll`, `borderless`) was already declared then, and is
- *     still declared now (`singleClickEdit` here is the TABLE's own key, which
- *     `ObjectGrid` now always passes as `true`; the `object-grid` key of that
- *     name is retired, objectstack#36270);
+ *     still declared now — except `singleClickEdit`, the TABLE's own key, which
+ *     left with the staged editing model (objectstack#35827; the `object-grid`
+ *     key of that name was retired by objectstack#36270);
  *   - the two keys that survived that diff, `renderCellEditor` and
  *     `cellClassName`, were DECLARED by `bf97b98c8` (maintainer ruling
  *     2026-08-30) on three surfaces:
@@ -961,7 +952,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   onNavigate,
   onCellChange,
   onRowSave,
-  onBatchSave,
   onAddRecord,
   // The host-driven mode (`ObjectGridExternalPaginationProps`). Every one of
   // these was read out of `...rest` through an `as any` cast until #4277 gave
@@ -1339,10 +1329,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // Enter or typing opens its editor, and each committed cell saves on its own,
   // with no pending-changes bar and no "Save All" (the model `ListView` and the
   // related tab ask for by name, objectstack#35684). A grid that renders
-  // read-only keeps click-to-open. A host's own `cellSelection` wins either
-  // way: `true` asks for the model on a read-only grid too (`ListView`), and
-  // `false` keeps the staged click-to-edit on an editable one.
-  const hostCellSelection = cellSelectionProp ?? inlineEditable;
+  // read-only keeps click-to-open. A host's `cellSelection` asks for the model
+  // on a read-only grid too (`ListView`); there is no opting out of it on an
+  // editable one (objectstack#35827 retired the staged model).
+  const hostCellSelection = cellSelectionProp === true || inlineEditable;
 
   // When the consumer wired onEdit/onDelete callbacks but the view schema
   // omits an explicit `operations` block, default to allowing those actions.
@@ -1474,10 +1464,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     recordIds: pageRecordIds,
     update: canEdit || inlineEditable,
     delete: canDelete,
-    // objectstack#34208 — inline cells read `update` while rendering, before any row action is used.
-    // objectstack#35684 — select-first cells read it only when the reader acts
-    // on one, so they ask when a cell is first selected (`onCellSelect` below).
-    updateOnMount: inlineEditable && !hostCellSelection,
+    // objectstack#35684 — select-first cells read `update` only when the
+    // reader acts on one, so they ask when a cell is first selected
+    // (`onCellSelect` below); an editable grid is always select-first
+    // (objectstack#35827), so nothing is asked on mount.
   });
 
   // objectstack#35684 — what the select-first table asks about a cell when
@@ -1557,6 +1547,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     latestCellHooks.current = { requiredPrompt, askStateMove, openReferencedRecord };
   });
   const opensReferencedRecords = !!openReferencedRecord;
+  // The host's predicate scope for the cell gate's lock predicates, as the
+  // edit dialog binds it (objectstack#36806).
+  const cellLockScope = usePredicateScope();
   const gridCellSelection = useMemo((): GridCellSelection | null => (hostCellSelection
     ? {
         describeCell: (row, columnKey) => {
@@ -1568,6 +1561,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           const recordUpdate = recordVerdict.current(recordId, 'update');
           const kind = cellReadOnlyKind({
             fieldDef,
+            row,
+            scope: cellLockScope,
             fieldWritable: !objectName || resolveFieldAffordance('listInlineEdit', perms, objectName, columnKey),
             gridEditable,
             objectEditable: objectInlineEditable,
@@ -1632,7 +1627,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       }
     : null), [
     hostCellSelection, opensReferencedRecords, objectFields, objectSchema, objectName, perms,
-    gridEditable, objectInlineEditable, approvalLocks, recordVerdict, pageRecordIds, t, leaveHeldRows,
+    gridEditable, objectInlineEditable, approvalLocks, recordVerdict, pageRecordIds, t, leaveHeldRows, cellLockScope,
   ]);
   // objectstack#35685 — the state-machine confirm, the grid's next question
   // when the required-fields prompt has nothing to ask.
@@ -1804,11 +1799,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // Publishing it into the designer panel and the generated
     // `sdui-intrinsics.d.ts` would advertise an offer nobody can take, which
     // is the option the ruling rejected as the most AI-error-prone of the
-    // three. Programmatic callers already have the channel its nine siblings
+    // three. Programmatic callers already have the channel its eight siblings
     // use: `onRowClick`, `onRowSelect`, `onCellChange`, `onRowSave`,
-    // `onBatchSave`, `onEdit`, `onDelete`, `onBulkDelete` and `onAddRecord`
-    // are props on `ObjectGridComponentProps`, and since objectui#9547 this one
-    // is the tenth prop there, which is where a caller should prefer to pass
+    // `onEdit`, `onDelete`, `onBulkDelete` and `onAddRecord` are props on
+    // `ObjectGridComponentProps`, and since objectui#9547 this one is the
+    // ninth prop there, which is where a caller should prefer to pass
     // it. When both are supplied the PROP WINS (maintainer ruling C on
     // objectui#9547), so `schema.onNavigate` below is the fallback read — kept,
     // because a host that builds the node in TypeScript still reaches the slot
@@ -3048,14 +3043,13 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   // Default inline-edit persistence.
   //
-  // When a consumer wires `onRowSave`/`onBatchSave` (React host), we defer to it.
-  // But a declaratively-configured `editable: true` view has no host wiring — so
-  // "Save All" would otherwise just clear pending changes without writing to the
-  // backend. Supply a default that persists through the grid's `dataSource`, then
-  // refresh so the grid reflects persisted values. Reporting failure is
-  // important: DataTable's saveRow keeps a row's pending changes when the save
-  // promise rejects, and saveBatch keeps exactly the rows the batch hands back
-  // as `failed`, so a failed write doesn't silently lose the user's edits.
+  // When a consumer wires `onRowSave` (React host), we defer to it. A
+  // declaratively-configured `editable: true` view has no host wiring, so the
+  // grid supplies a default that persists each committed cell through its own
+  // `dataSource` (objectstack#35827: the table's only save path). Reporting
+  // failure is important: the table keeps a record's edits when the save
+  // promise rejects and marks the refused cells, so a failed write doesn't
+  // silently lose the user's edits.
   // The one place a row's primary key is read for a write. `string`, as
   // `@objectstack/spec` declares every record door — the union this used to
   // annotate was a claim about `any`-typed row data, not a measurement of it
@@ -3390,147 +3384,36 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // write is one toast.
     const claim = claimAnswerWarnings(dataSource, { operation: 'update', resource: objectName, id });
     try {
-      if (hostCellSelection) {
-        // objectstack#35685 — the select-first model: the row redraws in
-        // place, and the save can be taken back. What Undo restores is read
-        // off the row before the write (relations as their stored ids); a
-        // written field the row does not carry offers no Undo at all.
-        const key = String(id);
-        const restore = captureUpdateUndoData(Object.keys(changes), row, objectSchema?.fields);
-        const written = await writeRowInPlace(key, changes, row);
-        // A reload re-reads through the bus; there is nothing of ours to show.
-        if (written.outcome === 'reloaded') return;
-        const feedback = claim.take(undefined);
-        if (!restore) {
-          toastRecordSave(toast, t('table.saved', { count: 1 }), feedback);
-          return;
-        }
-        const entry: CellSaveUndo = {
-          objectName,
-          id: key,
-          version: rowVersionOf(written.result),
-          restore,
-          shown: Object.fromEntries(Object.keys(changes).map((field) => [field, row[field]])),
-        };
-        cellUndoRef.current.push(entry);
-        const savedRow = mergeSavedRow(row, changes, written.result);
-        toastRecordSave(toast, t('table.saved', { count: 1 }), feedback, {
-          label: t('actions.undo'),
-          onClick: () => { void undoCellSave(entry, savedRow); },
-        });
+      // objectstack#35685 — the select-first model: the row redraws in
+      // place, and the save can be taken back. What Undo restores is read
+      // off the row before the write (relations as their stored ids); a
+      // written field the row does not carry offers no Undo at all.
+      const key = String(id);
+      const restore = captureUpdateUndoData(Object.keys(changes), row, objectSchema?.fields);
+      const written = await writeRowInPlace(key, changes, row);
+      // A reload re-reads through the bus; there is nothing of ours to show.
+      if (written.outcome === 'reloaded') return;
+      const feedback = claim.take(undefined);
+      if (!restore) {
+        toastRecordSave(toast, t('table.saved', { count: 1 }), feedback);
         return;
       }
-      try {
-        await writeRowGuarded(dataSource, objectName, id, changes, row);
-      } catch (err) {
-        if (!isConcurrentUpdateError(err)) throw err;
-        // A reload re-reads through the bus; there is nothing of ours to show.
-        if ((await resolveRowConflict(dataSource, objectName, id, changes, row, err)).outcome === 'reloaded') return;
-      }
-      // Refresh so the grid shows the persisted values.
-      setRefreshKey(k => k + 1);
-      // objectui#12303 — the write is said, through the console's shared toast
-      // (the one the form, kanban and view surfaces raise). Only here, once the
-      // row landed: a refusal rejects above, and the table flags the row.
-      toastRecordSave(toast, t('table.saved', { count: 1 }), claim.take(undefined));
+      const entry: CellSaveUndo = {
+        objectName,
+        id: key,
+        version: rowVersionOf(written.result),
+        restore,
+        shown: Object.fromEntries(Object.keys(changes).map((field) => [field, row[field]])),
+      };
+      cellUndoRef.current.push(entry);
+      const savedRow = mergeSavedRow(row, changes, written.result);
+      toastRecordSave(toast, t('table.saved', { count: 1 }), feedback, {
+        label: t('actions.undo'),
+        onClick: () => { void undoCellSave(entry, savedRow); },
+      });
     } finally {
       claim.release();
     }
-  };
-
-  const defaultBatchSave = async (
-    changes: Array<{ rowIndex: number; changes: Record<string, any>; row: any }>,
-  ): Promise<BatchSaveOutcome | undefined> => {
-    if (!dataSource || !objectName) {
-      throw new Error('Cannot persist inline edits: no dataSource/objectName configured on the grid.');
-    }
-    // Update each modified row. The DataSource `bulk`/`bulkUpdate` primitives
-    // apply a single uniform patch across many ids, which does NOT fit per-row
-    // edits (each row has its own field changes), so issue one update per row.
-    //
-    // Each row is its own write and its own outcome (objectui#12292). All are
-    // attempted together and every one is waited for, so a refused row never
-    // hides what happened to the others; a conflict is then put to the user
-    // one row at a time. Nothing the server accepted is taken back: the rows
-    // that landed are reported as saved, and only the rows that did not are
-    // handed back to the table as `failed`.
-    const ids = changes.map(({ row }) => resolveRecordId(row));
-    // objectstack-ai/objectstack#28252 — each row's write answer feedback rides
-    // the one "Save All" toast below, as the single-row save's does.
-    const claims: AnswerWarningClaim[] = ids.flatMap((id) =>
-      id === undefined || id === null ? [] : [claimAnswerWarnings(dataSource, { operation: 'update', resource: objectName, id })],
-    );
-    try {
-      return await saveRowsClaimed(dataSource, objectName, changes, ids, claims);
-    } finally {
-      for (const claim of claims) claim.release();
-    }
-  };
-
-  /** The body of {@link defaultBatchSave}, run while its rows' claims are open. */
-  const saveRowsClaimed = async (
-    dataSource: DataSource,
-    objectName: string,
-    changes: Array<{ rowIndex: number; changes: Record<string, any>; row: any }>,
-    ids: Array<string | undefined>,
-    claims: AnswerWarningClaim[],
-  ): Promise<BatchSaveOutcome | undefined> => {
-    const attempts = await Promise.allSettled(
-      changes.map(({ changes: rowChanges, row }, i) => {
-        const id = ids[i];
-        if (id === undefined || id === null) {
-          return Promise.reject(new Error('Cannot persist inline edit: row has no id/_id.'));
-        }
-        // A row whose edits break a field rule is refused here, unsent; the
-        // other rows still go (each row is its own outcome).
-        const refused = inlineRuleRefusal(rowChanges);
-        if (refused) return Promise.reject(refused);
-        return writeRowGuarded(dataSource, objectName, id, rowChanges, row);
-      }),
-    );
-    const failed: BatchSaveOutcome['failed'] = [];
-    // How many rows the server accepted — the number the toast below names.
-    let saved = 0;
-    for (let i = 0; i < changes.length; i++) {
-      const attempt = attempts[i];
-      if (attempt.status === 'fulfilled') {
-        saved += 1;
-        continue;
-      }
-      const { rowIndex, changes: rowChanges, row } = changes[i];
-      const id = ids[i];
-      const err: unknown = attempt.reason;
-      if (!isConcurrentUpdateError(err) || id === undefined || id === null) {
-        failed.push({ rowIndex, error: err });
-        continue;
-      }
-      try {
-        if ((await resolveRowConflict(dataSource, objectName, id, rowChanges, row, err)).outcome === 'saved') {
-          saved += 1;
-        }
-      } catch (resolutionError) {
-        failed.push({ rowIndex, error: resolutionError });
-      }
-    }
-    if (saved > 0) {
-      // Refresh so the grid shows the persisted values.
-      setRefreshKey(k => k + 1);
-      // objectui#12303 — "Save All" says what it saved, through the console's
-      // shared toast, counting only the rows the server accepted. A row that
-      // failed is not in the count: the table keeps it, flags it and shows
-      // the reason. A reloaded row wrote nothing, so it is not either.
-      // A row that wrote nothing parked nothing, so every claim is read.
-      const feedback: RecordSaveFeedback = { warnings: [] };
-      const notices: string[] = [];
-      for (const claim of claims) {
-        const own = claim.take(undefined);
-        for (const w of own.warnings) if (!feedback.warnings.includes(w)) feedback.warnings.push(w);
-        if (own.notice && !notices.includes(own.notice)) notices.push(own.notice);
-      }
-      if (notices.length > 0) feedback.notice = notices.join('\n');
-      toastRecordSave(toast, t('table.saved', { count: saved }), feedback);
-    }
-    return failed.length > 0 ? { failed } : undefined;
   };
 
   // Determine pagination settings (support both new and legacy formats)
@@ -4040,11 +3923,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           );
         }
       : undefined,
-    // objectstack#36270 — the authored `singleClickEdit` is retired: a grid
-    // that renders editable is select-first, where a click selects. A host
-    // that keeps the staged model (`cellSelection={false}`) edits on a single
-    // click, the retired key's default.
-    singleClickEdit: true,
     // objectui#11068 — arrow-key cell navigation on the WAI-ARIA grid pattern:
     // the data cells become ONE roving Tab stop that the arrows move (the
     // behaviour is `data-table`'s, documented on `DataTableSchema`). The
@@ -4053,12 +3931,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // viewer's write verdict (#5143), the same value handed down above. So a
     // grid that renders read-only keeps every cell its own Tab stop unless the
     // author writes `true`. On an editable grid the select-first model is the
-    // default (objectstack#36270) and data-table keeps navigation on under it
-    // (`keyboardNavigationProp || selectFirst`), so an explicit `false` only
-    // turns it off where the host keeps the staged model (`cellSelection={false}`).
+    // model (objectstack#36270, the only one since objectstack#35827) and
+    // data-table keeps navigation on under it (`keyboardNavigationProp ||
+    // selectFirst`), so an explicit `false` has no effect there.
     // Not an alias fallback: the right side is the key's own default.
     keyboardNavigation: schema.keyboardNavigation ?? inlineEditable,
-    // The save bar sits on the grid's own inset, as its cells do (`px-3`),
+    // The toolbar sits on the grid's own inset, as its cells do (`px-3`),
     // never flush against the view's edge (objectstack-ai/objectstack#27520).
     // objectstack#35548 / #36048 — a 36px header at 13px over faint row and column lines.
     className: ['[&>[data-slot=table-toolbar]]:px-3 [&>[data-slot=table-toolbar]]:pt-2', OBJECT_GRID_TABLE_DENSITY, schema.className].filter(Boolean).join(' '),
@@ -4118,7 +3996,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // Install a dataSource-backed default only when the consumer did NOT wire
     // its own handler, so declarative `editable: true` views still persist.
     onRowSave: onRowSave ?? defaultRowSave,
-    onBatchSave: onBatchSave ?? defaultBatchSave,
     onColumnResize: (columnKey: string, width: number) => {
       saveColumnState({
         ...columnState,
@@ -4981,8 +4858,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         ? opts.find((o: any) => String(o.label) === label || String(o.value) === label)
         : undefined;
       // Same resolution as the cell below the header (`SelectCellRenderer`):
-      // a declared hex renders as declared (objectui#5141/#5183), everything
-      // else keeps resolving to a palette family. `labelColorStyle` carries
+      // a declared hex renders as declared (objectui#5141/#5183), a declared
+      // family name resolves to its palette family, and an option with no
+      // declared colour renders neutral (objectstack#36882). `labelColorStyle` carries
       // the CSS custom properties the hex className reads — the pill needs
       // BOTH halves or it references undefined variables.
       const hexBadge = getBadgeHexAppearance(matched?.color);

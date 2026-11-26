@@ -741,7 +741,9 @@
         "$TURBO_ROOT$/.github/workflows/scaffold-e2e.yml",
         "$TURBO_ROOT$/packages/cli/src/commands/serve.ts",
         "$TURBO_ROOT$/scripts/publish-smoke.sh",
-        "$TURBO_ROOT$/packages/cli/src/commands/init.ts"
+        "$TURBO_ROOT$/packages/cli/src/commands/init.ts",
+        "$TURBO_ROOT$/examples/app-starter/src/**",
+        "$TURBO_ROOT$/examples/app-starter/objectstack.config.ts"
       ]
     },
     "test:smoke": {

@@ -1224,9 +1224,13 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
   /**
    * [ADR-0160 D1] Context packs: which of one record's fields, related lists
    * and body text are handed to a model, read as the caller by
-   * `get_record_context` (`@objectstack/service-record-context`).
+   * `get_record_context` (`@objectstack/service-record-context`). The tool
+   * exists on a host that mounts that service, by either door: the CLI mounts
+   * it where `requires` includes `record-context`, and a host that composes
+   * its own kernel lists `RecordContextServicePlugin` in `plugins`. A host
+   * that does neither serves no such tool, whatever packs it holds.
    */
-  aiContexts: z.array(AiContextSchema).optional().describe('AI context packs — the material of one record handed to a model, read as the caller by get_record_context (ADR-0160), which is served where `requires` includes `record-context`'),
+  aiContexts: z.array(AiContextSchema).optional().describe('AI context packs — the material of one record handed to a model, read as the caller by get_record_context (ADR-0160). A host serves that tool only when it mounts the record-context service: the CLI mounts it where `requires` includes `record-context`, and a host that composes its own kernel lists `RecordContextServicePlugin` in `plugins`'),
 
   /**
    * ObjectQL: Data Extensions
@@ -6586,8 +6590,19 @@ function validateCrossReferences(
             // hides the entry when the object isn't in the SchemaRegistry,
             // and stack-level cross-ref validation must skip it.
             if (!nav.requiresObject) {
+              // A platform-prefixed name is still refused: the prefix test
+              // cannot tell an object every environment carries from one a
+              // plugin contributes, so exempting it would let a menu point at
+              // an object that is absent. The message names the fix instead —
+              // `requiresObject` — because "not defined in objects" alone
+              // invites declaring a package copy of a platform object.
+              const base = `App '${appName}' navigation references object '${nav.objectName}' which is not defined in objects.`;
               errors.push(
-                `App '${appName}' navigation references object '${nav.objectName}' which is not defined in objects.`,
+                isPlatformObjectName(nav.objectName)
+                  ? `${base} '${nav.objectName}' is provided by the platform or a plugin, not by this stack: `
+                    + `add requiresObject: '${nav.objectName}' to the entry (the menu then hides it wherever the object `
+                    + `is not registered), and do not declare a copy of the object in this package.`
+                  : base,
               );
             }
           }

@@ -79,6 +79,7 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
 
 import { toast } from 'sonner';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 
 // jsdom/happy-dom ship neither; useIsMobile / useIsWideViewport and the Radix
 // popover's floating-ui measurement need them.
@@ -178,7 +179,7 @@ async function publishFromTheWorkbench(): Promise<void> {
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/interfaces`]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
