@@ -1,12 +1,12 @@
 ---
 '@objectstack/service-record-context': patch
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 ---
 
 feat(service-record-context): get_record_context lists a long body's outline in pages, so every heading's anchor is issued however many the body holds
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added
 
 ADR-0160 D3 "The body". No pack key and no error code changes. The tool's published input widens by one optional member, `outlineFrom`, and its body answer by one, `outlineNext`.
 
