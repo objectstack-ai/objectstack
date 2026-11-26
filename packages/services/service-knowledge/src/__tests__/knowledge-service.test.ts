@@ -68,7 +68,7 @@ describe('KnowledgeService — adapter & source registry', () => {
     svc.registerAdapter('memory', a);
     expect(svc.getAdapter('memory')).toBe(a);
     expect(svc.listAdapters()).toEqual(['memory']);
-    expect(() => svc.getAdapter('nope')).toThrow(/unknown adapter/);
+    expect(() => svc.getAdapter('nope')).toThrow(/adapter 'nope' is not mounted/);
   });
 
   it('registerSource / listSources / getSource / unregister', () => {
@@ -2381,5 +2381,88 @@ describe('KnowledgeService — record-level search (granularity, groupBy, freshn
     });
     const [hit] = await h.svc.search('q', { granularity: 'record', executionContext: SYSTEM });
     expect(hit.headingPath).toEqual(['Leave', 'Annual']);
+  });
+});
+
+/**
+ * ADR-0161 — a source whose named adapter is not mounted (the runtime mounts
+ * one store per database, so a source naming the other is the common case):
+ * the service mounts, the boot says so once at `error`, and indexing and
+ * searching that source answer `SERVICE_UNAVAILABLE` naming the adapters that
+ * are mounted. Never an empty answer that reads as "nothing matched".
+ */
+describe('KnowledgeService — a source naming an adapter that is not mounted', () => {
+  function serviceWith() {
+    const logs: Array<[string, string]> = [];
+    const logger = {
+      info: () => undefined,
+      debug: () => undefined,
+      warn: (m: string) => logs.push(['warn', m]),
+      error: (m: string) => logs.push(['error', m]),
+    };
+    const svc = new KnowledgeService({ logger });
+    const turso = makeAdapter('turso', [{ chunkId: 'c1', documentId: 'd1', sourceId: 'notes', snippet: 'x', score: 1 }]);
+    svc.registerAdapter('turso', turso);
+    svc.registerSource(objectSource('notes', 'task', 'turso'));
+    svc.registerSource(objectSource('docs', 'doc', 'pgvector'));
+    return { svc, logs, turso };
+  }
+
+  it('the boot reading names each such source once, at error, with the mounted choices', () => {
+    const { svc, logs } = serviceWith();
+    expect(svc.reportUnmountedAdapters()).toEqual(['docs']);
+    const errors = logs.filter(([level]) => level === 'error').map(([, m]) => m);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("source 'docs' names adapter 'pgvector', which is not mounted (mounted: turso)");
+  });
+
+  it('indexing it answers SERVICE_UNAVAILABLE naming the choices', async () => {
+    const { svc } = serviceWith();
+    const err = await svc.indexDocument('docs', { id: 'a', content: 'x' } as KnowledgeDocument).catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    expect((err as Error).message).toContain("adapter 'pgvector' is not mounted (mounted: turso)");
+  });
+
+  it('searching it alone is refused whole; beside a mounted source it is named as refused', async () => {
+    const { svc, logs } = serviceWith();
+    const system = { isSystem: true } as never;
+    const alone = await svc.search('q', { sourceIds: ['docs'], executionContext: system }).catch((e: unknown) => e);
+    expect(alone).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    expect((alone as { refused: unknown }).refused).toEqual([
+      expect.objectContaining({ sourceId: 'docs', code: 'SERVICE_UNAVAILABLE', status: 503 }),
+    ]);
+    const both = await svc.searchWithRefusals('q', { executionContext: system });
+    expect(both.hits.map((h) => h.sourceId)).toEqual(['notes']);
+    expect(both.refused).toEqual([expect.objectContaining({ sourceId: 'docs', code: 'SERVICE_UNAVAILABLE' })]);
+    // Said once at boot, never a line per search.
+    expect(logs.filter(([, m]) => m.includes("'docs'"))).toEqual([]);
+  });
+
+  it('the plugin takes the reading at kernel:bootstrapped, after every store has registered; boot goes on', async () => {
+    const reading = vi.spyOn(KnowledgeService.prototype, 'reportUnmountedAdapters');
+    try {
+      const kernel = new LiteKernel({ logger: { level: 'silent' } } as never);
+      const late: Plugin = {
+        name: 'test.late-store',
+        init: async () => undefined,
+        start: async (ctx: PluginContext) => {
+          ctx.getService<KnowledgeService>('knowledge').registerAdapter('turso', makeAdapter('turso'));
+        },
+      };
+      kernel.use(
+        new KnowledgeServicePlugin({
+          sources: [objectSource('notes', 'task', 'turso'), objectSource('docs', 'doc', 'pgvector')],
+          enableEventSync: false,
+        }),
+      );
+      kernel.use(late);
+      await kernel.bootstrap();
+      // Taken once, after the store that started last registered: only 'docs' is named.
+      expect(reading).toHaveBeenCalledTimes(1);
+      expect(reading.mock.results[0]?.value).toEqual(['docs']);
+      await kernel.shutdown();
+    } finally {
+      reading.mockRestore();
+    }
   });
 });

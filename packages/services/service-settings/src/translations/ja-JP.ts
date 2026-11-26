@@ -567,7 +567,7 @@ export const jaJP: PlatformTranslationData = {
           },
         },
         turso_url: { label: '接続 URL',
-          help: '例: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:' },
+          help: '例: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:' },
         turso_auth_token: { label: '認証トークン',
           help: 'マネージド Turso URL の場合のみ必要です。' },
         chunk_target: { label: '目標チャンクサイズ（文字数）',

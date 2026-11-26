@@ -244,6 +244,67 @@ export const CAPABILITY_PROVIDERS: Readonly<Record<string, CapabilitySpec>> = {
     export: 'RecordContextServicePlugin',
     identities: ['com.objectstack.service.record-context', 'RecordContextServicePlugin'],
   },
+  // ADR-0161: the `knowledge` service, its settings page and its embedder.
+  // Requested, never always-on: without the token no service, no store and no
+  // Knowledge settings page. The token mounts ONE vector store beside it,
+  // chosen by the platform database — see KNOWLEDGE_STORE_PROVIDERS below and
+  // `resolveCapabilityExtras`, which every boot reads in place of `extras` for
+  // this row. A host that mounts the service in `plugins[]` keeps its own and
+  // gets no store from the runtime.
+  knowledge: {
+    pkg: '@objectstack/service-knowledge',
+    export: 'KnowledgeServicePlugin',
+    identities: ['com.objectstack.service.knowledge', 'KnowledgeServicePlugin'],
+  },
+};
+
+/** One vector store the `knowledge` token can mount beside the service. */
+export type KnowledgeStoreSpec = {
+  pkg: string;
+  export: string;
+  identities: CapabilityIdentities;
+  /** The adapter id the store registers: the value a `KnowledgeSource.adapter` names. */
+  adapterId: string;
+  /**
+   * The package is an optional dependency of the CLI and of the verification
+   * handle, so an install may not have it: a boot that cannot import it says
+   * so once and goes on with the service alone, and a source naming the store
+   * answers `SERVICE_UNAVAILABLE`.
+   */
+  optional?: boolean;
+};
+
+/**
+ * The vector stores the `knowledge` token chooses between, keyed by the
+ * adapter id each registers (ADR-0161; the choice is
+ * `resolveKnowledgeStore` in `capability-composition.ts`):
+ *
+ *  - `pgvector` when the platform database is PostgreSQL — the store's tables
+ *    live in that database, in a schema of their own;
+ *  - `turso` on any other database (SQLite under `os dev`, libSQL, MySQL,
+ *    MongoDB) — a libSQL file of its own, `knowledge.db` under the project's
+ *    `.objectstack/data/`, never the platform's database file.
+ *
+ * `knowledge-memory` is never mounted by the runtime: its index is gone at
+ * every restart. A host that wants it mounts it itself.
+ */
+export const KNOWLEDGE_STORE_PROVIDERS: Readonly<Record<'pgvector' | 'turso', KnowledgeStoreSpec>> = {
+  pgvector: {
+    pkg: '@objectstack/knowledge-pgvector',
+    export: 'KnowledgePgvectorPlugin',
+    identities: ['com.objectstack.plugin.knowledge-pgvector', 'KnowledgePgvectorPlugin'],
+    adapterId: 'pgvector',
+  },
+  turso: {
+    pkg: '@objectstack/knowledge-turso',
+    export: 'KnowledgeTursoPlugin',
+    identities: ['com.objectstack.plugin.knowledge-turso', 'KnowledgeTursoPlugin'],
+    adapterId: 'turso',
+    // Its libSQL client is a native module with an `os` / `cpu` list: as a hard
+    // dependency it would refuse the whole CLI install on a platform outside
+    // that list, whether or not the app asks for `knowledge`.
+    optional: true,
+  },
 };
 
 /**

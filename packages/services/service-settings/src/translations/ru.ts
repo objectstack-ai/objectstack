@@ -711,7 +711,7 @@ export const ru: PlatformTranslationData = {
         },
         turso_url: {
           label: 'URL подключения',
-          help: 'Примеры: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
+          help: 'Примеры: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
         },
         turso_auth_token: { label: 'Токен авторизации', help: 'Нужен только для URL управляемого Turso.' },
         chunk_target: {

@@ -18,8 +18,14 @@ import type { SettingsActionHandler } from '../settings-service.types.js';
  *                                               6.x releases came from the
  *                                               ObjectOS Cloud monorepo)
  *
- * None of them reads this namespace yet: a deployment registers the plugin
- * beside the knowledge service itself.
+ * Only `turso` reads this namespace, and only `turso_url` and
+ * `turso_auth_token`, when the runtime mounts it for `requires:
+ * ['knowledge']` (#37102): a `file:` URL saved there is held to the data
+ * directory of the platform's state directory (`<OS_HOME>/data/`, else the
+ * project's `.objectstack/data/`), and a URL with a control character in it,
+ * written out or percent-encoded, or a token with one, is refused before it
+ * reaches the libSQL client. Every other adapter is registered by the
+ * deployment beside the knowledge service itself.
  *
  * As with the AI manifest, the real adapter wiring happens in the
  * knowledge plugins; this manifest is the canonical settings surface
@@ -87,7 +93,7 @@ const manifest = {
         'or in-memory (:memory:). In a cloud deployment with a database per organization, leave blank to ' +
         'reuse that organization\'s own database connection.' },
     { type: 'text', key: 'turso_url', label: 'Connection URL', required: false,
-      description: 'Examples: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
+      description: 'Examples: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
       visible: "${data.adapter === 'turso'}" },
     { type: 'password', key: 'turso_auth_token', label: 'Auth token',
       required: false, encrypted: true,
