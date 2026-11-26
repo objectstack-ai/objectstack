@@ -23,6 +23,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid at collection, not inside a case's clock: `RestServer` reaches
+// `@objectstack/objectql` only through dynamic imports (check:test-source-alias).
+import '@objectstack/objectql';
 // Explicit `.js` extension: NodeNext resolution (see the sibling nav-gate tests).
 import { RestServer } from './rest-server.js';
 
