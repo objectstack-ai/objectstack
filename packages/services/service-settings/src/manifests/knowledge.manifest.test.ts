@@ -97,11 +97,13 @@ describe('knowledgeTestActionHandler', () => {
     expect(r.severity).toBe('warning');
   });
 
-  it('accepts turso with no URL (will reuse tenant connection)', async () => {
+  it('accepts turso with no URL (the plugin defaults to its own file)', async () => {
     const r = await knowledgeTestActionHandler({ values: { adapter: 'turso' } } as any);
     expect(r.ok).toBe(true);
     expect(r.severity).toBe('info');
-    expect(r.message).toMatch(/reuse the tenant/);
+    // The plugin opens a file of its own, never the platform's database (#37107).
+    expect(r.message).toMatch(/knowledge\.db/);
+    expect(r.message).not.toMatch(/reuse the tenant/);
   });
 
   it('accepts turso with local file URL', async () => {
@@ -130,20 +132,19 @@ describe('knowledgeTestActionHandler', () => {
     expect(r.ok).toBe(true);
   });
 
-  // The turso adapter's plugin package is NOT built in this repo, so the live-call
-  // hint an operator reads in Settings -> AI & Embedder cannot be a bare "Mount
-  // @objectstack/knowledge-turso": that instruction was un-followable — it named a
-  // package with no directory here and no statement of where it comes from. Pinned
-  // as a property (names the package AND where it ships), not as a literal, so the
-  // wording can be improved without the guard going stale.
-  it('turso live-call hint says where the out-of-repo package comes from', async () => {
+  // The turso adapter's plugin package is built in this repo since #37107. The
+  // live-call hint names the package and how a deployment registers it, and no
+  // longer says it ships elsewhere. Pinned as a property, not as a literal, so
+  // the wording can be improved without the guard going stale.
+  it('turso live-call hint names the package and how it is registered, not an outside origin', async () => {
     const r = await knowledgeTestActionHandler({
       values: { adapter: 'turso', turso_url: 'file:./knowledge.db' },
     } as any);
     expect(r.ok).toBe(true);
     const message = String(r.message);
     expect(message).toContain('@objectstack/knowledge-turso');
-    expect(message).toMatch(/ObjectOS Cloud monorepo/);
+    expect(message).toMatch(/registered beside the knowledge service/);
+    expect(message).not.toMatch(/ObjectOS Cloud monorepo|does not ship/);
     // the un-followable form this card retired: named, with no origin stated
     expect(message).not.toMatch(/Mount @objectstack\/knowledge-turso to exercise live calls/);
   });

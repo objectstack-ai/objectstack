@@ -10,25 +10,17 @@ import type { SettingsActionHandler } from '../settings-service.types.js';
  * knowledge sources and any future agent that needs to embed ad-hoc
  * inputs.
  *
- * Adapter list — two of these plugin packages are built in this repo and one
- * is not, which is the difference that matters to an operator told to mount
- * one of them:
- *   - memory    @objectstack/knowledge-memory   built here (dev / test ref)
- *   - ragflow   @objectstack/knowledge-ragflow  built here (external RAGFlow)
- *   - turso     @objectstack/knowledge-turso    NOT built here — libSQL native
- *                                               F32_BLOB, works for cloud
- *                                               Turso AND local file mode
+ * Adapter list — every one of these plugin packages is built in this repo:
+ *   - memory    @objectstack/knowledge-memory   (dev / test ref)
+ *   - ragflow   @objectstack/knowledge-ragflow  (external RAGFlow)
+ *   - turso     @objectstack/knowledge-turso    libSQL native vectors, in a
+ *                                               file of its own or on Turso;
+ *                                               built here since #37107 (its
+ *                                               6.x releases came from the
+ *                                               ObjectOS Cloud monorepo)
  *
- * Spelled out for `turso` because the undated claim that used to stand here —
- * "mirrors the plugin packages currently published" — stopped being true and
- * nothing caught it. The package IS published on the public npm registry, but
- * on its own version track: `latest` was 6.9.0 (published 2026-05-27) while
- * this repo shipped 17.2.0, and 6.9.0 exact-pins `@objectstack/spec@6.9.0`, so
- * mounting it into an app on this platform version resolves a SECOND spec
- * rather than reusing this one. Its source lives in the ObjectOS Cloud
- * monorepo (see this repo's README). Measured against the registry on
- * 2026-08-23 with `@objectstack/spec` + `@objectstack/cli` as positive
- * controls; re-measure before treating those numbers as current.
+ * None of them reads this namespace yet: a deployment registers the plugin
+ * beside the knowledge service itself.
  *
  * As with the AI manifest, the real adapter wiring happens in the
  * knowledge plugins; this manifest is the canonical settings surface
@@ -187,7 +179,8 @@ export const knowledgeTestActionHandler: SettingsActionHandler = async ({ values
         ok: true,
         severity: 'info',
         message:
-          'No URL configured — adapter will reuse the tenant\'s primary libSQL connection at runtime. ' +
+          'No URL configured — the @objectstack/knowledge-turso plugin defaults to its own file, ' +
+          'knowledge.db under .objectstack/data/, never the platform database. ' +
           FORM_CHECK_ONLY,
       };
     }
@@ -203,10 +196,8 @@ export const knowledgeTestActionHandler: SettingsActionHandler = async ({ values
       ok: true,
       severity: 'info',
       message:
-        `Turso adapter configured (${u}). ${FORM_CHECK_ONLY} Live calls need @objectstack/knowledge-turso, ` +
-        'which this platform does not ship: it is built in the ObjectOS Cloud monorepo ' +
-        'and published on its own version track, so check that it offers a release ' +
-        'compatible with your platform version before mounting it.',
+        `Turso adapter configured (${u}). ${FORM_CHECK_ONLY} Live calls need the ` +
+        '@objectstack/knowledge-turso plugin registered beside the knowledge service, with this URL.',
     };
   }
 

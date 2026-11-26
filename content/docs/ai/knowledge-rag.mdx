@@ -9,7 +9,7 @@ Part of the [AI module](/docs/ai) — how agents retrieve knowledge through the 
 ObjectStack ships a Knowledge Protocol that lets you retrieve from pluggable backends (RAGFlow, LlamaIndex, Dify, custom pgvector, …) with one call: `KnowledgeService.search(query, { sourceIds?, topK? })`. The framework defines the contract and runs permission-aware filtering; the adapter plugin does the actual retrieval. See [the protocol design](/docs/protocol/knowledge) for the rationale.
 
 <Callout type="info">
-**This whole stack is open.** The `@objectstack/service-knowledge` service, the adapter plugins (`@objectstack/knowledge-memory`, `@objectstack/knowledge-ragflow`, `@objectstack/knowledge-pgvector`), the `@objectstack/embedder-openai` embedder, and the permission-aware retrieval + event sync below all ship in the **open-source framework**. The workflow is: declare your knowledge sources, pick an adapter, and call `search` — retrieval respects the same row-level security as any ObjectQL query. Only the in-product chat *runtime* that consumes retrieval ships in ObjectOS; see the callout under [Retrieving knowledge](#retrieving-knowledge).
+**This whole stack is open.** The `@objectstack/service-knowledge` service, the adapter plugins (`@objectstack/knowledge-memory`, `@objectstack/knowledge-ragflow`, `@objectstack/knowledge-pgvector`, `@objectstack/knowledge-turso`), the `@objectstack/embedder-openai` embedder, and the permission-aware retrieval + event sync below all ship in the **open-source framework**. The workflow is: declare your knowledge sources, pick an adapter, and call `search` — retrieval respects the same row-level security as any ObjectQL query. Only the in-product chat *runtime* that consumes retrieval ships in ObjectOS; see the callout under [Retrieving knowledge](#retrieving-knowledge).
 </Callout>
 
 ## Wiring
@@ -211,6 +211,20 @@ new KnowledgePgvectorPlugin({ queryPrefix: '' /* e.g. BGE's query instruction */
 - It stores each passage's text, which is as sensitive as the record it came from and is in every backup.
 
 Details — the tables, an approximate index as an operator's step, rebuilds — are in [the protocol's pgvector section](/docs/protocol/knowledge#41-knowledge-pgvector--the-open-vector-store-on-postgresql).
+
+## Local vector store: a libSQL file
+
+`@objectstack/knowledge-turso` keeps passages and vectors in a libSQL file of its own — by default `knowledge.db` under the project's `.objectstack/data/`, never the platform database's file — so a deployment on SQLite gets semantic search, Chinese text included, with no database server to run. Until `os dev` mounts it for you, add the package and register `KnowledgeTursoPlugin` beside the knowledge service yourself. Point a source at it with `adapter: 'turso'`:
+
+```ts
+new KnowledgeTursoPlugin(), // or { url: 'file:/var/lib/app/knowledge.db' }, ':memory:', a libsql:// URL
+```
+
+- It searches by an exact scan; the organization filter, the record scope and the metadata `filter` run in SQL before ranking. 10,000 passages of 1,536 dimensions take about 82 MB and a search about 50 ms; larger sources belong on pgvector.
+- A changed model or split is rebuilt beside the old index, which keeps answering until the reindex completes.
+- Where libSQL has no native build (Windows on ARM), boot goes on and its sources answer `SERVICE_UNAVAILABLE`.
+
+Details are in [the protocol's turso section](/docs/protocol/knowledge#42-knowledge-turso--the-open-vector-store-in-a-libsql-file).
 
 ## Why we did not build a vector DB
 
