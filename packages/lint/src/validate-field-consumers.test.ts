@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { CubeSchema } from '@objectstack/spec/data';
+import { CubeSchema, ObjectSchema } from '@objectstack/spec/data';
 import { DatasetSchema } from '@objectstack/spec/ui';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import {
@@ -1857,6 +1857,69 @@ describe('[#32628] validateFieldConsumers — a field permission\'s key is a car
     for (const key of ['region', 'inv.region.code', 'inv.nope', 'ghost.region']) {
       expect(find(stack({ [key]: GRANT }), 'inv', 'region')?.verdict, key).toBe('inert');
     }
+  });
+});
+
+describe('[#37502] validateFieldConsumers — a related list\'s columns are fields of the child it lists', () => {
+  /**
+   * `company` lists its `contact` rows; both declare `phone`. A view on `probe`
+   * wakes the rule (a stack of objects alone is not judged) and draws nothing
+   * of the two. `name` is each object's title, exempt.
+   */
+  const company = (relatedLists?: unknown[]): AnyRec => ({
+    name: 'company',
+    fields: { name: { type: 'text' }, phone: { type: 'phone' } },
+    ...(relatedLists ? { relatedLists } : {}),
+  });
+  const contact: AnyRec = {
+    name: 'contact',
+    fields: {
+      name: { type: 'text' },
+      phone: { type: 'phone' },
+      email: { type: 'email' },
+      company: { type: 'lookup', reference: 'company' },
+    },
+  };
+  const stack = (relatedLists?: unknown[]): AnyRec => ({
+    objects: [company(relatedLists), contact, { name: 'probe', fields: { name: { type: 'text' } } }],
+    views: [{ list: { data: { object: 'probe' }, columns: [] } }],
+  });
+
+  /** The `object.field` of every finding, sorted. */
+  const reported = (s: AnyRec): string[] =>
+    validateFieldConsumers(s).map((f) => `${f.object}.${f.field}`).sort();
+
+  it('the fixture is a related list the object schema accepts, in both name spellings', () => {
+    for (const list of ['contact', 'contact.company']) {
+      expect(ObjectSchema.safeParse(company([{ list, columns: ['name', 'phone'] }])).success, list).toBe(true);
+    }
+  });
+
+  it('baseline: with no related list, both `phone` fields are reported', () => {
+    expect(reported(stack())).toEqual(['company.phone', 'contact.company', 'contact.email', 'contact.phone']);
+  });
+
+  it('⛔ a column credits the CHILD\'s field: the parent\'s same-name `phone` is still reported', () => {
+    expect(reported(stack([{ list: 'contact', columns: ['name', 'phone'] }]))).toContain('company.phone');
+  });
+
+  it('the child\'s own column counts as a consumer of the child\'s field', () => {
+    expect(reported(stack([{ list: 'contact', columns: ['name', 'phone'] }]))).toEqual(
+      ['company.phone', 'contact.company', 'contact.email'],
+    );
+  });
+
+  it('`child.field` names the same child, and the relationship the list joins on', () => {
+    expect(reported(stack([{ list: 'contact.company', columns: ['phone', 'email'] }]))).toEqual(['company.phone']);
+  });
+
+  it('a bare-string entry carries no columns and credits nothing', () => {
+    expect(reported(stack(['contact']))).toEqual(['company.phone', 'contact.company', 'contact.email', 'contact.phone']);
+  });
+
+  it('⛔ a list of a child this stack does not declare credits no column to the parent', () => {
+    // Another package's object: its fields are unknown here, so the column lands on no object.
+    expect(reported(stack([{ list: 'task', columns: ['phone'] }]))).toContain('company.phone');
   });
 });
 
