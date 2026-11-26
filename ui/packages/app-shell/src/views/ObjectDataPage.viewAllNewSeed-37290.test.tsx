@@ -21,7 +21,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import { render, cleanup, fireEvent, screen, waitFor, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 // The page reaches `@objectstack/lint` through a dynamic import; its first load is paid at collection, not inside a case.
 import '@objectstack/lint';
@@ -219,8 +219,11 @@ describe('New from a record trail seeds the dependsOn fields (objectstack#37290)
     await waitFor(() => expect(newButton().disabled).toBe(true));
     fireEvent.click(screen.getByTestId('move'));
     await waitFor(() => expect(params().get('moved')).toBe('1'));
+    expect(newButton().disabled, 'still pending after the move (same mount)').toBe(true);
     settle({ id: 'O-1', account: 'A-1' });
     await waitFor(() => expect(newButton().disabled).toBe(false));
+    // A stale open would write the address after the pending flag clears: let it land before reading.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
     expect(params().get('form')).toBeNull();
     expect(params().getAll('formLink')).toEqual([]);
     expect(params().get('moved')).toBe('1');
