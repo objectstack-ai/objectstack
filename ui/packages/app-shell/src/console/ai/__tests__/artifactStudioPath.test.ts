@@ -16,9 +16,9 @@ describe('artifactStudioPath', () => {
     );
   });
 
-  it('flow → Automations pillar (the reserved ?surface=flow: consumer gets its first producer)', () => {
+  it('flow → the flow designer on its metadata address (objectstack#36903)', () => {
     expect(artifactStudioPath(pkg, { type: 'flow', name: 'customer_lost_follow_up' })).toBe(
-      '/studio/app.rmpe/automations?surface=flow%3Acustomer_lost_follow_up',
+      '/studio/app.rmpe/metadata/flow/customer_lost_follow_up',
     );
   });
 

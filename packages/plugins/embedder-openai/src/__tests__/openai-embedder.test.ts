@@ -4,6 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   OpenAIEmbedder,
   createOpenAIEmbedder,
+  documentedMaxBatchSize,
   OPENAI_COMPATIBLE_PRESETS,
 } from '../index';
 import { estimateTokens } from '@objectstack/spec/shared';
@@ -26,6 +27,16 @@ describe('OpenAIEmbedder', () => {
     const e = new OpenAIEmbedder({ apiKey: 'k', fetch: mockFetch({ data: [] }) });
     expect(e.id).toBe('openai');
     expect(e.dimensions).toBe(1536);
+  });
+
+  it('reports the model it sends as IEmbedder.model, for the knowledge index fingerprint (ADR-0161 K8, item 7)', async () => {
+    const fetchImpl = mockFetch({ data: [{ index: 0, embedding: [0.1, 0.2] }] });
+    expect(new OpenAIEmbedder({ apiKey: 'k', fetch: fetchImpl }).model).toBe('text-embedding-3-small');
+    const e = new OpenAIEmbedder({ apiKey: 'k', model: 'BAAI/bge-m3', fetch: fetchImpl });
+    expect(e.model).toBe('BAAI/bge-m3');
+    await e.embed(['x']);
+    const sent = JSON.parse(String((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body));
+    expect(sent.model).toBe(e.model);
   });
 
   it('looks up dimensions for known Chinese models', () => {
@@ -197,6 +208,24 @@ describe('OpenAIEmbedder batching (per-request input cap)', () => {
     expect(out).toEqual(Array.from({ length: 7 }, (_, i) => [i]));
   });
 
+  it('documentedMaxBatchSize answers the cap the embedder batches by, and nothing for an unknown model', async () => {
+    expect(documentedMaxBatchSize('text-embedding-v3')).toBe(10);
+    expect(documentedMaxBatchSize('text-embedding-3-small')).toBe(2048);
+    expect(documentedMaxBatchSize('my-gateway-model')).toBeUndefined();
+    expect(documentedMaxBatchSize('constructor')).toBeUndefined();
+    // The same table: with no maxBatchSize, the embedder batches at exactly that cap.
+    const f = echoFetch();
+    await new OpenAIEmbedder({ apiKey: 'k', model: 'text-embedding-v3', fetch: f as unknown as typeof fetch }).embed(inputs(12));
+    expect(sentSizes(f)).toEqual([documentedMaxBatchSize('text-embedding-v3'), 2]);
+  });
+
+  it('an explicit maxBatchSize above the documented cap is still used as given', async () => {
+    const f = echoFetch();
+    const e = new OpenAIEmbedder({ apiKey: 'k', model: 'text-embedding-v3', maxBatchSize: 25, fetch: f as unknown as typeof fetch });
+    await e.embed(inputs(30));
+    expect(sentSizes(f)).toEqual([25, 5]);
+  });
+
   it('refuses a maxBatchSize that is not a positive integer', () => {
     for (const bad of [0, -1, 1.5, Number.NaN]) {
       expect(() => new OpenAIEmbedder({ apiKey: 'k', maxBatchSize: bad })).toThrow(
@@ -292,6 +321,19 @@ describe('OpenAIEmbedder input limit (refused, not truncated)', () => {
     const e = new OpenAIEmbedder({ apiKey: 'k', maxInputTokens: 10, fetch: f as unknown as typeof fetch });
     await expect(e.embed([cjk(7)])).rejects.toThrow(/estimated at 12 tokens, over the 10-token input limit/);
     expect(f).not.toHaveBeenCalled();
+  });
+
+  it('reports its input limit as IEmbedder.maxInputTokens: the option, else the known-model table, else none', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(new OpenAIEmbedder({ apiKey: 'k' }).maxInputTokens).toBe(8192);
+      expect(new OpenAIEmbedder({ apiKey: 'k', model: 'text-embedding-v2' }).maxInputTokens).toBe(2048);
+      expect(new OpenAIEmbedder({ apiKey: 'k', model: 'BAAI/bge-large-zh-v1.5' }).maxInputTokens).toBe(512);
+      expect(new OpenAIEmbedder({ apiKey: 'k', maxInputTokens: 10 }).maxInputTokens).toBe(10);
+      expect(new OpenAIEmbedder({ apiKey: 'k', model: 'my-gateway-model', maxBatchSize: 5 }).maxInputTokens).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('refuses a maxInputTokens that is not a positive integer', () => {

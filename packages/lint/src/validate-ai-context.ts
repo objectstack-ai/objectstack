@@ -11,10 +11,21 @@
  * wrong — and is exactly why the author has to hear it here instead: a typo in
  * a pack ships as a pack that quietly reads less than it says.
  *
- * Four verdicts, each a `warning` (the pack loads and reads what resolves):
+ * Five verdicts, each a `warning` (the pack loads and reads what resolves):
  *
  * - `ai-context-field-unknown`: a name in `fields`, a `related` entry's
- *   `fields`, or `body.field` that the object does not define;
+ *   `fields`, `where` or `orderBy`, or `body.field` that the object does not
+ *   define — neither declares nor carries as an injected system column, which
+ *   the published definition the tool reads carries and the tool serves like
+ *   any field (a `where` or `orderBy` field the child lacks leaves the whole list
+ *   out of every answer, ADR-0160 D1/D3 second amendment — the tool never
+ *   runs a filter with one of its conditions removed);
+ * - `ai-context-sort-field-unsortable`: a `related` entry's `orderBy` field
+ *   the child does not offer as a sort — the sortability projection's
+ *   `sortable: false` (`resolveObjectSortability`): a formula, or a field
+ *   whose author declared `sortable: false`. Both MCP doors refuse such an
+ *   order with `INVALID_SORT`, so `get_record_context` leaves the list out of
+ *   every answer instead and states nothing (ADR-0160 D1: an author defect);
  * - `ai-context-related-link-unknown`: a `related` entry with no reference
  *   field to the root — `field` names none that points at it, or, omitted, the
  *   child has none or several (then `field` must say which);
@@ -39,9 +50,11 @@
  * unchanged.
  */
 
-import { AI_CONTEXT_BODY_FIELD_TYPES } from '@objectstack/spec/ai';
+import { AI_CONTEXT_BODY_FIELD_TYPES, aiContextWhereFields } from '@objectstack/spec/ai';
+import { resolveObjectSortability } from '@objectstack/spec/api';
 import { REFERENCE_VALUE_TYPES, referenceTargetOf } from '@objectstack/spec/data';
 import { closureDependencyRemedy, recordsOf } from './object-graph.js';
+import { injectedColumnDefsFor } from './system-fields.js';
 
 export type AiContextSeverity = 'warning';
 
@@ -60,17 +73,30 @@ export const AI_CONTEXT_OBJECT_UNKNOWN = 'ai-context-object-unknown';
 export const AI_CONTEXT_FIELD_UNKNOWN = 'ai-context-field-unknown';
 export const AI_CONTEXT_RELATED_LINK_UNKNOWN = 'ai-context-related-link-unknown';
 export const AI_CONTEXT_BODY_NOT_LONG_TEXT = 'ai-context-body-not-long-text';
+export const AI_CONTEXT_SORT_FIELD_UNSORTABLE = 'ai-context-sort-field-unsortable';
 
 type AnyRec = Record<string, unknown>;
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
-/** An object's fields as a name → definition map, or `undefined` when it declares no readable map. */
+/**
+ * An object's fields as a name → definition map, or `undefined` when it declares no readable map.
+ *
+ * The EFFECTIVE map: the declared fields plus the system columns the registry
+ * injects without the author declaring them (`owner_id`, `created_at`, …;
+ * {@link injectedColumnDefsFor}, the tables `applySystemFields` and the served
+ * read's `applyInjectedSystemColumns` spread), a declared field winning over
+ * the injected one of its name. `get_record_context` judges a pack against
+ * the published definition, which carries those columns, and reads them: a
+ * verdict over the declared fields alone warns on a name the tool serves.
+ */
 function fieldMapOf(object: AnyRec): Map<string, AnyRec> | undefined {
   const raw = object.fields;
   if (!raw || typeof raw !== 'object') return undefined;
-  return new Map(recordsOf(raw).map((f) => [str(f.name), f] as const).filter(([name]) => name !== ''));
+  const fields = new Map(recordsOf(raw).map((f) => [str(f.name), f] as const).filter(([name]) => name !== ''));
+  for (const [name, def] of injectedColumnDefsFor(object)) if (!fields.has(name)) fields.set(name, { ...def });
+  return fields;
 }
 
 /** The object a reference field points at, or `undefined` for any other field. */
@@ -188,6 +214,47 @@ export function validateAiContext(
       const childFields = judged(child, where, `${path}.object`);
       if (!childFields) return;
       unknownFields(strings(entry.fields), childFields, child, where, `${path}.fields`);
+      // [ADR-0160 D1, second amendment] The fields `where` and `orderBy` name.
+      // One the child lacks is no condition dropped: the list is left out.
+      const listLeftOut = (name: string, key: 'where' | 'orderBy', at: string) => {
+        out.push({
+          severity: 'warning',
+          rule: AI_CONTEXT_FIELD_UNKNOWN,
+          where,
+          path: at,
+          message:
+            `\`${key}\` names field '${name}', which object '${child}' does not define, so the list is left out of ` +
+            'every answer (a filter or an order is never read with one of its fields removed)',
+          hint: `Name a field of '${child}' (check the spelling), or remove it from \`${key}\``,
+        });
+      };
+      for (const name of aiContextWhereFields(entry.where)) {
+        if (!childFields.has(name)) listLeftOut(name, 'where', `${path}.where`);
+      }
+      const orderBy = Array.isArray(entry.orderBy) ? (entry.orderBy as unknown[]) : [];
+      // Judged by the projection the doors refuse by, never by a second reading of `type` or `sortable`.
+      const sortability = orderBy.length > 0 ? resolveObjectSortability({ fields: Object.fromEntries(childFields) }).fields : {};
+      orderBy.forEach((node, k) => {
+        const name = node && typeof node === 'object' ? str((node as AnyRec).field) : '';
+        if (!name) return;
+        if (!childFields.has(name)) {
+          listLeftOut(name, 'orderBy', `${path}.orderBy[${k}].field`);
+          return;
+        }
+        const verdict = sortability[name];
+        if (verdict?.sortable !== false) return;
+        const why = verdict.reason === 'virtual-type' ? 'is a formula, computed on read' : 'declares `sortable: false`';
+        out.push({
+          severity: 'warning',
+          rule: AI_CONTEXT_SORT_FIELD_UNSORTABLE,
+          where,
+          path: `${path}.orderBy[${k}].field`,
+          message:
+            `\`orderBy\` sorts by field '${name}' of object '${child}', which ${why}, so it is not offered as a sort ` +
+            'and the list is left out of every answer (an order is never read with one of its fields removed)',
+          hint: `Order the list by a field of '${child}' that is offered as a sort, or remove '${name}' from \`orderBy\``,
+        });
+      });
       if (!root || !objects.has(root)) return;
       const named = str(entry.field);
       const links = [...childFields.keys()].filter((name) => referenceOf(childFields.get(name)) === root);

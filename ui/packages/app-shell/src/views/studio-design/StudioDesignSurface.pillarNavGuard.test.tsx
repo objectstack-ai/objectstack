@@ -107,6 +107,7 @@ vi.mock('../metadata-admin/index.js', () => ({
 
 import { t } from '../metadata-admin/i18n';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { confirmUnsavedLeave } from '../../chrome/unsavedEdits';
 
 // jsdom has no matchMedia — useIsMobile / useIsWideViewport need a stub.
@@ -216,7 +217,7 @@ async function renderSurfaceAt(url: string) {
   render(
     <MemoryRouter initialEntries={[url]}>
       <Routes>
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
         {/* objectstack#36899 — a menu type entry opens that type's area list. */}
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio" element={<div data-testid="studio-landing-page" />} />

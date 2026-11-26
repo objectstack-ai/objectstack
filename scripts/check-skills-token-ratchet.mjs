@@ -857,7 +857,20 @@ export const CEILINGS = new Map([
   // no longer lists the retired modes `insert` and `replace`. 24649 -> 24591
   // priced bytes; the row follows the measurement down, zero headroom.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24591 / 4)
-  ['skills/objectstack-platform/SKILL.md', 6148],
+  // 6148 -> 6149 (card #37189): the enumeration row for the new `record-context`
+  // capability token — the token joins the `@objectstack/service-` + token cell
+  // of the `requires:` table, which `check:skill-identifier-liveness` holds
+  // exhaustive over `PLATFORM_CAPABILITY_TOKENS`. The standing enumeration-row
+  // case: ruling A on #32584 (record 6819475461), made standing by #32673
+  // letter A (record 6840575378). Raised by the row's own measured delta and
+  // by no more; nothing else in the file is cut and nothing rides along.
+  // Arithmetic in priced bytes (stamp line excluded): on the base the text was
+  // 24577 bytes (6145 tokens, headroom 3); the row adds 17 bytes, so the
+  // LANDED priced text is 24594 bytes -> 6149 tokens: the 3 tokens of headroom
+  // are absorbed and the ceiling moves 6148 -> 6149 (+1). Pinned AT the
+  // measurement.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24594 / 4)
+  ['skills/objectstack-platform/SKILL.md', 6149],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
@@ -1984,6 +1997,16 @@ export const CEILINGS = new Map([
   ['skills/objectstack-platform/references/operations.md', 3394],
   ['skills/objectstack-platform/references/plugin-development.md', 3137],
   ['skills/objectstack-upgrade/references/examples-upgrade.md', 1197],
+  // NEW FILE, pinned AT the measurement: the context pack (`ai_context`, ADR-0160)
+  // is a metadata kind no published skill taught beyond its key name. Card #37177
+  // (the `Skills-docs: follow-up` of the PR that admitted the kind) asks for the
+  // teaching "in references where the ceiling binds", and both SKILL.md rows were
+  // at 14 and 0 tokens of headroom, so the keys, bounds, body outline, pack names
+  // and `os validate` rules live here and each SKILL.md carries a pointer paid by
+  // deleting restatement in the same file (neither SKILL.md row moves). The row is
+  // the seat's claim amendment 7179788843 on that card: one new row for this file.
+  // 5813 bytes -> ceil(5813 / 4) = 1454; zero headroom.
+  ['skills/objectstack-ai/references/context-packs.md', 1454],
 
   // ── 2026-10-26 the objectui bundle joins the catalog — decision C, #25832 ──
   // The maintainer ruled (decision C, 2026-10-25, recorded as item 17d of the

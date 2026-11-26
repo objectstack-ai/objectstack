@@ -64,6 +64,14 @@ import {
 // local face (`SqlDriver.applyFilters`), `driver-memory` and `driver-mongodb`.
 import { findMisplacedReadableIds, readableIdsDriverRefusal } from '@objectstack/core';
 import { isComposedReadableIds, type FilterCondition } from '@objectstack/spec/data';
+// [#37345] A declared field's column DEFAULT, from the local face's own rule
+// and SQLite text: which fields get one (`emitsDeclaredColumnDefault`, the
+// question `SqlDriver.createColumn` asks) and what it says
+// (`sqliteDeclaredColumnDefaultSql`, the `dflt_value` the knex path writes).
+// ⛔ Never a copy of either in this file. See
+// {@link RemoteTransport.columnDeclarationSQL}.
+import { emitsDeclaredColumnDefault, sqliteDeclaredColumnDefaultSql } from '@objectstack/driver-sql';
+import { isNowDefaultToken } from '@objectstack/spec/data';
 // [ADR-0155 D2, D4] The fixed-read leaf: where it compiles and the predicates of
 // its fixed inner read, shared with the local face's compiler
 // (`SqlDriver#fixedReadLeafSubquery`), and the refusal every evaluator answers.
@@ -128,10 +136,44 @@ const BUILTIN_COLUMNS = new Set(['id', 'created_at', 'updated_at']);
  * NOT NULL column? Asked exactly as the local face's `declaresColumnNotNull`
  * (`driver-sql`'s `sql-driver.ts`) asks it — truthiness of `storage.notNull`,
  * whatever the field's type, `multiple: true` included, and never `required`.
- * See {@link RemoteTransport.columnDeclarationSQL}, its one reader here.
+ * See {@link RemoteTransport.columnDeclarationSQL}, the renderer that reads it,
+ * and {@link addsRowSensitiveColumn}, which decides whether a sync must ask if a
+ * table holds rows.
  */
 function declaresColumnNotNull(field: unknown): boolean {
   return Boolean((field as { storage?: { notNull?: unknown } } | null | undefined)?.storage?.notNull);
+}
+
+/**
+ * [#37281] Whether the `ALTER TABLE … ADD COLUMN` statements a sync is about
+ * to send for this table add a column whose statement depends on whether the
+ * table holds a row: one declaring `storage.notNull`, or [#37345] one whose
+ * declared DEFAULT is the `NOW()` expression (withheld on a populated table,
+ * see {@link RemoteTransport.columnDeclarationSQL}). Only then does the sync
+ * ask whether the table holds a row ({@link populatedTableProbe}), so a sync
+ * that adds no such column sends no extra statement.
+ */
+function addsRowSensitiveColumn(fields: Record<string, any> | undefined, existingColumns: ReadonlySet<unknown>): boolean {
+  return Object.entries(fields ?? {}).some(
+    ([name, field]) => !existingColumns.has(name)
+      && ((field as any)?.type || 'string') !== 'formula'
+      && (declaresColumnNotNull(field) || declaresNowColumnDefault(field)),
+  );
+}
+
+/**
+ * [#37345] Whether the column DEFAULT the local face gives this field is the
+ * `NOW()` expression: a `NOW()` token the shared renderer emits at all (a
+ * multi-value column gets no DEFAULT).
+ */
+function declaresNowColumnDefault(field: unknown): boolean {
+  return isNowDefaultToken((field as { defaultValue?: unknown } | null | undefined)?.defaultValue)
+    && sqliteDeclaredColumnDefaultSql(field) !== null;
+}
+
+/** [#37281] One row of the table, or none: whether it holds a row at all. */
+function populatedTableProbe(table: string): InStatement {
+  return { sql: `SELECT 1 FROM "${table}" LIMIT 1`, args: [] };
 }
 
 /**
@@ -2139,13 +2181,18 @@ export class RemoteTransport {
         });
         const existingColumns = new Set(columnsResult.rows.map((r: any) => r.name));
         for (const c of existingColumns) materialized.add(String(c));
+        // [#37281] Asked only when an added column declares `storage.notNull`
+        // or [#37345] a `NOW()` DEFAULT; see {@link columnDeclarationSQL} for
+        // what the answer changes.
+        const populated = addsRowSensitiveColumn(objectDef.fields, existingColumns)
+          && (await this.sendStatement(populatedTableProbe(tableName))).rows.length > 0;
 
         for (const [name, field] of Object.entries(objectDef.fields)) {
           if (existingColumns.has(name)) continue;
           const type = (field as any).type || 'string';
           if (type === 'formula') continue; // Virtual — no column
           this.assertSafeIdentifier(name);
-          await this.executeAddColumn(`ALTER TABLE "${tableName}" ADD COLUMN "${name}" ${this.columnDeclarationSQL(field)}`);
+          await this.executeAddColumn(`ALTER TABLE "${tableName}" ADD COLUMN "${name}" ${this.columnDeclarationSQL(field, false, populated)}`);
           materialized.add(name);
         }
       }
@@ -2182,13 +2229,16 @@ export class RemoteTransport {
    *
    * Collects all DDL statements (CREATE TABLE / ALTER TABLE ADD COLUMN /
    * CREATE INDEX) for every schema and uses `client.batch()` to minimize
-   * network round-trips. The process may perform up to four batch calls: one
+   * network round-trips. The process may perform up to five batch calls: one
    * to introspect existing tables, one to introspect the existing tables'
-   * columns together with the index names the database already carries, one to
-   * apply DDL statements, and — only when an existing table is missing a
-   * declared index — one to retrofit those indexes. Once every declared index
-   * exists (the steady state of every boot after the first) the fourth call is
-   * not made and no index DDL is sent (#17609).
+   * columns together with the index names the database already carries, —
+   * only when an existing table is about to gain a `storage.notNull` column or a
+   * `NOW()` DEFAULT —
+   * one asking those tables whether they hold a row (#37281), one to apply DDL
+   * statements, and — only when an existing table is missing a declared index
+   * — one to retrofit those indexes. Once every declared column and index
+   * exists (the steady state of every boot after the first) neither
+   * conditional call is made and no index DDL is sent (#17609).
    *
    * This method does not implement an internal fallback to sequential
    * `syncSchema()`. Any fallback behavior is expected to be handled
@@ -2262,12 +2312,28 @@ export class RemoteTransport {
       }));
       const introspection = await this.sendBatch([...pragmaStmts, EXISTING_INDEX_NAMES_SQL], 'read');
       const planned: PlannedIndex[] = [];
+      const columnsOf = existingSchemas.map((_, i) => new Set(introspection[i].rows.map((r: any) => r.name)));
+
+      // [#37281] Phase 2c, only when an existing table is about to gain a
+      // `storage.notNull` column or [#37345] a `NOW()` DEFAULT: ONE read batch asking each such table
+      // whether it holds a row, as {@link syncSchema} asks it. No other sync
+      // pays it. See {@link columnDeclarationSQL} for what the answer changes.
+      const probed = existingSchemas
+        .map((_, i) => i)
+        .filter((i) => addsRowSensitiveColumn((existingSchemas[i].schema as { fields?: Record<string, any> }).fields, columnsOf[i]));
+      const populated = new Set<number>();
+      if (probed.length > 0) {
+        const probes = await this.sendBatch(probed.map((i) => populatedTableProbe(existingSchemas[i].object)), 'read');
+        probed.forEach((i, k) => {
+          if (probes[k].rows.length > 0) populated.add(i);
+        });
+      }
 
       for (let i = 0; i < existingSchemas.length; i++) {
         const { object, schema } = existingSchemas[i];
         const objectDef = schema as { name: string; fields?: Record<string, any>; indexes?: unknown };
 
-        const existingColumns = new Set(introspection[i].rows.map((r: any) => r.name));
+        const existingColumns = columnsOf[i];
         const materialized = new Set<string>(BUILTIN_COLUMNS);
         for (const c of existingColumns) materialized.add(String(c));
 
@@ -2276,7 +2342,7 @@ export class RemoteTransport {
           const type = (field as any).type || 'string';
           if (type === 'formula') continue;
           this.assertSafeIdentifier(name);
-          ddlStatements.push(`ALTER TABLE "${object}" ADD COLUMN "${name}" ${this.columnDeclarationSQL(field)}`);
+          ddlStatements.push(`ALTER TABLE "${object}" ADD COLUMN "${name}" ${this.columnDeclarationSQL(field, false, populated.has(i))}`);
           materialized.add(name);
         }
 
@@ -2537,7 +2603,8 @@ export class RemoteTransport {
   /**
    * [#23847] What follows a declared field's column NAME in this transport's
    * DDL: the storage type {@link mapFieldTypeToSQL} decides, then ` NOT NULL`
-   * when the field declares `storage: { notNull: true }`. The ONE renderer for
+   * when the field declares `storage: { notNull: true }` (save on an `ADD
+   * COLUMN` to a table that holds rows, below). The ONE renderer for
    * every statement that materializes a declared field's column here — the
    * `CREATE TABLE` {@link buildCreateTableSQL} builds and the `ALTER TABLE …
    * ADD COLUMN` of {@link syncSchema} and {@link syncSchemasBatch} — so no door
@@ -2561,31 +2628,71 @@ export class RemoteTransport {
    * drift differ read each such column as DESTRUCTIVE `tighten_not_null` drift
    * against a table this transport had itself just created.
    *
-   * # ADD COLUMN on a table that already holds rows
+   * # ADD COLUMN on a table that already holds rows: added nullable (#37281)
    *
    * SQLite refuses `ADD COLUMN … NOT NULL` without a non-NULL `DEFAULT` once
    * the table has a row (`Cannot add a NOT NULL column with default value
-   * NULL`); an empty table accepts it. The local face sends the same
-   * statement and gets the same refusal, so the sync of that object fails
-   * loudly on both faces, and the engine reports it per object. ⛔ Never drop
-   * the ` NOT NULL` to let such a statement through: a nullable column under a
-   * `storage.notNull` declaration is exactly the silent, unenforced state this
-   * renderer replaced. Imposing NOT NULL on a column that already exists is
-   * not done here at all — that is `tighten_not_null`, destructive, and
-   * belongs to the migration path, not to an additive sync.
+   * NULL`); an empty table accepts it. Every existing row would hold NULL in
+   * the new column, and the `storage.notNull` contract (`FieldSchema.storage`)
+   * names what declaring the constraint over such rows is: "Declaring this
+   * over existing null rows is a destructive migration gated by the
+   * schema-drift ceremony". It is not an additive sync's to impose, and
+   * sending it anyway failed the whole object's sync and left the object
+   * unwritable.
    *
-   * ⚠️ One case still differs, and it is a DEFAULT question, not a nullability
-   * one: this transport emits no declared column DEFAULT for any field, while
-   * `createColumn` emits a literal `defaultValue` (`applyDeclaredColumnDefault`).
-   * So a `storage.notNull` field that also declares a literal `defaultValue`,
-   * added to a populated table, is accepted locally (existing rows take the
-   * default) and refused here. `turso-remote-not-null.test.ts` records that
-   * asymmetry; closing it means deciding whether, and from which shared source,
-   * this face emits declared defaults.
+   * So when `addedToPopulatedTable` is set — the `ADD COLUMN` doors of
+   * {@link syncSchema} and {@link syncSchemasBatch} set it once a table holds a
+   * row ({@link populatedTableProbe}) — a `storage.notNull` field is added
+   * WITHOUT the ` NOT NULL`, and the shared drift differ, which compares the
+   * column against `storage.notNull`, reports it as `tighten_not_null`:
+   * destructive, imposed only after the backfill. That is the answer the
+   * local face's `createColumn` gives the same statement (#37258).
+   *
+   * Everywhere else the constraint stays: on `CREATE TABLE`, on an `ADD COLUMN`
+   * to an empty table (no row to hold a NULL), and for a field declaring a
+   * literal or `NOW()` `defaultValue` (`emitsDeclaredColumnDefault`, the
+   * local face's own predicate, imported), which the local face emits as the
+   * column DEFAULT the existing rows take. Imposing NOT NULL on a column that
+   * already exists is not done here at all; that is `tighten_not_null`, and
+   * belongs to the migration path. ⛔ Never drop the ` NOT NULL` for such a
+   * field to let a statement through: the local face keeps it, so the faces
+   * would fork on the column.
+   *
+   * # The declared column DEFAULT (#37345)
+   *
+   * Last comes ` DEFAULT …`: the DEFAULT the local face's
+   * `applyDeclaredColumnDefault` gives the same field, rendered by
+   * `sqliteDeclaredColumnDefaultSql` from `driver-sql` — the same predicate
+   * (a literal or `NOW()`, never another runtime token, never an object, never
+   * a multi-value JSON column) and the same SQLite text, so a remote column
+   * and a local one carry one `dflt_value` and the shared drift differ, fed
+   * that value raw by the remote catalog read, reports neither. It is emitted
+   * for every field that declares one, nullable included, as `createColumn`
+   * emits it, on `CREATE TABLE` and on every `ADD COLUMN`. So a
+   * `storage.notNull` field with a literal default, added to a populated
+   * table, is accepted here as it is locally: the existing rows take the
+   * default. `turso-remote-not-null.test.ts` case 5 and
+   * `turso-remote-default-parity.test.ts` pin both faces to that one answer.
+   *
+   * ⚠️ One exception, deliberate: a `NOW()` default on an `ADD COLUMN` to a
+   * table that holds rows is NOT emitted. SQLite refuses a non-constant
+   * DEFAULT there (`Cannot add a column with non-constant default`), and the
+   * local face, which sends it, fails that object's whole sync on it — the
+   * defect #37413 records, with this face's `NOW()` half after it. ⛔ Never
+   * emit the `NOW()` expression on that statement: a nullable `NOW()` field
+   * added to a populated table is accepted on this face today, and the
+   * expression would break that sync on every hosted environment. Such a field
+   * keeps the answer it has always had here: nullable, added with no DEFAULT;
+   * `storage.notNull`, refused (`Cannot add a NOT NULL column with default
+   * value NULL`).
    */
-  private columnDeclarationSQL(field: any, tenantColumn: boolean = false): string {
+  private columnDeclarationSQL(field: any, tenantColumn: boolean = false, addedToPopulatedTable: boolean = false): string {
     const colType = this.mapFieldTypeToSQL(field);
-    return declaresColumnNotNull(field) || tenantColumn ? `${colType} NOT NULL` : colType;
+    const notNull = declaresColumnNotNull(field)
+      && !(addedToPopulatedTable && !emitsDeclaredColumnDefault(field));
+    const declared = notNull || tenantColumn ? `${colType} NOT NULL` : colType;
+    const columnDefault = addedToPopulatedTable && declaresNowColumnDefault(field) ? null : sqliteDeclaredColumnDefaultSql(field);
+    return columnDefault === null ? declared : `${declared} DEFAULT ${columnDefault}`;
   }
 
   /**

@@ -127,11 +127,16 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -205,7 +210,7 @@ function renderAt(url: string) {
       <LocationProbe />
       <Routes>
         <Route path="/studio" element={<div data-testid="studio-landing" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -217,7 +222,10 @@ describe('Studio home loop (objectui#12513)', () => {
     // with the switcher: the landing is reached from the app. objectstack#36899
     // — the left menu's show / hide control leads the bar, so the way out is
     // the button right after it.
-    renderAt(`/studio/${SHOWCASE}/automations`);
+    // objectstack#36903, objectstack#36904, objectstack#36905 — on the sharing
+    // overview's page: the Automations, Data and Access pillars' addresses
+    // redirect to the area now.
+    renderAt(`/studio/${SHOWCASE}/owd`);
 
     const back = await screen.findByTestId('studio-back-to-app');
     const header = screen.getByTestId('studio-shell-header');
@@ -226,28 +234,6 @@ describe('Studio home loop (objectui#12513)', () => {
     expect(buttons[1]).toBe(back);
     expect(within(header).queryByRole('button', { name: 'Studio home' })).toBeNull();
   });
-
-  it('the Organization flows empty block says how to change a packaged flow, links nowhere, and creates nothing', async () => {
-    // It linked to Setup › Packaged automation, whose flows half retired into
-    // Studio (objectstack ADR-0146 D11, N-28), so the sentence says where the
-    // flow is changed instead: in its package, with New similar.
-    server.active.delete('flow/qa_urgent_alert_clone');
-    renderAt('/studio/~org/automations');
-
-    const block = await screen.findByTestId('auto-empty', undefined, { timeout: 8000 });
-    expect(block).toHaveTextContent('open its package and use New similar');
-    expect(block).not.toHaveTextContent('Setup');
-    expect(within(block).queryByTestId('auto-empty-open-setup')).toBeNull();
-    expect(within(block).queryAllByRole('link')).toEqual([]);
-    expect(within(block).queryByTestId('auto-empty-new')).toBeNull();
-  });
-
-  it('control: a package’s own empty block offers no Setup link', async () => {
-    server.active.clear();
-    renderAt(`/studio/${SHOWCASE}/automations`);
-
-    const block = await screen.findByTestId('auto-empty', undefined, { timeout: 8000 });
-    expect(within(block).queryByTestId('auto-empty-open-setup')).toBeNull();
-    expect(within(block).queryByRole('link', { name: 'Open in Setup' })).toBeNull();
-  });
+  // objectstack#36903 — the Automations rail's empty blocks went with the rail:
+  // the package-less scope's list offers no create (StudioDesignSurface.packageLessFlows-11553).
 });

@@ -13,6 +13,21 @@
  *  4. The search narrows the entries by name, and says so when none match.
  *  5. Focus order: the toggle, then the search, then the entries.
  *
+ * objectstack#37201 — the two tiers (ADR-0084, amended 2026-11-25):
+ *  6. Group labels are muted, with no count and no link; an entry's muted
+ *     number is its items; an empty 常用 type is dimmed, numberless, a link.
+ *  7. The 「高级」 fold: closed by default, remembered under
+ *     `studio_menu_advanced`, open by itself on one of its pages without
+ *     writing the cookie, ignored by the search, a button with
+ *     `aria-expanded` / `aria-controls`.
+ *  8. The 常用 types are listed on a package that holds none of them.
+ *  9. `~org` and `~all` draw no fold.
+ *
+ * objectstack#37360 — 全部类型 All types (ADR-0084, amended 2026-11-25):
+ * 10. The fold's last row, below its groups and under no group's label; it
+ *     opens the area's type directory and is current there. CONTROL: a 高级
+ *     type the package holds none of is still not in the fold.
+ *
  * The provider, the sidebar primitive and the router are real; only the
  * metadata reads are doubled.
  */
@@ -22,26 +37,34 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
+/** What the doubled reads answer; each test may change it before rendering. */
+const reads = vi.hoisted(() => ({
+  entries: [] as Array<{ type: string; domain: string }>,
+  sweep: {} as { loading?: boolean; error?: string | null; countsByType: Record<string, number>; packagesByType: Record<string, string[]> },
+}));
+
+const SERVED = [
+  { type: 'hook', domain: 'data' },
+  { type: 'object', domain: 'data' },
+  { type: 'app', domain: 'ui' },
+  { type: 'page', domain: 'ui' },
+  { type: 'flow', domain: 'automation' },
+  { type: 'permission', domain: 'security' },
+  { type: 'position', domain: 'security' },
+];
+
 vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
     useMetadataClient: () => ({}),
-    useMetadataTypes: () => ({
-      loading: false,
-      error: null,
-      entries: [
-        { type: 'object', domain: 'data' },
-        { type: 'flow', domain: 'automation' },
-        { type: 'permission', domain: 'security' },
-      ],
-    }),
-    useGlobalDiagnostics: () => ({ countsByType: { object: 3 }, packagesByType: {}, reload: () => {} }),
+    useMetadataTypes: () => ({ loading: false, error: null, entries: reads.entries }),
+    useGlobalDiagnostics: () => ({ loading: false, error: null, ...reads.sweep, reload: () => {} }),
   };
 });
 
 import { StudioMenu, StudioMenuProvider, StudioMenuTrigger } from './StudioMenu';
-import { STUDIO_MENU_COOKIE } from './studioMenuModel';
+import { STUDIO_MENU_ADVANCED_COOKIE, STUDIO_MENU_COOKIE } from './studioMenuModel';
 
 const PKG = 'com.acme.app';
 
@@ -77,22 +100,22 @@ function Where() {
   return <output data-testid="where">{`${pathname}${search}`}</output>;
 }
 
-function Shell() {
+function Shell({ segment }: { segment: string }) {
   return (
     <StudioMenuProvider>
       <header>
         <StudioMenuTrigger locale="en" />
       </header>
-      <StudioMenu segment={PKG} locale="en" />
+      <StudioMenu segment={segment} locale="en" />
     </StudioMenuProvider>
   );
 }
 
-function renderAt(path: string) {
+function renderAt(path: string, segment = PKG) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="*" element={<Shell />} />
+        <Route path="*" element={<Shell segment={segment} />} />
       </Routes>
       <Where />
     </MemoryRouter>,
@@ -100,6 +123,8 @@ function renderAt(path: string) {
 }
 
 const toggle = () => screen.getByTestId('studio-menu-toggle');
+const fold = () => screen.getByTestId('studio-menu-advanced-toggle');
+const foldRegion = () => screen.getByTestId('studio-menu-advanced');
 const entry = (key: string) => screen.getByTestId(`studio-menu-entry-${key}`);
 /** The docked menu's open state, as the sidebar primitive draws it. */
 const docked = () => document.querySelector('[data-side="left"][data-state]')?.getAttribute('data-state');
@@ -107,6 +132,12 @@ const docked = () => document.querySelector('[data-side="left"][data-state]')?.g
 beforeEach(() => {
   clearCookies();
   setWidth(1280);
+  reads.entries = SERVED;
+  // The package holds objects, flows, permission sets and hooks; no app, page or position.
+  reads.sweep = {
+    countsByType: { object: 3, flow: 2, permission: 1, hook: 27 },
+    packagesByType: { object: [PKG], flow: [PKG], permission: [PKG], hook: [PKG] },
+  };
 });
 
 afterEach(() => {
@@ -166,10 +197,13 @@ describe('the current entry and the search', () => {
     for (const a of others) expect(a).not.toHaveAttribute('aria-current');
   });
 
-  it('draws each group\'s type count and an entry\'s item count', () => {
+  // objectstack#37201 — the group's type count is gone; a number is an entry's items.
+  it('draws no count on a group label and a muted item count on an entry', () => {
     renderAt(`/studio/${PKG}/data`);
-    expect(screen.getByTestId('studio-menu-group-count-data')).toHaveTextContent('1');
+    expect(screen.queryByTestId('studio-menu-group-count-data')).toBeNull();
     expect(entry('type:object')).toHaveTextContent(/3$/);
+    expect(screen.getByTestId('studio-menu-count-type:object')).toHaveClass('text-muted-foreground');
+    expect(screen.getByTestId('studio-menu-count-type:object')).toHaveAttribute('title', '3 items');
   });
 
   it('narrows the entries by name, and says so when none match', () => {
@@ -179,7 +213,7 @@ describe('the current entry and the search', () => {
 
     fireEvent.change(search, { target: { value: 'flow' } });
     const links = within(screen.getByTestId('studio-menu')).getAllByRole('link');
-    // "flow" names the flow type and the organization's flows.
+    // "flow" names the flow type and the organization's flows (a 高级 entry: the search ignores the fold).
     expect(links.map((a) => a.getAttribute('data-testid'))).toEqual(['studio-menu-entry-type:flow', 'studio-menu-entry-orgFlows']);
 
     fireEvent.change(search, { target: { value: 'zzz-nothing' } });
@@ -187,13 +221,268 @@ describe('the current entry and the search', () => {
     expect(screen.getByTestId('studio-menu-no-matches')).toHaveAttribute('role', 'status');
   });
 
-  it('focus order: the toggle, then the search, then the entries', () => {
+  it('focus order: the toggle, then the search, then the 常用 entries, the 高级 button, and its entries', () => {
     renderAt(`/studio/${PKG}/data`);
-    const order = [toggle(), screen.getByTestId('studio-menu-search'), entry('type:object')];
+    fireEvent.click(fold());
+    const order = [toggle(), screen.getByTestId('studio-menu-search'), entry('type:object'), entry('type:permission'), fold(), entry('type:hook')];
     for (let i = 1; i < order.length; i += 1) {
       expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
     for (const el of order) expect(el.getAttribute('tabindex') ?? '0').not.toBe('-1');
     expect(screen.getByRole('navigation', { name: 'Studio menu' })).toBe(screen.getByTestId('studio-menu'));
+  });
+});
+
+describe('the group labels (objectstack#37201)', () => {
+  it('are muted headings: no count, no link, not focusable', () => {
+    renderAt(`/studio/${PKG}/data`);
+    const group = screen.getByTestId('studio-menu-group-data');
+    const label = group.querySelector('[data-sidebar="group-label"]')!;
+    expect(label).toHaveTextContent(/^Data$/);
+    expect(label).toHaveClass('text-muted-foreground');
+    expect(label.querySelector('a, button, [tabindex]')).toBeNull();
+    expect(label.closest('a')).toBeNull();
+  });
+
+  it('a group is labelled in a tier only where it holds an entry of that tier', () => {
+    renderAt(`/studio/${PKG}/data`);
+    const menu = screen.getByTestId('studio-menu');
+    // 常用: data, ui, automation, security. 平台 Platform holds only 高级 entries; AI is not served here.
+    expect([...menu.querySelectorAll('[data-testid^="studio-menu-group-"]')].map((g) => g.getAttribute('data-testid'))).toEqual([
+      'studio-menu-group-data',
+      'studio-menu-group-ui',
+      'studio-menu-group-automation',
+      'studio-menu-group-security',
+    ]);
+    expect([...foldRegion().querySelectorAll('[data-testid^="studio-menu-advanced-group-"]')].map((g) => g.getAttribute('data-testid'))).toEqual([
+      'studio-menu-advanced-group-data',
+      'studio-menu-advanced-group-automation',
+      'studio-menu-advanced-group-system',
+      'studio-menu-advanced-group-security',
+    ]);
+    // Inside the closed fold: out of the accessibility tree until it opens.
+    expect(within(screen.getByTestId('studio-menu-advanced-group-security')).getAllByRole('link', { hidden: true }).map((a) => a.getAttribute('data-testid'))).toEqual([
+      'studio-menu-entry-owd',
+      'studio-menu-entry-environment',
+    ]);
+  });
+});
+
+describe('an empty 常用 type (objectstack#37201)', () => {
+  it('the package holds none: dimmed, no number, still a link to its list', () => {
+    renderAt(`/studio/${PKG}/data`);
+    const app = entry('type:app');
+    expect(app).toHaveAttribute('data-empty', 'true');
+    expect(app).toHaveAttribute('href', `/studio/${PKG}/metadata/app?package=${PKG}`);
+    expect(app).toHaveAttribute('title', 'None yet: open the list to make the first');
+    expect(app.querySelector('span')).toHaveClass('text-muted-foreground');
+    expect(screen.queryByTestId('studio-menu-count-type:app')).toBeNull();
+    expect(app).toHaveTextContent(/^App/);
+    expect(app).not.toHaveTextContent(/\d/);
+    // One it holds is neither dimmed nor numberless.
+    expect(entry('type:object')).not.toHaveAttribute('data-empty');
+    expect(entry('type:object').querySelector('span')).not.toHaveClass('text-muted-foreground');
+  });
+
+  it('a sweep that counts 0 of it: still no number, never "0"', () => {
+    reads.sweep = { ...reads.sweep, countsByType: { ...reads.sweep.countsByType, app: 0 } };
+    renderAt(`/studio/${PKG}/data`);
+    expect(entry('type:app')).toHaveAttribute('data-empty', 'true');
+    expect(screen.queryByTestId('studio-menu-count-type:app')).toBeNull();
+    expect(entry('type:app')).not.toHaveTextContent('0');
+  });
+
+  it('while the sweep has not answered, nothing is empty', () => {
+    reads.sweep = { loading: true, countsByType: {}, packagesByType: {} };
+    renderAt(`/studio/${PKG}/data`);
+    expect(entry('type:app')).not.toHaveAttribute('data-empty');
+    expect(entry('type:object')).not.toHaveAttribute('data-empty');
+  });
+
+  it('a sweep that failed answered nothing: nothing is empty', () => {
+    reads.sweep = { error: 'not found', countsByType: {}, packagesByType: {} };
+    renderAt(`/studio/${PKG}/data`);
+    expect(entry('type:app')).not.toHaveAttribute('data-empty');
+  });
+});
+
+describe('a package that holds nothing yet (objectstack#37201)', () => {
+  it('lists every served 常用 type, holding one or not; a 高级 type only when held', () => {
+    reads.entries = [
+      ...SERVED,
+      { type: 'dashboard', domain: 'ui' },
+      { type: 'report', domain: 'ui' },
+      { type: 'agent', domain: 'ai' },
+      { type: 'tool', domain: 'ai' },
+      { type: 'skill', domain: 'ai' },
+    ];
+    reads.sweep = { countsByType: {}, packagesByType: {} };
+    renderAt(`/studio/${PKG}/data`);
+    const links = (root: HTMLElement) => within(root).queryAllByRole('link').map((a) => a.getAttribute('data-testid')!.replace('studio-menu-entry-', ''));
+    const common = links(screen.getByTestId('studio-menu')).filter((k) => !links(foldRegion()).includes(k));
+    expect(common).toEqual([
+      'type:object',
+      'type:app',
+      'type:page',
+      'type:dashboard',
+      'type:report',
+      'type:flow',
+      'type:permission',
+      'type:agent',
+      'type:tool',
+      'type:skill',
+    ]);
+    for (const k of common) expect(entry(k)).toHaveAttribute('data-empty', 'true');
+    expect(screen.queryByTestId('studio-menu-entry-type:hook')).toBeNull();
+    expect(screen.queryByTestId('studio-menu-entry-type:position')).toBeNull();
+  });
+});
+
+describe('the 「高级」 fold (objectstack#37201)', () => {
+  it('closed by default: a button that names the region it controls, which is hidden', () => {
+    renderAt(`/studio/${PKG}/data`);
+    expect(fold().tagName).toBe('BUTTON');
+    expect(fold()).toHaveAccessibleName('Advanced');
+    expect(fold()).toHaveAttribute('aria-expanded', 'false');
+    expect(fold().getAttribute('aria-controls')).toBe(foldRegion().id);
+    expect(foldRegion().id).not.toBe('');
+    expect(foldRegion()).not.toBeVisible();
+    expect(entry('type:hook')).not.toBeVisible();
+    expect(entry('type:object')).toBeVisible();
+  });
+
+  it('a click opens it and remembers it under studio_menu_advanced, apart from the collapse cookie; a remount keeps it', () => {
+    const first = renderAt(`/studio/${PKG}/data`);
+    fireEvent.click(fold());
+    expect(fold()).toHaveAttribute('aria-expanded', 'true');
+    expect(foldRegion()).toBeVisible();
+    expect(entry('type:hook')).toBeVisible();
+    expect(cookie(STUDIO_MENU_ADVANCED_COOKIE)).toBe('true');
+    expect(cookie(STUDIO_MENU_COOKIE)).toBeUndefined();
+
+    first.unmount();
+    const second = renderAt(`/studio/${PKG}/data`);
+    expect(fold()).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(fold());
+    expect(fold()).toHaveAttribute('aria-expanded', 'false');
+    expect(cookie(STUDIO_MENU_ADVANCED_COOKIE)).toBe('false');
+    second.unmount();
+    renderAt(`/studio/${PKG}/data`);
+    expect(fold()).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('a bookmark to the hook list opens it by itself, marks the hook entry current, and writes no cookie', () => {
+    renderAt(`/studio/${PKG}/metadata/hook?package=${PKG}`);
+    expect(fold()).toHaveAttribute('aria-expanded', 'true');
+    expect(entry('type:hook')).toBeVisible();
+    expect(entry('type:hook')).toHaveAttribute('aria-current', 'page');
+    expect(cookie(STUDIO_MENU_ADVANCED_COOKIE)).toBeUndefined();
+  });
+
+  it('CONTROL: on a 常用 page it stays closed', () => {
+    renderAt(`/studio/${PKG}/metadata/object?package=${PKG}`);
+    expect(fold()).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('the author can still close it on a 高级 page', () => {
+    renderAt(`/studio/${PKG}/owd`);
+    expect(fold()).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(fold());
+    expect(fold()).toHaveAttribute('aria-expanded', 'false');
+    expect(cookie(STUDIO_MENU_ADVANCED_COOKIE)).toBe('false');
+  });
+
+  it('the search ignores it: a 高级 entry matches while the fold is closed, and no fold is drawn', () => {
+    renderAt(`/studio/${PKG}/data`);
+    fireEvent.change(screen.getByTestId('studio-menu-search'), { target: { value: 'hook' } });
+    expect(entry('type:hook')).toBeVisible();
+    expect(screen.queryByTestId('studio-menu-advanced-toggle')).toBeNull();
+    fireEvent.change(screen.getByTestId('studio-menu-search'), { target: { value: '' } });
+    expect(fold()).toHaveAttribute('aria-expanded', 'false');
+  });
+});
+
+describe('~org and ~all draw no fold (objectstack#37201)', () => {
+  it.each([
+    ['~org', '/studio/~org/metadata/flow?source=runtime'],
+    ['~all', '/studio/~all/metadata'],
+  ])('%s: its entries flat, in the table\'s order, under muted labels', (segment, path) => {
+    renderAt(path, segment);
+    expect(screen.queryByTestId('studio-menu-advanced-toggle')).toBeNull();
+    expect(screen.queryByTestId('studio-menu-advanced')).toBeNull();
+    const security = screen.getByTestId('studio-menu-group-security');
+    expect(within(security).getAllByRole('link').map((a) => a.getAttribute('data-testid'))).toEqual([
+      'studio-menu-entry-type:permission',
+      'studio-menu-entry-type:position',
+      'studio-menu-entry-environment',
+    ]);
+    for (const a of within(security).getAllByRole('link')) expect(a).toBeVisible();
+    expect(security.querySelector('[data-sidebar="group-label"]')).toHaveClass('text-muted-foreground');
+    expect(screen.getByTestId('studio-menu-entry-orgFlows')).toBeVisible();
+    // objectstack#37211 — no count above Organization flows (it read "0 types" over the group's one entry).
+    const automation = screen.getByTestId('studio-menu-group-automation');
+    expect(automation.querySelector('[data-sidebar="group-label"]')).toHaveTextContent(/^Automation$/);
+    expect(screen.queryByTestId('studio-menu-group-count-automation')).toBeNull();
+    expect(within(automation).getAllByRole('link').map((a) => a.getAttribute('data-testid'))).toEqual(['studio-menu-entry-orgFlows']);
+  });
+});
+
+describe('全部类型 All types (objectstack#37360, ADR-0084 amended 2026-11-25)', () => {
+  it('is the fold\'s last row, below its groups and under no group\'s label, and opens the type directory', () => {
+    renderAt(`/studio/${PKG}/data`);
+    fireEvent.click(fold());
+    const row = entry('allTypes');
+    expect(row).toBeVisible();
+    expect(row).toHaveTextContent(/^All types$/);
+    expect(row).toHaveAttribute('href', `/studio/${PKG}/metadata`);
+    // Last: no link of the fold comes after it, and every group of the fold comes before it.
+    const links = within(foldRegion()).getAllByRole('link');
+    expect(links[links.length - 1]).toBe(row);
+    const groups = [...foldRegion().querySelectorAll('[data-testid^="studio-menu-advanced-group-"]')];
+    expect(groups.length).toBeGreaterThan(0);
+    for (const g of groups) expect(g.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Under no group: no group holds it, and no group label sits over it.
+    expect(row.closest('[data-testid^="studio-menu-advanced-group-"], [data-testid^="studio-menu-group-"]')).toBeNull();
+    expect(row.closest('[data-sidebar="group"]')).toBeNull();
+    expect(screen.getByTestId('studio-menu-all-types').querySelector('[data-sidebar="group-label"]')).toBeNull();
+  });
+
+  it('on the type directory it is the current page, and the fold opens by itself without writing its cookie', () => {
+    renderAt(`/studio/${PKG}/metadata`);
+    expect(fold()).toHaveAttribute('aria-expanded', 'true');
+    expect(entry('allTypes')).toHaveAttribute('aria-current', 'page');
+    expect(cookie(STUDIO_MENU_ADVANCED_COOKIE)).toBeUndefined();
+  });
+
+  it('a search lists it last when its name matches, and not otherwise', () => {
+    renderAt(`/studio/${PKG}/data`);
+    const search = screen.getByTestId('studio-menu-search');
+    fireEvent.change(search, { target: { value: 'all types' } });
+    expect(within(screen.getByTestId('studio-menu')).getAllByRole('link').map((a) => a.getAttribute('data-testid'))).toEqual([
+      'studio-menu-entry-allTypes',
+    ]);
+    expect(screen.queryByTestId('studio-menu-no-matches')).toBeNull();
+    fireEvent.change(search, { target: { value: 'flow' } });
+    expect(screen.queryByTestId('studio-menu-entry-allTypes')).toBeNull();
+  });
+
+  it('CONTROL: the fold still leaves out a 高级 type the package holds none of', () => {
+    reads.entries = [...SERVED, { type: 'email_template', domain: 'system' }];
+    renderAt(`/studio/${PKG}/data`);
+    fireEvent.click(fold());
+    expect(entry('allTypes')).toBeVisible();
+    expect(entry('type:hook')).toBeVisible();
+    expect(screen.queryByTestId('studio-menu-entry-type:email_template')).toBeNull();
+    expect(screen.queryByTestId('studio-menu-entry-type:position')).toBeNull();
+  });
+
+  it.each([
+    ['~org', '/studio/~org/metadata/flow?source=runtime'],
+    ['~all', '/studio/~all/metadata'],
+  ])('%s draws no fold and no 全部类型 row', (segment, path) => {
+    renderAt(path, segment);
+    expect(screen.queryByTestId('studio-menu-entry-allTypes')).toBeNull();
+    expect(screen.queryByTestId('studio-menu-all-types')).toBeNull();
   });
 });

@@ -1780,6 +1780,18 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "日付範囲",
         helpText: "ダッシュボードを開いたときの期間と、閲覧者が日付を自分で選べるかどうか。"
       },
+      "dateRange.field": {
+        label: "日付フィールド",
+        helpText: "期間で絞り込む日付フィールド。空のままにすると作成日で絞り込みます。"
+      },
+      "dateRange.defaultRange": {
+        label: "既定の期間",
+        helpText: "ダッシュボードを開いたときに表示される期間。"
+      },
+      "dateRange.allowCustomRange": {
+        label: "カスタム範囲を許可",
+        helpText: "開始日と終了日を閲覧者が自分で選べるようにします。"
+      },
       globalFilters: {
         label: "グローバルフィルター",
         helpText: "閲覧者がすべてのウィジェット、または指定したウィジェットだけをまとめて絞り込めるフィルター。"
@@ -2219,8 +2231,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "ID とレポートタイプ。"
       },
       dataset_binding: {
-        label: "データセットのバインド",
-        description: "このレポートがレンダリングするセマンティックレイヤーのデータセット。メジャーと行は、それぞれこのデータセットのメジャーとディメンションから取得します。"
+        label: "データソースの紐付け",
+        description: "レポートの数値をどこから取得し、どのようにグループ化して並べ替えるか、そして行をクリックしたときにどのレコードを開くか。"
       },
       joined_blocks: {
         label: "結合ブロック",
@@ -2252,19 +2264,19 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "レポート種別: tabular/summary/matrix/joined"
       },
       dataset: {
-        label: "データセット",
-        helpText: "バインドするデータセット（メジャー/ディメンションはセマンティックレイヤーから取得）"
+        label: "データソース",
+        helpText: "レポートはここから数値を読み取ります。各ユーザーには、アクセス権のあるレコードだけが表示されます。"
       },
       values: {
-        label: "メジャー",
-        helpText: "表示するメジャー名（データセットから取得）"
+        label: "指標",
+        helpText: "表示する指標。合計、件数、平均、比率など（データソースから取得）。"
       },
       rows: {
-        label: "行",
-        helpText: "行をグループ化するディメンション名（データセットから取得）"
+        label: "グループ化",
+        helpText: "グループ化に使うフィールド（データソースから取得）。"
       },
       columns: {
-        label: "列",
+        label: "列のグループ化",
         helpText: "横方向のディメンション名（matrix のみ）"
       },
       order: {
@@ -2279,7 +2291,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       drilldown: {
         label: "ドリルダウン",
-        helpText: "集計された行/セルをクリックして、元になったレコードを開きます"
+        helpText: "集計された行またはセルをクリックして、その元になっているレコードを開きます。"
       },
       blocks: {
         label: "ブロック",
@@ -2298,16 +2310,16 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ブロックタイプ"
       },
       "blocks.dataset": {
-        label: "データセット"
+        label: "データソース"
       },
       "blocks.rows": {
-        label: "行"
+        label: "グループ化"
       },
       "blocks.columns": {
-        label: "列"
+        label: "列のグループ化"
       },
       "blocks.values": {
-        label: "メジャー"
+        label: "指標"
       },
       "blocks.runtimeFilter": {
         label: "実行時フィルター"
@@ -2317,7 +2329,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       runtimeFilter: {
         label: "実行時フィルター",
-        helpText: "レンダリング時のスコープフィルター。クエリ時に AND で結合されます"
+        helpText: "レポートを表示するたびに適用されるフィルター。データソース自体の条件に加えて適用されます。"
       },
       chart: {
         label: "チャート",
@@ -3149,6 +3161,46 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   ai_context: {
-    label: "AI コンテキストパック"
+    label: "AI コンテキストパック",
+    sections: {
+      basics: {
+        label: "基本情報",
+        description: "パックの識別情報と、レコードを読み取るオブジェクト。"
+      },
+      material: {
+        label: "内容",
+        description: "レコードのどの内容をモデルに渡すか。各ピッカーはルートオブジェクトのフィールド、または関連リスト自身のオブジェクトのフィールドを表示します。"
+      }
+    },
+    fields: {
+      name: {
+        label: "名前",
+        helpText: "一意の識別子（snake_case）。スキルの context キーと get_record_context ツールはこの名前でパックを指定します。"
+      },
+      label: {
+        label: "表示名",
+        helpText: "表示名。ツールの回答の見出しになります。パックには説明がないため、目的はここに書きます。"
+      },
+      object: {
+        label: "ルートオブジェクト",
+        helpText: "ルートオブジェクト：パックはそのレコードを 1 件読み取ります。"
+      },
+      fields: {
+        label: "フィールド",
+        helpText: "モデルに渡すルートオブジェクトのフィールド（順序どおり、最大 30 個）。参照フィールドは参照先レコードの名前で答えます。"
+      },
+      related: {
+        label: "関連リスト",
+        helpText: "このレコードを指す子リスト（1 階層のみ、最大 3 個）。各リストは子オブジェクト、ルートを指す参照フィールド、各行で読み取る列（最大 10 列）を指定します。列がなければ各行は名前だけを読み取ります。"
+      },
+      body: {
+        label: "本文",
+        helpText: "レコードの本文として読み取る、ただ 1 つの長文テキストフィールド。"
+      },
+      "body.field": {
+        label: "本文フィールド",
+        helpText: "ルートオブジェクトの長文テキストフィールド（textarea、markdown、html、richtext）。それ以外のフィールドは保存時に報告され、パックは本文を持ちません。"
+      }
+    }
   }
 };

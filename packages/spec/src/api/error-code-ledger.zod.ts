@@ -1656,6 +1656,25 @@ export const ERROR_CODE_LEDGER = {
     'DATASOURCE_ADMIN_ERROR',      // lifecycle/validation refusal from the datasource-admin service
     'EXTERNAL_DATASOURCE_ERROR',   // introspection/connection-test refusal from the external-datasource service
   ],
+  // [#37100] ADR-0161 K7 rules 4 and 5: a write or a search carrying an index
+  // fingerprint other than the one the source's stored generation was built
+  // under is refused 409 with this code, never served from or written into
+  // that generation. Stamped by each knowledge adapter that keeps generations,
+  // and asserted by name in the adapter contract suite (`./testing`).
+  '@objectstack/service-knowledge': [
+    'KNOWLEDGE_REBUILD_REQUIRED',
+  ],
+  '@objectstack/knowledge-memory': [
+    'KNOWLEDGE_REBUILD_REQUIRED',
+  ],
+  '@objectstack/knowledge-pgvector': [
+    'KNOWLEDGE_REBUILD_REQUIRED',
+  ],
+  // [#37107] The libSQL store, moved in from the cloud repo: the same refusal,
+  // and also for a source whose only index is a table of its earlier releases.
+  '@objectstack/knowledge-turso': [
+    'KNOWLEDGE_REBUILD_REQUIRED',
+  ],
   '@objectstack/plugin-audit': [
     'FEEDS_DISABLED',
     'FILES_DISABLED',

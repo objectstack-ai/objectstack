@@ -1780,6 +1780,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "日期范围",
         helpText: "打开仪表盘时默认的时间段，以及查看者能否自选日期。"
       },
+      "dateRange.field": {
+        label: "日期字段",
+        helpText: "时间段筛选所依据的日期字段。留空则按创建日期筛选。"
+      },
+      "dateRange.defaultRange": {
+        label: "默认时间段",
+        helpText: "打开仪表盘时显示的时间段。"
+      },
+      "dateRange.allowCustomRange": {
+        label: "允许自定义范围",
+        helpText: "允许查看者自己选择开始和结束日期。"
+      },
       globalFilters: {
         label: "全局筛选",
         helpText: "查看者可用来一次筛选全部组件，或只筛选你指定组件的筛选条件。"
@@ -2219,8 +2231,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "标识与报表类型"
       },
       dataset_binding: {
-        label: "数据集绑定",
-        description: "本报表渲染的语义层数据集。度量与行分别来自该数据集的度量与维度"
+        label: "数据来源绑定",
+        description: "报表的数字从哪里来、如何分组和排序，以及点击某一行时打开哪些记录"
       },
       joined_blocks: {
         label: "joined 报表分块",
@@ -2252,19 +2264,19 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "报表类型：tabular / summary / matrix / joined"
       },
       dataset: {
-        label: "数据集",
-        helpText: "要绑定的数据集（度量/维度来自其语义层）"
+        label: "数据来源",
+        helpText: "报表从这里取数；每个人只能看到自己有权限的记录"
       },
       values: {
-        label: "度量",
-        helpText: "要展示的度量名（来自该数据集）"
+        label: "指标",
+        helpText: "要展示的指标，例如合计、计数、平均值或比率（来自数据来源）"
       },
       rows: {
-        label: "行",
-        helpText: "用于分组行的维度名（来自该数据集）"
+        label: "分组",
+        helpText: "按哪些字段分组（来自数据来源）"
       },
       columns: {
-        label: "列",
+        label: "列分组",
         helpText: "横向展开的维度名（仅 matrix 报表）"
       },
       order: {
@@ -2279,7 +2291,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       drilldown: {
         label: "下钻",
-        helpText: "点击聚合后的行/单元格，打开其底层记录"
+        helpText: "点击汇总后的行或单元格，打开其中的记录"
       },
       blocks: {
         label: "分块",
@@ -2298,16 +2310,16 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "分块类型"
       },
       "blocks.dataset": {
-        label: "数据集"
+        label: "数据来源"
       },
       "blocks.rows": {
-        label: "行"
+        label: "分组"
       },
       "blocks.columns": {
-        label: "列"
+        label: "列分组"
       },
       "blocks.values": {
-        label: "度量"
+        label: "指标"
       },
       "blocks.runtimeFilter": {
         label: "运行时筛选"
@@ -2317,7 +2329,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       runtimeFilter: {
         label: "运行时筛选",
-        helpText: "渲染时的范围筛选，在查询时以 AND 方式并入"
+        helpText: "每次显示报表时都会应用的筛选，叠加在数据来源自身的条件之上"
       },
       chart: {
         label: "图表",
@@ -3149,6 +3161,46 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   ai_context: {
-    label: "AI 上下文包"
+    label: "AI 上下文包",
+    sections: {
+      basics: {
+        label: "基本信息",
+        description: "资料包的标识，以及它读取哪个对象的记录。"
+      },
+      material: {
+        label: "资料内容",
+        description: "把记录的哪些内容交给模型。每个选择器列出根对象的字段，或该关联列表自身对象的字段。"
+      }
+    },
+    fields: {
+      name: {
+        label: "名称",
+        helpText: "唯一标识（snake_case）。技能的 context 键和 get_record_context 工具都按它指名资料包。"
+      },
+      label: {
+        label: "显示名称",
+        helpText: "显示名称，即工具回答的标题。资料包没有描述：用途写在这里。"
+      },
+      object: {
+        label: "根对象",
+        helpText: "根对象：资料包读取它的一条记录。"
+      },
+      fields: {
+        label: "字段",
+        helpText: "交给模型的根对象字段，按顺序（最多 30 个）。其中的查找字段以它指向的记录名称作答。"
+      },
+      related: {
+        label: "关联列表",
+        helpText: "指向这条记录的子列表，只读一层（最多 3 个）。每个列表指明子对象、指向根对象的引用字段，以及每行读取的列（最多 10 列）；不选列时每行只读取其名称。"
+      },
+      body: {
+        label: "正文",
+        helpText: "作为记录正文读取的那一个长文本字段。"
+      },
+      "body.field": {
+        label: "正文字段",
+        helpText: "根对象的一个长文本字段（textarea、markdown、html、richtext）。选其他字段会在保存时报告，资料包也就不带正文。"
+      }
+    }
   }
 };

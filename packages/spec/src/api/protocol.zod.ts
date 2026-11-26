@@ -1530,6 +1530,15 @@ export const DestructiveChangeIssueSchema = lazySchema(() => z.object({
  * state `If-None-Match: *` pins. Both doors of the chain serve it keyed, never
  * the stored content hash.
  *
+ * On the per-item publish door the refusal judges one of two rows, and
+ * `currentVersion` names the row that refused. A refused `If-Match` /
+ * `If-None-Match: *` (`PublishMetaItemRequestSchema.parentVersion`) names the
+ * ACTIVE row's token, pinned back as `If-Match`. A refused draft pin
+ * (`PublishMetaItemRequestSchema.draftVersion`, judged first) names the
+ * DRAFT's current token, pinned back as `draftVersion` in the publish body,
+ * never as `If-Match`; there `null` means no draft is pending any more —
+ * nothing is left to publish (another writer published or discarded it).
+ *
  * Scope: this is the body of the conflicts the four `/meta` item doors answer
  * through the protocol's one conflict builder, which is how each of them
  * answers the repository's refusal. Not described here: a per-item
@@ -1551,8 +1560,11 @@ export const MetadataConflictErrorSchema = lazySchema(() => z.object({
     + 'Send it as `If-Match` to overwrite deliberately (or `If-None-Match: *` '
     + 'when it is `null`), or re-read the item to merge first. A `null` for an '
     + 'item whose read serves `editable: false` prescribes no pin: that item '
-    + 'takes no save. Opaque — echo '
-    + 'it verbatim, never parse it.',
+    + 'takes no save. On the per-item publish door a refused `draftVersion` '
+    + 'names the DRAFT\'s current token instead: send it back as `draftVersion` '
+    + 'in the publish body (never as `If-Match`, which pins the active row), and '
+    + 'there `null` means no draft is pending — nothing is left to publish. '
+    + 'Opaque — echo it verbatim, never parse it.',
   ),
 }));
 
@@ -1636,7 +1648,26 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
     + '`If-None-Match: *`, which takes `*` alone and never beside `If-Match`), '
     + 'refused 409 when one exists; an ABSENT key is unpinned and promotes over '
     + 'whatever is live, as before. It pins the active row only — which draft is '
-    + 'promoted is the address\'s, as without it.',
+    + 'promoted is the address\'s, as without it; the draft\'s own pin is '
+    + '`draftVersion`.',
+  ),
+  draftVersion: z.string().optional().describe(
+    'ADR-0008 optimistic-concurrency pin on the DRAFT this publish promotes: '
+    + 'the version token of the pending draft row the caller wrote or loaded '
+    + 'and means to publish (on the REST door, the `draftVersion` member of the '
+    + 'publish body, beside `message`; a draft save\'s receipt `version` and the '
+    + 'draft read\'s `version` serve it). A token that is not the current draft '
+    + 'row\'s at the address the promotion reads is refused 409 '
+    + '`METADATA_CONFLICT`, whose `currentVersion` names the draft\'s current '
+    + 'token (`null` when no draft is pending), and nothing is promoted: a draft '
+    + 'another writer changed after the caller wrote or read it is never '
+    + 'published on that writer\'s behalf. ABSENT is unpinned and promotes '
+    + 'whichever draft is pending, as before. It pins the draft only — the active '
+    + 'row the promotion replaces is `parentVersion`\'s (`If-Match`), and the two '
+    + 'may be sent together: the draft is judged first, so a request stale on '
+    + 'both is refused naming the draft\'s token. The address is resolved before '
+    + 'either pin: no draft at the address while another package holds one '
+    + 'answers `404 NO_DRAFT`, not this conflict.',
   ),
   userTextLocales: userTextLocalesMember(),
 }));
@@ -2753,6 +2784,8 @@ const HISTORY_PACKAGE_SELECTOR_DESCRIPTION =
 export const PACKAGE_SLOTTED_METADATA_TYPES: readonly string[] = Object.freeze([
   'api', 'agent', 'skill', 'action', 'email_template', 'permission', 'flow', 'picklist', 'mapping', 'dataset',
   'webhook', 'tool', 'connector',
+  // [ADR-0150 addendum 2026-11-25] the context pack, one slot per (package, name).
+  'ai_context',
 ]);
 
 /**

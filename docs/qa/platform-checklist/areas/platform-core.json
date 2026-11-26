@@ -3237,7 +3237,7 @@
       "title": "Seed mode matrix (update/upsert/ignore): each live mode does exactly its verb through the ONE SeedLoaderService, no-op replays skip instead of churning, ignore reports skips — and the retired `insert` and `replace` are refused at the draft save with SeedMode's own prescription, so neither can reach a load",
       "since": "v15",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -3257,7 +3257,7 @@
         "UPSERT: publish a seed draft (mode upsert) with rows A,B → both insert; edit the draft changing B's value and adding C; re-publish → A skipped (no-op replay — only seed-declared fields compared, so runtime edits to OTHER columns never block the skip), B updated in place (same id), C inserted; verify by id stability + values",
         "UPDATE: seed draft (mode update) touching A (changed value) and a nonexistent D → A updates, D is SKIPPED (update never creates); row count unchanged",
         "IGNORE: seed draft (mode ignore) with A (changed value) and new E → A untouched (still the update-mode value; existing rows are never rewritten), E inserted; the skip is visible as A's unchanged value + count",
-        "INSERT (retired): PUT a seed draft (mode insert) declaring A → refused 422 INVALID_METADATA, one issues[] entry {path: 'mode', code: 'invalid_value'} whose message is SeedMode's own prescription (`seed.mode: 'insert'` was removed in @objectstack/spec 18.7.0 …); nothing is stored under the seed's name",
+        "INSERT (retired): PUT a seed draft (mode insert) declaring A → refused 422 INVALID_METADATA, one issues[] entry {path: 'mode', code: 'invalid_value'} whose message is SeedMode's own prescription (`seed.mode: 'insert'` was removed in @objectstack/spec 19.0.0 …); nothing is stored under the seed's name",
         "REPLACE (retired): the same draft with mode replace → the same 422 refusal at `mode`, carrying replace's own prescription (it inserted every record and left clearing the table to the caller); nothing is stored",
         "idempotence tie-in: re-publish the upsert draft unchanged TWICE. The first replay may legitimately write, because the UPDATE step set A to a2, so it re-converges A to the seed; the SECOND replay is the idempotence probe — zero inserts and zero updates (all no-op skips), every row's updated_at untouched (the churn-avoidance isNoOpReplay exists for exactly this)",
         "teardown: the writable package's own delete, or discard the run's own DB"
@@ -3378,6 +3378,12 @@
           "date": "2026-11-19",
           "change": "title, fixtures, steps[4] to [6], acceptance[3] to [5], variants, enumSource and source[0] to [1] revised to the three live modes. #34791 (#34613) retired `insert` and `replace` at the schema: SeedMode became enumWithRetiredValues(SEED_MODE_VALUES, SEED_MODE_RETIRED), so the pin read 0 members and the watchdog went red; it now counts SEED_MODE_VALUES (3). steps[4] and [5] and acceptance[3] and [4] score the two retired modes as refused at the draft save, the answer measured in-process at base b65488a8 (the save door's own suite, protocol.seed-external-id-refusal.test.ts): 422 INVALID_METADATA, issue at mode, code invalid_value, message the mode's prescription. knownGaps[1] and [2] described insert-mode duplication and go with it; the stored-dataset refusal is recorded as scored from its unit pin. No live-mode verdict moves",
           "ref": "#35297"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-25",
+          "change": "steps[5]'s quoted prescription names @objectstack/spec 19.0.0, not 18.7.0. The retirement is not in the published 18.6.0 (read off the tag's tree), and with PROTOCOL_VERSION at 19 under pre mode the next release main cuts is 19.0.0, so SeedMode's own message now says 19.0.0 (packages/spec/src/data/seed.zod.ts, the same PR). No step, clause or verdict moves",
+          "ref": "#37314"
         }
       ]
     },
@@ -3788,10 +3794,10 @@
     },
     {
       "id": "platform-core.protocol-18-handshake-and-stored-replay",
-      "title": "Protocol 18 upgrade surfaces: a package declaring engines.protocol \"^17\" is refused 422 OS_PROTOCOL_INCOMPATIBLE naming `os migrate meta --from 17` (\"^18\" is admitted), a stored v17-shaped row is served canonical while a PUT of the same old shape is refused at parse, and a \"^18\" artifact built before a retirement boots with one warn per replayed conversion",
+      "title": "Protocol upgrade surfaces at protocol 19: a package declaring engines.protocol \"^18\" is refused 422 OS_PROTOCOL_INCOMPATIBLE naming `os migrate meta --from 18` (\"^19\" is admitted), a stored v17-shaped row is served canonical while a PUT of the same old shape is refused at parse, and an artifact built before a retirement, whose range admits 19 from a floor below the runtime's spec label, boots with one warn per replayed conversion",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3803,14 +3809,14 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
-          "a scratch package manifest with engines.protocol \"^17\" and one with \"^18\"",
+          "a scratch package manifest with engines.protocol \"^18\" and one with \"^19\"",
           "a stored v17-shaped row (e.g. an element using a retired flat data-binding key) planted into the scratch DB"
         ]
       },
       "steps": [
-        "POST /api/v1/marketplace/install-local (or POST /api/v1/packages) with the ^17 manifest; then the ^18 one",
+        "POST /api/v1/marketplace/install-local (or POST /api/v1/packages) with the ^18 manifest; then the ^19 one",
         "plant the row into sys_metadata, then reboot on the same DB (or plant with the server stopped), then GET /api/v1/meta/page/PLANTED and compare with the planted body; PUT the planted (old-shape) body back. ⚠️ A row planted under a running server is not what a GET reads: the server answers from its in-memory registry until it reboots (QA run #27438 read the pre-plant body), so a GET before the reboot scores the cache, not the stored-row replay",
-        "boot (`os start`) a ^18 dist/objectstack.json built before a retirement; read the boot warns. An edited copy of a built artifact must sit where its references resolve: its runtimeModule (objectstack-runtime.HASH.mjs) is resolved relative to the artifact's own directory (packages/runtime/src/load-artifact-bundle.ts#mergeRuntimeModule) and imports from node_modules, so keep the copy beside the original in the app's dist/ and boot it with `--artifact COPY`. ⚠️ Such a copy boots ALONE: the cwd config joins a boot only when the artifact is its own compiled output (packages/cli/src/utils/artifact-precedence.ts#cwdConfigJoinsBoot), so the config's code plugins drop out, and the showcase's boot aborts after the conversion warns (service-automation refuses connector 'showcase_status_api', provider 'rest': 'Installed providers: [none]'; QA run #33853 at a557fa38, where an unedited copy aborted the same way). The warns print before the abort, so acceptance[3] is read from that log; for a boot that also serves, build the artifact from an app with no code-plugin connector (examples/app-todo). Putting the edited copy at a scratch copy's conventional dist/objectstack.json is no way round it: there the config boots, not the copy, and no conversion warn prints"
+        "boot (`os start`) a dist/objectstack.json built before a retirement, its engines.protocol edited to '>=18.0.0'; read the boot warns. A '^18' artifact (what an 18.x build declares) is refused at the handshake under protocol 19 before any conversion runs, and a bare '^19' reads as the floor 19.0.0, above every step-18 stamp, so neither opens the window; '>=18.0.0' keeps the floor 18.0.0 below the runtime's spec label and admits 19, as the runtime's own option-B pin does (packages/runtime/src/standalone-stack-option-b-forward-conversion.test.ts). An edited copy of a built artifact must sit where its references resolve: its runtimeModule (objectstack-runtime.HASH.mjs) is resolved relative to the artifact's own directory (packages/runtime/src/load-artifact-bundle.ts#mergeRuntimeModule) and imports from node_modules, so keep the copy beside the original in the app's dist/ and boot it with `--artifact COPY`. ⚠️ Such a copy boots ALONE: the cwd config joins a boot only when the artifact is its own compiled output (packages/cli/src/utils/artifact-precedence.ts#cwdConfigJoinsBoot), so the config's code plugins drop out, and the showcase's boot aborts after the conversion warns (service-automation refuses connector 'showcase_status_api', provider 'rest': 'Installed providers: [none]'; QA run #33853 at a557fa38, where an unedited copy aborted the same way). The warns print before the abort, so acceptance[3] is read from that log; for a boot that also serves, build the artifact from an app with no code-plugin connector (examples/app-todo). Putting the edited copy at a scratch copy's conventional dist/objectstack.json is no way round it: there the config boots, not the copy, and no conversion warn prints"
       ],
       "acceptance": [
         {
@@ -3820,13 +3826,13 @@
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "^17 → 422 OS_PROTOCOL_INCOMPATIBLE with migrateCommand naming --from 17; ^18 admitted",
+          "clause": "^18 → 422 OS_PROTOCOL_INCOMPATIBLE with migrateCommand naming --from 18; ^19 admitted",
           "oracle": "api",
           "verify": "status + code + migrateCommand",
           "evidence": "both answers"
         },
         {
-          "clause": "the planted row is served in the canonical v18 shape; PUT of the old shape → 422 with the tombstone prescription",
+          "clause": "the planted row is served in the canonical shape; PUT of the old shape → 422 with the tombstone prescription",
           "oracle": "api",
           "verify": "GET body vs planted; PUT status + message",
           "evidence": "both excerpts"
@@ -3848,7 +3854,8 @@
         "packages/spec/src/conversions/stored.ts#applyConversionsToStoredItem",
         "packages/metadata-core/src/artifact-forward-conversion.ts#applyArtifactForwardConversions",
         "ADR-0087",
-        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22130-protocol-18, 23001-prerelease-artifact-window"
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22130-protocol-18, 23001-prerelease-artifact-window",
+        "v19 changeset 37229-protocol-19 and the step-19 semantic entry packages/spec/src/migrations/entries/semantic/19.protocol-18-range-refused.ts"
       ],
       "history": [
         {
@@ -3880,6 +3887,12 @@
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
           "ref": "#34068"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-25",
+          "change": "Revised to protocol 19: PROTOCOL_VERSION moved to 19.0.0, so the handshake refuses a range that admits 18 and not 19. title, fixtures.requires[2], steps[0], acceptance[1] and source move the refused/admitted pair from ^17/^18 to ^18/^19 and the migrateCommand from --from 17 to --from 18 (measured at the PR head: 'targets protocol ^18 (engines.protocol) but this runtime is protocol 19.0.0 … Run: objectstack migrate meta --from 18'). steps[2] and the title's artifact half: a ^18 artifact is now refused at the handshake before any conversion, and ^19 reads as the floor 19.0.0, which opens no window for step-18 retirements (artifact-forward-conversion.ts policy), so the run edits the copy's range to '>=18.0.0', the move the runtime's option-B pin made. acceptance[2] drops 'v18' from the canonical shape: the stored replay (applyConversionsToStoredItem, includeRetired) is unchanged at 19. The id keeps its protocol-18 slug because ids are immutable. No acceptance[0] ref changes; each still passes at protocol 19",
+          "ref": "#37314"
         }
       ]
     },
@@ -5274,6 +5287,134 @@
           "date": "2026-11-10",
           "change": "initial — multi-replica on Redis: one shared Redis cache, so cache-backed limits hold across replicas (#31624). Blocked(fixture): no multi-node gate in the open tree. Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
           "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.disabled-package-every-surface-agrees",
+      "title": "Once a package is disabled every surface says the same: its objects are gone from the MCP tools, global search and the metadata reads as well as the data API and the console, and enabling brings every surface back together",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin, who disables and enables the package",
+        "the admin's MCP client with a personal osk_ key"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the writable probe package of platform-core.package-lifecycle-enable-disable, published with a searchable probe object holding seeded rows and a nav entry"
+        ]
+      },
+      "steps": [
+        "with the package enabled: over MCP call list_objects and query_records on the probe object; GET /api/v1/search?q= a term in a probe row; GET /api/v1/meta/object/PROBE; open the probe's list in the console",
+        "PATCH /api/v1/packages/:id/disable",
+        "repeat every read of steps[0]",
+        "PATCH /api/v1/packages/:id/enable and repeat every read again"
+      ],
+      "acceptance": [
+        {
+          "clause": "after disable no surface serves the probe object: MCP list_objects omits it and query_records refuses it, global search returns no probe hit, the metadata read does not serve it, and the console shows its named not-found state",
+          "oracle": "api",
+          "verify": "compare the five reads before and after disable (packages/objectql/src/registry-packages.ts#disablePackage flips the registry every surface reads)",
+          "evidence": "the five reads in both states"
+        },
+        {
+          "clause": "after enable every surface serves it again, the rows intact",
+          "oracle": "api",
+          "verify": "the five reads match the first state, row counts equal",
+          "evidence": "the reads after enable"
+        }
+      ],
+      "negative": [
+        "any one surface still serving the disabled package's object while another refuses it is a FAIL: the surfaces disagree",
+        "a search hit or an MCP row from a disabled package is a FAIL"
+      ],
+      "source": [
+        "docs/NORTH-STAR.md, Product areas, area:package core feature 1: once disabled every surface says the same",
+        "packages/objectql/src/registry-packages.ts#disablePackage",
+        "the REST, /meta/app and console half is platform-core.package-lifecycle-enable-disable"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-25",
+          "change": "initial — maps the every-surface half of North Star core feature package 1 (MCP and search beside the REST and console reads platform-core.package-lifecycle-enable-disable covers); read from source at 49c8e0f0, no live run made",
+          "ref": "#35212"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.release-notes-and-migration-guide-gates",
+      "title": "Every released major has a curated, navigable release page, every breaking change carries its migration in its changeset and its ADR-0087 disposition, and the protocol upgrade guide is generated from the change registry — each gate can go red",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "build",
+      "personas": [
+        "ci",
+        "the release maintainer who reads the gates before a release"
+      ],
+      "fixtures": {
+        "app": "any",
+        "requires": [
+          "a checkout with packages/spec/CHANGELOG.md and content/docs/releases",
+          "a built packages/spec for the upgrade-guide check"
+        ]
+      },
+      "steps": [
+        "run pnpm check:release-notes; record the verdict and the released majors it read",
+        "run pnpm check:adr-0087-registration; record the verdict",
+        "run pnpm --filter @objectstack/spec check:upgrade-guide and check:spec-changes; record the verdicts",
+        "run each gate's --self-test; record that each red path is exercised",
+        "red probe: in a scratch copy, remove the newest major's entry from content/docs/releases/meta.json; run check:release-notes against it; record the red; revert"
+      ],
+      "acceptance": [
+        {
+          "clause": "every gate is green on a clean tree",
+          "oracle": "build",
+          "verify": "each command exits 0 with its own pass line",
+          "evidence": "the gate outputs"
+        },
+        {
+          "clause": "a released major without a navigable release page fails the release-notes gate, naming the major",
+          "oracle": "build",
+          "verify": "the probe run exits non-zero naming the unwired page (scripts/check-release-notes.mjs#findProblems; the two documented exceptions are scripts/check-release-notes.mjs#KNOWN_MISSING)",
+          "evidence": "the red output and the green re-run"
+        },
+        {
+          "clause": "the upgrade guide is a projection of the change registry, so a registry change without its guide cannot pass",
+          "oracle": "build",
+          "verify": "check:upgrade-guide generates in memory and exits 0 (packages/spec/scripts/build-upgrade-guide.ts#build)",
+          "evidence": "the gate output"
+        },
+        {
+          "clause": "the self-tests prove each gate can go red",
+          "oracle": "build",
+          "verify": "every --self-test passes its batteries",
+          "evidence": "the self-test outputs"
+        }
+      ],
+      "negative": [
+        "a green release-notes run with the newest major unwired is a FAIL of the gate",
+        "a breaking changeset that lands without its migration and disposition is a FAIL of the registration gate; report it against the changeset, not the ledger"
+      ],
+      "source": [
+        "docs/NORTH-STAR.md, Product areas, area:package core feature 4: every release has release notes, and a breaking change has a migration guide",
+        "scripts/check-release-notes.mjs#findProblems",
+        "scripts/check-adr-0087-registration.mjs#MIGRATION_LEDGER_GENERATOR",
+        "packages/spec/scripts/build-upgrade-guide.ts#build",
+        "AGENTS.md, Post-Task Checklist step 3 (breaking changesets carry their migration)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-25",
+          "change": "initial — maps North Star core feature package 4 to an item; read from source at 49c8e0f0, no live run made",
+          "ref": "#35212"
         }
       ]
     }

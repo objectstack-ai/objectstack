@@ -2384,12 +2384,13 @@ export const EmptyStateSchema = lazySchema(() => strictObject({
  * cards a lane has loaded, so a lane longer than its page still shows the
  * whole lane's figure. A field the reader may not read shows no figure.
  *
- * One carve-out, a known gap: a board that does not query its own cards adds
- * up a `sum` over the cards its host hands it (the other three draw nothing
- * there). The list view hands a board whose lanes it cannot know before the
- * query — lanes over a lookup field, or a view with grouping — the page of
- * records it fetched, so on that board `sum` totals that page, not every
- * record of the lane, and says nothing to mark it.
+ * objectstack#36871: the list view hands a board whose lanes it cannot know
+ * before the query (lanes over a lookup field) the page of records it fetched
+ * AND the query of that page, so that board asks the same read and its four
+ * aggregates cover every record of each lane too. Its `count` counts the
+ * page it was handed, as its lane header does. Only a board handed its cards
+ * without their query (records handed in whole) adds up a `sum` over those
+ * cards, and draws none of the other three.
  */
 export const KanbanLaneSummarySchema = lazySchema(() => z.discriminatedUnion('type', [
   strictObject({
@@ -2515,9 +2516,10 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
     + '`{ type: \'sum\', field: \'amount\' }` totals a number field over all of the lane records, '
     + '`avg` averages it, and `min` / `max` show its smallest / largest value, each computed by the query '
     + '(a field the reader may not read shows no figure); `{ type: \'none\' }` shows nothing. '
-    + 'Known gap: on a board given its records by its host instead of querying them (in a list view, '
-    + 'lanes over a lookup field or a view with grouping), `sum` totals the records handed in, one page, '
-    + 'unmarked, and the other three show nothing. '
+    + 'A list view board whose lanes come from a lookup field draws one page of records: its `sum`, '
+    + '`avg`, `min` and `max` still cover every record of each lane, and its `count` counts that page. '
+    + 'Only on a board handed its records whole, '
+    + 'without their query, does `sum` total the records handed in and the other three show nothing. '
     + 'Takes precedence over summarizeField. Omit to keep summarizeField\'s sum, or no statistic without it.',
   ),
   /**
@@ -3494,7 +3496,7 @@ export function checkListViewTimesheetBinding(
  * migration command — the author deletes the key by hand.
  */
 const VIEW_LIST_COLUMN_STATE_RETIRED =
-  '`listView.columnState` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — it was '
+  '`listView.columnState` was removed in @objectstack/spec 19.0.0 (ADR-0049 enforce-or-remove) — it was '
   + 'never a list view key: it held one column order and set of widths the console once stored on a view '
   + 'row, and that layout is no longer applied. Delete the key. To ship a column order, list `columns` in that '
   + 'order (or set `fieldOrder`); to ship a width, set `width` on the column.';
@@ -6389,7 +6391,7 @@ type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
  * the measured incident).
  */
 const VIEW_COLUMN_STATE_RETIRED =
-  '`view.columnState` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — it held one '
+  '`view.columnState` was removed in @objectstack/spec 19.0.0 (ADR-0049 enforce-or-remove) — it held one '
   + 'column order and set of widths on a shared view row; nothing writes it any more, and a stored layout is '
   + 'no longer applied, so every reader sees the view\'s own column order and widths. The console keeps '
   + 'column widths in each reader\'s browser and saves a column order into the view itself. '

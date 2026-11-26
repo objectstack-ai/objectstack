@@ -114,6 +114,11 @@ import '@objectstack/lint';
 // record preview's `lazy()` detail entry: its first load is paid at collection too.
 import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -191,7 +196,8 @@ function renderStudio(entry = `/studio/${PACKAGE_ID}/interfaces`) {
     <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }}>
       <MemoryRouter initialEntries={[entry]}>
         <Routes>
-          <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+          <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
+          <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
           {/* objectstack#36905 — a permission set opens at its metadata address. */}
           <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         </Routes>
@@ -223,10 +229,17 @@ describe('objectstack#35018 — 正在看 on the Access and Automations rails re
   });
 
   it('Automations: 「正在看：流程 · 新会议提醒」, no type word, no machine name', async () => {
-    renderStudio(`/studio/${PACKAGE_ID}/automations?surface=flow:${FLOW}`);
+    // objectstack#36903 — the flow designer, full-screen on the flow's address.
+    renderStudio(`/studio/${PACKAGE_ID}/metadata/flow/${FLOW}`);
     await waitFor(() => expect(chip.surfaceContextLabel).toBe('正在看：流程 · 新会议提醒'), { timeout: 6000 });
     expect(String(chip.surfaceContextLabel)).not.toContain('flow');
     expect(String(chip.surfaceContextLabel)).not.toContain(FLOW);
     expect(chip.surfaceContextTitle).toBe(`flow · ${FLOW}`);
+    // The agent's data is the URL's: the address names the flow, with no
+    // `?surface=`, under the metadata area — the shape every designer on its
+    // metadata address sends (objectstack#36904, objectstack#36905).
+    expect(JSON.stringify(agentSurface())).toBe(
+      JSON.stringify({ pillar: 'metadata', artifact: { type: 'flow', name: FLOW } }),
+    );
   });
 });

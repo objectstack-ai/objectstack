@@ -85,7 +85,12 @@ import { toast } from 'sonner';
 import '@objectstack/lint';
 import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { t, tFormat } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -159,7 +164,7 @@ async function publishAt(path: string, expectPosts: number): Promise<void> {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -300,10 +305,11 @@ describe('the package-less publish names its count, and its zero is no success (
 // the way to Access.
 describe('a publish that put an app or object live points the author to Access (objectstack#27521)', () => {
   function LocationProbe() {
-    return <div data-testid="location">{useLocation().pathname}</div>;
+    const { pathname, search } = useLocation();
+    return <div data-testid="location">{`${pathname}${search}`}</div>;
   }
 
-  it('an object went live: the hint, and "Open Access" leads to the Access pillar', async () => {
+  it('an object went live: the hint, and "Open Access" leads to the package\'s permission sets', async () => {
     batchBody = batch({
       outcome: 'published',
       publishedCount: 1,
@@ -315,7 +321,7 @@ describe('a publish that put an app or object live points the author to Access (
       <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data`]}>
         <Routes>
           <Route path="/studio/:packageId/metadata/*" element={<><StudioDesignSurface area="metadata" /><LocationProbe /></>} />
-          <Route path="/studio/:packageId/:tab" element={<><StudioDesignSurface /><LocationProbe /></>} />
+          <Route path="/studio/:packageId/:tab" element={<><StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect><LocationProbe /></>} />
         </Routes>
       </MemoryRouter>,
     );
@@ -329,7 +335,10 @@ describe('a publish that put an app or object live points the author to Access (
     expect(options.description).toBe(t('engine.studio.publishedAccessHint', 'en'));
     expect(options.action?.label).toBe(t('engine.studio.publishedOpenAccess', 'en'));
     options.action!.onClick();
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${PACKAGE_ID}/access`));
+    // objectstack#36909 — the package's permission sets, in one hop: not the retired Access pillar's address.
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${PACKAGE_ID}/metadata/permission?package=${PACKAGE_ID}`),
+    );
   });
 
   it('CONTROL — only a flow went live: the plain toast, no Access hint', async () => {

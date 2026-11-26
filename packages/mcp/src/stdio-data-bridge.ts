@@ -135,7 +135,7 @@ import {
   // context-pack listing before the record-context executor parses it.
   stripReadDecorations,
 } from '@objectstack/spec/kernel';
-import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+import type { IDataEngine, IMetadataService, ISecurityService } from '@objectstack/spec/contracts';
 import { resolveObjectSortability } from '@objectstack/spec/api';
 // [#32442] The ONE reading of `enable.aiReadable` (ruling A, #32865).
 import { isAiReadExposed } from '@objectstack/spec/data';
@@ -172,7 +172,7 @@ import {
   diagnoseObjectListRead,
   type DiagnosedObjectListing,
 } from './metadata-completeness.js';
-import { staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { resolveQueryReadPageCap, staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 // [ADR-0149 D2] The `/meta` list translation and its locale parse, the pair
 // the HTTP door's `loadDatasets` runs — imported, never restated, so both
 // transports localize a saved dataset with one function.
@@ -250,8 +250,12 @@ export interface StdioDataBridgeDeps {
    * use and `undefined` when this host registers none — the deployment then
    * has no field-level posture, and the schema is served as declared, as on
    * every other object-schema exit.
+   *
+   * [ADR-0160 D3, second amendment] The same service answers the fields the
+   * principal may query on (`getQueryableFields`, feature-detected), which
+   * the record-context door hands its executor.
    */
-  security?: () => ObjectSchemaMaskSecuritySurface | undefined;
+  security?: () => (ObjectSchemaMaskSecuritySurface & Pick<Partial<ISecurityService>, 'getQueryableFields'>) | undefined;
   /**
    * [decision 6840464379] Where the object-schema mask finds an object's
    * declared `schemaReadDelegate` ({@link CallerObjectViewDeps.schemaReadDelegates}).
@@ -1418,6 +1422,23 @@ function droppedFieldsMember(dropped: DroppedFieldsEvent[]): { droppedFields?: D
  * bridge produces — the graceful-degradation contract `McpDataBridge` declares,
  * honoured rather than re-decided.
  */
+/**
+ * [ADR-0150 D2/D6, addendum 2026-11-25] The manifest namespace of the package
+ * `packageId` names, from the engine's registry (`getPackage`), or `undefined`:
+ * an engine with no registry, or an id with no package record. A pack whose
+ * package cannot be placed is then spelt by its bare name.
+ */
+function installedPackageNamespaceOf(engine: unknown, packageId: string): string | undefined {
+  let manifest: { namespace?: unknown } | undefined;
+  try {
+    const registry = (engine as { registry?: { getPackage?(id: string): unknown } } | undefined)?.registry;
+    manifest = (registry?.getPackage?.(packageId) as { manifest?: { namespace?: unknown } } | undefined)?.manifest;
+  } catch {
+    return undefined;
+  }
+  return typeof manifest?.namespace === 'string' && manifest.namespace !== '' ? manifest.namespace : undefined;
+}
+
 export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge {
   const { engine, metadataService, protocol, resolvePrincipal, keyedDigest, security, schemaReadDelegates } = deps;
   // [#25138] One definition source for the gate, the relation-target gate and
@@ -1893,9 +1914,27 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
         }
         return ((await metadataService.list('ai_context')) ?? []).map(stripReadDecorations);
       },
+      // [ADR-0150 D6, addendum 2026-11-25] A package's pack is spelt by its
+      // face `NS-NAME`, as a package-held skill's prompt name is: the engine
+      // here is the `objectql` service, whose registry places the package.
+      packageNamespace: (packageId: string) => installedPackageNamespaceOf(engine, packageId),
       get: (object: string, id: string) => self.get(object, id),
       query: (object: string, o: Parameters<McpDataBridge['query']>[1]) => self.query(object, o),
       fieldVisibilityOf: (object: string) => self.fieldVisibilityOf!(object),
+      // [ADR-0160 D3, second amendment] The fields the principal may query
+      // on: the security service's own answer (`getQueryableFields`), judged
+      // on the map its engine guard refuses a filter or sort with, so a
+      // related list's `where` or `orderBy` the guard would refuse is dropped
+      // and stated before the read. No security service, or one predating the
+      // method: `undefined`, and the executor takes the contract's fallback.
+      queryableFieldsOf: async (object: string) => {
+        const surface = security?.();
+        if (typeof surface?.getQueryableFields !== 'function') return undefined;
+        return await surface.getQueryableFields(object, await resolvePrincipal());
+      },
+      // [ADR-0160 D3] The deployment's page cap (`resolveQueryReadPageCap`), the
+      // same value the `/mcp` door answers.
+      pageCap: () => resolveQueryReadPageCap(),
       userTextLocales: () => self.userTextLocales!(),
     });
     bridge.recordContextToolDefinitions = () => service.recordContextTools().definitions;

@@ -1,0 +1,79 @@
+---
+title: Record Citation schema — AI Protocol reference
+navTitle: Record Citation
+description: "A record citation — the passage of a record an answer rests on. One citation is { object, id, context?, anchor?, quote }."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+A record citation — the passage of a record an answer rests on
+(ADR-0160 D9, as amended a third time).
+
+One citation is `{ object, id, context?, anchor?, quote }`. It is the record
+sibling of a dataset answer's `sourceLine` (`dataset-tools.zod.ts`), with one
+difference: a dataset answer's provenance is composed by the tool, while a
+citation is written by the model, so it is a claim. The shape lets the
+platform check the claim without a model: `quote` must be found verbatim in
+the data member of what `get_record_context` answers for `object`, `id`,
+`context` and `anchor` to the asking user (`record-context-tools.zod.ts`,
+`RecordContextDataSchema`).
+
+- `object`, `id` name the root record of the pack the statement was read
+  through. A quote taken from a related row still names the root.
+- `context` names that pack, spelt as `get_record_context`'s `context`
+  argument takes it. It may be omitted when the object has one pack; on an
+  object with several, a citation without it is not verified.
+- `anchor` is a heading of the root record's body, as the body outline
+  issued it (`record-body-anchor.ts`, `headingsOf`). Omitted when the
+  citation is to the record as a whole or to a field.
+- `quote` is the passage relied on, verbatim from text the tool returned.
+
+A citation is verified once, when the answer is produced, by the platform
+as the asking user; one whose quote is not found, or whose verifying call is
+refused, is dropped before the answer is shown. The verified list is
+persisted with the message, and no surface re-verifies it on display. The
+verifier is `@objectstack/service-record-context`'s `verifyRecordCitations`;
+only the shapes are spec.
+
+The verified list rides an answer as a UI-message data part named
+`RECORD_CITATIONS_PART_TYPE`, whose `data` is a
+`RecordCitationsSchema` list.
+
+<Callout type="info">
+**Source:** `packages/spec/src/ai/record-citation.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { RecordCitationSchema, RecordCitationsSchema } from '@objectstack/spec/ai';
+import type { RecordCitation, RecordCitations } from '@objectstack/spec/ai';
+
+// Validate data
+const result = RecordCitationSchema.parse(data);
+```
+
+---
+
+## RecordCitation
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The root record's object, as `get_record_context` was called with it |
+| **id** | `string` | ✅ | The root record's id |
+| **context** | `string` | optional | The context pack the record was read through, spelt as `get_record_context`'s `context` argument takes it. Omit it only when the object has one pack |
+| **anchor** | `string` | optional | A heading of the root record's body, by the `anchor` the body outline issued. Omit it when the citation is to the record as a whole or to a field |
+| **quote** | `string` | ✅ | The passage relied on, verbatim from text the tool returned |
+
+
+---
+
+## RecordCitations
+
+**Type:** `{ object: string; id: string; context?: string; anchor?: string; … }[]`
+
+
+---
+

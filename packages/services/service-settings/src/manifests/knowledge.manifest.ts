@@ -10,34 +10,38 @@ import type { SettingsActionHandler } from '../settings-service.types.js';
  * knowledge sources and any future agent that needs to embed ad-hoc
  * inputs.
  *
- * Adapter list — two of these plugin packages are built in this repo and one
- * is not, which is the difference that matters to an operator told to mount
- * one of them:
- *   - memory    @objectstack/knowledge-memory   built here (dev / test ref)
- *   - ragflow   @objectstack/knowledge-ragflow  built here (external RAGFlow)
- *   - turso     @objectstack/knowledge-turso    NOT built here — libSQL native
- *                                               F32_BLOB, works for cloud
- *                                               Turso AND local file mode
+ * Adapter list — every one of these plugin packages is built in this repo:
+ *   - memory    @objectstack/knowledge-memory   (dev / test ref)
+ *   - ragflow   @objectstack/knowledge-ragflow  (external RAGFlow)
+ *   - turso     @objectstack/knowledge-turso    libSQL native vectors, in a
+ *                                               file of its own or on Turso;
+ *                                               built here since #37107 (its
+ *                                               6.x releases came from the
+ *                                               ObjectOS Cloud monorepo)
  *
- * Spelled out for `turso` because the undated claim that used to stand here —
- * "mirrors the plugin packages currently published" — stopped being true and
- * nothing caught it. The package IS published on the public npm registry, but
- * on its own version track: `latest` was 6.9.0 (published 2026-05-27) while
- * this repo shipped 17.2.0, and 6.9.0 exact-pins `@objectstack/spec@6.9.0`, so
- * mounting it into an app on this platform version resolves a SECOND spec
- * rather than reusing this one. Its source lives in the ObjectOS Cloud
- * monorepo (see this repo's README). Measured against the registry on
- * 2026-08-23 with `@objectstack/spec` + `@objectstack/cli` as positive
- * controls; re-measure before treating those numbers as current.
+ * None of them reads this namespace yet: a deployment registers the plugin
+ * beside the knowledge service itself.
  *
  * As with the AI manifest, the real adapter wiring happens in the
  * knowledge plugins; this manifest is the canonical settings surface
  * for "what knowledge backend is wired" and saves operators from
  * grepping defineStack() during onboarding / incident response.
+ *
+ * `chunk_target` is read by the knowledge service's splitter (#37098): the
+ * longest passage, in characters, beneath a knowledge source's own
+ * `split.maxChars`, and lowered further by the embedder's input limit. It
+ * applies to every adapter that takes the service's passages, the in-memory
+ * one included. `chunk_overlap` was offered here until #37098 and nothing
+ * ever read it; the splitter cuts without overlap, so it was retired rather
+ * than implemented. Removing it is why `version` is 2 (the spec's
+ * `SettingsManifest.version` contract: "increment when keys are
+ * renamed/removed"). A `sys_setting` row stored for it is kept, never
+ * deleted; the service no longer resolves it, and a write naming the key is
+ * refused `400 UNKNOWN_KEY`, the answer every undeclared key gets.
  */
 const manifest = {
   namespace: 'knowledge',
-  version: 1,
+  version: 2,
   label: 'Knowledge',
   icon: 'BookOpen',
   description:
@@ -100,16 +104,10 @@ const manifest = {
 
     // ── Indexing defaults ─────────────────────────────────────────
     { type: 'group', id: 'indexing', label: 'Indexing defaults', required: false,
-      description: 'A value set on a knowledge source itself wins over these defaults.',
-      visible: "${data.adapter !== 'memory'}" },
+      description: 'A value set on a knowledge source itself wins over these defaults.' },
     { type: 'number', key: 'chunk_target', label: 'Target chunk size (chars)',
       required: false, default: 800, min: 64, max: 8192,
-      description: 'Soft cap on chunk size in characters before token-aware splitting kicks in.',
-      visible: "${data.adapter !== 'memory'}" },
-    { type: 'number', key: 'chunk_overlap', label: 'Chunk overlap (chars)',
-      required: false, default: 80, min: 0, max: 2048,
-      description: 'Characters retained from the previous chunk so context survives the boundary.',
-      visible: "${data.adapter !== 'memory'}" },
+      description: "Longest passage, in characters, when the knowledge service splits a document. A size set on a knowledge source itself wins; the embedding model's input limit can lower it." },
     { type: 'number', key: 'over_fetch', label: 'Over-fetch multiplier',
       required: false, default: 4, min: 1, max: 20,
       description: 'Search fetches this many times the requested number of results, so enough are left to return after they are filtered by document details.',
@@ -181,7 +179,8 @@ export const knowledgeTestActionHandler: SettingsActionHandler = async ({ values
         ok: true,
         severity: 'info',
         message:
-          'No URL configured — adapter will reuse the tenant\'s primary libSQL connection at runtime. ' +
+          'No URL configured — the @objectstack/knowledge-turso plugin defaults to its own file, ' +
+          'knowledge.db under .objectstack/data/, never the platform database. ' +
           FORM_CHECK_ONLY,
       };
     }
@@ -197,10 +196,8 @@ export const knowledgeTestActionHandler: SettingsActionHandler = async ({ values
       ok: true,
       severity: 'info',
       message:
-        `Turso adapter configured (${u}). ${FORM_CHECK_ONLY} Live calls need @objectstack/knowledge-turso, ` +
-        'which this platform does not ship: it is built in the ObjectOS Cloud monorepo ' +
-        'and published on its own version track, so check that it offers a release ' +
-        'compatible with your platform version before mounting it.',
+        `Turso adapter configured (${u}). ${FORM_CHECK_ONLY} Live calls need the ` +
+        '@objectstack/knowledge-turso plugin registered beside the knowledge service, with this URL.',
     };
   }
 

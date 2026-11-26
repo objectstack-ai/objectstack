@@ -629,6 +629,7 @@ export const ptBR: PlatformTranslationData = {
         },
         embedder_provider: {
           label: 'Provedor',
+          help: 'Lido na inicialização do servidor: uma alteração salva em qualquer configuração do embedder entra em vigor após a próxima reinicialização.',
           options: {
             none: 'Desativado (sem embeddings)',
             openai: 'OpenAI',
@@ -716,11 +717,7 @@ export const ptBR: PlatformTranslationData = {
         },
         chunk_target: {
           label: 'Tamanho-alvo da parte (caracteres)',
-          help: 'Limite flexível do tamanho da parte antes de entrar a divisão por tokens.',
-        },
-        chunk_overlap: {
-          label: 'Sobreposição das partes (caracteres)',
-          help: 'Caracteres mantidos da parte anterior para que o contexto atravesse o limite.',
+          help: 'Tamanho máximo de um trecho, em caracteres, quando o serviço de conhecimento divide um documento. Um tamanho definido na própria fonte tem prioridade; o limite de entrada do modelo de embeddings pode reduzi-lo.',
         },
         over_fetch: {
           label: 'Multiplicador de busca extra',

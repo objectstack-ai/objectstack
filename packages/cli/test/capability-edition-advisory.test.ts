@@ -47,7 +47,7 @@ const PROVIDER = '@objectstack/security-enterprise';
 /** The stack: one private object, one grant at a hierarchy depth, the token declared. */
 function stackLiteral(wired: boolean): string {
   return `{
-  manifest: { id: 'com.example.edition-advisory', namespace: 'ea', version: '1.0.0', name: 'Edition Advisory', type: 'app', engines: { protocol: '^18' } },
+  manifest: { id: 'com.example.edition-advisory', namespace: 'ea', version: '1.0.0', name: 'Edition Advisory', type: 'app', engines: { protocol: '^19' } },
   requires: ['${TOKEN}'],${wired ? '\n  plugins: [new FixtureProviderPlugin()],' : ''}
   objects: [
     { name: 'ea_note', label: 'Note', pluralLabel: 'Notes', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } },

@@ -65,6 +65,14 @@
 //    identical shape on `enable.apiEnabled` (`"Api Enabled"` / `"API Enabled"`)
 //    and it is still unfiled; this is the second instance of one producer.
 //
+// ⚠️ RE-POINTED (#36836). The "rows" twin these rows copy was
+// `report.fields.rows.label` (行 / Filas). #36836 moved that report row to the
+// business wording (グループ化 / Agrupar por), so it no longer carries the
+// record-row sense. The renderings did not move: the same fragment stands
+// authored for the same sense in `sys_import_job.fields.total_rows.label`
+// (総行数 / Filas totales — rows of an import, i.e. records), and the copies now
+// point there.
+//
 // ## ⭐ One schema key, one rendering — what was copied and what was NOT
 //
 // Rounds 8 and 9 both delivered this by copying an authored twin byte for byte
@@ -281,10 +289,10 @@ const DECISIONS: readonly Decision[] = [
     verbatim: ['ADR-0057', 'record', 'TTL'],
     copies: [
       { catalog: 'objects', key: 'sys_setting.description', modes: { 'ja-JP': 'コントラクト', 'es-ES': 'contrato' } },
-      { catalog: 'metadataForms', key: 'report.fields.rows.label', modes: { 'ja-JP': '行', 'es-ES': 'filas' } },
+      { catalog: 'objects', key: 'sys_import_job.fields.total_rows.label', modes: { 'ja-JP': '行', 'es-ES': 'filas' } },
     ],
     reason:
-      'THE SENTENCE NAMES THREE MACHINE TOKENS AND ALL THREE STAY VERBATIM — ADR-0057, the class value `record`, and TTL — asserted by the token guard below in every locale including zh-CN, which is what makes the rule a reading rather than this round house style. "contract" takes the authored twin sys_setting.description (SettingsManifest コントラクト / el contrato SettingsManifest), so ja takes the katakana the catalog already spends on this word rather than 契約. "rows" takes report.fields.rows.label 行 / Filas. ⚠️ "Leave empty" takes the catalog own authored idiom for the empty input, ⛔ not a literal: sys_user._actions.create_user.params.password.label is （空欄の場合は自動生成）/ (dejar en blanco para generarla) ⇒ 空欄 / en blanco. ⇒ ja データライフサイクルのコントラクト（ADR-0057）: 行をどれだけ保持し、容量をどう回収するか。空欄の場合は永続的な record セマンティクスになります。record 以外のクラスは、少なくとも 1 つの境界ポリシー（保持期間、TTL、ローテーション）を宣言する必要があります。 / es Contrato de ciclo de vida de los datos (ADR-0057): cuánto viven las filas y cómo se recupera el espacio. Déjalo en blanco para una semántica record permanente. Las clases distintas de record requieren al menos una política acotante (retención, TTL o rotación). ⚠️ Punctuation copied rather than chosen: ja takes full-width （） and 。 from object.fields.datasource.helpText one row up, es keeps ASCII from the same twin.',
+      'THE SENTENCE NAMES THREE MACHINE TOKENS AND ALL THREE STAY VERBATIM — ADR-0057, the class value `record`, and TTL — asserted by the token guard below in every locale including zh-CN, which is what makes the rule a reading rather than this round house style. "contract" takes the authored twin sys_setting.description (SettingsManifest コントラクト / el contrato SettingsManifest), so ja takes the katakana the catalog already spends on this word rather than 契約. "rows" takes sys_import_job.fields.total_rows.label 行 / Filas. ⚠️ "Leave empty" takes the catalog own authored idiom for the empty input, ⛔ not a literal: sys_user._actions.create_user.params.password.label is （空欄の場合は自動生成）/ (dejar en blanco para generarla) ⇒ 空欄 / en blanco. ⇒ ja データライフサイクルのコントラクト（ADR-0057）: 行をどれだけ保持し、容量をどう回収するか。空欄の場合は永続的な record セマンティクスになります。record 以外のクラスは、少なくとも 1 つの境界ポリシー（保持期間、TTL、ローテーション）を宣言する必要があります。 / es Contrato de ciclo de vida de los datos (ADR-0057): cuánto viven las filas y cómo se recupera el espacio. Déjalo en blanco para una semántica record permanente. Las clases distintas de record requieren al menos una política acotante (retención, TTL o rotación). ⚠️ Punctuation copied rather than chosen: ja takes full-width （） and 。 from object.fields.datasource.helpText one row up, es keeps ASCII from the same twin.',
   },
   {
     population: 'lifecycle',
@@ -306,10 +314,10 @@ const DECISIONS: readonly Decision[] = [
     verdict: BOTH_TRANSLATE,
     copies: [
       { catalog: 'objects', key: 'sys_setting.description', modes: { 'ja-JP': 'コントラクト', 'es-ES': 'contrato' } },
-      { catalog: 'metadataForms', key: 'report.fields.rows.label', modes: { 'ja-JP': '行', 'es-ES': 'filas' } },
+      { catalog: 'objects', key: 'sys_import_job.fields.total_rows.label', modes: { 'ja-JP': '行', 'es-ES': 'filas' } },
     ],
     reason:
-      'EVERY TERM HAS AN AUTHORED TWIN AND THE ROW NAMES EACH. "contract" from sys_setting.description (コントラクト / contrato) — the same twin the block helpText above takes, so the two read as one thing. "rows" from report.fields.rows.label (行 / Filas). "object" from object.sections.fields.description (オブジェクト / objeto), the twin on this very form. ⇒ このオブジェクトの行の永続化コントラクト / Contrato de persistencia de las filas de este objeto. ⚠️ zh-CN wrote 本对象数据的持久化契约, replacing "rows" with 数据 — a reasonable Chinese move that is NOT copied here, because the schema statement is about ROWS specifically (the reaper deletes rows, the archiver copies rows) and both target locales have an authored word for it.',
+      'EVERY TERM HAS AN AUTHORED TWIN AND THE ROW NAMES EACH. "contract" from sys_setting.description (コントラクト / contrato) — the same twin the block helpText above takes, so the two read as one thing. "rows" from sys_import_job.fields.total_rows.label (行 / Filas). "object" from object.sections.fields.description (オブジェクト / objeto), the twin on this very form. ⇒ このオブジェクトの行の永続化コントラクト / Contrato de persistencia de las filas de este objeto. ⚠️ zh-CN wrote 本对象数据的持久化契约, replacing "rows" with 数据 — a reasonable Chinese move that is NOT copied here, because the schema statement is about ROWS specifically (the reaper deletes rows, the archiver copies rows) and both target locales have an authored word for it.',
   },
   {
     population: 'lifecycle',
@@ -336,10 +344,10 @@ const DECISIONS: readonly Decision[] = [
     en: 'Age-based retention window',
     verdict: BOTH_TRANSLATE,
     copies: [
-      { catalog: 'metadataForms', key: 'report.fields.rows.label', modes: { 'ja-JP': '行', 'es-ES': 'filas' } },
+      { catalog: 'objects', key: 'sys_import_job.fields.total_rows.label', modes: { 'ja-JP': '行', 'es-ES': 'filas' } },
     ],
     reason:
-      'THREE WORDS, TWO WITH TWINS AND ONE WITHOUT, AND THE ROW SAYS WHICH. "retention" repeats this block own label, asserted. "rows" from report.fields.rows.label. ⛔ "window" has NO authored twin for the time-span sense in either catalog — the only 「window」 in the corpus is sys_job_queue.fields.idempotency_key.help, where es keeps the English `(queue, window)` verbatim as a tuple of machine names and ja writes ウィンドウ for exactly that tuple. So ja takes ウィンドウ on the strength of that single occurrence and es composes ventana, and neither is presented as a copy. ⇒ 行の経過時間にもとづく保持ウィンドウ / Ventana de retención basada en la antigüedad de las filas. ⚠️ "Age-based" is rendered as the age OF THE ROWS rather than an abstract age, because the schema says so: maxAge reaps by created_at.',
+      'THREE WORDS, TWO WITH TWINS AND ONE WITHOUT, AND THE ROW SAYS WHICH. "retention" repeats this block own label, asserted. "rows" from sys_import_job.fields.total_rows.label. ⛔ "window" has NO authored twin for the time-span sense in either catalog — the only 「window」 in the corpus is sys_job_queue.fields.idempotency_key.help, where es keeps the English `(queue, window)` verbatim as a tuple of machine names and ja writes ウィンドウ for exactly that tuple. So ja takes ウィンドウ on the strength of that single occurrence and es composes ventana, and neither is presented as a copy. ⇒ 行の経過時間にもとづく保持ウィンドウ / Ventana de retención basada en la antigüedad de las filas. ⚠️ "Age-based" is rendered as the age OF THE ROWS rather than an abstract age, because the schema says so: maxAge reaps by created_at.',
   },
   {
     population: 'lifecycle',
@@ -363,7 +371,7 @@ const DECISIONS: readonly Decision[] = [
     verdict: BOTH_TRANSLATE,
     verbatim: ['created_at', 'h/d/w/y', '30d'],
     copies: [
-      { catalog: 'metadataForms', key: 'report.fields.rows.label', modes: { 'ja-JP': '行', 'es-ES': 'filas' } },
+      { catalog: 'objects', key: 'sys_import_job.fields.total_rows.label', modes: { 'ja-JP': '行', 'es-ES': 'filas' } },
       { catalog: 'metadataForms', key: 'hook.fields.events.helpText', modes: { 'ja-JP': '例: ', 'es-ES': 'p. ej.' } },
     ],
     reason:
@@ -389,7 +397,7 @@ const DECISIONS: readonly Decision[] = [
     verdict: BOTH_TRANSLATE,
     verbatim: ['TTL'],
     reason:
-      'THE SAME TWO STEMS AS THE LABEL ABOVE, plus "per-row" from report.fields.rows.label (行 / filas). ⇒ 行ごとの TTL による期限切れ / Caducidad por TTL de cada fila. ⚠️ es repeats the label wording verbatim as its opening rather than varying it: the helpText of a composite in this catalog restates the row (see object.fields.lifecycle.storage.strategy, whose en helpText "Storage strategy" is literally the row name plus its parent), and varying it would suggest a second concept.',
+      'THE SAME TWO STEMS AS THE LABEL ABOVE, plus "per-row" from sys_import_job.fields.total_rows.label (行 / filas). ⇒ 行ごとの TTL による期限切れ / Caducidad por TTL de cada fila. ⚠️ es repeats the label wording verbatim as its opening rather than varying it: the helpText of a composite in this catalog restates the row (see object.fields.lifecycle.storage.strategy, whose en helpText "Storage strategy" is literally the row name plus its parent), and varying it would suggest a second concept.',
   },
   {
     population: 'lifecycle',
@@ -446,7 +454,7 @@ const DECISIONS: readonly Decision[] = [
     verdict: BOTH_TRANSLATE,
     verbatim: ['1d'],
     copies: [
-      { catalog: 'metadataForms', key: 'report.fields.rows.label', modes: { 'ja-JP': '行', 'es-ES': 'filas' } },
+      { catalog: 'objects', key: 'sys_import_job.fields.total_rows.label', modes: { 'ja-JP': '行', 'es-ES': 'filas' } },
       { catalog: 'metadataForms', key: 'hook.fields.events.helpText', modes: { 'ja-JP': '例: ', 'es-ES': 'p. ej.' } },
     ],
     reason:
@@ -574,10 +582,10 @@ const DECISIONS: readonly Decision[] = [
     verdict: BOTH_TRANSLATE,
     verbatim: ['audit'],
     copies: [
-      { catalog: 'metadataForms', key: 'report.fields.rows.label', modes: { 'ja-JP': '行', 'es-ES': 'filas' } },
+      { catalog: 'objects', key: 'sys_import_job.fields.total_rows.label', modes: { 'ja-JP': '行', 'es-ES': 'filas' } },
     ],
     reason:
-      '⭐ `audit` IS A MACHINE VALUE AND STAYS VERBATIM — asserted below, and asserted at the schema: LifecycleClassSchema is a five-member enum whose members include audit, so the parenthesis names a value an author types into the class row above, ⛔ not the English word for auditing (which this catalog does translate elsewhere: sys_metadata_audit.label is メタデータ監査 / Auditoría de metadatos). Rendering it would send an author to type 監査. ⛔ "cold store" has no authored twin in either locale (probed, zero hits) and is composed — コールドストレージ / almacenamiento en frío — which the row states. "rows" copied from report.fields.rows.label. ⇒ コールドストレージへの引き渡し（audit クラス）。アーカイブのコピーが成功する前に、行がホット側から削除されることはありません。 / Traspaso al almacenamiento en frío (clase audit). Las filas nunca se eliminan en caliente antes de que la copia de archivado haya finalizado correctamente. ⚠️ Both locales keep the guarantee in the NEGATIVE ("never ... before"), which is the durability claim the schema makes; turning it positive would read as best-effort.',
+      '⭐ `audit` IS A MACHINE VALUE AND STAYS VERBATIM — asserted below, and asserted at the schema: LifecycleClassSchema is a five-member enum whose members include audit, so the parenthesis names a value an author types into the class row above, ⛔ not the English word for auditing (which this catalog does translate elsewhere: sys_metadata_audit.label is メタデータ監査 / Auditoría de metadatos). Rendering it would send an author to type 監査. ⛔ "cold store" has no authored twin in either locale (probed, zero hits) and is composed — コールドストレージ / almacenamiento en frío — which the row states. "rows" copied from sys_import_job.fields.total_rows.label. ⇒ コールドストレージへの引き渡し（audit クラス）。アーカイブのコピーが成功する前に、行がホット側から削除されることはありません。 / Traspaso al almacenamiento en frío (clase audit). Las filas nunca se eliminan en caliente antes de que la copia de archivado haya finalizado correctamente. ⚠️ Both locales keep the guarantee in the NEGATIVE ("never ... before"), which is the durability claim the schema makes; turning it positive would read as best-effort.',
   },
   {
     population: 'lifecycle',
@@ -605,7 +613,7 @@ const DECISIONS: readonly Decision[] = [
     verdict: BOTH_TRANSLATE,
     verbatim: ['retention.maxAge'],
     copies: [
-      { catalog: 'metadataForms', key: 'report.fields.rows.label', modes: { 'ja-JP': '行', 'es-ES': 'filas' } },
+      { catalog: 'objects', key: 'sys_import_job.fields.total_rows.label', modes: { 'ja-JP': '行', 'es-ES': 'filas' } },
     ],
     reason:
       'THE METADATA PATH retention.maxAge STAYS VERBATIM (asserted) — it is the key an author writes, and the schema refusal message quotes it back. "rows" copied. ⇒ これより古い行をアーカイブします — retention.maxAge と一致している必要があります / Archiva las filas más antiguas que este valor — debe coincidir con retention.maxAge. ⚠️ The SPACED em dash is copied rather than chosen: the en source spaces it, zh-CN kept it spaced on this very leaf, and permission.sections.system_permissions.description carries the same spaced form in ja and es. ⭐ The obligation is rendered as an obligation in both (必要があります / debe), ⛔ not as advice — a mismatch is a parse failure, asserted below.',
@@ -666,7 +674,7 @@ const DECISIONS: readonly Decision[] = [
     verdict: BOTH_TRANSLATE,
     verbatim: ['7y'],
     copies: [
-      { catalog: 'metadataForms', key: 'report.fields.rows.label', modes: { 'ja-JP': '行', 'es-ES': 'filas' } },
+      { catalog: 'objects', key: 'sys_import_job.fields.total_rows.label', modes: { 'ja-JP': '行', 'es-ES': 'filas' } },
       { catalog: 'metadataForms', key: 'hook.fields.events.helpText', modes: { 'ja-JP': '例: ', 'es-ES': 'p. ej.' } },
     ],
     reason:
@@ -1327,7 +1335,11 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // authored in all three locales.
       // 825 since #37140: the `ai_context` type's own label (ADR-0160 D1),
       // authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(825);
+      // 828 since #36949: the dashboard form declares the `dateRange`
+      // children — three row labels, authored in all three locales.
+      // 837 since #37143: the `ai_context` form (ADR-0160 D1 clause 2) — two
+      // section labels and seven row labels, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(837);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

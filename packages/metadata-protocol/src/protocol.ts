@@ -619,7 +619,7 @@ import { ProtocolWriteGatesTables } from './protocol-write-gates-tables.js';
 import { ProtocolRegistryHydrationFacet, type ObjectRegistryRefusal, type RegistryHealStop, type RegistryWriteThroughRequest } from './protocol-registry-hydration.js';
 import type { HealPackageBinding } from './protocol-heal-binding.js';
 // [#29985 codemod] Save refusals, saveMetaItem, saveConflict, migrateStoredMetadata: the members below delegate to its facet, `ProtocolSaveFacet`.
-import { ProtocolSaveFacet } from './protocol-save.js';
+import { ProtocolSaveFacet, packagelessRowHeldBaseDraftAddress } from './protocol-save.js';
 // [#29985 codemod] History, publish, drafts, publish backfill: the members below delegate to its facet, `ProtocolHistoryAndPublishFacet`.
 import { ProtocolHistoryAndPublishFacet } from './protocol-history-and-publish.js';
 import type { RegistryQuestion } from './registry-question.js';
@@ -7976,7 +7976,12 @@ export class ObjectStackProtocolImplementation implements
             getOverlayRepo: (...a) => this.getOverlayRepo(...a),
             readItemActiveRows: (...a) => this.readItemActiveRows(...a),
         };
-        return packagelessDraftAddress.call(host, type, name, member, body);
+        // [#35524] …at the draft address the read naming no package takes
+        // there: the row-held base's, where the member's active rows are
+        // bound to one dependent only ({@link packagelessRowHeldBaseDraftAddress}).
+        return packagelessRowHeldBaseDraftAddress(
+            protocolHost(this), type, name, member, packagelessDraftAddress.call(host, type, name, member, body),
+        );
     }
 
     /**
@@ -9775,6 +9780,8 @@ export class ObjectStackProtocolImplementation implements
         userTextLocales?: readonly (string | undefined)[];
         /** [#36601] The caller's pin on the active row this promotion replaces (`PublishMetaItemRequestSchema.parentVersion`). */
         parentVersion?: string | null;
+        /** [#36350] The caller's pin on the draft this promotion reads (`PublishMetaItemRequestSchema.draftVersion`). */
+        draftVersion?: string;
         /** The registry question this promotion asks (`registry-question.ts`). */
         registryQuestion: RegistryQuestion;
         /** [#32396] Judge every refusal, write nothing: the answer then carries no `result`. */

@@ -58,6 +58,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { studioBackTarget } from './StudioBackToApp';
 import { rememberAppReturnPage, resetAppReturnPageForTests } from '../../utils/appReturnPage';
 import { parsePackages } from './packages-io';
@@ -145,7 +146,7 @@ function renderAt(entry: string) {
     <MemoryRouter initialEntries={[entry]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
         <Route path="/apps/*" element={<RunningApp />} />
         <Route path="*" element={<Elsewhere />} />
       </Routes>

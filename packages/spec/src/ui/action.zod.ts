@@ -65,6 +65,7 @@ import {
   actionTextsWithoutRunnableCode,
   hookRefusalCodesThrownIn,
   hookRefusalReasonsThrownIn,
+  isUndeclaredThrownReason,
   hookTextKeysAskedIn,
   undeclaredActionRefusalCodeAtSave,
   undeclaredActionRefusalReasonAtSave,
@@ -689,19 +690,75 @@ export const ActionParamSchema = lazySchema(() => strictObject(
  * console compiling until an executor exists — a coupling the ruling's
  * contract-first split (spec now, executor halves downstream) must not carry —
  * and a member would be a second spelling of the bulk def's `operation`.
+ *
+ * `ask_ai` (ADR-0160 D7) IS a member, and the coupling above is why it lands
+ * with its executor: the spec member and the console executor ship in one PR,
+ * so the console never compiles against a type it cannot run. It is an action
+ * on one record that focuses the in-app assistant on that record. It names
+ * nothing — a `target` beside it is refused at parse — and it is never an AI
+ * tool: `ai.exposed: true` beside it is refused at parse, and no server
+ * dispatch admits it (the runtime's headless predicate answers `false`), so
+ * neither `list_actions`/`run_action` nor the `action_` tool family serves it.
+ * A client draws it only where it draws the assistant's pin control (the
+ * assistant surface on, and the AI service advertising that it honours a
+ * conversation focus); elsewhere the action is absent, not disabled.
  */
-export const ActionType = z.enum(['script', 'url', 'modal', 'flow', 'api', 'form']);
+export const ActionType = z.enum(['script', 'url', 'modal', 'flow', 'api', 'form', 'ask_ai']);
 export type ActionType = z.input<typeof ActionType>;
 
 /**
+ * Action types whose dispatch names nothing, so a `target` is not required:
+ * `script` (an inline `body` may stand in for it) and `ask_ai` (ADR-0160 D7:
+ * it focuses the assistant on the record it runs on, and a `target` beside it
+ * is refused — see {@link refuseAskAiContradictions}).
+ */
+const TARGETLESS_TYPES: ReadonlySet<string> = new Set(['script', 'ask_ai']);
+
+/**
  * Action types that require a `target` field.
- * Derived from ActionType, excluding 'script' which allows inline handlers.
+ * Derived from ActionType, excluding the targetless types above.
  * These types reference an external resource (URL, flow, modal, or API endpoint)
  * and cannot function without a target binding.
  */
 const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
-  ActionType.options.filter((t) => t !== 'script'),
+  ActionType.options.filter((t) => !TARGETLESS_TYPES.has(t)),
 );
+
+/**
+ * ADR-0160 D7 — the two things an `ask_ai` action may not declare.
+ *
+ * - `target`: the action names nothing. The context pack the assistant reads
+ *   is chosen by the pack-selection rule of `get_record_context`, never by the
+ *   action, so a `target` here would be a declaration no runtime reads.
+ * - `ai.exposed: true` (registered actions only — the inline shape has no
+ *   `ai` key): an `ask_ai` action has no server dispatch, so no agent could
+ *   ever run it; exposing it would advertise a tool that cannot exist.
+ */
+function refuseAskAiContradictions(
+  data: { type?: string; target?: unknown; ai?: { exposed?: boolean } | undefined },
+  ctx: z.RefinementCtx,
+): void {
+  if (data.type !== 'ask_ai') return;
+  if (data.target !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['target'],
+      message:
+        "A `type: 'ask_ai'` action takes no `target`: it focuses the in-app assistant on the record it "
+        + "runs on, and the material the assistant reads about that record is chosen by the record's "
+        + 'context pack, not by the action. Drop `target`.',
+    });
+  }
+  if (data.ai?.exposed === true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['ai', 'exposed'],
+      message:
+        "A `type: 'ask_ai'` action is never an AI tool: it has no server dispatch (it only opens the "
+        + 'assistant in the console), so no agent could run it. Drop `ai.exposed`, or set it to `false`.',
+    });
+  }
+}
 
 /**
  * Action Schema
@@ -2723,15 +2780,17 @@ function refuseUndeclaredLiteralActionRefusalCode(
     if (Object.prototype.hasOwnProperty.call(data.refusals, code)) continue;
     ctx.addIssue({ code: 'custom', path: ['body', 'source'], message: undeclaredActionRefusalCodeAtSave(code, declared) });
   }
-  for (const { code, reason } of hookRefusalReasonsThrownIn(source)) {
+  for (const pair of hookRefusalReasonsThrownIn(source)) {
+    const { code, reason } = pair;
     if (!Object.prototype.hasOwnProperty.call(data.refusals, code)) continue;
-    // Read only under a code that declares `reasons`, as on a hook.
+    // A single reason is read only under a code that declares `reasons`, a
+    // listed one (#36877) under every code, as on a hook.
     const reasons = data.refusals[code]?.reasons;
-    if (!reasons || Object.prototype.hasOwnProperty.call(reasons, reason)) continue;
+    if (!isUndeclaredThrownReason(pair, reasons)) continue;
     ctx.addIssue({
       code: 'custom',
       path: ['body', 'source'],
-      message: undeclaredActionRefusalReasonAtSave(code, reason, Object.keys(reasons)),
+      message: undeclaredActionRefusalReasonAtSave(code, reason, Object.keys(reasons ?? {})),
     });
   }
 }
@@ -2974,7 +3033,8 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
 }, {
   message: "Action 'target' is required when type is 'url', 'flow', 'modal', 'api', or 'form'.",
   path: ['target'],
-}).superRefine(refuseUnopenableUrlTarget("A `type: 'url'` action's `target`")).refine((data) => {
+}).superRefine(refuseUnopenableUrlTarget("A `type: 'url'` action's `target`"))
+  .superRefine(refuseAskAiContradictions).refine((data) => {
   // A `script` action must be *executable*: it needs either an inline `body`
   // (the runtime invokes it in the sandbox) or a `target` naming a registered
   // bundle function. With neither, AppPlugin registers no engine handler and
@@ -3392,7 +3452,7 @@ export const InlineActionSchema = lazySchema(() => z.preprocess(
     CONFIRM_BESIDE_PARAMS_REFUSAL,
   ).superRefine(refuseUnopenableUrlTarget(
     "An inline `type: 'url'` action's `target` (or its legacy spelling `to`)",
-  )),
+  )).superRefine(refuseAskAiContradictions),
 ));
 
 /**

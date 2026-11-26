@@ -3891,7 +3891,7 @@ const rowPatchRetired = (owner: string) => retiredKey(
 );
 
 /**
- * The console runner's built-in executors: `ActionType`'s six, the members its
+ * The console runner's built-in executors: `ActionType`'s members, which its
  * `builtinExecutors` table is typed by (`Record<RunnableActionType, …>`, so the
  * table and the enum cannot drift), and its one local alias `navigation`
  * (read points recorded in `liveness/page.json`, row `regions`). Every other name is a handler a
@@ -5466,7 +5466,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * key from authored grids.
    */
   singleClickEdit: retiredKey(
-    '`object-grid` property `singleClickEdit` was removed in @objectstack/spec 18.7.0 (ADR-0049) — '
+    '`object-grid` property `singleClickEdit` was removed in @objectstack/spec 19.0.0 (ADR-0049) — '
     + 'a grid that renders editable now selects a cell on a click and opens its editor on double-click, '
     + 'Enter, F2 or typing, so a single-click entry no longer exists for this key to switch. '
     + 'Delete the key; `editable` (with the viewer\'s write verdict) decides whether the grid edits. '

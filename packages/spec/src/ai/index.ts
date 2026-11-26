@@ -22,6 +22,7 @@
  * - AI face name    — the derived flat name an item is listed under (ADR-0150 D6)
  * - Dataset tools   — `list_datasets` / `query_dataset` inputs and outputs (ADR-0149 D2)
  * - Context pack    — the `ai_context` kind and the `get_record_context` tool's input and output (ADR-0160)
+ * - Record citation — the citation shape an answer carries, and the body anchor it names (ADR-0160 D9)
  * - Object-query source — the `source` block the Ask data tools answer beside their result
  * - Build Progress  — phase vocabulary for the agent loop's `data-build-progress` frames
  */
@@ -32,6 +33,7 @@ export * from './tool.zod';
 export { toolForm } from './tool.form';
 export * from './skill.zod';
 export { skillForm } from './skill.form';
+export { aiContextForm } from './ai-context.form';
 export * from './conversation.zod';
 export * from './model-registry.zod';
 export * from './embedding.zod';
@@ -41,6 +43,8 @@ export * from './face-name';
 export * from './dataset-tools.zod';
 export * from './ai-context.zod';
 export * from './record-context-tools.zod';
+export * from './record-citation.zod';
+export * from './record-body-anchor';
 export * from './object-query-source.zod';
 export * from './knowledge-source.zod';
 export * from './knowledge-document.zod';

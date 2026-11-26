@@ -47,10 +47,23 @@ export interface RecordContextDoor {
   listContextPacks(): Promise<readonly unknown[]>;
   /** The record, read as the caller; `null` (or a throw) when the caller cannot read it. */
   get(objectName: string, id: string): Promise<unknown>;
-  /** A list read as the caller, `query_records`' read (with its one-level `expand`). */
+  /**
+   * A list read as the caller, `query_records`' read (with its one-level
+   * `expand`). A related list with a `where` is read with the link filter and
+   * that `where` joined under `$and`, and with its `orderBy` (ADR-0160 D3,
+   * second amendment): still one query. The door decides each expansion
+   * target's API exposure: a target it does not expose is left unexpanded,
+   * so the lookup carries no id and no name (ADR-0160 D3 "Object level").
+   */
   query(
     objectName: string,
-    opts: { where: Record<string, unknown>; fields?: string[]; limit?: number; expand?: string[] },
+    opts: {
+      where: Record<string, unknown>;
+      fields?: string[];
+      limit?: number;
+      expand?: string[];
+      orderBy?: Array<{ field: string; order: 'asc' | 'desc' }>;
+    },
   ): Promise<unknown>;
   /**
    * [#35137] The served-schema field names and the readable ones, both asked
@@ -58,11 +71,38 @@ export interface RecordContextDoor {
    */
   fieldVisibilityOf?(objectName: string): Promise<{ served: readonly string[]; readable: readonly string[] } | undefined>;
   /**
+   * [ADR-0160 D3, second amendment] The fields the caller may QUERY ON in
+   * `objectName` — filter or sort by — the security service's
+   * `getQueryableFields` for the caller. OPTIONAL: absent, or `undefined`,
+   * the executor takes that contract's fallback (a field that declares a
+   * `maskingRule` is never queryable, and neither is one the caller's served
+   * schema hides or field-level security withholds).
+   */
+  queryableFieldsOf?(objectName: string): Promise<readonly string[] | undefined>;
+  /**
    * [ADR-0090 D10] Whether a read on `objectName` is narrowed by the agent
    * ceiling, with the security service's sentence. OPTIONAL: a door with no
    * probe states no narrowing.
    */
   diagnoseDelegation?(objectName: string): Promise<{ narrowed: boolean; statement?: string } | undefined>;
+  /**
+   * [ADR-0160 D3] The most rows one `query` of this door may ask for: the
+   * deployment's page limits where the door refuses (or cuts) a larger page.
+   * The executor never asks a related list for more: a list whose cut plus
+   * its probe row is above the cap is read with at most the cap and cut one
+   * row under it, and the cut is stated. OPTIONAL: absent, or `undefined`,
+   * the door caps nothing below the executor's own cut.
+   */
+  pageCap?(): number | undefined | Promise<number | undefined>;
   /** The caller's locale ladder for the executor's sentences. OPTIONAL: `en`. */
   userTextLocales?(): Promise<readonly string[]>;
+  /**
+   * [ADR-0150 D6, addendum 2026-11-25] The manifest namespace of the
+   * installed package `packageId` names — what a package's pack is spelt by
+   * where its name crosses the AI face (`NS-NAME`, `deriveAiFaceName`): the
+   * `context` argument and the candidates a refusal lists. `undefined` for an
+   * id the host cannot place. OPTIONAL: a door without it spells every pack by
+   * its bare name, as an environment pack is spelt.
+   */
+  packageNamespace?(packageId: string): string | undefined | Promise<string | undefined>;
 }

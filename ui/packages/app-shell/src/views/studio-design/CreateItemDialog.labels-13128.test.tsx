@@ -48,6 +48,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { MetadataListCreateDialog } from '../metadata-admin/MetadataListCreateDialog';
 import { t } from '../metadata-admin/i18n';
 
@@ -115,10 +116,11 @@ describe('Studio create dialogs bind each label to its input (objectui#13128)', 
   });
 
   it('Create app (a sibling dialog on the same component): "App name" and "Identifier" each find their input', async () => {
+    // objectstack#36903 — the Automations pillar is retired; the sharing overview's page hosts the toolbar.
     render(
-      <MemoryRouter initialEntries={['/studio/app.a/automations']}>
+      <MemoryRouter initialEntries={['/studio/app.a/owd']}>
         <Routes>
-          <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+          <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
         </Routes>
       </MemoryRouter>,
     );

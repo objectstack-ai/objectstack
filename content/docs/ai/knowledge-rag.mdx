@@ -9,7 +9,7 @@ Part of the [AI module](/docs/ai) — how agents retrieve knowledge through the 
 ObjectStack ships a Knowledge Protocol that lets you retrieve from pluggable backends (RAGFlow, LlamaIndex, Dify, custom pgvector, …) with one call: `KnowledgeService.search(query, { sourceIds?, topK? })`. The framework defines the contract and runs permission-aware filtering; the adapter plugin does the actual retrieval. See [the protocol design](/docs/protocol/knowledge) for the rationale.
 
 <Callout type="info">
-**This whole stack is open.** The `@objectstack/service-knowledge` service, the adapter plugins (`@objectstack/knowledge-memory`, `@objectstack/knowledge-ragflow`), the `@objectstack/embedder-openai` embedder, and the permission-aware retrieval + event sync below all ship in the **open-source framework**. The workflow is: declare your knowledge sources, pick an adapter, and call `search` — retrieval respects the same row-level security as any ObjectQL query. Only the in-product chat *runtime* that consumes retrieval ships in ObjectOS; see the callout under [Retrieving knowledge](#retrieving-knowledge).
+**This whole stack is open.** The `@objectstack/service-knowledge` service, the adapter plugins (`@objectstack/knowledge-memory`, `@objectstack/knowledge-ragflow`, `@objectstack/knowledge-pgvector`, `@objectstack/knowledge-turso`), the `@objectstack/embedder-openai` embedder, and the permission-aware retrieval + event sync below all ship in the **open-source framework**. The workflow is: declare your knowledge sources, pick an adapter, and call `search` — retrieval respects the same row-level security as any ObjectQL query. Only the in-product chat *runtime* that consumes retrieval ships in ObjectOS; see the callout under [Retrieving knowledge](#retrieving-knowledge).
 </Callout>
 
 ## Wiring
@@ -48,7 +48,13 @@ kernel.use(new KnowledgeMemoryPlugin());
 Retrieval is a plain service call — no AI runtime required. Resolve the `knowledge`
 service and call `search`. Hits are re-checked against the caller's
 `ExecutionContext` (RLS), sorted by score, and capped at `topK` before they come
-back.
+back. Because the re-check runs after ranking, for a caller other than the
+system identity the service asks each object source for more hits than `topK`,
+and asks once more when too few records survive, so a caller who may read few of
+the matching records still gets up to `topK` hits
+([the protocol](/docs/protocol/knowledge) gives the factors and the cap). A
+hit's `title` is the value of the object's display field (`nameField`, else the
+derived title field).
 
 ```ts
 const knowledge = ctx.getService('knowledge');
@@ -58,8 +64,27 @@ const hits = await knowledge.search('proposals about ACME', {
   topK: 5,
   executionContext,  // the caller's context — retrieval drops any hit RLS would hide
 });
-// hits: KnowledgeHit[] — each { chunkId, documentId, sourceId, sourceRecordId?, score, snippet, title? }
+// hits: KnowledgeHit[] — each { chunkId, documentId, sourceId, sourceRecordId?, score, snippet, title?, docHash?, headingPath? }
 ```
+
+By default a hit is a passage, so one record with several matching passages
+can take several of the `topK` places. Pass `granularity: 'record'` to get one
+hit per record (its best passage), or `groupBy: '<metadata field>'` to get one
+hit per value of that field — "which policies", not "which clauses":
+
+```ts
+const policies = await knowledge.search('parental leave', {
+  groupBy: 'policy',   // a field the source lists in metadataFields; implies granularity: 'record'
+  topK: 5,             // counts groups, not passages
+  executionContext,
+});
+```
+
+A record-level hit is checked against its record as it reads now: a record
+deleted, out of the source's `where`, or changed since it was indexed is not
+returned (its index entry is repaired in the background, unless the source
+sets `refresh.onRecordChange: false` for an external indexer). The rules are in
+[the protocol](/docs/protocol/knowledge#records-not-passages).
 
 <Callout type="info">
 **In-product chat ships in ObjectOS.** Exposing this retrieval to a chat UI as
@@ -73,11 +98,87 @@ Protocol, adapters, embedder, and `KnowledgeService.search` — is open, so you 
 installed ([Connect an MCP Client](/docs/ai/connect-mcp)).
 </Callout>
 
+## Searching inside chosen records
+
+Pass `scope` to search only inside some records: the records an object source indexes, or a parent record that source reaches through a lookup it lists in `metadataFields`.
+
+```ts
+// Only the clauses of one policy: the clause source lists its `policy` lookup in metadataFields.
+const hits = await knowledge.search('notice period', {
+  topK: 5,
+  scope: [{ object: 'policy', ids: [policyId] }],
+  executionContext,
+});
+```
+
+An adapter that reads the scope filters before it ranks, so the `topK` hits all come from inside the scope. Whatever the adapter does, the service drops any hit outside the scope, so an adapter that ignores it may answer fewer than `topK`. A source the scope does not reach is not searched, and `scope: []` answers nothing, never everything. A scope narrows what is searched; each hit is still re-checked against the caller, so it never shows a record the caller could not read. Bounds, the parent-link rules and what an adapter must do are in [the protocol's record scope](/docs/protocol/knowledge#record-scope).
+
+## The `search_knowledge` tool
+
+An AI client searches through one tool, `search_knowledge`, defined once by the knowledge service. The MCP door (HTTP and stdio) and the in-product agent serve that one definition unchanged, so every client is offered the same arguments and gets the same answer. It searches only sources whose `aiExposed` is not `false`, and reads as the person asking.
+
+| Argument | What it does |
+|:--|:--|
+| `query` | What to look for, in plain words. Required. |
+| `sourceIds` | Only these sources, by the ids every answer lists in `sources`. Omit to search them all. |
+| `topK` | At most this many hits, 1 to 20, default 5. Counts records or groups in the two modes below. |
+| `granularity` | `"chunk"` (the default): one hit per passage. `"record"`: one hit per record, its best passage. |
+| `groupBy` | One hit per value of a field the source lists in `metadataFields`, such as `policy`: "which policies", not "which clauses". Implies `"record"`; refused with `"chunk"`. A source of indexed records that does not list the field answers nothing for that call; a file or web source still answers, one hit per document, with no `groupValue`. |
+| `scope` | Only inside these records: a list of `{ object, ids }`, as `KnowledgeSearchOptions.scope` reads it above. At most 10 entries of at most 500 ids. |
+
+Each hit carries `sourceId`, `documentId`, `title`, `snippet`, `score`, and for an indexed record `record: { object, id }`, which the record tools read. It also carries `headingPath`, the headings its passage sits under, where the document has headings, and under `groupBy` the group's value as `groupValue`: the value as the index stores it (a string, a number, or a list for a multi-value lookup), absent on a hit of a file or web source. The answer also lists the searchable `sources`, and in `refused` any source that could not be searched.
+
+The tool is stricter than the service in a few places, so that a mistake is reported instead of being answered as "nothing matched":
+
+- An empty `scope`, an entry with no ids, and an empty `sourceIds` are refused, not answered with no hits.
+- An object name, record id or field name over 255 characters, or one holding a NUL character, is refused.
+- Each malformed argument is refused `VALIDATION_ERROR` (400), naming the argument. Over MCP, a shape the tool's schema states (an empty or over-long `scope`, a string over 255 characters, an unknown `granularity` or key) is refused first by the MCP input-validation check, as error `-32602` naming the argument, without that code. The coded refusal answers what the schema cannot state, such as a NUL character or `groupBy` with `"chunk"`, and every malformed argument the in-product agent sends.
+
+The answer never says how many hits the permission re-check or the scope removed. A `scope` entry or `groupBy` field that only a withheld source would answer gets the same empty answer as one that no source answers, so the answer never shows that a withheld source exists.
+
 ## What you get for free
 
 - **Permission-aware retrieval.** Every hit with a `sourceRecordId` is re-checked against the caller's `ExecutionContext` via `IDataEngine` — the same RLS that gates plain ObjectQL queries. A salesperson asking "find proposals about ACME" only sees the proposals they could already read directly. Before a source is searched, the caller's field-level read rules and the object's API exposure are asked too: a source serving a field the caller may not query is not searched for them (see [the protocol's source admission](/docs/protocol/knowledge#source-admission-exposure-and-field-level-rules)). File / HTTP hits pass through (ACL is the adapter's problem).
 - **Inline event sync.** When records on indexed objects change, the kernel's `IRealtimeService` events drive `KnowledgeService.handleRecordUpsert/Delete` automatically. No cron, no queue (yet — Phase 2).
 - **Adapter swap, zero caller changes.** Move from `memory` to `ragflow` to a custom adapter without touching your `search` calls, the `search_knowledge` tool, or any agent prompt.
+
+## Configuring the embedder from Settings
+
+When `KnowledgeServicePlugin` is mounted beside the settings service, Settings → AI & Embedder offers an **Embedder** section (`ai.embedder_*`): provider, API key, model, Base URL (for a custom or Azure endpoint), dimensions and batch size. The knowledge plugin reads those settings once, when the server starts, and registers the `EMBEDDER_SERVICE` (`'embedder'`) that knowledge adapters embed with:
+
+- **An embedder is already registered** — by ObjectOS Cloud, or by your own plugin — **it is kept.** The plugin logs one line saying so and does not apply the settings. It checks at `kernel:bootstrapped`, after every plugin's `init()`, `start()` and `kernel:ready` handler, so an embedder registered in any of those is seen. Register yours there, not later.
+- **A provider is saved and complete** → an `@objectstack/embedder-openai` embedder for that provider. The saved Base URL applies only to the custom and Azure providers; other providers use their preset endpoint. The boot line names the endpoint host. "Complete" is what the **Test embedder** button checks: a provider, an API key (Ollama excepted) and, for a custom or Azure endpoint, a Base URL.
+- **Dimensions and batch size are positive integers**, saved as numbers or set as text through an `OS_*` override (`OS_AI_EMBEDDER_DIMENSIONS=256`). A value that is not a positive integer is refused, with a `warn` at boot and the error below on every use — never silently ignored.
+- **The batch size is passed only when you saved it.** Left unsaved (the form shows 64), the embedder sends as many inputs per request as the model's documented cap allows — 10 for DashScope `text-embedding-v3`, 2048 for OpenAI `text-embedding-3-*` — and 10 for a model it does not know. A saved batch size is held to the saved model's documented cap (`documentedMaxBatchSize(model)` from `@objectstack/embedder-openai`): a saved 64 on `text-embedding-v3` sends 10. For a model without a documented cap the saved size is sent as saved.
+- **Nothing is configured** — no provider saved, `none` saved, or the saved settings incomplete → the server still boots, and every use of the embedder answers an error naming the missing settings: an adapter that embeds refuses indexing and search with it, and nothing is sent anywhere. Nothing is sent to a provider until you have saved one, and the API key is never logged or put in an error.
+
+**A saved change takes effect after a restart** — the page says so under the provider field. There is no hot replacement.
+
+An adapter that embeds resolves the service where it embeds, not at boot:
+
+```ts
+const embedder = ctx.getService<IEmbedder>(EMBEDDER_SERVICE); // from @objectstack/spec/contracts
+const vectors = await embedder.embed(chunks.map((c) => c.content));
+```
+
+## Splitting documents into passages
+
+The knowledge service cuts each document into passages once, and every adapter that takes passages (`knowledge-memory` does) indexes the same ones. An object source chooses how with `split`:
+
+```ts
+source: {
+  kind: 'object',
+  object: 'policy',
+  contentFields: ['title', 'body'],
+  split: { strategy: 'markdown', maxChars: 600 },
+}
+```
+
+- `recursive` (the default) cuts at blank lines, then line breaks, then sentence ends, then semicolons, then characters. It reads Chinese and English sentence ends — 「3.2 条」 and 「400.50 元」 stay whole — and never cuts inside a Markdown table or list item that fits.
+- `markdown` cuts one section per heading; each passage begins with its heading path, which is embedded with it.
+- `whole` keeps each document as one passage.
+
+A passage is at most `split.maxChars` characters — else the **Knowledge → Target chunk size** setting, else 800 — and, when the adapter reports its embedder's input limit, within 80% of that limit by the shared token estimate below. A `whole` document over that budget is **removed from the index and reported** (`failed` and `failures` on the reindex result, an `error` log on the event sync), never truncated; because the estimate runs high, a `whole` document can use about 60% of the model's limit. The full rules are in [the protocol's split section](/docs/protocol/knowledge#35-the-split).
 
 ## Embedder input limits
 
@@ -86,6 +187,8 @@ Every embedding model accepts a text up to some length, counted in tokens. A pro
 - When a limit applies, `embed()` measures every input before it sends anything. When one is over the model's limit, the whole call fails with an error naming the input's index, the model, the estimate and the limit. Nothing is sent and nothing is truncated.
 - The limit comes from the known-model table, which carries each provider's documented per-input limit (OpenAI `text-embedding-3-*` 8192, DashScope `text-embedding-v3` 8192, BigModel `embedding-3` 3072, SiliconFlow `BAAI/bge-m3` 8192, `BAAI/bge-large-*-v1.5` 512, …). Set `maxInputTokens` to override it.
 - A model that is not in the table, with no `maxInputTokens`, has no limit — its inputs are sent at any length — and the embedder warns once when it is constructed.
+- The embedder reports the limit it applies as `maxInputTokens` (`IEmbedder.maxInputTokens`), so a knowledge adapter can pass it on (`embedding.maxInputTokens`) and the service's passages fit it.
+- It reports the model it sends as `model` (`IEmbedder.model`), so a knowledge adapter can pass it on (`embedding.model`) and the index fingerprint sees a model change.
 
 ```ts
 new OpenAIEmbedder({
@@ -113,9 +216,42 @@ The sum is multiplied by 1.1 and rounded up. On the sampled classes — Chinese,
 
 Known residual: text made mostly of random hex or base64 — UUIDs, sha256 digests, encoded blobs — tokenizes at about 1–1.4 characters per token and can estimate below its real count. Emoji and rare ideographs (CJK Extension B and later) may also estimate low: `cl100k` spends two to four tokens on each. Other providers' tokenizers are not sampled.
 
+## When the model or the split changes: rebuild
+
+Vectors from two embedding models are not comparable, and neither are the passages of two splits. So every source's index is built under one **index fingerprint** — the embedding model and dimensions the adapter reports, the resolved split, and the content list — which the knowledge service computes and carries on every write and every search, and the adapter checks against the index it holds. Change any of them and the source's stored index is **refused** (`KNOWLEDGE_REBUILD_REQUIRED`, 409) until a complete reindex rebuilds it; it never answers with vectors of the old model ranked against the new one. A search over several sources still answers from the others, and the `search_knowledge` tool names each refused source in `refused`. Changing `where` or `metadataFields` changes no vector: a complete reindex repairs it in place. The full rules are in [the protocol's fingerprint section](/docs/protocol/knowledge#36-the-index-fingerprint).
+
+## Self-hosted vector store: PostgreSQL + pgvector
+
+`@objectstack/knowledge-pgvector` keeps passages and vectors in PostgreSQL with the pgvector extension — a `url` you give it, else the platform database when that is PostgreSQL — in a schema of its own (`os_knowledge`), so nothing collides with your objects' tables. Register it beside the knowledge service and point a source at it with `adapter: 'pgvector'`:
+
+```ts
+new KnowledgePgvectorPlugin({ queryPrefix: '' /* e.g. BGE's query instruction */ }),
+```
+
+- It searches by an exact scan, so a 3072-wide model works; the organization filter and the metadata `filter` run in SQL before ranking.
+- An unchanged passage is not sent to the embedder again on a reindex.
+- Without the `vector` extension (or the right to create it), boot goes on: the plugin warns with the SQL a database owner runs, and its sources answer `SERVICE_UNAVAILABLE` until then.
+- It stores each passage's text, which is as sensitive as the record it came from and is in every backup.
+
+Details — the tables, an approximate index as an operator's step, rebuilds — are in [the protocol's pgvector section](/docs/protocol/knowledge#41-knowledge-pgvector--the-open-vector-store-on-postgresql).
+
+## Local vector store: a libSQL file
+
+`@objectstack/knowledge-turso` keeps passages and vectors in a libSQL file of its own — by default `knowledge.db` under the project's `.objectstack/data/`, never the platform database's file — so a deployment on SQLite gets semantic search, Chinese text included, with no database server to run. Until `os dev` mounts it for you, add the package and register `KnowledgeTursoPlugin` beside the knowledge service yourself. Point a source at it with `adapter: 'turso'`:
+
+```ts
+new KnowledgeTursoPlugin(), // or { url: 'file:/var/lib/app/knowledge.db' }, ':memory:', a libsql:// URL
+```
+
+- It searches by an exact scan; the organization filter, the record scope and the metadata `filter` run in SQL before ranking. 10,000 passages of 1,536 dimensions take about 82 MB and a search about 50 ms; larger sources belong on pgvector.
+- A changed model or split is rebuilt beside the old index, which keeps answering until the reindex completes.
+- Where libSQL has no native build (Windows on ARM), boot goes on and its sources answer `SERVICE_UNAVAILABLE`.
+
+Details are in [the protocol's turso section](/docs/protocol/knowledge#42-knowledge-turso--the-open-vector-store-in-a-libsql-file).
+
 ## Why we did not build a vector DB
 
-Mature OSS (RAGFlow, LlamaIndex, Dify) already nail chunking, embedding, hybrid retrieval, rerank, and OCR. ObjectStack's value is **the metadata-native source declaration + the permission-aware filter on top of those engines** — not yet-another-RAG-stack. Customers pick the retrieval engine that matches their data; we make sure it talks to ObjectStack the same way every time.
+Mature OSS (RAGFlow, LlamaIndex, Dify) already nail embedding, hybrid retrieval, rerank, and OCR. ObjectStack's value is **the metadata-native source declaration, one structural split for every adapter, and the permission-aware filter on top of those engines** — not yet-another-RAG-stack. Customers pick the retrieval engine that matches their data; we make sure it talks to ObjectStack the same way every time.
 
 ---
 

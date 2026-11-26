@@ -14,6 +14,10 @@
  *     (the package-less scope and the cross-package leg). The item then opens
  *     the generic item page (decision 3).
  *
+ * An item of a customization pair (`<base>.custom`) with no published app of
+ * its own is asked of its base: `packageId` and `apps` are then the base's,
+ * and the same three rules pick among them (`StudioAreaAppOpen`).
+ *
  * Rule 1's first half and rule 2 are the rule Studio's 「‹ Back to app」
  * applies (`studioBackTarget`), so both share {@link rememberedPackageApp} and
  * {@link packageAppSegment}. An app's segment is the one the console resolves:
@@ -106,8 +110,9 @@ export function studioAppEditSegment({
 }
 
 /**
- * The app segment that a new report opens in (decision 13), or `null` when
- * there is none. A new report has no menu entry yet, so this is
+ * The app segment that a new report opens in (decision 13), or a new
+ * dashboard (objectstack#36907, in the app's design mode), or `null` when
+ * there is none. A new item has no menu entry yet, so this is
  * {@link studioAppEditSegment} without the menu half of rule 1.
  */
 export function studioAppCreateSegment({
@@ -137,6 +142,15 @@ export function studioCreateLandsInApp(areaPackageId: string | null | undefined,
 /** The item's page in the app at `segment`: `/apps/<app>/dashboard/<name>` or `/apps/<app>/report/<name>`. */
 export function appItemPath(segment: string, type: StudioAppEditType, name: string): string {
   return `/apps/${encodeURIComponent(segment)}/${type}/${encodeURIComponent(name)}`;
+}
+
+/**
+ * The app's root, `/apps/<app>`, where a new dashboard is made
+ * (objectstack#36907): the app opens its landing, with the design mode
+ * entered by the arrival the address never carries (`designModeAddDashboardArrival`).
+ */
+export function appHomePath(segment: string): string {
+  return `/apps/${encodeURIComponent(segment)}`;
 }
 
 /** The app's new-report page, `/apps/<app>/reports/new` (decision 13). */

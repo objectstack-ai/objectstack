@@ -112,6 +112,7 @@ vi.mock('./StudioBundleItemEditor.js', () => ({
 }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 // The source under test reaches dynamic imports of `@objectstack/lint`; their first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
@@ -169,9 +170,9 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Where />
       <Routes>
-        <Route path="/studio" element={<div data-testid="studio-landing" />} />
+        <Route path="/studio" element={<div data-testid="studio-entry" />} />
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -221,8 +222,9 @@ describe('Studio: the "All metadata" area in the builder (objectstack#28561)', (
       host: { packageId: PACKAGE_ID, readOnly: false, basePath: `/studio/${PACKAGE_ID}/metadata` },
     });
     expect(where()).toBe(`/studio/${PACKAGE_ID}/metadata?package=${PACKAGE_ID}`);
-    // The directory is no one entry's page; the builder's menu stays beside it.
-    expect(menu().queryByRole('link', { current: 'page' })).toBeNull();
+    // objectstack#37360 — rewritten on purpose: the directory is 全部类型 All types' page, the 高级 fold's
+    // last row. It read "The directory is no one entry's page". The builder's menu stays beside it.
+    expect(menu().getByRole('link', { current: 'page' })).toHaveAttribute('data-testid', 'studio-menu-entry-allTypes');
     expect(menu().getByTestId('studio-menu-group-data')).toBeInTheDocument();
     expect(screen.queryByTestId('studio-pillar-not-found')).toBeNull();
     // The surface and the area share the one package-list read.
@@ -293,17 +295,17 @@ describe('⌘K on the builder (objectstack#36900)', () => {
   const overlay = () => document.querySelector('[data-testid="overlay:command-palette"]');
   const paletteItem = (value: string) => document.querySelector(`[cmdk-item][data-value="${value}"]`);
 
-  it("on a package's pillar, Ctrl+K opens the palette with the menu's entries, and a pick opens through the surface", async () => {
+  it("on a package's page, Ctrl+K opens the palette with the menu's entries, and a pick opens through the surface", async () => {
     servePackages();
-    // objectstack#36904 — the Data pillar is retired (`/data` lands on the
-    // object list); the Automations pillar is a pillar page still.
-    renderAt(`/studio/${PACKAGE_ID}/automations`);
+    // objectstack#36904, objectstack#36903 — the Data and Automations pillars
+    // are retired: the package's object list in the area hosts the palette.
+    renderAt(`/studio/${PACKAGE_ID}/metadata/object?package=${PACKAGE_ID}`);
     await waitFor(() => menu().getByTestId('studio-menu-entry-type:flow'));
     expect(overlay()).toBeNull();
 
     fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
     await waitFor(() => expect(overlay()).not.toBeNull());
-    expect(where()).toBe(`/studio/${PACKAGE_ID}/automations?palette=1`);
+    expect(new URL(where(), 'http://x').searchParams.get('palette')).toBe('1');
     await waitFor(() => expect(paletteItem('studio-entry type:flow')).not.toBeNull());
     expect(paletteItem('studio-entry orgFlows')).not.toBeNull();
 

@@ -5,9 +5,11 @@
  *
  * ## The defect this holds closed
  *
- * The console's top bar is not one component: six frames each draw a sticky
+ * The console's top bar is not one component: five frames each draw a sticky
  * `header` around `AppHeader` (or, inside an app, `AppShell` draws it around
  * the `navbar` that `ConsoleLayout` hands it). They were all `h-14`, 56 px.
+ * (A sixth, the Studio home's console frame in `apps/console`'s
+ * `StudioRoute.tsx`, was deleted with that home by objectstack#36908.)
  * The approved artboards draw the bar at 48 px, and changing one frame alone
  * makes the bar jump on the way from Home into an app — which is why
  * objectui#12601 left Home at 56 px and carded this. So the height is held for
@@ -17,12 +19,12 @@
  *   - what sits under the bar at the viewport's edge (the app sidebar) offsets
  *     by that same height, derived from it rather than restated;
  *   - every frame that mounts `AppHeader` draws its bar from that constant —
- *     by reading it, or, across a package boundary it cannot import over, as a
- *     literal equal to it;
+ *     by reading it, or, through `@object-ui/layout`'s `AppShell`, which cannot
+ *     import over the package boundary, as a literal equal to it;
  *   - no other source copies the bar's class, and nothing offsets from a
  *     56 px bar any more.
  *
- * A seventh frame that mounts `AppHeader`, a copy of the bar's class anywhere
+ * A sixth frame that mounts `AppHeader`, a copy of the bar's class anywhere
  * in the trees below, or a revert of any one frame to `h-14` turns this file
  * red.
  *
@@ -69,24 +71,20 @@ const LAYOUT_APP_SHELL = 'packages/layout/src/AppShell.tsx';
  *   token      reads `CONSOLE_TOP_BAR` (this package's frames)
  *   app-shell  hands `AppHeader` to `@object-ui/layout`'s `AppShell` as its
  *              `navbar`; that header is a literal equal to the constant
- *   literal    a frame outside this package; its header is a literal equal to
- *              the constant
+ *
+ * `apps/console/src/components/StudioRoute.tsx` was listed here as a literal
+ * copy until objectstack#36908 deleted the Studio home's console frame it drew.
  */
-const FRAMES: ReadonlyArray<{ file: string; bar: 'token' | 'app-shell' | 'literal' }> = [
+const FRAMES: ReadonlyArray<{ file: string; bar: 'token' | 'app-shell' }> = [
   { file: 'packages/app-shell/src/console/home/HomeLayout.tsx', bar: 'token' },
   { file: 'packages/app-shell/src/console/organizations/OrganizationsLayout.tsx', bar: 'token' },
   { file: 'packages/app-shell/src/console/organizations/manage/OrganizationLayout.tsx', bar: 'token' },
   { file: 'packages/app-shell/src/console/ai/AiChatPage.tsx', bar: 'token' },
   { file: 'packages/app-shell/src/layout/ConsoleLayout.tsx', bar: 'app-shell' },
-  { file: 'apps/console/src/components/StudioRoute.tsx', bar: 'literal' },
 ];
 
-/** The sources allowed to spell the bar's class as a literal: the constant and its two copies. */
-const LITERAL_SITES = new Set([
-  TOKEN_MODULE,
-  LAYOUT_APP_SHELL,
-  ...FRAMES.filter((f) => f.bar === 'literal').map((f) => f.file),
-]);
+/** The sources allowed to spell the bar's class as a literal: the constant and its one copy. */
+const LITERAL_SITES = new Set([TOKEN_MODULE, LAYOUT_APP_SHELL]);
 
 /** The workspace directories whose `package.json` names this package as a dependency, and this package. */
 function packagesThatCanMountAppHeader(): string[] {
@@ -177,7 +175,7 @@ describe('the console top bar is one 48 px bar in every frame (objectui#12639)',
     expect(SCANNED).toContain(LAYOUT_APP_SHELL);
   });
 
-  it('every frame that mounts `AppHeader` is listed here, so a seventh frame cannot draw its own bar', () => {
+  it('every frame that mounts `AppHeader` is listed here, so a sixth frame cannot draw its own bar', () => {
     const mounting = SCANNED.filter((rel) => /<AppHeader\b/.test(code(rel)));
     expect(
       mounting,
@@ -189,7 +187,7 @@ describe('the console top bar is one 48 px bar in every frame (objectui#12639)',
   });
 
   for (const { file, bar } of FRAMES) {
-    it(`${file} draws the bar ${bar === 'token' ? 'from `CONSOLE_TOP_BAR`' : 'equal to `CONSOLE_TOP_BAR`'}`, () => {
+    it(`${file} draws the bar ${bar === 'token' ? 'from `CONSOLE_TOP_BAR`' : 'through `AppShell`, equal to `CONSOLE_TOP_BAR`'}`, () => {
       if (bar === 'token') {
         const tag = headerTagOf(file);
         expect(tag, `${file}'s top bar no longer reads CONSOLE_TOP_BAR`).toMatch(
@@ -198,19 +196,15 @@ describe('the console top bar is one 48 px bar in every frame (objectui#12639)',
         expect(heightStepsOf(tag.replace(/CONSOLE_TOP_BAR/, '')), `${file} sets its own bar height`).toEqual([]);
         return;
       }
-      if (bar === 'app-shell') {
-        expect(code(file)).toMatch(/import\s*\{[^}]*\bAppShell\b[^}]*\}\s*from\s*'@object-ui\/layout'/);
-        // The same slot draws the design mode's bar while the mode is on
-        // (objectstack#36362), and so at the same height.
-        expect(code(file)).toMatch(
-          /<AppShell\b[\s\S]*?navbar=\{\s*designMode\.active \?\s*\(\s*<DesignModeBar\b[\s\S]*?\)\s*:\s*\(\s*<AppHeader\b/,
-        );
-        expect(headerLiteralOf(LAYOUT_APP_SHELL), `${LAYOUT_APP_SHELL}'s header is not the console bar`).toBe(
-          CONSOLE_TOP_BAR,
-        );
-        return;
-      }
-      expect(headerLiteralOf(file), `${file}'s header is not the console bar`).toBe(CONSOLE_TOP_BAR);
+      expect(code(file)).toMatch(/import\s*\{[^}]*\bAppShell\b[^}]*\}\s*from\s*'@object-ui\/layout'/);
+      // The same slot draws the design mode's bar while the mode is on
+      // (objectstack#36362), and so at the same height.
+      expect(code(file)).toMatch(
+        /<AppShell\b[\s\S]*?navbar=\{\s*designMode\.active \?\s*\(\s*<DesignModeBar\b[\s\S]*?\)\s*:\s*\(\s*<AppHeader\b/,
+      );
+      expect(headerLiteralOf(LAYOUT_APP_SHELL), `${LAYOUT_APP_SHELL}'s header is not the console bar`).toBe(
+        CONSOLE_TOP_BAR,
+      );
     });
   }
 

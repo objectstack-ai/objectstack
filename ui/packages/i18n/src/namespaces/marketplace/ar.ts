@@ -90,6 +90,8 @@ const ar = {
       versions: "الإصدارات",
       noApprovedVersions: "لا توجد إصدارات معتمدة.",
       prerelease: "ما قبل الإصدار",
+      notInstallableHosted: "غير قابل للتثبيت على البيئات المستضافة",
+      notInstallableHostedReason: "إضافة برمجية: البيئات المستضافة لا تشغّل الإضافات البرمجية. ثبّتها على بيئة تشغيل ذاتية الاستضافة أو بيئة Enterprise.",
       moreOptions: "مزيد من خيارات التثبيت",
       uninstallFromRuntime: "إلغاء التثبيت من هذا الوقت التشغيل",
       addSampleData: 'إضافة بيانات تجريبية',

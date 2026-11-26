@@ -21,7 +21,7 @@ export default defineStack({
     type: 'app',
     name: 'Stripe',
     description: 'Read Stripe customers, charges, invoices and payment intents from flows, over Stripe\'s OpenAPI document.',
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
   },
 
   // `automation` materializes the `connectors:` entry at boot and runs the

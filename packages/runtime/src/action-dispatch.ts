@@ -172,6 +172,12 @@ export interface ResolvedActionCall {
          * answer refuses it, and nothing is handed off.
          */
         elicitConfirmation?: actionExec.ActionConfirmationElicitor;
+        /**
+         * [#34325] The door would ask a client that supports confirmation,
+         * and this call's client does not (`actionExec.ActionConfirmationDoor`):
+         * a `no_confirmation_service` refusal names that route too.
+         */
+        elicitsCapableClients?: boolean;
     };
     /**
      * [ADR-0106 D1] This door's answer for a name nothing declares, where it
@@ -425,7 +431,7 @@ async function confirmAdmittedAction(
         ...(subjectRecordId !== undefined ? { recordId: subjectRecordId } : {}),
         params,
         door: handOff.door,
-    }, wiring.ec);
+    }, wiring.ec, { elicitsCapableClients: handOff.elicitsCapableClients === true });
     if ('refused' in answer) {
         const { refused } = answer;
         return {
@@ -751,7 +757,7 @@ async function dispatchAdmittedAction(
             }
             const inject = await actionExec.resolveInProcessRequest(deps, requestContext, envId);
             if (!inject) {
-                return { kind: 'refused', refusal: { message: actionExec.apiActionForwardUnavailableError(actionDef, door), status: 503 } };
+                return { kind: 'refused', refusal: { message: actionExec.apiActionForwardUnavailableError(actionDef, door, ec), status: 503 } };
             }
             // [#28657] On a denied load the request is built from the
             // `recordId` alone — ⛔ never from a row the caller could not read.

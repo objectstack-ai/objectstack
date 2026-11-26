@@ -48,6 +48,7 @@
  */
 
 import { isConfigBag } from '@object-ui/react';
+import { renderableLabel } from './renderable-label';
 
 /** The two keys this module reads off an action node. */
 export interface StaticParamsSubject {
@@ -68,7 +69,9 @@ export function resetStaticParamsWarnings(): void {
 
 function warnNodeLevelObjectParams(subject: StaticParamsSubject, where: string): void {
   if (process.env.NODE_ENV === 'production') return;
-  const name = String(subject.name ?? subject.label ?? '(unnamed)');
+  // A nameless action is named by its label, read through the shared guard: an
+  // inline locale map would otherwise print `[object Object]` here.
+  const name = String(subject.name ?? renderableLabel(subject.label, '(unnamed)', where) ?? '(unnamed)');
   const memo = `${where}:${name}`;
   if (warned.has(memo)) return;
   warned.add(memo);

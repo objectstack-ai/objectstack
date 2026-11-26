@@ -1537,6 +1537,11 @@ export interface AggregateParams {
  * grouped read with no `limit` to the deployment's default page size and
  * answers `hasMore`). A group absent from a partial answer was dropped, not
  * empty. Absent or `false`: the answer is every group the query has.
+ *
+ * ⚠ `hasMore` is a property ON the array: a copy (`[...rows]`, `.slice()`,
+ * `.map()`, a structured clone) drops it silently, and the copy then reads
+ * as a whole answer. Read the flag off the answer as returned, or carry it
+ * across the copy.
  */
 export type ListViewGroupHeaderAnswer = ListViewGroupHeaderRow[] & {
   /** `true` when more groups exist than the answer carries. */

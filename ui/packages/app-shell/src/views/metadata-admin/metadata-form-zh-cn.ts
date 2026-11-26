@@ -704,6 +704,18 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       'triggerConditions.value': { label: '值' },
     },
   },
+  ai_context: {
+    label: 'AI 上下文包',
+    fields: {
+      name: { label: '名称' },
+      label: { label: '显示名称' },
+      object: { label: '根对象' },
+      fields: { label: '字段' },
+      related: { label: '关联列表' },
+      body: { label: '正文' },
+      'body.field': { label: '正文字段' },
+    },
+  },
   flow: {
     label: '流程',
     fields: {

@@ -118,11 +118,11 @@ checks it **before it loads anything** and refuses an out-of-range app at the
 boundary with the exact migration command. Change it when you deliberately move
 to a new protocol major — never to silence a mismatch.
 
-**Object naming:** The object `name` is the canonical identifier and equals the physical table name. Embed any domain prefix directly in the name (e.g. `name: 'crm_account'`); the object-level `namespace` *field* is retired (ADR-0129 D3) and refused at load. Never set `tableName`, and never add a `sys_metadata` object to a runtime manifest.
+**Object naming:** The object `name` is the canonical identifier and equals the physical table name. The object-level `namespace` *field* is retired (ADR-0129 D3) and refused at load. Never set `tableName`, and never add a `sys_metadata` object to a runtime manifest.
 
 **`manifest.namespace` (ADR-0048):** Optional, but **enforced once set**. When a package declares `manifest.namespace: 'crm'`, every `object.name` must start with `crm_` or `defineStack` errors (`validateNamespacePrefix` in `@objectstack/spec`); the legacy `<ns>__<short>` double-underscore form is rejected, and `sys_`-prefixed names are platform-reserved and exempt. The namespace is also a package-ownership key — installing two packages that both claim `crm` fails with `NamespaceConflictError` (downgrade to a warning with `OS_METADATA_COLLISION=warn`). Never `actions`, `connectors`, `global`, `hooks`, `oauth`, `runs`, `trigger` (route literals; `os validate` and build refuse).
 
-**Which names carry the namespace (ADR-0150):** object and doc names, capabilities (`crm.export_data`) and positions (one slot per environment). Every other name stays short (`send_email`): flows, actions, hooks, apps, pages, dashboards, reports, datasets, permission sets, tools, skills, agents are identified by package and name. A prefixed name stays valid; no name starts with `_`, which the router reserves. `os lint`'s `naming/namespace-prefix` warns on a bare capability or position name, and when one package declares an app, page, dashboard, flow, report or dataset name twice, or an action name twice on one object.
+**Which names carry the namespace (ADR-0150):** object and doc names, capabilities (`crm.export_data`) and positions (one slot per environment). Every other name stays short (`send_email`): flows, actions, hooks, apps, pages, dashboards, reports, datasets, permission sets, tools, skills, agents, context packs are identified by package and name. A prefixed name stays valid; no name starts with `_`, which the router reserves. `os lint`'s `naming/namespace-prefix` warns on a bare capability or position name, and when one package declares an app, page, dashboard, flow, report or dataset name twice, or an action name twice on one object.
 
 **Customizing an installed package (ADR-0146):** Customize an installed base `hotcrm` in its paired writable `hotcrm.custom`, which depends on it: a same-named item there with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (its `manifest.id`/`manifest.version`) replaces the base's document whole. Reads honour it only from the pair (the row's `package_id`), for a view, dashboard, report, email_template, translation, flow, action, page, app, dataset, doc, book or mapping, never judging `basedOn`. An email template is one item per (name, locale): an override names a locale the base ships; one it does not ship is added without `overrides`. Then no `?package`, `?package=hotcrm`, the layered read and both lists serve it, and removing the pair's item (`DELETE …?package=hotcrm.custom`) serves the base's again; the env-wide list holds one item per name one code package ships (a dependent's stays under its own `?package=`); a pre-D11 unbound Setup row wins over the base's until `os migrate packageless-overlays` moves it, and once movable as a declared override, its package-less save, publish, reset and rollback are refused (D11); an email-template row at a locale the base does not ship moves as the pair's own member and keeps that write. The base's address serves the pair's added locale too (both lists, the layered read with `code` null and `effective` the pair's, the execution list, a send in that locale); one a dependent adds under the base's name is served only under its own `?package=`. An undeclared pair row or a dependent's row at a base-shipped locale is an orphan in the layered read's `overlay`, `effective` = the base's. An override may narrow a public form's anonymous intake, never re-open one any honoured body withdrew. `GET /packages/hotcrm.custom/export` carries it with `overrides`.
 
@@ -179,10 +179,10 @@ The five retired remote templates (`todo`, `compliance`, `content`,
 
 `objectstack.config.ts` at the root is THE entry point (`defineStack()`), beside
 `package.json` and `tsconfig.json`. Metadata lives under `src/<collection>/` —
-`objects/` (one `task.object.ts` per object), then the optional `views/`, `apps/`,
+`objects/`, then the optional `views/`, `apps/`,
 `flows/`, `actions/`, `dashboards/`, `reports/`, `datasets/`, `i18n/` and
 `handlers/` (runtime hook handlers) — each with a barrel `index.ts`
-(`export * from './task.object'`) handed to the stack key of its name.
+(`export * from './task.object'`).
 
 ### Naming Conventions
 
@@ -301,7 +301,7 @@ token through the `CAPABILITY_PROVIDERS` registry in
 | Token | Provider package |
 |:--|:--|
 | `automation` | `@objectstack/service-automation` — flows, and any declarative `connectors:` entry |
-| `analytics`° `cache`° `storage`° `queue`° `job`° `messaging`° `realtime` `settings`° `sms`° `push` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)) |
+| `analytics`° `cache`° `storage`° `queue`° `job`° `messaging`° `realtime` `settings`° `sms`° `push` `record-context` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)); `record-context` serves `get_record_context`, **objectstack-ai** [context packs](../objectstack-ai/references/context-packs.md) |
 | `mailbox` | `@objectstack/service-mailbox` — inbound mail |
 | `marketplace` `package-registry`° | `@objectstack/service-package` |
 | `audit` `email`° `sharing`° `approvals` `webhooks` | `@objectstack/plugin-` + the token |

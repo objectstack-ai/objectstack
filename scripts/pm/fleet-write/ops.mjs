@@ -193,12 +193,13 @@
  * `/contents/**` and `/git/**`; `REFUSED_PATH_FAMILIES` refuses both for every
  * row, the one mailbox ref DELETE aside (above). The workflow-run dispatch (`workflow_dispatch`) and the failed-jobs
  * re-run (`run_rerun_failed`), both below, are `actions: write`, the two rows
- * spending it; the seven advisory rows that write (`advisory_report`,
+ * spending it; the eight advisory rows that write (`advisory_report`,
  * `advisory_create`, `advisory_collaborators_add`, `advisory_versions`,
- * `advisory_state`, `advisory_note` and `advisory_rewrite`, below) are
+ * `advisory_state`, `advisory_note`, `advisory_rewrite` and
+ * `advisory_severity`, below) are
  * `repository-advisories: write`, and the two that read (`advisory_read` and
  * `advisory_list`, below) spend the same grant at `read` alone (each row's
- * `grant`), the nine rows spending it; the
+ * `grant`), the ten rows spending it; the
  * front-of-queue enqueue (`pr_enqueue_front`, below) and the dequeue
  * (`pr_dequeue`, below) are `merge-queues: write`, the two rows spending it —
  * GitHub's GraphQL mutations are outside that ledger,
@@ -611,6 +612,7 @@
  *   `advisory_collaborators_add` `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and logins
  *   `advisory_versions`          `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and `versions`: package, range, patched versions; optional `drop`: packages
  *   `advisory_state`             `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and `draft`, `closed` or `published`
+ *   `advisory_severity`          `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and `severity`: `critical`, `high`, `medium` or `low`
  *
  * `advisory_create` is the maintainer's naming of a second way in, verbatim
  * as the body of issue 29410 records it: 「立一张 skills 卡，我现在就派发，然后你再试」.
@@ -709,14 +711,16 @@
  *     and packages, never a name or a version, which are the unpublished
  *     advisory's until the publish. `advisoryReportLandedText`,
  *     `advisoryCreateLandedText`, `advisoryLandedText`,
- *     `advisoryVersionsLandedText`, `advisoryStateLandedText` and
- *     `advisoryFenceText` are the only spellings of an advisory row. An id
+ *     `advisoryVersionsLandedText`, `advisoryStateLandedText`,
+ *     `advisorySeverityLandedText` and `advisoryFenceText` are the only
+ *     spellings of an advisory row. Of a severity it prints that the answer
+ *     stores the one sent, ⛔ never the word (`advisory_severity`, below). An id
  *     exposes no content, but it is public in the log. A draft's package names
  *     and the versions row's entries and `drop` names are `quiet` too: a
  *     refusal never echoes one, and a `drop` name is spoken of by its position
  *     in the action (`drop[1]`) alone.
  *
- * The executor's five paths (`execute.mjs`, in the shape of the hierarchy rows'):
+ * The executor's six paths (`execute.mjs`, in the shape of the hierarchy rows'):
  *
  *   - `advisory_report` is one POST of the row's body. It LANDS on a 2xx
  *     whose answer carries a `ghsa_id` (`advisoryReportReadBack`); the row and
@@ -762,6 +766,13 @@
  *     as `published`, with the versions it was sent. A landed publish alone
  *     earns a notice annotation naming the id (`relayAdvisoryAnnotationMessage`,
  *     `dispatch.mjs`): it is public once published, which is the point.
+ *   - `advisory_severity` reads the advisory the same way and refuses with
+ *     nothing sent unless it reads `triage`, `draft` or `closed`
+ *     (`ADVISORY_SEVERITY_STATES`) and carries no CVSS vector (the `cvss`
+ *     fence of `ADVISORY_SEVERITY_FENCES`). Its PATCH body is the table's
+ *     `{ severity }` and nothing else, and it LANDS only when the answer,
+ *     still unpublished, stores the severity sent (`advisorySeverityReadBack`;
+ *     its own section, below).
  *
  * Each row travels `alone` and spends `repository-advisories: write`, a grant
  * minted only for its stroke (`STROKE_SCOPED_PERMISSIONS`), so every other
@@ -1106,6 +1117,44 @@
  *
  * The grant and the gate are the note's: `repository-advisories: write`, minted for the stroke alone; it travels
  * `alone`; and the stroke's target-write sender gate.
+ *
+ * ## The one row that sets an advisory's severity — `advisory_severity`
+ *
+ * The field orders the list the maintainer decides publishing from, and a published advisory shows it to the public,
+ * so a seat that grades an advisory, or takes one over graded differently, makes the field agree. The maintainer's
+ * words, verbatim as the body of issue 36805 records them: 「级别也你修改」 and 「先立卡处理，支持车队改级别」.
+ *
+ *   row                 request                                         the payload carries
+ *   `advisory_severity` `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and `severity`, one of `ADVISORY_SEVERITIES`
+ *
+ * NO PROSE, SO NOTHING SEALED. `severity` is the report's and the draft's own field (`FIELDS`): a quiet closed enum of
+ * GitHub's four, `ADVISORY_SEVERITIES`, so a value outside it is refused by the key's name and never echoed, and any
+ * other key is refused by its name. The PATCH body is the table's, `{ severity }` and nothing else.
+ *
+ * The executor (`execute.mjs`, `advisoryPreflight` and `confirmAdvisory`) reads the advisory first and judges
+ * `ADVISORY_SEVERITY_FENCES`: `ADVISORY_FENCES` with `from` `ADVISORY_SEVERITY_STATES` — `triage`, `draft` or `closed`,
+ * the note's and the rewrite's three; `published` and `withdrawn` refused, because a published severity is public —
+ * then the `cvss` fence (below). A fence that fails sends nothing. The action LANDS only when the PATCH answer names the
+ * advisory, still in one of those states, and stores the severity sent (`advisorySeverityReadBack`); the seat confirms
+ * it afterwards through `advisory_list`'s sealed `severity` field. ⛔ The public run carries the id, the state and the
+ * sentence that the answer stores the one sent (`advisorySeverityLandedText`), never the severity word: `advisory_list`
+ * seals every unpublished advisory's severity, so no row prints one.
+ *
+ * THE CVSS VECTOR — measured against the REST description, not a live advisory. GitHub's description
+ * (`github/rest-api-description`, `descriptions/api.github.com/api.github.com.json` at c9c95fe3, read 2026-11-24,
+ * operation `security-advisories/update-repository-advisory`) says of `severity` "You must choose between setting this
+ * field or `cvss_vector_string`", calls the vector what "calculates the severity of the advisory", and documents a 422,
+ * "Cannot update severity value when CVSS is set." (example `update_severity_with_cvss_set`). So the row takes no
+ * vector, and the `cvss` fence refuses, nothing sent, an advisory whose `cvss` or `cvss_severities` (`cvss_v3`,
+ * `cvss_v4`) carries a vector, or answers either in a shape it cannot judge (`advisoryCvssVectorOf`). The severity of
+ * such an advisory stays the maintainer's to set in the GitHub UI. NOT measured: the App's PATCH of `severity` in each
+ * of the three states; the first live run after merge confirms it, and a refusal is a FAILED action carrying
+ * `ADVISORY_ACCESS_REMEDY`.
+ *
+ * The grant and the gate are `advisory_state`'s: `repository-advisories: write`, minted for the stroke alone; it
+ * travels `alone`; and the stroke's target-write sender gate. The security lane's write list (pm-dispatch
+ * `references/lanes/security.md` and `references/security-findings.md` §3) does not name this row yet. Adding it there
+ * is a governed skills edit of its own, and until then this section documents the row.
  *
  * ## The platform's `client_payload` ceilings — pinned, with their source
  *
@@ -2056,7 +2105,7 @@ const packagesText = (entries) => {
   const n = new Set(entries.map((v) => v.package)).size;
   return `${n} package${n === 1 ? '' : 's'}`;
 };
-/** The severities a report or a draft may carry — GitHub's own enum for both. */
+/** The severities a report or a draft may carry, and the one `advisory_severity` sets — GitHub's own enum for all three. */
 export const ADVISORY_SEVERITIES = Object.freeze(['critical', 'high', 'medium', 'low']);
 /** A weakness id as a report or a draft carries one, `CWE-` and a number. */
 export const CWE_ID_SHAPE = /^CWE-[1-9][0-9]{0,4}$/;
@@ -2328,6 +2377,88 @@ export function advisoryVersionsReadBack({ ghsaId, sent = [], drop = [], answer 
 export function advisoryVersionsLandedText({ ghsaId, state, versions = [], drop = [] }) {
   const dropped = drop.length ? ` · dropped ${drop.length} package${drop.length === 1 ? '' : 's'}` : '';
   return `${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} · versions set: ${entriesText(versions.length)} across ${packagesText(versions)}${dropped}`;
+}
+
+// ---------------------------------------------------------------------------
+// `advisory_severity` (header: "The one row that sets an advisory's severity") — the states, the fences, the read-back.
+// ---------------------------------------------------------------------------
+
+/**
+ * The states `advisory_severity` sets a severity in — the note's and the rewrite's three, every unpublished state.
+ * `published` and `withdrawn` are refused: a published advisory shows its severity to the public (header).
+ */
+export const ADVISORY_SEVERITY_STATES = Object.freeze(['triage', 'draft', 'closed']);
+
+/** One CVSS slot of an advisory answer — `{ vector_string, score }` or null — as `none`, `set` or `unreadable`. Pure. */
+const cvssSlotOf = (slot) => {
+  if (slot === undefined || slot === null) return 'none';
+  if (!advisoryShaped(slot)) return 'unreadable';
+  const v = slot.vector_string;
+  if (v === undefined || v === null) return 'none';
+  return typeof v === 'string' ? 'set' : 'unreadable';
+};
+
+/**
+ * Does an advisory answer carry a CVSS vector (header: the `cvss` fence)? `set` when `cvss.vector_string`, or
+ * `cvss_severities.cvss_v3` / `.cvss_v4`'s, is a string — any string, so a blank one fails closed too; `unreadable`
+ * when none is set but one of those is answered in a shape the platform's `repository-advisory` schema does not
+ * declare (an object or null each); `none` otherwise — every slot absent, null, or null at its `vector_string`.
+ * ⛔ A verdict word alone: never the vector or the score. Pure.
+ */
+export function advisoryCvssVectorOf(json) {
+  const sev = json?.cvss_severities;
+  const severities = sev === undefined || sev === null ? [] : advisoryShaped(sev) ? [cvssSlotOf(sev.cvss_v3), cvssSlotOf(sev.cvss_v4)] : ['unreadable'];
+  const verdicts = [cvssSlotOf(json?.cvss), ...severities];
+  return verdicts.includes('set') ? 'set' : verdicts.includes('unreadable') ? 'unreadable' : 'none';
+}
+
+/**
+ * The fences on a severity's advisory, judged on the executor's own GET — `ADVISORY_FENCES` with `from`
+ * `ADVISORY_SEVERITY_STATES` (its `versions` and `notes` fences pass a row that sets no versions and publishes
+ * nothing), then the `cvss` fence: the platform refuses a severity while a vector is set (header), so the row never
+ * sends one there. `ctx` is `ADVISORY_FENCES`' `{ ghsaId, answer, from }`.
+ */
+export const ADVISORY_SEVERITY_FENCES = Object.freeze([
+  ...ADVISORY_FENCES,
+  Object.freeze({
+    fence: 'cvss',
+    wants: () => 'an advisory carrying no CVSS vector — the platform refuses a severity while one is set, and the severity of such an advisory stays the maintainer\'s to set',
+    fails: (c) => {
+      if (!advisoryRead(c)) return 'not judged, because the advisory was not read';
+      const v = advisoryCvssVectorOf(c.answer.json);
+      if (v === 'none') return null;
+      return v === 'set' ? 'the advisory carries a CVSS vector, which calculates its severity' : "the advisory's cvss or cvss_severities is not of the platform's declared shape, so it cannot be judged free of a vector";
+    },
+  }),
+]);
+
+/** The severity fences `ctx` fails: `[{ fence, wants, got }]`, `[]` when all hold — spoken through `advisoryFenceText`. Pure. */
+export function advisorySeverityFenceFailures(ctx = {}) {
+  return ADVISORY_SEVERITY_FENCES.map((f) => ({ fence: f.fence, wants: f.wants(ctx), got: f.fails(ctx) })).filter((f) => f.got !== null);
+}
+
+/**
+ * What LANDED means for `advisory_severity` (the header's section): the PATCH answered 2xx with the advisory the
+ * action names, still in `ADVISORY_SEVERITY_STATES`, storing exactly `sent`. Answers `{ ok, why }`; `why` carries the
+ * status, the id and the state alone — of the severity only whether it is none, another of the four or of no
+ * declared shape, ⛔ never the word. Pure.
+ */
+export function advisorySeverityReadBack({ ghsaId, sent, answer } = {}) {
+  if (!twoXX(answer)) return { ok: false, why: `HTTP ${answer?.status ?? 'none'}` };
+  if (!advisoryShaped(answer.json)) return { ok: false, why: `HTTP ${answer.status}, but the answer is not an advisory, so its severity cannot be read back` };
+  if (answer.json.ghsa_id !== ghsaId) return { ok: false, why: `HTTP ${answer.status}, but the answer names ${advisoryPrintable(answer.json.ghsa_id, GHSA_ID_SHAPE, 'advisory id')}` };
+  if (!ADVISORY_SEVERITY_STATES.includes(answer.json.state)) {
+    return { ok: false, why: `HTTP ${answer.status}, but the answer reads state ${advisoryPrintable(answer.json.state, ADVISORY_STATE_SHAPE, 'advisory state')}, not ${orList(ADVISORY_SEVERITY_STATES)}` };
+  }
+  const stored = answer.json.severity;
+  if (stored === sent) return { ok: true, why: '' };
+  const what = stored === undefined || stored === null ? 'no severity' : ADVISORY_SEVERITIES.includes(stored) ? 'another severity than the one sent' : 'a severity of no declared shape';
+  return { ok: false, why: `HTTP ${answer.status}, but the answer stores ${what}` };
+}
+
+/** The row a landed `advisory_severity` prints: the id, the state and that the answer stores the one sent — ⛔ never the word. Pure. */
+export function advisorySeverityLandedText({ ghsaId, state }) {
+  return `${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} · severity set: the answer stores the one sent`;
 }
 
 /**
@@ -4060,6 +4191,24 @@ export const OPS = Object.freeze({
     optional: Object.freeze([]),
     alone: true,
     requests: (a, repo) => [{ verb: 'PATCH', path: `/repos/${repo}/security-advisories/${a.ghsa_id}`, advisoryRewrite: { ghsaId: a.ghsa_id, sealedNote: a.sealed_note } }],
+  }),
+  // The one row that sets an advisory's severity — see the header. The id and one of GitHub's four severities, no prose,
+  // so nothing is sealed. The body `{ severity }` is the table's, from the action alone; the executor sends it only after
+  // its own GET reads an unpublished advisory carrying no CVSS vector (`ADVISORY_SEVERITY_FENCES`), and it lands only
+  // when the answer stores the severity sent. repository-advisories write, alone, the stroke's target-write gate.
+  advisory_severity: Object.freeze({
+    permission: 'repository-advisories',
+    required: Object.freeze(['ghsa_id', 'severity']),
+    optional: Object.freeze([]),
+    alone: true,
+    requests: (a, repo) => [
+      {
+        verb: 'PATCH',
+        path: `/repos/${repo}/security-advisories/${a.ghsa_id}`,
+        body: { severity: a.severity },
+        advisorySeverity: { ghsaId: a.ghsa_id, severity: a.severity },
+      },
+    ],
   }),
 });
 

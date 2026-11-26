@@ -61,13 +61,19 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { t } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
-// objectstack#36904 — an object opens its designer on its own address; the
-// old Data and Interfaces addresses land on the object list, which is no item.
-// objectstack#36905 — the sharing overview's own page took the Access pillar's place here.
-const PILLARS = ['metadata/object/fo_job', 'automations', 'owd'] as const;
+// objectstack#36904, objectstack#36903 — an object and a flow open their
+// designer on their own address; the old Data and Interfaces addresses land on
+// the object list, which is no item. objectstack#36905 — the sharing
+// overview's own page took the Access pillar's place here.
+const PILLARS = ['metadata/object/fo_job', 'metadata/flow/notify_owner', 'owd'] as const;
 const READ_ONLY = t('engine.studio.pkg.readonly', 'en');
 
 function servePackage(writable: boolean) {
@@ -88,7 +94,7 @@ function renderPillar(pillar: (typeof PILLARS)[number]) {
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/${pillar}`]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );

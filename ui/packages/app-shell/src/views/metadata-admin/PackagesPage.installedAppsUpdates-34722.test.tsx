@@ -24,8 +24,9 @@
  *   - a module package (`type: 'module'` declaring its app in `dependencies`)
  *     is folded under that app's line and shown on demand;
  *   - the columns are Name, Version, Status, Source, Update, and the developer
- *     doors (Import, the platform switch, the Source chip's Show all) are not
- *     drawn; New Package is, and lands in Studio (objectstack#36834).
+ *     doors (the platform switch, the Source chip's Show all) are not drawn;
+ *     New Package is, and lands in Studio (objectstack#36834), with Import
+ *     beside it (objectstack#37139; see the last describe of this file).
  * On the Studio door all of the developer doors and columns stay, and the
  * catalog is never asked.
  *
@@ -68,21 +69,30 @@ vi.mock('./PackageFormDialog', () => ({
     open,
     mode,
     onSaved,
+    newApp,
   }: {
     open: boolean;
     mode: string;
     onSaved?: (r: { id: string }) => void;
+    newApp?: { reserve?: unknown; create?: unknown };
   }) =>
     open && mode === 'create' ? (
-      <button type="button" data-testid="stub-create-save" onClick={() => onSaved?.({ id: 'app.fresh' })}>
+      <button
+        type="button"
+        data-testid="stub-create-save"
+        // objectstack#37134 — whether the page handed the dialog the app step.
+        data-new-app={typeof newApp?.reserve === 'function' && typeof newApp?.create === 'function' ? 'step' : 'none'}
+        onClick={() => onSaved?.({ id: 'app.fresh' })}
+      >
         save
       </button>
     ) : null,
 }));
 
 import { resolveHref } from '@object-ui/layout';
-import { PackagesPage, type InstalledPackageRow } from './PackagesPage';
+import { PackageDetailSheet, PackagesPage, type InstalledPackageRow } from './PackagesPage';
 import { t } from './i18n';
+import { SETUP_NEW_PACKAGE_PATH, setupPackagePath } from './packageSource';
 // The page's package form reaches the CEL authoring helpers, which load these
 // two lazily; loaded here so their first load is paid at import, not inside a
 // test's clocked window.
@@ -159,6 +169,8 @@ let catalogReads: string[] = [];
 let writes: string[] = [];
 /** How many times the list door was read. */
 let packagesReads = 0;
+/** The package ids whose customizations door was read (objectstack#36908). */
+let customizationReads: string[] = [];
 
 /** Boot the real runtime config, then serve the package, install and catalog doors. */
 async function serve({
@@ -181,6 +193,7 @@ async function serve({
   catalogReads = [];
   writes = [];
   packagesReads = 0;
+  customizationReads = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: unknown, init?: { method?: string }) => {
@@ -200,9 +213,32 @@ async function serve({
       if (/^\/api\/v1\/packages\/[^/]+$/.test(path) && method === 'DELETE') {
         return reply(200, { success: true, data: {} });
       }
+      // objectstack#36908 — a read-only base's detail reads what this
+      // deployment changed on it: one tab arrangement, for every base.
+      const customized = /^\/api\/v1\/packages\/([^/]+)\/customizations$/.exec(path);
+      if (customized) {
+        customizationReads.push(decodeURIComponent(customized[1]));
+        const arrangements = [{ object: 'acme_task', key: 'relatedLists' }];
+        return reply(200, {
+          success: true,
+          data: {
+            packageId: decodeURIComponent(customized[1]),
+            overrides: [],
+            extensions: [],
+            arrangements,
+            switchedOff: [],
+            contributions: [],
+            counts: { overrides: 0, extensions: 0, arrangements: 1, switchedOff: 0, contributions: 0 },
+          },
+        });
+      }
       if (path === '/api/v1/cloud-connection/installed') return reply(404, {});
       if (path === '/api/v1/marketplace/install-local' && method === 'GET') {
         return reply(200, { success: true, data: { items: installs } });
+      }
+      // objectstack#37139 — Import: the file's manifest, installed.
+      if (path === '/api/v1/marketplace/install-local' && method === 'POST') {
+        return reply(200, { success: true, data: { manifestId: 'com.acme.imported' } });
       }
       const listing = /^\/api\/v1\/marketplace\/packages\/([^/]+)$/.exec(path);
       if (listing) {
@@ -468,7 +504,7 @@ describe('Setup → Installed Apps: an app is one line, its modules folded under
 describe('the two doors (objectstack#34722)', () => {
   const headers = () => screen.getAllByRole('columnheader').map((h) => h.textContent?.trim());
 
-  it('the administration face draws the administrator columns, New Package, and none of the developer doors', async () => {
+  it('the administration face draws the administrator columns, New Package and Import, and none of the other developer doors', async () => {
     await serve({ packages: [HOTCRM, ...MODULES, TODO, CODE, PLATFORM] });
     renderAt(SETUP_URL);
     await settled();
@@ -481,9 +517,9 @@ describe('the two doors (objectstack#34722)', () => {
       row('engine.packages.installedApps.col.update'),
       row('engine.packages.col.actions'),
     ]);
-    expect(screen.queryByRole('button', { name: row('engine.packages.import') })).toBeNull();
-    // objectstack#36834 — New Package is the administration face's one header
-    // action; it lands in Studio (see the create case below).
+    // objectstack#36834 — New Package lands in Studio (see the create case
+    // below); objectstack#37139 — Import sits beside it.
+    expect(screen.getByRole('button', { name: row('engine.packages.import') })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: row('engine.packages.new') })).toBeInTheDocument();
     expect(screen.queryByTestId('pkg-show-platform')).toBeNull();
     expect(screen.queryByTestId('pkg-source-filter')).toBeNull();
@@ -600,12 +636,10 @@ describe('Setup → Packages: the administration face (objectstack#36834)', () =
 
     expect(screen.getByTestId('pkg-source-picker-marketplace')).toHaveAttribute('data-state', 'on');
     expect(screen.queryByTestId('pkg-row-com.acme.code')).toBeNull();
-    expect(screen.queryByRole('button', { name: row('engine.packages.import') })).toBeNull();
     // Clearing the filter stays on the administration face.
     fireEvent.click(screen.getByTestId('pkg-source-picker-all'));
     await waitFor(() => expect(query().get('face')).toBe('admin'));
     expect(await screen.findByTestId('pkg-row-com.acme.code')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: row('engine.packages.import') })).toBeNull();
   });
 
   it('an unknown face is refused by name, not read as the development surface', async () => {
@@ -731,5 +765,241 @@ describe('Setup → Packages: the administration face (objectstack#36834)', () =
       expect(row(key, 'zh'), `${key}: a missing zh row echoes the key back`).not.toBe(key);
       expect(row(key, 'zh'), `${key}: the zh row must not be the English one`).not.toBe(row(key));
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// objectstack#36908 — the console's new-package doors land on this face with
+// New Package open (`SETUP_NEW_PACKAGE_PATH`), the Studio home that held that
+// dialog having been removed.
+// ---------------------------------------------------------------------------
+
+describe('Setup → Packages: the new-package deep link (objectstack#36908)', () => {
+  it('`?new=package` opens New Package on arrival and drops the param, keeping the face', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(SETUP_NEW_PACKAGE_PATH);
+    expect(SETUP_NEW_PACKAGE_PATH).toBe(`${ADMIN_URL}&new=package`);
+
+    expect(await screen.findByTestId('stub-create-save')).toBeInTheDocument();
+    await waitFor(() => expect(query().has('new')).toBe(false));
+    expect(query().get('face')).toBe('admin');
+
+    // The create lands in Studio on the new package, as New Package does.
+    fireEvent.click(screen.getByTestId('stub-create-save'));
+    expect(await screen.findByTestId('where')).toHaveTextContent('/studio/app.fresh/data');
+  });
+
+  it('CONTROL: the face without the param opens no dialog', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(ADMIN_URL);
+    await screen.findByTestId('pkg-row-com.acme.code');
+    expect(screen.queryByTestId('stub-create-save')).toBeNull();
+  });
+
+  it('on the development surface the param opens nothing, and is dropped', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(`${STUDIO_URL}?new=package`);
+    await screen.findByTestId('pkg-row-com.acme.code');
+    await waitFor(() => expect(query().has('new')).toBe(false));
+    expect(screen.queryByTestId('stub-create-save')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// objectstack#37134 — New Package, from the button and from the console's
+// new-package doors (`?new=package`), hands the dialog the app step, so it
+// offers 「同时创建应用」 (the dialog itself is pinned in
+// `PackageFormDialog.newAppStep-36748.test.tsx`).
+// ---------------------------------------------------------------------------
+
+describe('Setup → Packages: New Package offers 「同时创建应用」 (objectstack#37134)', () => {
+  it('the New Package button opens the dialog with the app step, and lands where it did', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(ADMIN_URL);
+    await screen.findByTestId('pkg-row-com.acme.code');
+    fireEvent.click(screen.getByRole('button', { name: row('engine.packages.new') }));
+    const save = await screen.findByTestId('stub-create-save');
+    expect(save).toHaveAttribute('data-new-app', 'step');
+    fireEvent.click(save);
+    expect(await screen.findByTestId('where')).toHaveTextContent('/studio/app.fresh/data');
+  });
+
+  it('the `?new=package` door opens the dialog with the app step', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(SETUP_NEW_PACKAGE_PATH);
+    expect(await screen.findByTestId('stub-create-save')).toHaveAttribute('data-new-app', 'step');
+  });
+
+  it('the development surface’s New Package does too', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(STUDIO_URL);
+    await screen.findByTestId('pkg-row-com.acme.code');
+    fireEvent.click(screen.getByRole('button', { name: row('engine.packages.new') }));
+    expect(await screen.findByTestId('stub-create-save')).toHaveAttribute('data-new-app', 'step');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// objectstack#36908 — the removed Studio home's "n customized, m switched off"
+// and its "Customizations in this environment" panel are drawn in a read-only
+// base's detail on this face (`PackageCustomizationsPanel.test.tsx` pins
+// the panel itself).
+// ---------------------------------------------------------------------------
+
+/** A code base's paired customization package, served read-only (`isCustomizationPackage`). */
+const CODE_PAIR: InstalledPackageRow = {
+  manifest: { id: 'com.acme.code.custom', name: 'Code App customizations', version: '1.0.0', type: 'app', scope: 'project' },
+  enabled: true,
+  source: 'code',
+  writable: false,
+};
+
+/** The detail sheet alone, on the administration face. */
+function renderSheet(pkg: InstalledPackageRow) {
+  return render(
+    <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
+      <MemoryRouter initialEntries={[ADMIN_URL]}>
+        <PackageDetailSheet pkg={pkg} face="admin" open onOpenChange={() => {}} onChanged={() => {}} />
+      </MemoryRouter>
+    </I18nProvider>,
+  );
+}
+
+/** The sheet's own reads have had a turn to start: its info block is drawn. */
+async function settledSheet(sheet: HTMLElement) {
+  await waitFor(() => expect(within(sheet).getAllByText(/1\.0\.0/).length).toBeGreaterThan(0));
+  await new Promise((r) => setTimeout(r, 50));
+}
+
+describe('Setup → Packages: a read-only base’s customizations in its detail (objectstack#36908)', () => {
+  it('a code package’s detail draws what this deployment changed on it, its arrangement named apart (objectstack#37236)', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(ADMIN_URL);
+    fireEvent.click(await screen.findByTestId('pkg-row-com.acme.code'));
+    const sheet = await screen.findByRole('dialog');
+
+    const section = within(sheet).getByTestId('pkg-detail-customizations');
+    await waitFor(() =>
+      expect(within(section).getByTestId('pkg-detail-customizations-summary')).toHaveTextContent('0 customized, 1 rearranged, 0 switched off'),
+    );
+    expect(within(section).getByTestId('pkg-detail-customize')).toHaveAttribute('href', '/studio/com.acme.code/data');
+  });
+
+  it('an authored package’s detail draws no customizations section: it is changed in place', async () => {
+    await serve({ packages: [AUTHORED] });
+    renderAt(ADMIN_URL);
+    fireEvent.click(await screen.findByTestId('pkg-row-app.b2r4'));
+    const sheet = await screen.findByRole('dialog');
+    expect(within(sheet).queryByTestId('pkg-detail-customizations')).toBeNull();
+  });
+
+  it('CONTROL: the development surface’s detail draws no customizations section', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(STUDIO_URL);
+    fireEvent.click(await screen.findByTestId('pkg-row-com.acme.code'));
+    const sheet = await screen.findByRole('dialog');
+    expect(within(sheet).queryByTestId('pkg-detail-customizations')).toBeNull();
+  });
+
+  it('a read-only `.custom` pair’s detail draws no section and reads no customizations: it is read through its base', async () => {
+    await serve({ packages: [CODE_PAIR] });
+    renderAt(ADMIN_URL);
+    fireEvent.click(await screen.findByTestId(`pkg-row-${CODE_PAIR.manifest.id}`));
+    const sheet = await screen.findByRole('dialog');
+    await settledSheet(sheet);
+    expect(within(sheet).queryByTestId('pkg-detail-customizations')).toBeNull();
+    expect(customizationReads).toEqual([]);
+  });
+
+  // The administration face lists no kernel package (pinned above), so its
+  // detail is opened directly: the sheet's own gate is what is measured.
+  it('a kernel package’s detail draws no section and reads no customizations: it takes no customization', async () => {
+    await serve({ packages: [PLATFORM] });
+    renderSheet(PLATFORM);
+    const sheet = await screen.findByRole('dialog');
+    await settledSheet(sheet);
+    expect(within(sheet).queryByTestId('pkg-detail-customizations')).toBeNull();
+    expect(customizationReads).toEqual([]);
+  });
+
+  it('CONTROL: the same direct render of a code package’s detail draws the section and reads its customizations once', async () => {
+    await serve({ packages: [CODE] });
+    renderSheet(CODE);
+    const sheet = await screen.findByRole('dialog');
+    await waitFor(() => expect(within(sheet).getByTestId('pkg-detail-customizations')).toBeInTheDocument());
+    await waitFor(() => expect(customizationReads).toEqual(['com.acme.code']));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// objectstack#37139 — Import sits in Setup → Packages' header beside New
+// Package and works as it does on the development face; Studio's package
+// menu's 「Manage in Setup…」 opens this face on one package's row
+// (`?package=ID`).
+// ---------------------------------------------------------------------------
+
+/** The header's Import, fed one package file. */
+async function importOn(lang: 'en' | 'zh') {
+  const button = await screen.findByRole('button', { name: row('engine.packages.import', lang) });
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+  const file = new File([JSON.stringify({ id: 'com.acme.imported', name: 'Imported', version: '1.0.0' })], 'imported.json', {
+    type: 'application/json',
+  });
+  fireEvent.change(input, { target: { files: [file] } });
+  return button;
+}
+
+describe('Setup → Packages: Import beside New Package (objectstack#37139)', () => {
+  it.each(['en', 'zh'] as const)('%s: the header draws Import, then New Package', async (lang) => {
+    await serve({ packages: [CODE] });
+    renderAt(ADMIN_URL, lang);
+    await screen.findByTestId('pkg-row-com.acme.code');
+    const importButton = screen.getByRole('button', { name: row('engine.packages.import', lang) });
+    const newButton = screen.getByRole('button', { name: row('engine.packages.new', lang) });
+    expect(importButton.compareDocumentPosition(newButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(importButton.parentElement).toBe(newButton.parentElement);
+  });
+
+  it.each(['en', 'zh'] as const)('%s: Import installs the file and re-reads the list, as on the development face', async (lang) => {
+    await serve({ packages: [CODE] });
+    renderAt(ADMIN_URL, lang);
+    await screen.findByTestId('pkg-row-com.acme.code');
+    const readsBefore = packagesReads;
+    await importOn(lang);
+    expect(
+      await screen.findByText(t('engine.packages.import.success', lang === 'en' ? 'en-US' : 'zh-CN').replace('{id}', 'com.acme.imported')),
+    ).toBeInTheDocument();
+    expect(writes).toEqual(['POST /api/v1/marketplace/install-local']);
+    await waitFor(() => expect(packagesReads).toBeGreaterThan(readsBefore));
+  });
+
+  it('CONTROL: the development surface’s Import sends the same request', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(STUDIO_URL);
+    await screen.findByTestId('pkg-row-com.acme.code');
+    await importOn('en');
+    await waitFor(() => expect(writes).toEqual(['POST /api/v1/marketplace/install-local']));
+  });
+});
+
+describe('Setup → Packages on one package’s row: `?package=ID` (objectstack#37139)', () => {
+  it('opens that package’s detail on arrival and drops the param, keeping the face', async () => {
+    await serve({ packages: [CODE, AUTHORED] });
+    renderAt(setupPackagePath('app.b2r4'));
+    const sheet = await screen.findByRole('dialog');
+    expect(within(sheet).getByText('app.b2r4')).toBeInTheDocument();
+    // The administration actions are there: Disable and Delete.
+    expect(within(sheet).getByRole('button', { name: row('engine.packages.detail.disable') })).toBeInTheDocument();
+    expect(within(sheet).getByRole('button', { name: row('engine.packages.detail.deletePackage') })).toBeInTheDocument();
+    await waitFor(() => expect(query().has('package')).toBe(false));
+    expect(query().get('face')).toBe('admin');
+  });
+
+  it('an id the list does not name opens nothing, and the param is dropped', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(setupPackagePath('com.gone.away'));
+    await screen.findByTestId('pkg-row-com.acme.code');
+    await waitFor(() => expect(query().has('package')).toBe(false));
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });

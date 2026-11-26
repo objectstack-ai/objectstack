@@ -7,8 +7,8 @@
  * (objectui#2623).
  *
  *   object    → Data pillar, the object's schema/records surface
- *   flow      → Automations pillar (the `?surface=flow:` consumer was reserved
- *               for exactly this bridge — this is its first producer)
+ *   flow      → the flow designer, full-screen on the flow's metadata address
+ *               (objectstack#36903: the Automations pillar retired)
  *   dashboard, page, view, app
  *             → the item's page in the "All metadata" area. objectstack#36502:
  *               the Interfaces pillar that designed them is retired; they are

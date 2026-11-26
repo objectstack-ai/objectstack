@@ -212,6 +212,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
         save: saveDraftVersioned,
         recordRead: recordDraftRead,
         forget: forgetDraftVersion,
+        heldDraftVersion,
         dialog: draftConflictDialog,
     } = useDraftSaveGuard(metadataClient, handleAfterChange);
     useEffect(() => {
@@ -302,6 +303,11 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
     // surfaces the "unpublished changes" indicator immediately (the save
     // wrote a draft). Never on a refused one (objectui#11583).
     const [savedSignal, setSavedSignal] = useState(0);
+    // objectstack#36350 — the version the landed save's receipt returned (the
+    // guard holds it as that save's `If-Match`): the draft bar's Publish after
+    // this save is pinned to it, so a draft another writer changed since is
+    // refused instead of published on their behalf.
+    const [savedDraftVersion, setSavedDraftVersion] = useState<string | undefined>(undefined);
     // An edit-mode save is in flight: Save is disabled until it settles.
     const [saving, setSaving] = useState(false);
     // Mirror the committed draft into a ref so `handlePatch` can compute the
@@ -387,9 +393,10 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
             setSaving(false);
         }
         if (!landed) return;
+        setSavedDraftVersion(heldDraftVersion('view', String(flat.id ?? activeView.id)));
         setSavedSignal((s) => s + 1);
         if (draftRef.current === savedDraft) setIsDirty(false);
-    }, [draft, onSave, onCreate, mode, saveDraftVersioned]);
+    }, [draft, onSave, onCreate, mode, saveDraftVersioned, heldDraftVersion, activeView.id]);
 
     // Discard = revert any unsaved edits AND close the panel, in both modes
     // (objectui#2320). Create mode has no committed view to preview against, so
@@ -498,6 +505,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                         objectName={objectDef.name}
                         dirty={isDirty}
                         savedSignal={savedSignal}
+                        savedDraftVersion={savedDraftVersion}
                         onAfterChange={handleAfterChange}
                     />
                 )}

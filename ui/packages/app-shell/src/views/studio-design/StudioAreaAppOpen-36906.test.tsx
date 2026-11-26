@@ -4,6 +4,8 @@
  * objectstack#36906 — a dashboard or a report opened from a Studio list opens
  * in its app's edit state; the report list's New opens the app's new-report
  * page; with no app, the generic item page (or the area's own create).
+ * objectstack#36907 — the dashboard list's New opens the app in its design
+ * mode, the 「Add menu item」 picker on its dashboards.
  *
  * Through the real `StudioMetadataArea` and its routes, with the metadata
  * pages stubbed to their names and the metadata client answering the
@@ -14,11 +16,15 @@
  *   - the Studio address is replaced, so Back from the app page skips it;
  *   - which opens keep the generic item page (a tab, the draft review, no app,
  *     the cross-package leg, any other type, an item with no published version);
- *   - a read-only base: its own rows open in its app, a pair row keeps the
- *     generic page, and its report New opens the app page only where the pair
- *     door is open;
- *   - a dashboard made by the area's own create opens in its app, and Back
- *     from there lands on the list, not on an empty create page.
+ *   - a read-only base: its own rows open in its app, a pair row opens in the
+ *     base's app (objectstack#37237: the pair publishes no app of its own),
+ *     and its report New opens the app page only where the pair door is open;
+ *   - a dashboard made by the area's own create (on a phone, where the
+ *     dashboard New has no design mode to open) opens in its app, and Back
+ *     from there lands on the list, not on an empty create page;
+ *   - the dashboard New (objectstack#36907): the app's root with the arrival
+ *     that enters the design mode, decision 6 and the pair leg picking the
+ *     app; no app or a phone, the area's own create; the report New unchanged.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -118,7 +124,12 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   resetAppReturnPageForTests();
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: DESKTOP_WIDTH });
 });
+
+/** jsdom's window width, a desktop's; a phone is under 768 px (`usePhoneViewport`). */
+const DESKTOP_WIDTH = window.innerWidth;
+const phoneWidth = () => Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 390 });
 
 /** The app page the area hands over to: its address, its landing and how it was reached; and the browser's Back. */
 function AppPage() {
@@ -211,6 +222,8 @@ describe('a Studio dashboard or report opens in its app (objectstack#36906)', ()
     mount(`/studio/${PKG}/metadata/dashboard/ops_board?package=${PKG}`);
     expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('item');
     expect(screen.queryByTestId('app-page')).toBeNull();
+    // A plain package is no pair: its apps are the only ones read.
+    expect(apps.listCalls).toEqual([['app', { packageId: PKG }]]);
   });
 
   it('the History tab and the draft review keep the generic item page', async () => {
@@ -242,13 +255,9 @@ describe("the report list's New opens the app's new-report page (objectstack#369
     expect(studioOf(opened.at)).toBe(`/studio/${PKG}/metadata/report?package=${PKG}`);
   });
 
-  it('with no app to open, the area creates as before; a dashboard New is not this card', async () => {
+  it('with no app to open, the area creates as before', async () => {
     apps.byPackage.set(PKG, []);
     mount(`/studio/${PKG}/metadata/report/new?package=${PKG}`);
-    expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('create');
-    cleanup();
-    apps.byPackage.set(PKG, [{ name: 'crm_app' }]);
-    mount(`/studio/${PKG}/metadata/dashboard/new?package=${PKG}`);
     expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('create');
   });
 });
@@ -272,7 +281,9 @@ describe('an item with no published version keeps the generic item page (objects
     expect(screen.queryByTestId('app-page')).toBeNull();
   });
 
-  it("a dashboard made by the area's create opens in its app, and Back from there lands on the list", async () => {
+  it("a dashboard made by the area's create (a phone's) opens in its app, and Back from there lands on the list", async () => {
+    // objectstack#36907 — elsewhere a dashboard's New opens the app's design mode.
+    phoneWidth();
     const list = `/studio/${PKG}/metadata/dashboard?package=${PKG}`;
     mount(`/studio/${PKG}/metadata/dashboard/new?package=${PKG}`, [list]);
     fireEvent.click(await screen.findByText('save the new item'));
@@ -326,13 +337,6 @@ describe('a read-only base (objectstack#36906)', () => {
     expect(studioOf(opened.at)).toBe(`/studio/${BASE}/metadata/dashboard?package=${BASE}`);
   });
 
-  it('a pair row keeps the generic item page: the pair has no published app of its own', async () => {
-    mountBase(`/studio/${PAIR}/metadata/dashboard/headcount?package=${PAIR}`, null);
-    expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('item');
-    expect(screen.queryByTestId('app-page')).toBeNull();
-    expect(apps.listCalls).toEqual([['app', { packageId: PAIR }]]);
-  });
-
   it("report New opens the base app's new-report page (it saves in the pair), returning to the list", async () => {
     mountBase(`/studio/${BASE}/metadata/report/new?package=${BASE}`, customizationOf(false));
     const opened = await appPage();
@@ -348,5 +352,183 @@ describe('a read-only base (objectstack#36906)', () => {
     mountBase(`/studio/${BASE}/metadata/report/new?package=${BASE}`, null);
     expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('list');
     expect(apps.listCalls).toEqual([]);
+  });
+});
+
+describe("a customization pair's dashboard or report opens in its base's app (objectstack#37237)", () => {
+  const BASE = 'com.example.hr';
+  const PAIR = `${BASE}.custom`;
+  const pairList = (type: string) => `/studio/${PAIR}/metadata/${type}?package=${PAIR}`;
+
+  beforeEach(() => {
+    listed.value.set(BASE, { id: BASE, name: 'HR', writable: false, manifest: {} });
+    listed.value.set(PAIR, { id: PAIR, name: 'HR (customizations)', writable: true, manifest: {} });
+    apps.byPackage.set(BASE, [{ name: 'hr_app', label: 'HR' }]);
+    for (const item of ['dashboard/headcount', 'report/attrition']) published.add(item);
+  });
+
+  it("a pair dashboard opens in the base app's edit state, and × returns to the pair's list", async () => {
+    mount(`/studio/${PAIR}/metadata/dashboard/headcount?package=${PAIR}`);
+    const opened = await appPage();
+    // The base ships one app: its address is the base's id, never the pair's.
+    expect(opened.at.split('?')[0]).toBe(`/apps/${BASE}/dashboard/headcount`);
+    expect(opened.state).toEqual({ designModeNewDashboard: 'headcount' });
+    expect(studioOf(opened.at)).toBe(pairList('dashboard'));
+    expect(opened.how).toBe('REPLACE');
+    // One read more, and only of the base: the item itself is asked of the pair.
+    expect(apps.listCalls).toEqual([
+      ['app', { packageId: PAIR }],
+      ['app', { packageId: BASE }],
+    ]);
+    expect(itemReads.calls).toEqual([['dashboard', 'headcount', { packageId: PAIR }]]);
+  });
+
+  it("reached from the base's list: a row of the pair links `?package=PAIR`, which re-roots the area onto the pair", async () => {
+    mount(`/studio/${BASE}/metadata/dashboard/headcount?package=${PAIR}`);
+    const opened = await appPage();
+    expect(opened.at.split('?')[0]).toBe(`/apps/${BASE}/dashboard/headcount`);
+    expect(studioOf(opened.at)).toBe(pairList('dashboard'));
+    expect(itemReads.calls).toEqual([['dashboard', 'headcount', { packageId: PAIR }]]);
+  });
+
+  it("a pair report opens the base app's builder, picked by decision 6 among the base's apps", async () => {
+    apps.byPackage.set(BASE, [{ name: 'hr_people' }, { name: 'hr_reports' }]);
+    rememberAppReturnPage({ path: '/apps/hr_reports/home', app: 'hr_reports', label: 'HR Reports' });
+    mount(`/studio/${PAIR}/metadata/report/attrition?package=${PAIR}`);
+    const opened = await appPage();
+    expect(opened.at.split('?')[0]).toBe('/apps/hr_reports/report/attrition');
+    expect(opened.state).toEqual({ openReportBuilder: 'attrition' });
+    expect(studioOf(opened.at)).toBe(pairList('report'));
+    cleanup();
+
+    // No remembered app: the base's first app (rule 2).
+    resetAppReturnPageForTests();
+    mount(`/studio/${PAIR}/metadata/report/attrition?package=${PAIR}`);
+    expect((await appPage()).at.split('?')[0]).toBe('/apps/hr_people/report/attrition');
+  });
+
+  it('a pair whose base has no published app keeps the generic item page', async () => {
+    apps.byPackage.set(BASE, []);
+    mount(`/studio/${PAIR}/metadata/dashboard/headcount?package=${PAIR}`);
+    expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('item');
+    expect(screen.queryByTestId('app-page')).toBeNull();
+    expect(apps.listCalls).toEqual([
+      ['app', { packageId: PAIR }],
+      ['app', { packageId: BASE }],
+    ]);
+  });
+
+  it("a pair with a published app of its own opens there; the base's apps are not read", async () => {
+    apps.byPackage.set(PAIR, [{ name: 'hr_custom_app' }]);
+    mount(`/studio/${PAIR}/metadata/dashboard/headcount?package=${PAIR}`);
+    expect((await appPage()).at.split('?')[0]).toBe(`/apps/${PAIR}/dashboard/headcount`);
+    expect(apps.listCalls).toEqual([['app', { packageId: PAIR }]]);
+  });
+});
+
+describe("the dashboard list's New opens the app's design mode on its dashboards (objectstack#36907)", () => {
+  const LIST = `/studio/${PKG}/metadata/dashboard?package=${PKG}`;
+  const entersDesignMode = (studioReturn: string) => ({ designModeAddDashboard: { studioReturn } });
+
+  it("opens the app's root with the arrival that enters the mode; the address carries no mode, and Back lands on the list", async () => {
+    mount(`/studio/${PKG}/metadata/dashboard/new?package=${PKG}&q=ops`, [LIST]);
+    const opened = await appPage();
+    // One app in the package: its address is the package id (ADR-0048 option A).
+    expect(opened.at).toBe(`/apps/${PKG}`);
+    expect(opened.state).toEqual(entersDesignMode(`${LIST}&q=ops`));
+    expect(opened.how).toBe('REPLACE');
+    expect(apps.listCalls).toEqual([['app', { packageId: PKG }]]);
+    expect(itemReads.calls).toEqual([]);
+    fireEvent.click(screen.getByText('back'));
+    expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('list');
+  });
+
+  it('the app is picked by decision 6: the remembered app among the package apps, else the first', async () => {
+    apps.byPackage.set(PKG, [{ name: 'sales' }, { name: 'service' }]);
+    rememberAppReturnPage({ path: '/apps/service/home', app: 'service', label: 'Service' });
+    mount(`/studio/${PKG}/metadata/dashboard/new?package=${PKG}`);
+    expect((await appPage()).at).toBe('/apps/service');
+    cleanup();
+    resetAppReturnPageForTests();
+    mount(`/studio/${PKG}/metadata/dashboard/new?package=${PKG}`);
+    expect((await appPage()).at).toBe('/apps/sales');
+  });
+
+  it("with no app to open, the area's own create; on a phone too, with no app read", async () => {
+    apps.byPackage.set(PKG, []);
+    mount(`/studio/${PKG}/metadata/dashboard/new?package=${PKG}`);
+    expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('create');
+    expect(screen.queryByTestId('app-page')).toBeNull();
+    cleanup();
+    apps.byPackage.set(PKG, [{ name: 'crm_app' }]);
+    apps.listCalls = [];
+    phoneWidth();
+    mount(`/studio/${PKG}/metadata/dashboard/new?package=${PKG}`);
+    expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('create');
+    expect(apps.listCalls).toEqual([]);
+  });
+
+  describe('a read-only base and its pair', () => {
+    const BASE = 'com.example.hr';
+    const PAIR = `${BASE}.custom`;
+    const customizationOf = (walled: boolean) =>
+      ({ base: BASE, baseLabel: 'HR', basedOn: null, walled, pairId: null, ensure: async () => PAIR, ensurePackage: vi.fn() }) as any;
+
+    beforeEach(() => {
+      listed.value.set(BASE, { id: BASE, name: 'HR', writable: false, manifest: {} });
+      listed.value.set(PAIR, { id: PAIR, name: 'HR (customizations)', writable: true, manifest: {} });
+      apps.byPackage.set(BASE, [{ name: 'hr_app', label: 'HR' }]);
+    });
+
+    function mountBase(url: string, customization: unknown) {
+      return render(
+        <MemoryRouter initialEntries={[url]}>
+          <Routes>
+            <Route path={`/studio/${BASE}/metadata/*`} element={<StudioMetadataArea packageId={BASE} customization={customization as any} />} />
+            <Route path="/apps/*" element={<AppPage />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    }
+
+    it("a base's New opens the base's app (what the mode saves goes to the pair); walled, it goes back to the list", async () => {
+      mountBase(`/studio/${BASE}/metadata/dashboard/new?package=${BASE}`, customizationOf(false));
+      const opened = await appPage();
+      expect(opened.at).toBe(`/apps/${BASE}`);
+      expect(opened.state).toEqual(entersDesignMode(`/studio/${BASE}/metadata/dashboard?package=${BASE}`));
+      cleanup();
+      apps.listCalls = [];
+      mountBase(`/studio/${BASE}/metadata/dashboard/new?package=${BASE}`, customizationOf(true));
+      expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('list');
+      expect(apps.listCalls).toEqual([]);
+    });
+
+    it("the pair leg: a pair's New, the pair publishing no app, opens its base's app, one read more", async () => {
+      mount(`/studio/${PAIR}/metadata/dashboard/new?package=${PAIR}`);
+      const opened = await appPage();
+      expect(opened.at).toBe(`/apps/${BASE}`);
+      expect(opened.state).toEqual(entersDesignMode(`/studio/${PAIR}/metadata/dashboard?package=${PAIR}`));
+      expect(apps.listCalls).toEqual([
+        ['app', { packageId: PAIR }],
+        ['app', { packageId: BASE }],
+      ]);
+    });
+
+    it("the pair leg picks among the base's apps by decision 6; a base with no app, the area's own create", async () => {
+      apps.byPackage.set(BASE, [{ name: 'hr_people' }, { name: 'hr_reports' }]);
+      rememberAppReturnPage({ path: '/apps/hr_reports/home', app: 'hr_reports', label: 'HR Reports' });
+      mount(`/studio/${PAIR}/metadata/dashboard/new?package=${PAIR}`);
+      expect((await appPage()).at).toBe('/apps/hr_reports');
+      cleanup();
+      apps.byPackage.set(BASE, []);
+      mount(`/studio/${PAIR}/metadata/dashboard/new?package=${PAIR}`);
+      expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('create');
+    });
+
+    it("CONTROL — a pair's report New keeps the area's own create: the pair leg is the dashboard New's alone", async () => {
+      mount(`/studio/${PAIR}/metadata/report/new?package=${PAIR}`);
+      expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('create');
+      expect(apps.listCalls).toEqual([['app', { packageId: PAIR }]]);
+    });
   });
 });

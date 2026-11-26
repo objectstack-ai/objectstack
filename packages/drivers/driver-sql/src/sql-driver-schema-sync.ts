@@ -2811,32 +2811,97 @@ export function nowColumnDefault(this: Pick<SchemaSyncHost, 'isMysql' | 'isPostg
     if (type === 'datetime' && this.isMysql) return this.knex.fn.now(MYSQL_DATETIME_PRECISION);
     return this.knex.fn.now();
   }
+  return this.knex.raw(sqliteNowColumnDefaultSql(type));
+}
+
+/**
+ * [#37345] The SQLite `NOW()` column DEFAULT for a column of `type`, as SQL
+ * text: the SQLite branch of {@link nowColumnDefault}, which wraps it in
+ * `knex.raw`, and the one the Turso REMOTE face renders through
+ * {@link sqliteDeclaredColumnDefaultSql}. One string per type, so the two
+ * faces of that driver cannot write different `NOW()` defaults.
+ */
+export function sqliteNowColumnDefaultSql(type: string): string {
   switch (type) {
-    case 'date': return this.knex.raw("(strftime('%Y-%m-%d', 'now'))");
+    case 'date': return "(strftime('%Y-%m-%d', 'now'))";
     // The CASE trims a zero-millisecond `.000` so a defaulted row is
     // byte-canonical ({@link canonicalTimeOfDay}) — `%f` alone would store
     // `'01:55:08.000'` once in a thousand inserts, and that row would then
     // miss an equality filter against the canonical `'01:55:08'`. SQLite
     // fixes `'now'` per statement, so the three calls cannot straddle a
     // millisecond boundary.
-    case 'time': return this.knex.raw(
+    case 'time': return (
       "(case when strftime('%H:%M:%f', 'now') like '%.000' " +
-      "then strftime('%H:%M:%S', 'now') else strftime('%H:%M:%f', 'now') end)",
+      "then strftime('%H:%M:%S', 'now') else strftime('%H:%M:%f', 'now') end)"
     );
     // datetime (and any non-temporal field that opts into NOW()): canonical instant.
-    default:     return this.knex.raw("(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))");
+    default:     return "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
   }
 }
 
-/** The body of `SqlDriver#applyDeclaredColumnDefault`; the method's docblock there is its contract. */
-export function applyDeclaredColumnDefault(this: Pick<SchemaSyncHost, 'nowColumnDefault'>, col: Knex.ColumnBuilder, field: any, type: string): void {
+/** [#37345] The field types `createColumn` builds through knex's `table.boolean`, whose DEFAULT knex spells `'1'` / `'0'`. */
+const KNEX_BOOLEAN_COLUMN_TYPES: ReadonlySet<string> = new Set(['boolean', 'toggle']);
+
+/**
+ * [#37345] The column DEFAULT {@link applyDeclaredColumnDefault} gives this
+ * field's column on SQLite, as the SQL text that follows `DEFAULT` — or
+ * `null` when it gives none. The Turso REMOTE face, which writes its DDL as
+ * text rather than through knex, renders a declared field's DEFAULT with this,
+ * so a remote table and a local one carry the same `dflt_value` for the same
+ * declaration and the shared drift differ reads them alike.
+ *
+ * Which fields get one is not decided here: {@link emitsDeclaredColumnDefault}
+ * (a literal or `NOW()`, never another runtime token, never an object) and the
+ * multi-value short-circuit `createColumn` takes before it reaches the
+ * emitter (a JSON column, no scalar DEFAULT) — the same two questions, asked
+ * in the same order. A `NOW()` default is {@link sqliteNowColumnDefaultSql},
+ * the string the local face's {@link nowColumnDefault} wraps.
+ *
+ * The literal is the one place this mirrors knex rather than sharing a
+ * function with it: the local face hands the value to `col.defaultTo`, and
+ * knex's SQLite column compiler renders it — `'1'` / `'0'` on a boolean
+ * column (the string `'false'` reading false), otherwise the value's
+ * `toString()` single-quoted with an embedded quote doubled (so a number is
+ * the quoted `'5'`). `turso-remote-default-parity.test.ts` holds the two
+ * faces to one `dflt_value` for each kind of default, so a knex upgrade that
+ * renders differently goes red there instead of forking the faces.
+ */
+export function sqliteDeclaredColumnDefaultSql(field: any): string | null {
+  if (!emitsDeclaredColumnDefault(field)) return null;
+  const type = String(field?.type || 'string');
+  if (isMultiValuedColumn(type, field)) return null;
+  const dv = field.defaultValue;
+  if (isNowDefaultValue(dv)) return sqliteNowColumnDefaultSql(type);
+  if (KNEX_BOOLEAN_COLUMN_TYPES.has(type)) return `'${dv === 'false' ? 0 : dv ? 1 : 0}'`;
+  return `'${String(dv).replace(/'/g, "''")}'`;
+}
+
+/**
+ * [#37258] Whether {@link applyDeclaredColumnDefault} gives this field's column
+ * a physical DEFAULT — asked by `createColumn` on `ALTER TABLE … ADD COLUMN`
+ * to a table that already holds rows, where a `storage.notNull` column is
+ * accepted by the database only if the existing rows can take that DEFAULT.
+ * The one statement of the rule, so the emitter and that question cannot
+ * answer differently.
+ */
+export function emitsDeclaredColumnDefault(field: any): boolean {
   const dv = field?.defaultValue;
-  if (dv === undefined || dv === null) return;
-  if (isNowDefaultValue(dv)) {
-    col.defaultTo(this.nowColumnDefault(type));
-    return;
-  }
-  if (isRuntimeDefaultToken(dv)) return;
-  if (typeof dv === 'object') return;
-  col.defaultTo(dv as any);
+  if (dv === undefined || dv === null) return false;
+  if (isNowDefaultValue(dv)) return true;
+  return !isRuntimeDefaultToken(dv) && typeof dv !== 'object';
+}
+
+/**
+ * The body of `SqlDriver#applyDeclaredColumnDefault`; the method's docblock there is its contract.
+ *
+ * [#37320] `expressionForm`: the literal is emitted parenthesised, `DEFAULT
+ * ('d')` — the only DEFAULT a MySQL TEXT column takes (MySQL 8.0.13+ /
+ * MariaDB 10.2+). `createColumn` asks for it on exactly that column, which it
+ * builds through `specificType` so knex does not strip the clause.
+ */
+export function applyDeclaredColumnDefault(this: Pick<SchemaSyncHost, 'knex' | 'nowColumnDefault'>, col: Knex.ColumnBuilder, field: any, type: string, expressionForm: boolean = false): void {
+  if (!emitsDeclaredColumnDefault(field)) return;
+  const dv = field.defaultValue;
+  if (isNowDefaultValue(dv)) col.defaultTo(this.nowColumnDefault(type));
+  else col.defaultTo(expressionForm ? this.knex.raw('(?)', [dv]) : (dv as any));
 }

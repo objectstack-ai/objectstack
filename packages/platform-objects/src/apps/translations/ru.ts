@@ -97,6 +97,7 @@ export const ru: TranslationData = {
         nav_settings_localization: { label: 'Локализация' },
         nav_exchange_rates: { label: 'Курсы валют' },
         nav_units_of_measure: { label: 'Единицы измерения' },
+        nav_standard_unit_settings: { label: 'Настройки стандартных единиц' },
         nav_work_calendars: { label: 'Рабочие календари' },
         nav_work_calendar_exceptions: { label: 'Исключения календаря' },
         nav_settings_company: { label: 'Компания' },

@@ -10,8 +10,9 @@
  *
  *   - with an agent in the catalog the chip is unchanged: "Build an app", to
  *     `/studio`, dimmed with its reason for a session that may not author;
- *   - with none it says what it opens, "New in Studio", and opens Studio's
- *     new-package flow (`STUDIO_NEW_PACKAGE_PATH`);
+ *   - with none it says what it opens, "New blank app", and opens Studio's
+ *     new-package flow (`SETUP_NEW_PACKAGE_PATH`, Setup → Packages with New
+ *     Package open since objectstack#36908);
  *   - with none, a session that may not author gets no build chip at all,
  *     while the template chip beside it still carries the reason;
  *   - while the catalog has not answered, neither form is drawn, so neither
@@ -19,9 +20,14 @@
  *
  * objectstack#36969 — the AI form is drawn where the catalog serves the build
  * agent itself (alias-aware), not any agent: where in-app building is closed
- * the catalog keeps `ask` and drops `build`, and the chip takes the "New in
- * Studio" form there, as for an empty catalog. So the unchanged-chip cases
+ * the catalog keeps `ask` and drops `build`, and the chip takes the "New
+ * blank app" form there, as for an empty catalog. So the unchanged-chip cases
  * serve `build`; a catalog of `ask` or of another agent alone is pinned below.
+ *
+ * objectstack#37227 — the first bullet above no longer holds: the maintainer
+ * ruled "Build an app" (to bare `/studio`) off the home page, with "Build with
+ * AI". Where the catalog serves the build agent the chip row now draws no build
+ * chip of either form; "New in Studio" is unchanged where it does not.
  *
  * The catalog stand-in moves the way the real `useAgents` does: an empty first
  * frame before the request leaves, then loading, then the answer. `t` echoes
@@ -32,7 +38,7 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const navigateMock = vi.fn();
@@ -43,6 +49,14 @@ const state = vi.hoisted(() => ({
   agents: [] as Array<{ name: string }>,
   /** Holds the catalog in flight. */
   catalogPending: false,
+  /** Set once the stand-in has drawn the catalog's answer (objectstack#37227). */
+  answered: false,
+  /**
+   * Whether the session holds the Setup → Packages pair (`setup.access` +
+   * `manage_platform_settings`). `'unreported'` stubs nothing: the real
+   * provider around the page answers, with no `systemPermissions` at all.
+   */
+  setupPair: true as boolean | 'unreported',
 }));
 
 vi.mock('react-router-dom', async () => {
@@ -87,6 +101,7 @@ vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => {
         if (phase === 'idle') setPhase('loading');
         else if (phase === 'loading' && !state.catalogPending) setPhase('answered');
       }, [phase]);
+      if (phase === 'answered') state.answered = true;
       return { agents: phase === 'answered' ? state.agents : [], isLoading: phase === 'loading' };
     },
     // A custom agent: AI is on, and no ask or build CTA joins the row.
@@ -108,6 +123,23 @@ vi.mock('../../../providers/MetadataProvider', () => ({
 vi.mock('../../../context/NavigationContext', () => ({
   useNavigationContext: () => ({ currentAppName: undefined }),
 }));
+vi.mock('@object-ui/permissions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/permissions')>();
+  return {
+    ...actual,
+    usePermissions: () => {
+      const real = actual.usePermissions();
+      if (state.setupPair === 'unreported') return real;
+      return {
+        ...real,
+        hasCapabilities: (required: string[]) =>
+          required.includes('setup.access') || required.includes('manage_platform_settings')
+            ? state.setupPair
+            : real.hasCapabilities(required),
+      };
+    },
+  };
+});
 vi.mock('../../../hooks/useCanAuthorMetadata', () => ({
   useCanAuthorMetadata: () => state.canAuthorMetadata,
   useCanReadPendingDrafts: () => true,
@@ -154,46 +186,58 @@ vi.mock('../../deployment-notice/DeploymentNotice', () => ({ DeploymentNotice: (
 // not inside a test's clock.
 import '@objectstack/lint';
 import { HomePage } from '../HomePage';
-import { STUDIO_NEW_PACKAGE_PATH } from '../../../views/studio-design/studioNewPackage';
+import { SETUP_NEW_PACKAGE_PATH } from '../../../views/metadata-admin/packageSource';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 beforeEach(() => {
   navigateMock.mockReset();
   state.canAuthorMetadata = true;
   state.agents = [];
   state.catalogPending = false;
+  state.answered = false;
+  state.setupPair = true;
 });
+
+/**
+ * An absence read before the catalog answers would pass on a page that has
+ * not yet drawn the chip at all, so the cases that pin one wait for the answer.
+ */
+async function catalogAnswered(): Promise<void> {
+  await waitFor(() => expect(state.answered).toBe(true));
+}
 
 afterEach(() => {
   cleanup();
 });
 
-describe('with the build agent in the catalog, the build chip is unchanged (objectstack#26614)', () => {
+describe('with the build agent in the catalog, no build chip is drawn (objectstack#37227)', () => {
   beforeEach(() => {
     state.agents = [{ name: 'build' }, { name: 'custom_helper' }];
   });
 
-  it('"Build an app" opens Studio', async () => {
-    const user = userEvent.setup();
+  it('neither "Build an app" nor "Build with AI"; the template chip stays', async () => {
     render(<HomePage />);
-    const build = await screen.findByTestId('home-build-app');
-    expect(build).toBeEnabled();
-    expect(build).toHaveTextContent('«home.build.title»');
+    expect(await screen.findByTestId('home-start-template')).toBeEnabled();
+    await catalogAnswered();
+    expect(screen.queryByTestId('home-build-app')).toBeNull();
+    expect(screen.queryByTestId('home-build-with-ai')).toBeNull();
     expect(screen.queryByTestId('home-build-in-studio')).toBeNull();
-    await user.click(build);
-    expect(navigateMock).toHaveBeenCalledWith('/studio');
   });
 
-  it('a session that may not author still gets it dimmed, with its reason', async () => {
+  it('a session that may not author gets none either; the template chip keeps the reason', async () => {
     state.canAuthorMetadata = false;
     render(<HomePage />);
-    const build = await screen.findByTestId('home-build-app');
-    expect(build).toBeDisabled();
-    expect(build).toHaveAttribute('aria-describedby', screen.getByTestId('home-authoring-gate-reason').id);
+    await catalogAnswered();
+    const template = await screen.findByTestId('home-start-template');
+    expect(template).toBeDisabled();
+    expect(template).toHaveAttribute('aria-describedby', screen.getByTestId('home-authoring-gate-reason').id);
+    expect(screen.queryByTestId('home-build-app')).toBeNull();
+    expect(screen.queryByTestId('home-build-in-studio')).toBeNull();
   });
 });
 
 describe('with no agent in the catalog (objectstack#26614)', () => {
-  it('the chip reads "New in Studio" and opens Studio\'s new-package flow', async () => {
+  it('the chip reads "New blank app" and opens Studio\'s new-package flow', async () => {
     const user = userEvent.setup();
     render(<HomePage />);
     const chip = await screen.findByTestId('home-build-in-studio');
@@ -201,8 +245,52 @@ describe('with no agent in the catalog (objectstack#26614)', () => {
     expect(chip).toHaveTextContent('«home.build.inStudio»');
     expect(screen.queryByTestId('home-build-app')).toBeNull();
     await user.click(chip);
-    expect(navigateMock).toHaveBeenCalledWith(STUDIO_NEW_PACKAGE_PATH);
-    expect(STUDIO_NEW_PACKAGE_PATH).toBe('/studio?new=package');
+    expect(navigateMock).toHaveBeenCalledWith(SETUP_NEW_PACKAGE_PATH);
+    expect(SETUP_NEW_PACKAGE_PATH).toBe('/apps/setup/component/developer/packages?face=admin&new=package');
+  });
+
+  it('an author who may enter Studio but not Setup → Packages is sent to the "All metadata" area, never Setup (objectstack#36908)', async () => {
+    state.setupPair = false;
+    const user = userEvent.setup();
+    render(<HomePage />);
+    await user.click(await screen.findByTestId('home-build-in-studio'));
+    expect(navigateMock).toHaveBeenCalledWith('/studio/~all/metadata');
+    expect(navigateMock).not.toHaveBeenCalledWith(SETUP_NEW_PACKAGE_PATH);
+  });
+
+  /**
+   * objectstack#36908 — the doors fail OPEN where the server never reported
+   * the capability set, as their own authoring gate (`useCanAuthorMetadata`)
+   * does: the door is only a link, and Setup → Packages and the create route
+   * keep their own server-side gates. Nothing is stubbed here: the real
+   * provider answers, once with no `systemPermissions` and once (the control)
+   * with a reported set that holds neither capability of the pair.
+   */
+  it.each([
+    ['an unreported set (no `systemPermissions`) fails open, to Setup\'s New Package', undefined, SETUP_NEW_PACKAGE_PATH],
+    ['control: a reported set without the pair goes to the "All metadata" area', ['manage_metadata'], '/studio/~all/metadata'],
+  ])('%s', async (_case, systemPermissions, to) => {
+    state.setupPair = 'unreported';
+    const answer: MePermissionsAuthenticatedResponse = {
+      authenticated: true,
+      userId: 'u1',
+      tenantId: 'org_1',
+      positions: [],
+      hasAnyQueue: false,
+      objectsUsingQueues: [],
+      permissionSets: ['member'],
+      ...(systemPermissions ? { systemPermissions } : {}),
+      objects: {},
+      fields: {},
+    };
+    const user = userEvent.setup();
+    render(
+      <MePermissionsProvider initialPermissions={answer}>
+        <HomePage />
+      </MePermissionsProvider>,
+    );
+    await user.click(await screen.findByTestId('home-build-in-studio'));
+    expect(navigateMock).toHaveBeenCalledWith(to);
   });
 
   it('a session that may not author gets no build chip; the template chip keeps the reason', async () => {
@@ -220,7 +308,7 @@ describe('without the build agent in the catalog, the chip takes its Studio form
   it.each([
     ['in-app building closed: `ask` served, `build` not', [{ name: 'ask' }]],
     ['another agent only', [{ name: 'custom_helper' }]],
-  ])('%s: "New in Studio", to Studio\'s new-package flow, and no "Build an app"', async (_case, agents) => {
+  ])('%s: "New blank app", to Studio\'s new-package flow, and no "Build an app"', async (_case, agents) => {
     state.agents = agents;
     const user = userEvent.setup();
     render(<HomePage />);
@@ -229,7 +317,7 @@ describe('without the build agent in the catalog, the chip takes its Studio form
     expect(chip).toHaveTextContent('«home.build.inStudio»');
     expect(screen.queryByTestId('home-build-app')).toBeNull();
     await user.click(chip);
-    expect(navigateMock).toHaveBeenCalledWith(STUDIO_NEW_PACKAGE_PATH);
+    expect(navigateMock).toHaveBeenCalledWith(SETUP_NEW_PACKAGE_PATH);
   });
 
   it('a session that may not author gets no build chip there', async () => {
@@ -241,15 +329,13 @@ describe('without the build agent in the catalog, the chip takes its Studio form
     expect(screen.queryByTestId('home-build-app')).toBeNull();
   });
 
-  it('regression: the build agent\'s legacy id keeps "Build an app", to /studio', async () => {
+  it('regression: the build agent\'s legacy id still counts as the build agent, so no Studio form either', async () => {
     state.agents = [{ name: 'metadata_assistant' }, { name: 'data_chat' }];
-    const user = userEvent.setup();
     render(<HomePage />);
-    const build = await screen.findByTestId('home-build-app');
-    expect(build).toHaveTextContent('«home.build.title»');
+    expect(await screen.findByTestId('home-start-template')).toBeEnabled();
+    await catalogAnswered();
     expect(screen.queryByTestId('home-build-in-studio')).toBeNull();
-    await user.click(build);
-    expect(navigateMock).toHaveBeenCalledWith('/studio');
+    expect(screen.queryByTestId('home-build-app')).toBeNull();
   });
 });
 

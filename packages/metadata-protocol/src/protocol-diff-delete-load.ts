@@ -789,13 +789,29 @@ export class ProtocolDiffDeleteLoadFacet {
                 // below nor its "already at artifact default" / "nothing to
                 // delete" claim holds. A delete naming none never lands here:
                 // it addresses a row the read above found.
-                if (!current && request.packageId != null && (rowsAtAddress.candidates.length > 0 || rowsAtAddress.unbound)) {
+                //
+                // [#35524, epic ruling 6781691009, contract review S2 option
+                // (b)] …and a draft discard naming no package at the row-held
+                // base's draft address over a stored package-unbound draft
+                // ({@link packagelessRowHeldBaseDraftAddress}): it addresses the
+                // base's draft, as the discard naming the base does, so with no
+                // base draft it answers that discard's receipt, naming the
+                // package-unbound draft still stored, never "No pending draft"
+                // while one is. Only that address is `none` with a
+                // package-unbound draft stored: `packagelessDraftAddress` makes
+                // a stored package-unbound draft the address itself (`draft`,
+                // key `null`) wherever it does not move to a base.
+                const receiptPackageId = request.packageId
+                    ?? (draftAddress?.kind === 'none' && draftAddress.into !== null && rowsAtAddress.unbound
+                        ? draftAddress.into
+                        : null);
+                if (!current && receiptPackageId != null && (rowsAtAddress.candidates.length > 0 || rowsAtAddress.unbound)) {
                     return {
                         success: true,
                         reset: false,
                         message: targetState === 'draft'
-                            ? `No pending draft of ${request.type}/${request.name} is bound to package '${request.packageId}', so nothing was discarded: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'draft')}.`
-                            : `No row of ${request.type}/${request.name} is bound to package '${request.packageId}', so nothing was deleted: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'row')}.`,
+                            ? `No pending draft of ${request.type}/${request.name} is bound to package '${receiptPackageId}', so nothing was discarded: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'draft')}.`
+                            : `No row of ${request.type}/${request.name} is bound to package '${receiptPackageId}', so nothing was deleted: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'row')}.`,
                     };
                 }
                 // [#23495] …and a draft discard naming no package, of an item

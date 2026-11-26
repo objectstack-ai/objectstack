@@ -256,3 +256,137 @@ describe('the board under a list view claims no lane count before its lanes answ
     expect(screen.getByTestId('record-count-bar')).toHaveTextContent('12 records');
   });
 });
+
+/**
+ * objectstack#36871 — a board whose lanes this view does not know before the
+ * query (a lookup lane field: no options) is handed this view's window, one
+ * page of rows, and draws a lane per value in it. Its lane statistic
+ * (`kanban.summary`) used to add up that page under the name of the lane's
+ * total — 「Sum · Amount 156」 for a lane whose 30 records total 870 — and drew
+ * no `avg`, `min` or `max` at all although the view-settings picker offers
+ * them. The view now hands the board the query of its window beside the rows
+ * (`laneStatisticQuery`, and the effective filter on the node), and the board
+ * asks ONE grouped aggregate over every record of each lane, as a board that
+ * pages its own lanes does.
+ *
+ * 60 deals over two accounts, alternating, so the view's first page of 25
+ * holds 13 of `acc-a` (amounts 0, 2, … 24) and 12 of `acc-b` (1, 3, … 23).
+ */
+describe('a lookup-laned board under a list view draws each lane\'s whole statistic, not its page\'s (objectstack#36871)', () => {
+  const DEAL = 'crm_deal';
+  const ACCOUNT = 'crm_account';
+  const DEALS: Row[] = Array.from({ length: 60 }, (_, i) => ({
+    id: `deal-${String(i).padStart(2, '0')}`,
+    name: `Deal ${String(i).padStart(2, '0')}`,
+    account: i % 2 === 0 ? 'acc-a' : 'acc-b',
+    amount: i,
+  }));
+  const DEFS: Record<string, unknown> = {
+    [DEAL]: {
+      name: DEAL,
+      label: 'Deal',
+      fields: {
+        name: { type: 'text', label: 'Deal Name' },
+        account: { type: 'lookup', label: 'Account', reference: ACCOUNT },
+        amount: { type: 'number', label: 'Amount' },
+      },
+    },
+    [ACCOUNT]: { name: ACCOUNT, label: 'Account', fields: { name: { type: 'text', label: 'Name' } } },
+  };
+  const BOARD_VIEW = {
+    type: 'list-view',
+    objectName: DEAL,
+    viewType: 'kanban',
+    columns: [{ field: 'name' }, { field: 'account' }, { field: 'amount' }],
+    pagination: { pageSize: 25 },
+    kanban: { groupByField: 'account', titleField: 'name' },
+  };
+
+  /** The platform's grouped-aggregate door over `DEALS`, `where` evaluated as a backend would. */
+  function dealSource(withDoor = true) {
+    const store = new ValueDataSource<Row>({ items: DEALS });
+    const queryGroupHeaders = vi.fn(async (object: string, query: any) => {
+      const kept = (await store.find(object, { ...(query.where ? { $filter: query.where } : {}), $top: 100000 } as any)) as any;
+      const rows: Row[] = Array.isArray(kept) ? kept : kept.data ?? kept.records ?? [];
+      const key = query.groupBy[0];
+      const groups = new Map<unknown, Row[]>();
+      for (const row of rows) groups.set(row[key] ?? null, [...(groups.get(row[key] ?? null) ?? []), row]);
+      return [...groups].map(([k, members]) => {
+        const out: Row = { [key]: k };
+        for (const agg of query.aggregations) {
+          const values = members.map((m) => m[agg.field]).filter((v) => typeof v === 'number') as number[];
+          out[agg.alias] =
+            agg.function === 'count' ? values.length
+            : values.length === 0 ? null
+            : agg.function === 'sum' ? values.reduce((a, b) => a + b, 0)
+            : agg.function === 'avg' ? values.reduce((a, b) => a + b, 0) / values.length
+            : agg.function === 'min' ? Math.min(...values)
+            : Math.max(...values);
+        }
+        return out;
+      });
+    });
+    return {
+      find: vi.fn(async (object: string, params: any) => store.find(object, params)),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async (object: string) => DEFS[object]),
+      ...(withDoor ? { queryGroupHeaders } : {}),
+    } as any;
+  }
+
+  const foot = (title: string) => lane(title).querySelector<HTMLElement>('[data-kanban-lane-statistic]');
+  /** The figure a person reads at a lane's foot, thousands separators dropped. */
+  const figure = (title: string) => (foot(title)?.lastElementChild?.textContent ?? '').replace(/,/g, '');
+
+  it.each([
+    // sum: 0 + 2 + … + 58 = 870 and 1 + 3 + … + 59 = 900, never the page's 156 / 144.
+    ['sum', 'Sum', '870', '900'],
+    ['avg', 'Avg', '29', '30'],
+    ['min', 'Min', '0', '1'],
+    // max: 58 / 59, never the page's 24 / 23.
+    ['max', 'Max', '58', '59'],
+  ])('%s covers every record of each lane over a window of one page', async (type, word, a, b) => {
+    const ds = dealSource();
+    mountBoard(ds, { ...BOARD_VIEW, kanban: { ...BOARD_VIEW.kanban, summary: { type, field: 'amount' } } });
+
+    // RIG SELF-CHECK — the board drew the view's window, one page of 25 cards
+    // over two lanes from the data, not every record.
+    await waitFor(() => expect(cards()).toHaveLength(25));
+    expect(within(lane('acc-a')).getAllByRole('listitem')).toHaveLength(13);
+    expect(within(lane('acc-b')).getAllByRole('listitem')).toHaveLength(12);
+
+    await waitFor(() => expect(foot('acc-a')).not.toBeNull());
+    expect(foot('acc-a')!.textContent).toContain(`${word} · Amount`);
+    expect(figure('acc-a')).toBe(a);
+    expect(figure('acc-b')).toBe(b);
+    // ONE grouped read, by the lane field.
+    expect(ds.queryGroupHeaders).toHaveBeenCalledTimes(1);
+    expect(ds.queryGroupHeaders.mock.calls[0][1].groupBy).toEqual(['account']);
+  });
+
+  it('asks the read under the view\'s filter, the one its own window was fetched with', async () => {
+    const ds = dealSource();
+    mountBoard(ds, {
+      ...BOARD_VIEW,
+      filter: [{ field: 'amount', operator: 'greater_than', value: 9 }],
+      kanban: { ...BOARD_VIEW.kanban, summary: { type: 'sum', field: 'amount' } },
+    });
+
+    await waitFor(() => expect(foot('acc-a')).not.toBeNull());
+    // 10 + 12 + … + 58 = 850 and 11 + 13 + … + 59 = 875.
+    expect(figure('acc-a')).toBe('850');
+    expect(figure('acc-b')).toBe('875');
+  });
+
+  it('CONTROL: over a source with no grouped door it draws no figure, never the page\'s sum', async () => {
+    const ds = dealSource(false);
+    mountBoard(ds, { ...BOARD_VIEW, kanban: { ...BOARD_VIEW.kanban, summary: { type: 'sum', field: 'amount' } } });
+
+    await waitFor(() => expect(cards()).toHaveLength(25));
+    expect(foot('acc-a')).toBeNull();
+    expect(foot('acc-b')).toBeNull();
+  });
+});

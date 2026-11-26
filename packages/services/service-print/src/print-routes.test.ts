@@ -417,6 +417,7 @@ describe("the print door — its own 5xx sentences, in the request's language", 
       expect(envelope(answer)).toEqual([failure.code, failure.status]);
       expect(answer.body.error.message).toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'][failure.key]);
       expect(answer.body.error.message).not.toBe(BUILTIN_OPERATION_MESSAGES.en[failure.key]);
+      expect(JSON.stringify(answer.body)).not.toContain('/srv/secret');
     });
 
     it(`${failure.name}: the control — an English or absent accept-language keeps the English sentence`, async () => {
@@ -454,8 +455,10 @@ describe("the print door — its own 5xx sentences, in the request's language", 
     const zh = await printAs(setup, { 'accept-language': 'zh-CN' });
     expect(envelope(zh)).toEqual(['INTERNAL_ERROR', 500]);
     expect(zh.body.error.message).toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'].print_caller_unresolved);
+    expect(JSON.stringify(zh.body)).not.toContain('/srv/secret');
     const absent = await printAs(setup);
     expect(absent.body.error.message).toBe('The caller of this print could not be resolved.');
+    expect(JSON.stringify(absent.body)).not.toContain('/srv/secret');
   });
 
   it('a 4xx refusal keeps its producer\'s own text whatever the request\'s language', async () => {

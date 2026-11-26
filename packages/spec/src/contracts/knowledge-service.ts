@@ -29,8 +29,41 @@ export interface KnowledgeSearchOptions {
    * source the caller is allowed to see is queried.
    */
   sourceIds?: string[];
-  /** Max number of hits to return. Adapters may cap further. */
+  /**
+   * Max number of hits to return. Adapters may cap further. Under
+   * `granularity: 'record'` it counts records (or `groupBy` groups), not
+   * passages.
+   */
   topK?: number;
+  /**
+   * What one hit stands for (ADR-0161 K1, record-level return).
+   *
+   * - `'chunk'` (the default): one hit per matching passage, as before.
+   * - `'record'`: one hit per record — the best-scoring passage of the
+   *   record, so `topK` counts records. Each hit returned is checked against
+   *   the record as it reads now: a record that was deleted, left the
+   *   source's `where`, or changed since it was indexed is not returned, and
+   *   its document is repaired in the background — except in a source with
+   *   `refresh.onRecordChange: false`, whose index an external indexer owns:
+   *   there the hit is only not returned. A `file` / `http` hit is grouped by
+   *   its document.
+   *
+   * The return type does not change: still `KnowledgeHit[]`.
+   */
+  granularity?: 'chunk' | 'record';
+  /**
+   * Group record-level hits by the value of this metadata field instead of by
+   * record — "which policies", not "which clauses" — keeping the best hit of
+   * each group; the group value is the hit's `metadata[groupBy]`, and hits
+   * with the same value form one group whichever source they come from. Implies
+   * `granularity: 'record'`; passing it with `granularity: 'chunk'` (or
+   * passing an empty name, or an unknown `granularity`) is refused with
+   * `code: 'VALIDATION_ERROR'`, `status: 400`. An `object` source that does not list the field in its
+   * `metadataFields` answers no hits for this search (never ungrouped), and
+   * neither does a record with no value for it; a `file` / `http` source
+   * groups by its document.
+   */
+  groupBy?: string;
   /** Adapter-specific filter (passed opaquely). */
   filter?: Record<string, unknown>;
   /**
@@ -41,6 +74,37 @@ export interface KnowledgeSearchOptions {
    * `IDataEngine`.
    */
   executionContext?: ExecutionContext;
+  /**
+   * Search only inside these records (ADR-0161 K8, item 17, as its dated note
+   * of 2026-11-25 shapes it). Each entry names an object and record ids of it:
+   *
+   * - **The object a source indexes**: only the documents of those records
+   *   are searched in that source.
+   * - **A parent object**: only the documents whose lookup to it holds one of
+   *   those ids are searched, in a source that lists that lookup (a `lookup`
+   *   or `master_detail` field pointing at the object) in its
+   *   `metadataFields` — "the clauses of this policy". A source that lists no
+   *   such field, or two or more of them, is not reached by the entry; a
+   *   parent two hops away is not reached either.
+   *
+   * Several entries are a union: a document is searched when any entry holds
+   * for it. A source no entry reaches is not searched, and a `file` / `http`
+   * source answers nothing under a scope.
+   *
+   * - **Absent**: no scope, as before this option.
+   * - **Empty** (`[]`), or an entry whose `ids` is empty: nothing is in scope,
+   *   and the search answers no hits. Never read as "no scope".
+   *
+   * **Bounds.** At most 10 entries, each with at most 500 ids; `object` and
+   * every id a non-empty string, and no other key on an entry. A scope past
+   * them is refused before any adapter is called, with a coded error
+   * (ADR-0112: `code: 'VALIDATION_ERROR'`, `status: 400`).
+   *
+   * A ranking scope, not the access decision: every hit is still re-read as
+   * the caller, and an entry that reaches nothing answers the same empty
+   * answer a source withheld from the caller gives.
+   */
+  scope?: Array<{ object: string; ids: string[] }>;
 }
 
 /** Options accepted by `IKnowledgeService.reindexSource`. */
@@ -82,6 +146,19 @@ export interface KnowledgeReindexResult {
    * implementation that predates the field.
    */
   purged?: number | null;
+  /**
+   * Documents removed from the index instead of written, because they cannot
+   * be indexed as the source's split asks — today a `whole` document whose
+   * token estimate is over the embedder's input budget, which is never
+   * truncated. `0` when none was. Absent from a result of an implementation
+   * that predates the field.
+   */
+  failed?: number;
+  /**
+   * Which documents those were and why, in walk order, bounded by the
+   * service (`failed` counts them all). Absent when `failed` is absent.
+   */
+  failures?: Array<{ documentId: string; reason: string }>;
 }
 
 /**

@@ -103,6 +103,7 @@ import { SharingRuleCloneDialog, type SharingRuleCloneDialogProps } from './Shar
 import { PermissionSetCloneDialog } from './PermissionSetCloneDialog.js';
 import { permissionSetCloneNoticeText } from './permission-set-clone.js';
 import { newSimilarOutcome } from '../studio-design/permissionNewSimilar.js';
+import { useStudioDashboardNew } from '../studio-design/StudioAreaAppOpen.js';
 import { postureHasOrgWall, useTenancyPosture } from '../../hooks/useTenancyPosture.js';
 import {
   applyListState,
@@ -762,6 +763,11 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       : {}),
   };
   const filtered = applyListState(scopedItems, listState, rowReader, locale);
+  // objectstack#36903 — a host that says what its empty list means (the
+  // package-less scope, whose list is its source filter's narrowing of the
+  // environment's rows) reads an unsearched, empty list as empty, not as a
+  // search with no match.
+  const hintedEmpty = !!host?.emptyListHint && !query.trim() && filtered.length === 0;
   // The list context every row link carries to its detail (decision 10).
   const listContext = listContextQuery(listState);
 
@@ -818,8 +824,16 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const typeWritable = !!(entry?.allowEnvironmentOverlay || entry?.allowRuntimeCreate);
   // A declaration-only catalog is never authored here: its items are created
   // on the authored object's page.
-  const canCreate =
+  const canCreateHere =
     typeWritable && !walled && (!envScope || canAuthor) && !authoredObject && (!host?.readOnly || createInPair);
+  // objectstack#36907 — in the Studio area a dashboard's New opens an app's
+  // design mode (its 「Add menu item」 picker, so the dashboard hangs in a
+  // menu): offered only where an app opens, never on a phone, and with no app
+  // the list says why instead.
+  const dashboardNew = useStudioDashboardNew(
+    canCreateHere && type === 'dashboard' && host?.packageId ? host.packageId : null,
+  );
+  const canCreate = canCreateHere && (dashboardNew === 'off' || dashboardNew === 'offered');
   // The wall is the gate to NAME only where the type would otherwise admit a
   // write: a type with no runtime write channel is read-only for the operator
   // too, and its page says nothing about the wall.
@@ -844,7 +858,23 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     `${routeLocation.pathname}?${search}`,
     !loading && filtered.length > 0,
   );
-  const createButton = canCreate && (
+  // What an empty list says under its title. objectstack#36907 — a dashboard
+  // list whose New is withheld never falls through to the read-only hint: the
+  // package is writable. While its apps are read it says nothing yet; on a
+  // phone it says where a dashboard is made; with no app, why there is no New.
+  const emptyHint: string | null =
+    (scopedItems.length === 0 || hintedEmpty ? host?.emptyListHint : undefined) ??
+    config.emptyStateHint ??
+    (canCreate
+      ? tFormat('engine.list.createHint', locale, { type: typeLabel })
+      : dashboardNew === 'no-app'
+        ? t('engine.list.dashboardNewNoApp', locale)
+        : dashboardNew === 'phone'
+          ? t('engine.list.dashboardNewWiderScreen', locale)
+          : dashboardNew === 'pending'
+            ? null
+            : t('engine.list.readOnlyHint', locale));
+  const createButton = (canCreate && (
     <Button
       size="sm"
       variant={config.createFields ? 'default' : 'outline'}
@@ -859,7 +889,11 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       <Plus className="h-4 w-4 mr-1" />
       {t('engine.list.create', locale)}
     </Button>
-  );
+  )) || (dashboardNew === 'no-app' && (
+    <span role="note" className="max-w-xs text-xs text-muted-foreground" data-testid="metadata-list-create-unavailable">
+      {t('engine.list.dashboardNewNoApp', locale)}
+    </span>
+  ));
   // Declarative type-level actions (GAP-1) scoped to the list toolbar.
   // Per-row (`list_item`) actions are not surfaced here yet — they need the
   // row's recordId from the grid.
@@ -1449,16 +1483,11 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
         {!loading && !error && !packagesPending && (envScope || !!host || (projectPackages?.length ?? 0) > 0) && filtered.length === 0 && (
           <Empty>
             <EmptyTitle>
-              {scopedItems.length === 0
+              {scopedItems.length === 0 || hintedEmpty
                 ? tFormat('engine.list.emptyType', locale, { type: typeLabel })
                 : tFormat('engine.list.emptyQuery', locale, { query })}
             </EmptyTitle>
-            <EmptyDescription>
-              {config.emptyStateHint ??
-                (canCreate
-                  ? tFormat('engine.list.createHint', locale, { type: typeLabel })
-                  : t('engine.list.readOnlyHint', locale))}
-            </EmptyDescription>
+            {emptyHint !== null && <EmptyDescription data-testid="metadata-list-empty-hint">{emptyHint}</EmptyDescription>}
             {scopedItems.length === 0 && canCreate && (
               <div className="mt-4">
                 <Button onClick={handleCreate}>
