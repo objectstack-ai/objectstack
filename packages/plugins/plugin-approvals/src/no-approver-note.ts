@@ -23,6 +23,7 @@
  */
 
 import {
+  APPROVAL_LIST_PARAM_MAX_ITEMS,
   approvalMessageKey,
   interpolate,
   type ApprovalListParam,
@@ -188,8 +189,11 @@ function slotList(slots: readonly Slot[], declaredLabel: PositionLabelOf | undef
  * so every slot reads in the recipient's language whatever the slate's size.
  * (The `approvalNoApproverHoldingSlots<n>` sentences #36463 spelled slates of
  * 2 to 8 slots with stay in the packs: notices already delivered carry those
- * keys and are rendered again at every inbox read.) A note that stored `who`
- * keeps it as written.
+ * keys and are rendered again at every inbox read.) A slate of more slots
+ * than a list param takes (`APPROVAL_LIST_PARAM_MAX_ITEMS`) rides
+ * `approvalNoApproverHolding` with `who` the English clauses joined, so the
+ * emit is not refused and the submitter is still told. A note that stored
+ * `who` keeps it as written.
  */
 export function noApproverNotice(note: Pick<NoApproverNote, 'slots' | 'who'>, declaredLabel?: PositionLabelOf): {
   id: ApprovalMessageId; params: Record<string, ApprovalTextParam>;
@@ -199,7 +203,9 @@ export function noApproverNotice(note: Pick<NoApproverNote, 'slots' | 'who'>, de
     const { type, value } = slotParams(slots[0], declaredLabel);
     return { id: 'approvalNoApproverHoldingSlot', params: { type, value } };
   }
-  if (slots.length > 1) return { id: 'approvalNoApproverHolding', params: { who: slotList(slots, declaredLabel) } };
+  if (slots.length > 1 && slots.length <= APPROVAL_LIST_PARAM_MAX_ITEMS) {
+    return { id: 'approvalNoApproverHolding', params: { who: slotList(slots, declaredLabel) } };
+  }
   const who = note.slots ? noApproverWho(note.slots, declaredLabel) : note.who;
   return who
     ? { id: 'approvalNoApproverHolding', params: { who } }

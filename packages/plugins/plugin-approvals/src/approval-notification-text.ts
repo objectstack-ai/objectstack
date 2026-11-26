@@ -70,6 +70,14 @@ export interface ApprovalListParam {
   readonly separator: { readonly key: string; readonly fallback: string };
 }
 
+/**
+ * [#36853] The mirror of the messaging service's
+ * `NOTIFICATION_LIST_PARAM_MAX_ITEMS`: the most items an emit takes in one
+ * list param. A longer list is refused there (and `notify` only logs it), so a
+ * producer with more items must not send them as a list.
+ */
+export const APPROVAL_LIST_PARAM_MAX_ITEMS = 100;
+
 /** [#35384] The structural mirror of the messaging service's `NotificationObjectLabelParam`. */
 export interface ApprovalObjectLabelParam {
   /** The object's API name, never its label. */
