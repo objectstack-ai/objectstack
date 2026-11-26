@@ -440,6 +440,30 @@ describe('a build that stalls is cancelled at the bound', () => {
     expect(calls.completeBuild).toBe(1);
   });
 
+  it('a build queued behind a walk that never ends (a plain reindex, with no fence) is cancelled at the bound', async () => {
+    vi.useFakeTimers();
+    const db = makeEngine(rows(10));
+    const { adapter, calls } = makeAdapter();
+    // The first upsert never answers: a plain reindexSource (no build, no fence) holds the source's walk queue for good.
+    let hang = true;
+    const upsert = adapter.upsert.bind(adapter);
+    adapter.upsert = (batch, ctx) => (hang ? new Promise<void>(() => {}) : upsert(batch, ctx));
+    const { lock, state } = makeLock();
+    const { service } = makeService(db.engine, adapter, lock);
+
+    void service.reindexSource('kb', { limit: 5 });
+    await vi.advanceTimersByTimeAsync(0);
+    hang = false;
+    const pending = service.rebuildSource('kb', { trigger: 'operator' });
+    await vi.advanceTimersByTimeAsync(BUILD_STALL_LIMIT_MS + 1_000);
+    const record = await pending;
+
+    expect(record.status).toBe('timed-out');
+    expect(state.released).toBe(1);
+    expect(calls.beginBuild).toBe(0);
+    expect(calls.completeBuild).toBe(0);
+  });
+
   it('applies with no cluster service too (one node): the bound needs no lock', async () => {
     vi.useFakeTimers();
     const db = makeEngine(rows(10));
