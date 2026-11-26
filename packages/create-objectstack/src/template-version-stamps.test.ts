@@ -90,6 +90,19 @@ const writeFixtureFile = (file: string, content: string) => {
 };
 
 /**
+ * The stamper reads `engines.protocol`'s major from the protocol constant's
+ * source (`PROTOCOL_SOURCE`), never from the scaffolder version, so a fixture
+ * checkout carries its own copy, at the fixture's major. Shaped like the real
+ * file: TypeScript the read must strip, `PROTOCOL_MAJOR` derived.
+ */
+const writeProtocolSource = (into: string, protocolVersion: string) =>
+  writeFixtureFile(
+    path.join(into, 'packages', 'spec', 'src', 'kernel', 'protocol-version.ts'),
+    `export const PROTOCOL_VERSION = '${protocolVersion}';\n` +
+      "export const PROTOCOL_MAJOR: number = Number.parseInt(PROTOCOL_VERSION.split('.')[0]!, 10);\n",
+  );
+
+/**
  * Copy `absFile` into the fixture at the SAME repo-relative position, then do
  * the same for every RELATIVE import it makes, transitively.
  *
@@ -141,6 +154,7 @@ beforeAll(() => {
     path.join(fixture, 'packages', 'create-objectstack', 'package.json'),
     JSON.stringify({ name: 'create-objectstack', version: FIXTURE_VERSION }, null, 2) + '\n',
   );
+  writeProtocolSource(fixture, FIXTURE_VERSION);
 
   for (const template of FIXTURE_TEMPLATES) {
     const dir = fixtureTemplateDir(template);
@@ -271,6 +285,7 @@ describe('the entry-point guard leaves the CLI path working', () => {
         path.join(dir, 'packages', 'create-objectstack', 'package.json'),
         JSON.stringify({ name: 'create-objectstack', version: prerelease }, null, 2) + '\n',
       );
+      writeProtocolSource(dir, '43.0.0');
       const templateDir = path.join(dir, 'packages', 'create-objectstack', 'src', 'templates', 'blank');
       writeFixtureFile(
         path.join(templateDir, 'package.json'),
