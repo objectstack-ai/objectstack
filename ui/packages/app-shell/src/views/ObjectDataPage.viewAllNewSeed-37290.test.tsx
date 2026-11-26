@@ -14,12 +14,15 @@
  * trail holds the record's id alone, so the page reads the record once.
  *
  * Control: a link with no `dependsOn` writes the parent pair and reads nothing.
+ * A read refused, empty or past `TRAIL_NEW_PARENT_READ_TIMEOUT_MS` opens the
+ * form with the parent pair alone; New is pending while the read runs; a read
+ * that settles after the address moved on opens nothing.
  */
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 // The page reaches `@objectstack/lint` through a dynamic import; its first load is paid at collection, not inside a case.
 import '@objectstack/lint';
 
@@ -61,7 +64,7 @@ vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 vi.mock('./CreateViewDialog', () => ({ CreateViewDialog: () => null }));
 vi.mock('./metadata-admin/useMetadata', () => ({ useMetadataClient: () => ({}) }));
 
-import { ObjectDataPage } from './ObjectDataPage';
+import { ObjectDataPage, TRAIL_NEW_PARENT_READ_TIMEOUT_MS } from './ObjectDataPage';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { RECORD_TRAIL_PARAM } from '../urlParams';
 
@@ -95,10 +98,13 @@ const OBJECTS = [
 
 const TRAIL = encodeURIComponent(JSON.stringify([{ o: 'opportunity', i: 'O-1', t: 'Big deal' }]));
 
-function makeDataSource() {
+const readParent = async (object: string, id: string) =>
+  (object === 'opportunity' && id === 'O-1' ? { id: 'O-1', name: 'Big deal', account: 'A-1' } : null);
+
+function makeDataSource(findOne: (object: string, id: string) => Promise<unknown> = readParent) {
   return {
     find: vi.fn(async () => ({ data: [], total: 0 })),
-    findOne: vi.fn(async (object: string, id: string) => (object === 'opportunity' && id === 'O-1' ? { id: 'O-1', name: 'Big deal', account: 'A-1' } : null)),
+    findOne: vi.fn(findOne),
     create: vi.fn(async () => ({})),
     update: vi.fn(async () => ({})),
     delete: vi.fn(async () => ({})),
@@ -110,6 +116,13 @@ function Probe() {
   return h('output', { 'data-testid': 'probe' }, `${location.pathname}${location.search}`);
 }
 
+/** Moves the address on (a filter change made while New's read is pending). */
+function Mover() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return h('button', { 'data-testid': 'move', onClick: () => navigate(`${location.pathname}${location.search}&moved=1`) }, 'move');
+}
+
 function renderAt(objectName: string, dataSource: any) {
   return render(
     h(ExpressionProvider, {
@@ -119,7 +132,7 @@ function renderAt(objectName: string, dataSource: any) {
         { initialEntries: [`/apps/demo/${objectName}/data?filter[opportunity]=O-1&${RECORD_TRAIL_PARAM}=${TRAIL}`] },
         h(Routes, null, h(Route, {
           path: '/apps/:appName/:objectName/data',
-          element: h(React.Fragment, null, h(ObjectDataPage, { dataSource, objects: OBJECTS }), h(Probe)),
+          element: h(React.Fragment, null, h(ObjectDataPage, { dataSource, objects: OBJECTS }), h(Probe), h(Mover)),
         })),
       ),
     }),
@@ -127,7 +140,8 @@ function renderAt(objectName: string, dataSource: any) {
 }
 
 const params = () => new URLSearchParams((screen.getByTestId('probe').textContent ?? '').split('?')[1] ?? '');
-const clickNew = () => fireEvent.click(document.querySelector('[data-testid="object-data-new-button"]')!);
+const newButton = () => document.querySelector('[data-testid="object-data-new-button"]') as HTMLButtonElement;
+const clickNew = () => fireEvent.click(newButton());
 
 beforeEach(() => {
   cleanup();
@@ -138,6 +152,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
@@ -161,5 +176,53 @@ describe('New from a record trail seeds the dependsOn fields (objectstack#37290)
     await waitFor(() => expect(params().get('form')).toBe('new'));
     expect(params().getAll('formLink')).toEqual(['opportunity:O-1']);
     expect(ds.findOne).not.toHaveBeenCalledWith('opportunity', 'O-1');
+  });
+
+  it('a refused parent read opens the form with the parent pair alone', async () => {
+    const ds = makeDataSource(async () => { throw Object.assign(new Error('forbidden'), { status: 403 }); });
+    renderAt('contract', ds);
+    clickNew();
+    await waitFor(() => expect(params().get('form')).toBe('new'));
+    expect(params().getAll('formLink')).toEqual(['opportunity:O-1']);
+    expect(ds.findOne).toHaveBeenCalledWith('opportunity', 'O-1');
+    expect(newButton().disabled).toBe(false);
+  });
+
+  it('a parent read that finds nothing opens the form with the parent pair alone', async () => {
+    const ds = makeDataSource(async () => null);
+    renderAt('contract', ds);
+    clickNew();
+    await waitFor(() => expect(params().get('form')).toBe('new'));
+    expect(params().getAll('formLink')).toEqual(['opportunity:O-1']);
+    expect(ds.findOne).toHaveBeenCalledWith('opportunity', 'O-1');
+  });
+
+  it('New is pending while the read runs, and a read that never settles opens the parent pair alone after the bound', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const ds = makeDataSource(() => new Promise(() => {}));
+    renderAt('contract', ds);
+    clickNew();
+    await waitFor(() => expect(newButton().disabled).toBe(true));
+    expect(newButton().getAttribute('aria-busy')).toBe('true');
+    expect(params().get('form')).toBeNull();
+    await vi.advanceTimersByTimeAsync(TRAIL_NEW_PARENT_READ_TIMEOUT_MS);
+    await waitFor(() => expect(params().get('form')).toBe('new'));
+    expect(params().getAll('formLink')).toEqual(['opportunity:O-1']);
+    expect(newButton().disabled).toBe(false);
+  });
+
+  it('a read that settles after the address moved on opens nothing and keeps the new address', async () => {
+    let settle: (rec: unknown) => void = () => {};
+    const ds = makeDataSource(() => new Promise((resolve) => { settle = resolve; }));
+    renderAt('contract', ds);
+    clickNew();
+    await waitFor(() => expect(newButton().disabled).toBe(true));
+    fireEvent.click(screen.getByTestId('move'));
+    await waitFor(() => expect(params().get('moved')).toBe('1'));
+    settle({ id: 'O-1', account: 'A-1' });
+    await waitFor(() => expect(newButton().disabled).toBe(false));
+    expect(params().get('form')).toBeNull();
+    expect(params().getAll('formLink')).toEqual([]);
+    expect(params().get('moved')).toBe('1');
   });
 });

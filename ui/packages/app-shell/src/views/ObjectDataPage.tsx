@@ -324,6 +324,13 @@ function addressPanelFilterConditionCount(searchParams: URLSearchParams): number
   return Array.isArray(conditions) ? conditions.length : 0;
 }
 
+/**
+ * objectstack#37290 — how long New under a record trail waits for the parent
+ * read its `dependsOn` seed needs. Past it the form opens with the parent link
+ * alone, as it does when the read is refused or finds nothing.
+ */
+export const TRAIL_NEW_PARENT_READ_TIMEOUT_MS = 5000;
+
 export function ObjectDataPage({ dataSource, objects }: any) {
   const { appName, objectName } = useParams();
   const { t, language } = useObjectTranslation();
@@ -908,6 +915,12 @@ export function ObjectDataPage({ dataSource, objects }: any) {
     label: 'builtin:create:disabledWhen',
   });
   const createDisabled = createPredicates?.disabledWhen != null && createDisabledPred;
+  // objectstack#37290 — New under a record trail may read the parent first
+  // (the `dependsOn` seed). While it does, New is pending; a click's result is
+  // dropped when the page unmounted or the address moved on before it settled.
+  const [newPending, setNewPending] = React.useState(false);
+  const newClickRef = React.useRef(0);
+  React.useEffect(() => () => { newClickRef.current += 1; }, []);
 
   if (!objectDef) {
     return (
@@ -977,9 +990,24 @@ export function ObjectDataPage({ dataSource, objects }: any) {
             setSearchParams(sp);
           };
           if (Array.isArray(dependsOn) && dependsOn.length > 0 && typeof dataSource?.findOne === 'function') {
-            Promise.resolve(dataSource.findOne(source.o, source.i))
-              .then((rec: unknown) => open(rec && typeof rec === 'object' ? (rec as Record<string, unknown>) : undefined))
-              .catch(() => open(undefined));
+            const click = ++newClickRef.current;
+            const at = `${location.pathname}${location.search}`;
+            setNewPending(true);
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const timedOut = new Promise<undefined>((resolve) => {
+              timer = setTimeout(() => resolve(undefined), TRAIL_NEW_PARENT_READ_TIMEOUT_MS);
+            });
+            const read = Promise.resolve()
+              .then(() => dataSource.findOne(source.o, source.i))
+              .catch(() => undefined);
+            void Promise.race([read, timedOut]).then((rec: unknown) => {
+              clearTimeout(timer);
+              if (click !== newClickRef.current) return;
+              setNewPending(false);
+              const now = locationRef.current;
+              if (`${now.pathname}${now.search}` !== at) return;
+              open(rec && typeof rec === 'object' ? (rec as Record<string, unknown>) : undefined);
+            });
             return;
           }
           open(undefined);
@@ -987,7 +1015,8 @@ export function ObjectDataPage({ dataSource, objects }: any) {
         }
         navigate('../new', { relative: 'path' });
       }}
-      disabled={createDisabled}
+      disabled={createDisabled || newPending}
+      aria-busy={newPending || undefined}
       className="shadow-none gap-1.5 h-8 sm:h-9"
       data-testid="object-data-new-button"
     >
