@@ -3563,6 +3563,7 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#37454 — 概览 Overview, the package's own page (ADR-0084, amended 2026-11-26).
   'engine.studio.menu.overview': 'Overview',
   'engine.studio.menu.overviewPending': '{count} changes wait for a publish',
+  'engine.studio.menu.overviewPendingOne': '{count} change waits for a publish',
   'engine.studio.overview.chip.readOnly': 'Built-in',
   'engine.studio.overview.chip.writable': 'Writable',
   'engine.studio.overview.chip.enabled': 'In use',
@@ -3583,6 +3584,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.overview.readOnlySource': '{source}. Read-only: it cannot be changed directly.',
   'engine.studio.overview.pendingNote': 'Changes the AI assistant drafted wait here until you publish them. Your own saves go live at once.',
   'engine.studio.overview.loadFailed': 'Could not read this package: {error}',
+  'engine.studio.overview.loading': 'Reading this package…',
   // objectstack#36502 — the notice on a retired Interfaces link's landing.
   'engine.studio.interfacesRetired.sentence': 'Interface edits have moved into the app.',
   'engine.studio.interfacesRetired.backToApp': 'Back to the app',

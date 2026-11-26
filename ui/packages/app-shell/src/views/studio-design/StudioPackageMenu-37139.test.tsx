@@ -16,8 +16,9 @@
  *     Duplicate, Revert and Adopt are greyed (the server refuses each there);
  *     Revert is greyed too while nothing has changed since the last publish.
  *     Export and Manage in Setup… are never greyed.
- *  3. No 「⋯」 on `~org` or `~all` (no current package), and none for a user
- *     without `manage_metadata`.
+ *  3. No 「⋯」 on `~org` or `~all` (no current package): its one home, a
+ *     package's overview, is not drawn there at its own address. None for a
+ *     user without `manage_metadata`.
  *  4. Each item does what the development face's action does: the same door,
  *     the same confirmation, the same answer; Manage in Setup… opens Setup →
  *     Packages on this package's row.
@@ -330,19 +331,25 @@ describe('which items are greyed (objectstack#37139)', () => {
 // ---------------------------------------------------------------------------
 
 describe('no 「⋯」 without a current package or without manage_metadata (objectstack#37139)', () => {
-  it.each(['en-US', 'zh-CN'] as const)('%s: none on ~org and none on ~all', async (locale) => {
+  // objectstack#37454 — the menu's one home is a package's overview, so the
+  // check asks for the overview's own address on the two scopes: neither draws
+  // it, so neither draws the menu. (Asked on their other pages it would pass
+  // whatever the scopes did, the overview being absent there anyway.)
+  it.each(['en-US', 'zh-CN'] as const)('%s: none on ~org/overview and none on ~all/overview', async (locale) => {
     localeFixture = locale;
-    renderAt('/studio/~org/metadata/flow');
+    renderAt('/studio/~org/overview');
     await waitFor(() => expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent(t('engine.studio.menu.orgFlows', locale)), {
       timeout: 8000,
     });
+    expect(screen.queryByTestId('studio-package-overview')).toBeNull();
     expect(screen.queryByTestId('studio-package-menu')).toBeNull();
     cleanup();
 
-    renderAt('/studio/~all/metadata');
+    renderAt('/studio/~all/overview');
     await waitFor(() => expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent(t('engine.studio.menu.environment', locale)), {
       timeout: 8000,
     });
+    expect(screen.queryByTestId('studio-package-overview')).toBeNull();
     expect(screen.queryByTestId('studio-package-menu')).toBeNull();
   });
 

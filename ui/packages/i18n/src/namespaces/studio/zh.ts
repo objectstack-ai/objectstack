@@ -3147,6 +3147,7 @@ const STUDIO_ZH: Record<string, string> = {
   // objectstack#37454 — 概览 Overview, the package's own page (ADR-0084, amended 2026-11-26).
   'engine.studio.menu.overview': '概览',
   'engine.studio.menu.overviewPending': '{count} 项修改待发布',
+  'engine.studio.menu.overviewPendingOne': '{count} 项修改待发布',
   'engine.studio.overview.chip.readOnly': '系统自带',
   'engine.studio.overview.chip.writable': '可写',
   'engine.studio.overview.chip.enabled': '使用中',
@@ -3167,6 +3168,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.overview.readOnlySource': '{source}。只读：不能直接修改。',
   'engine.studio.overview.pendingNote': 'AI 助手做的修改先存为草稿，在这里等你发布；你自己保存的修改会立即生效。',
   'engine.studio.overview.loadFailed': '无法读取这个软件包：{error}',
+  'engine.studio.overview.loading': '正在读取这个软件包…',
   // objectstack#36502 — 旧「界面」链接落地时的提示。
   'engine.studio.interfacesRetired.sentence': '界面的修改已经搬到应用里',
   'engine.studio.interfacesRetired.backToApp': '回到应用',

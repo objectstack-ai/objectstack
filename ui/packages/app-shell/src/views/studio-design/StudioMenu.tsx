@@ -117,6 +117,7 @@ import {
   STUDIO_MENU_GROUP_ICONS,
   STUDIO_MENU_OVERVIEW_LABEL_KEY,
   STUDIO_MENU_OVERVIEW_PENDING_KEY,
+  STUDIO_MENU_OVERVIEW_PENDING_ONE_KEY,
   StudioMenuDataContext,
   useStudioMenuData,
   useStudioMenuTypes,
@@ -440,6 +441,8 @@ function StudioMenuBody({
   const renderOverview = () => {
     if (!overview) return null;
     const isCurrent = current === overview.key;
+    const pendingLabel = (count: number) =>
+      tFormat(count === 1 ? STUDIO_MENU_OVERVIEW_PENDING_ONE_KEY : STUDIO_MENU_OVERVIEW_PENDING_KEY, locale, { count });
     const closeDrawer = () => {
       if (isMobile) setOpenMobile(false);
     };
@@ -464,8 +467,8 @@ function StudioMenuBody({
               <Link
                 to={overview.pendingTo}
                 data-testid="studio-menu-overview-pending"
-                aria-label={tFormat(STUDIO_MENU_OVERVIEW_PENDING_KEY, locale, { count: overview.pending })}
-                title={tFormat(STUDIO_MENU_OVERVIEW_PENDING_KEY, locale, { count: overview.pending })}
+                aria-label={pendingLabel(overview.pending)}
+                title={pendingLabel(overview.pending)}
                 onClick={(e) => {
                   if (!e.defaultPrevented) closeDrawer();
                 }}

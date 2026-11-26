@@ -16,6 +16,11 @@
  *     pinned through both doors in `StudioDesignSurface.publishCount-11807`.)
  *  4. A read-only package keeps its posture: 系统自带 with a lock, no Publish
  *     from either door.
+ *  5. The overview's branch order: an unknown package lands on the surface's
+ *     not-found state, not on an overview; the package-less scope's
+ *     `~org/overview` redirects to its area; inside the page, the row read's
+ *     loading state (announced) comes before its failure, which comes before
+ *     the fields.
  *
  * The REAL `StudioDesignSurface`, metadata client and permission provider over
  * a fetch stub serving the package list and the package's drafts.
@@ -70,6 +75,8 @@ import { StudioDesignSurface } from './StudioDesignSurface';
 import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { STUDIO_PACKAGE_MENU_ITEMS } from './StudioPackageMenu';
+import { StudioPackageOverviewPage } from './StudioPackageOverviewPage';
+import { studioOrgScopePath } from './studioScope';
 
 const OWN = 'com.example.sales';
 const INSTALLED = 'com.vendor.crm';
@@ -342,5 +349,102 @@ describe('the Pending tab: the changes panel in place, wired as the top bar’s 
     await waitFor(() => expect(within(overviewHeader()).getByTestId('studio-overview-chip-access')).toHaveAttribute('data-writable', 'false'));
     await waitFor(() => expect(panels.sheet?.onPublish).toBeUndefined());
     expect(panels.embedded?.onPublish).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. The branch order
+// ---------------------------------------------------------------------------
+
+/** The page alone, with its address printed outside it. */
+function renderPage(entry = `/studio/${OWN}/overview`) {
+  return render(
+    <MemoryRouter initialEntries={[entry]}>
+      <StudioPackageOverviewPage
+        packageId={OWN}
+        packageName="Sales"
+        writable
+        apps={[]}
+        app={null}
+        pendingCount={null}
+        locale="en-US"
+        menu={null}
+        pending={null}
+        refreshKey={0}
+        beforeNavigate={() => true}
+        navigate={() => {}}
+      />
+      <Where />
+    </MemoryRouter>,
+  );
+}
+
+/** The surface with its address printed outside the routes, so a redirect that leaves the route is still read. */
+function renderSurfaceAt(entry: string) {
+  return render(
+    <MePermissionsProvider initialPermissions={AUTHOR}>
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
+          <Route
+            path="/studio/:packageId/:tab"
+            element={
+              <StudioPillarRedirect>
+                <StudioDesignSurface />
+              </StudioPillarRedirect>
+            }
+          />
+        </Routes>
+        <Where />
+      </MemoryRouter>
+    </MePermissionsProvider>,
+  );
+}
+
+describe('the overview\'s branch order (objectstack#37454)', () => {
+  it('the row read fails: the failure is said in place of the fields; the header stays', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => json({ success: false, error: { message: 'list is down' } }, 503)) as unknown as typeof fetch,
+    );
+    renderPage();
+    const failed = await screen.findByTestId('studio-overview-load-failed', undefined, { timeout: 8000 });
+    expect(failed).toHaveAttribute('role', 'alert');
+    expect(failed).toHaveTextContent(tFormat('engine.studio.overview.loadFailed', 'en-US', { error: '' }).replace(/\s*$/, ''));
+    expect(screen.queryByTestId('studio-overview-loading')).toBeNull();
+    expect(screen.queryByTestId('studio-overview-field-name')).toBeNull();
+    expect(screen.getByTestId('studio-overview-title')).toHaveTextContent('Sales');
+  });
+
+  it('the row read still on the wire: an announced loading row, neither a failure nor fields; CONTROL: once it answers, the fields', async () => {
+    let answer!: (r: Response) => void;
+    const wire = new Promise<Response>((resolve) => {
+      answer = resolve;
+    });
+    vi.stubGlobal('fetch', vi.fn(() => wire) as unknown as typeof fetch);
+    renderPage();
+    const loading = screen.getByTestId('studio-overview-loading');
+    expect(loading).toHaveAttribute('role', 'status');
+    expect(loading).toHaveTextContent(t('engine.studio.overview.loading', 'en-US'));
+    expect(screen.queryByTestId('studio-overview-load-failed')).toBeNull();
+    expect(screen.queryByTestId('studio-overview-field-name')).toBeNull();
+
+    answer(json(PACKAGE_LIST));
+    await waitFor(() => expect(screen.getByTestId('studio-overview-field-name')).toHaveTextContent('Sales'));
+    expect(screen.queryByTestId('studio-overview-loading')).toBeNull();
+  });
+
+  it('an unknown package at its overview address lands on the not-found state, not on an overview', async () => {
+    renderSurfaceAt('/studio/com.nowhere.pkg/overview');
+    expect(await screen.findByTestId('studio-package-not-found', undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.queryByTestId('studio-package-overview')).toBeNull();
+    expect(screen.queryByTestId('studio-package-menu')).toBeNull();
+  });
+
+  it('the package-less scope has no overview: ~org/overview redirects to its area', async () => {
+    renderSurfaceAt('/studio/~org/overview');
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent(studioOrgScopePath()), { timeout: 8000 });
+    expect(screen.queryByTestId('studio-package-overview')).toBeNull();
+    expect(screen.queryByTestId('studio-package-menu')).toBeNull();
   });
 });

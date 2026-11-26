@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { RESERVED_URL_PARAMS } from '../../urlParams.js';
+import { RECORD_DETAIL_TAB_PARAM, RESERVED_URL_PARAMS } from '../../urlParams.js';
 import {
   STUDIO_RETURN_PARAM,
   readStudioReturn,
@@ -25,9 +25,6 @@ import {
   studioMetadataItemAddress,
   studioMetadataTypePath,
   studioOwdOverviewPath,
-  studioOverviewTab,
-  studioPackageOverviewPath,
-  STUDIO_OVERVIEW_TAB_PARAM,
   studioPackagePath,
   studioAddressParts,
   studioPath,
@@ -39,6 +36,7 @@ import {
   STUDIO_QUERY_PARAMS,
   STUDIO_RETIRED_INTERFACES_KEPT_PARAMS,
 } from './studioAddressTable.js';
+import { studioOverviewTab, studioPackageOverviewPath } from './studioOverviewAddress.js';
 import { DESIGNER_SURFACE_PARAM } from '../metadata-admin/nav-selection.js';
 import { CATALOG_SCOPE_PARAM, ENVIRONMENT_SCOPE } from '../metadata-admin/catalog-scope.js';
 import {
@@ -171,6 +169,9 @@ describe('studioPackageOverviewPath — 概览 Overview\'s own route (objectstac
     expect(studioPackageOverviewPath('crm')).toBe('/studio/crm/overview');
     expect(studioPackageOverviewPath('crm', { tab: 'info' })).toBe('/studio/crm/overview');
     expect(studioPackageOverviewPath('crm', { tab: 'pending' })).toBe('/studio/crm/overview?tab=pending');
+    // The open tab rides the console's reserved key, not a Studio restatement of it (ui AGENTS rule #8).
+    expect(new URL(studioPackageOverviewPath('crm', { tab: 'pending' }), 'http://x').searchParams.get(RECORD_DETAIL_TAB_PARAM)).toBe('pending');
+    expect(RESERVED_URL_PARAMS).toContain(RECORD_DETAIL_TAB_PARAM);
     expect(studioPackageOverviewPath('com.example crm')).toBe('/studio/com.example%20crm/overview');
   });
 
@@ -214,7 +215,7 @@ describe('the mapping table agrees with the code (objectstack#36895)', () => {
       'review',
       'package',
       CATALOG_SCOPE_PARAM,
-      STUDIO_OVERVIEW_TAB_PARAM,
+      RECORD_DETAIL_TAB_PARAM,
       'new',
     ]);
     expect(STUDIO_QUERY_PARAMS.find((row) => row.key === CATALOG_SCOPE_PARAM)?.values).toBe(ENVIRONMENT_SCOPE);

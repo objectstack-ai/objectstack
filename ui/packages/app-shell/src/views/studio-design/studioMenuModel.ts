@@ -83,9 +83,9 @@ import {
   studioMetadataAreaAddress,
   studioMetadataAreaRoot,
   studioOwdOverviewPath,
-  studioPackageOverviewPath,
   studioPackagePath,
 } from './studioAddress.js';
+import { studioPackageOverviewPath } from './studioOverviewAddress.js';
 import { isStudioOrgScope, studioOrgScopePath } from './studioScope.js';
 import { STUDIO_MENU_PLACEMENT, type StudioMenuTier } from './studioMenuPlacement.js';
 

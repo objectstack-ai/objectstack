@@ -17,4 +17,4 @@ Studio has a page for the open package itself, 概览 Overview, at `/studio/<pac
 
 The Studio menu's first row, above its groups, is 概览 Overview. While drafts wait for a publish it carries their count as a badge, and one click on the badge opens the Pending tab. A search lists it when its name matches.
 
-`DraftChangesPanel` takes two optional props, `embedded` (draw the panel in place instead of as a sheet) and `reloadKey` (read the drafts again when it changes); without them it behaves as before. New locale keys in the studio catalogue (en, zh): `engine.studio.menu.overview`, `engine.studio.menu.overviewPending` and `engine.studio.overview.*`.
+`DraftChangesPanel` takes two optional props, `embedded` (draw the panel in place instead of as a sheet) and `reloadKey` (read the drafts again when it changes); without them it behaves as before. New locale keys in the studio catalogue (en, zh): `engine.studio.menu.overview`, `engine.studio.menu.overviewPending` with its singular `engine.studio.menu.overviewPendingOne`, and `engine.studio.overview.*`.

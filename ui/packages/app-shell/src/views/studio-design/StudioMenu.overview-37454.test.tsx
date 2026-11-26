@@ -9,6 +9,7 @@
  *     current row there. CONTROL: `~org` and `~all` draw no such row.
  *  2. While drafts wait for a publish it carries their count as a badge, and
  *     only then. CONTROL: a ledger of zero, and one not yet known, draw none.
+ *     Its label counts in the catalogue's singular for one draft.
  *  3. One click on the badge opens the overview's Pending tab; the row itself
  *     opens the Info tab.
  *  4. A search lists it when its name matches, and only then.
@@ -138,6 +139,17 @@ describe('its badge: the pending count, only while drafts wait (objectstack#3745
     renderAt(`/studio/${PKG}/data`, { pending: 3 });
     expect(badge()).toHaveTextContent(/^3$/);
     expect(badge()).toHaveAttribute('aria-label', '3 changes wait for a publish');
+  });
+
+  it('one draft pending: the label is singular in en; zh-CN has one form', async () => {
+    renderAt(`/studio/${PKG}/data`, { pending: 1 });
+    expect(badge()).toHaveTextContent(/^1$/);
+    expect(badge()).toHaveAttribute('aria-label', '1 change waits for a publish');
+    cleanup();
+
+    await loadStudioCatalogue('zh-CN');
+    renderAt(`/studio/${PKG}/data`, { pending: 1, locale: 'zh-CN' });
+    expect(badge()).toHaveAttribute('aria-label', '1 项修改待发布');
   });
 
   it.each([

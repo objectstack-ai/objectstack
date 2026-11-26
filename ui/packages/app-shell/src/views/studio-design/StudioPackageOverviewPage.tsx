@@ -43,12 +43,8 @@ import { StudioItemHeader, StudioTab } from './StudioItemHeader.js';
 import { STUDIO_KIND_CHIP } from './studio-tokens.js';
 import { fetchListedPackageManifests, type ListedPackageManifest } from './packages-io.js';
 import { appHomePath, packageAppSegment, type StudioAppTarget } from './studioAppEdit.js';
-import {
-  STUDIO_OVERVIEW_TAB_PARAM,
-  STUDIO_OVERVIEW_TABS,
-  studioOverviewTab,
-  type StudioOverviewTab,
-} from './studioAddress.js';
+import { RECORD_DETAIL_TAB_PARAM } from '../../urlParams.js';
+import { STUDIO_OVERVIEW_TABS, studioOverviewTab, type StudioOverviewTab } from './studioOverviewAddress.js';
 
 /** The served `source` values the Packages page names (`engine.packages.source.*`). */
 const NAMED_SOURCES = new Set(['code', 'marketplace', 'authored']);
@@ -115,14 +111,14 @@ export function StudioPackageOverviewPage({
   navigate,
 }: StudioPackageOverviewPageProps): React.ReactElement {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = studioOverviewTab(searchParams.get(STUDIO_OVERVIEW_TAB_PARAM));
+  const tab = studioOverviewTab(searchParams.get(RECORD_DETAIL_TAB_PARAM));
   const openTab = (next: StudioOverviewTab) => {
     if (next === tab) return;
     setSearchParams(
       (prev) => {
         const query = new URLSearchParams(prev);
-        if (next === 'info') query.delete(STUDIO_OVERVIEW_TAB_PARAM);
-        else query.set(STUDIO_OVERVIEW_TAB_PARAM, next);
+        if (next === 'info') query.delete(RECORD_DETAIL_TAB_PARAM);
+        else query.set(RECORD_DETAIL_TAB_PARAM, next);
         return query;
       },
       { replace: true },
@@ -210,8 +206,9 @@ export function StudioPackageOverviewPage({
         {t('engine.studio.overview.basics', locale)}
       </h2>
       {read.state === 'loading' ? (
-        <p className="flex items-center gap-2 border-t py-3 text-sm text-muted-foreground" data-testid="studio-overview-loading">
+        <p role="status" className="flex items-center gap-2 border-t py-3 text-sm text-muted-foreground" data-testid="studio-overview-loading">
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          <span className="sr-only">{t('engine.studio.overview.loading', locale)}</span>
         </p>
       ) : read.state === 'failed' ? (
         <p role="alert" className="border-t py-3 text-sm text-destructive" data-testid="studio-overview-load-failed">
