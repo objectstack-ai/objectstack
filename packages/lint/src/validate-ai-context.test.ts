@@ -160,6 +160,59 @@ describe('validateAiContext — ADR-0160 D1 author defects', () => {
     ]);
   });
 
+  // The runtime answer this verdict matches, measured over one real kernel (the
+  // `/mcp` door, the real protocol, `SqlDriver`): on an object that declares
+  // neither `owner_id` nor `created_at`, the served definition carries both,
+  // and `get_record_context` answers both in the root's `fields`, a related
+  // list's `fields`, its `where` and its `orderBy`. On an `ownership: 'org'`
+  // object the platform injects no `owner_id` and the tool leaves it out.
+  // `service-record-context`'s injected-system-columns test pins the
+  // executor's half over a door serving the same registry-injected shape.
+  it('an injected system column the object does not declare is no unknown field (owner_id, created_at)', () => {
+    const stack = {
+      objects,
+      aiContexts: [pack({
+        fields: ['title', 'owner_id', 'created_at'],
+        related: [{
+          object: 'policy_revision',
+          fields: ['version', 'owner_id', 'created_by'],
+          where: { owner_id: 'usr_1' },
+          orderBy: [{ field: 'created_at', order: 'desc' }],
+        }],
+      })],
+    };
+    expect(objects.flatMap((o) => Object.keys(o.fields))).not.toContain('owner_id');
+    expect(validateAiContext(stack)).toEqual([]);
+  });
+
+  it('a column the platform does not inject on the object is still unknown: owner_id under ownership org', () => {
+    const orgOwned = objects.map((o) => (o.name === 'policy' || o.name === 'policy_revision' ? { ...o, ownership: 'org' } : o));
+    const stack = {
+      objects: orgOwned,
+      aiContexts: [pack({
+        fields: ['title', 'owner_id', 'created_at'],
+        related: [{ object: 'policy_revision', fields: ['owner_id'], where: { owner_id: 'usr_1' }, orderBy: [{ field: 'owner_id' }] }],
+      })],
+    };
+    expect(rulesOf(stack)).toEqual([
+      [AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].fields[1]'],
+      [AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].related[0].fields[0]'],
+      [AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].related[0].where'],
+      [AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].related[0].orderBy[0].field'],
+    ]);
+    // And `systemFields: false` withholds every injected column, `created_at` included.
+    const optedOut = objects.map((o) => (o.name === 'policy' ? { ...o, systemFields: false } : o));
+    expect(rulesOf({ objects: optedOut, aiContexts: [pack({ fields: ['created_at'], related: undefined })] })).toEqual([
+      [AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].fields[0]'],
+    ]);
+  });
+
+  it('a body naming an injected column is judged by the injected definition, not reported unknown', () => {
+    expect(rulesOf({ objects, aiContexts: [pack({ body: { field: 'created_at' } })] })).toEqual([
+      [AI_CONTEXT_BODY_NOT_LONG_TEXT, 'aiContexts[0].body.field'],
+    ]);
+  });
+
   it('every verdict is a warning, and every rule it emits has an `os explain` entry', () => {
     const findings = validateAiContext({ objects, aiContexts: [pack({ fields: ['nope'], body: { field: 'title' } })] });
     expect(findings.every((f) => f.severity === 'warning')).toBe(true);
