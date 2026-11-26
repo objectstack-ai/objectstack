@@ -18,5 +18,6 @@ runKnowledgeAdapterContract({
     builds: true,
     refusesOtherFingerprint: true,
     generations: true,
+    scope: true,
   },
 });

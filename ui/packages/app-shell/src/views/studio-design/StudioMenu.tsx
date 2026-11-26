@@ -29,6 +29,12 @@
  *    the hook list), without writing the cookie.
  *  - A search ignores it: the matches of both tiers are listed flat.
  *  - `~org` and `~all` draw no fold: their entries are listed flat.
+ *
+ * The fold's last row, below its groups and under no group's label, is
+ * 全部类型 All types (ADR-0084, amended 2026-11-25; objectstack#37360): it
+ * opens the area's type directory, where every type of the six groups is
+ * listed, the ones the package holds none of yet included. A search lists it
+ * last, after the matching groups.
  */
 
 import * as React from 'react';
@@ -64,6 +70,7 @@ import {
   STUDIO_MENU_COOKIE,
   buildStudioMenu,
   readStudioMenuAdvancedCookie,
+  studioMenuAllTypesEntry,
   studioMenuCurrentKey,
   studioMenuEntryMatches,
   studioMenuScope,
@@ -202,6 +209,9 @@ function StudioMenuBody({
   const matching = menu
     .map((g) => ({ ...g, entries: g.entries.filter((e) => studioMenuEntryMatches(e, labelOf(e), query)) }))
     .filter((g) => g.entries.length > 0);
+  // objectstack#37360 — 全部类型 All types: a package's, under no group.
+  const allTypes = studioMenuAllTypesEntry(scope);
+  const allTypesMatches = !!allTypes && studioMenuEntryMatches(allTypes, labelOf(allTypes), query);
   // The fold is a package's: a search, `~org` and `~all` list their entries flat.
   const folded = scope.kind === 'package' && !searching;
   const tiers = studioMenuTiers(menu);
@@ -210,7 +220,8 @@ function StudioMenuBody({
   // page is one of its entries — until the author closes it on that page.
   const [remembered, setRemembered] = React.useState(readAdvancedCookie);
   const [closedOn, setClosedOn] = React.useState<string | null>(null);
-  const currentIsAdvanced = tiers.advanced.some((g) => g.entries.some((e) => e.key === current));
+  const currentIsAdvanced =
+    tiers.advanced.some((g) => g.entries.some((e) => e.key === current)) || (!!allTypes && allTypes.key === current);
   const advancedOpen = remembered || (currentIsAdvanced && closedOn !== current);
   const toggleAdvanced = () => {
     const next = !advancedOpen;
@@ -280,6 +291,13 @@ function StudioMenuBody({
       );
     });
 
+  // The fold's last row, under no group: no label above it, no group around it.
+  const renderAllTypes = (entry: StudioMenuEntry) => (
+    <div className="px-2 py-1" data-testid="studio-menu-all-types">
+      <SidebarMenu aria-label={labelOf(entry)}>{renderEntry(entry)}</SidebarMenu>
+    </div>
+  );
+
   return (
     <Sidebar
       collapsible="offcanvas"
@@ -302,14 +320,15 @@ function StudioMenuBody({
       </SidebarHeader>
       <SidebarContent>
         <nav aria-label={t('engine.studio.menu.label', locale)} data-testid="studio-menu">
-          {matching.length === 0 && (
+          {matching.length === 0 && !allTypesMatches && (
             <p role="status" className="px-4 py-3 text-xs text-muted-foreground" data-testid="studio-menu-no-matches">
               {t('engine.studio.menu.noMatches', locale)}
             </p>
           )}
           {!folded && renderGroups(matching, 'flat')}
+          {!folded && allTypes && allTypesMatches && renderAllTypes(allTypes)}
           {folded && renderGroups(tiers.common, 'common')}
-          {folded && tiers.advanced.length > 0 && (
+          {folded && (tiers.advanced.length > 0 || allTypes) && (
             <>
               <div aria-hidden="true" data-testid="studio-menu-advanced-divider" className="mx-2 my-1 h-px bg-sidebar-border" />
               <div className="px-2 py-1">
@@ -330,6 +349,7 @@ function StudioMenuBody({
               </div>
               <div id={advancedId} data-testid="studio-menu-advanced" hidden={!advancedOpen} className="pl-2">
                 {renderGroups(tiers.advanced, 'advanced')}
+                {allTypes && renderAllTypes(allTypes)}
               </div>
             </>
           )}

@@ -54,6 +54,42 @@
           "evidenceScope": "in-repo",
           "evidence": "packages/services/service-record-context/src/record-context-tools.ts#executeGetRecordContext — the list's columns, projected onto the child as the caller is served it; packages/services/service-record-context/src/read-set.ts#planObjectsOf — a lookup among them adds its target to the read set.",
           "producer": "packages/objectql/src/engine-top-level.ts#METADATA_ARRAY_KEYS — the stack's `aiContexts` reach the registry as `ai_context` items with their package stamped; packages/runtime/src/domains/mcp.ts#recordContextMembers and packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge read them back (`listContextPacks`) for the executor."
+        },
+        "where": {
+          "status": "live",
+          "verifiedAt": "2026-11-25",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/services/service-record-context/src/record-context-tools.ts#executeGetRecordContext — joined to the link filter with `$and` in the one capped child query, read as the caller; each field it names (`aiContextWhereFields`) is judged first: one the child lacks leaves the list out, one the caller cannot query on (`queryableAmong`) drops it with the not-visible statement.",
+          "producer": "packages/objectql/src/engine-top-level.ts#METADATA_ARRAY_KEYS — the stack's `aiContexts` reach the registry as `ai_context` items with their package stamped; packages/runtime/src/domains/mcp.ts#recordContextMembers and packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge read them back (`listContextPacks`) for the executor.",
+          "note": "ADR-0160 second amendment (row 11). Parse-time subset of the object filter form: AI_CONTEXT_WHERE_OPERATORS joined by $and / $or, literal comparands only."
+        },
+        "orderBy": {
+          "children": {
+            "field": {
+              "status": "live",
+              "verifiedAt": "2026-11-25",
+              "evidenceScope": "in-repo",
+              "evidence": "packages/services/service-record-context/src/record-context-tools.ts#executeGetRecordContext — the sort key of the one capped child query, read as the caller; judged first, as `where`'s fields are: one the child lacks leaves the list out, one the caller cannot query on (`queryableAmong`) drops it with the not-visible statement.",
+              "producer": "packages/objectql/src/engine-top-level.ts#METADATA_ARRAY_KEYS — the stack's `aiContexts` reach the registry as `ai_context` items with their package stamped; packages/runtime/src/domains/mcp.ts#recordContextMembers and packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge read them back (`listContextPacks`) for the executor.",
+              "note": "ADR-0160 second amendment (row 11). The child's own field only: a dotted path is refused at parse."
+            },
+            "order": {
+              "status": "live",
+              "verifiedAt": "2026-11-25",
+              "evidenceScope": "in-repo",
+              "evidence": "packages/services/service-record-context/src/record-context-tools.ts#executeGetRecordContext — the direction of that sort key in the one child query (`asc` when omitted).",
+              "producer": "packages/objectql/src/engine-top-level.ts#METADATA_ARRAY_KEYS — the stack's `aiContexts` reach the registry as `ai_context` items with their package stamped; packages/runtime/src/domains/mcp.ts#recordContextMembers and packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge read them back (`listContextPacks`) for the executor.",
+              "note": "SortNodeSchema's `order`; `direction` is refused by name."
+            }
+          }
+        },
+        "limit": {
+          "status": "live",
+          "verifiedAt": "2026-11-25",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/services/service-record-context/src/record-context-tools.ts#executeGetRecordContext — the cut of the one child query (asked for one row past it), marked `truncated` and stated in the notes when it cuts; absent, the row cap RECORD_CONTEXT_RELATED_MAX_ROWS (= AI_CONTEXT_MAX_RELATED_ROWS) applies.",
+          "producer": "packages/objectql/src/engine-top-level.ts#METADATA_ARRAY_KEYS — the stack's `aiContexts` reach the registry as `ai_context` items with their package stamped; packages/runtime/src/domains/mcp.ts#recordContextMembers and packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge read them back (`listContextPacks`) for the executor.",
+          "note": "ADR-0160 second amendment (row 11). Bounded at parse by AI_CONTEXT_MAX_RELATED_ROWS, never lowered at call time."
         }
       }
     },

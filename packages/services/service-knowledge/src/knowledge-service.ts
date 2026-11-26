@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import type {
   AdapterContext,
   AdapterIndexExpectation,
+  AdapterScopeTerm,
   IDataEngine,
   IKnowledgeAdapter,
   IKnowledgeService,
@@ -41,6 +42,7 @@ import {
   type KnowledgeSourceAdmission,
   type ObjectAdmission,
 } from './knowledge-source-admission.js';
+import { readSearchScope, scopeCheck, scopeTermsFor, type SearchScopeEntry } from './knowledge-search-scope.js';
 
 /**
  * Minimal logger shape; falls back to no-op when none is provided.
@@ -126,6 +128,10 @@ export class KnowledgeService implements IKnowledgeService {
   private readonly adapters = new Map<string, IKnowledgeAdapter>();
   private readonly sources = new Map<string, KnowledgeSource>();
   private readonly defaultTopK: number;
+  /** Adapters whose answer the scope check has already dropped a hit from — reported once each ({@link searchRound}). */
+  private readonly scopeIgnoredReported = new Set<string>();
+  /** `${source id}\u0000${object}` pairs a scope entry did not reach for two or more parent links — reported once each. */
+  private readonly scopeAmbiguousReported = new Set<string>();
   /**
    * The tail of each document's record-sync chain, keyed by document id
    * (`${source.id}:${recordId}`) — see {@link serializeRecordSync}. A key
@@ -768,6 +774,18 @@ export class KnowledgeService implements IKnowledgeService {
    * hit as the caller ({@link applyPermissionFilter}), and answer the best
    * `topK` hits by score — passages, or records under `granularity: 'record'`.
    *
+   * ## The record scope (`scope`, ADR-0161 K8, item 17)
+   *
+   * A scope is held to its bounds before anything else is done
+   * ({@link readSearchScope}: a coded refusal past them), then turned into the
+   * terms of each admitted source ({@link sourcesInScope}). A source no entry
+   * reaches is not searched, so an empty scope answers no hits and asks no
+   * adapter. Each searched adapter is handed its source's terms, and every hit
+   * it answers is checked against them, whatever the adapter did
+   * ({@link searchRound}). The refill below counts the hits that passed both
+   * that check and the re-check; whether a source may hold more is still judged
+   * on how many hits its adapter answered.
+   *
    * ## The refill after the permission filter
    *
    * The re-check runs AFTER ranking, so a caller who may read few of the
@@ -842,6 +860,7 @@ export class KnowledgeService implements IKnowledgeService {
    * `refused` lists them all.
    */
   async searchWithRefusals(query: string, opts: KnowledgeSearchOptions = {}): Promise<KnowledgeSearchReport> {
+    const scope = readSearchScope(opts.scope);
     const topK = opts.topK ?? this.defaultTopK;
     const groupBy = opts.groupBy;
     if (groupBy !== undefined) {
@@ -866,7 +885,9 @@ export class KnowledgeService implements IKnowledgeService {
     }
     const byRecord = opts.granularity === 'record' || groupBy !== undefined;
     const ctx = opts.executionContext;
-    let admitted = await this.admitSources(this.resolveSearchTargets(opts.sourceIds), ctx);
+    let admitted: Array<{ source: KnowledgeSource; organizationIds?: string[]; scope?: AdapterScopeTerm[] }> =
+      await this.admitSources(this.resolveSearchTargets(opts.sourceIds), ctx);
+    if (scope !== undefined) admitted = this.sourcesInScope(admitted, scope);
     if (groupBy !== undefined) admitted = this.sourcesGroupableBy(admitted, groupBy);
     if (admitted.length === 0) return { hits: [], refused: [] };
     const sources = await this.planSearches(admitted);
@@ -938,10 +959,7 @@ export class KnowledgeService implements IKnowledgeService {
    * `metadataFields`. Any other object source answers no hits for this search
    * — its hits carry no group value, and a hit is never answered ungrouped.
    */
-  private sourcesGroupableBy(
-    sources: Array<{ source: KnowledgeSource; organizationIds?: string[] }>,
-    groupBy: string,
-  ): Array<{ source: KnowledgeSource; organizationIds?: string[] }> {
+  private sourcesGroupableBy<T extends { source: KnowledgeSource }>(sources: T[], groupBy: string): T[] {
     return sources.filter(({ source }) => {
       if (source.source.kind !== 'object') return true;
       if (((source.source as ObjectKnowledgeSource).metadataFields ?? []).includes(groupBy)) return true;
@@ -1149,7 +1167,7 @@ export class KnowledgeService implements IKnowledgeService {
    * (the round skips it, as before).
    */
   private async planSearches(
-    admitted: Array<{ source: KnowledgeSource; organizationIds?: string[] }>,
+    admitted: Array<{ source: KnowledgeSource; organizationIds?: string[]; scope?: AdapterScopeTerm[] }>,
   ): Promise<SearchTarget[]> {
     const out: SearchTarget[] = [];
     // The settings page's chunk target, read at most once for the whole search.
@@ -1170,11 +1188,19 @@ export class KnowledgeService implements IKnowledgeService {
   /**
    * One round of {@link search}: ask each source's adapter for `ask(source)`
    * hits. Answers, per source that answered, the hits it serves and how many
-   * the adapter returned (`answered`, before a hit naming another source is
-   * dropped — what decides whether the adapter may hold more). A source whose
-   * adapter is unknown or throws is absent from the answer: a coded refusal
-   * (ADR-0112 `code` and `status`) is added to `refused`, anything else is
-   * logged.
+   * the adapter returned (`answered`, before a hit naming another source or
+   * outside the scope is dropped — what decides whether the adapter may hold
+   * more). A source whose adapter is unknown or throws is absent from the
+   * answer: a coded refusal (ADR-0112 `code` and `status`) is added to
+   * `refused`, anything else is logged.
+   *
+   * Under a scope, the adapter is handed the source's terms, and every hit it
+   * answers is checked against them ({@link scopeCheck}, fail closed). The first
+   * time the check drops a hit of an adapter, that is reported once for the
+   * adapter, at `warn`: it does not apply the scope before ranking, or answers
+   * hits without the document's metadata, so its scoped searches may answer
+   * fewer than `topK` (ADR-0161 K8, rule 2). How many hits were dropped is
+   * logged, never returned.
    */
   private async searchRound(
     query: string,
@@ -1184,7 +1210,7 @@ export class KnowledgeService implements IKnowledgeService {
     refused: KnowledgeSearchRefusal[],
   ): Promise<Map<string, { hits: KnowledgeHit[]; answered: number }>> {
     const out = new Map<string, { hits: KnowledgeHit[]; answered: number }>();
-    for (const { source, organizationIds, fingerprint } of sources) {
+    for (const { source, organizationIds, fingerprint, scope } of sources) {
       const adapter = this.adapters.get(source.adapter);
       if (!adapter) {
         this.options.logger?.warn?.(
@@ -1199,6 +1225,7 @@ export class KnowledgeService implements IKnowledgeService {
           filter,
           ...(organizationIds === undefined ? {} : { organizationIds }),
           ...(fingerprint === undefined ? {} : { index: { fingerprint } }),
+          ...(scope === undefined ? {} : { scope: scope.map((term) => ({ ...term, ids: [...term.ids] })) }),
         });
         // A hit is served as the source it was searched for. One whose
         // `sourceId` names another source (an adapter answering from a store
@@ -1213,7 +1240,10 @@ export class KnowledgeService implements IKnowledgeService {
               'another source; dropped — a hit is served only as the source it was searched for.',
           );
         }
-        out.set(source.id, { hits: served, answered: hits.length });
+        out.set(source.id, {
+          hits: scope === undefined ? served : this.checkScope(served, scope, source),
+          answered: hits.length,
+        });
       } catch (err) {
         const coded = codedRefusalOf(err);
         if (coded !== undefined) {
@@ -1231,6 +1261,66 @@ export class KnowledgeService implements IKnowledgeService {
       }
     }
     return out;
+  }
+
+  /**
+   * [ADR-0161 K8, item 17] Pair each admitted source with the terms `scope`
+   * gives it ({@link scopeTermsFor}): a `record` term for an entry naming the
+   * object the source indexes, a `metadata` term for an entry naming a parent
+   * object the source reaches through the one parent link it lists in
+   * `metadataFields`, read from the object's registered definition. A source
+   * no entry reaches — every `file` / `http` source among them — is not
+   * searched, logged at `debug`. A source that lists two or more parent links
+   * to an entry's object is not reached by that entry, reported once per
+   * source and object at `warn`, naming the fields.
+   */
+  private sourcesInScope<T extends { source: KnowledgeSource }>(
+    sources: T[],
+    scope: readonly SearchScopeEntry[],
+  ): Array<T & { scope: AdapterScopeTerm[] }> {
+    const out: Array<T & { scope: AdapterScopeTerm[] }> = [];
+    for (const entry of sources) {
+      const { terms, ambiguous } = scopeTermsFor(entry.source, scope, (object) => this.schemaFor(object));
+      for (const { object, fields } of ambiguous) {
+        const key = `${entry.source.id}\u0000${object}`;
+        if (this.scopeAmbiguousReported.has(key)) continue;
+        this.scopeAmbiguousReported.add(key);
+        this.options.logger?.warn?.(
+          `[knowledge] source '${entry.source.id}' lists ${fields.length} fields pointing at '${object}' ` +
+            `(${fields.join(', ')}); a search scoped to '${object}' records does not reach it — ` +
+            'it is not told which field the scope means.',
+        );
+      }
+      if (terms.length === 0) {
+        this.options.logger?.debug?.(
+          `[knowledge] source '${entry.source.id}' not searched: no entry of the search's scope reaches it.`,
+        );
+        continue;
+      }
+      out.push({ ...entry, scope: terms });
+    }
+    return out;
+  }
+
+  /**
+   * The hits of `source` that some scope term holds for ({@link scopeCheck});
+   * the rest are dropped, and the first time an adapter's answer loses a hit
+   * here it is reported once, at `warn` ({@link searchRound}).
+   */
+  private checkScope(hits: KnowledgeHit[], terms: readonly AdapterScopeTerm[], source: KnowledgeSource): KnowledgeHit[] {
+    const inScope = scopeCheck(terms);
+    const kept = hits.filter(inScope);
+    const dropped = hits.length - kept.length;
+    if (dropped > 0 && !this.scopeIgnoredReported.has(source.adapter)) {
+      this.scopeIgnoredReported.add(source.adapter);
+      this.options.logger?.warn?.(
+        `[knowledge] adapter '${source.adapter}' answered ${dropped} hit(s) for source '${source.id}' outside the ` +
+          "search's scope; dropped. The adapter does not apply AdapterSearchOptions.scope before ranking, or answers " +
+          "hits without the document's metadata, so its scoped searches may answer fewer than topK. " +
+          'Reported once for this adapter.',
+      );
+    }
+    return kept;
   }
 
   // ── Sync entrypoints (called by the host plugin's event bridge) ───
@@ -1740,11 +1830,15 @@ export interface KnowledgeSearchReport {
   refused: KnowledgeSearchRefusal[];
 }
 
-/** One source a search round asks: its organizations scope and the fingerprint its search carries. */
+/**
+ * One source a search round asks: its organizations scope, the fingerprint its
+ * search carries, and the record scope's terms for it (ADR-0161 K8, item 17).
+ */
 interface SearchTarget {
   source: KnowledgeSource;
   organizationIds?: string[];
   fingerprint?: string;
+  scope?: AdapterScopeTerm[];
 }
 
 /** An ADR-0112 coded refusal's code, status and message, or `undefined` for any other thrown value. */

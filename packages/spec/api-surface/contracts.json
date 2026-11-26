@@ -42,6 +42,7 @@
     "AdapterListDocumentsOptions (interface)",
     "AdapterListDocumentsPage (interface)",
     "AdapterListedDocument (interface)",
+    "AdapterScopeTerm (type)",
     "AdapterSearchOptions (interface)",
     "AnalyticsDriverCapabilities (interface)",
     "AnalyticsQuery (type)",

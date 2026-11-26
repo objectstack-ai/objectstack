@@ -1,0 +1,92 @@
+---
+title: Units of measure — fixed, record and code modes
+navTitle: Units
+description: How a quantity gets its unit — one standard code, or each record's own unit code in a sibling text field — how a text field declares itself a unit code field, and how to convert the free text a field stored before it held unit codes
+---
+
+A quantity is a `number` field that stores a **bare number**, never a `{ value, unit }`
+object. What the field's `unitConfig` decides is which unit that number is in. A unit is
+stored as a **code**, in exact uppercase, never as a record id: a standard UN/ECE
+Recommendation 20 code such as `KGM` (kilogram), `MTR` (metre) or `H87` (piece), or one
+of the organization's own units (ADR-0158). The keys mirror
+[`currencyConfig`](/docs/data-modeling/currency): `unitConfig`, `unitMode` and `unitField`
+mean what `currencyConfig`, `currencyMode` and `currencyField` mean there.
+
+## The three modes
+
+`unitMode` is required and has no default: the platform never guesses a unit.
+
+| Mode | On | Declares | The unit of each record |
+|:---|:---|:---|:---|
+| `fixed` | `number` | `unit`: one standard code, checked at build | always `unit` |
+| `record` | `number` | `unitField`: the sibling `text` field holding each record's code; optional `unitDimension` | whatever that record's `unitField` holds |
+| `code` | `text` | optional `unitDimension` | the field holds the unit code itself, with no quantity beside it |
+
+```ts
+fields: {
+  weight:   { type: 'number', unitConfig: { unitMode: 'fixed', unit: 'KGM' } },
+  quantity: { type: 'number', unitConfig: { unitMode: 'record', unitField: 'unit_code', unitDimension: 'mass' } },
+  unit_code: { type: 'text' },
+  base_unit: { type: 'text', unitConfig: { unitMode: 'code' } },
+}
+```
+
+The field a `record` quantity's `unitField` names is a unit code field by that pointer,
+so it declares nothing itself. `unitMode: 'code'` is for a `text` field no quantity points
+at: a material's base unit, the unit column of a pack table. `unitDimension` (`mass`,
+`length`, `area`, `volume`, `time`, `count` or `package`) restricts the dimension every unit
+must have. Every other field type is refused a `unitConfig`, `formula` and `summary`
+included; a `currency` amount's unit is its currency.
+
+At write, a unit code field must hold a standard code or one of the organization's own
+non-retired units (`sys_unit`), of the restricted dimension when one is declared, and a
+quantity beside a blank code is refused.
+
+## Converting a field that already holds rows
+
+A `text` column holds whatever its writers typed: `kg`, `KG`, `公斤`, `pcs`. Making that
+column a unit code field (a quantity switched to `unitMode: 'record'` that names it, a
+`unitField` re-pointed at it, or its own `unitMode: 'code'`) does not touch the rows
+already stored. They keep their text, which is no unit code. From the save on, every
+write of the field must hold a unit code, and editing a quantity beside a value there
+that is free text or blank is refused until the row holds one.
+
+1. **The save answers 409 `destructive_change`.** Saving the object reports
+   `unit_code_field_declared` on a stored text field it newly makes a code field, or
+   `unit_mode_to_record` on a stored quantity switched to `unitMode: 'record'` (or
+   re-pointed at a field that held no stored unit), whose rows now sit beside blanks.
+   The message names the command to run. Re-submit the save with
+   `force` (`?force=true` on `PUT /api/v1/meta/:type/:name`) to make the change.
+2. **Dry run with no mapping.**
+   `os migrate unit-codes --object material --field uom` lists every distinct value the
+   field stores, with its row count, and writes nothing. That is the list of spellings
+   to map.
+3. **Write the mapping.** A JSON file of stored text, exactly as written, to a unit
+   code: `{ "kg": "KGM", "KG": "KGM", "公斤": "KGM", "pcs": "H87", "": "H87" }`.
+   Matching is exact, so `kg` and `KG` are two keys. The entry `""` gives a **blank unit
+   beside a quantity** its code; without it those rows stay blank. Each target must be a
+   code the field admits.
+4. **`--apply`.** `os migrate unit-codes --object material --field uom --map-file units.json --apply`
+   is refused before any write while a stored value that is no unit code has no mapping
+   entry, naming each one, so one run converts the whole field. It is idempotent: re-run
+   it until the report shows nothing to convert.
+
+The mapping is yours and never derived: nothing guesses that `公斤` is `KGM`. A row that
+already holds a unit code is never rewritten, a retired unit or a code of another
+dimension included, since rewriting it would change what its quantity means; the report
+lists those apart, and a run that leaves any of them is not complete. On a database whose
+rows belong to more than one organization, give `--org <id>` once per organization, or
+`--all-organizations` to use the one mapping for all of them: a run naming neither there
+is refused before any write and lists each organization's counts. See
+[`os migrate unit-codes`](/docs/deployment/cli#os-migrate-unit-codes) for every flag.
+With no shell on the deployment (a hosted organization), an organization admin holding
+`setup.write` runs the same conversion for their current organization's rows with
+`POST /api/v1/meta/_migrate-unit-codes` and the body `{ "object", "field", "mapping", "apply" }`,
+a preview unless `apply` is `true`.
+
+## See also
+
+- [Currency fields](/docs/data-modeling/currency) — the money counterpart of these modes.
+- [Field Type Gallery](/docs/data-modeling/field-types) — the `number` and `text` fields
+  a unit configuration goes on.
+- [Field reference: `unitConfig`](/docs/references/data/field) — the generated schema.
