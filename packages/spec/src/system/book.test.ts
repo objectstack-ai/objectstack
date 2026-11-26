@@ -37,8 +37,19 @@ describe('BookSchema (ADR-0046 §6)', () => {
     expect(() => BookSchema.parse({ name: 'crm_guide', groups: [{ key: 'Start', label: 'x' }] })).toThrow();
   });
   it('accepts audience variants', () => {
-    for (const audience of ['org', 'public', { permissionSet: 'crm_admin' }] as const) {
-      expect(() => BookSchema.parse({ name: 'b', audience, groups: [] })).not.toThrow();
+    for (const audience of ['org', 'public', { permissionSet: 'crm_admin' }, { systemPermission: 'setup.access' }] as const) {
+      expect(BookSchema.safeParse({ name: 'b', audience, groups: [] }).success).toBe(true);
+      // Parsed as authored, never narrowed to another arm.
+      expect(BookSchema.parse({ name: 'b', audience, groups: [] }).audience).toEqual(audience);
+    }
+  });
+  it('rejects a { systemPermission } audience carrying an unknown key, and one with no string token', () => {
+    for (const audience of [
+      { systemPermission: 'setup.access', label: 'Admins' },
+      { systemPermission: ['setup.access'] },
+      { systemPermissions: ['setup.access'] },
+    ]) {
+      expect(BookSchema.safeParse({ name: 'b', audience, groups: [] }).success).toBe(false);
     }
   });
   it('rejects the removed { profile } audience shape (ADR-0090 D2)', () => {
@@ -382,6 +393,29 @@ describe('audienceAllows (ADR-0046 §6.7, ADR-0090 vocabulary)', () => {
   it('permission-set gate FAILS CLOSED when holdings are unknown (ADR-0049)', () => {
     expect(audienceAllows({ permissionSet: 'crm_admin' }, unresolved)).toBe(false);
   });
+
+  // The capability gate: whoever holds the token, through any set — the
+  // answer an app's `requiredPermissions: [token]` gives.
+  it('system-permission gate requires holding the named capability, through whichever set', () => {
+    const gated = { systemPermission: 'setup.access' };
+    const orgAdmin = { authenticated: true, permissionSets: ['organization_admin'], systemPermissions: ['setup.access'] };
+    const delegatedAdmin = { authenticated: true, permissionSets: ['ops_admin'], systemPermissions: ['setup.access'] };
+    const plain = { authenticated: true, permissionSets: ['member_default'], systemPermissions: ['api.read'] };
+    expect(audienceAllows(gated, orgAdmin)).toBe(true);
+    expect(audienceAllows(gated, delegatedAdmin)).toBe(true);
+    expect(audienceAllows(gated, plain)).toBe(false);
+    expect(audienceAllows(gated, { authenticated: false, systemPermissions: ['setup.access'] })).toBe(false);
+  });
+  it('system-permission gate reads capabilities, never set names', () => {
+    // A set NAMED like the token is not the capability.
+    expect(audienceAllows({ systemPermission: 'setup.access' }, { authenticated: true, permissionSets: ['setup.access'] })).toBe(false);
+    // And a { permissionSet } gate is not opened by a capability of that name.
+    expect(audienceAllows({ permissionSet: 'crm_admin' }, { authenticated: true, systemPermissions: ['crm_admin'] })).toBe(false);
+  });
+  it('system-permission gate FAILS CLOSED when capabilities are unknown (ADR-0049)', () => {
+    expect(audienceAllows({ systemPermission: 'setup.access' }, unresolved)).toBe(false);
+    expect(audienceAllows({ systemPermission: 'setup.access' }, admin)).toBe(false);
+  });
 });
 
 describe('resolveDocAudiences — union over claiming books (§6.7)', () => {
@@ -433,6 +467,23 @@ describe('resolveDocAudiences — union over claiming books (§6.7)', () => {
     const gatedOnly = resolveDocAudiences([adminBook], corpus);
     expect(docAudienceAllows(gatedOnly.get('crm_admin_setup'), member)).toBe(false);
     expect(docAudienceAllows(gatedOnly.get('crm_admin_setup'), { authenticated: false })).toBe(false);
+  });
+  it('a doc only a { systemPermission } book claims is read by holders of the capability alone', () => {
+    const setupBook: Book & { packageId?: string } = {
+      name: 'setup_manual',
+      audience: { systemPermission: 'setup.access' },
+      groups: [{ key: 'all', label: 'All', include: '*' }],
+      packageId: 'com.objectstack.setup',
+    };
+    const docs: ResolverDoc[] = [...corpus, { name: 'setup_overview', packageId: 'com.objectstack.setup' }];
+    const audiences = resolveDocAudiences([publicBook, adminBook, setupBook], docs);
+    expect(audiences.get('setup_overview')).toEqual([{ systemPermission: 'setup.access' }]);
+    // `include: '*'` reaches only the book's own package.
+    expect(audiences.get('crm_unclaimed')).toEqual(['org']);
+    const holder = { authenticated: true, systemPermissions: ['setup.access'] };
+    const member = { authenticated: true, permissionSets: ['member_default'], systemPermissions: [] };
+    expect(docAudienceAllows(audiences.get('setup_overview'), holder)).toBe(true);
+    expect(docAudienceAllows(audiences.get('setup_overview'), member)).toBe(false);
   });
   it('an unknown doc (absent from the corpus map) gets the org default', () => {
     expect(docAudienceAllows(undefined, { authenticated: true })).toBe(true);
