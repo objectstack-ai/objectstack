@@ -478,6 +478,12 @@ interface ObjectFacts {
    */
   validations: Set<string>;
   /**
+   * `_milestones` addresses — per watched `field`, the `value`s an
+   * `activityMilestones` entry of this object fires on (#37524).
+   * `objects.<obj>._milestones.<field>.<value>.summary` is keyed by that pair.
+   */
+  milestones: Map<string, Set<string>>;
+  /**
    * `_tabs` names — the filter-preset tabs declared for this object, from
    * `page.interfaceConfig.userFilters.tabs[].name`. See {@link collectPageTabs}
    * for why that is the only carrier and how the object binding is resolved.
@@ -667,6 +673,7 @@ function emptyFacts(): ObjectFacts {
     sections: new Set(),
     sectionEntries: new Map(),
     validations: new Set(),
+    milestones: new Map(),
     tabs: new Set(),
     relatedListLabels: new Set(),
     relatedListNames: new Set(),
@@ -1337,6 +1344,15 @@ function buildUniverse(stack: AnyRec): Universe {
     // deliberately so the bundle mirrors the declared rule set 1:1.
     for (const rule of recordsOf(obj.validations)) {
       collectValidationRuleNames(rule, facts.validations);
+    }
+    // #37524: `_milestones.<field>.<value>` is keyed by the pair a milestone fires on.
+    for (const milestone of recordsOf(obj.activityMilestones)) {
+      const field = strName(milestone.field);
+      const value = typeof milestone.value === 'string' && milestone.value.length > 0 ? milestone.value : undefined;
+      if (!field || !value) continue;
+      let values = facts.milestones.get(field);
+      if (!values) facts.milestones.set(field, (values = new Set()));
+      values.add(value);
     }
     // `_relatedLists.<list>` is keyed by an object-form `relatedLists` entry's
     // literal `list` (`object.field` is one key), and resolves only over an
@@ -2199,6 +2215,31 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `Match the key to the rule's \`name\`, or drop it if the rule was renamed or ` +
               `removed.`,
           );
+        }
+
+        // _milestones.<field>.<value>
+        //
+        // A milestone's summary template, keyed by the pair that fires it. A
+        // key over a pair no milestone declares is never read: the row keeps
+        // its authored sentence.
+        for (const [field, rawValues] of Object.entries(asRecord(rawNode._milestones))) {
+          for (const value of Object.keys(asRecord(rawValues))) {
+            if (facts.milestones.get(field)?.has(value)) continue;
+            const declared = facts.milestones.get(field);
+            orphan(
+              `${inLocale} · object "${objectName}" · milestone "${field}" → "${value}"`,
+              `${objPath}._milestones${memberPath(field)}${memberPath(value)}`,
+              declared
+                ? `Translations are keyed to a milestone of field "${field}" firing on "${value}", ` +
+                  `which object "${objectName}" does not declare, so no timeline row reads this key.` +
+                  suggest(value, declared)
+                : `Translations are keyed to a milestone watching field "${field}", which no ` +
+                  `\`activityMilestones\` entry of object "${objectName}" watches, so no timeline row ` +
+                  `reads this key.`,
+              `Match the key to the milestone's \`field\` and \`value\`, or drop it if the milestone ` +
+                `was changed or removed.`,
+            );
+          }
         }
 
         // _actions.<name>[.params.<name>[.options.<value>] | .outcomeMessages.<outcome>

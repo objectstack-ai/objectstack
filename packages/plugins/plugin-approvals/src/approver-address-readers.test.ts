@@ -202,11 +202,12 @@ const PERSON_SITES: Readonly<Record<string, { count: number; role: PersonRole; w
     role: 'display',
     why: 'resolves the step-taker\'s display name and avatar for the activity entry, no comparison',
   },
-  'approval-service.ts · localizeRoutingNotes · a.actor_id': {
+  'approval-service.ts · localizeActionRows · row.actor_id': {
     count: 2,
     role: 'display',
     why: 'a presence test, no identity: only a row no person wrote can be the administrators\' routing note '
-      + '(#25576) or the submitter exclusion note (#25573) this renders in the reader\'s language',
+      + '(#25576), the submitter exclusion note (#25573), the no-approver note or the record-deleted '
+      + 'cancellation (#37531) this renders in the reader\'s language',
   },
   'action-slot-backfill.ts · backfillActionSlots · actor_id: { $contains: \':\' }': {
     count: 1,

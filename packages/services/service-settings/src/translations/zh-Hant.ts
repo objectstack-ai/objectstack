@@ -478,7 +478,7 @@ export const zhHant: PlatformTranslationData = {
         },
         turso_url: {
           label: '連線 URL',
-          help: '範例：libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
+          help: '範例：libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
         },
         turso_auth_token: { label: '驗證權杖', help: '僅託管 Turso URL 需要。' },
         chunk_target: { label: '目標區塊大小（字元）', help: '知識服務切分文件時每個片段的最大字元數。知識來源自身設定的大小優先；嵌入模型的輸入上限可能將其調低。' },

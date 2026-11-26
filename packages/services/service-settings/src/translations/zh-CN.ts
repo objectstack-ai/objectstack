@@ -594,7 +594,7 @@ export const zhCN: PlatformTranslationData = {
             turso: 'Turso / libSQL(云端或本地)',
           },
         },
-        turso_url: { label: '连接 URL', help: '示例:libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:' },
+        turso_url: { label: '连接 URL', help: '示例:libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:' },
         turso_auth_token: { label: 'Auth Token', help: '仅托管 Turso URL 需要。' },
         chunk_target: { label: '目标 chunk 大小(字符)', help: '知识服务切分文档时每个片段的最大字符数。知识源自身设置的大小优先；嵌入模型的输入上限可能将其调低。' },
         over_fetch: { label: '过取倍数', help: '检索时按请求结果数的这一倍数取回候选,以便按文档信息过滤后仍有足够结果可返回。' },

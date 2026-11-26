@@ -79,6 +79,7 @@ export default defineStack({
 | Column headers of a table in an action's result dialog or preflight panel | `objects.<name>._actions.<action>.resultDialog.columns.<field path>.<column path>` / `.preflight.columns.<field path>.<column path>` — a sibling of `fields`, both paths written literally, dots included |
 | Form sections | `objects.<name>._sections.<section>` |
 | Custom validation-rule messages | `objects.<name>._validations.<rule>.message` |
+| Activity-milestone timeline rows | `objects.<name>._milestones.<field>.<value>.summary` — keyed by the milestone's watched `field` and the `value` it fires on; the template keeps the authored `{field}` tokens, and a reader in that language reads the row composed from it, a select token named by its translated option label. A language with no entry reads the authored `summary` |
 | App navigation | `apps.<app>.navigation.<id>.label` |
 | Dashboard label / description | `dashboards.<name>.label` / `description` |
 | Dashboard widget title / description (the card-header subtitle) | `dashboards.<name>.widgets.<widgetId>.title` / `description` |

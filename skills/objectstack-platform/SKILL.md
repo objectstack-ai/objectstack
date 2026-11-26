@@ -300,7 +300,7 @@ token through the `CAPABILITY_PROVIDERS` registry in
 | Token | Provider package |
 |:--|:--|
 | `automation` | `@objectstack/service-automation` — flows, and any declarative `connectors:` entry |
-| `analytics`° `cache`° `storage`° `queue`° `job`° `messaging`° `realtime` `settings`° `sms`° `push` `record-context` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)); `record-context` serves `get_record_context`, **objectstack-ai** [context packs](../objectstack-ai/references/context-packs.md) |
+| `analytics`° `cache`° `storage`° `queue`° `job`° `messaging`° `realtime` `settings`° `sms`° `push` `record-context` `knowledge` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)); `record-context` serves `get_record_context`, **objectstack-ai** [context packs](../objectstack-ai/references/context-packs.md) |
 | `mailbox` | `@objectstack/service-mailbox` — inbound mail |
 | `marketplace` `package-registry`° | `@objectstack/service-package` |
 | `audit` `email`° `sharing`° `approvals` `webhooks` | `@objectstack/plugin-` + the token |
