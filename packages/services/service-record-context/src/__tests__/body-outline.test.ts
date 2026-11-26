@@ -228,6 +228,3 @@ describe('[ADR-0160 D3] the outline comes in pages that list every heading', () 
     expect(last.unlistable).toBe(1);
   });
 });
-    expect(boundedOutline(headings, 1)).toEqual({ outline: [], omitted: 2 });
-  });
-});
