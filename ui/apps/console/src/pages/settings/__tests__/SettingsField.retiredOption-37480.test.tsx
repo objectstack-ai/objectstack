@@ -86,3 +86,37 @@ describe('objectstack#37480 — a stored select value outside the current option
     expect(screen.queryByTestId('settings-select-retired')).toBeNull();
   });
 });
+
+/** The same options drawn as a radio group. */
+const ADAPTER_RADIO: Specifier = { ...ADAPTER, type: 'radio' };
+
+function renderRadioIn(language: string, value: unknown) {
+  const instance = createI18n({ defaultLanguage: language, detectBrowserLanguage: false });
+  render(
+    <I18nProvider instance={instance} persistLanguage={false}>
+      <SettingsField spec={ADAPTER_RADIO} value={value} onChange={vi.fn()} />
+    </I18nProvider>,
+  );
+  return instance;
+}
+
+describe('objectstack#37480 — a stored radio value outside the current options is named', () => {
+  it('the group shows a checked, disabled item reading the stored code marked "no longer available"', () => {
+    const en = renderRadioIn('en', 'ragflow');
+    const named = en.t('console.settingsView.selectValueRetired', { value: 'ragflow' });
+
+    const item = screen.getByRole('radio', { name: named });
+    expect(item).toBeChecked();
+    expect(item).toBeDisabled();
+    // The current options stay pickable and unchecked.
+    expect(screen.getByRole('radio', { name: 'Dify' })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Dify' })).toBeEnabled();
+  });
+
+  it('CONTROL — a stored value among the options checks its own item, with no retired item', () => {
+    renderRadioIn('en', 'dify');
+    expect(screen.getByRole('radio', { name: 'Dify' })).toBeChecked();
+    expect(screen.getAllByRole('radio')).toHaveLength(2);
+    expect(screen.queryByTestId('settings-radio-retired')).toBeNull();
+  });
+});

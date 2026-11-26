@@ -1012,7 +1012,13 @@ export function SettingsField(props: SettingsFieldProps) {
         </Select>,
       );
     }
-    case 'radio':
+    case 'radio': {
+      // Same named state as the closed select above: a stored value the
+      // manifest no longer offers gets one disabled, checked item of its own,
+      // so the group does not read as nothing chosen.
+      const stored = value == null ? '' : String(value);
+      const retired =
+        stored !== '' && !(spec.options ?? []).some((opt) => String(opt.value) === stored);
       return wrapper(
         <RadioGroup
           value={value == null ? undefined : String(value)}
@@ -1020,6 +1026,17 @@ export function SettingsField(props: SettingsFieldProps) {
           disabled={disabled}
           aria-labelledby={labelId}
         >
+          {retired ? (
+            <div className="flex items-center space-x-2" data-testid="settings-radio-retired">
+              <RadioGroupItem value={stored} id={`${id}-retired`} disabled />
+              <Label htmlFor={`${id}-retired`} className="text-sm font-normal text-muted-foreground">
+                {t('console.settingsView.selectValueRetired', {
+                  value: stored,
+                  defaultValue: '{{value}} (no longer available)',
+                })}
+              </Label>
+            </div>
+          ) : null}
           {spec.options?.map((opt) => (
             <div key={String(opt.value)} className="flex items-center space-x-2">
               <RadioGroupItem value={String(opt.value)} id={`${id}-${opt.value}`} />
@@ -1031,6 +1048,7 @@ export function SettingsField(props: SettingsFieldProps) {
         </RadioGroup>,
         undefined,
       );
+    }
     case 'multiselect': {
       const arr = Array.isArray(value) ? (value as (string | number)[]) : [];
       return wrapper(
