@@ -213,6 +213,20 @@ describe('validateAiContext — ADR-0160 D1 author defects', () => {
     ]);
   });
 
+  it('on a sys_ root, the child\'s injected references to it are links, as get_record_context resolves them', () => {
+    const withUser = [
+      ...objects,
+      { name: 'sys_user', fields: { name: { type: 'text' } } },
+      { name: 'task', fields: { subject: { type: 'text' }, assignee: { type: 'lookup', reference: 'sys_user' } } },
+    ];
+    const userPack = { name: 'user_brief', object: 'sys_user', fields: ['name'] };
+    const [finding] = validateAiContext({ objects: withUser, aiContexts: [{ ...userPack, related: [{ object: 'task' }] }] });
+    expect([finding?.rule, finding?.path]).toEqual([AI_CONTEXT_RELATED_LINK_UNKNOWN, 'aiContexts[0].related[0]']);
+    expect(finding?.message).toContain('assignee');
+    expect(finding?.message).toContain('owner_id');
+    expect(validateAiContext({ objects: withUser, aiContexts: [{ ...userPack, related: [{ object: 'task', field: 'assignee' }] }] })).toEqual([]);
+  });
+
   it('every verdict is a warning, and every rule it emits has an `os explain` entry', () => {
     const findings = validateAiContext({ objects, aiContexts: [pack({ fields: ['nope'], body: { field: 'title' } })] });
     expect(findings.every((f) => f.severity === 'warning')).toBe(true);
