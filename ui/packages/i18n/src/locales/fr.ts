@@ -4775,6 +4775,9 @@ const fr = {
       metrics: 'Indicateurs',
       noAddedFilter: 'Aucun filtre ajouté à la définition du jeu de données',
     },
+    recordCitations: {
+      title: 'Cité depuis les enregistrements',
+    },
     tool: {
       aggregate_data: "Synthétiser les données",
       get_record: "Lire l’enregistrement",
