@@ -121,7 +121,6 @@ export interface RotationHost {
   readonly fractionalNumericFields: SqlDriver['fractionalNumericFields'];
   isJsonField: SqlDriver['isJsonField'];
   readonly isMysql: SqlDriver['isMysql'];
-  readonly isSqlite: SqlDriver['isSqlite'];
   readonly jsonFields: SqlDriver['jsonFields'];
   readonly knex: SqlDriver['knex'];
   legacyMysqlTimeColumns: SqlDriver['legacyMysqlTimeColumns'];
@@ -189,7 +188,7 @@ export class RotationFacet {
   }
 
   /** The body of `SqlDriver#ensureShardTable`; the method's docblock there is its contract. */
-  static async ensureShardTable(this: Pick<RotationHost, 'computeAndRecordTenantField' | 'createAuditTimestampColumn' | 'createColumn' | 'isSqlite' | 'knex' | 'resolveTenantField' | 'syncDeclaredIndexes' | 'warnBuiltinColumnCollisions'>, shardName: string, obj: { fields?: Record<string, any>; tenancy?: any; indexes?: any[] }, baseTable: string = shardName): Promise<void> {
+  static async ensureShardTable(this: Pick<RotationHost, 'computeAndRecordTenantField' | 'createAuditTimestampColumn' | 'createColumn' | 'dialectName' | 'knex' | 'resolveTenantField' | 'syncDeclaredIndexes' | 'warnBuiltinColumnCollisions'>, shardName: string, obj: { fields?: Record<string, any>; tenancy?: any; indexes?: any[] }, baseTable: string = shardName): Promise<void> {
     const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
     // [#12015] Both branches below drop a declared field named after a builtin
     // column — the create branch skips it explicitly, the column-sync branch
@@ -226,7 +225,7 @@ export class RotationFacet {
       const columnInfo = await this.knex(shardName).columnInfo();
       const existingColumns = Object.keys(columnInfo);
       // [#37258] Same question as the managed path below.
-      const populated = await addsNotNullToPopulatedTable(this.knex, shardName, obj.fields, existingColumns, this.isSqlite);
+      const populated = await addsNotNullToPopulatedTable(this.knex, shardName, obj.fields, existingColumns, this.dialectName === 'sqlite');
       await this.knex.schema.alterTable(shardName, (table) => {
         for (const [name, field] of Object.entries(obj.fields ?? {})) {
           if (!existingColumns.includes(name)) {
@@ -234,7 +233,7 @@ export class RotationFacet {
           }
         }
       });
-      if (populated && this.isSqlite) await backfillWithheldNowDefaults(this.knex, shardName, obj.fields, existingColumns);
+      if (populated && this.dialectName === 'sqlite') await backfillWithheldNowDefaults(this.knex, shardName, obj.fields, existingColumns);
     }
 
     // Declared indexes per shard. Auto-derived names already embed the shard
@@ -448,7 +447,7 @@ export class RotationFacet {
   }
 
   /** The body of `SqlDriver#initObjects`; the method's docblock there is its contract. */
-  static async initObjects(this: Pick<RotationHost, 'assertSchemaMutable' | 'autoNumberFields' | 'backfillCanonicalBooleans' | 'backfillCanonicalDatetimes' | 'backfillCanonicalJsonEncoding' | 'backfillCanonicalTimes' | 'carryDeclaredRenames' | 'createAuditTimestampColumn' | 'createColumn' | 'dateFields' | 'dateFieldsOnInstantColumn' | 'deferredDdl' | 'deferredSchemaObjects' | 'dialectName' | 'ensureDatabaseExists' | 'ensureRotation' | 'ensureSequencesTable' | 'isSqlite' | 'knex' | 'migrateMysqlDatetimeColumns' | 'migrateMysqlTimeColumns' | 'reconcileAndWarnDrift' | 'registerObjectMetadata' | 'resolveFileColumnsMoved' | 'rethrowWithRowSizeExplanation' | 'retireIndexesNamedForOldKeys' | 'supportsRotation' | 'syncTableIndexes' | 'tablesCreatedHere' | 'tablesFoundExisting' | 'tablesWithTimestamps' | 'tenantFieldByTable' | 'warnBuiltinColumnCollisions'>, objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>): Promise<void> {
+  static async initObjects(this: Pick<RotationHost, 'assertSchemaMutable' | 'autoNumberFields' | 'backfillCanonicalBooleans' | 'backfillCanonicalDatetimes' | 'backfillCanonicalJsonEncoding' | 'backfillCanonicalTimes' | 'carryDeclaredRenames' | 'createAuditTimestampColumn' | 'createColumn' | 'dateFields' | 'dateFieldsOnInstantColumn' | 'deferredDdl' | 'deferredSchemaObjects' | 'dialectName' | 'ensureDatabaseExists' | 'ensureRotation' | 'ensureSequencesTable' | 'knex' | 'migrateMysqlDatetimeColumns' | 'migrateMysqlTimeColumns' | 'reconcileAndWarnDrift' | 'registerObjectMetadata' | 'resolveFileColumnsMoved' | 'rethrowWithRowSizeExplanation' | 'retireIndexesNamedForOldKeys' | 'supportsRotation' | 'syncTableIndexes' | 'tablesCreatedHere' | 'tablesFoundExisting' | 'tablesWithTimestamps' | 'tenantFieldByTable' | 'warnBuiltinColumnCollisions'>, objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>): Promise<void> {
     // The ADR-0104 media arm, resolved BEFORE registration because
     // `registerObjectMetadata` below freezes `isJsonField`'s answer into
     // `jsonFields` for every media column it sees. Memoized, and every failure
@@ -645,7 +644,7 @@ export class RotationFacet {
         // left to the `tighten_not_null` ceremony — see `createColumn`. Asked
         // only when an added column declares the constraint, so no other sync
         // pays the read.
-        const populated = await addsNotNullToPopulatedTable(this.knex, tableName, obj.fields, existingColumns, this.isSqlite);
+        const populated = await addsNotNullToPopulatedTable(this.knex, tableName, obj.fields, existingColumns, this.dialectName === 'sqlite');
         try {
           await this.knex.schema.alterTable(tableName, (table) => {
             if (obj.fields) {
@@ -659,7 +658,7 @@ export class RotationFacet {
         } catch (e: any) {
           await this.rethrowWithRowSizeExplanation(tableName, obj.fields, keyedColumns, addedColumns, e);
         }
-        if (populated && this.isSqlite) await backfillWithheldNowDefaults(this.knex, tableName, obj.fields, existingColumns);
+        if (populated && this.dialectName === 'sqlite') await backfillWithheldNowDefaults(this.knex, tableName, obj.fields, existingColumns);
       }
 
       // Materialize the table's index set: field-level `unique` (tenancy-aware
