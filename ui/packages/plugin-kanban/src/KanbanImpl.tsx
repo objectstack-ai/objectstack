@@ -30,11 +30,11 @@ import { resolveConditionalFormatting } from "@object-ui/core"
 import type { KanbanConditionalFormattingRule } from "@object-ui/types"
 import type { KanbanCard, KanbanColumn } from './types'
 import { createSafeTranslation } from "@object-ui/i18n"
-import { EyeOff, FoldHorizontal, MoreHorizontal, Plus, Sigma, UnfoldHorizontal } from "lucide-react"
+import { EyeOff, FoldHorizontal, MessageSquare, MoreHorizontal, Paperclip, Plus, Sigma, UnfoldHorizontal } from "lucide-react"
 import { useKanbanRecordsSettled } from './KanbanRecordsSettled'
 import { useKanbanColumnSummary, sumLaneField } from './KanbanColumnSummary'
 import { laneFigureOf } from './KanbanLaneStatistic'
-import { useKanbanCardDisplay } from './KanbanCardDisplay'
+import { cardFooterCountsOf, useKanbanCardDisplay } from './KanbanCardDisplay'
 import { laneCount, useKanbanLanePaging } from './KanbanLanePaging'
 import { readCollapsedLanes, useKanbanLaneMenu, writeCollapsedLanes } from './KanbanLaneMenu'
 import { ownerInitials, type KanbanCardOwner } from './KanbanCardOwner'
@@ -91,6 +91,9 @@ const useKanbanT = createSafeTranslation(
     'kanban.laneMenu.hideHint': 'Its cards move to Uncategorized',
     'kanban.laneMenu.createIn': 'New record in {{column}}',
     'kanban.laneMenu.create': 'New',
+    // objectstack#36423 — a card's foot counts (`kanban.cardFooter`).
+    'kanban.cardFooter.comments': 'Open comments: {{count}}',
+    'kanban.cardFooter.attachments': 'Attachments: {{count}}',
   },
   'kanban.noCards',
 )
@@ -393,7 +396,10 @@ function SortableCard({ card, onCardClick, conditionalFormatting, objectFields }
   const movable = React.useContext(KanbanCardsMovable)
   const opens = React.useContext(KanbanCardsOpenRecord)
   // objectstack#36370 — `kanban.showFieldLabels: false` draws the values alone.
-  const { showFieldLabels } = useKanbanCardDisplay()
+  // objectstack#36423 — and the board's read of each card's foot counts.
+  const { showFieldLabels, footerCounts } = useKanbanCardDisplay()
+  const footer = cardFooterCountsOf(footerCounts, card.id)
+  const { t } = useKanbanT()
   // A card that neither drags nor opens (objectstack#33548) is no control: no
   // `button` role, no tab stop, no key activation and no hover-as-link face.
   // Its click still reaches `onCardClick`, which the host routes to nothing.
@@ -536,6 +542,34 @@ function SortableCard({ card, onCardClick, conditionalFormatting, objectFields }
               </div>
             )}
           </CardContent>
+        )}
+        {/* objectstack#36423 — the card's foot: its open comment threads and
+            its attachments, each only when the view asks it and above zero. */}
+        {footer && (
+          <div className="flex items-center gap-3 px-2 sm:px-4 pb-2 text-xs text-muted-foreground" data-kanban-card-footer="">
+            {footer.comments !== undefined && (
+              <span
+                className="inline-flex items-center gap-1"
+                data-kanban-card-comments={footer.comments}
+                title={t('kanban.cardFooter.comments', { count: footer.comments })}
+                aria-label={t('kanban.cardFooter.comments', { count: footer.comments })}
+              >
+                <MessageSquare className="size-3.5" aria-hidden="true" />
+                {footer.comments}
+              </span>
+            )}
+            {footer.attachments !== undefined && (
+              <span
+                className="inline-flex items-center gap-1"
+                data-kanban-card-attachments={footer.attachments}
+                title={t('kanban.cardFooter.attachments', { count: footer.attachments })}
+                aria-label={t('kanban.cardFooter.attachments', { count: footer.attachments })}
+              >
+                <Paperclip className="size-3.5" aria-hidden="true" />
+                {footer.attachments}
+              </span>
+            )}
+          </div>
         )}
       </Card>
     </div>

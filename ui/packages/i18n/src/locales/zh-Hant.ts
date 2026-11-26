@@ -1083,6 +1083,8 @@ const zhHant = {
       kanbanAddCardField: "新增欄位",
       kanbanShowFieldLabels: "顯示欄位名",
       kanbanHideEmptyFields: "隱藏空欄位",
+      kanbanFooterComments: "顯示評論數",
+      kanbanFooterAttachments: "顯示附件數",
       kanbanSummary: "列底統計",
       kanbanSummaryAvg: "平均值",
       kanbanSummaryMin: "最小值",
@@ -1141,6 +1143,11 @@ const zhHant = {
       hideHint: "這一列的卡片會移到「未分類」",
       createIn: "在「{{column}}」新建",
       create: "新建",
+    },
+    // objectstack#36423 — a card's foot counts (`kanban.cardFooter`).
+    cardFooter: {
+      comments: "未解決的評論：{{count}}",
+      attachments: "附件：{{count}}",
     },
     addCard: '新增卡片',
     addColumn: '新增列',

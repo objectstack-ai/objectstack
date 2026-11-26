@@ -361,6 +361,8 @@ export function kanbanViewOptions(viewDef: any, objectDef: any): Record<string, 
         ...(viewDef?.kanban?.summary && typeof viewDef.kanban.summary === 'object' ? { summary: viewDef.kanban.summary } : {}),
         ...(typeof viewDef?.kanban?.showFieldLabels === 'boolean' ? { showFieldLabels: viewDef.kanban.showFieldLabels } : {}),
         ...(typeof viewDef?.kanban?.hideEmptyFields === 'boolean' ? { hideEmptyFields: viewDef.kanban.hideEmptyFields } : {}),
+        // objectstack#36423 — the counts at each card's foot, only when declared.
+        ...(viewDef?.kanban?.cardFooter && typeof viewDef.kanban.cardFooter === 'object' ? { cardFooter: viewDef.kanban.cardFooter } : {}),
     };
 }
 

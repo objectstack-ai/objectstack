@@ -131,10 +131,15 @@ describe('the Console relays the board block (objectstack#36370)', () => {
 
   it('(d) omits each key the view does not declare, and an empty lane list', () => {
     const out = kanbanViewOptions({ kanban: { groupByField: 'stage', lanes: [] } }, OBJECT);
-    for (const key of ['lanes', 'summary', 'showFieldLabels', 'hideEmptyFields']) {
+    for (const key of ['lanes', 'summary', 'showFieldLabels', 'hideEmptyFields', 'cardFooter']) {
       expect(out).not.toHaveProperty(key);
     }
     // CONTROL: the bag is not empty.
     expect(out.groupByField).toBe('stage');
+  });
+
+  it('(d) carries the card footer counts when the view declares them (objectstack#36423)', () => {
+    const out = kanbanViewOptions({ kanban: { groupByField: 'stage', cardFooter: { comments: true, attachments: false } } }, OBJECT);
+    expect(out.cardFooter).toEqual({ comments: true, attachments: false });
   });
 });

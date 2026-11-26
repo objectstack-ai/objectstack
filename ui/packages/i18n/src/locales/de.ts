@@ -1056,6 +1056,8 @@ const de = {
       kanbanAddCardField: "Feld hinzufügen",
       kanbanShowFieldLabels: "Feldnamen anzeigen",
       kanbanHideEmptyFields: "Leere Felder ausblenden",
+      kanbanFooterComments: "Anzahl der Kommentare anzeigen",
+      kanbanFooterAttachments: "Anzahl der Anhänge anzeigen",
       kanbanSummary: "Spaltenauswertung",
       kanbanSummaryAvg: "Durchschnitt",
       kanbanSummaryMin: "Minimum",
@@ -1114,6 +1116,11 @@ const de = {
       hideHint: "Die Karten wandern nach „Nicht kategorisiert“",
       createIn: "Neuer Datensatz in {{column}}",
       create: "Neu",
+    },
+    // objectstack#36423 — a card's foot counts (`kanban.cardFooter`).
+    cardFooter: {
+      comments: "Offene Kommentare: {{count}}",
+      attachments: "Anhänge: {{count}}",
     },
     uncategorized: "Nicht kategorisiert",
     loadMore: "Mehr laden",
