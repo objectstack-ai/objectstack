@@ -2876,6 +2876,7 @@ const ar = {
       savedCleared: "تم مسح القيمة المحفوظة",
       deprecatedBadge: "مهمل",
       deprecatedBadgeReplacedBy: "مهمل ← {{replacedBy}}",
+      selectValueRetired: "{{value}} (لم يعد متاحًا)",
       unsupportedSpecifierType: "نوع إعداد غير مدعوم: {{type}}",
       mapAddRow: "إضافة صف",
       mapRemoveRow: "إزالة {{key}}",

@@ -2811,6 +2811,9 @@ const en = {
       savedCleared: 'Saved value cleared',
       deprecatedBadge: 'Deprecated',
       deprecatedBadgeReplacedBy: 'Deprecated → {{replacedBy}}',
+      // `selectValueRetired` names a stored select value the setting no longer offers
+      // (an option removed in a later release); `{{value}}` is the stored code.
+      selectValueRetired: '{{value}} (no longer available)',
       unsupportedSpecifierType: 'Unsupported specifier type: {{type}}',
       // The `map` control (objectstack#31391): keyed rows over the keys the server
       // serves. `mapAddRow` is the picker that adds a row by its key, `{{key}}` in

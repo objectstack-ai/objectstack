@@ -2588,6 +2588,7 @@ const de = {
       savedCleared: "Gespeicherter Wert geleert",
       deprecatedBadge: "Veraltet",
       deprecatedBadgeReplacedBy: "Veraltet → {{replacedBy}}",
+      selectValueRetired: "{{value}} (nicht mehr verfügbar)",
       unsupportedSpecifierType: "Nicht unterstützter Einstellungstyp: {{type}}",
       mapAddRow: "Zeile hinzufügen",
       mapRemoveRow: "{{key}} entfernen",

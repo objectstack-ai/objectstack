@@ -2658,6 +2658,7 @@ const fr = {
       savedCleared: "Valeur enregistrée effacée",
       deprecatedBadge: "Obsolète",
       deprecatedBadgeReplacedBy: "Obsolète → {{replacedBy}}",
+      selectValueRetired: "{{value}} (plus disponible)",
       unsupportedSpecifierType: "Type de paramètre non pris en charge : {{type}}",
       mapAddRow: "Ajouter une ligne",
       mapRemoveRow: "Retirer {{key}}",

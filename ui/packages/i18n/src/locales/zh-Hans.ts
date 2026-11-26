@@ -2384,6 +2384,7 @@ const zh = {
       savedCleared: '已清除保存的值',
       deprecatedBadge: '已弃用',
       deprecatedBadgeReplacedBy: '已弃用 → {{replacedBy}}',
+      selectValueRetired: '{{value}}（已不可用）',
       unsupportedSpecifierType: '不支持的设置项类型：{{type}}',
       mapAddRow: '添加一行',
       mapRemoveRow: '移除 {{key}}',
