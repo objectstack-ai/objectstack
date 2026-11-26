@@ -729,6 +729,35 @@ describe('[ADR-0160 D8] a skill with context takes a record', () => {
     expect((await rpc(servingBridge([policySkill()], [POLICY_PACK]), 'prompts/list')).result.prompts).toHaveLength(1);
   });
 
+  it('the long-lived stdio server (bridgePrompts) lists the same argument and answers the same message', async () => {
+    const metadataService = {
+      list: async (type: string) => (type === 'skill' ? [policySkill(), policySkill({ name: 'no_pack', context: 'nothing_here' })] : type === 'ai_context' ? [POLICY_PACK] : []),
+    };
+    const runtime = new MCPServerRuntime({ name: 'skill-prompts-stdio', version: '0.0.0' });
+    await runtime.bridgePrompts(metadataService as never);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'test-client', version: '0.0.0' });
+    await Promise.all([runtime.server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const prompts = (await client.listPrompts()).prompts;
+      const byName = Object.fromEntries(prompts.map((p) => [p.name, p]));
+      expect(byName.policy_inquiry.arguments?.map((a) => [a.name, a.required ?? false])).toEqual([[SKILL_PROMPT_RECORD_ARGUMENT, false]]);
+      expect(byName.no_pack.arguments).toBeUndefined();
+
+      const got = await client.getPrompt({ name: 'policy_inquiry', arguments: { recordId: 'pol_1' } });
+      const http = await rpc(servingBridge([policySkill()], [POLICY_PACK]), 'prompts/get', {
+        name: 'policy_inquiry',
+        arguments: { recordId: 'pol_1' },
+      });
+      expect(got.messages).toEqual(http.result.messages);
+      const bare = await client.getPrompt({ name: 'policy_inquiry' });
+      expect(bare.messages[0].content).toEqual({ type: 'text', text: INSTRUCTIONS });
+    } finally {
+      await client.close();
+      await runtime.stop().catch(() => {});
+    }
+  });
+
   describe('the pack a context names, resolved by ADR-0150 D3 and handed on by its face', () => {
     const namespaces: Record<string, string> = { 'com.acme.policies': 'acme', 'com.beta.policies': 'beta' };
     const packageNamespace = (id: string) => namespaces[id];

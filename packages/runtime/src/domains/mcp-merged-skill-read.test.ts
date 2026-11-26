@@ -368,3 +368,64 @@ describe('buildMcpBridge.listSkills reads the merged metadata listing (#8726)', 
     });
   });
 });
+
+describe('[ADR-0160 D8] the skill prompt bridge reads the packs a skill\'s context resolves against', () => {
+  const prev = process.env.OS_MCP_SERVER_ENABLED;
+  beforeEach(() => {
+    process.env.OS_MCP_SERVER_ENABLED = 'true';
+  });
+  afterEach(() => {
+    if (prev === undefined) delete process.env.OS_MCP_SERVER_ENABLED;
+    else process.env.OS_MCP_SERVER_ENABLED = prev;
+    vi.restoreAllMocks();
+  });
+
+  const PACK = { name: 'policy_document', label: 'Policy document', object: 'policy', fields: ['title'] };
+  const recordContext = {
+    recordContextTools: () => ({
+      definitions: [{ name: 'get_record_context', description: 'Read one record through its context pack.' }],
+      getRecordContext: async () => ({}),
+    }),
+  };
+  const withPacks = (extra: Record<string, unknown> = {}) => {
+    const built = makeKernel({
+      withProtocol: true,
+      getMetaItems: async (req: any) => ({
+        type: req.type,
+        // The served listing decorates every item; the bridge hands the authored pack on.
+        items: req.type === 'ai_context' ? [{ ...PACK, _diagnostics: { degraded: false } }] : [],
+      }),
+    });
+    const services: Record<string, any> = { 'record-context': recordContext, ...extra };
+    const base = built.kernel.getService;
+    built.kernel.getService = (n: string) => services[n] ?? base(n);
+    built.kernel.getServiceAsync = async (n: string) => built.kernel.getService(n);
+    return built;
+  };
+
+  it('where the record-context service serves get_record_context, the bridge lists the packs, read decorations stripped', async () => {
+    const bridge = await bridgeFor(withPacks().kernel);
+    expect(typeof bridge.getRecordContext).toBe('function');
+    expect(await bridge.listContextPacks()).toEqual([PACK]);
+  });
+
+  it('CONTROL — with no record-context service the bridge lists no packs, and no skill takes a record', async () => {
+    const bridge = await bridgeFor(makeKernel({ withProtocol: true }).kernel);
+    expect(bridge.getRecordContext).toBeUndefined();
+    expect(bridge.listContextPacks).toBeUndefined();
+  });
+
+  it('a package skill\'s closure is the one walk over the engine\'s registry; no engine is the empty closure', async () => {
+    const registry = {
+      getPackage: (id: string) => ({ 'com.acme.app': { manifest: { id: 'com.acme.app', dependencies: { 'com.acme.base': '*' } } }, 'com.acme.base': { manifest: { id: 'com.acme.base' } } } as any)[id],
+      getAllPackages: () => [{ manifest: { id: 'com.acme.app' } }, { manifest: { id: 'com.acme.base' } }],
+    };
+    const bridge = await bridgeFor(withPacks({ objectql: { registry } }).kernel);
+    await bridge.listSkills();
+    expect([...bridge.packageResolutionClosure('com.acme.app')]).toEqual(['com.acme.base']);
+
+    const bare = await bridgeFor(withPacks().kernel);
+    await bare.listSkills();
+    expect([...bare.packageResolutionClosure('com.acme.app')]).toEqual([]);
+  });
+});
