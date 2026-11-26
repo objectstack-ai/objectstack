@@ -318,10 +318,11 @@ describe('「Add app」 offers 「New blank app」 whatever the catalog serves, 
     ]);
   });
 
-  it('an author who may enter Studio but not Setup → Packages is sent to the "All metadata" area, never Setup (objectstack#36908)', () => {
+  // objectstack#37565 — the cross-package directory moved to Setup; the door is Studio's package-less scope, for now.
+  it('an author who may enter Studio but not Setup → Packages is sent to Studio\'s package-less scope, never Setup (objectstack#36908)', () => {
     setupPair = false;
     const choices = addChoices();
-    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toHaveAttribute('href', '/studio/~all/metadata');
+    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toHaveAttribute('href', '/studio/~org/metadata/flow?source=runtime');
   });
 
   it.each([
@@ -685,14 +686,14 @@ describe('the docs portal\'s head names no app and only switches apps (objectsta
     expect(choices.queryByText('Build with AI')).toBeNull();
   });
 
-  it('an author who may not open Setup → Packages gets 「New blank app」 to the "All metadata" area', () => {
+  it('an author who may not open Setup → Packages gets 「New blank app」 to Studio\'s package-less scope (objectstack#37565)', () => {
     setupPair = false;
     apps = [CRM];
     admin = true;
     renderPortalMenu();
     expect(
       within(screen.getByTestId('add-app-choices')).getByTestId('sidebar-app-menu-add-new-in-studio'),
-    ).toHaveAttribute('href', '/studio/~all/metadata');
+    ).toHaveAttribute('href', '/studio/~org/metadata/flow?source=runtime');
   });
 
   it('guard: handed no entries, it draws no 「Add app」 and no separator for it', () => {
