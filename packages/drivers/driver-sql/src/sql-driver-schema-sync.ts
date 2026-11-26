@@ -2933,7 +2933,7 @@ export function sqliteNowBackfillSql(table: string, added: ReadonlyArray<readonl
   if (columns.length === 0) return null;
   const sets = columns.map(([name, field]) => {
     const col = quoteSqliteIdentifier(name);
-    return `${col} = ${sqliteNowColumnDefaultSql(String(field?.type || 'string'))}`;
+    return `${col} = COALESCE(${col}, ${sqliteNowColumnDefaultSql(String(field?.type || 'string'))})`;
   });
   const holdsNull = columns.map(([name]) => `${quoteSqliteIdentifier(name)} IS NULL`);
   return `UPDATE ${quoteSqliteIdentifier(table)} SET ${sets.join(', ')} WHERE ${holdsNull.join(' OR ')}`;
