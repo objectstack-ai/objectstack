@@ -1339,7 +1339,9 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // children — three row labels, authored in all three locales.
       // 837 since #37143: the `ai_context` form (ADR-0160 D1 clause 2) — two
       // section labels and seven row labels, authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(837);
+      // 838 since #37141: the skill form's `context` row (ADR-0160 D8) — one
+      // row label, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(838);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

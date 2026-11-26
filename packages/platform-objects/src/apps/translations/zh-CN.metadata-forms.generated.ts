@@ -3146,8 +3146,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "工具名（支持通配符：action_*）"
       },
       context: {
-        label: "Context",
-        helpText: "Context pack this skill works from (its name). Requires get_record_context in Tools. Over MCP the prompt then takes an optional record id"
+        label: "上下文包",
+        helpText: "此技能使用的上下文包（填名称）。工具中须包含 get_record_context。通过 MCP 调用时，提示词可额外接收一个可选的记录 ID"
       },
       triggerConditions: {
         label: "触发条件",

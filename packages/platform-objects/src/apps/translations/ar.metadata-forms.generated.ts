@@ -3146,8 +3146,8 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "أسماء الأدوات (تدعم حرف البدل: action_*)"
       },
       context: {
-        label: "Context",
-        helpText: "Context pack this skill works from (its name). Requires get_record_context in Tools. Over MCP the prompt then takes an optional record id"
+        label: "حزمة السياق",
+        helpText: "حزمة السياق التي تعمل منها هذه المهارة (اسمها). تتطلب get_record_context في الأدوات. عبر MCP تأخذ المطالبة عندئذٍ معرّف سجل اختياريًا"
       },
       triggerConditions: {
         label: "شروط التشغيل",

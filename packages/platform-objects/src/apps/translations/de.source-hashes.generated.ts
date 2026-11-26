@@ -115,8 +115,6 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.report.fields.exportOptions.includeHeaders.label": "f114a4778c9727ae",
   "metadataForms.report.fields.name.label": "5274417ff1ccaf01",
   "metadataForms.sharing_rule.fields.name.label": "5274417ff1ccaf01",
-  "metadataForms.skill.fields.context.helpText": "9044f0cc4416a4f6",
-  "metadataForms.skill.fields.context.label": "984d16efc3c62426",
   "metadataForms.skill.fields.name.label": "5274417ff1ccaf01",
   "metadataForms.tool.fields.name.label": "5274417ff1ccaf01",
   "metadataForms.tool.sections.schemas.label": "e288a14c24f0afe7",

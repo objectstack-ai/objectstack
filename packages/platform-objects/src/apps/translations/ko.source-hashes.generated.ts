@@ -63,8 +63,6 @@ export const koGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.report.fields.exportOptions.formats.label": "193cd91818d64ef7",
   "metadataForms.report.fields.exportOptions.includeHeaders.helpText": "44cbc80015ff051d",
   "metadataForms.report.fields.exportOptions.includeHeaders.label": "f114a4778c9727ae",
-  "metadataForms.skill.fields.context.helpText": "9044f0cc4416a4f6",
-  "metadataForms.skill.fields.context.label": "984d16efc3c62426",
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",
   "objects.sys_email_template.fields.id.label": "00b0385c9c152888",
   "objects.sys_email_template.fields.package_id.help": "e1f8cc4d0105cedc",

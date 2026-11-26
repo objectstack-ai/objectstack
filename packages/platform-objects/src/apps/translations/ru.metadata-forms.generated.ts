@@ -3146,8 +3146,8 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Имена инструментов (поддерживается подстановка: action_*)"
       },
       context: {
-        label: "Context",
-        helpText: "Context pack this skill works from (its name). Requires get_record_context in Tools. Over MCP the prompt then takes an optional record id"
+        label: "Пакет контекста",
+        helpText: "Пакет контекста, с которым работает этот навык (его имя). Требует get_record_context в инструментах. Через MCP промпт тогда принимает необязательный ID записи"
       },
       triggerConditions: {
         label: "Условия активации",

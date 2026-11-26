@@ -3146,8 +3146,8 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Noms des outils (prend en charge le joker : action_*)"
       },
       context: {
-        label: "Context",
-        helpText: "Context pack this skill works from (its name). Requires get_record_context in Tools. Over MCP the prompt then takes an optional record id"
+        label: "Pack de contexte",
+        helpText: "Pack de contexte sur lequel s'appuie cette compétence (son nom). Nécessite get_record_context dans Outils. Via MCP, le prompt accepte alors un ID d'enregistrement facultatif"
       },
       triggerConditions: {
         label: "Conditions de déclenchement",
