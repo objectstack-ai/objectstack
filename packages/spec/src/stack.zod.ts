@@ -1223,9 +1223,13 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
   /**
    * [ADR-0160 D1] Context packs: which of one record's fields, related lists
    * and body text are handed to a model, read as the caller by
-   * `get_record_context` (`@objectstack/service-record-context`).
+   * `get_record_context` (`@objectstack/service-record-context`). The tool
+   * exists on a host that mounts that service, by either door: the CLI mounts
+   * it where `requires` includes `record-context`, and a host that composes
+   * its own kernel lists `RecordContextServicePlugin` in `plugins`. A host
+   * that does neither serves no such tool, whatever packs it holds.
    */
-  aiContexts: z.array(AiContextSchema).optional().describe('AI context packs — the material of one record handed to a model, read as the caller by get_record_context (ADR-0160), which is served where `requires` includes `record-context`'),
+  aiContexts: z.array(AiContextSchema).optional().describe('AI context packs — the material of one record handed to a model, read as the caller by get_record_context (ADR-0160). A host serves that tool only when it mounts the record-context service: the CLI mounts it where `requires` includes `record-context`, and a host that composes its own kernel lists `RecordContextServicePlugin` in `plugins`'),
 
   /**
    * ObjectQL: Data Extensions
