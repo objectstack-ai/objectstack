@@ -110,6 +110,23 @@
 // fails when that run is redder than the run at the published major — so a
 // roll-unaware pin reds on `main` before it can red the version branch.
 //
+// THE PRE-MODE WINDOW COUNTS TOO (ruling record 7176929521, option A). A
+// STABLE label with Changesets in pre mode (`.changeset/pre.json` at
+// `"mode": "pre"`) and a pending `major` for `@objectstack/spec` is a tree
+// whose next publish is `<label major + 1>.0.0-<tag>.0`: the `major` is
+// already written down, so a removal that lands now ships in label + 1, never
+// in another release of the label's line. Citing label + 1 there names the
+// carrier, which is the same ADR-0087 test the prerelease label above passes.
+// It is the exception `packages/spec/src/kernel/protocol-version.ts` and
+// `check-changeset-no-major.mjs` already read, and it is read here THROUGH
+// that gate's reader (`readProtocolLockstepInputs`: `readPre` and the pending
+// majors it filters for this package) — ⛔ never a second parser of
+// `.changeset/`. Label + 2 is still refused; pre mode without a pending spec
+// major, a pending major outside pre mode, and a prerelease label (whose own
+// major is already the carrier) each open nothing. An unreadable
+// `.changeset/` opens nothing either: the exception is a widening, so a
+// missing input leaves the stricter verdict.
+//
 // The PROTOCOL major is a different number and is deliberately out of reach:
 // `toMajor: 18` in `packages/spec/src/conversions/registry.ts`, `step18` in
 // the migrations registry and the `PROTOCOL_VERSION` ladder are all correct.
@@ -164,9 +181,11 @@
 // nothing and reads no package build output.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readProtocolLockstepInputs } from './check-changeset-no-major.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -433,25 +452,59 @@ function readSpecMajor(readFile) {
   return { major, version };
 }
 
+/**
+ * The release window `.changeset/` describes under `root`, read through
+ * `check-changeset-no-major.mjs`'s own reader — this file parses none of it.
+ * `pendingSpecMajors` is the list of pending changeset files declaring
+ * `"@objectstack/spec": major`, or `null` when `.changeset/` is unreadable.
+ */
+function readReleaseWindow(root) {
+  const { pre, pendingSpecMajors } = readProtocolLockstepInputs(root);
+  return { pre, pendingSpecMajors };
+}
+
+/**
+ * The major a citation is judged against. The label's own major, except in
+ * the pre-mode window (header, "THE PRE-MODE WINDOW COUNTS TOO"): a stable
+ * label, pre mode and a pending spec `major` make it label + 1.
+ */
+function judgedMajor(spec, window) {
+  const stable = !String(spec.version).includes('-');
+  const pending = window?.pendingSpecMajors ?? [];
+  if (stable && window?.pre?.mode === 'pre' && pending.length > 0) {
+    return { major: spec.major + 1, opening: { tag: window.pre.tag ?? 'unknown', evidence: pending } };
+  }
+  return { major: spec.major, opening: null };
+}
+
 // ── The check ──────────────────────────────────────────────────────────────
 
 /**
  * @param files {Array<{file: string, text: string}>} the scanned corpus
  * @param ledger the QUOTATION_EXEMPTIONS to evaluate against
  * @param manifestRaw the text of packages/spec/package.json, or null
+ * @param window `readReleaseWindow`'s answer, or null for no pre-mode window
  */
-function runAllChecks(files, ledger, manifestRaw, selfPath = null) {
+function runAllChecks(files, ledger, manifestRaw, selfPath = null, window = null) {
   const problems = [];
   const readFile = (rel) => (rel === SPEC_MANIFEST ? manifestRaw : null);
-  const spec = readSpecMajor(readFile);
-  if (spec.problem) return { problems: [spec.problem], findings: [], census: new Map(), specMajor: null };
+  const label = readSpecMajor(readFile);
+  if (label.problem) return { problems: [label.problem], findings: [], census: new Map(), specMajor: null, labelMajor: null };
+  const { major: judged, opening } = judgedMajor(label, window);
+  const spec = { ...label, major: judged };
+  const against = opening
+    ? `${spec.major}, the major the next publish carries (${SPEC_MANIFEST} → ${spec.version}, in pre mode `
+      + `\`${opening.tag}\` with a pending major for ${PKG}: `
+      + `${opening.evidence.map((f) => `.changeset/${f}`).join(', ')})`
+    : `the published major ${spec.major} (${SPEC_MANIFEST} → ${spec.version})`;
+  const tail = { specMajor: spec.major, labelMajor: label.major, opening };
 
   if (files.length === 0) {
     problems.push(
       'no file was scanned at all — the corpus is empty. A gate that cannot find its '
       + 'input must not report that the input is fine (#4690).',
     );
-    return { problems, findings: [], census: new Map(), specMajor: spec.major };
+    return { problems, findings: [], census: new Map(), ...tail };
   }
 
   const census = new Map();
@@ -507,13 +560,13 @@ function runAllChecks(files, ledger, manifestRaw, selfPath = null) {
 
   for (const f of live) {
     problems.push(
-      `${f.file}:${f.line} — dates a change to \`${PKG}\` ${f.version}, above the published major `
-      + `${spec.major} (${SPEC_MANIFEST} → ${spec.version})`
+      `${f.file}:${f.line} — dates a change to \`${PKG}\` ${f.version}, above ${against}`
       + `${f.wrapped ? ' [the citation crosses a line break — a single-line grep misses it]' : ''}\n`
       + `      ${f.lineText.trim().slice(0, 160)}\n`
       + '      Name the npm release that actually carries the change. Already shipped ⇒ the version '
-      + 'from `packages/spec/CHANGELOG.md`. Not shipped yet ⇒ the bare published major, which ADR-0087 '
-      + 'guarantees is the carrier (a pre-GA retirement ships `minor`), never a guessed minor. Quoting '
+      + `from \`packages/spec/CHANGELOG.md\`. Not shipped yet ⇒ the bare major ${spec.major}, which ADR-0087 `
+      + 'guarantees is the carrier (a pre-GA retirement ships `minor`'
+      + `${opening ? `; in this pre-mode window the next publish opens ${spec.major}` : ''}), never a guessed minor. Quoting `
       + 'the bad number on purpose ⇒ a witnessed QUOTATION_EXEMPTIONS entry in this script.',
     );
   }
@@ -538,7 +591,7 @@ function runAllChecks(files, ledger, manifestRaw, selfPath = null) {
     );
   });
 
-  return { problems, findings: live, census, specMajor: spec.major, dormant };
+  return { problems, findings: live, census, dormant, ...tail };
 }
 
 // ── Self-test ──────────────────────────────────────────────────────────────
@@ -594,6 +647,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the self-fixture floor counts above the FIXTURES\' major, so the tree reaching 18 does not gut it → GREEN': 1,
   'the detector\'s own source stripped of its fixtures is still RED once the tree reaches 18': 1,
   'the roll adds no problem — the REAL corpus one major up is never redder than at the published major': 1,
+  'pre mode with a pending spec major — label + 1 (19.0.0 on 18.6.0) names the carrier → GREEN': 1,
+  'pre mode WITHOUT a pending spec major — another package\'s major opens nothing, 19.0.0 → RED': 1,
+  'non-pre control — a pending spec major outside pre mode opens nothing, 19.0.0 → RED': 1,
+  'label + 2 (20.0.0 on 18.6.0) is refused inside the window → RED': 1,
+  'a PRERELEASE label is already the carrier — the window opens nothing past it, 20.0.0 on 19.0.0-next.0 → RED': 1,
   'an empty corpus → RED, never a green skip (#4690)': 1,
   'a corpus that never mentions the package → RED (broken reader)': 1,
   'an unreadable spec manifest → RED': 1,
@@ -604,11 +662,21 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // duplicate-label refusal: two rows sharing a label collapse to ONE key above,
 // so the roster falls below this number; the table cross-check names WHICH
 // label collided.
-const SELF_TEST_BATTERY_FLOOR = 34;
+const SELF_TEST_BATTERY_FLOOR = 39;
 
 // The fixtures' reference major, and the tree one major up from it.
 const MANIFEST_17 = JSON.stringify({ name: PKG, version: `${SELF_FIXTURE_MAJOR}.4.0` });
 const MANIFEST_18 = JSON.stringify({ name: PKG, version: `${SELF_FIXTURE_MAJOR + 1}.0.0` });
+
+// The pre-mode window's fixtures, written against the tree that opened the
+// v19 line (a stable 18.6.0 label, pre mode `next`, the line's `major`), and
+// materialised as a real `.changeset/` directory so the rows drive the shared
+// reader, not a hand-built object.
+const MANIFEST_18_6 = JSON.stringify({ name: PKG, version: '18.6.0' });
+const MANIFEST_19_NEXT = JSON.stringify({ name: PKG, version: '19.0.0-next.0' });
+const PRE_NEXT = '{\n  "mode": "pre",\n  "tag": "next"\n}\n';
+const SPEC_MAJOR_CHANGESET = '---\n"@objectstack/spec": major\n---\n\nThe v19 line opens.\n';
+const OTHER_MAJOR_CHANGESET = '---\n"@object-ui/i18n": major\n"@objectstack/spec": minor\n---\n\nAnother package opens a major.\n';
 
 // The column-aligned table that broke the scratch instrument, verbatim.
 const PARTITION_SHARD_TABLE =
@@ -911,6 +979,45 @@ function selfTest() {
       wants: [/holds 1 citation\(s\) above 17, the major its fixtures are written against, below the floor of 12/],
     },
     {
+      label: 'pre mode with a pending spec major — label + 1 (19.0.0 on 18.6.0) names the carrier → GREEN',
+      files: F('`singleClickEdit` was removed in @objectstack/spec 19.0.0 (ADR-0049). Delete the key.\n'),
+      manifest: MANIFEST_18_6,
+      changesets: { 'pre.json': PRE_NEXT, 'v19-line-opens.md': SPEC_MAJOR_CHANGESET },
+      expect: 'green',
+    },
+    {
+      label: 'pre mode WITHOUT a pending spec major — another package\'s major opens nothing, 19.0.0 → RED',
+      files: F('`singleClickEdit` was removed in @objectstack/spec 19.0.0 (ADR-0049). Delete the key.\n'),
+      manifest: MANIFEST_18_6,
+      changesets: { 'pre.json': PRE_NEXT, 'i18n-major.md': OTHER_MAJOR_CHANGESET },
+      expect: 'red',
+      wants: [/19\.0\.0, above the published major 18 \(packages\/spec\/package\.json → 18\.6\.0\)/],
+    },
+    {
+      label: 'non-pre control — a pending spec major outside pre mode opens nothing, 19.0.0 → RED',
+      files: F('`singleClickEdit` was removed in @objectstack/spec 19.0.0 (ADR-0049). Delete the key.\n'),
+      manifest: MANIFEST_18_6,
+      changesets: { 'v19-line-opens.md': SPEC_MAJOR_CHANGESET },
+      expect: 'red',
+      wants: [/19\.0\.0, above the published major 18 \(packages\/spec\/package\.json → 18\.6\.0\)/],
+    },
+    {
+      label: 'label + 2 (20.0.0 on 18.6.0) is refused inside the window → RED',
+      files: F('`singleClickEdit` was removed in @objectstack/spec 20.0.0 (ADR-0049). Delete the key.\n'),
+      manifest: MANIFEST_18_6,
+      changesets: { 'pre.json': PRE_NEXT, 'v19-line-opens.md': SPEC_MAJOR_CHANGESET },
+      expect: 'red',
+      wants: [/20\.0\.0, above 19, the major the next publish carries .*pre mode `next` with a pending major .*v19-line-opens\.md/],
+    },
+    {
+      label: 'a PRERELEASE label is already the carrier — the window opens nothing past it, 20.0.0 on 19.0.0-next.0 → RED',
+      files: F('`singleClickEdit` was removed in @objectstack/spec 20.0.0 (ADR-0049). Delete the key.\n'),
+      manifest: MANIFEST_19_NEXT,
+      changesets: { 'pre.json': PRE_NEXT, 'v19-line-opens.md': SPEC_MAJOR_CHANGESET },
+      expect: 'red',
+      wants: [/20\.0\.0, above the published major 19 \(packages\/spec\/package\.json → 19\.0\.0-next\.0\)/],
+    },
+    {
       label: 'an empty corpus → RED, never a green skip (#4690)',
       files: [],
       expect: 'red',
@@ -937,6 +1044,20 @@ function selfTest() {
     batterySeen.set(name, (batterySeen.get(name) ?? 0) + 1);
   };
 
+  // A row's `changesets` is written to a scratch `<root>/.changeset/` and read
+  // back through `readReleaseWindow`, the same reader `main` uses.
+  const windowFor = (changesets) => {
+    if (!changesets) return null;
+    const root = mkdtempSync(join(tmpdir(), 'future-spec-major-'));
+    try {
+      mkdirSync(join(root, '.changeset'));
+      for (const [name, text] of Object.entries(changesets)) writeFileSync(join(root, '.changeset', name), text);
+      return readReleaseWindow(root);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
+
   let failed = 0;
   for (const c of cases) {
     registerCase(c.label);
@@ -947,6 +1068,7 @@ function selfTest() {
         c.ledger ?? [],
         'manifest' in c ? c.manifest : MANIFEST_17,
         c.selfPath ?? null,
+        windowFor(c.changesets),
       ));
     } catch (err) {
       console.error(`  ✗ ${c.label}\n      threw: ${err.message}`);
@@ -1005,16 +1127,20 @@ function selfTest() {
     // fixed, before the roll ever reaches it.
     const rollLabel = 'the roll adds no problem — the REAL corpus one major up is never redder than at the published major';
     registerCase(rollLabel);
-    const atMajor = runAllChecks(real, QUOTATION_EXEMPTIONS, readManifestRaw(), SELF_PATH);
-    if (atMajor.specMajor === null) {
+    // The real window rides both runs: the roll moves the LABEL, and a
+    // prerelease label opens nothing past itself, so the window can only make
+    // the run at the published major the more permissive of the two.
+    const realWindow = readReleaseWindow(REPO_ROOT);
+    const atMajor = runAllChecks(real, QUOTATION_EXEMPTIONS, readManifestRaw(), SELF_PATH, realWindow);
+    if (atMajor.labelMajor === null) {
       failed += 1;
       console.error(`  ✗ ${rollLabel}\n      ${SPEC_MANIFEST} gave no major to roll from:\n      ${atMajor.problems.join('\n      ')}`);
     } else {
-      const nextLabel = `${atMajor.specMajor + 1}.0.0-next.0`;
+      const nextLabel = `${atMajor.labelMajor + 1}.0.0-next.0`;
       const up = runAllChecks(
-        real, QUOTATION_EXEMPTIONS, JSON.stringify({ name: PKG, version: nextLabel }), SELF_PATH,
+        real, QUOTATION_EXEMPTIONS, JSON.stringify({ name: PKG, version: nextLabel }), SELF_PATH, realWindow,
       );
-      if (up.specMajor !== atMajor.specMajor + 1 || up.problems.length > atMajor.problems.length) {
+      if (up.labelMajor !== atMajor.labelMajor + 1 || up.problems.length > atMajor.problems.length) {
         failed += 1;
         console.error(
           `  ✗ ${rollLabel}\n      ${atMajor.problems.length} problem(s) at ${atMajor.specMajor}, `
@@ -1023,7 +1149,8 @@ function selfTest() {
         );
       } else {
         console.log(
-          `  ✓ ${rollLabel} (${atMajor.problems.length} at ${atMajor.specMajor}, `
+          `  ✓ ${rollLabel} (${atMajor.problems.length} at ${atMajor.specMajor}`
+          + `${atMajor.opening ? ` [label ${atMajor.labelMajor}, pre-mode window open]` : ''}, `
           + `${up.problems.length} at ${nextLabel})`,
         );
       }
@@ -1133,13 +1260,13 @@ function main() {
   }
 
   const files = readCorpus();
-  const { problems, census, specMajor, dormant } = runAllChecks(
-    files, QUOTATION_EXEMPTIONS, readManifestRaw(), SELF_PATH,
+  const { problems, census, specMajor, labelMajor, opening, dormant } = runAllChecks(
+    files, QUOTATION_EXEMPTIONS, readManifestRaw(), SELF_PATH, readReleaseWindow(REPO_ROOT),
   );
 
   if (process.argv.includes('--census')) {
     const rows = [...census.entries()].sort((a, b) => a[0].localeCompare(b[0], 'en', { numeric: true }));
-    console.log(`census — \`${PKG}\` <version> citations, published major ${specMajor}`);
+    console.log(`census — \`${PKG}\` <version> citations, label major ${labelMajor}, judged against ${specMajor}`);
     for (const [key, { sites, files: fs }] of rows) {
       console.log(`  ${key.padEnd(18)} ${String(sites).padStart(5)} sites  ${String(fs.size).padStart(4)} files`);
     }
@@ -1151,18 +1278,23 @@ function main() {
     console.error(
       `\nADR-0087 (Amended 2026-09-13): "A tombstone names the npm release it ships in, ⛔ never the\n`
       + 'protocol major." A pre-GA retirement ships `minor`, so it lands in a version of the CURRENT\n'
-      + 'major — never in the next one.',
+      + 'major — never in the next one, unless Changesets pre mode and a pending major for the package\n'
+      + 'already make the next publish open it (ruling record 7176929521).',
     );
     process.exit(1);
   }
 
   const scanned = files.length;
   const mentioning = files.filter((f) => f.text.includes(PKG)).length;
-  const atMajor = census.get(`${specMajor} (bare)`);
+  const atMajor = census.get(`${labelMajor} (bare)`);
   console.log(
     `✓ check-future-spec-major: no \`${PKG}\` citation names a major above ${specMajor}\n`
+    + (opening
+      ? `  pre-mode window: label major ${labelMajor}, pre mode \`${opening.tag}\`, pending major for \`${PKG}\` in `
+        + `${opening.evidence.map((f) => `.changeset/${f}`).join(', ')} — the next publish carries ${specMajor}\n`
+      : '')
     + `  ${scanned} scanned file(s), ${mentioning} mentioning \`${PKG}\`\n`
-    + `  control — bare \`${PKG}\` ${specMajor}: ${atMajor?.sites ?? 0} site(s) / `
+    + `  control — bare \`${PKG}\` ${labelMajor}: ${atMajor?.sites ?? 0} site(s) / `
     + `${atMajor?.files.size ?? 0} file(s), all legitimate and all read by this same matcher\n`
     + `  ${QUOTATION_EXEMPTIONS.length - dormant.length} live witnessed ledger entr(y|ies), every witness still matching\n`
     + (dormant.length === 0
