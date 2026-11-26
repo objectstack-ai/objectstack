@@ -357,7 +357,9 @@ describe('the package-less scope lists a package-less flow and opens it editable
     // scope, so it is named, as a package with no app is: objectstack#37456 —
     // by the package row's switcher, beside the way back to the apps home.
     const row = within(screen.getByTestId('studio-package-row'));
-    expect(row.getByTestId('studio-pkg-switcher-name')).toHaveTextContent('Organization flows');
+    // Named for what it holds, not after its one flow entry (the menu row keeps that name).
+    expect(row.getByTestId('studio-pkg-switcher-name')).toHaveTextContent(/^Organization metadata$/);
+    expect(screen.getByTestId('studio-menu-entry-orgFlows')).toHaveTextContent('Organization flows');
     expect(row.getByTestId('studio-package-back')).toHaveAccessibleName('Leave Studio and go back to your apps');
     expect(screen.getByTestId('studio-brand-name')).toHaveTextContent(/^App Studio$/);
     // No "New" flow here: authoring stays package-first.

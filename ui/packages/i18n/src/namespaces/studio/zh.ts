@@ -3187,6 +3187,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.pkg.search': '搜索软件包',
   'engine.studio.pkg.noMatches': '没有匹配的软件包',
   'engine.studio.pkg.newPackage': '新建软件包',
+  'engine.studio.pkg.orgScope': '组织元数据',
   // objectstack#37139 — 应用名或包名右侧的「⋯」软件包菜单。
   'engine.studio.packageMenu.trigger': '软件包操作',
   'engine.studio.packageMenu.editInfo': '编辑软件包信息',

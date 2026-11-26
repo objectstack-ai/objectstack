@@ -344,7 +344,7 @@ describe('no 「⋯」 without a current package or without manage_metadata (obj
   it.each(['en-US', 'zh-CN'] as const)('%s: none on ~org/overview and none on ~all/overview', async (locale) => {
     localeFixture = locale;
     renderAt('/studio/~org/overview');
-    await waitFor(() => expect(within(header()).getByTestId('studio-pkg-switcher-name')).toHaveTextContent(t('engine.studio.menu.orgFlows', locale)), {
+    await waitFor(() => expect(within(header()).getByTestId('studio-pkg-switcher-name')).toHaveTextContent(t('engine.studio.pkg.orgScope', locale)), {
       timeout: 8000,
     });
     expect(screen.queryByTestId('studio-package-overview')).toBeNull();

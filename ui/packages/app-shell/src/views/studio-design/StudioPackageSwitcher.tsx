@@ -168,7 +168,7 @@ export function StudioPackageSwitcher({
   const openApp = packageId === null ? null : (listed?.app ?? studioPackageApp(packageId, apps));
   const openLabel =
     packageId === null
-      ? t(scope === 'all' ? 'engine.studio.menu.environment' : 'engine.studio.menu.orgFlows', locale)
+      ? t(scope === 'all' ? 'engine.studio.menu.environment' : 'engine.studio.pkg.orgScope', locale)
       : (listed?.label ??
         (openApp ? navItemLabelText(openApp.label, locale) || openApp.name : null) ??
         (openEntry?.id === packageId ? openEntry.name : null) ??

@@ -3607,6 +3607,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.pkg.search': 'Search packages',
   'engine.studio.pkg.noMatches': 'No package matches',
   'engine.studio.pkg.newPackage': 'New package',
+  // The switcher's name for the package-less scope (`~org`): its menu lists more
+  // than flows, so it is not named after its flow entry.
+  'engine.studio.pkg.orgScope': 'Organization metadata',
   // objectstack#37139 — the 「⋯」 package menu beside the app or package name:
   // the development face's whole-package actions, for a manage_metadata holder.
   'engine.studio.packageMenu.trigger': 'Package actions',

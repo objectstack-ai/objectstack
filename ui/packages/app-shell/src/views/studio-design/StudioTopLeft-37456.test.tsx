@@ -228,7 +228,7 @@ describe('Studio top left — the package switcher (objectstack#37456)', () => {
 
   it('names the scope in the package-less scope', () => {
     renderTopLeft({ packageId: null });
-    expect(screen.getByTestId('studio-pkg-switcher-name')).toHaveTextContent(/./);
+    expect(screen.getByTestId('studio-pkg-switcher-name')).toHaveTextContent(/^Organization metadata$/);
     expect(screen.getByTestId('studio-pkg-switcher')).not.toHaveAttribute('data-package');
   });
 });
