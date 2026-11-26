@@ -113,7 +113,7 @@
 // Paid during collection: the pages' source reach loads it lazily (check:test-source-alias).
 import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import {
@@ -124,6 +124,28 @@ import {
   useLocation,
   useParams,
 } from 'react-router-dom';
+
+// objectstack#37565 — the viewer's capability set, as `usePermissions()` answers it: a holder of
+// Setup's entry capability unless a case says otherwise (`undefined`: no reported set).
+const HOLDER = ['studio.access', 'setup.access'];
+const held = vi.hoisted(() => ({ capabilities: ['studio.access', 'setup.access'] as string[] | undefined }));
+vi.mock('@object-ui/permissions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/permissions')>();
+  // One object per answer, as the hook's own identity is (objectui#6724).
+  const answers = new Map<string[] | undefined, ReturnType<typeof actual.usePermissions>>();
+  return {
+    ...actual,
+    usePermissions: () => {
+      const base = actual.usePermissions();
+      let answer = answers.get(held.capabilities);
+      if (!answer) answers.set(held.capabilities, (answer = { ...base, systemPermissions: held.capabilities }));
+      return answer;
+    },
+  };
+});
+afterEach(() => {
+  held.capabilities = HOLDER;
+});
 
 // ---------------------------------------------------------------------------
 // Mocks — everything that takes part in the routing decision (AppContent's

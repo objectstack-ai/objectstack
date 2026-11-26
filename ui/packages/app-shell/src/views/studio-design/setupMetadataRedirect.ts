@@ -7,7 +7,9 @@
  * Every `/apps/<app>/metadata/...` URL, and every legacy alias that chained
  * into one, opens Studio's "All metadata" area (`metadataArea.ts`) on the same
  * page, except the environment directory and its lists, which are Setup's own
- * page again (`views/setup/accessDirectory.ts`, objectstack#37565). The area
+ * page again (`views/setup/accessDirectory.ts`, objectstack#37565), for a
+ * principal who may open Setup; for one who may not, they stay on Studio's
+ * cross-package leg, where they landed before. The area
  * mounts the metadata-admin pages under the same route shapes, so the path
  * below `metadata` carries over as it is. The query carries over too, because
  * `?package=`, `?scope=environment` and `?review=1` keep their Setup meaning
@@ -34,9 +36,11 @@ export const SETUP_KEPT_METADATA_TYPE = 'datasource';
  * `rest` is the path below `…/metadata` as the URL spells it (encoded), `''`
  * at the root: `object`, `object/account`, `permission/admin/history`,
  * `_diagnostics`. `search` is the URL's query, with or without its `?`, and
- * `hash` its fragment, with its `#`.
+ * `hash` its fragment, with its `#`. `setupAccess` says the principal may open
+ * Setup (`holdsSetupAccess`); without it the environment directory's URLs
+ * stay on the cross-package leg.
  */
-export function setupMetadataStudioPath(rest: string, search: string, hash = ''): string | null {
+export function setupMetadataStudioPath(rest: string, search: string, hash = '', setupAccess = false): string | null {
   const segments = rest.split('/').filter(Boolean);
   if (segments[0] === SETUP_KEPT_METADATA_TYPE) return null;
   const tail = segments.join('/');
@@ -44,8 +48,8 @@ export function setupMetadataStudioPath(rest: string, search: string, hash = '')
   const studio = onLeg
     ? `${onLeg}${hash}`
     : studioMetadataAreaAddress(STUDIO_ALL_PACKAGES_SEGMENT, tail, { query: new URLSearchParams(search), hash });
-  // objectstack#37565 — the leg's directory is Setup's page: land there in one hop.
-  return studioAddressAfterSetupMove(studio);
+  // objectstack#37565 — the leg's directory is Setup's page: land there in one hop, if Setup opens.
+  return setupAccess ? studioAddressAfterSetupMove(studio) : studio;
 }
 
 /**

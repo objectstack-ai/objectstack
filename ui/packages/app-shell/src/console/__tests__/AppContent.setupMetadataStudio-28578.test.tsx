@@ -43,8 +43,30 @@
  */
 
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
+
+// objectstack#37565 — the viewer's capability set, as `usePermissions()` answers it: a holder of
+// Setup's entry capability unless a case says otherwise (`undefined`: no reported set).
+const HOLDER = ['studio.access', 'setup.access'];
+const held = vi.hoisted(() => ({ capabilities: ['studio.access', 'setup.access'] as string[] | undefined }));
+vi.mock('@object-ui/permissions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/permissions')>();
+  // One object per answer, as the hook's own identity is (objectui#6724).
+  const answers = new Map<string[] | undefined, ReturnType<typeof actual.usePermissions>>();
+  return {
+    ...actual,
+    usePermissions: () => {
+      const base = actual.usePermissions();
+      let answer = answers.get(held.capabilities);
+      if (!answer) answers.set(held.capabilities, (answer = { ...base, systemPermissions: held.capabilities }));
+      return answer;
+    },
+  };
+});
+afterEach(() => {
+  held.capabilities = HOLDER;
+});
 // The page reaches `celAuthoring`'s dynamic `@objectstack/lint` import; its
 // first load is paid here, at collection, never inside a case's clock
 // (`check:test-source-alias`).
@@ -185,6 +207,19 @@ const TO_SETUP_DIRECTORY: Array<[string, string]> = [
   ['/component/metadata/resource?type=position&scope=environment', `${SETUP_DIRECTORY}/position?scope=environment`],
 ];
 
+/**
+ * objectstack#37565 — [Setup URL, Studio URL] for a principal who may not open
+ * Setup: the environment directory's addresses stay on Studio's cross-package
+ * leg, where they landed before it moved.
+ */
+const TO_STUDIO_WITHOUT_SETUP: Array<[string, string]> = [
+  ['/metadata', '/studio/~all/metadata'],
+  ['/metadata/position?scope=environment', '/studio/~all/metadata/position?scope=environment'],
+  ['/metadata/sharing_rule?scope=environment&package=crm', '/studio/~all/metadata/sharing_rule?scope=environment'],
+  ['/component/metadata/directory', '/studio/~all/metadata'],
+  ['/component/metadata/resource?type=position&scope=environment', '/studio/~all/metadata/position?scope=environment'],
+];
+
 /** [Setup URL, the page it keeps rendering, where it settles] */
 const STAYS: Array<[string, string, string]> = [
   ['/metadata/datasource', 'metadata-resource-list-page', '/metadata/datasource'],
@@ -220,6 +255,22 @@ describe.each([
     await waitFor(() => expect(chain).toEqual([`${base}${from}`, to]));
     expect(chain.some((entry) => entry.startsWith('/studio'))).toBe(false);
     expect(screen.queryByTestId('studio-probe')).not.toBeInTheDocument();
+  });
+
+  // objectstack#37565 — without Setup's entry capability, or with no reported set, the leg keeps them.
+  describe.each([
+    ['holding studio.access only', ['studio.access']],
+    ['with no reported capability set', undefined],
+  ] as const)('%s', (_who, capabilities) => {
+    it.each(TO_STUDIO_WITHOUT_SETUP)(`${base}%s → %s, in one hop`, async (from, to) => {
+      held.capabilities = capabilities === undefined ? undefined : [...capabilities];
+      metadataApps = [...apps];
+      const chain = renderAt(`${base}${from}`);
+
+      expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
+      expect(chain).toEqual([`${base}${from}`, to]);
+      expect(chain.some((entry) => entry.startsWith('/apps/setup/component/security'))).toBe(false);
+    });
   });
 
   it.each(STAYS)(`${base}%s stays in Setup on %s`, async (from, testid, settles) => {

@@ -53,11 +53,33 @@
  */
 
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation, useParams } from 'react-router-dom';
 
 import { systemRoutes } from '../AppContent';
+
+// objectstack#37565 — the viewer's capability set, as `usePermissions()` answers it: a holder of
+// Setup's entry capability unless a case says otherwise (`undefined`: no reported set).
+const HOLDER = ['studio.access', 'setup.access'];
+const held = vi.hoisted(() => ({ capabilities: ['studio.access', 'setup.access'] as string[] | undefined }));
+vi.mock('@object-ui/permissions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/permissions')>();
+  // One object per answer, as the hook's own identity is (objectui#6724).
+  const answers = new Map<string[] | undefined, ReturnType<typeof actual.usePermissions>>();
+  return {
+    ...actual,
+    usePermissions: () => {
+      const base = actual.usePermissions();
+      let answer = answers.get(held.capabilities);
+      if (!answer) answers.set(held.capabilities, (answer = { ...base, systemPermissions: held.capabilities }));
+      return answer;
+    },
+  };
+});
+afterEach(() => {
+  held.capabilities = HOLDER;
+});
 
 /**
  * Records every distinct location the router settles on. `<Navigate replace>`
@@ -165,6 +187,19 @@ describe('console host legacy redirects → Studio\'s All metadata area, in ONE 
     expect(screen.getByTestId('setup-directory')).toBeInTheDocument();
     expect(screen.queryByTestId('studio')).not.toBeInTheDocument();
     expectNoAliasAnywhere(chain);
+  });
+
+  // objectstack#37565 — for a principal who may not open Setup, or with no reported set, they stay on the leg.
+  it.each([
+    [['studio.access'], '/apps/x/system/metadata', '/studio/~all/metadata'],
+    [['studio.access'], '/apps/x/system/positions', '/studio/~all/metadata/position?scope=environment'],
+    [['studio.access'], '/apps/x/system/permissions', '/studio/~all/metadata/permission?scope=environment'],
+    [undefined, '/apps/x/system/metadata/position?scope=environment', '/studio/~all/metadata/position?scope=environment'],
+    [undefined, '/apps/x/system/roles', '/studio/~all/metadata/position?scope=environment'],
+  ] as const)('holding %j, the environment directory %s stays on Studio\'s leg: %s', (capabilities, from, to) => {
+    held.capabilities = capabilities === undefined ? undefined : [...capabilities];
+    expectStudioInOneHop(renderAt(from), from, to);
+    expect(screen.queryByTestId('setup-directory')).not.toBeInTheDocument();
   });
 
   it('a datasource stays in Setup: the canonical route, the app prefix preserved', () => {

@@ -47,6 +47,19 @@ describe('setupMetadataStudioPath', () => {
     // A trailing or doubled slash does not leak into the target.
     ['object/', '', '/studio/~all/metadata/object'],
   ])('%s %s → %s', (rest, search, expected) => {
+    // A principal who may open Setup (objectstack#37565).
+    expect(setupMetadataStudioPath(rest, search, '', true)).toBe(expected);
+  });
+
+  // objectstack#37565 — for a principal who may not open Setup (and by default), the
+  // environment directory's addresses stay on the cross-package leg, where they landed before.
+  it.each([
+    ['', '', '/studio/~all/metadata'],
+    ['position', '?scope=environment', '/studio/~all/metadata/position?scope=environment'],
+    ['position', '?scope=environment&package=crm', '/studio/~all/metadata/position?scope=environment'],
+    ['position/manager', '?scope=environment', '/studio/~all/metadata/position/manager?scope=environment'],
+  ])('without Setup: %s %s → %s', (rest, search, expected) => {
+    expect(setupMetadataStudioPath(rest, search, '', false)).toBe(expected);
     expect(setupMetadataStudioPath(rest, search)).toBe(expected);
   });
 
@@ -90,7 +103,7 @@ describe('setupMetadataStudioPath', () => {
       ['', ''],
       ['position', '?scope=environment&package=crm'],
     ] as const) {
-      const target = new URL(setupMetadataStudioPath(rest, search)!, 'http://x');
+      const target = new URL(setupMetadataStudioPath(rest, search, '', true)!, 'http://x');
       expect(target.pathname.startsWith(ACCESS_DIRECTORY_PATH)).toBe(true);
       expect(accessDirectoryLocation(target.pathname.slice(ACCESS_DIRECTORY_PATH.length), target.search)).toBeNull();
     }

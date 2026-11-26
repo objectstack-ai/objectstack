@@ -89,10 +89,32 @@
  */
 
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
+
+// objectstack#37565 — the viewer's capability set, as `usePermissions()` answers it: a holder of
+// Setup's entry capability unless a case says otherwise (`undefined`: no reported set).
+const HOLDER = ['studio.access', 'setup.access'];
+const held = vi.hoisted(() => ({ capabilities: ['studio.access', 'setup.access'] as string[] | undefined }));
+vi.mock('@object-ui/permissions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/permissions')>();
+  // One object per answer, as the hook's own identity is (objectui#6724).
+  const answers = new Map<string[] | undefined, ReturnType<typeof actual.usePermissions>>();
+  return {
+    ...actual,
+    usePermissions: () => {
+      const base = actual.usePermissions();
+      let answer = answers.get(held.capabilities);
+      if (!answer) answers.set(held.capabilities, (answer = { ...base, systemPermissions: held.capabilities }));
+      return answer;
+    },
+  };
+});
+afterEach(() => {
+  held.capabilities = HOLDER;
+});
 
 // AGENTS.md §测试纪律 — the lazily-imported page modules are stubbed so no
 // unbounded `import()` races a bounded assertion window. The paths are
@@ -199,19 +221,6 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   }),
   useWorkspaceAdminStatus: () => ({ isAdmin: true, isResolved: true }),
 }));
-
-// The viewer holds Studio's entry capability, which Setup's directory page asks
-// for (objectstack#37565). No provider is mounted, so the answer is stubbed: the
-// no-provider defaults, plus a reported capability set holding it.
-vi.mock('@object-ui/permissions', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@object-ui/permissions')>();
-  let answer: ReturnType<typeof actual.usePermissions> | undefined;
-  return {
-    ...actual,
-    // One object for every render, as the hook's own answer is (objectui#6724).
-    usePermissions: () => (answer ??= { ...actual.usePermissions(), systemPermissions: ['studio.access'] }),
-  };
-});
 
 const dataSourceStub = {
   onConnectionStateChange: () => () => {},
@@ -404,6 +413,21 @@ describe('the catalog entries reach the catalog, on Setup\'s directory page (obj
     renderConsoleAt(url);
 
     await waitFor(() => expect(chain).toEqual([url, target]));
+  });
+
+  // objectstack#37565 — for a principal who may not open Setup, or with no reported set, the
+  // catalog stays on Studio's cross-package leg, where these URLs landed before it moved.
+  it.each([
+    [['studio.access'], '/apps/setup/system/positions', '/studio/~all/metadata/position?scope=environment'],
+    [['studio.access'], '/apps/setup/system/permissions', '/studio/~all/metadata/permission?scope=environment'],
+    [undefined, '/apps/setup/system/roles', '/studio/~all/metadata/position?scope=environment'],
+    [undefined, '/apps/my-app/system/permissions', '/studio/~all/metadata/permission?scope=environment'],
+  ] as const)('holding %j, %s stays on Studio\'s leg in ONE hop: %s', async (capabilities, url, target) => {
+    held.capabilities = capabilities === undefined ? undefined : [...capabilities];
+    renderConsoleAt(url);
+
+    expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
+    expect(chain).toEqual([url, target]);
   });
 });
 
