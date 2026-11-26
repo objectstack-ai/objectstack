@@ -194,7 +194,7 @@ describe('resolveSettingsStoreUrl', () => {
   it('refuses a NUL byte or another control character, in a setting and in the plugin option alike', () => {
     const root = tempDir();
     const inside = `file:${join(dataDirectoryOf(root), 'k.db')}`;
-    for (const url of [`${inside}${NUL}`, `file:${dataDirectoryOf(root)}/k${NUL}.db`, `${inside}\n`, `libsql://db${NUL}.turso.io`, `:memory:${NUL}`]) {
+    for (const url of [`${inside}${NUL}`, `file:${dataDirectoryOf(root)}/k${NUL}.db`, `file:${dataDirectoryOf(root)}/k\t.db`, `libsql://db${NUL}.turso.io`, `:memory:${NUL}`]) {
       expect(resolveSettingsStoreUrl(url, { projectRoot: root, env: {} })).toMatchObject({
         reason: expect.stringContaining('NUL byte'),
       });

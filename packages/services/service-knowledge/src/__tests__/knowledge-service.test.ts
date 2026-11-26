@@ -2401,7 +2401,7 @@ describe('KnowledgeService — a source naming an adapter that is not mounted', 
       error: (m: string) => logs.push(['error', m]),
     };
     const svc = new KnowledgeService({ logger });
-    const turso = makeAdapter('turso', [{ id: 'd1', sourceId: 'notes', content: 'x', score: 1 } as KnowledgeHit]);
+    const turso = makeAdapter('turso', [{ chunkId: 'c1', documentId: 'd1', sourceId: 'notes', snippet: 'x', score: 1 }]);
     svc.registerAdapter('turso', turso);
     svc.registerSource(objectSource('notes', 'task', 'turso'));
     svc.registerSource(objectSource('docs', 'doc', 'pgvector'));
@@ -2425,12 +2425,13 @@ describe('KnowledgeService — a source naming an adapter that is not mounted', 
 
   it('searching it alone is refused whole; beside a mounted source it is named as refused', async () => {
     const { svc, logs } = serviceWith();
-    const alone = await svc.search('q', { sourceIds: ['docs'] }).catch((e: unknown) => e);
+    const system = { isSystem: true } as never;
+    const alone = await svc.search('q', { sourceIds: ['docs'], executionContext: system }).catch((e: unknown) => e);
     expect(alone).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
     expect((alone as { refused: unknown }).refused).toEqual([
       expect.objectContaining({ sourceId: 'docs', code: 'SERVICE_UNAVAILABLE', status: 503 }),
     ]);
-    const both = await svc.searchWithRefusals('q', {});
+    const both = await svc.searchWithRefusals('q', { executionContext: system });
     expect(both.hits.map((h) => h.sourceId)).toEqual(['notes']);
     expect(both.refused).toEqual([expect.objectContaining({ sourceId: 'docs', code: 'SERVICE_UNAVAILABLE' })]);
     // Said once at boot, never a line per search.

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 20 — spawns the real producer once per single-cause fixture: nine in-process bootStack boots, no two the same configuration (a top-level requires, a package body's, the top level over the bodies, the control, an explicit instance, triggers with its hard dependencies, record-context with mcp, its no-token control, a host-mounted record-context), each its case's subject; 5.9 s in a local run for the first six, 10.0 s with the three record-context boots (local, verbose reporter); slowest CI reading 11.4 s (scheduled full-battery run 41199450735, Test Core shard log) x 1.25, rounded up, read before the record-context boots — the first CI reading after them re-measures it
+// test-budget: 22 — spawns the real producer once per single-cause fixture: eleven in-process bootStack boots, no two the same configuration (a top-level requires, a package body's, the top level over the bodies, the control, an explicit instance, triggers with its hard dependencies, record-context with mcp, its no-token control, a host-mounted record-context, knowledge with realtime, its no-token control), each its case's subject; 5.9 s in a local run for the first six, 10.0 s with the three record-context boots, 14.8 s with the two knowledge boots (local, verbose reporter); slowest CI reading 11.4 s (scheduled full-battery run 41199450735, Test Core shard log) read before the record-context boots, scaled by the local ratio to 16.9 s, x 1.25, rounded up — the first CI reading after the knowledge boots re-measures it
 
 /**
  * #22301 item 1 — `bootStack` mounts the providers an app's `requires` names,
@@ -315,13 +315,13 @@ describe("requires: ['knowledge'] — the knowledge service and one store", () =
     const ql = await stack.kernel.getServiceAsync<any>('objectql');
     await ql.insert('rqp_article', { title: 'Granite quarry RQP', body: 'basalt and granite slabs' }, { context: { isSystem: true } });
     const ec = { isSystem: true, userId: 'system', roles: [], permissions: [] };
-    let hits: Array<{ sourceId: string; content: string }> = [];
+    let hits: Array<{ sourceId: string; snippet: string }> = [];
     for (let i = 0; i < 50 && hits.length === 0; i++) {
       hits = (await knowledge.searchWithRefusals('granite quarry', { executionContext: ec, sourceIds: ['rqp_articles'] })).hits;
       if (hits.length === 0) await new Promise((r) => setTimeout(r, 50));
     }
     expect(hits.map((h) => h.sourceId)).toEqual(['rqp_articles']);
-    expect(hits[0]?.content).toContain('granite');
+    expect(hits[0]?.snippet).toContain('granite');
 
     const refused = await knowledge.search('granite', { executionContext: ec, sourceIds: ['rqp_elsewhere'] }).catch((e: unknown) => e);
     expect(refused).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
