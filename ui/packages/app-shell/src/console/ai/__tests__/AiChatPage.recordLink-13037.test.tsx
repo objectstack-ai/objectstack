@@ -29,7 +29,7 @@ const ANSWER = 'Top customer: [Wayne Enterprises](/record/account/acc_42).';
  */
 const LIST_FILTER = { logic: 'and', conditions: [{ field: 'stage', operator: 'equals', value: 'open' }] };
 const LIST_ANSWER = `There are [12 open opportunities](/list/opportunity?view=all&uf__filter=${encodeURIComponent(JSON.stringify(LIST_FILTER))}).`;
-const answerNow = vi.hoisted(() => ({ content: '' }));
+const answerNow = vi.hoisted(() => ({ content: '', recordCitations: undefined as unknown }));
 
 vi.mock('@object-ui/plugin-chatbot', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -38,7 +38,12 @@ vi.mock('@object-ui/plugin-chatbot', async (importOriginal) => {
     useObjectChat: () => ({
       messages: [
         { id: 'u1', role: 'user', content: 'analyse my customers' },
-        { id: 'a1', role: 'assistant', content: answerNow.content || ANSWER },
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: answerNow.content || ANSWER,
+          ...(answerNow.recordCitations ? { recordCitations: answerNow.recordCitations } : {}),
+        },
       ],
       isLoading: false,
       error: undefined,
@@ -112,7 +117,9 @@ beforeEach(() => {
         ? { item: { name: 'account', _packageId: 'com.acme.crm' } }
         : String(input).endsWith('/api/v1/meta/object/opportunity')
           ? { item: { name: 'opportunity', _packageId: 'com.acme.crm' } }
-          : { success: true, data: [] };
+          : String(input).endsWith('/api/v1/meta/object/policy')
+            ? { item: { name: 'policy', _packageId: 'com.acme.compliance' } }
+            : { success: true, data: [] };
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -122,6 +129,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   answerNow.content = '';
+  answerNow.recordCitations = undefined;
   cleanup();
   vi.unstubAllGlobals();
   window.history.replaceState(null, '', '/');
@@ -167,4 +175,45 @@ describe('objectstack#31869 — a list link in an answer opens the filtered list
       expect(windowOpen).not.toHaveBeenCalled();
     });
   }
+});
+
+/**
+ * objectstack#37365 (ADR-0160 D9) — a record citation's chip opens the cited
+ * record through the same opener, at the cited section: `?section=ANCHOR`.
+ * The console's assistant dock draws this same `ChatPane`, so the dock and
+ * the `/ai` page open a citation alike. A quote from a related row opens the
+ * root record the citation names, with no section.
+ */
+describe('objectstack#37365 — a record citation opens the record at the cited section', () => {
+  const CITATIONS = [
+    { object: 'policy', id: 'pol_7', context: 'policy_document', anchor: 'scope', quote: 'Applies to every contractor.' },
+    { object: 'policy', id: 'pol_7', context: 'policy_document', quote: 'Revision 3 published' },
+  ];
+
+  for (const [mount, basename, prefix] of [
+    ['a /_console/ mount', '/_console', '/_console'],
+    ['a root mount', '/', ''],
+  ] as const) {
+    it(`under ${mount}: the chip opens /apps/APP/OBJ/record/ID?section=ANCHOR`, async () => {
+      answerNow.recordCitations = CITATIONS;
+      renderPane(basename);
+      const chip = await screen.findByRole('button', { name: 'Applies to every contractor.' });
+      await act(async () => {
+        fireEvent.click(chip);
+      });
+      await waitFor(() => expect(window.location.pathname).toBe(`${prefix}/apps/com.acme.compliance/policy/record/pol_7`));
+      expect(window.location.search).toBe('?section=scope');
+    });
+  }
+
+  it('a quote from a related row opens the root record, with no section', async () => {
+    answerNow.recordCitations = CITATIONS;
+    renderPane('/');
+    const chip = await screen.findByRole('button', { name: 'Revision 3 published' });
+    await act(async () => {
+      fireEvent.click(chip);
+    });
+    await waitFor(() => expect(window.location.pathname).toBe('/apps/com.acme.compliance/policy/record/pol_7'));
+    expect(window.location.search).toBe('');
+  });
 });
