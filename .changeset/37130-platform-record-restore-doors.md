@@ -20,7 +20,11 @@ Skills-docs: none — no `skills/` page teaches the protocol's restore doors, th
 
 Also in `@objectstack/metadata`:
 
-- `refusePlatformRecordRestore(type, name, row)` is exported: the one refusal the service's `rollback` and the protocol's two restore doors ask, so the three cannot disagree. `SysMetadataRepository.restoreVersion` takes `refusePlatformRecord: true` to ask it on the row it writes; the undo writes do not pass it.
+- `refusePlatformRecordRestore(type, name, row)` is exported: the one refusal the service's `rollback` and the protocol's two restore doors ask, so the three cannot disagree.
 - `list()` lists a stored row whose body's `_packageId` stamp differs from its package column once, under the column, after the boot priming pass, where it listed the row twice (the primed copy under the stamp). A read naming the column's package answers it, as on a process that never primed it.
 - `listPackageBindings` is `degraded`, naming the loader in `errors`, when a loader of stored rows (`datasource:`) offers no `loadRowBindings`: the items it holds answer their registration's binding, which is not their rows'. No such loader ships in this repository.
 - A node whose boot priming pass finds a legacy row already bound by another node answers the bound package for that row's item, where it answered `null` (fail-closed) until it restarted.
+
+Also in `@objectstack/metadata-protocol`:
+
+- `SysMetadataRepository.restoreVersion` takes `refusePlatformRecord: true` to ask `refusePlatformRecordRestore` (`@objectstack/metadata`) on the row it writes; the undo writes do not pass it.
