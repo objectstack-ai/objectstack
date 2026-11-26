@@ -911,7 +911,9 @@ the directory you run from. For anything more, write a wrapper script.
   refuse a contract it does not know.
 - **Two versions.** `objectstack-scenario-driver/1` is `info`, `author` and `ask`; `objectstack-scenario-driver/2` is
   `/1` plus door mode (`door` on an `author` call, below). A command names the version it speaks in its `info`
-  answer, and every later call carries that name, so a `/1` command keeps running every other mode unchanged.
+  answer, and every later call carries that name, so a `/1` command keeps running every other mode unchanged. In
+  `@objectstack/scenarios/runner`, `EXTERNAL_DRIVER_CONTRACT` is `/1` and keeps that value (a command that pins it
+  as a literal keeps answering), `EXTERNAL_DRIVER_CONTRACT_V2` is `/2`, and `EXTERNAL_DRIVER_CONTRACTS` lists both.
 - **`info`**, once, before any card runs: `{"contract":"objectstack-scenario-driver/1","kind":"info"}` →
   `{"name":"my-agent","version":"1.4.2","contract":"objectstack-scenario-driver/2"}`. The `info` input is the one
   input both versions share, so it always carries the `/1` name, whatever the command speaks. The record's driver is
@@ -924,7 +926,9 @@ the directory you run from. For anything more, write a wrapper script.
 - **`author` with `door`** (`/2` only; `--modes door`, `step.mode` `door`): build the app through the app's **MCP draft
   door** alone — `save_metadata_draft` and its reads, no project, no shell or file tools — into the package the prompt
   names; the runner then publishes the drafts as a person and grades what the environment serves
-  ([door mode](#door-mode----modes-door)). `cwd` is an empty directory of the call's own and the call runs there; no
+  ([door mode](#door-mode----modes-door)). Building through the door alone is the command's to keep: the runner
+  denies the `claude` driver's turn every file and command tool, but it cannot see inside an external command, so it
+  enforces none of that there (it still grades only what the publish serves). `cwd` is an empty directory of the call's own and the call runs there; no
   file in it is recorded or graded.
   `{"contract":"objectstack-scenario-driver/2","kind":"author","step":{"card","mode":"door","phase":"build","step":"author"},"prompt":"…","cwd":"/tmp/…","tier":"starter","limits":{…},"door":{"mcp":{"url":"…","configFile":"/tmp/…/mcp.json"},"skillsDir":"/tmp/…/.claude/skills"}}`
   - `door.mcp.configFile` holds the door's OAuth access token, scoped `openid metadata:write`, exactly as an `ask`

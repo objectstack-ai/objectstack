@@ -28,7 +28,7 @@
  *     contract it speaks ({@link EXTERNAL_DRIVER_CONTRACTS}). A command that
  *     cannot answer it is refused before any card runs. The `info` input is
  *     the one input every version shares and always carries the first name
- *     ({@link EXTERNAL_DRIVER_CONTRACT_V1}), so a command of either version
+ *     ({@link EXTERNAL_DRIVER_CONTRACT}), so a command of either version
  *     answers it; every later input carries the name the command answered.
  *   - Door mode (contract `/2` only): an `author` call may carry `door`
  *     ({@link ExternalDoorInput}), the app's MCP draft door and nothing of a
@@ -57,19 +57,25 @@ import { CODEX_API_BILLING_ENV } from './codex.js';
 import { noResult, runTurnProcess } from './process.js';
 import { readDoorArm, type DoorArm } from '../door.js';
 
-/** The first contract version: `info`, `author` (a project in `cwd`) and `ask`. Every `info` input carries this name. */
-export const EXTERNAL_DRIVER_CONTRACT_V1 = 'objectstack-scenario-driver/1';
+/**
+ * The contract's first version: `info`, `author` (a project in `cwd`) and
+ * `ask`. Every `info` input carries this name, and every later input to a
+ * command whose `info` answer names no contract. Its value never changes: a
+ * command that pins it (a literal schema, a type check against
+ * {@link ExternalInfoInput}) keeps answering this runner. A command checks the
+ * name and refuses one it does not know.
+ */
+export const EXTERNAL_DRIVER_CONTRACT = 'objectstack-scenario-driver/1';
 
 /**
- * The contract's current name and version: `/1` plus door mode (`door` on an
- * `author` input, {@link ExternalDoorInput}). The first key of every input
- * after `info`, for a command that answers it in `info`. A command checks it
- * and refuses one it does not know.
+ * The second version: `/1` plus door mode (`door` on an `author` input,
+ * {@link ExternalDoorInput}). The first key of every input after `info`, for
+ * a command whose `info` answer names it.
  */
-export const EXTERNAL_DRIVER_CONTRACT = 'objectstack-scenario-driver/2';
+export const EXTERNAL_DRIVER_CONTRACT_V2 = 'objectstack-scenario-driver/2';
 
 /** Every contract version this runner speaks, oldest first. */
-export const EXTERNAL_DRIVER_CONTRACTS = [EXTERNAL_DRIVER_CONTRACT_V1, EXTERNAL_DRIVER_CONTRACT] as const;
+export const EXTERNAL_DRIVER_CONTRACTS = [EXTERNAL_DRIVER_CONTRACT, EXTERNAL_DRIVER_CONTRACT_V2] as const;
 export type ExternalContract = (typeof EXTERNAL_DRIVER_CONTRACTS)[number];
 
 const isExternalContract = (c: string): c is ExternalContract => (EXTERNAL_DRIVER_CONTRACTS as readonly string[]).includes(c);
@@ -93,7 +99,7 @@ export interface ExternalLimits {
 
 /** The one input every contract version shares, so it always carries the first name. */
 export interface ExternalInfoInput {
-  contract: typeof EXTERNAL_DRIVER_CONTRACT_V1;
+  contract: typeof EXTERNAL_DRIVER_CONTRACT;
   kind: 'info';
 }
 
@@ -147,7 +153,7 @@ export interface ExternalAskInput {
 /**
  * The `info` answer: `name` becomes the record's driver (`external:NAME`),
  * `version` its version, `contract` the contract it speaks (absent ⇒
- * {@link EXTERNAL_DRIVER_CONTRACT_V1}, the answer every `/1` command gives).
+ * {@link EXTERNAL_DRIVER_CONTRACT}, the answer every `/1` command gives).
  */
 export const ExternalInfoSchema = z.strictObject({
   name: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'a name of letters, digits, `.`, `_` and `-`'),
@@ -276,7 +282,7 @@ export class ExternalDriver implements AgentDriver {
     const door = readDoorArm(opts);
     this.doorSkills = door.skills;
     this.door = door.arm;
-    const input: ExternalInfoInput = { contract: EXTERNAL_DRIVER_CONTRACT_V1, kind: 'info' };
+    const input: ExternalInfoInput = { contract: EXTERNAL_DRIVER_CONTRACT, kind: 'info' };
     const run = spawnSync(this.argv[0]!, this.argv.slice(1), { input: JSON.stringify(input), encoding: 'utf8', timeout: opts.infoTimeoutMs ?? 30_000, env: externalEnv() });
     const stderr = (run.stderr ?? '').trim();
     const refused = (why: string) => new Error(`--driver external:${opts.command}: the command did not answer the \`info\` call (${why})${stderr ? `; stderr: ${stderr.slice(-500)}` : ''}`);
@@ -286,7 +292,7 @@ export class ExternalDriver implements AgentDriver {
     if (!info.ok) throw refused(info.why);
     this.name = info.value.name;
     this.version = info.value.version;
-    const contract = info.value.contract ?? EXTERNAL_DRIVER_CONTRACT_V1;
+    const contract = info.value.contract ?? EXTERNAL_DRIVER_CONTRACT;
     if (!isExternalContract(contract)) {
       throw new Error(`--driver external:${opts.command}: the command's \`info\` answer names the contract \`${contract}\`, which this runner does not speak (it speaks ${EXTERNAL_DRIVER_CONTRACTS.map((k) => `\`${k}\``).join(', ')})`);
     }
@@ -295,7 +301,7 @@ export class ExternalDriver implements AgentDriver {
 
   /** Does the command take a door (contract `/2`)? */
   get speaksDoor(): boolean {
-    return this.contract !== EXTERNAL_DRIVER_CONTRACT_V1;
+    return this.contract !== EXTERNAL_DRIVER_CONTRACT;
   }
 
   /**
@@ -306,7 +312,7 @@ export class ExternalDriver implements AgentDriver {
   assertDoor(): void {
     if (!this.speaksDoor) {
       throw new Error(
-        `--driver external:${this.opts.command}: \`${this.name}\` speaks \`${this.contract}\`, which has no door; door mode hands an external command the app's MCP draft door on \`${EXTERNAL_DRIVER_CONTRACT}\` only (its \`info\` answer names that contract)`,
+        `--driver external:${this.opts.command}: \`${this.name}\` speaks \`${this.contract}\`, which has no door; door mode hands an external command the app's MCP draft door on \`${EXTERNAL_DRIVER_CONTRACT_V2}\` only (its \`info\` answer names that contract)`,
       );
     }
   }

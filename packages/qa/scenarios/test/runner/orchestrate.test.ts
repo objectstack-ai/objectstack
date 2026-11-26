@@ -4698,6 +4698,26 @@ describe('runCard — door mode through an external command on contract `/2`: th
     }
     // One stand-in start per turn (the info call, the door turn, the Run half's asks), as the external driver's own e2e cases budget.
   }, 30_000);
+
+  it('⛔ the CLI refuses `--modes door` with a `/1` command before any card runs, naming the contract: nothing is scaffolded and no record is written', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-door-ext-cli-'));
+    const log = join(dir, 'calls.jsonl');
+    vi.stubEnv('FAKE_DRIVER_CONTRACT', '1');
+    vi.stubEnv('FAKE_DRIVER_LOG', log);
+    try {
+      const out = join(dir, 'out');
+      const work = join(dir, 'work');
+      await expect(runScenarios(['--driver', `external:${FAKE_EXTERNAL}`, '--only', 'crm_account_with_contacts', '--modes', 'door', '--out', out, '--work', work])).rejects.toThrow(
+        /`fake-agent` speaks `objectstack-scenario-driver\/1`, which has no door; door mode hands an external command the app's MCP draft door on `objectstack-scenario-driver\/2` only/,
+      );
+      expect([readdirSync(out), readdirSync(work)]).toEqual([[], []]);
+      // Only the `info` call ran (it logs nothing): no turn reached the command.
+      expect(existsSync(log)).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('runCard — a masking-off round grades every question turn under its masking (`schemaMasking`)', () => {

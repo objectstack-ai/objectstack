@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { exportGallery } from '../../src/export/exporter.js';
 import { makeDriver, parseArgs } from '../../src/runner/cli.js';
 import { RecordedDriver, stepKey, type AgentDriver, type AskTask, type AuthorResult, type AuthorTask, type DriverInfo } from '../../src/runner/driver.js';
-import { EXTERNAL_DRIVER_CONTRACT, EXTERNAL_DRIVER_CONTRACT_V1, ExternalDriver, parseExternalCommand } from '../../src/runner/drivers/external.js';
+import { EXTERNAL_DRIVER_CONTRACT, EXTERNAL_DRIVER_CONTRACT_V2, ExternalDriver, parseExternalCommand } from '../../src/runner/drivers/external.js';
 import { authorNotMeasured } from '../../src/runner/orchestrate.js';
 import { cardScorecard, renderScorecard } from '../../src/runner/scorecard.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
@@ -66,7 +66,7 @@ describe('the external driver contract — one process per call, JSON in on stdi
     const { turn, files } = await new ExternalDriver({ command: COMMAND }).author(author('ECHO build it', cwd));
     const e = echoed(turn);
     expect(e.input).toEqual({
-      contract: EXTERNAL_DRIVER_CONTRACT,
+      contract: EXTERNAL_DRIVER_CONTRACT_V2,
       kind: 'author',
       step: { card: 'c', mode: 'scratch', phase: 'build', step: 'author' },
       prompt: 'ECHO build it',
@@ -87,7 +87,7 @@ describe('the external driver contract — one process per call, JSON in on stdi
   it('an ask call: the key in a 0600 file named on stdin, never on argv, in the environment or on stdin; the file gone after', async () => {
     const turn = await new ExternalDriver({ command: COMMAND }).ask(ask('ECHO how many accounts?'));
     const { input, argv, seen } = echoed(turn);
-    expect(input).toMatchObject({ contract: EXTERNAL_DRIVER_CONTRACT, kind: 'ask', step: { card: 'c', mode: 'scratch', phase: 'run', step: 'q1', persona: 'sdr' }, prompt: 'ECHO how many accounts?', limits: { timeoutMs: 5 * 60_000 } });
+    expect(input).toMatchObject({ contract: EXTERNAL_DRIVER_CONTRACT_V2, kind: 'ask', step: { card: 'c', mode: 'scratch', phase: 'run', step: 'q1', persona: 'sdr' }, prompt: 'ECHO how many accounts?', limits: { timeoutMs: 5 * 60_000 } });
     expect(Object.keys(input.mcp as object).sort()).toEqual(['configFile', 'url']);
     expect(seen).toMatchObject({ fileMode: '600', urlMatches: true, runsInConfigDir: true, keyPrint: keyPrint(KEY), keyOnArgv: false, keyInEnv: false, keyOnStdin: false });
     expect(argv.join(' ')).not.toContain(KEY);
@@ -219,18 +219,20 @@ describe('door mode over the external driver — contract `objectstack-scenario-
     const log = join(tempDir('ext-log'), 'calls.jsonl');
     vi.stubEnv('FAKE_DRIVER_LOG', log);
     const current = new ExternalDriver({ command: COMMAND });
-    expect([current.contract, current.speaksDoor]).toEqual([EXTERNAL_DRIVER_CONTRACT, true]);
-    expect(EXTERNAL_DRIVER_CONTRACT).toBe('objectstack-scenario-driver/2');
-    expect(echoed((await current.author(author('ECHO'))).turn).input.contract).toBe(EXTERNAL_DRIVER_CONTRACT);
-    expect(echoed(await current.ask(ask('ECHO'))).input.contract).toBe(EXTERNAL_DRIVER_CONTRACT);
+    expect([current.contract, current.speaksDoor]).toEqual([EXTERNAL_DRIVER_CONTRACT_V2, true]);
+    expect(EXTERNAL_DRIVER_CONTRACT_V2).toBe('objectstack-scenario-driver/2');
+    // ⛔ The published constant keeps its value: a command that pins it (a literal schema of `/1`) still answers this runner's `info`.
+    expect(EXTERNAL_DRIVER_CONTRACT).toBe('objectstack-scenario-driver/1');
+    expect(echoed((await current.author(author('ECHO'))).turn).input.contract).toBe(EXTERNAL_DRIVER_CONTRACT_V2);
+    expect(echoed(await current.ask(ask('ECHO'))).input.contract).toBe(EXTERNAL_DRIVER_CONTRACT_V2);
 
     // A `/1` command answers `info` with no contract, and is still sent `/1` inputs: scratch, template and ask run as before.
     vi.stubEnv('FAKE_DRIVER_CONTRACT', '1');
     const first = new ExternalDriver({ command: COMMAND });
-    expect([first.contract, first.speaksDoor]).toEqual([EXTERNAL_DRIVER_CONTRACT_V1, false]);
+    expect([first.contract, first.speaksDoor]).toEqual([EXTERNAL_DRIVER_CONTRACT, false]);
     const built = (await first.author(author('ECHO'))).turn;
-    expect([built.meta.resultSubtype, echoed(built).input.contract]).toEqual(['success', EXTERNAL_DRIVER_CONTRACT_V1]);
-    expect(echoed(await first.ask(ask('ECHO'))).input.contract).toBe(EXTERNAL_DRIVER_CONTRACT_V1);
+    expect([built.meta.resultSubtype, echoed(built).input.contract]).toEqual(['success', EXTERNAL_DRIVER_CONTRACT]);
+    expect(echoed(await first.ask(ask('ECHO'))).input.contract).toBe(EXTERNAL_DRIVER_CONTRACT);
     expect('door' in echoed(built).input).toBe(false);
   });
 
@@ -249,7 +251,7 @@ describe('door mode over the external driver — contract `objectstack-scenario-
     const { input, argv, cwd, seen } = echoed(result.turn);
     const door = input.door as { mcp: { url: string; configFile: string }; skillsDir: string };
     expect(input).toMatchObject({
-      contract: EXTERNAL_DRIVER_CONTRACT,
+      contract: EXTERNAL_DRIVER_CONTRACT_V2,
       kind: 'author',
       step: { card: 'c', mode: 'door', phase: 'build', step: 'author' },
       prompt: 'ECHO build it through the door',
