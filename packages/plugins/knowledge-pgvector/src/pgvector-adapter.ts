@@ -15,6 +15,7 @@ import type { KnowledgeDocument, KnowledgeHit } from '@objectstack/spec/ai';
 import {
   DEFAULT_KNOWLEDGE_SCHEMA,
   GENERATION_TABLE,
+  type GenerationState,
   SAFE_IDENTIFIER,
   qualified,
   schemaDdl,
@@ -42,6 +43,13 @@ export interface PgClientLike {
 export interface PgPoolLike {
   query<R = Record<string, unknown>>(text: string, params?: unknown[]): Promise<PgQueryResult<R>>;
   connect(): Promise<PgClientLike>;
+  /**
+   * A connection of its own, outside the pool, which `release` closes. A build
+   * holds its source's builder lock (a session advisory lock) on one for as
+   * long as it runs, so a long build never takes a pooled connection from the
+   * writes. Absent: the lock is held on a pooled connection from `connect`.
+   */
+  connectSession?(): Promise<PgClientLike>;
 }
 
 /** Options of {@link PgvectorKnowledgeAdapter}. */
@@ -75,13 +83,31 @@ export interface PgvectorKnowledgeAdapterOptions {
    * of the index fingerprint (ADR-0161 K8, item 15).
    */
   queryPrefix?: string;
+  /**
+   * How long a build may go without a call for its source (a page written,
+   * the listing, a delete) before its builder lock is let go, so a build that
+   * stopped part-way on a process that keeps running does not keep every
+   * other process from building the source. A process that stops lets go at
+   * once. @default 900000 (15 minutes)
+   */
+  buildLockIdleMs?: number;
+  /** How many passage rows of a replaced generation one DELETE removes. @default 1000 */
+  deleteBatchSize?: number;
+  /** Where the adapter reports what it cannot hand to a caller: an old generation it could not delete. */
+  logger?: { warn?(message: string): void };
 }
 
 /** The ADR-0112 code of a write or a search refused under another fingerprint (ADR-0161 K7, rules 4 and 5). */
 export const KNOWLEDGE_REBUILD_REQUIRED = 'KNOWLEDGE_REBUILD_REQUIRED';
 
+/** The standard ADR-0112 code of a build refused because another process is building the source. */
+const LOCK_CONFLICT = 'LOCK_CONFLICT';
+
 /** How many times {@link PgvectorKnowledgeAdapter.upsert} plans a batch again when a concurrent write removed a passage it meant to keep. */
 const UPSERT_ATTEMPTS = 3;
+
+/** How many times {@link PgvectorKnowledgeAdapter.search} runs again when the active generation was switched under it. */
+const SEARCH_ATTEMPTS = 3;
 
 /** A generation row: one complete index of one source under one fingerprint. */
 interface GenerationRow {
@@ -89,6 +115,21 @@ interface GenerationRow {
   fingerprint: string | null;
   recipe_hash: string | null;
   dim: number;
+  state: GenerationState;
+}
+
+/** A source's generations: the active one, the one under construction, and those being deleted. */
+interface SourceGenerations {
+  active?: GenerationRow;
+  building?: GenerationRow;
+  retired: GenerationRow[];
+}
+
+/** A source's builder lock this adapter holds: the session it is held on, its key, and its idle timer. */
+interface BuilderLock {
+  client: PgClientLike;
+  key: string;
+  timer?: ReturnType<typeof setTimeout>;
 }
 
 /** What the store learned when it became ready. */
@@ -125,19 +166,52 @@ interface Readiness {
  * `WHERE`, before ranking. A passage whose cosine similarity is not positive is
  * not a hit.
  *
- * ## The index fingerprint (ADR-0161 K7; K8, item 8)
+ * ## Generations (ADR-0161 K7; K8, item 8)
  *
- * The generation row holds the fingerprint the source was built under. A write
- * or a search carrying another is refused `KNOWLEDGE_REBUILD_REQUIRED` and is
- * never served from the stored generation. A source that holds nothing takes
- * the first fingerprint it is handed, and passage rows of the source left
- * without a generation row are deleted as that generation opens: it never
- * adopts vectors of another fingerprint. `beginBuild` under the stored
- * fingerprint rebuilds inside the generation; under another it is refused,
- * its `remedy` carrying the exact statements that clear the source (one
- * DELETE per passage table, then the generation row) — this store does not
- * yet build a second generation beside the first. `completeBuild` records
- * the recipe hash; `indexStatus` answers both.
+ * A generation row holds the fingerprint its passages were built under. A
+ * source holds one `active` generation, the one searched, and, while a build
+ * under another fingerprint runs, one `building` generation beside it — one
+ * of each per source, by two unique indexes. A source that holds nothing
+ * takes the first fingerprint it is handed as its active one, and passage
+ * rows of the source left without a generation row are deleted as any
+ * generation opens: a generation never adopts vectors of another fingerprint.
+ *
+ * - `beginBuild` takes the source's builder lock (below), then: under the
+ *   active fingerprint it rebuilds inside the active generation; under the
+ *   fingerprint of the generation under construction it takes that one up
+ *   with what it already holds (a build is RESUMABLE: the walk skips every
+ *   document whose hash the new generation already holds); under a third it
+ *   retires the one under construction and opens a new one.
+ * - A write carrying `ctx.index` goes to the generation of that fingerprint:
+ *   during a build, event-sync writes carry the new fingerprint and land in
+ *   the new generation only. A write whose fingerprint neither holds is
+ *   refused `KNOWLEDGE_REBUILD_REQUIRED`, and nothing is written to the
+ *   active generation under another fingerprint.
+ * - A search carrying another fingerprint than the active one's is refused
+ *   `KNOWLEDGE_REBUILD_REQUIRED` and never answered from the active
+ *   generation; while the generation of the searched fingerprint is under
+ *   construction, the refusal says the source is being rebuilt.
+ * - `completeBuild`, after the walk and its purge, makes the generation under
+ *   construction active and the old one `retired` in one transaction, then
+ *   deletes the retired generation's passages in batches
+ *   ({@link PgvectorKnowledgeAdapterOptions.deleteBatchSize} rows per
+ *   statement) and its row last. A deletion that stops part-way is finished
+ *   by the source's next build; a retired generation is never searched.
+ *   Under the active fingerprint it records the recipe hash.
+ *
+ * ## One builder per source
+ *
+ * `beginBuild` takes a PostgreSQL session advisory lock on the source (a key
+ * hashed from the schema and the source id), on a connection of its own
+ * ({@link PgPoolLike.connectSession}), and holds it until `completeBuild`.
+ * A second `beginBuild` from another process is refused `LOCK_CONFLICT`
+ * (409) and its walk does not run. The lock goes when the build completes,
+ * when the process or its connection dies (PostgreSQL frees it), or after
+ * {@link PgvectorKnowledgeAdapterOptions.buildLockIdleMs} without a call for
+ * the source, so a walk that failed on a running process does not hold it.
+ * The knowledge service runs one walk of a source at a time, so a lock this
+ * adapter still holds when it begins a build again is the earlier build's,
+ * and is kept for the new one.
  *
  * ## Writes
  *
@@ -172,9 +246,14 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
   private readonly resolveEmbedder: () => IEmbedder | undefined;
   private readonly schema: string;
   private readonly queryPrefix: string;
+  private readonly buildLockIdleMs: number;
+  private readonly deleteBatchSize: number;
+  private readonly logger?: { warn?(message: string): void };
   private readiness?: Readiness;
   /** Widths whose passage table this adapter has created or found. */
   private readonly tables = new Set<number>();
+  /** The builder locks this adapter holds, by source id. */
+  private readonly builders = new Map<string, BuilderLock>();
 
   constructor(opts: PgvectorKnowledgeAdapterOptions) {
     this.id = opts.id ?? 'pgvector';
@@ -189,6 +268,12 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       );
     }
     this.queryPrefix = opts.queryPrefix ?? '';
+    this.buildLockIdleMs = opts.buildLockIdleMs ?? 15 * 60 * 1000;
+    this.deleteBatchSize = opts.deleteBatchSize ?? 1000;
+    if (!Number.isInteger(this.deleteBatchSize) || this.deleteBatchSize < 1) {
+      throw new RangeError(`knowledge-pgvector: deleteBatchSize must be a positive integer, got ${String(opts.deleteBatchSize)}`);
+    }
+    this.logger = opts.logger;
   }
 
   /** What the adapter reports about its embedder (ADR-0161 K8, item 6), read now. */
@@ -207,18 +292,21 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     this.requirePool();
     const readiness = await this.ready();
     const embedder = this.requireEmbedder();
-    const generation = (await this.writeTarget(ctx, embedder, true))!;
-    await this.ensureVectorTable(generation.dim, readiness);
+    this.touchBuilderLock(ctx.source.id);
     // An unchanged passage is rewritten in place, keeping its vector. When its
     // row is gone by the time the write runs (a concurrent rewrite of the same
-    // document removed it), the write is rolled back and planned again, so the
-    // passage is embedded and inserted rather than lost.
+    // document removed it), or its generation was switched or retired, the
+    // write is rolled back and planned again, so the passage is embedded and
+    // inserted, into the generation that holds the fingerprint now, rather
+    // than lost.
     for (let attempt = 1; ; attempt++) {
+      const generation = (await this.writeTarget(ctx, embedder, true))!;
+      await this.ensureVectorTable(generation.dim, readiness);
       const missing = await this.writePassages(docs, ctx.source.id, generation, readiness, embedder);
       if (missing === undefined) return;
       if (attempt >= UPSERT_ATTEMPTS) {
         throw new Error(
-          `knowledge-pgvector: passage '${missing}' of source '${ctx.source.id}' was removed by a concurrent write ` +
+          `knowledge-pgvector: ${missing} of source '${ctx.source.id}' was removed by a concurrent write ` +
             `${UPSERT_ATTEMPTS} times while this write ran; nothing of this batch was written. Retry the write.`,
         );
       }
@@ -227,9 +315,12 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
 
   /**
    * One attempt of {@link upsert}: read the stored chunk hashes, embed what
-   * changed, write in one transaction. Answers `undefined` when written, or the
-   * id of an unchanged passage whose row was gone (the transaction is rolled
-   * back).
+   * changed, write in one transaction. Answers `undefined` when written, or
+   * what was gone (the transaction is rolled back): an unchanged passage's
+   * row, or the generation itself, retired or replaced while the embedder
+   * answered. The generation row is share-locked for the transaction, so a
+   * switch or a retirement waits for the write and the batched deletion that
+   * follows it sees every row the write put there.
    */
   private async writePassages(
     docs: KnowledgeDocument[],
@@ -274,6 +365,17 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
 
     let missing: string | undefined;
     const written = await this.transaction(async (client) => {
+      const target = await client.query(
+        `SELECT 1 FROM ${qualified(this.schema, GENERATION_TABLE)}
+          WHERE source_id = $1 AND generation = $2 AND fingerprint IS NOT DISTINCT FROM $3 AND dim = $4
+            AND state IN ('active', 'building')
+          FOR SHARE`,
+        [sourceId, generation.generation, generation.fingerprint, generation.dim],
+      );
+      if (target.rows.length === 0) {
+        missing = `generation ${generation.generation}`;
+        return false;
+      }
       for (const { doc, passages } of planned) {
         await client.query(
           `DELETE FROM ${table} WHERE source_id = $1 AND generation = $2 AND document_id = $3 AND NOT (chunk_id = ANY($4::text[]))`,
@@ -305,7 +407,7 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
               common,
             );
             if (updated.rows.length === 0) {
-              missing = p.id;
+              missing = `passage '${p.id}'`;
               return false;
             }
           } else {
@@ -332,6 +434,7 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     if (documentIds.length === 0) return;
     const pool = this.requirePool();
     await this.ready();
+    this.touchBuilderLock(ctx.source.id);
     // From every generation of the source: a removed document leaves them all.
     const widths = await pool.query<{ dim: number }>(
       `SELECT DISTINCT dim FROM ${qualified(this.schema, GENERATION_TABLE)} WHERE source_id = $1`,
@@ -356,7 +459,9 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     // fingerprint carries no model or width, and comparing it would refuse a
     // healthy index as one to rebuild. No embedder is SERVICE_UNAVAILABLE.
     const embedder = this.requireEmbedder();
-    // The generation the writes go to (ADR-0161 K8, item 1).
+    this.touchBuilderLock(ctx.source.id);
+    // The generation the writes go to (ADR-0161 K8, item 1): during a build,
+    // the one under construction, so the walk skips what it already holds.
     const generation = await this.writeTarget(ctx, embedder, false);
     if (!generation || !(await this.tableExists(generation.dim))) return { documents: [] };
     // In byte order ("C"), both the order and the cursor's comparison, so a
@@ -382,19 +487,43 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     if (opts.organizationIds !== undefined && opts.organizationIds.length === 0) return [];
     // A record scope with no term that has ids ranks nothing (ADR-0161 K8, item 17).
     if (opts.scope !== undefined && !opts.scope.some((term) => term.ids.length > 0)) return [];
+    for (let attempt = 1; ; attempt++) {
+      const hits = await this.searchAttempt(query, opts);
+      if (hits !== undefined) return hits;
+      if (attempt >= SEARCH_ATTEMPTS) {
+        throw new Error(
+          `knowledge-pgvector: the active generation of source '${opts.source.id}' changed ${SEARCH_ATTEMPTS} times during one search; retry it.`,
+        );
+      }
+    }
+  }
+
+  /**
+   * One attempt of {@link search}. Answers `undefined` when the generation it
+   * ranked was switched out by a completed build between the read of the
+   * generations and the ranking (the ranking statement holds only while its
+   * generation is the active one, so it never reads a generation whose
+   * passages are being deleted).
+   */
+  private async searchAttempt(query: string, opts: AdapterSearchOptions): Promise<KnowledgeHit[] | undefined> {
     const pool = this.requirePool();
     const readiness = await this.ready();
     // The embedder first: without one the service's fingerprint carries no
     // model or width, and comparing it would refuse a healthy index as one to
     // rebuild. No embedder is SERVICE_UNAVAILABLE, as on every other call.
     const embedder = this.requireEmbedder();
-    const generation = await this.activeGeneration(opts.source.id);
+    const { active: generation, building } = await this.generations(opts.source.id);
     if (!generation) return [];
-    // Vectors of two fingerprints are never ranked against each other (K7, rule 5).
-    if (opts.index !== undefined && generation.fingerprint !== opts.index.fingerprint) {
-      throw rebuildRequired(opts.source.id, await this.clearSql(opts.source.id, generation.dim));
+    // Vectors of two fingerprints are never ranked against each other (K7,
+    // rule 5); while the searched fingerprint's generation is being built, the
+    // refusal says so.
+    const searched = opts.index?.fingerprint;
+    if (searched !== undefined && generation.fingerprint !== searched) {
+      throw rebuildRequired(opts.source.id, building !== undefined && building.fingerprint === searched);
     }
-    if (embedder.dimensions !== generation.dim) throw rebuildRequired(opts.source.id, await this.clearSql(opts.source.id, generation.dim));
+    if (embedder.dimensions !== generation.dim) {
+      throw rebuildRequired(opts.source.id, building !== undefined && building.dim === embedder.dimensions);
+    }
     if (!(await this.tableExists(generation.dim))) return [];
     const topK = Math.max(0, Math.floor(opts.topK));
     if (topK === 0) return [];
@@ -411,7 +540,15 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
 
     const ext = readiness.extensionSchema;
     const params: unknown[] = [opts.source.id, generation.generation, vectorLiteral(vector), topK];
-    const where = ['source_id = $1', 'generation = $2'];
+    const where = [
+      'source_id = $1',
+      'generation = $2',
+      // Holds only while the generation is the active one: a completed build
+      // retires it and then deletes its passages, after this statement's
+      // snapshot or before it, never inside it.
+      `EXISTS (SELECT 1 FROM ${qualified(this.schema, GENERATION_TABLE)} g
+                WHERE g.source_id = $1 AND g.generation = $2 AND g.state = 'active')`,
+    ];
     if (opts.organizationIds !== undefined) {
       params.push(opts.organizationIds);
       where.push(`organization_id = ANY($${params.length}::text[])`);
@@ -467,6 +604,11 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
        LIMIT $4`,
       params,
     );
+    if (result.rows.length === 0) {
+      // No hit, or a generation switched out meanwhile: read which.
+      const now = await this.generations(opts.source.id);
+      if (now.active?.generation !== generation.generation) return undefined;
+    }
     return result.rows.map((r) => ({
       chunkId: r.chunk_id,
       documentId: r.document_id,
@@ -487,51 +629,109 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
   async indexStatus(ctx: AdapterContext): Promise<AdapterIndexStatus> {
     this.requirePool();
     await this.ready();
-    const generation = await this.activeGeneration(ctx.source.id);
+    const { active, building } = await this.generations(ctx.source.id);
     const status: AdapterIndexStatus = {};
-    if (generation?.fingerprint != null) status.fingerprint = generation.fingerprint;
-    if (generation?.recipe_hash != null) status.recipeHash = generation.recipe_hash;
+    if (active?.fingerprint != null) status.fingerprint = active.fingerprint;
+    if (active?.recipe_hash != null) status.recipeHash = active.recipe_hash;
+    if (building !== undefined) status.building = true;
     return status;
   }
 
+  /**
+   * The start of a complete build (ADR-0161 K7, rule 3). Takes the source's
+   * builder lock — refused `LOCK_CONFLICT` while another process holds it —
+   * then rebuilds inside the active generation, takes up the generation under
+   * construction for this fingerprint (resumed: what it holds is kept), or
+   * opens one beside the active generation. A generation under construction
+   * for another fingerprint is abandoned: retired, and deleted in batches. So
+   * is any generation a switch left retired.
+   */
   async beginBuild(ctx: AdapterContext): Promise<void> {
     const index = requireIndex(ctx, 'beginBuild');
     this.requirePool();
-    await this.ready();
+    const readiness = await this.ready();
     const embedder = this.requireEmbedder();
-    const generation = (await this.activeGeneration(ctx.source.id))
-      ?? (await this.openFirstGeneration(ctx.source.id, index.fingerprint, embedder));
-    if (generation.fingerprint === index.fingerprint && generation.dim === embedder.dimensions) return;
-    const sql = await this.clearSql(ctx.source.id, generation.dim);
-    throw Object.assign(
-      new Error(
-        `Knowledge source '${ctx.source.id}' was indexed under another embedding model, split or content recipe, ` +
-          'and this store does not yet build a second index beside the first.',
-      ),
-      {
-        code: KNOWLEDGE_REBUILD_REQUIRED,
-        status: 409,
-        remedy:
-          'Either restore the earlier embedding and split configuration, or clear the source\'s index and run a ' +
-          `complete reindex. Run as a database owner:\n${sql.join('\n')}`,
-      },
-    );
+    const sourceId = ctx.source.id;
+    await this.takeBuilderLock(sourceId);
+    try {
+      const target = await this.inTransaction(async (client) => {
+        const { active, building } = await this.generations(sourceId, client, true);
+        const fits = (g: GenerationRow | undefined): boolean =>
+          g !== undefined && g.fingerprint === index.fingerprint && g.dim === embedder.dimensions;
+        if (building !== undefined && fits(building)) return building;
+        // A build of another fingerprint left unfinished: abandoned, one per source.
+        if (building !== undefined) await this.retire(client, sourceId, building.generation);
+        if (active !== undefined && fits(active)) return active;
+        // A source that holds nothing takes the fingerprint as its active one;
+        // beside an active generation, the new one is built aside.
+        return this.openGeneration(client, sourceId, index.fingerprint, embedder, active === undefined ? 'active' : 'building');
+      });
+      await this.ensureVectorTable(target.dim, readiness);
+      await this.sweepRetired(sourceId);
+    } catch (err) {
+      await this.releaseBuilderLock(sourceId);
+      throw err;
+    }
   }
 
+  /**
+   * The end of a complete build (ADR-0161 K8, item 8 c), called after the walk
+   * and its purge. The generation built under `ctx.index.fingerprint` becomes
+   * the active one and records the recipe hash; the generation it replaces is
+   * retired in the same transaction, then its passages are deleted in batches
+   * and its row last. Under the active fingerprint, the recipe hash is
+   * recorded. The builder lock is let go either way.
+   */
   async completeBuild(ctx: AdapterContext): Promise<void> {
     const index = requireIndex(ctx, 'completeBuild');
-    const pool = this.requirePool();
+    this.requirePool();
     await this.ready();
-    const updated = await pool.query(
-      `UPDATE ${qualified(this.schema, GENERATION_TABLE)} SET recipe_hash = $3
-        WHERE source_id = $1 AND state = 'active' AND fingerprint = $2 RETURNING generation`,
-      [ctx.source.id, index.fingerprint, index.recipeHash],
-    );
-    if (updated.rows.length === 0) {
-      throw new Error(
-        `completeBuild: source '${ctx.source.id}' holds no active generation under this fingerprint; call beginBuild first.`,
-      );
+    const sourceId = ctx.source.id;
+    try {
+      await this.inTransaction(async (client) => {
+        const { active, building } = await this.generations(sourceId, client, true);
+        const t = qualified(this.schema, GENERATION_TABLE);
+        if (building !== undefined && building.fingerprint === index.fingerprint) {
+          // The switch: one statement retires the old generation, the next
+          // makes the new one active (one active row per source at a time).
+          if (active) await this.retire(client, sourceId, active.generation);
+          await client.query(`UPDATE ${t} SET state = 'active', recipe_hash = $3 WHERE source_id = $1 AND generation = $2`, [
+            sourceId,
+            building.generation,
+            index.recipeHash,
+          ]);
+          return;
+        }
+        if (active !== undefined && active.fingerprint === index.fingerprint) {
+          await client.query(`UPDATE ${t} SET recipe_hash = $3 WHERE source_id = $1 AND generation = $2`, [
+            sourceId,
+            active.generation,
+            index.recipeHash,
+          ]);
+          return;
+        }
+        throw new Error(
+          `completeBuild: source '${sourceId}' holds no generation under this fingerprint; call beginBuild first.`,
+        );
+      });
+      try {
+        await this.sweepRetired(sourceId);
+      } catch (err) {
+        // The switch is recorded and the old generation is never searched
+        // again; only its rows are left. Not the caller's failure.
+        this.logger?.warn?.(
+          `knowledge-pgvector: the replaced index of source '${sourceId}' was not fully deleted (${errorText(err)}); ` +
+            'it is never searched, and the source\'s next build deletes the rest.',
+        );
+      }
+    } finally {
+      await this.releaseBuilderLock(sourceId);
     }
+  }
+
+  /** Let go of every builder lock this adapter holds; the plugin calls it before it closes its pool. */
+  async close(): Promise<void> {
+    for (const sourceId of [...this.builders.keys()]) await this.releaseBuilderLock(sourceId);
   }
 
   async healthCheck(): Promise<{ ok: boolean; message?: string }> {
@@ -655,40 +855,102 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     return present;
   }
 
-  private async activeGeneration(sourceId: string): Promise<GenerationRow | undefined> {
-    const found = await this.requirePool().query<GenerationRow>(
-      `SELECT generation, fingerprint, recipe_hash, dim FROM ${qualified(this.schema, GENERATION_TABLE)}
-        WHERE source_id = $1 AND state = 'active' ORDER BY generation DESC LIMIT 1`,
+  /** The source's generations; `forUpdate` locks their rows for the transaction `client` runs. */
+  private async generations(
+    sourceId: string,
+    client: Pick<PgClientLike, 'query'> = this.requirePool(),
+    forUpdate = false,
+  ): Promise<SourceGenerations> {
+    const found = await client.query<GenerationRow>(
+      `SELECT generation, fingerprint, recipe_hash, dim, state FROM ${qualified(this.schema, GENERATION_TABLE)}
+        WHERE source_id = $1 ORDER BY generation${forUpdate ? ' FOR UPDATE' : ''}`,
       [sourceId],
     );
-    const row = found.rows[0];
-    return row === undefined ? undefined : { ...row, generation: Number(row.generation), dim: Number(row.dim) };
+    const out: SourceGenerations = { retired: [] };
+    for (const r of found.rows) {
+      const state: GenerationState = r.state === 'building' ? 'building' : r.state === 'retired' ? 'retired' : 'active';
+      const row: GenerationRow = { ...r, generation: Number(r.generation), dim: Number(r.dim), state };
+      if (state === 'retired') out.retired.push(row);
+      else out[state] = row;
+    }
+    return out;
   }
 
   /**
-   * A source that holds nothing takes the first fingerprint it is handed
-   * (there is nothing to mix with). "Holds nothing" is made true: passage rows
-   * of the source left in any passage table without a generation row (a
-   * generation row deleted by hand, its passages not) are deleted in the same
-   * transaction that opens the generation, so a first generation never adopts
-   * vectors embedded under another fingerprint. Only the call whose insert
-   * opened the generation clears; a concurrent one waits on the key and finds
-   * it open.
+   * Open a generation of `sourceId` under `fingerprint`, numbered past every
+   * generation the source has. Passage rows of the source left without a
+   * generation row (a row deleted by hand, its passages not) are deleted
+   * first, in the same transaction, so no generation ever adopts vectors
+   * embedded under another fingerprint. When a concurrent call opened the
+   * generation of that state first, that one is answered.
    */
-  private async openFirstGeneration(sourceId: string, fingerprint: string | undefined, embedder: IEmbedder): Promise<GenerationRow> {
-    await this.transaction(async (client) => {
-      const opened = await client.query(
-        `INSERT INTO ${qualified(this.schema, GENERATION_TABLE)} (source_id, generation, fingerprint, dim, model, state)
-         VALUES ($1, 1, $2, $3, $4, 'active') ON CONFLICT (source_id, generation) DO NOTHING RETURNING generation`,
-        [sourceId, fingerprint ?? null, embedder.dimensions, embedder.model ?? null],
+  private async openGeneration(
+    client: PgClientLike,
+    sourceId: string,
+    fingerprint: string | undefined,
+    embedder: IEmbedder,
+    state: 'active' | 'building',
+  ): Promise<GenerationRow> {
+    const t = qualified(this.schema, GENERATION_TABLE);
+    for (const width of await this.passageWidths(client)) {
+      const passages = qualified(this.schema, vectorTable(width));
+      await client.query(
+        `DELETE FROM ${passages} p WHERE p.source_id = $1
+           AND NOT EXISTS (SELECT 1 FROM ${t} g WHERE g.source_id = p.source_id AND g.generation = p.generation)`,
+        [sourceId],
       );
-      if (opened.rows.length === 0) return true;
-      for (const width of await this.passageWidths(client)) {
-        await client.query(`DELETE FROM ${qualified(this.schema, vectorTable(width))} WHERE source_id = $1`, [sourceId]);
+    }
+    const opened = await client.query<GenerationRow>(
+      `INSERT INTO ${t} (source_id, generation, fingerprint, dim, model, state)
+       SELECT $1, COALESCE(max(generation), 0) + 1, $2, $3, $4, $5 FROM ${t} WHERE source_id = $1
+       ON CONFLICT DO NOTHING
+       RETURNING generation, fingerprint, recipe_hash, dim, state`,
+      [sourceId, fingerprint ?? null, embedder.dimensions, embedder.model ?? null, state],
+    );
+    const row = opened.rows[0] ?? (await this.generations(sourceId, client))[state];
+    if (row === undefined) {
+      throw new Error(`knowledge-pgvector: no ${state} generation of source '${sourceId}' could be opened; retry.`);
+    }
+    return { ...row, generation: Number(row.generation), dim: Number(row.dim), state };
+  }
+
+  /** Mark a generation `retired`: held by no write and no search; {@link sweepRetired} deletes it. */
+  private async retire(client: PgClientLike, sourceId: string, generation: number): Promise<void> {
+    await client.query(`UPDATE ${qualified(this.schema, GENERATION_TABLE)} SET state = 'retired' WHERE source_id = $1 AND generation = $2`, [
+      sourceId,
+      generation,
+    ]);
+  }
+
+  /**
+   * Delete the retired generations of `sourceId`: their passages in batches of
+   * {@link deleteBatchSize} rows, one statement and one short transaction
+   * each, so no long lock is held over a large source; the generation row last,
+   * so no passage is ever left without one.
+   */
+  private async sweepRetired(sourceId: string): Promise<void> {
+    const pool = this.requirePool();
+    const { retired } = await this.generations(sourceId);
+    for (const g of retired) {
+      if (await this.tableExists(g.dim)) {
+        const table = qualified(this.schema, vectorTable(g.dim));
+        for (;;) {
+          const deleted = await pool.query<{ n: number }>(
+            `WITH gone AS (
+               DELETE FROM ${table} WHERE (source_id, generation, chunk_id) IN (
+                 SELECT source_id, generation, chunk_id FROM ${table} WHERE source_id = $1 AND generation = $2 LIMIT $3)
+               RETURNING 1)
+             SELECT count(*)::int AS n FROM gone`,
+            [sourceId, g.generation, this.deleteBatchSize],
+          );
+          if (Number(deleted.rows[0]?.n ?? 0) < this.deleteBatchSize) break;
+        }
       }
-      return true;
-    });
-    return (await this.activeGeneration(sourceId))!;
+      await pool.query(
+        `DELETE FROM ${qualified(this.schema, GENERATION_TABLE)} WHERE source_id = $1 AND generation = $2 AND state = 'retired'`,
+        [sourceId, g.generation],
+      );
+    }
   }
 
   /** The widths of the passage tables that exist in the store's schema. */
@@ -702,57 +964,105 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
   }
 
   /**
-   * The generation a write carrying `ctx.index` goes to: the active one, when
-   * its fingerprint is the one carried (or none is carried); refused when it is
-   * another, or when the embedder's width is not the generation's. A source
-   * that holds nothing gets its first generation (`create`), or none.
+   * The generation a call carrying `ctx.index` writes to or lists: the one
+   * under construction when it holds that fingerprint, else the active one
+   * when it holds it (or none is carried); refused when neither does, or when
+   * the embedder's width is not the generation's. A source that holds nothing
+   * gets its first generation (`create`), or none.
    */
   private async writeTarget(
     ctx: AdapterContext,
-    embedder: IEmbedder | undefined,
+    embedder: IEmbedder,
     create: boolean,
   ): Promise<GenerationRow | undefined> {
-    const active = await this.activeGeneration(ctx.source.id);
-    if (!active) {
-      if (!create || !embedder) return undefined;
-      const opened = await this.openFirstGeneration(ctx.source.id, ctx.index?.fingerprint, embedder);
-      return this.checkTarget(ctx, opened, embedder);
+    const sourceId = ctx.source.id;
+    const fingerprint = ctx.index?.fingerprint;
+    const { active, building } = await this.generations(sourceId);
+    const checked = (g: GenerationRow): GenerationRow => {
+      if (embedder.dimensions !== g.dim) throw rebuildRequired(sourceId, false);
+      return g;
+    };
+    if (building !== undefined && fingerprint !== undefined && building.fingerprint === fingerprint) return checked(building);
+    if (active === undefined) {
+      if (!create) return undefined;
+      const opened = await this.inTransaction((client) => this.openGeneration(client, sourceId, fingerprint, embedder, 'active'));
+      if (fingerprint !== undefined && opened.fingerprint !== fingerprint) throw rebuildRequired(sourceId, false);
+      return checked(opened);
     }
-    return this.checkTarget(ctx, active, embedder);
+    if (fingerprint === undefined || active.fingerprint === fingerprint) return checked(active);
+    throw rebuildRequired(sourceId, false);
   }
 
-  private async checkTarget(
-    ctx: AdapterContext,
-    generation: GenerationRow,
-    embedder: IEmbedder | undefined,
-  ): Promise<GenerationRow> {
-    const fingerprint = ctx.index?.fingerprint;
-    if (fingerprint !== undefined && generation.fingerprint !== fingerprint) {
-      throw rebuildRequired(ctx.source.id, await this.clearSql(ctx.source.id, generation.dim));
-    }
-    if (embedder !== undefined && embedder.dimensions !== generation.dim) {
-      throw rebuildRequired(ctx.source.id, await this.clearSql(ctx.source.id, generation.dim));
-    }
-    return generation;
+  // ── The builder lock ──────────────────────────────────────────────
+
+  /** The advisory lock key of a source: 64 bits of a hash of the schema and the source id. */
+  private lockKey(sourceId: string): string {
+    const digest = createHash('sha256').update(`knowledge-pgvector\u0000${this.schema}\u0000${sourceId}`).digest();
+    return digest.readBigInt64BE(0).toString();
   }
 
   /**
-   * The statements that clear everything this store holds for a source, so it
-   * can be built afresh: one DELETE per passage table that exists, then the
-   * generation rows — passages first, so no generation row is ever missing
-   * while its passages remain.
+   * Take the source's builder lock on a session of its own, or keep the one
+   * this adapter already holds (the knowledge service runs one walk of a
+   * source at a time, so that one is an earlier build's that ended without
+   * `completeBuild`). Refused `LOCK_CONFLICT` while another session holds it.
    */
-  private async clearSql(sourceId: string, knownWidth: number): Promise<string[]> {
-    const literal = `'${sourceId.replace(/'/g, "''")}'`;
-    // The tables found in the schema, and always the width the source's
-    // generation records: should the catalogue read fail, the statements still
-    // clear that table before the generation row, never the row alone.
-    const found = await this.passageWidths().catch(() => [] as number[]);
-    const widths = [...new Set([...found, knownWidth])].sort((a, b) => a - b);
-    return [
-      ...widths.map((width) => `DELETE FROM ${qualified(this.schema, vectorTable(width))} WHERE source_id = ${literal};`),
-      `DELETE FROM ${qualified(this.schema, GENERATION_TABLE)} WHERE source_id = ${literal};`,
-    ];
+  private async takeBuilderLock(sourceId: string): Promise<void> {
+    if (this.builders.has(sourceId)) {
+      this.touchBuilderLock(sourceId);
+      return;
+    }
+    const pool = this.requirePool();
+    const client = pool.connectSession ? await pool.connectSession() : await pool.connect();
+    const key = this.lockKey(sourceId);
+    let locked: boolean;
+    try {
+      const got = await client.query<{ locked: boolean }>('SELECT pg_try_advisory_lock($1::bigint) AS locked', [key]);
+      locked = got.rows[0]?.locked === true;
+    } catch (err) {
+      client.release(err instanceof Error ? err : true);
+      throw err;
+    }
+    if (!locked) {
+      client.release();
+      throw builderBusy(sourceId, this.buildLockIdleMs);
+    }
+    this.builders.set(sourceId, { client, key });
+    this.touchBuilderLock(sourceId);
+  }
+
+  /** A call for the source while this adapter builds it: the lock's idle time starts again. */
+  private touchBuilderLock(sourceId: string): void {
+    const held = this.builders.get(sourceId);
+    if (!held) return;
+    if (held.timer !== undefined) clearTimeout(held.timer);
+    held.timer = setTimeout(() => void this.releaseBuilderLock(sourceId), this.buildLockIdleMs);
+    held.timer.unref?.();
+  }
+
+  /** Let go of the source's builder lock, when this adapter holds it. */
+  private async releaseBuilderLock(sourceId: string): Promise<void> {
+    const held = this.builders.get(sourceId);
+    if (!held) return;
+    this.builders.delete(sourceId);
+    if (held.timer !== undefined) clearTimeout(held.timer);
+    try {
+      await held.client.query('SELECT pg_advisory_unlock($1::bigint)', [held.key]);
+      held.client.release();
+    } catch (err) {
+      // A session that is gone has let go of its lock already.
+      held.client.release(err instanceof Error ? err : true);
+    }
+  }
+
+  /** Run `work` in one transaction: committed when it resolves, rolled back when it throws. */
+  private async inTransaction<T>(work: (client: PgClientLike) => Promise<T>): Promise<T> {
+    let value: T | undefined;
+    await this.transaction(async (client) => {
+      value = await work(client);
+      return true;
+    });
+    return value as T;
   }
 
   /** Run `work` in one transaction: committed when it answers `true`, rolled back when it answers `false` or throws. */
@@ -794,23 +1104,37 @@ function requireIndex(ctx: AdapterContext, member: string): NonNullable<AdapterC
 }
 
 /**
- * A refusal under another fingerprint (ADR-0161 K7, rules 4 and 5). Its
- * message is one sentence a search caller may read; the statements that clear
- * the source are operator text, carried in `remedy` — the knowledge service
- * shows it in a reindex result and its log, never to a search caller.
+ * A refusal under another fingerprint (ADR-0161 K7, rules 4 and 5): the
+ * source needs a rebuild, or — `building` — the generation of the searched
+ * fingerprint is under construction. Its message is one sentence a search
+ * caller may read; what to do is operator text, carried in `remedy`.
  */
-function rebuildRequired(sourceId: string, clearSql: string[]): Error {
+function rebuildRequired(sourceId: string, building: boolean): Error {
+  const message = building
+    ? `Knowledge source '${sourceId}' is being rebuilt under its new index fingerprint; it answers again when the ` +
+      'rebuild completes.'
+    : `Knowledge source '${sourceId}' needs a rebuild: its index was built under another embedding model, split or ` +
+      'content recipe, and it is not searched until a complete reindex has rebuilt it.';
+  return Object.assign(new Error(message), {
+    code: KNOWLEDGE_REBUILD_REQUIRED,
+    status: 409,
+    remedy:
+      'Run a complete reindex of the source. The store builds the new index beside the old one and switches to it ' +
+      'when the reindex completes; the old index is then deleted.',
+  });
+}
+
+/** A build refused because another process holds the source's builder lock. */
+function builderBusy(sourceId: string, idleMs: number): Error {
   return Object.assign(
-    new Error(
-      `Knowledge source '${sourceId}' needs a rebuild: its index was built under another embedding model, split or ` +
-        'content recipe, and it is not searched until a complete reindex has rebuilt it.',
-    ),
+    new Error(`Knowledge source '${sourceId}' is being built by another process; this build did not start.`),
     {
-      code: KNOWLEDGE_REBUILD_REQUIRED,
+      code: LOCK_CONFLICT,
       status: 409,
       remedy:
-        'Run a complete reindex of the source; if the store refuses to begin it, clear the source\'s index first. ' +
-        `Run as a database owner:\n${clearSql.join('\n')}`,
+        'One process builds a source at a time. Start the reindex again once that build ends: a build whose process ' +
+        `stopped lets go at once, and one that stopped part-way on a running process lets go after ${Math.round(idleMs / 60000)} ` +
+        'minute(s) without progress.',
     },
   );
 }
