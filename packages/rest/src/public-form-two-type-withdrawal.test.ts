@@ -94,8 +94,22 @@ function makeRes() {
 
 interface Answer { status: number; body: any }
 
-async function boot(ships: { forms?: unknown[]; views?: unknown[]; objects?: unknown[] }, opts: { i18n?: unknown } = {}) {
-  const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as any);
+/**
+ * A store that cannot roll a transaction back: a `SqlDriver` that declares
+ * `supports.transactionsUnsupported`, the shape the remote Turso transport
+ * takes (as `rest-batch-no-rollback-driver.test.ts` builds it). `ObjectQL`
+ * then runs a transaction's callback with no transaction, and
+ * `engineCanRollBack` answers no.
+ */
+class NoRollbackSqlDriver extends SqlDriver {
+  override get supports() {
+    return { ...super.supports, transactionsUnsupported: true };
+  }
+}
+
+async function boot(ships: { forms?: unknown[]; views?: unknown[]; objects?: unknown[] }, opts: { i18n?: unknown; canRollBack?: boolean } = {}) {
+  const driverOptions = { client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as any;
+  const driver = opts.canRollBack === false ? new NoRollbackSqlDriver(driverOptions) : new SqlDriver(driverOptions);
   const engine = new ObjectQL();
   engine.registerDriver(driver, true);
   await engine.init();
@@ -964,5 +978,93 @@ describe('[ADR-0159 D5] the old shapes answer what they answered before the type
     expect(JSON.stringify(wire(await b.get()))).toBe(JSON.stringify(wire(BEFORE['data-object-resolve'])));
     const submitted = await b.post();
     expect([submitted.status, submitted.body?.code]).toEqual([BEFORE['data-object-submit'].status, BEFORE['data-object-submit'].body?.code]);
+  });
+});
+
+describe('[ADR-0159 D5, ADR-0067 D2 and D3] the undo of a `form` publish puts back the old-shape row the publish removed', () => {
+  const engines: ObjectQL[] = [];
+  afterAll(async () => {
+    for (const engine of engines) await engine.destroy().catch(() => {});
+  });
+  const SECOND = `${OBJECT}.second`;
+  const NEW_SLUG = 'renamed-37086';
+  /**
+   * The base ships the form in an old-shape container, open on {@link SLUG}; the pair
+   * stores its own old-shape row of the name with the form switched off.
+   */
+  const pairWithItsOwnOldShapeRow = async (canRollBack: boolean): Promise<Booted> => {
+    const b = await boot({ views: [container(true)] }, { canRollBack });
+    engines.push(b.engine);
+    expect(engineCanRollBackOf(b)).toBe(canRollBack);
+    await b.install(PAIR);
+    await b.saveInto('view', PAIR, viewItem(false, overrides));
+    await closedOnBothDoors(b);
+    return b;
+  };
+  const engineCanRollBackOf = (b: Booted) => (b.protocol as any).engine?.getDriverByName?.((b.protocol as any).engine?.getDefaultDriverName?.())?.supports?.transactionsUnsupported !== true;
+  /** Two `form` drafts in the pair: the form of the name on {@link NEW_SLUG}, and a second form on `secondSlug`. */
+  const twoFormDrafts = async (b: Booted, secondSlug: string) => {
+    await b.protocol.saveMetaItem({ type: 'form', name: NAME, packageId: PAIR, mode: 'draft', item: formItem(true, overrides, NEW_SLUG) });
+    await b.protocol.saveMetaItem({ type: 'form', name: SECOND, packageId: PAIR, mode: 'draft', item: { ...formItem(true, {}, secondSlug), name: SECOND } });
+  };
+
+  it('a package publish refused part-way on an engine that cannot roll back leaves the old-shape row as it was (ablate: the restore of the removed rows in the undo)', async () => {
+    const b = await pairWithItsOwnOldShapeRow(false);
+    const before = await rawRows(b, 'view', NAME, PAIR);
+    expect(before.length).toBe(1);
+    // Both drafts take the same new link: each passes the judging pass, and the
+    // second is refused once the first holds the link, after its promotion.
+    await twoFormDrafts(b, NEW_SLUG);
+    const answer: any = await b.protocol.publishPackageDrafts({ packageId: PAIR });
+    expect(answer.success).toBe(false);
+    expect(answer.failed.map((f: any) => [f.name, f.code])).toContainEqual([SECOND, 'FORM_ADDRESS_TAKEN']);
+    expect(await rawRows(b, 'form', NAME, PAIR)).toEqual([]);
+    expect(await rawRows(b, 'view', NAME, PAIR)).toEqual(before);
+    await closedOnBothDoors(b);
+    await closedOnBothDoors(b, NEW_SLUG);
+  });
+
+  it('CONTROL: the same package publish with the second form on another link is published, and the form\'s promotion removes the old-shape row', async () => {
+    const b = await pairWithItsOwnOldShapeRow(false);
+    await twoFormDrafts(b, OTHER_SLUG);
+    const answer: any = await b.protocol.publishPackageDrafts({ packageId: PAIR });
+    expect(answer.success, JSON.stringify(answer.failed)).toBe(true);
+    expect(await rawRows(b, 'view', NAME, PAIR)).toEqual([]);
+    expect((await rawRows(b, 'form', NAME, PAIR)).length).toBe(1);
+    await openOnBothDoors(b, NEW_SLUG);
+  });
+
+  for (const canRollBack of [false, true]) {
+    it(`a commit revert puts back the old-shape row the commit's \`form\` publish removed, at its version (${canRollBack ? 'an engine that can roll back' : 'an engine that cannot roll back'}; ablate: the removed rows in the commit plan)`, async () => {
+      const b = await pairWithItsOwnOldShapeRow(canRollBack);
+      const before = await rawRows(b, 'view', NAME, PAIR);
+      await b.protocol.saveMetaItem({ type: 'form', name: NAME, packageId: PAIR, mode: 'draft', item: formItem(false, overrides) });
+      const published: any = await b.protocol.publishPackageDrafts({ packageId: PAIR });
+      expect(published.success, JSON.stringify(published.failed)).toBe(true);
+      expect(await rawRows(b, 'view', NAME, PAIR)).toEqual([]);
+      const reverted: any = await b.protocol.revertCommit({ commitId: published.commitId, packageId: PAIR });
+      expect(reverted.failed).toEqual([]);
+      expect(reverted.reverted).toEqual(expect.arrayContaining([
+        { type: 'form', name: NAME, action: 'removed' },
+        { type: 'view', name: NAME, action: 'restored' },
+      ]));
+      expect(await rawRows(b, 'form', NAME, PAIR)).toEqual([]);
+      expect((await rawRows(b, 'view', NAME, PAIR)).map((r) => r.metadata)).toEqual(before.map((r) => r.metadata));
+      await closedOnBothDoors(b);
+    });
+  }
+
+  it('CONTROL: the revert of a `form` publish that removed no old-shape row removes the form and restores nothing else', async () => {
+    const b = await boot({ views: [container(true)] }, { canRollBack: false });
+    engines.push(b.engine);
+    await b.install(PAIR);
+    await b.protocol.saveMetaItem({ type: 'form', name: NAME, packageId: PAIR, mode: 'draft', item: formItem(false, overrides) });
+    const published: any = await b.protocol.publishPackageDrafts({ packageId: PAIR });
+    expect(published.success, JSON.stringify(published.failed)).toBe(true);
+    await closedOnBothDoors(b);
+    const reverted: any = await b.protocol.revertCommit({ commitId: published.commitId, packageId: PAIR });
+    expect(reverted.reverted).toEqual([{ type: 'form', name: NAME, action: 'removed' }]);
+    expect(await rawRows(b, 'view', NAME, PAIR)).toEqual([]);
+    await openOnBothDoors(b);
   });
 });
