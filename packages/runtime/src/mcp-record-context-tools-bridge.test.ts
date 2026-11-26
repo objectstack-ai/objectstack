@@ -505,6 +505,12 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
             id: 'p1', title: 'Fire cover', status: 'active', secret_note: 'hush', vault: 'v1',
             content: '# Scope\nCovers fire.\n# Exclusions\nFlood.', organization_id: 'org_1',
         }, sys);
+        // A body of 300 headings at one level, past the body bound: its outline comes in pages.
+        await engine.insert('rc_policy', {
+            id: 'p2', title: 'Long cover', status: 'active', secret_note: 'hush', vault: 'v1',
+            content: Array.from({ length: 300 }, (_, i) => `## Clause ${i + 1}\nThe insurer pays clause ${i + 1}.\n`).join(''),
+            organization_id: 'org_1',
+        }, sys);
         await engine.insert('rc_revision', { id: 'r1', version: 'v1', policy: 'p1', owner_id: 'usr_member', organization_id: 'org_1' }, sys);
         await engine.insert('rc_revision', { id: 'r2', version: 'v2', policy: 'p1', owner_id: 'usr_other', organization_id: 'org_1' }, sys);
         await engine.insert('rc_hidden', { id: 'h1', version: 'h', policy: 'p1', organization_id: 'org_1' }, sys);
@@ -867,6 +873,26 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
 
     it('an anchor the body does not resolve is one coded answer', async () => {
         const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main', anchor: 'nowhere' });
+        expect(answer.isError).toBe(true);
+        expect(answer.payload.error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+    });
+
+    it('[ADR-0160 D3] a long body\'s outline pages on both doors: outlineFrom reaches the executor through each, and the page it lists issues anchors that read their sections', async () => {
+        const first = await both({ objectName: 'rc_policy', recordId: 'p2', context: 'rc_main' });
+        expect(first.isError).toBe(false);
+        const next = first.payload.data.body.outlineNext;
+        expect(next).toBe(first.payload.data.body.outline.length);
+        const page = await both({ objectName: 'rc_policy', recordId: 'p2', context: 'rc_main', outlineFrom: next });
+        expect(page.isError).toBe(false);
+        // A door that dropped the key would answer the first page again.
+        expect(page.payload.data.body.outline[0]).toEqual({ anchor: `clause-${next + 1}`, heading: `Clause ${next + 1}`, level: 2 });
+        const anchor = page.payload.data.body.outline.at(-1).anchor;
+        const section = await both({ objectName: 'rc_policy', recordId: 'p2', context: 'rc_main', anchor });
+        expect(section.payload.data.body.text).toMatch(/^## Clause \d+\nThe insurer pays clause \d+\.\n$/);
+    });
+
+    it('[ADR-0160 D3] an outlineFrom on a body carried whole is one coded answer on both doors', async () => {
+        const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main', outlineFrom: 80 });
         expect(answer.isError).toBe(true);
         expect(answer.payload.error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
     });
