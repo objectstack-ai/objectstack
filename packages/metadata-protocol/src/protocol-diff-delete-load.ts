@@ -764,16 +764,24 @@ export class ProtocolDiffDeleteLoadFacet {
                 // draft discard are refused, with the enable as the remedy.
                 // The delete removed the hidden row, so the next enable
                 // served the package's item without it. A draft discard
-                // reads the draft rows, so it asks whether the customization
-                // is the ACTIVE row too: with no draft stored it answers
-                // that remedy, never `?package=`.
+                // reads the draft rows, so where a package-unbound row or
+                // draft is stored it judges the holders over the active
+                // rows too, as the draft save does: a customization that is
+                // the ACTIVE row, or a holder that holds only an active row,
+                // answers that remedy, never `?package=` nor the receipt.
                 if (request.packageId == null) {
-                    const customized = targetState === 'draft' && !rowsAtAddress.unbound
-                        ? (await host.packagelessAddress(singularTypeForRepo, request.name, member, 'active')).unbound
-                        : false;
+                    const active = targetState === 'draft'
+                        ? await host.packagelessAddress(singularTypeForRepo, request.name, member, 'active')
+                        : undefined;
                     const holderRefusal = packagelessHolderRefusal(
                         host, 'delete', request.type, singularTypeForRepo, request.name, member,
-                        customized ? { ...rowsAtAddress, customized } : rowsAtAddress,
+                        active !== undefined && (rowsAtAddress.unbound || active.unbound)
+                            ? {
+                                candidates: [...new Set([...rowsAtAddress.candidates, ...active.candidates])],
+                                unbound: rowsAtAddress.unbound,
+                                customized: active.unbound,
+                            }
+                            : rowsAtAddress,
                     );
                     if (holderRefusal) {
                         addressRefusal = holderRefusal;

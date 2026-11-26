@@ -1248,8 +1248,10 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
      */
     const expectRefusedEnableFirst = (answer: { status: number | undefined; body: any }, ids: readonly string[]) => {
         expect([answer.status, codeOf(answer.body)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
-        const message = String(answer.body?.error?.message ?? answer.body?.message ?? '');
-        expect([message.startsWith('Enable the package that holds dashboard '), message.startsWith('Name the package')], message).toEqual([true, false]);
+        // The REST door answers a thrown refusal `{ error: <message>, code }`; the dispatcher nests it.
+        const message = String(typeof answer.body?.error === 'string' ? answer.body.error : answer.body?.error?.message ?? '');
+        // …and the door cuts a client message at 500 characters: the remedy arrives whole.
+        expect([message.startsWith('Enable the package that holds dashboard '), message.endsWith('…')], JSON.stringify(answer.body)).toEqual([true, false]);
         for (const id of ids) expect(JSON.stringify(answer.body)).not.toContain(id);
     };
     /** Every stored row of the dashboard, active and draft, with its stored bytes: what a refused write must leave as it was. */

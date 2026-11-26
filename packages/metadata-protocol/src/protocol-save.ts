@@ -3289,13 +3289,13 @@ export function disabledHoldersCustomizationRefusal(
     name: string,
 ): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
     const nothing = verb === 'save' ? 'Nothing was written.' : 'Nothing was deleted.';
+    // Kept well under the 500 characters a door's client message is cut at
+    // (`truncateClientMessage`), so the remedy's last sentence arrives.
     const err = new Error(
-        `Enable the package that holds ${type} '${name}' first, then send this ${verb} again: GET /api/v1/packages `
-        + `lists each installed package with whether it is enabled, and PATCH /api/v1/packages/:id/enable enables one. `
-        + `${nothing} Every package that holds the name is disabled, and the row stored for it under no package is `
-        + `that package's customization, hidden with it until the package is enabled, so no read would show this `
-        + `${verb}. Naming the package (?package=, in process packageId) does not reach that row: it addresses the `
-        + `package's own row beside it.`,
+        `Enable the package that holds ${type} '${name}' first, then send this ${verb} again (GET /api/v1/packages `
+        + `shows which packages are disabled; PATCH /api/v1/packages/:id/enable enables one). ${nothing} Every package `
+        + `holding the name is disabled, and the row stored for it under no package is that package's customization, `
+        + `hidden with it. Naming the package (?package=) does not reach that row.`,
     ) as Error & { code: 'RESOURCE_CONFLICT'; status: 409 };
     err.code = 'RESOURCE_CONFLICT';
     err.status = 409;
