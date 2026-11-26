@@ -47,6 +47,13 @@ export {
   UNIT_RATIO_PRECISION,
   UNIT_DECIMAL_PLACES_MAX,
 } from './sys-unit.object.js';
+// [ADR-0158 U6; Open item 10, option A] An organization's display decimal
+// places for a standard unit code. Zero platform rows.
+export {
+  SysStandardUnitSetting,
+  STANDARD_UNIT_SETTING_CODES,
+  STANDARD_UNIT_SETTING_CODE_PATTERN,
+} from './sys-standard-unit-setting.object.js';
 // [ADR-0157 D1] Working calendars and their dated exceptions, read by the
 // calendar service (`@objectstack/objectql`).
 export {
