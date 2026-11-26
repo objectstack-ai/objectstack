@@ -12,7 +12,7 @@ Clause-②: no (narrowing) — narrowed: `PUT /api/settings/knowledge` refuses `
 Metadata-protocol: none
 Skills-docs: updated here — `skills/objectstack-ai/SKILL.md` and its eval case 3 teach the `pgvector` adapter where they taught `ragflow`; `content/docs/protocol/knowledge.mdx`, `content/docs/ai/knowledge-rag.mdx` and `content/docs/ai/index.mdx` name the adapters this repository builds.
 
-<!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: a settings manifest is a runtime registration, not authorable metadata, and `KnowledgeSource.adapter` stays a free string. The narrowed answers are settings doors of one namespace; stored rows are untouched, so there is nothing for a migration to rewrite. -->
+<!-- adr-0087: not-required (runtime-export-retired @objectstack/knowledge-ragflow#*) the package is deleted whole: what it published (`KnowledgeRagflowPlugin`, `KnowledgeRagflowAdapter` and their option types) is runtime code a host registers; no `packages/spec` schema, metadata type or stored shape names it, and `KnowledgeSource.adapter` stays a free string, so there is nothing for `objectstack migrate meta` to rewrite. The settings half has the same answer: a settings manifest is a runtime registration, not authorable metadata; the narrowed answers are doors of one settings namespace, and stored rows are untouched. -->
 
 **BREAKING** for a deployment that saved the RAGFlow adapter on the Knowledge settings page, or that registers `KnowledgeRagflowPlugin`.
 
@@ -24,9 +24,12 @@ On the Knowledge settings page (`knowledge` namespace, manifest `version` 3):
 - A stored `adapter = ragflow` is still served as stored, since the settings service never rewrites a stored value. The Console shows the Adapter select with nothing selected. Saving other keys works; saving `ragflow` again is refused; "Test connection" answers "Unknown adapter: ragflow". No code ever read this setting, so nothing else changes behaviour.
 - Stored rows for the three removed keys are kept, never deleted. The page no longer serves them, and no settings door clears them, the encrypted `ragflow_api_key` included.
 
-What to do if you used it:
+What leaves, and what to write instead:
 
-- Stop registering `KnowledgeRagflowPlugin` and remove the dependency. Bind your sources to an adapter this repository builds: `@objectstack/knowledge-pgvector` (`adapter: 'pgvector'`, PostgreSQL with pgvector), `@objectstack/knowledge-turso` (`adapter: 'turso'`, a libSQL file) or `@objectstack/knowledge-memory` (`adapter: 'memory'`, development and tests). To keep an external engine, register your own `IKnowledgeAdapter` under an id of your choice.
+- FROM `@objectstack/knowledge-ragflow` TO an adapter package this repository builds: `@objectstack/knowledge-pgvector` (`adapter: 'pgvector'`, PostgreSQL with pgvector), `@objectstack/knowledge-turso` (`adapter: 'turso'`, a libSQL file) or `@objectstack/knowledge-memory` (`adapter: 'memory'`, development and tests). Fix: stop registering `KnowledgeRagflowPlugin`, remove the dependency, and bind your sources to one of those; to keep an external engine, register your own `IKnowledgeAdapter` under an id of your choice.
+
+On a deployment that used it, also:
+
 - A knowledge source that still names `adapter: 'ragflow'` with no such adapter registered boots without an error: searches over it answer no hits and log `references unknown adapter`, and indexing it throws `unknown adapter 'ragflow'`. Change the source's `adapter`.
 - Pick an adapter on the Knowledge settings page and save, which replaces the stored `ragflow` value.
 - To remove the stored API key, delete the `knowledge` rows named `ragflow_base_url`, `ragflow_api_key` and `ragflow_default_dataset` from `sys_platform_setting`, and the `sys_secret` row whose `id` the `ragflow_api_key` row holds in `value_enc` (a `sec_` handle). Until then the `sys_secret` orphan report may list it. An earlier note in this release says mounting the knowledge service and clearing the key from Setup removes it; for `ragflow_api_key` that no longer applies, because the page no longer declares the key.
