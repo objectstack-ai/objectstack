@@ -33,6 +33,7 @@ import {
     demotedDeclaredCode,
     declaredUserMessage,
     declaredRefusalMessage,
+    declaredRefusalLines,
     packageScopedRefusalCandidates,
     UNDECLARED_HOOK_REFUSAL_CODE,
 } from './thrown-http-error.js';
@@ -603,7 +604,27 @@ function withDeclaredUserMessage(
     const headed = withRefusalHeadAnswer(error, mapped);
     const userMessage = boundedDeclaredUserMessage(error);
     if (userMessage === undefined) return headed;
-    return { status: headed.status, body: { ...headed.body, userMessage } };
+    return { status: headed.status, body: { ...withDeclaredRefusalLines(error, headed.body), userMessage } };
+}
+
+/**
+ * [#36877, ruling 7178348458 term 3] A declared refusal thrown as a `reasons`
+ * list carries its sentences as `details.refusals` on this door too, riding
+ * with the `userMessage` that joins them ({@link declaredRefusalLines}, the
+ * one recogniser the dispatcher's composition reads). Every sentence is kept
+ * whole: `userMessage` is bounded at {@link CLIENT_MESSAGE_MAX} (#5423), and a
+ * long list read off the structured member loses no line. `details` is
+ * merged, so a member another arm set is kept; a body with no list is
+ * returned as it was.
+ */
+function withDeclaredRefusalLines(error: unknown, body: Record<string, unknown>): Record<string, unknown> {
+    const refusals = declaredRefusalLines(error);
+    if (refusals === undefined) return body;
+    const details = body.details;
+    const kept = details !== null && typeof details === 'object' && !Array.isArray(details)
+        ? details as Record<string, unknown>
+        : {};
+    return { ...body, details: { ...kept, refusals } };
 }
 
 /**
