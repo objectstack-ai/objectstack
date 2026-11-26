@@ -23,6 +23,8 @@
  * publish reaches the door: the race the pins are for.
  */
 
+import type { MetadataClient } from '@object-ui/data-objectstack';
+
 type Options = Record<string, unknown>;
 
 interface Row {
@@ -37,6 +39,8 @@ export interface DraftPublishDoor {
     reset: (type: string, name: string, options?: Options) => Promise<unknown>;
     getDraft: (type: string, name: string, options?: Options) => Promise<unknown>;
   };
+  /** The same doors, typed as the console's client for callers that take one. */
+  metadataClient: Pick<MetadataClient, 'save' | 'publish' | 'reset' | 'getDraft'>;
   /** The pending draft body at the address, or `undefined`. */
   draftOf: (type: string, name: string, packageId?: string | null) => unknown;
   /** The live body at the address, or `undefined`. */
@@ -71,63 +75,67 @@ export function draftPublishDoor(): DraftPublishDoor {
     drafts.set(k, row);
     return row;
   };
-  return {
-    client: {
-      async save(type, name, body, options = {}) {
-        calls.push(['save', type, name, options]);
-        const k = key(type, name, options.packageId);
-        if (options.mode !== 'draft') {
-          const row = { body, version: `live-${++seq}` };
-          live.set(k, row);
-          return { success: true, version: row.version };
-        }
-        const current = drafts.get(k);
-        if (options.ifNoneMatch === '*' && current) throw conflict(current.version);
-        if (typeof options.ifMatch === 'string' && options.ifMatch !== current?.version) {
-          throw conflict(current?.version ?? null);
-        }
-        const row = writeDraft(k, body);
-        return { success: true, version: row.version, state: 'draft' };
-      },
-      async publish(type, name, options = {}) {
-        calls.push(['publish', type, name, options]);
-        if (pendingInterleave) {
-          const run = pendingInterleave;
-          pendingInterleave = null;
-          run();
-        }
-        const k = key(type, name, options.packageId);
-        const draft = drafts.get(k);
-        if (options.draftVersion !== undefined && options.draftVersion !== draft?.version) {
-          throw conflict(draft?.version ?? null);
-        }
-        const active = live.get(k);
-        if (typeof options.ifMatch === 'string' && options.ifMatch !== active?.version) throw conflict(active?.version ?? null);
-        if (options.ifNoneMatch === '*' && active) throw conflict(active.version);
-        if (!draft) throw Object.assign(new Error('no draft'), { status: 404, code: 'NO_DRAFT' });
-        const row = { body: draft.body, version: `live-${++seq}` };
+  const client: DraftPublishDoor['client'] = {
+    async save(type, name, body, options = {}) {
+      calls.push(['save', type, name, options]);
+      const k = key(type, name, options.packageId);
+      if (options.mode !== 'draft') {
+        const row = { body, version: `live-${++seq}` };
         live.set(k, row);
-        drafts.delete(k);
         return { success: true, version: row.version };
-      },
-      async reset(type, name, options = {}) {
-        calls.push(['reset', type, name, options]);
-        const k = key(type, name, options.packageId);
-        if (options.state === 'draft') {
-          const draft = drafts.get(k);
-          if (typeof options.ifMatch === 'string' && options.ifMatch !== draft?.version) throw conflict(draft?.version ?? null);
-          drafts.delete(k);
-        } else {
-          live.delete(k);
-        }
-        return { success: true };
-      },
-      async getDraft(type, name, options = {}) {
-        calls.push(['getDraft', type, name, options]);
-        const draft = drafts.get(key(type, name, options.packageId));
-        return draft ? { type, name, item: draft.body, version: draft.version } : null;
-      },
+      }
+      const current = drafts.get(k);
+      if (options.ifNoneMatch === '*' && current) throw conflict(current.version);
+      if (typeof options.ifMatch === 'string' && options.ifMatch !== current?.version) {
+        throw conflict(current?.version ?? null);
+      }
+      const row = writeDraft(k, body);
+      return { success: true, version: row.version, state: 'draft' };
     },
+    async publish(type, name, options = {}) {
+      calls.push(['publish', type, name, options]);
+      if (pendingInterleave) {
+        const run = pendingInterleave;
+        pendingInterleave = null;
+        run();
+      }
+      const k = key(type, name, options.packageId);
+      const draft = drafts.get(k);
+      if (options.draftVersion !== undefined && options.draftVersion !== draft?.version) {
+        throw conflict(draft?.version ?? null);
+      }
+      const active = live.get(k);
+      if (typeof options.ifMatch === 'string' && options.ifMatch !== active?.version) throw conflict(active?.version ?? null);
+      if (options.ifNoneMatch === '*' && active) throw conflict(active.version);
+      if (!draft) throw Object.assign(new Error('no draft'), { status: 404, code: 'NO_DRAFT' });
+      const row = { body: draft.body, version: `live-${++seq}` };
+      live.set(k, row);
+      drafts.delete(k);
+      return { success: true, version: row.version };
+    },
+    async reset(type, name, options = {}) {
+      calls.push(['reset', type, name, options]);
+      const k = key(type, name, options.packageId);
+      if (options.state === 'draft') {
+        const draft = drafts.get(k);
+        if (typeof options.ifMatch === 'string' && options.ifMatch !== draft?.version) throw conflict(draft?.version ?? null);
+        drafts.delete(k);
+      } else {
+        live.delete(k);
+      }
+      return { success: true };
+    },
+    async getDraft(type, name, options = {}) {
+      calls.push(['getDraft', type, name, options]);
+      const draft = drafts.get(key(type, name, options.packageId));
+      return draft ? { type, name, item: draft.body, version: draft.version } : null;
+    },
+  };
+  return {
+    client,
+    // The doors answer what the console's client answers for these calls; its
+    // generic signatures are what the cast stands in for.
+    metadataClient: client as unknown as DraftPublishDoor['metadataClient'],
     draftOf: (type, name, packageId) => drafts.get(key(type, name, packageId))?.body,
     liveOf: (type, name, packageId) => live.get(key(type, name, packageId))?.body,
     seedLive: (type, name, packageId, body) => {

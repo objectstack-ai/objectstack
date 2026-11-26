@@ -36,7 +36,7 @@ describe("the item page's Save publishes only the draft it wrote (objectstack#37
     const door = draftPublishDoor();
     const draftVersion = await savedDraft(door);
     door.interleave(TARGET.type, TARGET.name, PKG, { label: 'theirs' });
-    const outcome = await publishDetailSave(door.client, { ...TARGET, draftVersion }, false);
+    const outcome = await publishDetailSave(door.metadataClient, { ...TARGET, draftVersion }, false);
     expect(outcome).toMatchObject({ kind: 'refused', draftDiscarded: false });
     expect(door.liveOf(TARGET.type, TARGET.name, PKG)).toBeUndefined();
     expect(door.draftOf(TARGET.type, TARGET.name, PKG)).toEqual({ label: 'theirs' });
@@ -49,7 +49,7 @@ describe("the item page's Save publishes only the draft it wrote (objectstack#37
     const draftVersion = await savedDraft(door);
     const { guard, ask } = guardOver(door);
     door.interleave(TARGET.type, TARGET.name, PKG, { label: 'theirs' });
-    const outcome = await publishDetailSave(door.client, { ...TARGET, draftVersion }, false, guard.publish);
+    const outcome = await publishDetailSave(door.metadataClient, { ...TARGET, draftVersion }, false, guard.publish);
     expect(outcome.kind).toBe('refused');
     expect(outcome.kind === 'refused' && isPublishDraftMoved(outcome.error)).toBe(true);
     expect(ask).not.toHaveBeenCalled();
@@ -62,7 +62,7 @@ describe("the item page's Save publishes only the draft it wrote (objectstack#37
       const door = draftPublishDoor();
       const draftVersion = await savedDraft(door);
       const pinned = guarded ? guardOver(door).guard.publish : undefined;
-      expect(await publishDetailSave(door.client, { ...TARGET, draftVersion }, false, pinned)).toEqual({ kind: 'published' });
+      expect(await publishDetailSave(door.metadataClient, { ...TARGET, draftVersion }, false, pinned)).toEqual({ kind: 'published' });
       expect(door.liveOf(TARGET.type, TARGET.name, PKG)).toEqual({ label: 'mine' });
     }
   });
