@@ -177,7 +177,8 @@ describe('[#21476] a public form that cannot take intake on this posture is not 
     // file field carrying a value is refused), which reads it whenever a
     // declared field carries a value. None for the predicate: a predicate
     // that read the object on this posture would be a second object read.
-    expect(s.getMetaItems.mock.calls.map(([r]) => r.type)).toEqual(['view', 'object']);
+    // [ADR-0159 D5] Beside it, the env-wide `form` read the candidates come from.
+    expect(s.getMetaItems.mock.calls.map(([r]) => r.type)).toEqual(['view', 'form', 'object']);
   });
 
   it('CONTROL: a degraded walled request reads the posture IN FORCE (single) — accepted', async () => {

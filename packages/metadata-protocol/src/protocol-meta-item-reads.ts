@@ -51,6 +51,7 @@ import {
 import { packagelessContentPackage } from './protocol-environment-rows.js';
 import type { ProtocolHost } from './protocol-host.js';
 import { readEffectiveForms, type FormReadHost } from './protocol-form-reads.js';
+import { PROJECTED_FORM_SOURCE_KEY } from '@objectstack/spec/ui';
 import {
     admitExactQualifier,
     declinedCopyReplaced,
@@ -673,33 +674,44 @@ export async function getMetaItem(host: Pick<ProtocolHost, 'engine' | 'getServic
 }
 
 /**
- * [ADR-0159 D5] The active by-name `form` read: the generic read's answer
- * (its envelope, lock and trailers), with the item the effective `form` list
- * serves at the address ({@link readEffectiveForms}). Naming a package, that
- * package's item; naming none, the item the generic read chose when the list
- * serves it, else the list's first item of the name. When the list serves no
- * item of the name at the address (the closed reading), no `item` is served,
- * which both transports answer `404`.
+ * [ADR-0159 D5] The active by-name `form` read: the generic read's answer (its
+ * envelope, lock, trailers and the layer it chose), unless the effective
+ * `form` list resolves the address across the types.
+ *
+ * - The list serves the address's form from a stored `view` row (the old shape
+ *   still replacing it, or a base that ships the name only as an old shape):
+ *   that projected item is served.
+ * - The list serves the generic read's own holder, or serves the name at all
+ *   (a copy bound to no package), or serves the holder elsewhere (a pair's
+ *   address the base answers): the
+ *   generic read's item stands, as every type's does.
+ * - The list serves the name nowhere (a `view` row with no form replaced it):
+ *   no `item` is served, which both transports answer `404`.
  */
 async function readEffectiveFormItem(
     host: Pick<ProtocolHost, 'readMetaItemFace'> & FormReadHost,
     request: { type: string; name: string; packageId?: string; member?: string; userTextLocales?: readonly string[] },
 ): Promise<any> {
     const generic: any = await host.readMetaItemFace(request, 'served');
-    const listed = await readEffectiveForms(host, {
+    const listedAt = (packageId: string | undefined) => readEffectiveForms(host, {
         type: 'form',
         names: [request.name],
-        ...(request.packageId !== undefined ? { packageId: request.packageId } : {}),
+        ...(packageId !== undefined ? { packageId } : {}),
     }, 'served');
+    const listed = await listedAt(request.packageId);
     const pkgOf = (item: unknown): unknown => (item as { _packageId?: unknown } | null)?._packageId;
+    const fromView = (item: unknown): boolean => (item as Record<string, unknown> | null)?.[PROJECTED_FORM_SOURCE_KEY] === 'view';
+    const envelope = generic && typeof generic === 'object' ? generic : { type: 'form', name: request.name };
     const genericItem = generic?.item;
-    const served = listed.find((item) => genericItem !== undefined && pkgOf(item) === pkgOf(genericItem)) ?? listed[0];
-    if (served === undefined) {
-        if (generic === null || typeof generic !== 'object') return generic;
-        const { item: _item, ...rest } = generic;
-        return rest;
-    }
-    return { ...(generic && typeof generic === 'object' ? generic : { type: 'form', name: request.name }), item: served };
+    if (genericItem === undefined) return listed.length > 0 ? { ...envelope, item: listed[0] } : generic;
+    const matching = listed.find((item) => pkgOf(item) === pkgOf(genericItem));
+    const projected = (matching !== undefined && fromView(matching) ? matching : undefined)
+        ?? (request.packageId !== undefined ? listed.find(fromView) : undefined);
+    if (projected !== undefined) return { ...envelope, item: projected };
+    if (matching !== undefined || listed.length > 0) return generic;
+    if (request.packageId !== undefined && (await listedAt(undefined)).some((item) => pkgOf(item) === pkgOf(genericItem))) return generic;
+    const { item: _item, ...rest } = envelope;
+    return rest;
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItemForExecution`; the method's docblock there is its contract. */

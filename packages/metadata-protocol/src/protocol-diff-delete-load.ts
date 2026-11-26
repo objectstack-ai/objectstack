@@ -23,7 +23,7 @@
  * not move.
  */
 
-import { applyOldShapeFormRowRemovals, type OldShapeFormRowRemoval } from './protocol-form-writes.js';
+import { applyOldShapeFormRowRemovals, healOldShapeFormRowRemovals, type OldShapeFormRowRemoval } from './protocol-form-writes.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import {
     historyRowsOfMember,
@@ -937,16 +937,7 @@ export class ProtocolDiffDeleteLoadFacet {
                     packageId,
                     ...memberOption(member),
                 }));
-                for (const removal of removedOldShapeRows) {
-                    if (removal.kind === 'delete') {
-                        await host.restoreArtifactRegistryView('view', removal.row.name, null, removal.row.packageId);
-                    } else {
-                        await host.applyRegistryWriteThrough({
-                            type: 'view', name: removal.row.name, item: removal.body,
-                            packageId: removal.row.packageId, organizationId: null,
-                        });
-                    }
-                }
+                await healOldShapeFormRowRemovals(host, removedOldShapeRows);
 
                 // Heal the registry: drop the overlay's runtime shadow so the
                 // packaged artifact is visible again (all kernels), and on

@@ -426,7 +426,7 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // the stated closure, or against the whole collection of a runtime write.
   {
     name: 'validateFormObjectBindings',
-    runtimeTypes: ['form'],
+    runtimeTypes: ['flow', 'form'],
     run: (stack, ctx) =>
       validateFormObjectBindings(
         stack,

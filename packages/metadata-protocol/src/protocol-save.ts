@@ -23,7 +23,7 @@
  * not move.
  */
 
-import { applyOldShapeFormRowRemovals, formAddressClashRefusal, packagelessListOverFormRefusal, type OldShapeFormRowRemoval } from './protocol-form-writes.js';
+import { applyOldShapeFormRowRemovals, healOldShapeFormRowRemovals, formAddressClashRefusal, packagelessListOverFormRefusal, type OldShapeFormRowRemoval } from './protocol-form-writes.js';
 import { MetadataAuthoringSurfaceSchema } from '@objectstack/spec/api';
 import { stampHtmlPageRequires } from './runtime-authoring-gate.js';
 import { SysMetadataRepository, actionCustomizationHoldersOf, actionHeldOnlyOnOtherObjects, actionRowsBindingObjectOf, isPackageBoundRow, packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
@@ -2347,16 +2347,7 @@ export class ProtocolSaveFacet {
             }));
             // [ADR-0159 D5] The registry heal of each old-shape row the write
             // removed or re-saved, after the commit.
-            for (const removal of removedOldShapeRows) {
-                if (removal.kind === 'delete') {
-                    await host.restoreArtifactRegistryView('view', removal.row.name, null, removal.row.packageId);
-                } else {
-                    await host.applyRegistryWriteThrough({
-                        type: 'view', name: removal.row.name, item: removal.body,
-                        packageId: removal.row.packageId, organizationId: null,
-                    });
-                }
-            }
+            await healOldShapeFormRowRemovals(host, removedOldShapeRows);
             // Persistence succeeded — NOW it's safe to mutate the
             // in-memory registry. If put() had thrown, the registry
             // would still reflect the prior state. Drafts are NOT

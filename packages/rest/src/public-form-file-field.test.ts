@@ -112,6 +112,8 @@ describe('[#25572] POST /forms/:slug/submit: an anonymous submission carries no 
     const protocol: any = new ObjectStackProtocolImplementation(engine as any);
     const realGetMetaItems = protocol.getMetaItems.bind(protocol);
     protocol.getMetaItems = async (request: any) => {
+      // [ADR-0159 D5] No `form` item is injected: the doors read the injected old shape through the projection.
+      if (request?.type === 'form') return [];
       if (request?.type === 'view') return [FORM];
       if (request?.type === 'object') return [SUPPLIER];
       return realGetMetaItems(request);
@@ -119,6 +121,8 @@ describe('[#25572] POST /forms/:slug/submit: an anonymous submission carries no 
     // [#28409] The doors judge withdrawal against the effective list beside
     // the per-package layer: the injected list is that whole layer here.
     protocol.getMetaItemsPerPackage = async (request: any) => (request?.type === 'view' ? [FORM] : []);
+    // [ADR-0159 D6 rule 7] No stored body here: the store is not provisioned, the injected lists are the layer.
+    protocol.getUnreadableFormBodies = async () => [];
     const realCreateData = protocol.createData.bind(protocol);
     createData = vi.fn(realCreateData);
     protocol.createData = createData;

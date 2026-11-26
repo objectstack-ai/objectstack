@@ -23,7 +23,7 @@
  * not move.
  */
 
-import { applyOldShapeFormRowRemovals, packagelessListOverFormRefusal, type OldShapeFormRowRemoval } from './protocol-form-writes.js';
+import { applyOldShapeFormRowRemovals, healOldShapeFormRowRemovals, packagelessListOverFormRefusal, type OldShapeFormRowRemoval } from './protocol-form-writes.js';
 import { stampHtmlPageRequires } from './runtime-authoring-gate.js';
 import type { RuntimeAuthoringIssue, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
 import { DraftConflictError, packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
@@ -1423,16 +1423,7 @@ export class ProtocolHistoryAndPublishFacet {
                 // [#22877] …of the member that was judged.
                 ...memberOption(request.member),
             }));
-            for (const removal of removedOldShapeRows) {
-                if (removal.kind === 'delete') {
-                    await host.restoreArtifactRegistryView('view', removal.row.name, null, removal.row.packageId);
-                } else {
-                    await host.applyRegistryWriteThrough({
-                        type: 'view', name: removal.row.name, item: removal.body,
-                        packageId: removal.row.packageId, organizationId: null,
-                    });
-                }
-            }
+            await healOldShapeFormRowRemovals(host, removedOldShapeRows);
             return {
                 singularType,
                 advisories: runtimeAdvisories,

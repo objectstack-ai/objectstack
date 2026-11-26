@@ -80,6 +80,8 @@ import {
     PROJECTED_FORM_SOURCE_KEY,
     formIntakeLayer,
     openFormAt,
+    projectViewForms,
+    projectedFormsOf,
     thankYouRecordFieldNames,
     type FormIntakeLayer,
     type UnreadableFormBody,
@@ -160,12 +162,6 @@ function thankYouAnswerFields(
 }
 
 /**
- * Register the public (anonymous) form endpoints —
- * `RestServer#registerFormEndpoints`' body, called by that method with the
- * server as `this`. The method's own docblock, which the published declaration
- * carries, names the two routes and what authorizes them.
- */
-/**
  * [ADR-0159 D2] The body of a `form` item the doors serve as the form: the
  * item without its envelope (its identity, its label — served beside the form
  * — its override declaration and protection, and every `_` envelope key), so
@@ -182,6 +178,12 @@ function formBodyOf(item: unknown): any {
     return body;
 }
 
+/**
+ * Register the public (anonymous) form endpoints —
+ * `RestServer#registerFormEndpoints`' body, called by that method with the
+ * server as `this`. The method's own docblock, which the published declaration
+ * carries, names the two routes and what authorizes them.
+ */
 export function registerFormEndpoints(this: FormRouteHost, basePath: string): void {
     const isScoped = basePath.includes('/environments/:environmentId');
 
@@ -243,7 +245,10 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
         if (item?.[PROJECTED_FORM_SOURCE_KEY] === 'view') {
             const pkg = item?._packageId ?? undefined;
             for (const view of views ?? []) {
-                if (!view || typeof view !== 'object' || view.name !== item.name) continue;
+                if (!view || typeof view !== 'object') continue;
+                // The served item of that name, or (from a protocol that hands
+                // the doors a container) the container whose projection it is.
+                if (view.name !== item.name && !projectViewForms(view).forms.some((f) => f.name === item.name)) continue;
                 if ((view._packageId ?? undefined) !== pkg) continue;
                 const c = anonymousFormIntakeCandidates(view).find((candidate) => candidate.slug === slug);
                 if (!c) continue;
@@ -302,7 +307,14 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 : []);
         const formsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = { ...viewsRequest, type: 'form' };
         const views = listOf(await p.getMetaItems(viewsRequest));
-        const forms = typeof (p as any).getMetaItems === 'function' ? listOf(await p.getMetaItems(formsRequest)) : [];
+        // [ADR-0159 D5] The candidates are the effective `form` read, which
+        // projects the old shapes itself. A protocol that serves no `form`
+        // item at all (one older than the type) serves its forms only as old
+        // shapes, and the doors read them through THE same projection; where
+        // the protocol serves the type, an empty `form` read is the same
+        // projection of the same `view` read, so nothing is added.
+        const servedForms = listOf(await p.getMetaItems(formsRequest));
+        const forms = servedForms.length > 0 ? servedForms : projectedFormsOf(views);
         // [#28409] The per-package layers, where the protocol serves them: a
         // server-only extension, feature-detected like the other extensions
         // the doors read. A protocol without it serves no narrower list than

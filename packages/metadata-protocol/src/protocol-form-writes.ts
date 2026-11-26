@@ -257,3 +257,25 @@ export async function applyOldShapeFormRowRemovals(
     }
     return removals;
 }
+
+/**
+ * [ADR-0159 D5] The registry heal of each old-shape row a `form` write removed
+ * or re-saved ({@link applyOldShapeFormRowRemovals}), run after the commit by
+ * every door that removes them: a deleted row's name is restored to what the
+ * store still serves, a re-saved container is written through as stored.
+ */
+export async function healOldShapeFormRowRemovals(
+    host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'restoreArtifactRegistryView'>,
+    removals: readonly OldShapeFormRowRemoval[],
+): Promise<void> {
+    for (const removal of removals) {
+        if (removal.kind === 'delete') {
+            await host.restoreArtifactRegistryView('view', removal.row.name, null, removal.row.packageId);
+        } else {
+            await host.applyRegistryWriteThrough({
+                type: 'view', name: removal.row.name, item: removal.body,
+                packageId: removal.row.packageId, organizationId: null,
+            });
+        }
+    }
+}
