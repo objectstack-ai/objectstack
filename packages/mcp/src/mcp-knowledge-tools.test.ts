@@ -27,6 +27,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 import { MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE } from '@objectstack/spec/ai';
 import type { KnowledgeHit, KnowledgeSource, ObjectKnowledgeSource } from '@objectstack/spec/ai';
 import type { IDataEngine, IKnowledgeAdapter } from '@objectstack/spec/contracts';
@@ -321,7 +322,7 @@ describe('[ADR-0161 K9] search_knowledge over the real definition — every tran
    * the transport, not through the SDK client, whose result parse re-orders
    * an input schema's keys and would make a byte comparison read the client.
    */
-  async function rawOverStdio(bridge: McpDataBridge, message: { jsonrpc: '2.0'; id: number; method: string; params?: object }) {
+  async function rawOverStdio(bridge: McpDataBridge, message: JSONRPCMessage & { id: number }) {
     const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
     runtime.bridgeDataTools(bridge);
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
