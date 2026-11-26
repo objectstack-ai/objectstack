@@ -10,10 +10,12 @@
  * default model id. Free / single-model envs return one entry, so the footer
  * picker (which `ChatbotEnhanced` renders only for 2+ models) stays hidden.
  *
- * Intentionally dependency-free (uses `fetch`), mirroring {@link useAgents}.
+ * It asks through the host's `apiFetch`, else the global `fetch`, and imports no
+ * HTTP client, mirroring {@link useAgents}.
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useContext, useEffect, useRef, useState, useCallback } from 'react';
+import { SchemaRendererContext, type ApiFetch } from '@object-ui/react';
 import type { ChatbotModelOption } from './ChatbotEnhanced';
 
 export interface UseAiModelsOptions {
@@ -83,6 +85,13 @@ function normalize(raw: RawModel[]): ChatbotModelOption[] {
 /**
  * Fetch the AI-model allowlist for the current environment.
  *
+ * Every request rides the host's AUTHENTICATED fetch (`SchemaRendererProvider`'s
+ * `apiFetch`), the channel the renderers' own reads use: a session held by its
+ * bearer token alone carries no cookie, so `credentials: 'include'` on the bare
+ * global fetch read as anonymous, and a `401` never reached the host's
+ * session-ended check. A host that mounts no provider keeps the global fetch,
+ * cookies included.
+ *
  * @example
  * const { models, defaultModelId } = useAiModels({ apiBase: '/api/v1/ai' });
  */
@@ -99,6 +108,11 @@ export function useAiModels(options: UseAiModelsOptions = {}): UseAiModelsReturn
   // triggering a refetch on every render.
   const headersRef = useRef(headers);
   headersRef.current = headers;
+  // The host's authenticated fetch, or the global one with no provider (see the
+  // hook's doc). Held in a ref like the headers.
+  const apiFetch = useContext(SchemaRendererContext)?.apiFetch;
+  const fetchRef = useRef<ApiFetch>(apiFetch ?? fetch);
+  fetchRef.current = apiFetch ?? fetch;
 
   useEffect(() => {
     if (!enabled || !apiBase) return;
@@ -121,7 +135,7 @@ export function useAiModels(options: UseAiModelsOptions = {}): UseAiModelsReturn
       setIsLoading(true);
       setError(undefined);
       try {
-        const res = await fetch(url, {
+        const res = await fetchRef.current(url, {
           method: 'GET',
           headers: { Accept: 'application/json', ...(headersRef.current ?? {}) },
           credentials: 'include',

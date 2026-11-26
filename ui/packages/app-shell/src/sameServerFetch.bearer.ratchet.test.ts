@@ -9,7 +9,8 @@
 /**
  * Ratchet — a request that sends the session cookie (`credentials: 'include'`)
  * goes through the console's authenticated fetch, never the bare global
- * `fetch`, in app-shell and the console.
+ * `fetch`, in the console and in every `ui/packages/*` source tree (app-shell,
+ * and since objectstack#37225 the renderer packages beside it).
  *
  * The defect this closes: a bare `fetch('/api/…', { credentials: 'include' })`
  * carries the session cookie and nothing else. A session held by its bearer
@@ -27,18 +28,32 @@
  * fallback of `??` / `||`), and `sharedGetJson` without its transport argument
  * (its default is the global `fetch`), when the init it is handed — written
  * inline, or a `const` of this file named as the argument — carries
- * `credentials: 'include'`. The URL is not judged: a request to another origin
- * that must not see the bearer is an allow-list row with that reason.
+ * `credentials: 'include'`. The URL is not judged there: a request to another
+ * origin that must not see the bearer is an allow-list row with that reason.
  *
- * If this fails on a new call: route it through `createAuthenticatedFetch`
- * (`{ sameOriginOnly: true }` when the URL is author-written and may name
- * another host). If the call must stay bare, add a row to {@link ALLOWED} with
- * the reason. If it fails on a row: a row whose count went down is shrunk or
- * deleted in the same change. ⛔ Never raise a count to make room.
+ * Also bare (objectstack#37225): the global `fetch` on a written `/api/` path
+ * with NO init, or an inline init that names no `credentials` — the default
+ * `same-origin` credentials send the cookie alone just the same. Here the URL is
+ * the only evidence the request is the server's, so it has to be written out.
+ *
+ * The renderer packages (`components`, `fields`, `plugin-*`, …) do not import
+ * `@object-ui/auth`: their channel is the host's authenticated fetch, handed
+ * down as `SchemaRendererProvider`'s `apiFetch` (the console's is
+ * `createAuthenticatedFetch({ sameOriginOnly: true })`), read straight off
+ * `SchemaRendererContext` and falling back to the global `fetch` only in a host
+ * that mounts none. App-shell and the console build `createAuthenticatedFetch`
+ * per call.
+ *
+ * If this fails on a new call: route it through the host's `apiFetch` (a
+ * renderer package) or `createAuthenticatedFetch` (app-shell, the console;
+ * `{ sameOriginOnly: true }` when the URL is author-written and may name another
+ * host). If the call must stay bare, add a row to {@link ALLOWED} with the
+ * reason. If it fails on a row: a row whose count went down is shrunk or deleted
+ * in the same change. ⛔ Never raise a count to make room.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -46,23 +61,34 @@ import ts from 'typescript';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** `ui/packages/app-shell/src` */
 const APP_SHELL_SRC = HERE;
+/** `ui/packages`, whose every package's `src` is scanned. */
+const PACKAGES_ROOT = path.resolve(HERE, '../..');
 /** `ui/apps/console/src` */
 const CONSOLE_SRC = path.resolve(HERE, '../../../apps/console/src');
-/** Both trees' paths are written relative to `ui/`. */
+/** Every tree's paths are written relative to `ui/`. */
 const UI_ROOT = path.resolve(HERE, '../../..');
+
+/**
+ * The renderer packages objectstack#37225 named: each must be read, so a scan
+ * that silently lost one of them fails here rather than passing over it.
+ */
+const RENDERER_PACKAGES = [
+  'components',
+  'fields',
+  'permissions',
+  'plugin-charts',
+  'plugin-chatbot',
+  'plugin-dashboard',
+  'plugin-detail',
+  'plugin-grid',
+  'plugin-report',
+] as const;
 
 /**
  * The bare cookie-only calls left, per file, with the reason each stays.
  * SHRINK-ONLY: a row's count only goes down, a row only goes away.
  */
 const ALLOWED: Readonly<Record<string, { count: number; reason: string }>> = {
-  'apps/console/src/LocalizationFetchProvider.tsx': {
-    count: 1,
-    reason:
-      'the boot read of `/api/v1/auth/me/localization`, shared in flight with the language seed and the early ' +
-      'request `index.html` sends, by a key built from this init; a session it cannot see reads ' +
-      '`authenticated: false` and falls back to the browser language rather than failing. Its transport is its own decision.',
-  },
   'apps/console/src/components/FormPage.tsx': {
     count: 1,
     reason: 'the channel is the bare global fetch on the PUBLIC form route on purpose; the internal route hands the authenticated fetch.',
@@ -121,6 +147,16 @@ const ALLOWED: Readonly<Record<string, { count: number; reason: string }>> = {
     count: 1,
     reason: 'the test request of an `api` action preview, sent to the author-written target; its transport is not decided here.',
   },
+  'packages/auth/src/LoginForm.tsx': {
+    count: 1,
+    reason: 'the SSO sign-in request, sent before a session, and so a bearer, exists.',
+  },
+  'packages/permissions/src/MePermissionsProvider.tsx': {
+    count: 1,
+    reason:
+      'the fallback of the injected `fetcher` (`fetcher ?? fetch`): the console hands its authenticated fetch ' +
+      '(`AppContent`), and a host that hands none has only the cookie. The package depends on `@object-ui/types` alone.',
+  },
 };
 
 const GLOBAL_FETCH = new Set(['fetch', 'window.fetch', 'globalThis.fetch', 'self.fetch']);
@@ -165,6 +201,33 @@ function isGlobalFetchCallee(callee: ts.Expression, sf: ts.SourceFile): boolean 
   return false;
 }
 
+/** A URL written out as a literal, read only for whether it names an `/api/` path. */
+function namesApiPath(node: ts.Expression | undefined): boolean {
+  if (!node) return false;
+  const n = unwrap(node);
+  if (ts.isStringLiteralLike(n)) return n.text.includes('/api/');
+  if (ts.isTemplateExpression(n)) {
+    return [n.head.text, ...n.templateSpans.map((span) => span.literal.text)].some((part) => part.includes('/api/'));
+  }
+  return false;
+}
+
+/** No init, or an inline one with no `credentials` key: the default `same-origin`, the cookie alone. */
+function defaultsCredentials(init: ts.Expression | undefined): boolean {
+  if (!init) return true;
+  const n = unwrap(init);
+  return (
+    ts.isObjectLiteralExpression(n) &&
+    !n.properties.some(
+      (p) =>
+        ts.isSpreadAssignment(p) ||
+        ((ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) &&
+          (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) &&
+          p.name.text === 'credentials'),
+    )
+  );
+}
+
 /** The bare cookie-only calls in one source text, as `line :: call` strings. */
 function bareCookieOnlyCalls(fileName: string, text: string): string[] {
   const sf = ts.createSourceFile(
@@ -194,6 +257,7 @@ function bareCookieOnlyCalls(fileName: string, text: string): string[] {
     if (ts.isCallExpression(n)) {
       const bare =
         (isGlobalFetchCallee(n.expression, sf) && initIncludes(n.arguments[1])) ||
+        (isGlobalFetchCallee(n.expression, sf) && namesApiPath(n.arguments[0]) && defaultsCredentials(n.arguments[1])) ||
         (unwrap(n.expression).getText(sf) === 'sharedGetJson' && n.arguments.length < 3 && initIncludes(n.arguments[1]));
       if (bare) {
         const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
@@ -220,19 +284,40 @@ function sourceFiles(root: string): string[] {
   return out;
 }
 
+/** Every `ui/packages/<name>/src` that exists, by package directory name. */
+function packageSourceRoots(): Map<string, string> {
+  const roots = new Map<string, string>();
+  for (const entry of readdirSync(PACKAGES_ROOT, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const src = path.join(PACKAGES_ROOT, entry.name, 'src');
+    if (existsSync(src)) roots.set(entry.name, src);
+  }
+  return roots;
+}
+
+let scanned: Map<string, string[]> | undefined;
+
+/** The whole scan, once per run: two cases read it. */
 function scan(): Map<string, string[]> {
+  if (scanned) return scanned;
   const found = new Map<string, string[]>();
-  for (const file of [...sourceFiles(APP_SHELL_SRC), ...sourceFiles(CONSOLE_SRC)]) {
+  const files = [...[...packageSourceRoots().values()].flatMap(sourceFiles), ...sourceFiles(CONSOLE_SRC)];
+  for (const file of files) {
     const calls = bareCookieOnlyCalls(file, readFileSync(file, 'utf8'));
     if (calls.length) found.set(path.relative(UI_ROOT, file).split(path.sep).join('/'), calls);
   }
+  scanned = found;
   return found;
 }
 
-describe('cookie-only same-server fetch ratchet (app-shell + console)', () => {
-  it('reads both trees (guards a broken scan path)', () => {
+describe('cookie-only same-server fetch ratchet (every ui package + console)', () => {
+  it('reads every tree (guards a broken scan path)', () => {
     expect(sourceFiles(APP_SHELL_SRC).length).toBeGreaterThan(500);
     expect(sourceFiles(CONSOLE_SRC).length).toBeGreaterThan(100);
+    const roots = packageSourceRoots();
+    expect(roots.size).toBeGreaterThan(30);
+    const unread = RENDERER_PACKAGES.filter((name) => !roots.has(name) || sourceFiles(roots.get(name)!).length === 0);
+    expect(unread).toEqual([]);
   });
 
   it('the detector sees every bare spelling, and none of the authenticated ones', () => {
@@ -249,7 +334,16 @@ describe('cookie-only same-server fetch ratchet (app-shell + console)', () => {
       ["await (apiFetch ?? createAuthenticatedFetch())('/api/v1/x', { credentials: 'include' });", 0],
       ["await sharedGetJson(u, { credentials: 'include' }, authFetch);", 0],
       ["await fetch('https://cdn.example.com/a.json', { credentials: 'omit' });", 0],
-      ["await fetch('/api/v1/x');", 0],
+      // No init, or no `credentials`, on a written `/api/` path: the cookie alone (objectstack#37225).
+      ["await fetch('/api/v1/x');", 1],
+      ['await fetch(`/api/v1/objects/${name}/fields`);', 1],
+      ["await window.fetch(`${base}/api/v1/x`, { method: 'POST', headers: h });", 1],
+      ["await fetch('/api/v1/x', { credentials: 'same-origin' });", 0],
+      ["await fetch('/api/v1/x', { ...init });", 0],
+      ["await fetch(url);", 0],
+      ["await fetch('https://cdn.example.com/a.json');", 0],
+      ["await authFetch('/api/v1/x');", 0],
+      ["await doFetch(`/api/v1/objects/${name}/fields`);", 0],
     ];
     for (const [code, expected] of cases) {
       // Inside an async function: at a script's top level `await (x)(…)` parses as a call of `await`.
