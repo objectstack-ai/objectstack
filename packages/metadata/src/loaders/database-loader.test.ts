@@ -4269,6 +4269,26 @@ describe('[#37013] a platform-registered skill and a package\'s same-named skill
     expect(JSON.stringify(await rowOf(PKG))).toBe(before);
   });
 
+  // [#37604 item 1] After the withdrawal the package is the name's one holder, so a version attributed
+  // to the environment is its slot's (M1); the version the platform registered is still never restored
+  // into the package's row.
+  for (const [door, address] of [['naming the package', { packageId: PKG }], ['naming no package (the name\'s one holder)', {}]] as const) {
+    it(`after the platform withdraws its record, rollback ${door} of the version the platform registered: refused 409 RESOURCE_CONFLICT, the package's row byte-identical (BASE: the platform's version written into the package's row)`, async () => {
+      const manager = await platformThenPackage();
+      await manager.unregister('skill', NAME, { notify: false, origin: 'platform' });
+      const history = (await driver.find('sys_metadata_history', { where: { type: 'skill', name: NAME } })) as Array<Record<string, unknown>>;
+      const platformVersion = Number(history.find((row) => String(row.metadata).includes('platform v1'))!.version);
+      const before = JSON.stringify(await rowOf(PKG));
+
+      const refused = await manager.rollback('skill', NAME, platformVersion, address).catch((error) => error);
+
+      expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+      expect(String(refused.message)).toContain('the platform registered');
+      expect(JSON.stringify(await rowOf(PKG))).toBe(before);
+      expect(((await manager.get('skill', NAME, PKG)) as any)?.instructions).toBe('package rules');
+    });
+  }
+
   it('the platform withdrawing its record leaves the environment\'s own item of the name', async () => {
     const manager = managerOver();
     await manager.register('skill', NAME, platformSkill('platform v1'), { notify: false, origin: 'platform' });
@@ -4898,6 +4918,31 @@ describe('[#37039] a stored row\'s package binding is read from its package colu
     const memory = new MetadataManager({ formats: ['json'], loaders: [new MemoryLoader()] });
     await memory.register('skill', 'pkg_skill', { name: 'pkg_skill', label: 'a', instructions: 'a', _packageId: ALPHA }, { notify: false });
     expect((await memory.listPackageBindings('skill')).degraded).toBe(false);
+  });
+
+  /**
+   * [#37604] A loader that cannot be read at all loses both walks of one
+   * `listPackageBindings` read: it is named once in `errors`, and its rows
+   * are not read a second time. BEFORE: `errors` named it twice, and the
+   * failure was reported twice for one read.
+   */
+  it('[#37604] listPackageBindings over a loader the list walk lost names it once and does not read its rows again (BEFORE: named twice)', async () => {
+    const rowBindingReads = vi.fn(async () => { throw new Error('sys_metadata unreachable'); });
+    const unreachable: MetadataLoader = {
+      contract: { name: 'down', protocol: 'datasource:', capabilities: { read: true, write: false, watch: false, list: true } },
+      async load() { throw new Error('sys_metadata unreachable'); },
+      async loadMany() { throw new Error('sys_metadata unreachable'); },
+      async list() { throw new Error('sys_metadata unreachable'); },
+      async exists() { return false; },
+      async stat() { return null; },
+      loadRowBindings: rowBindingReads,
+    } as unknown as MetadataLoader;
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerLoader(unreachable);
+    const read = await manager.listPackageBindings('skill');
+    expect(read.degraded).toBe(true);
+    expect(read.errors.filter((error) => error.startsWith('down:'))).toHaveLength(1);
+    expect(rowBindingReads).not.toHaveBeenCalled();
   });
 
   /**

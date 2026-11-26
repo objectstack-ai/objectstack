@@ -34,6 +34,7 @@ import { packageScopedRowWhere } from './sys-metadata-repository.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import type { SysMetadataRepository } from './sys-metadata-repository.js';
 import { ConflictError, assertProtocolCompat } from '@objectstack/metadata-core';
+import { isPlatformRecordRow } from '@objectstack/metadata';
 import {
     planUnmanagedImport,
     UNMANAGED_SEED_TYPE,
@@ -897,7 +898,13 @@ export class ProtocolPackageCommitsFacet {
             (r) => (r?.package_id == null || r.package_id === '' || r.package_id === 'sys_metadata')
                 // [#23198] An overlay of an artifact item keeps its binding
                 // (ADR-0070); see the header. The type folds as the save's does.
-                && !host.isArtifactBacked(PLURAL_TO_SINGULAR[r.type] ?? r.type, String(r.name)),
+                && !host.isArtifactBacked(PLURAL_TO_SINGULAR[r.type] ?? r.type, String(r.name))
+                // [#37604] …nor the platform's own record: the package-less row
+                // the platform registers at every boot is no orphan an author
+                // left behind, and rebound it would become the target's item,
+                // mark and all (`isPlatformRecordRow`, `@objectstack/metadata`,
+                // the one reader the restore refusal and the overlay census ask).
+                && !isPlatformRecordRow(r),
         );
 
         // [ADR-0029 D9.9, ADR-0086 D3, #28776] ⭐ THE OWNER JUDGES, in the save
