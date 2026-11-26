@@ -35,7 +35,11 @@ export const AIModelConfigSchema = lazySchema(() => strictObject({
   },
 }, {
   provider: z.enum(['openai', 'azure_openai', 'anthropic', 'local']).default('openai'),
-  model: z.string().describe('Model name (e.g. gpt-4, claude-3-opus)'),
+  model: z.string().optional().describe(
+    'Model name (e.g. gpt-4, claude-3-opus). Optional: when absent, the agent runs on the '
+    + 'host\'s default model for this environment, so an agent that only tunes sampling '
+    + '(e.g. `temperature`) need not name a model.',
+  ),
   temperature: z.number().min(0).max(2).default(0.7),
   maxTokens: z.number().optional(),
   topP: z.number().optional(),
