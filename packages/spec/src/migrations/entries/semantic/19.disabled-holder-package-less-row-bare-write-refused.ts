@@ -19,13 +19,18 @@ export const entry: SemanticMigration = {
     + '?mode=draft, DELETE /api/v1/meta/TYPE/NAME, its draft discard with ?state=draft, and the in-process save '
     + 'and delete of a metadata item with no packageId), for a name held only by installed packages that are '
     + 'disabled, of a type the registry reads by package, while a package-less row or a package-less draft is '
-    + 'stored for that name',
+    + 'stored for that name. Where the package-less write onto a packaged item was already closed (ADR-0146 D11: '
+    + '403 NOT_OVERRIDABLE for the save and the delete), only the draft discard moves',
   replacement:
     'Enable a package that holds the name (PATCH /api/v1/packages/ID/enable; GET /api/v1/packages shows which '
     + 'packages are disabled), then send the same write again: it edits, drafts or removes the package-less row as '
     + 'it did before. While every holder stays disabled the write answers 409 RESOURCE_CONFLICT and stores, edits '
     + 'and removes nothing. Naming the package on the write (?package=ID) is not the fix: it addresses that '
-    + 'package\'s own row, so it leaves the hidden row where it is and stores a second row beside it.',
+    + 'package\'s own row, so it leaves the hidden row where it is and stores a second row beside it. An item the '
+    + 'ADR-0146 D11 close covers (one read-only code package ships it, with a pair, and os migrate '
+    + 'packageless-overlays would move its row) is the exception this entry does not change: its save and its '
+    + 'delete naming no package answer that close first, 403 NOT_OVERRIDABLE with that close\'s own remedy, with '
+    + 'the package enabled or disabled; there only the draft discard answers this 409.',
   reason:
     'A package-less row stored at a name a package holds is that package\'s customization, never a second item, '
     + 'and a disabled package\'s items are withheld from every read that names no package. The writes that name no '
@@ -37,9 +42,11 @@ export const entry: SemanticMigration = {
     + 'refusal keeps the ?package= remedy) answer as before. There is no mechanical rewrite: whether the disabled '
     + 'package should be enabled again is a judgement about the deployment.',
   acceptanceCriteria:
-    'For every name whose holders are all disabled and for which a package-less row or draft is stored: PUT '
-    + '/api/v1/meta/TYPE/NAME (publish mode and ?mode=draft) and DELETE /api/v1/meta/TYPE/NAME (and ?state=draft) '
-    + 'naming no package answer 409 RESOURCE_CONFLICT and leave every stored row of the name byte-identical; once '
-    + 'a holder is enabled again, the read naming no package serves the package-less row as it was stored, and '
-    + 'the same writes answer as they did before the disable.',
+    'For every name whose holders are all disabled and for which a package-less row or draft is stored, where the '
+    + 'ADR-0146 D11 close leaves the package-less write open: PUT /api/v1/meta/TYPE/NAME (publish mode and '
+    + '?mode=draft) and DELETE /api/v1/meta/TYPE/NAME (and ?state=draft) naming no package answer 409 '
+    + 'RESOURCE_CONFLICT and leave every stored row of the name byte-identical. Where that close applies, the '
+    + 'draft discard answers the same 409, and the save, the draft save and the delete answer 403 NOT_OVERRIDABLE '
+    + 'as they did before, storing nothing. Once a holder is enabled again, the read naming no package serves the '
+    + 'package-less row as it was stored, and the same writes answer as they did before the disable.',
 };
