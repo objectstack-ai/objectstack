@@ -842,6 +842,11 @@ function GridFieldBody({
       // The child FIELD's hand-lock predicate, carried onto the column in memory
       // by `@object-ui/plugin-form`'s column derivation (never an authored
       // `inlineColumns` key), folds into the same per-row verdict.
+      // A child field's static `uiReadonly` rides the same in-memory carry
+      // when an AUTHORED column names it (objectstack#36806): locked on every
+      // row, no predicate to judge.
+      const uiReadonly = (c as { uiReadonly?: boolean }).uiReadonly === true;
+      if (uiReadonly) return { readonly: true, required: !!c.required };
       const uiReadonlyWhen = (c as { uiReadonlyWhen?: FieldRulePredicate }).uiReadonlyWhen;
       if (!c.readonlyWhen && !uiReadonlyWhen && !c.requiredWhen) {
         return { readonly: false, required: !!c.required };

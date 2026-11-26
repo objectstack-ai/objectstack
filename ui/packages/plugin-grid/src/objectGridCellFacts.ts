@@ -53,6 +53,8 @@ export interface CellReadOnlyInputs {
    * half is read.
    */
   row?: Record<string, unknown> | null;
+  /** The host's predicate scope (`current_user` and friends), as the edit dialog binds it. */
+  scope?: Record<string, unknown>;
   /** May this reader write the field (`resolveFieldAffordance('listInlineEdit', …)`)? */
   fieldWritable: boolean;
   /** The authored `editable` the grid was handed (the list page folds `userActions.editInline` into it). */
@@ -76,7 +78,7 @@ export function cellReadOnlyKind(inputs: CellReadOnlyInputs): CellReadOnlyKind |
   const fieldKind = fieldInlineReadOnlyKind(inputs.fieldDef);
   if (fieldKind) return fieldKind;
   // The conditional half of the one hand-lock verdict, over this row.
-  if (inputs.row != null && fieldReadOnlyByHand(inputs.fieldDef, inputs.row)) return 'readonly';
+  if (inputs.row != null && fieldReadOnlyByHand(inputs.fieldDef, inputs.row, { scope: inputs.scope })) return 'readonly';
   if (!inputs.fieldWritable) return 'noFieldPermission';
   if (!inputs.canUpdate) return 'noPermission';
   if (!inputs.objectEditable) return 'objectReadOnly';

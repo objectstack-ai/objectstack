@@ -50,6 +50,7 @@ import {
   useFilterScope,
   useResolvedFilter,
   classifyLoadError,
+  usePredicateScope,
 } from '@object-ui/react';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -1308,6 +1309,8 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
   // before the early returns for `loading` / `error` / `!calendarConfig`,
   // otherwise React detects a hook-order change when those conditions
   // flip across re-renders (e.g. tab switching between board → calendar).
+  // The host's predicate scope, as the edit dialog binds it (objectstack#36806).
+  const predicateScope = usePredicateScope();
   const handleEventDropDefault = useCallback(async (record: any, newStart: Date, newEnd?: Date) => {
     if (!calendarConfig) return;
     const { startDateField, endDateField } = calendarConfig;
@@ -1333,8 +1336,8 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
     // array identity puts the event back where the record has it.
     const lockDefs = objectSchema?.fields as Record<string, Record<string, unknown> | undefined> | undefined;
     if (
-      fieldReadOnlyByHand(lockDefs?.[startDateField], record) ||
-      (writesEnd && fieldReadOnlyByHand(lockDefs?.[endDateField as string], record))
+      fieldReadOnlyByHand(lockDefs?.[startDateField], record, { scope: predicateScope }) ||
+      (writesEnd && fieldReadOnlyByHand(lockDefs?.[endDateField as string], record, { scope: predicateScope }))
     ) {
       setData((prev) => prev.slice());
       return;
@@ -1411,7 +1414,7 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
           })
         : tt('form.recordNotFoundOrHidden', "This record doesn't exist, or you don't have access to it.");
     }
-  }, [calendarConfig, schema.objectName, dataSource, data, tt, t, labels, objectSchema]);
+  }, [calendarConfig, schema.objectName, dataSource, data, tt, t, labels, objectSchema, predicateScope]);
 
   // Quick-create state: clicking an empty day cell opens a small dialog
   // pre-filled with that date. On submit, dataSource.create() inserts a

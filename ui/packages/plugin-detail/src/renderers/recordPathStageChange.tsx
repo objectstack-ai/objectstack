@@ -107,6 +107,7 @@ import {
   isExternalWriteRefusal,
   isPermissionError,
   useInlineEdit,
+  usePredicateScope,
   useRecordContext,
   useSafeFieldLabel,
 } from '@object-ui/react';
@@ -228,6 +229,9 @@ export function useStageChange(
   const rereadRecord = async () => { await (ctx?.reread ?? ctx?.refresh)?.(); };
   const inline = useInlineEdit();
   const perms = usePermissions();
+  // The host's predicate scope (`current_user` and friends), as the form binds
+  // it, so a hand-lock predicate means the same here as in the edit dialog.
+  const predicateScope = usePredicateScope();
   const { t } = useDetailTranslation();
   const { fieldLabel, translateOptions } = useSafeFieldLabel();
   const { language } = useObjectTranslation();
@@ -252,7 +256,7 @@ export function useStageChange(
     && !inline.editing
     // The one hand-lock verdict over the stored record (`fieldReadOnlyByHand`):
     // a status that moves only through actions (`uiReadonly`) offers no stage.
-    && !fieldReadOnlyByHand(fieldDef, ctx?.data as Record<string, unknown> | undefined)
+    && !fieldReadOnlyByHand(fieldDef, ctx?.data as Record<string, unknown> | undefined, { scope: predicateScope })
     && !isComputedDetailField(undefined, fieldDef)
     && !NON_EDITABLE_SYSTEM_FIELDS.has(statusField)
     && resolveFieldAffordance('recordEdit', perms, objectName, statusField);
@@ -267,7 +271,7 @@ export function useStageChange(
   // fill-in asks the same one).
   const fillable = (name: string, def: Record<string, unknown>): boolean =>
     name !== statusField
-    && !fieldReadOnlyByHand(def, record)
+    && !fieldReadOnlyByHand(def, record, { scope: predicateScope })
     && !isComputedDetailField(undefined, def as FieldDef)
     && !NON_EDITABLE_SYSTEM_FIELDS.has(name)
     && !!objectName

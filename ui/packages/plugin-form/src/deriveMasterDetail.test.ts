@@ -673,4 +673,27 @@ describe('line-item columns and the hand lock (#36806)', () => {
     const hydrated = hydrateColumns([{ name: 'qty' }], schema, { booleanLabel });
     expect((hydrated[0] as { uiReadonlyWhen?: unknown }).uiReadonlyWhen).toBe("parent.status != 'draft'");
   });
+
+  // REWORK S3(a): an AUTHORED column over a `uiReadonly` child field, typed
+  // or not, carries the lock — no server strip stands behind the hand lock.
+  it('an authored column over a uiReadonly child field carries the lock, typed or untyped', () => {
+    const schema = {
+      name: 'line',
+      fields: {
+        status: { type: 'text', label: 'Status', uiReadonly: true },
+        qty: { type: 'number', label: 'Qty', uiReadonlyWhen: "record.status != 'draft'" },
+        note: { type: 'text', label: 'Note' },
+      },
+    };
+    const [untyped, typed, typedWhen, plain] = hydrateColumns(
+      [{ name: 'status' }, { name: 'status', type: 'text' }, { name: 'qty', type: 'number' }, { name: 'note' }],
+      schema,
+      { booleanLabel },
+    ) as Array<{ uiReadonly?: boolean; uiReadonlyWhen?: unknown }>;
+    expect(untyped!.uiReadonly).toBe(true);
+    expect(typed!.uiReadonly).toBe(true);
+    expect(typedWhen!.uiReadonlyWhen).toBe("record.status != 'draft'");
+    expect(plain!.uiReadonly).toBeUndefined();
+    expect(plain!.uiReadonlyWhen).toBeUndefined();
+  });
 });

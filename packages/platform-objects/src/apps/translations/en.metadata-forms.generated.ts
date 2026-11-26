@@ -923,7 +923,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonlyWhen: {
         label: "Ui Readonly When",
-        helpText: "CEL predicate over the record (e.g. record.status != 'draft') — people cannot edit the field in the console while it is TRUE; actions, imports, the API and flows still write it, judged by the object's validations. Reads the record's own columns, as Read-only when does."
+        helpText: "CEL predicate over the record (e.g. record.status != 'draft') — while it is TRUE, people cannot edit the field of an existing record in the console (the edit dialog, the record page, grids, kanban and calendar drag); a new record's create dialog is not judged. Actions, imports, the API and flows still write it, judged by the object's validations. Reads the record's own columns, as Read-only when does."
       },
       requiredWhen: {
         label: "Required When",

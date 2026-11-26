@@ -923,7 +923,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonlyWhen: {
         label: "In der Oberfläche schreibgeschützt wenn",
-        helpText: "CEL-Prädikat über den Datensatz (z. B. record.status != 'draft') – solange es TRUE ist, kann niemand das Feld in der Konsole bearbeiten; Aktionen, Importe, die API und Flows schreiben es weiterhin, beurteilt von den Validierungen des Objekts. Liest die eigenen Spalten des Datensatzes, wie Schreibgeschützt wenn."
+        helpText: "CEL-Prädikat über den Datensatz (z. B. record.status != 'draft') – solange es TRUE ist, kann niemand das Feld eines bestehenden Datensatzes in der Konsole bearbeiten (Bearbeitungsdialog, Datensatzseite, Tabellen, Ziehen in Kanban und Kalender); der Erstellungsdialog eines neuen Datensatzes wertet es nicht aus. Aktionen, Importe, die API und Flows schreiben es weiterhin, beurteilt von den Validierungen des Objekts. Liest die eigenen Spalten des Datensatzes, wie Schreibgeschützt wenn."
       },
       requiredWhen: {
         label: "Erforderlich wenn",

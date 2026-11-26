@@ -46,6 +46,21 @@ describe('grid hand lock (#36806)', () => {
     expect(cellReadOnlyKind({ ...OPEN, fieldDef, row: { status: 'draft' } })).toBeNull();
   });
 
+  // REWORK S1: a projected row without the operand cannot be judged, and no
+  // server judges the hand lock, so the cell locks rather than opens.
+  it('a row missing the uiReadonlyWhen operand is locked', () => {
+    const fieldDef = { type: 'text', uiReadonlyWhen: "record.status != 'draft'" };
+    expect(cellReadOnlyKind({ ...OPEN, fieldDef, row: { name: 'projected' } })).toBe('readonly');
+  });
+
+  // REWORK S1: the host scope reaches the cell gate.
+  it('judges a current_user predicate over the scope the grid passes', () => {
+    const fieldDef = { type: 'text', uiReadonlyWhen: 'current_user.id != record.owner' };
+    const scope = { current_user: { id: 'u1' } };
+    expect(cellReadOnlyKind({ ...OPEN, fieldDef, row: { owner: 'u1' }, scope })).toBeNull();
+    expect(cellReadOnlyKind({ ...OPEN, fieldDef, row: { owner: 'u2' }, scope })).toBe('readonly');
+  });
+
   it('controls: a plain column edits', () => {
     expect(fieldInlineReadOnlyKind({ type: 'text' })).toBeNull();
     expect(cellReadOnlyKind({ ...OPEN, row: { status: 'approved' } })).toBeNull();

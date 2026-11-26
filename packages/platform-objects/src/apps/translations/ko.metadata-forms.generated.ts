@@ -923,7 +923,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonlyWhen: {
         label: "화면에서 읽기 전용 조건",
-        helpText: "레코드에 대한 CEL 조건식(예: record.status != 'draft') — TRUE인 동안 콘솔에서 이 필드를 편집할 수 없습니다. 작업, 가져오기, API, 플로우는 계속 기록하며 개체의 유효성 검사로 판정됩니다. 읽기 전용 조건과 마찬가지로 레코드 자체의 열을 읽습니다."
+        helpText: "레코드에 대한 CEL 조건식(예: record.status != 'draft') — TRUE인 동안 기존 레코드의 이 필드는 콘솔에서 편집할 수 없습니다(편집 대화상자, 레코드 페이지, 그리드, 칸반 및 캘린더 드래그). 새 레코드의 생성 대화상자는 판단하지 않습니다. 작업, 가져오기, API 및 흐름은 계속 기록하며, 객체의 유효성 검사가 판단합니다. '읽기 전용 조건'처럼 레코드 자체의 열을 읽습니다."
       },
       requiredWhen: {
         label: "필수 조건",

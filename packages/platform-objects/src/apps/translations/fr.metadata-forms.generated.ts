@@ -923,7 +923,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonlyWhen: {
         label: "Lecture seule dans l'interface si",
-        helpText: "Prédicat CEL sur l'enregistrement (par ex. record.status != 'draft') : tant qu'il vaut TRUE, personne ne peut modifier le champ dans la console ; les actions, les imports, l'API et les flux continuent de l'écrire, jugés par les validations de l'objet. Lit les colonnes propres de l'enregistrement, comme Lecture seule si."
+        helpText: "Prédicat CEL sur l'enregistrement (p. ex. record.status != 'draft') : tant qu'il vaut TRUE, personne ne peut modifier le champ d'un enregistrement existant dans la console (la boîte d'édition, la page de l'enregistrement, les grilles, le glisser-déposer du kanban et du calendrier) ; la boîte de création d'un nouvel enregistrement ne l'évalue pas. Les actions, les imports, l'API et les flux continuent de l'écrire, jugés par les validations de l'objet. Lit les colonnes propres de l'enregistrement, comme Lecture seule si."
       },
       requiredWhen: {
         label: "Obligatoire si",

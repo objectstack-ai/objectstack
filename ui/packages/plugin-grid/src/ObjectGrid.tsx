@@ -1557,6 +1557,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     latestCellHooks.current = { requiredPrompt, askStateMove, openReferencedRecord };
   });
   const opensReferencedRecords = !!openReferencedRecord;
+  // The host's predicate scope for the cell gate's lock predicates, as the
+  // edit dialog binds it (objectstack#36806).
+  const cellLockScope = usePredicateScope();
   const gridCellSelection = useMemo((): GridCellSelection | null => (hostCellSelection
     ? {
         describeCell: (row, columnKey) => {
@@ -1569,6 +1572,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           const kind = cellReadOnlyKind({
             fieldDef,
             row,
+            scope: cellLockScope,
             fieldWritable: !objectName || resolveFieldAffordance('listInlineEdit', perms, objectName, columnKey),
             gridEditable,
             objectEditable: objectInlineEditable,
@@ -1633,7 +1637,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       }
     : null), [
     hostCellSelection, opensReferencedRecords, objectFields, objectSchema, objectName, perms,
-    gridEditable, objectInlineEditable, approvalLocks, recordVerdict, pageRecordIds, t, leaveHeldRows,
+    gridEditable, objectInlineEditable, approvalLocks, recordVerdict, pageRecordIds, t, leaveHeldRows, cellLockScope,
   ]);
   // objectstack#35685 — the state-machine confirm, the grid's next question
   // when the required-fields prompt has nothing to ask.

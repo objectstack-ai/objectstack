@@ -580,6 +580,10 @@ const useSafeFormTranslation = createSafeTranslation(
     // not be evaluated (see `handleSubmit`). Byte-identical to the `en` pack.
     'form.visibleWhenFaulted':
       "Can't submit: the visibleWhen rule of {{fields}} could not be evaluated. The rule must be fixed before this form can be submitted.",
+    // objectstack#36806 — the same refusal for a faulted `uiReadonlyWhen` (the
+    // hand lock no server judges). Byte-identical to the `en` pack.
+    'form.uiReadonlyWhenFaulted':
+      "Can't submit: the uiReadonlyWhen rule of {{fields}} could not be evaluated. The rule must be fixed before this form can be submitted.",
     // objectui#12108 — the hint under an empty field the server fills at insert
     // (see `renderFieldDescription`). Byte-identical to the `en` pack.
     'form.serverDefaultHint': 'Set automatically when saved.',
@@ -2247,14 +2251,33 @@ ComponentRegistry.register('form',
     // stored BLANK field rule is a fault like any other (ADR-0137 D2; see
     // `FieldRuleFaults`) and is refused; a new one is refused earlier, at
     // authoring, by the form schema's triad wire.
-    const { conditionallyHiddenFieldNames, faultedVisibleWhenFieldNames } = React.useMemo(() => {
+    // [objectstack#36806] A faulted `uiReadonlyWhen` (the hand lock's
+    // predicate) is refused the same way, on an edit form (a create never
+    // judges it). It has the one possible judge here: no server evaluates the
+    // hand lock, so ADR-0137 D2's "the submit refuses what render let through"
+    // can only be this form. Render already holds the field locked (the hand
+    // lock fails closed); the refusal says the rule itself must be fixed.
+    const { conditionallyHiddenFieldNames, faultedVisibleWhenFieldNames, faultedUiReadonlyWhenFieldNames } = React.useMemo(() => {
       const hidden = new Set<string>();
       const faulted: string[] = [];
+      const faultedHandLock: string[] = [];
       for (const f of fields as FormFieldConfig[]) {
         const name = f?.name;
         if (!name) continue;
         const visibleWhen = (f as any).visibleWhen;
         const visibleOn = (f as any).visibleOn;
+        const uiReadonlyWhen = isCreateForm ? undefined : (f as any).uiReadonlyWhen;
+        if (uiReadonlyWhen != null && visibleWhen == null && f.type !== 'section-divider') {
+          const handLock = resolveFieldRuleState(
+            { uiReadonlyWhen },
+            ruleRecord,
+            { readonly: (f as any).readonly === true },
+            previousRecord,
+            predicateScope,
+            `field '${name}'`,
+          );
+          if (handLock.faults.uiReadonlyWhen !== undefined) faultedHandLock.push(name);
+        }
         if (visibleWhen == null && visibleOn == null) continue;
         if (visibleWhen != null) {
           // A fail-closed section gate (objectui#13055) is judged off the triad.
@@ -2279,6 +2302,7 @@ ComponentRegistry.register('form',
             `field '${name}'`,
           );
           if (st.faults.visibleWhen !== undefined && f.type !== 'section-divider') faulted.push(name);
+          if (st.faults.uiReadonlyWhen !== undefined && f.type !== 'section-divider') faultedHandLock.push(name);
           if (!st.visible || (gate && !sectionGateVisible(f, ruleRecord, previousRecord, predicateScope))) {
             hidden.add(name);
             continue;
@@ -2293,7 +2317,11 @@ ComponentRegistry.register('form',
           hidden.add(name);
         }
       }
-      return { conditionallyHiddenFieldNames: hidden, faultedVisibleWhenFieldNames: faulted };
+      return {
+        conditionallyHiddenFieldNames: hidden,
+        faultedVisibleWhenFieldNames: faulted,
+        faultedUiReadonlyWhenFieldNames: faultedHandLock,
+      };
     }, [fields, ruleRecord, previousRecord, isCreateForm, predicateScope]);
 
     // ── The section grouping contract (objectui#6236, maintainer ruling
@@ -3647,6 +3675,16 @@ ComponentRegistry.register('form',
         raiseRefusal(message);
         // Marks the tabs that hold the fields, as a rejected submit does.
         setRejectedFieldNames(faultedVisibleWhenFieldNames);
+        return Promise.resolve();
+      }
+      if (faultedUiReadonlyWhenFieldNames.length > 0) {
+        event?.preventDefault?.();
+        raiseRefusal(t('form.uiReadonlyWhenFaulted', {
+          fields: faultedUiReadonlyWhenFieldNames
+            .map((n) => fieldLabelByName[n] || n)
+            .join(t('validation.formInvalidJoiner')),
+        }));
+        setRejectedFieldNames(faultedUiReadonlyWhenFieldNames);
         return Promise.resolve();
       }
       return submitThroughValidation(event);

@@ -923,7 +923,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       uiReadonlyWhen: {
         label: "画面上で読み取り専用の条件",
-        helpText: "レコードに対する CEL 述語（例: record.status != 'draft'）。TRUE の間はコンソールでこのフィールドを編集できません。アクション、インポート、API、フローは引き続き書き込めて、オブジェクトの検証ルールで判定されます。「読み取り専用条件」と同じく、レコード自身の列を読みます。"
+        helpText: "レコードに対する CEL 述語（例: record.status != 'draft'）— TRUE の間、既存レコードのこのフィールドはコンソールで編集できません（編集ダイアログ、レコードページ、グリッド、かんばんとカレンダーのドラッグ）。新規レコードの作成ダイアログでは判定されません。アクション、インポート、API、フローは引き続き書き込み、オブジェクトの検証ルールが判定します。「読み取り専用条件」と同じくレコード自身の列を読みます。"
       },
       requiredWhen: {
         label: "必須条件",

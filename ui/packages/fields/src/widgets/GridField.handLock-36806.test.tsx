@@ -53,4 +53,24 @@ describe('line-item grid hand lock (uiReadonlyWhen, #36806)', () => {
     );
     expect((screen.getAllByLabelText('Qty')[0] as HTMLInputElement).disabled).toBe(true);
   });
+
+  // REWORK S3(a): an authored column over a `uiReadonly` child field carries
+  // `uiReadonly: true` (plugin-form's `hydrateColumns`), and the cell reads it.
+  it('a column carrying uiReadonly locks every row', () => {
+    render(
+      <GridField
+        value={[{ product: 'A', status: 'x' }]}
+        onChange={() => {}}
+        field={{
+          columns: [
+            { name: 'product', label: 'Product', type: 'text' },
+            { name: 'status', label: 'Status', type: 'text', uiReadonly: true },
+          ],
+        } as any}
+        contextRecord={{}}
+      />,
+    );
+    expect((screen.getAllByLabelText('Status')[0] as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getAllByLabelText('Product')[0] as HTMLInputElement).disabled).toBe(false);
+  });
 });

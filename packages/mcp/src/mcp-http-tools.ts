@@ -3846,6 +3846,9 @@ export function registerObjectTools(
       },
     );
 
+    // #36806: the uiReadonly clause names only the console surfaces that honour
+    // the hand lock; the Gantt, the timesheet cell, the swimlane drag and the
+    // assistant are #37448.
     server.registerTool(
       note('describe_object'),
       {
@@ -3853,8 +3856,8 @@ export function registerObjectTools(
           'Get the schema of a data object as you may read it, with what a write needs: name, label, description; '
           + 'each field\'s name, type, label, description (where set: the author\'s, or the platform\'s on a column '
           + 'it injects), required, readonly (leave it out of a write), uiReadonly / uiReadonlyWhen where set '
-          + '(a person cannot edit the field at the console; your write may still set it, judged by the '
-          + 'validations), system, '
+          + '(a person cannot edit the field in the console\'s dialogs, record page, grids, kanban or calendar; '
+          + 'your write may still set it, judged by the validations), system, '
           + 'options (send the value) and defaultValue (omit the field to get it; never copy the value); the active '
           + 'validations; the enabled features. readonly is the schema\'s, not your edit permission.',
         inputSchema: strictToolInput(

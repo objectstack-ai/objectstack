@@ -353,6 +353,18 @@ export function evalFieldPredicate(
 const VISIBLE_WHEN_FAULTED = true;
 const READONLY_WHEN_FAULTED = false;
 const REQUIRED_WHEN_FAULTED = false;
+/**
+ * The hand lock's predicate (`Field.uiReadonlyWhen`, objectstack#36806) fails
+ * CLOSED, unlike `readonlyWhen`. ADR-0137 D2 lets a lock fail open at render
+ * only because a judge stands behind it: the server drops a `readonlyWhen`
+ * write the client let through. No server evaluates `uiReadonlyWhen` — it is a
+ * console-only lock — so a fault that opened the field would be a silent edit
+ * nobody judges. Closed costs a person the edit (the warning names the fault,
+ * and actions, imports and the API still write the field); open would cost the
+ * lock. The same verdict covers a row that does not carry the predicate's
+ * operands (`No such key`): locked until the row is read in full.
+ */
+const UI_READONLY_WHEN_FAULTED = true;
 
 /**
  * The verdict {@link resolveFieldRuleState} applies when the author declared NO
@@ -403,7 +415,7 @@ const REQUIRED_WHEN_ABSENT = false;
 export interface FieldRuleFaults {
   visibleWhen?: string;
   readonlyWhen?: string;
-  /** The hand lock's predicate (`@objectstack/spec` `Field.uiReadonlyWhen`); fail-open, as `readonlyWhen`. */
+  /** The hand lock's predicate (`@objectstack/spec` `Field.uiReadonlyWhen`); fails CLOSED (no server judges it). */
   uiReadonlyWhen?: string;
   requiredWhen?: string;
 }
@@ -468,7 +480,8 @@ export function resolveFieldRuleState(
      * The HAND lock's predicate (`@objectstack/spec` `Field.uiReadonlyWhen`,
      * ruling record 7180466652): folded into the same `readonly` verdict, since
      * every caller of this function is a console surface a person edits
-     * through. Fail-open on a fault, as `readonlyWhen`.
+     * through. Fails CLOSED on a fault (see `UI_READONLY_WHEN_FAULTED`): no
+     * server judges it, so a fault never opens the field.
      */
     uiReadonlyWhen?: FieldRulePredicate;
     requiredWhen?: FieldRulePredicate;
@@ -536,7 +549,7 @@ export function resolveFieldRuleState(
       ? evalFieldPredicate(
           rules.uiReadonlyWhen,
           record,
-          READONLY_WHEN_FAULTED,
+          UI_READONLY_WHEN_FAULTED,
           previous,
           scope,
           diag('uiReadonlyWhen'),

@@ -33,8 +33,11 @@
  *
  * The predicate halves run through {@link resolveFieldRuleState}, the one
  * evaluator of field-level CEL, so a predicate here means what it means on
- * the form; a predicate that cannot be evaluated leaves the field editable,
- * as `readonlyWhen` does everywhere on the client (the server decides).
+ * the form. A `readonlyWhen` that cannot be evaluated leaves the field
+ * editable (the server drops the write); a `uiReadonlyWhen` that cannot be
+ * evaluated LOCKS it, since no server judges the hand lock — including a row
+ * that does not carry the predicate's operands, so a surface whose row is a
+ * projection reads them first (the grid's row load, `@object-ui/plugin-grid`).
  */
 import { resolveFieldRuleState, type FieldRulePredicate } from './fieldRules.js';
 
@@ -74,7 +77,8 @@ export function fieldHasConditionalHandLock(def: FieldHandLockDef | null | undef
 /**
  * The FULL verdict over one record: the static half, or `readonlyWhen` /
  * `uiReadonlyWhen` TRUE over `record`. With no record the predicates are
- * judged over an empty one (a column-level question, answered fail-open).
+ * judged over an empty one: `readonlyWhen` then answers open, `uiReadonlyWhen`
+ * locked (it cannot be judged, and nothing behind it judges the write).
  */
 export function fieldReadOnlyByHand(
   def: FieldHandLockDef | null | undefined,

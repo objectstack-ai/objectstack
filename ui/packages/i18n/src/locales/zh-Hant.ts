@@ -204,6 +204,7 @@ const zhHant = {
     uploadInFlight: '請等待上傳完成後再儲存。',
     clearedOnHide: '已清空不再適用於當前取值的欄位：{{fields}}',
     visibleWhenFaulted: '無法提交：{{fields}} 的 visibleWhen 規則無法求值。需先修正該規則，才能提交此表單。',
+    uiReadonlyWhenFaulted: '無法提交：{{fields}} 的 uiReadonlyWhen 規則無法求值。需先修正該規則，才能提交此表單。',
     fieldRequired: '此欄位為必填項',
     saveError: '儲存失敗',
     unsavedChanges: '您有未儲存的更改，確定要離開嗎？',

@@ -39,8 +39,29 @@ describe('fieldReadOnlyByHand (#36806)', () => {
     expect(fieldReadOnlyByHand({}, { status: 'draft' })).toBe(false);
   });
 
-  it('a predicate that cannot be evaluated leaves the field editable (fail-open)', () => {
-    expect(fieldReadOnlyByHand({ uiReadonlyWhen: 'record.(' }, { status: 'x' })).toBe(false);
+  // REWORK S2: no server judges the hand lock (ADR-0137 D2), so a fault
+  // LOCKS the field — unlike `readonlyWhen`, whose fault the server answers.
+  it('a uiReadonlyWhen that cannot be evaluated LOCKS the field (fail-closed)', () => {
+    expect(fieldReadOnlyByHand({ uiReadonlyWhen: 'record.(' }, { status: 'x' })).toBe(true);
+    // The control: a faulted readonlyWhen stays open on the client.
+    expect(fieldReadOnlyByHand({ readonlyWhen: 'record.(' }, { status: 'x' })).toBe(false);
+  });
+
+  // REWORK S1: a projected row that lacks the operand cannot be judged.
+  it('a row missing the predicate\'s operand is locked, and judged once the operand is read', () => {
+    const def = { uiReadonlyWhen: "record.status != 'draft'" };
+    expect(fieldReadOnlyByHand(def, { name: 'projected row' })).toBe(true);
+    expect(fieldReadOnlyByHand(def, { name: 'full row', status: 'draft' })).toBe(false);
+  });
+
+  // REWORK S1: the host scope binds `current_user` on every surface.
+  it('judges a current_user predicate over the host scope it is given', () => {
+    const def = { uiReadonlyWhen: "current_user.id != record.owner" };
+    const scope = { current_user: { id: 'u1' } };
+    expect(fieldReadOnlyByHand(def, { owner: 'u1' }, { scope })).toBe(false);
+    expect(fieldReadOnlyByHand(def, { owner: 'u2' }, { scope })).toBe(true);
+    // No scope: the root is unbound, the predicate faults, the field locks.
+    expect(fieldReadOnlyByHand(def, { owner: 'u1' })).toBe(true);
   });
 });
 
@@ -54,5 +75,11 @@ describe('resolveFieldRuleState folds the hand lock (#36806)', () => {
     const rules = { uiReadonlyWhen: "record.status != 'draft'" };
     expect(resolveFieldRuleState(rules, { status: 'approved' }, {}).readonly).toBe(true);
     expect(resolveFieldRuleState(rules, { status: 'draft' }, {}).readonly).toBe(false);
+  });
+
+  it('a faulted uiReadonlyWhen locks and is reported under its own key', () => {
+    const state = resolveFieldRuleState({ uiReadonlyWhen: 'record.(' }, { status: 'x' }, {});
+    expect(state.readonly).toBe(true);
+    expect(state.faults?.uiReadonlyWhen).toBeTruthy();
   });
 });

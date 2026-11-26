@@ -923,7 +923,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       uiReadonlyWhen: {
         label: "介面唯讀條件",
-        helpText: "針對記錄的 CEL 述詞（例如 record.status != 'draft'）——為 TRUE 時使用者無法在主控台中編輯該欄位；動作、匯入、API 與流程仍可寫入，並由物件的驗證規則裁決。與「唯讀條件」一樣讀取記錄自身的欄位。"
+        helpText: "基於記錄的 CEL 謂詞（例如 record.status != 'draft'）——為 TRUE 時，使用者無法在控制台中編輯既有記錄的該欄位（編輯對話框、記錄頁、表格、看板和行事曆拖曳）；新建記錄的建立對話框不做判斷。動作、匯入、API 和流程仍可寫入，並由物件的驗證規則裁決。與「唯讀條件」一樣讀取記錄自身的欄。"
       },
       requiredWhen: {
         label: "必填條件",

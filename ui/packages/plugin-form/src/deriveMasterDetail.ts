@@ -415,7 +415,9 @@ export function hydrateColumns(
   return cols.map((col) => {
     if (col.type) {
       if (col.type === 'currency') reportCurrencyColumnScale(col, childSchema?.name, false);
-      return col; // explicit type — respect the author's choice
+      // explicit type — respect the author's choice, save the child field's
+      // hand lock, which no authored column may open (objectstack#36806)
+      return withHandLock(col, (fields as any)[col.name]);
     }
     const d = (fields as any)[col.name];
     if (!d) return col; // unknown field — leave as-is (grid falls back to text)
@@ -436,7 +438,7 @@ export function hydrateColumns(
     }
     if (type === 'file') applyFileColumnProps(next, d);
     if (next.readonlyWhen == null && d?.readonlyWhen) next.readonlyWhen = d.readonlyWhen;
-    if ((next as { uiReadonlyWhen?: unknown }).uiReadonlyWhen == null && d?.uiReadonlyWhen) (next as { uiReadonlyWhen?: unknown }).uiReadonlyWhen = d.uiReadonlyWhen;
+    Object.assign(next, withHandLock(next, d));
     if (next.requiredWhen == null && d?.requiredWhen) {
       next.requiredWhen = d.requiredWhen;
     }
@@ -448,6 +450,26 @@ export function hydrateColumns(
     }
     return next;
   });
+}
+
+/**
+ * The child FIELD's hand lock carried onto an authored line-item column
+ * (objectstack#36806): `uiReadonly: true` and `uiReadonlyWhen`, in memory only
+ * (never authored `inlineColumns` keys), read by `GridFieldWidget`'s per-row
+ * cell verdict. Derived columns never list a `uiReadonly` child field
+ * (`deriveInlineGridColumns` skips it); an AUTHORED column may name one, typed
+ * or not, and the lock must hold there too — no server strip stands behind it.
+ */
+function withHandLock(col: GridColumn, d: Record<string, unknown> | undefined): GridColumn {
+  if (!d) return col;
+  const lockStatic = d.uiReadonly === true;
+  const lockWhen = d.uiReadonlyWhen;
+  if (!lockStatic && lockWhen == null) return col;
+  const next = { ...col } as GridColumn & { uiReadonly?: boolean; uiReadonlyWhen?: unknown };
+  if (lockStatic) next.uiReadonly = true;
+  // The FIELD's predicate, never a column's own: the column may not open it.
+  if (lockWhen != null) next.uiReadonlyWhen = lockWhen;
+  return next;
 }
 
 /**

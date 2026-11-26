@@ -923,7 +923,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       uiReadonlyWhen: {
         label: "Somente leitura na interface quando",
-        helpText: "Predicado CEL sobre o registro (por ex., record.status != 'draft') — enquanto for TRUE, ninguém pode editar o campo no console; ações, importações, a API e fluxos continuam gravando-o, julgados pelas validações do objeto. Lê as colunas do próprio registro, como Somente leitura quando."
+        helpText: "Predicado CEL sobre o registro (ex.: record.status != 'draft') — enquanto for TRUE, ninguém pode editar o campo de um registro existente no console (a caixa de edição, a página do registro, as grades e o arrastar no kanban e no calendário); a caixa de criação de um novo registro não o avalia. Ações, importações, a API e os fluxos continuam gravando-o, julgados pelas validações do objeto. Lê as colunas do próprio registro, como Somente leitura quando."
       },
       requiredWhen: {
         label: "Obrigatório quando",
