@@ -30,7 +30,7 @@ import type { ScriptContext } from '../sandbox/script-runner.js';
 const runner = new QuickJSScriptRunner({ hookTimeoutMs: 10_000 });
 
 const MESSAGE = '时长（分钟）的小数位数不能超过 0 位(当前 1 位)';
-const FIELDS = [{ field: 'duration_minutes', code: 'invalid_scale', message: MESSAGE }];
+const FIELDS = [{ field: 'duration_minutes', code: 'max_scale' as const, message: MESSAGE }];
 
 /** Run the Log a Call body against an api whose write rejects with `thrown`; answer what the runner threw. */
 async function runAction(source: string, thrown: unknown): Promise<SandboxError> {
