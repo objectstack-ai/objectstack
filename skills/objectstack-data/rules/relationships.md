@@ -10,8 +10,8 @@
 
 | Type | Lifecycle | Required | Sharing | Roll-ups | Use Case |
 |:-----|:----------|:---------|:--------|:---------|:---------|
-| `lookup` | Independent | Optional by default | Independent | Supported via `summary` | "Related to" |
-| `master_detail` | Coupled (cascade delete) | Forced only under `controlled_by_parent`, unless the optional master (below); else lint-warned | Inherits parent; read-on-master opt-ins (below) | Supported via `summary` | "Owned by" |
+| `lookup` | Independent | Optional by default | Independent | Via `summary` | "Related to" |
+| `master_detail` | Coupled (cascade delete) | Forced only under `controlled_by_parent`, unless the optional master (below); else lint-warned | Inherits parent; read-on-master opt-ins (below) | Via `summary` | "Owned by" |
 | `tree` | Self-reference | Optional — and so is `reference`, which when written must name this object itself; any other object is refused at parse, not lint-warned | N/A | Not available | Hierarchical |
 
 ## Patterns
@@ -185,8 +185,8 @@ or a child not offering Change Owner itself (a `controlled_by_parent` detail).
 ## Roll-up Summaries
 
 A parent `summary` field aggregates a child collection. The engine recomputes it
-**server-side** whenever a child is inserted/updated/deleted (inside the same
-transaction as the write, so it's consistent).
+**server-side** on every child insert/update/delete, in the write's
+transaction.
 
 ```json
 {
@@ -197,8 +197,10 @@ transaction as the write, so it's consistent).
 
 `object` is the child object to aggregate, `field` its field (ignored for
 `count`), `function` one of `count` / `sum` / `min` / `max` / `avg`. Optional:
-`relationshipField` (auto-detected from the child's `master_detail`/`lookup`
-field referencing this parent when omitted) and `filter` (below).
+`filter` (below) and `relationshipField` (omitted: the child's `lookup` /
+`master_detail` referencing this parent). Refused at publish when omitted and the
+child has neither, or naming no child field
+(`rollup/child-without-parent-reference`).
 
 Empty collections roll up to `0` for `count`/`sum`, `null` for `min`/`max`/`avg`.
 
