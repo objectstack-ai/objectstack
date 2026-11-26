@@ -7,10 +7,9 @@
 #   2. Nothing ever exercised the published package end-to-end, so registry
 #      breakage would only be found by a real new user.
 #
-# Job 1 (PRs touching the scaffolder / docker example) scaffolds with the
-# repo-built scaffolder and runs the generated project against this checkout's packed
-# tarballs (what the next release would publish), not the registry: install →
-# validate → build → test → boot → health probes → docker build/run. That
+# Job 1 (PRs touching the scaffolder / docker example) scaffolds with the repo-built
+# scaffolder and runs the generated project against this checkout's packed tarballs, not
+# the registry: install → validate → build → test → boot → health probes → docker. That
 # run scaffolds with `--skip-install` and installs the project itself, so it
 # exercises the scaffolder's `--skip-install` shape; a second, throwaway
 # project is scaffolded WITHOUT it purely to assert the shape a real user
