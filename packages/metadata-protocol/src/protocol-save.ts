@@ -851,6 +851,18 @@ export class ProtocolSaveFacet {
                 // The package-unbound row: `packageId` stays empty.
             } else if (served !== undefined) {
                 if (served.packageId !== null) request = { ...request, packageId: served.packageId };
+                else {
+                    // [ADR-0150 D3, the 2026-11-26 note] The package-unbound
+                    // row beside a disabled package's row is the row the read
+                    // serves only while an enabled package holds the name.
+                    // With every holder disabled it is their customization,
+                    // hidden with them, and the save is refused, never
+                    // written unseen ({@link packagelessHolderRefusal}).
+                    const hiddenRefusal = packagelessHolderRefusal(
+                        host, 'save', request.type, writeType, request.name, member, address,
+                    );
+                    if (hiddenRefusal) throw hiddenRefusal;
+                }
             } else if (address.candidates.length > 1) {
                 // [#34681] …where the read naming no package serves the
                 // row-held base, the save writes the base's row
@@ -864,7 +876,9 @@ export class ProtocolSaveFacet {
                 // read naming no package counts ({@link packagelessHolderRefusal}):
                 // two or more enabled holders are refused naming them, and a name
                 // only disabled packages hold is refused naming none, never
-                // written at one row's package or as a new package-unbound row.
+                // written at one row's package or as a new package-unbound row,
+                // nor over the package-unbound row stored for it (their
+                // customization, hidden with them: the enable is the remedy).
                 const holderRefusal = packagelessHolderRefusal(
                     host, 'save', request.type, writeType, request.name, itemDiscriminator(writeType, request.item), address,
                 );
@@ -945,7 +959,9 @@ export class ProtocolSaveFacet {
         // ({@link packagelessHolderRefusal}), judged over the item's active rows
         // and its drafts: the draft address alone took the one package with a
         // row, or a new package-unbound draft. An ambiguous draft address is
-        // left to the repository's `409`, as before.
+        // left to the repository's `409`, as before. A package-unbound row or
+        // draft of a name only disabled packages hold is their customization:
+        // the draft save is refused there too, with the enable as its remedy.
         if (draftAddress !== undefined && draftAddress.kind !== 'ambiguous') {
             const member = itemDiscriminator(singularType, request.item);
             const active = await host.packagelessAddress(singularType, request.name, member, 'active');
@@ -3252,6 +3268,41 @@ export function disabledHoldersOnlyRefusal(
 }
 
 /**
+ * [ADR-0150 D3, the 2026-11-26 note under it] The refusal of a write naming
+ * no package of a name every holder of which is disabled, where a
+ * PACKAGE-UNBOUND row or draft is stored for the name. That row is the
+ * holder's customization (a package-less row over a held name is never a
+ * second item), so it is hidden with its holder, from the reads and from the
+ * writes alike: the save edited it unseen, the draft save stored a draft no
+ * read reaches, and the delete and the draft discard removed what the next
+ * enable would have served.
+ *
+ * `409 RESOURCE_CONFLICT`, the refusal family of
+ * {@link disabledHoldersOnlyRefusal}, with no new code, and naming no package
+ * as that one does. Its remedy is the enable, never `?package=`: a write
+ * naming the package addresses that package's own row, so it leaves the
+ * hidden row where it is and stores a second row beside it.
+ */
+export function disabledHoldersCustomizationRefusal(
+    verb: 'save' | 'delete',
+    type: string,
+    name: string,
+): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
+    const nothing = verb === 'save' ? 'Nothing was written.' : 'Nothing was deleted.';
+    const err = new Error(
+        `Enable the package that holds ${type} '${name}' first, then send this ${verb} again: GET /api/v1/packages `
+        + `lists each installed package with whether it is enabled, and PATCH /api/v1/packages/:id/enable enables one. `
+        + `${nothing} Every package that holds the name is disabled, and the row stored for it under no package is `
+        + `that package's customization, hidden with it until the package is enabled, so no read would show this `
+        + `${verb}. Naming the package (?package=, in process packageId) does not reach that row: it addresses the `
+        + `package's own row beside it.`,
+    ) as Error & { code: 'RESOURCE_CONFLICT'; status: 409 };
+    err.code = 'RESOURCE_CONFLICT';
+    err.status = 409;
+    return err;
+}
+
+/**
  * [#34681, epic ruling 6781691009, #34348 ruling (b), ADR-0150 D3/D5] THE
  * ROW-HELD BASE a write naming no package takes, where the stored rows at the
  * member are bound to two or more packages: the base whose dependents' rows
@@ -3417,10 +3468,21 @@ export async function packagelessRowHeldBaseDraftAddress(
  *    customization pair is that holder's): {@link disabledHoldersOnlyRefusal},
  *    naming no package. The write edited the disabled package's row, or
  *    stored a row every read then withholds.
- *  - `undefined` otherwise: no holder, one enabled holder, a package-unbound
- *    row stored at the address or the environment's own item (ADR-0150 D3
- *    (a): the row the write edits), a type the registry does not read by
- *    package, or a registry without the reads.
+ *  - …and a package-unbound row or draft is stored for the name
+ *    (`address.unbound`, or `address.customized` for a door whose own rows
+ *    are another state's): that row is the disabled holder's customization,
+ *    hidden with it, so the write is refused all the same, with the enable
+ *    as its remedy ({@link disabledHoldersCustomizationRefusal}; the dated
+ *    note under ADR-0150 D3). The bare save edited the hidden row, the bare
+ *    draft save stored a draft no read reaches, and the bare delete and the
+ *    bare draft discard removed what the next enable would have served.
+ *  - `undefined` otherwise: no holder (a name the environment alone holds,
+ *    whatever row is stored for it), one enabled holder, the environment's
+ *    own item (ADR-0150 D3 (a): the row the write edits), a package-unbound
+ *    row at the address of a name some ENABLED package holds (the row the
+ *    read serves, or the customization of no one holder two enabled holders
+ *    leave to the write), a type the registry does not read by package, or a
+ *    registry without the reads.
  *
  * Known gap: with an enabled and a disabled holder, the draft save and the
  * delete have no {@link servedPackagelessSaveAddress} step and still take
@@ -3434,15 +3496,27 @@ export function packagelessHolderRefusal(
     type: string,
     name: string,
     member: string | undefined,
-    address: { readonly candidates: readonly string[]; readonly unbound: boolean },
+    address: {
+        readonly candidates: readonly string[];
+        readonly unbound: boolean;
+        /**
+         * A package-unbound row is stored for the name in a state other than
+         * the one `candidates` and `unbound` were read from (the draft
+         * discard's: its own rows are the drafts, and the customization may
+         * be the active row). Read by the disabled-holders judgment only.
+         */
+        readonly customized?: boolean;
+    },
 ): (Error & { code: 'RESOURCE_CONFLICT'; status: 409 }) | undefined {
-    if (address.unbound) return undefined;
     const registry = host.engine?.registry as HolderRegistry | undefined;
     if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(type) !== true) return undefined;
     if (typeof registry.getEnvironmentScopedItem === 'function' && registry.getEnvironmentScopedItem(type, name, member) !== undefined) {
         return undefined;
     }
-    if (typeof registry.resolveItem === 'function') {
+    // A package-unbound row at the address leaves the ENABLED holders' answer
+    // as it was (the write edits that row); only the disabled-holders
+    // judgment below reads past it.
+    if (!address.unbound && typeof registry.resolveItem === 'function') {
         try {
             registry.resolveItem(type, name, null, member);
         } catch (error) {
@@ -3464,7 +3538,12 @@ export function packagelessHolderRefusal(
     const disabledHoldersPair = (id: string): boolean => known.some((holder) => disabled(holder) && pairsOf(holder, installed).includes(id));
     const every = [...new Set([...known, ...address.candidates])];
     if (every.length === 0 || every.some((id) => !disabled(id) && !disabledHoldersPair(id))) return undefined;
-    return disabledHoldersOnlyRefusal(verb, shownType, name);
+    // [ADR-0150 D3, the 2026-11-26 note] A package-unbound row of a name only
+    // disabled packages hold is their customization, hidden with them: the
+    // write is refused with the enable as its remedy, never `?package=`.
+    return address.unbound || address.customized === true
+        ? disabledHoldersCustomizationRefusal(verb, shownType, name)
+        : disabledHoldersOnlyRefusal(verb, shownType, name);
 }
 
 /** The registry reads {@link packagelessHolderRefusal} asks, each optional-called. */

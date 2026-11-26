@@ -754,11 +754,26 @@ export class ProtocolDiffDeleteLoadFacet {
                 // are refused naming them, and a name only disabled packages hold
                 // is refused naming none, never one row removed. Over no stored
                 // row too (the delete and the draft discard answered the no-op
-                // receipt). A package-unbound row at the address is the
-                // environment's own, and its removal is left as it was.
+                // receipt). A package-unbound row at the address of a name
+                // an enabled package holds, or no package holds, is removed
+                // as it was.
+                //
+                // [ADR-0150 D3, the 2026-11-26 note] …but a package-unbound
+                // row or draft of a name ONLY disabled packages hold is
+                // their customization, hidden with them: the delete and the
+                // draft discard are refused, with the enable as the remedy.
+                // The delete removed the hidden row, so the next enable
+                // served the package's item without it. A draft discard
+                // reads the draft rows, so it asks whether the customization
+                // is the ACTIVE row too: with no draft stored it answers
+                // that remedy, never `?package=`.
                 if (request.packageId == null) {
+                    const customized = targetState === 'draft' && !rowsAtAddress.unbound
+                        ? (await host.packagelessAddress(singularTypeForRepo, request.name, member, 'active')).unbound
+                        : false;
                     const holderRefusal = packagelessHolderRefusal(
-                        host, 'delete', request.type, singularTypeForRepo, request.name, member, rowsAtAddress,
+                        host, 'delete', request.type, singularTypeForRepo, request.name, member,
+                        customized ? { ...rowsAtAddress, customized } : rowsAtAddress,
                     );
                     if (holderRefusal) {
                         addressRefusal = holderRefusal;
