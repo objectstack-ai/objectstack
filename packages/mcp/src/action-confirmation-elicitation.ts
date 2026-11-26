@@ -96,6 +96,24 @@ export interface McpActionCallDoor {
 }
 
 /**
+ * [#34325] What the action tools tell the bridge about the door when no
+ * elicitor rides beside the call, passed as the bridge method's fourth
+ * argument (after an `undefined` door). Additive: a bridge that does not read
+ * it hands the call off exactly as before.
+ */
+export interface McpActionCallDoorFacts {
+  /**
+   * This door would ask a client that advertised `elicitation` (it read the
+   * client's `initialize` and can carry a request to it while the call is
+   * open), and this call's client did not advertise it. The
+   * `no_confirmation_service` refusal then names the route that works here: a
+   * client that supports confirmation (step 3). Never set on a door that
+   * cannot ask any client, where that sentence would be false.
+   */
+  elicitsCapableClients?: true;
+}
+
+/**
  * The result shape this door reads: `action` and nothing else. Loose on
  * purpose, unlike the SDK's own `ElicitResultSchema`, which also parses
  * `content` — a client's form payload is not read (step 3.1), so a payload the
@@ -211,4 +229,32 @@ export function actionConfirmationElicitorFor(
       return error instanceof McpError && error.code === ErrorCode.RequestTimeout ? 'timed_out' : 'cancel';
     }
   };
+}
+
+/**
+ * [#34325] What the action tools hand the bridge for the tool call `extra`
+ * belongs to:
+ *
+ * - the client can be elicited: `door`, its elicitor (step 1);
+ * - this server read the client's `initialize` and can carry a request to it,
+ *   but the client advertised no form-mode `elicitation`: `facts`
+ *   (`elicitsCapableClients`), so a `no_confirmation_service` refusal tells the
+ *   caller that a client supporting confirmation is asked in place here. That
+ *   is the long-lived stdio server today;
+ * - this server never read the client's `initialize`: neither, and the bridge
+ *   is called as before. That is the per-request Streamable HTTP server,
+ *   which asks no client, so the refusal names only the in-app route there.
+ *
+ * Judged on what the server can do, never on a transport name: a door that
+ * comes to read `initialize` gets the step-3 sentence with the elicitation
+ * that makes it true.
+ */
+export function actionCallDoorFor(
+  server: McpServer,
+  extra: RequestHandlerExtra<ServerRequest, ServerNotification> | undefined,
+): { door?: McpActionCallDoor; facts?: McpActionCallDoorFacts } {
+  const elicitConfirmation = actionConfirmationElicitorFor(server, extra);
+  if (elicitConfirmation) return { door: { elicitConfirmation } };
+  const readInitialize = server.server.getClientCapabilities() !== undefined;
+  return readInitialize && typeof extra?.sendRequest === 'function' ? { facts: { elicitsCapableClients: true } } : {};
 }

@@ -289,6 +289,9 @@ export const aiEmbedderSettingsSpecifiers: SettingsManifest['specifiers'] = [
       '(e.g. OpenAI for chat + 阿里通义 for embeddings).' },
   { type: 'select', key: 'embedder_provider', label: 'Provider',
     required: false, default: 'none',
+    // Read once, when the knowledge service boots (#37094): no hot replacement.
+    description:
+      'Read when the server starts: a saved change to any embedder setting takes effect after the next restart.',
     options: [
       { value: 'none', label: 'Disabled (no embeddings)' },
       { value: 'openai', label: 'OpenAI' },

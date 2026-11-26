@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
+    "@objectstack/embedder-openai": "workspace:*",
     "@objectstack/service-settings": "workspace:*",
     "@objectstack/spec": "workspace:*"
   },

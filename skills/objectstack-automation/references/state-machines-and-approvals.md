@@ -226,7 +226,7 @@ an id that does not exist gets.
 | `manager`    | The submitter's manager (`sys_user.manager_id`) |
 | `field`      | User id read from a record field (`value` = field name). Resolved against the record's **live** state at node entry, so a field written mid-flow routes correctly; a multi-select user field fans out into one approver per user |
 | `queue`      | Members of ownership queue `value` at node entry; an empty queue adds nobody. In a packaged flow, see below |
-| `expression` | A **CEL expression** resolved at node entry (`value` = the expression) — see **Dynamic approvers** below. The optional `resolveAs: 'user'(default) \| 'department' \| 'position' \| 'team'` re-expands each resolved id through the graph |
+| `expression` | A **CEL expression** resolved at node entry (`value` = the expression string) — see **Dynamic approvers** below. The optional `resolveAs: 'user'(default) \| 'department' \| 'position' \| 'team'` re-expands each resolved id through the graph |
 
 **A packaged flow's `queue` approver** (ADR-0150 D3) resolves `value` as a
 packaged assignment rule does (SKILL.md § Assignment rules), from the package
@@ -260,16 +260,16 @@ slate — guard genuinely-optional inputs explicitly, e.g.
 
 ```typescript
 // ① Route on a field an EARLIER approver filled in mid-flow (live value):
-{ type: 'expression', value: cel`current.co_review_departments`, resolveAs: 'department' }
+{ type: 'expression', value: 'current.co_review_departments', resolveAs: 'department' }
 
 // ② The previous approval node's decision outputs pick this node's approvers:
-{ type: 'expression', value: cel`vars.lead_review.next_reviewers` }
+{ type: 'expression', value: 'vars.lead_review.next_reviewers' }
 
 // ③ Dynamic co-sign: expression yields department ids; resolveAs expands
 //    each into its members, and with behavior: 'per_group' EACH department is
 //    its own sign-off group:
 {
-  approvers: [{ type: 'expression', value: cel`current.picked_departments`, resolveAs: 'department' }],
+  approvers: [{ type: 'expression', value: 'current.picked_departments', resolveAs: 'department' }],
   behavior: 'per_group',
   onEmptyApprovers: 'fail',
 }

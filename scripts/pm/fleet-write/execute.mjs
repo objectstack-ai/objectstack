@@ -309,12 +309,23 @@
  *     published. A non-2xx is a FAILED action carrying its
  *     cause and then `ADVISORY_ACCESS_REMEDY`; a 2xx that does not show the
  *     result is a FAILED action naming what it shows.
+ *   - `advisory_severity` is fenced HERE the same way (`advisoryPreflight`,
+ *     `ADVISORY_SEVERITY_FENCES`): the advisory's own GET must read `triage`,
+ *     `draft` or `closed` (`ADVISORY_SEVERITY_STATES`; `published` and
+ *     `withdrawn` refused) and carry no CVSS vector — the platform refuses a
+ *     severity while one is set (`ops.mjs`, the row's section) — or the
+ *     PATCH is NOT SENT, exit 5. The ONE PATCH carries the table's
+ *     `{ severity }` and nothing else, and the action LANDS only when its
+ *     answer, still unpublished, stores the severity sent
+ *     (`advisorySeverityReadBack`). Its row (`advisorySeverityLandedText`)
+ *     names the id and the state and says the answer stores the one sent —
+ *     ⛔ never the severity word, which `advisory_list` seals.
  *
  * ⛔ The payload reaches this file through the event file (`readEventPayload`,
  * `validate.mjs`), never through `env:`, and the text this path prints — row,
  * log line, step summary, annotation — is built from the advisory's id, its
  * state, its collaborators' logins and counts ALONE (`advisoryReportLandedText`, `advisoryCreateLandedText`,
- * `advisoryLandedText`, `advisoryVersionsLandedText`, `advisoryStateLandedText`, `advisoryFenceText`, each
+ * `advisoryLandedText`, `advisoryVersionsLandedText`, `advisoryStateLandedText`, `advisorySeverityLandedText`, `advisoryFenceText`, each
  * value in its own shape through `advisoryPrintable`), plus, on a refusal,
  * its CAUSE (`advisoryRefusalCause`): the platform's `message` and
  * `documentation_url` from the refusal's own answer — each capped
@@ -784,6 +795,10 @@ import {
   advisoryReportReadBack,
   advisoryStateLandedText,
   advisoryStateReadBack,
+  ADVISORY_SEVERITY_STATES,
+  advisorySeverityFenceFailures,
+  advisorySeverityLandedText,
+  advisorySeverityReadBack,
   GOVERNED_REVIEW_FILES_PAGE_CAP,
   GOVERNED_REVIEW_FILES_PAGE_SIZE,
   GOVERNED_REVIEW_OPS,
@@ -1790,21 +1805,22 @@ export async function confirmMailboxBranch(req, answer, payload, api, t) {
  * (`advisoryRefusalCause`). Never throws.
  */
 export async function advisoryPreflight(req, payload, api, t) {
-  const spec = req.advisoryCollaborators ?? req.advisoryVersions ?? req.advisoryState;
+  const spec = req.advisoryCollaborators ?? req.advisoryVersions ?? req.advisoryState ?? req.advisorySeverity;
   const { ghsaId } = spec;
   const to = req.advisoryState ? req.advisoryState.to : null;
   const versions = req.advisoryVersions ? req.advisoryVersions.versions : null;
   const drop = req.advisoryVersions?.drop ?? [];
-  const from = to ? (Object.hasOwn(ADVISORY_TRANSITIONS, to) ? ADVISORY_TRANSITIONS[to] : []) : versions ? ADVISORY_VERSIONS_STATES : ADVISORY_OPEN_STATES;
+  const from = to ? (Object.hasOwn(ADVISORY_TRANSITIONS, to) ? ADVISORY_TRANSITIONS[to] : []) : versions ? ADVISORY_VERSIONS_STATES : req.advisorySeverity ? ADVISORY_SEVERITY_STATES : ADVISORY_OPEN_STATES;
   const read = await rest(api, `/repos/${payload.repo}/security-advisories/${ghsaId}`, {}, t);
-  const failures = advisoryFenceFailures({ ghsaId, answer: read, from, to, ...(versions ? { versions, drop } : {}) });
+  // The severity's fences are ADVISORY_FENCES and its `cvss` fence (`ADVISORY_SEVERITY_FENCES`); every other row's are ADVISORY_FENCES.
+  const failures = req.advisorySeverity ? advisorySeverityFenceFailures({ ghsaId, answer: read, from }) : advisoryFenceFailures({ ghsaId, answer: read, from, to, ...(versions ? { versions, drop } : {}) });
   if (failures.length) {
     const refused = !(read.status >= 200 && read.status < 300);
     return { fail: `REFUSED at the relay's fence on ${ghsaId}, nothing sent — ${advisoryFenceText(failures)}${refused ? `; ${advisoryRefusalCause(read, advisoryProseOf(spec))}; ${ADVISORY_ACCESS_REMEDY}` : ''}` };
   }
   const known = advisoryProseOf(read.json);
   if (to) return { plan: null, state: read.json.state, known, versions: to === ADVISORY_PUBLISHED_STATE ? advisoryVersionsOf(read.json).entries : null };
-  if (versions) return { plan: null, state: read.json.state, known, versions: null };
+  if (versions || req.advisorySeverity) return { plan: null, state: read.json.state, known, versions: null };
   return { plan: advisoryCollaboratorPlan({ existing: advisoryCollaboratorLogins(read.json), requested: spec.add }), state: read.json.state, known, versions: null };
 }
 
@@ -1896,7 +1912,8 @@ export function advisoryRefusalCause(answer, known = []) {
 /**
  * Did an advisory action LAND? Judged on its own answer alone — `advisoryReportReadBack` (a 2xx carrying an id),
  * `advisoryCreateReadBack` (a 2xx carrying an id that reads state `draft`),
- * `advisoryReadBack` (every login sent listed), `advisoryVersionsReadBack` (still a draft, exactly the entries sent, no dropped package)
+ * `advisoryReadBack` (every login sent listed), `advisoryVersionsReadBack` (still a draft, exactly the entries sent, no dropped package),
+ * `advisorySeverityReadBack` (still unpublished, storing the severity sent)
  * or `advisoryStateReadBack` (the state asked for shown; a publish with the entries its GET read) — and spelled
  * by the row texts of `ops.mjs` alone. Returns `{ ok, why, result, ghsaId }`. ⛔ Never `resultOf`, never the
  * answer's body; a refusal names its cause (`advisoryRefusalCause`), which never quotes the body this request
@@ -1928,6 +1945,12 @@ export function confirmAdvisory(req, answer, pre) {
     const v = advisoryVersionsReadBack({ ghsaId, sent: versions, drop, answer });
     if (!v.ok) return failed(v.why);
     return { ok: true, why: '', result: advisoryVersionsLandedText({ ghsaId, state: answer.json.state, versions, drop }) };
+  }
+  if (req.advisorySeverity) {
+    const { ghsaId, severity } = req.advisorySeverity;
+    const v = advisorySeverityReadBack({ ghsaId, sent: severity, answer });
+    if (!v.ok) return failed(v.why);
+    return { ok: true, why: '', result: advisorySeverityLandedText({ ghsaId, state: answer.json.state }) };
   }
   const { ghsaId } = req.advisoryCollaborators;
   const v = advisoryReadBack({ existing: pre.plan.existing, missing: pre.plan.missing, answer });
@@ -2758,7 +2781,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         continue;
       }
       // The advisory PATCHes (header): the advisory's fences, judged HERE on its own GET before the PATCH — refused, NOT SENT.
-      const adv = req.advisoryCollaborators || req.advisoryVersions || req.advisoryState ? await advisoryPreflight(req, payload, api, t) : null;
+      const adv = req.advisoryCollaborators || req.advisoryVersions || req.advisoryState || req.advisorySeverity ? await advisoryPreflight(req, payload, api, t) : null;
       if (adv?.fail) {
         const why = scrub(adv.fail, [token]);
         rows.push({ action: i + 1, op: action.op, call: `${req.verb} ${req.path}`, status: 'not sent', result: `FAILED: ${why}` });
@@ -2774,7 +2797,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         continue;
       }
       // The body is the child's id from its own answer, the advisory's merged login list or the one state asked for —
-      // the op table spells none of the three — or, for the versions, the table's own entries, sent after the fences.
+      // the op table spells none of the three — or, for the versions and the severity, the table's own body, sent after the fences.
       let body = sub ? { sub_issue_id: sub.childId } : adv?.plan ? { collaborating_users: adv.plan.merged } : adv && req.advisoryState ? { state: req.advisoryState.to } : (req.body ?? null);
       if (req.graphql) {
         const resolved = await graphqlVariables(req, payload, api, t);
@@ -2908,13 +2931,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "advisory_list: the row's gate before any request, then one walk per listed state on the platform's own cursor, nothing written; a short page or a full one with no next link ends a walk; a refused, unreached or off-shape page, a next link off this API's collection, a repeated advisory, the page cap and the channel's cap each FAILED with nothing emitted; each advisory projected to five fields, the JSON padded and sealed to the seat's key as exactly ten notice parts the reader parses back and opens; ⛔ the marker, every listed id, the cursor and the count reach no log line, row, step summary or annotation, and the row reads the same whatever the count": 27,
   "advisory_note: the relay's key judged against the committed half before any request; the advisory's GET and its fences, the open, the section judged again and the mask (sparing the note's own notice), a second GET immediately before ONE PATCH of { description } — the text read, byte for byte, the separator and the section — then that PATCH's answer and a GET after it read back byte for byte; a key, fence, open, section, race, cap, refusal or read-back failure each FAILED with no write or no second one, and no byte of the note, the description or the key on any line, row, summary, annotation, pace line or real process's output": 25,
   "advisory_rewrite: the note's key judged first; the advisory's GET and the rewrite's fences — a published or withdrawn advisory refused, triage, draft and closed landing; the open under the rewrite's own associated data, so a note's seal never opens as one; the text judged again and masked; a second GET immediately before ONE PATCH of exactly the fields sealed, byte for byte; the read-back of each field sent and of the one not sent; ONE notice whose keyed digest is of the text the advisory stores, read back by the seat's parser; and no byte of the new text or the old on any line, row, summary, annotation or pace line": 16,
+  "advisory_severity: the advisory read first and its fences judged — a published or withdrawn advisory, another advisory, an unread one and one carrying a CVSS vector refused with nothing sent; triage, draft and closed landing on ONE PATCH of exactly { severity }; the read-back landing only on an answer storing the severity sent, still unpublished, and FAILED otherwise, never re-sent; a refusal naming its cause; the validator's gate before any request; and the marker on no channel and the severity word on no row, summary or annotation": 7,
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
 // hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's, 22 → 23 with the mailbox
 // branch delete's, 23 → 24 with the private-repository issue body's, 24 → 25 with advisory_list's, 25 → 26 with
 // pr_enqueue_front's, 26 → 27 with the cloud staging deploy's, 27 → 28 with advisory_note's: one battery, one row;
-// 28 → 30 with the jump's SIZE lift and pr_dequeue's; 30 → 31 with advisory_rewrite's.
-const SELF_TEST_BATTERY_FLOOR = 31;
+// 28 → 30 with the jump's SIZE lift and pr_dequeue's; 30 → 31 with advisory_rewrite's; 31 → 32 with advisory_severity's.
+const SELF_TEST_BATTERY_FLOOR = 32;
+const SEVERITY_BATTERY = "advisory_severity: the advisory read first and its fences judged — a published or withdrawn advisory, another advisory, an unread one and one carrying a CVSS vector refused with nothing sent; triage, draft and closed landing on ONE PATCH of exactly { severity }; the read-back landing only on an answer storing the severity sent, still unpublished, and FAILED otherwise, never re-sent; a refusal naming its cause; the validator's gate before any request; and the marker on no channel and the severity word on no row, summary or annotation";
 const REWRITE_BATTERY = "advisory_rewrite: the note's key judged first; the advisory's GET and the rewrite's fences — a published or withdrawn advisory refused, triage, draft and closed landing; the open under the rewrite's own associated data, so a note's seal never opens as one; the text judged again and masked; a second GET immediately before ONE PATCH of exactly the fields sealed, byte for byte; the read-back of each field sent and of the one not sent; ONE notice whose keyed digest is of the text the advisory stores, read back by the seat's parser; and no byte of the new text or the old on any line, row, summary, annotation or pace line";
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
@@ -4630,6 +4655,82 @@ export async function selfTest() {
         cli(SELF_PATH, [], { [EVENT_PATH_ENV]: REFUSED, [SENDER_ENV]: 'os-dev-a' }),
       ];
       t('⛔ …and the real processes, reading the payload from an event file as the runner does: the validator accepting and refusing a report and the executor stopping at its prerequisite and its refusal print the marker NOWHERE — stdout, stderr, GITHUB_OUTPUT or the step summary', cliRuns.map((r) => [r.status, r.text.includes('ADVISORY MARKER')]), [[EXIT_OK, false], [EXIT_REFUSED, false], [EXIT_PREREQUISITE, false], [EXIT_REFUSED, false]], cliRuns.map((r) => r.text.slice(0, 200)).join(' | '));
+    }
+
+    // ── advisory_severity ───────────────────────────────────────────────────
+    battery(SEVERITY_BATTERY);
+    {
+      // A made-up id: the fixture names no real advisory.
+      const GHSA = 'GHSA-abcd-2345-wxyz';
+      // Spaces and punctuation: prose, never an id's, a state's or a severity's shape.
+      const MARKER = 'ADVISORY MARKER: how the flaw is reached, never to be logged';
+      const ADV = `/repos/${REPO}/security-advisories/${GHSA}`;
+      const A_GET = `GET ${ADV}`;
+      const A_PATCH = `PATCH ${ADV}`;
+      const WORD = /\b(?:critical|high|medium|low)\b/;
+      // An advisory carrying the marker in its prose and its CVSS score's neighbours, and NO vector unless asked.
+      const advisory = (extra = {}, status = 200) => ({
+        status,
+        json: { ghsa_id: GHSA, state: 'draft', severity: 'low', summary: MARKER, description: MARKER, cve_id: MARKER, vulnerabilities: [{ package: { ecosystem: 'npm', name: MARKER } }], cvss: null, cvss_severities: null, ...extra },
+      });
+      const DOC = 'https://docs.github.test/rest/security-advisories';
+      const refusal = (status, message) => ({ status, json: { message, errors: [{ message: MARKER }], documentation_url: DOC } });
+      const grade = (severity = 'critical', extra = {}) => ({ op: 'advisory_severity', ghsa_id: GHSA, severity, ...extra });
+      const swept = [];
+      const sevRun = async (actions, answers) => {
+        const paceLines = [];
+        const file = join(dir, `pace-sev-${paceCase++}.jsonl`);
+        const r = await run(base(actions), answers, { file, pace: { ...paceFor(file), log: (l) => paceLines.push(l) } });
+        swept.push({ r, paceLines });
+        return r;
+      };
+      const LANDED = (state) => `${GHSA} · state ${state} · severity set: the answer stores the one sent`;
+      const landed = await sevRun([grade('critical')], { ...allowed, [A_GET]: advisory(), [A_PATCH]: advisory({ severity: 'critical' }) });
+      t('⭐ severity: the sender gate, the advisory read first, then ONE PATCH whose body is exactly { severity } — the value sent and nothing else; landed on an answer storing it; the row names the id and the state alone; exit 0, no annotation', [landed.exit, landed.seen.map((s) => s.call), writes(landed.seen).map((s) => s.body), landed.rows.map((r) => [r.call, r.status, r.result]), landed.annotations], [EXIT_OK, [PERM, A_GET, A_PATCH], [{ severity: 'critical' }], [[A_PATCH, 200, LANDED('draft')]], []], landed.logs.join(' | '));
+      const inStates = [];
+      for (const state of ['triage', 'closed']) {
+        const r = await sevRun([grade('medium')], { ...allowed, [A_GET]: advisory({ state }), [A_PATCH]: advisory({ state, severity: 'medium' }) });
+        inStates.push([r.exit, writes(r.seen).map((s) => s.body), r.rows[0]?.result]);
+      }
+      t('⭐ …and so in triage and in closed — every unpublished state', inStates, [[EXIT_OK, [{ severity: 'medium' }], LANDED('triage')], [EXIT_OK, [{ severity: 'medium' }], LANDED('closed')]]);
+      // ⛔ Refused, NOT SENT: the fences on the executor's own GET.
+      const VECTOR = `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H ${MARKER}`;
+      const fencedCases = [
+        [advisory({ state: 'published' }), 'state'],
+        [advisory({ state: 'withdrawn' }), 'state'],
+        [advisory({ cvss: { vector_string: VECTOR, score: 9.8 } }), 'cvss'],
+        [advisory({ cvss_severities: { cvss_v3: null, cvss_v4: { vector_string: VECTOR, score: 9.3 } } }), 'cvss'],
+        [advisory({ cvss: MARKER }), 'cvss'],
+        [advisory({ ghsa_id: 'GHSA-wxyz-2345-abcd' }), 'advisory'],
+        [refusal(404, 'Not Found'), 'read'],
+      ];
+      const fenced = [];
+      for (const [answer, fence] of fencedCases) {
+        const r = await sevRun([grade()], { ...allowed, [A_GET]: answer });
+        fenced.push([r.exit, writes(r.seen).length, r.rows[0]?.status, r.rows[0]?.result.startsWith(`FAILED: REFUSED at the relay's fence on ${GHSA}, nothing sent — fence \`${fence}\``)]);
+      }
+      t('⛔ refused, NOT SENT, at the fence on the advisory\'s own GET: a published and a withdrawn advisory at the state fence; a vector at cvss, at cvss_severities.cvss_v4 and a cvss of no declared shape at the cvss fence; another advisory at the advisory fence; a 404 at the read — zero writes, exit 5', fenced, fencedCases.map(() => [EXIT_ACTION_FAILED, 0, 'not sent', true]));
+      // ⛔ The read-back: the PATCH answer must store the severity sent.
+      const other = await sevRun([grade('critical')], { ...allowed, [A_GET]: advisory(), [A_PATCH]: advisory({ severity: 'high' }) });
+      const none = await sevRun([grade('critical')], { ...allowed, [A_GET]: advisory(), [A_PATCH]: advisory({ severity: null }) });
+      const published = await sevRun([grade('critical')], { ...allowed, [A_GET]: advisory(), [A_PATCH]: advisory({ state: 'published', severity: 'critical' }) });
+      t('⛔ the read-back FAILED: an answer storing another severity, none, or reading published — ONE write each, exit 5, ⛔ never re-sent, and the sentence names no severity word', [other, none, published].map((r) => [r.exit, writes(r.seen).length, r.rows[0]?.result]), [[EXIT_ACTION_FAILED, 1, 'FAILED: HTTP 200, but the answer stores another severity than the one sent — read the advisory before anything else, ⛔ do not re-send'], [EXIT_ACTION_FAILED, 1, 'FAILED: HTTP 200, but the answer stores no severity — read the advisory before anything else, ⛔ do not re-send'], [EXIT_ACTION_FAILED, 1, 'FAILED: HTTP 200, but the answer reads state published, not triage, draft or closed — read the advisory before anything else, ⛔ do not re-send']]);
+      // The platform's documented refusal while a vector is set: should one slip past the fence, its cause is printed.
+      const CVSS_SET = 'Cannot update severity value when CVSS is set.';
+      const refused = await sevRun([grade('low')], { ...allowed, [A_GET]: advisory(), [A_PATCH]: refusal(422, CVSS_SET) });
+      const quoted = await sevRun([grade('low')], { ...allowed, [A_GET]: advisory(), [A_PATCH]: refusal(422, MARKER) });
+      t("⛔ a refused PATCH is a FAILED action naming the platform's cause and the remedy — the documented 'CVSS is set' refusal printed as given, one quoting the advisory withheld", [refused.exit, refused.rows[0]?.result, quoted.rows[0]?.result], [EXIT_ACTION_FAILED, `FAILED: HTTP 422; cause, as the platform gives it: "${CVSS_SET}" (documentation: ${DOC}); ${ADVISORY_ACCESS_REMEDY}`, `FAILED: HTTP 422; cause not printed: the platform's message quotes the payload or the advisory, and no row prints either (documentation: ${DOC}); ${ADVISORY_ACCESS_REMEDY}`]);
+      // ⛔ The validator's gate, inside the executor: zero requests.
+      const gated = [];
+      for (const actions of [[grade(MARKER)], [grade('HIGH')], [{ op: 'advisory_severity', ghsa_id: GHSA }], [grade('high', { ghsa_id: `${GHSA}/cve` })], [grade('high', { cvss_vector_string: VECTOR })], [grade('high', { state: 'published' })], [grade(), { op: 'comment', issue: 1, body: 'x' }]]) {
+        const r = await sevRun(actions, { ...allowed });
+        gated.push([r.exit, r.seen.length]);
+      }
+      t('⛔ refused before ANY request, the sender gate included: prose and an upper-case word as the severity, no severity, a malformed id, a CVSS vector key, a state key, and a severity beside another action — exit 2', gated, Array.from({ length: 7 }, () => [EXIT_REFUSED, 0]));
+      // ⛔ The sweep: the marker on no channel; the severity word on no row, summary or annotation.
+      const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), JSON.stringify(r.annotations ?? []), ...paceLines].join('\n'));
+      const rowsAndSummaries = swept.map(({ r }) => [r.summary ?? '', ...(r.rows ?? []).map((row) => row.result), JSON.stringify(r.annotations ?? [])].join('\n'));
+      t('⛔ THE MARKER TEST: across every run of this battery — landed, fenced, read back wrong, refused and gated — the marker and the vector reach NO log line, row, step summary, annotation or pace-log line, and the severity word reaches no row, summary or annotation', [swept.length, emitted.filter((x) => x.includes('ADVISORY MARKER') || x.includes('CVSS:3.1')).length, rowsAndSummaries.filter((x) => WORD.test(x)).length], [22, 0, 0], rowsAndSummaries.filter((x) => WORD.test(x)).join(' | ').slice(0, 400));
     }
 
     // ── advisory_read ───────────────────────────────────────────────────────
