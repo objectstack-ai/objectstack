@@ -1307,8 +1307,8 @@ export class ProtocolPackageCommitsFacet {
                     error: `Commit item '${it.type}/${it.name}' was not reverted: the view row${notPutBack.length > 1 ? 's' : ''} `
                         + `${notPutBack.map((n) => `'${n}'`).join(', ')} this commit also edited could not be put back, and a `
                         + 'form is taken back only once every view row its commit edited stands again. Nothing was written '
-                        + 'for it, so it stays as published. Resolve the cause reported for that row, then revert the '
-                        + 'commit again.',
+                        + 'for it, so the form stays as published. The entry for each such row here says why it was '
+                        + 'not put back.',
                 });
                 continue;
             }
@@ -1796,7 +1796,9 @@ export class ProtocolPackageCommitsFacet {
                         // [#37130] The platform's own record is never restored:
                         // refused into `failed[]` as {@link rollbackMetaItem}
                         // refuses it, nothing written; the commit's other items
-                        // still revert (ADR-0067 D3).
+                        // still revert (ADR-0067 D3), except its `form` items,
+                        // which wait for every `view` row the commit edited and
+                        // stay as published while one is not put back (ADR-0159 D5).
                         refusePlatformRecord: true,
                     });
                     rowWritten = `its row was restored to the body of version ${restoreToVersion}`;
