@@ -275,7 +275,7 @@ async function drain() {
 async function mountWithAppliedCard() {
   const view = renderStudio();
   const card = await screen.findByTestId('applied-card');
-  await waitFor(() => expect(screen.getByTestId('studio-changes-count')).toHaveTextContent('1'));
+  await waitFor(() => expect(screen.getByTestId('studio-menu-overview-pending')).toHaveTextContent('1'));
   await act(drain);
   return { view, card };
 }
@@ -367,7 +367,7 @@ describe('the Studio copilot\'s applied card undoes through discard-drafts (obje
     await waitFor(() => expect(within(card).getByTestId('applied-card-discarded')).toBeInTheDocument());
     expect(sdk.discardDrafts).toHaveBeenCalledTimes(1);
     expect(sdk.discardDrafts).toHaveBeenCalledWith(PACKAGE_ID);
-    await waitFor(() => expect(screen.queryByTestId('studio-changes-count')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('studio-menu-overview-pending')).toBeNull());
     expect(draftReads).toBeGreaterThan(readsBefore);
   });
 
@@ -391,7 +391,7 @@ describe('the Studio copilot\'s applied card undoes through discard-drafts (obje
       expect(failed).toHaveTextContent('object/hcpl_borrowing: draft is locked by a publish in progress');
       expect(within(card).queryByTestId('applied-card-discarded')).toBeNull();
       expect(pulses).toBe(1);
-      expect(screen.getByTestId('studio-changes-count')).toHaveTextContent('1');
+      expect(screen.getByTestId('studio-menu-overview-pending')).toHaveTextContent('1');
     } finally {
       unsubscribe();
     }

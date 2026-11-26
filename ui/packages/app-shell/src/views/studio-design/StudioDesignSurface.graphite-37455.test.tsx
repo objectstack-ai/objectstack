@@ -150,33 +150,34 @@ function carriesAccent(el: Element): boolean {
 describe('a non-default app theme does not tint Studio (objectstack#37455)', () => {
   it('CONTROL: the app\'s colour is on the page root, and it is not graphite', async () => {
     render(<BrandedApp studio />);
-    await screen.findByTestId('studio-shell-header');
+    await screen.findByTestId('studio-pillars-host');
     const root = document.documentElement.style;
     expect(root.getPropertyValue('--primary').trim()).not.toBe('');
     expect(root.getPropertyValue('--accent').trim()).not.toBe('');
     expect(root.getPropertyValue('--primary').trim()).not.toBe(STUDIO_ACCENT_HSL.light);
   });
 
-  it('the surface\'s root carries Studio\'s accent: its header, the page and its buttons sit under it', async () => {
+  it('the surface\'s root carries Studio\'s accent: its top-left rows, the page and its buttons sit under it', async () => {
     render(<BrandedApp studio />);
-    const header = await screen.findByTestId('studio-shell-header');
-    const scope = header.closest(ACCENT_SCOPE);
+    const host = await screen.findByTestId('studio-pillars-host');
+    const scope = host.closest(ACCENT_SCOPE);
     expect(scope).not.toBeNull();
     expect(scope).not.toBe(document.body);
     expect(carriesAccent(scope as Element)).toBe(true);
-    expect(scope).toContainElement(screen.getByTestId('studio-pillars-host'));
+    // objectstack#37456 — no top bar: the left column's top rows stand where it was.
+    expect(scope).toContainElement(screen.getByTestId('studio-top-left'));
     expect(scope).toContainElement(await screen.findByTestId('topbar-ai-assistant'));
   });
 
   it('a portalled surface (the command palette) is outside the root and still under the accent, on body', async () => {
     render(<BrandedApp studio />);
-    const header = await screen.findByTestId('studio-shell-header');
+    const host = await screen.findByTestId('studio-pillars-host');
     const palette = await waitFor(() => {
       const el = document.querySelector(`[data-testid="${COMMAND_PALETTE_TESTID}"]`);
       expect(el).not.toBeNull();
       return el as HTMLElement;
     });
-    const studioRoot = header.closest(ACCENT_SCOPE) as Element;
+    const studioRoot = host.closest(ACCENT_SCOPE) as Element;
     expect(studioRoot.contains(palette)).toBe(false);
     expect(palette.closest(ACCENT_SCOPE)).toBe(document.body);
     expect(carriesAccent(document.body)).toBe(true);
@@ -184,7 +185,7 @@ describe('a non-default app theme does not tint Studio (objectstack#37455)', () 
 
   it('Studio unmounted: the accent leaves body, and the app\'s branding on the page root is as the app wrote it', async () => {
     const { rerender } = render(<BrandedApp studio />);
-    await screen.findByTestId('studio-shell-header');
+    await screen.findByTestId('studio-pillars-host');
     const primary = document.documentElement.style.getPropertyValue('--primary');
     expect(carriesAccent(document.body)).toBe(true);
 
@@ -286,8 +287,9 @@ describe('dark theme: the accent\'s dark declarations apply on the surface root 
   it('under the dark theme, the surface root and body match the variant and carry dark graphite', async () => {
     document.documentElement.classList.add('dark');
     render(<BrandedApp studio />);
-    const header = await screen.findByTestId('studio-shell-header');
-    const studioRoot = header.closest(ACCENT_SCOPE) as Element;
+    // objectstack#37456 — no top bar: the left column's top-left is the anchor inside the surface root.
+    const topLeft = await screen.findByTestId('studio-top-left');
+    const studioRoot = topLeft.closest(ACCENT_SCOPE) as Element;
     expect(studioRoot).not.toBeNull();
     expect(document.documentElement).toHaveClass('dark');
     for (const node of [studioRoot, document.body]) {
@@ -300,8 +302,9 @@ describe('dark theme: the accent\'s dark declarations apply on the surface root 
 
   it('CONTROL: under the light theme neither matches the variant, so the dark declarations do not apply', async () => {
     render(<BrandedApp studio />);
-    const header = await screen.findByTestId('studio-shell-header');
-    const studioRoot = header.closest(ACCENT_SCOPE) as Element;
+    // objectstack#37456 — no top bar: the left column's top-left is the anchor inside the surface root.
+    const topLeft = await screen.findByTestId('studio-top-left');
+    const studioRoot = topLeft.closest(ACCENT_SCOPE) as Element;
     expect(matchesDarkVariant(studioRoot)).toBe(false);
     expect(matchesDarkVariant(document.body)).toBe(false);
     // The accent still sits on both: only its light declarations apply.
