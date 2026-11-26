@@ -17,6 +17,10 @@
  * - Edit and Delete on another member's comment only on the explain engine's
  *   definite allow of a by-id update of the record; an unanswered verdict
  *   offers them on the viewer's own comments alone.
+ * - objectstack#36423: the resolution door and the own-comment delete door
+ *   are not the data source, so each stored write is announced as a
+ *   `sys_comment` change on the data-invalidation bus (a board card's open
+ *   thread count asks again); a refused write is not.
  */
 
 import * as React from 'react';
@@ -56,7 +60,7 @@ vi.mock('./MetadataInspector', () => ({
 }));
 
 import { I18nProvider } from '@object-ui/i18n';
-import { MetadataCtx } from '@object-ui/react';
+import { MetadataCtx, subscribeDataChanges, type DataChange } from '@object-ui/react';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { toast } from 'sonner';
 import { RecordDetailView } from './RecordDetailView';
@@ -575,5 +579,77 @@ describe('a member without the sys_comment delete grant deletes through the own-
     });
     expect(toast.error).toHaveBeenCalledWith('The comment was not deleted. Please try again.');
     expect(within(panel(container)!).getByText(ADA_BODY)).toBeInTheDocument();
+  });
+});
+
+describe('the comment doors announce their writes on the data-invalidation bus (objectstack#36423)', () => {
+  let changes: DataChange[] = [];
+  let unsubscribe: () => void = () => {};
+  beforeEach(() => {
+    changes = [];
+    unsubscribe = subscribeDataChanges((change) => changes.push(change));
+  });
+  afterEach(() => unsubscribe());
+  const commentChanges = () => changes.filter((c) => c.objectName === 'sys_comment');
+
+  const MEMBER_PERMS = {
+    ...PERMS,
+    objects: { ...PERMS.objects, sys_comment: { ...FULL, allowDelete: false } },
+  } as MePermissionsAuthenticatedResponse;
+  const moreOn = (root: HTMLElement, text: string) => commentIn(root, text)?.querySelector(':scope > [data-comment-actions] [data-comment-action="more"]') ?? null;
+
+  async function deleteOwnAsMember() {
+    stubExplain(true, false);
+    const mounted = await mount({ perms: MEMBER_PERMS });
+    await waitFor(() => expect(button(mounted.container)).not.toBeNull());
+    fireEvent.click(button(mounted.container)!);
+    await within(panel(mounted.container)!).findByText(ADA_BODY);
+    engage(mounted.container);
+    fireEvent.pointerDown(moreOn(mounted.container, ADA_BODY)!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    fireEvent.click(await within(document.body).findByRole('menuitem', { name: 'Delete' }));
+    const dialog = await within(document.body).findByRole('alertdialog');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    });
+    return mounted;
+  }
+
+  it('a stored ✓ is announced as a sys_comment write', async () => {
+    const { container } = await openPanel();
+    const ada = commentIn(container, ADA_BODY)!;
+    await act(async () => {
+      fireEvent.click(ada.querySelector('[data-comment-action="resolve"]')!);
+    });
+    await waitFor(() => expect(within(panel(container)!).queryByText(ADA_BODY)).toBeNull());
+    expect(commentChanges()).toEqual([{ objectName: 'sys_comment', recordId: 'c-ada' }]);
+  });
+
+  it('a refused ✓ is not announced', async () => {
+    const { container } = await openPanel();
+    doorFetch.mockResolvedValueOnce(new Response(JSON.stringify({ success: false }), { status: 403 }));
+    const ada = commentIn(container, ADA_BODY)!;
+    await act(async () => {
+      fireEvent.click(ada.querySelector('[data-comment-action="resolve"]')!);
+    });
+    expect(toast.error).toHaveBeenCalledWith('The thread was not updated. Please try again.');
+    expect(commentChanges()).toEqual([]);
+  });
+
+  it('a member\'s delete through the own-comment door is announced', async () => {
+    const { container } = await deleteOwnAsMember();
+    await waitFor(() => expect(within(panel(container)!).queryByText(ADA_BODY)).toBeNull());
+    expect(commentChanges()).toEqual([{ objectName: 'sys_comment', recordId: 'c-ada' }]);
+  });
+
+  it('a refused door delete is not announced', async () => {
+    // Every DELETE the doors answer is refused.
+    doorFetch.mockImplementation(async (url: unknown, init?: { method?: string }) =>
+      init?.method === 'DELETE'
+        ? new Response(JSON.stringify({ success: false }), { status: 409 })
+        : new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    );
+    await deleteOwnAsMember();
+    expect(toast.error).toHaveBeenCalledWith('The comment was not deleted. Please try again.');
+    expect(commentChanges()).toEqual([]);
   });
 });

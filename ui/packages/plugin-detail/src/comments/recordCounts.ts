@@ -44,9 +44,16 @@
  * that names none of them, or `MAX_COUNT_ROUNDS`) has no count, never a zero.
  *
  * The counts are asked again when the surface reloads (`reloadKey`) and when a
- * write to a counted object is announced on the data-invalidation bus (a
- * comment posted or resolved, an attachment uploaded or deleted, in the record
- * drawer a card opens).
+ * write to a counted object is announced on the data-invalidation bus, as each
+ * write in the record drawer a card opens is: a comment posted, edited or
+ * deleted through the data source (its mutation event), a thread resolved or
+ * reopened and a member's own comment deleted through the comment doors, and
+ * an attachment uploaded or deleted (the record page and the Attachments panel
+ * announce the door writes themselves).
+ *
+ * An ask replaced by a newer one (a write announced mid-read) is not called
+ * off: its answer is dropped, and over a cut answer its remaining rounds still
+ * run. Accepted: only a deployment that cuts sees the extra reads.
  */
 
 import * as React from 'react';
