@@ -776,6 +776,8 @@ const de = {
       errorRowPrefix: "Zeile {{row}}: ",
       referenceNotFound: "Kein passender Datensatz für „{{value}}“",
       referenceAmbiguous: "„{{value}}“ passt zu mehreren Datensätzen — verwenden Sie einen eindeutigen Wert oder die Datensatz-ID",
+      referenceOutOfScope: "„{{value}}“ wurde gefunden, aber nicht unter {{scope}}",
+      scopeEntry: "{{label}} „{{value}}“",
       invalidBoolean: "„{{value}}“ ist kein gültiger Wahr/Falsch-Wert",
       invalidNumber: "„{{value}}“ ist keine gültige Zahl",
       invalidDate: "„{{value}}“ ist kein gültiges Datum",

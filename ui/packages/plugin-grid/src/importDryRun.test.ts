@@ -143,3 +143,51 @@ describe('formatDryRunError', () => {
     expect(message).toBe('value is out of range');
   });
 });
+
+describe('formatDryRunError — reference_out_of_scope (objectstack#36794)', () => {
+  const labels = new Map([['task', '任务'], ['project', '项目']]);
+  const t = (key: string, vars?: Record<string, unknown>) =>
+    ({
+      'grid.import.referenceOutOfScope': `"${vars?.value}" was found, but not under ${vars?.scope}`,
+      'grid.import.scopeEntry': `${vars?.label} "${vars?.value}"`,
+      'grid.import.referenceNotFound': `No matching record for "${vars?.value}"`,
+    } as Record<string, string>)[key] ?? key;
+  const serverSentence = 'task: no record matches "Design review" (Project = "Gemini")';
+
+  it('names the scoping column by its label and the row\'s cell, from the structured scope', () => {
+    const { fieldLabel, message } = formatDryRunError(
+      { field: 'task', code: 'reference_out_of_scope', error: serverSentence, scope: [{ field: 'project', value: 'Gemini' }] },
+      labels, 'Design review', t,
+    );
+    expect(fieldLabel).toBe('任务');
+    expect(message).toBe('"Design review" was found, but not under 项目 "Gemini"');
+  });
+
+  it('names every scoping column of a multi-column scope', () => {
+    const { message } = formatDryRunError(
+      {
+        field: 'task', code: 'reference_out_of_scope', error: serverSentence,
+        scope: [{ field: 'project', value: 'Gemini' }, { field: 'phase', value: 'P2' }],
+      },
+      labels, 'Design review', t,
+    );
+    // A column with no label is named by its api-name.
+    expect(message).toBe('"Design review" was found, but not under 项目 "Gemini", phase "P2"');
+  });
+
+  it('is never rendered as "no matching record"', () => {
+    const { message } = formatDryRunError(
+      { field: 'task', code: 'reference_out_of_scope', error: serverSentence, scope: [{ field: 'project', value: 'Gemini' }] },
+      labels, 'Design review', t,
+    );
+    expect(message).not.toContain('No matching record');
+  });
+
+  it('with no scope to name, shows the server\'s own sentence minus the api-name prefix, never parsing it', () => {
+    const { message } = formatDryRunError(
+      { field: 'task', code: 'reference_out_of_scope', error: serverSentence },
+      labels, 'Design review', t,
+    );
+    expect(message).toBe('no record matches "Design review" (Project = "Gemini")');
+  });
+});

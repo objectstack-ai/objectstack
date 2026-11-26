@@ -776,6 +776,8 @@ const ko = {
       errorRowPrefix: "{{row}}행: ",
       referenceNotFound: "\"{{value}}\"과(와) 일치하는 레코드가 없습니다",
       referenceAmbiguous: "\"{{value}}\"이(가) 여러 레코드와 일치합니다 — 고유한 값이나 레코드 ID를 사용하세요",
+      referenceOutOfScope: "\"{{value}}\"을(를) 찾았지만 {{scope}}에 속하지 않습니다",
+      scopeEntry: "{{label}} \"{{value}}\"",
       invalidBoolean: "\"{{value}}\"은(는) 유효한 true/false 값이 아닙니다",
       invalidNumber: "\"{{value}}\"은(는) 유효한 숫자가 아닙니다",
       invalidDate: "\"{{value}}\"은(는) 유효한 날짜가 아닙니다",

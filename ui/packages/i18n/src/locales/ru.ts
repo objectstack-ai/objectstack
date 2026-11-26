@@ -813,6 +813,8 @@ const ru = {
       errorRowPrefix: "Строка {{row}}: ",
       referenceNotFound: "Нет записи, соответствующей «{{value}}»",
       referenceAmbiguous: "«{{value}}» соответствует нескольким записям — используйте уникальное значение или идентификатор записи",
+      referenceOutOfScope: "«{{value}}» найдено, но не в {{scope}}",
+      scopeEntry: "{{label}} «{{value}}»",
       invalidBoolean: "«{{value}}» не является допустимым значением true/false",
       invalidNumber: "«{{value}}» не является допустимым числом",
       invalidDate: "«{{value}}» не является допустимой датой",

@@ -335,6 +335,34 @@ describe('[#36159] [#36794] a scoped miss whose value exists outside the row\'s 
     for (const c of taskReads) expect(c.query!.where).toHaveProperty('project');
   });
 
+  it('a scope the engine cannot filter by (every scoped read refused): reference_not_found saying the lookup could not be made, never out of scope', async () => {
+    const { p, findData } = protocol();
+    // The scope names a target field no driver can filter by (a formula): the
+    // engine's filter seam refuses every read carrying it, as INVALID_FIELD.
+    findData.mockImplementation(async (args: FindArgs) => {
+      const where = args.query!.where as Record<string, unknown>;
+      if (args.object === 'xm_task' && 'project' in where) {
+        throw Object.assign(new Error("ObjectQL.find('xm_task') filters on 'project', a virtual formula field"), {
+          code: 'INVALID_FIELD', status: 400, field: 'project', fields: ['project'],
+        });
+      }
+      return (ROWS[args.object] ?? []).filter((r) => matches(r, where));
+    });
+    // "Design review" exists, under Apollo, and the row names Gemini: still no
+    // out-of-scope claim, because the scoped question was never asked.
+    const summary = await run(p, [{ name: 'INV-1', project: 'Gemini', task: 'Design review' }]);
+    expect(summary.results.map(refusal)).toEqual([{
+      ok: false, code: 'reference_not_found', field: 'task',
+      error: 'task: "Design review" could not be looked up within Project = "Gemini": the lookup\'s target cannot be '
+        + 'filtered by that column, so the lookup field\'s dependsOn needs another one',
+    }]);
+    expect(summary.results.map(cellErrors)).toEqual([[{ field: 'task', code: 'reference_not_found', scope: undefined }]]);
+    // No unscoped probe ran.
+    const taskReads = findData.mock.calls.map(([c]) => c).filter((c) => c.object === 'xm_task');
+    expect(taskReads.length).toBeGreaterThan(0);
+    for (const c of taskReads) expect(c.query!.where).toHaveProperty('project');
+  });
+
   it('the unscoped probe is the importing caller\'s own read, and a record that caller cannot read stays unnamed', async () => {
     const { p, findData } = protocol();
     // The caller's reads see no Apollo task: the fake hides xm_task rows of p1

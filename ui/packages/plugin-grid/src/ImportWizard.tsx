@@ -174,6 +174,8 @@ export const IMPORT_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // baked-in api-name and internal object name) never reaches the user.
   'grid.import.referenceNotFound': 'No matching record for "{{value}}"',
   'grid.import.referenceAmbiguous': '"{{value}}" matches more than one record — use a unique value or the record id',
+  'grid.import.referenceOutOfScope': '"{{value}}" was found, but not under {{scope}}',
+  'grid.import.scopeEntry': '{{label}} "{{value}}"',
   'grid.import.invalidBoolean': '"{{value}}" is not a valid true/false value',
   'grid.import.invalidNumber': '"{{value}}" is not a valid number',
   'grid.import.invalidDate': '"{{value}}" is not a valid date',
@@ -455,7 +457,7 @@ export interface ImportResult {
   totalRows: number;
   importedRows: number;
   skippedRows: number;
-  errors: Array<{ row: number; field: string; message: string; code?: string }>;
+  errors: Array<{ row: number; field: string; message: string; code?: string; scope?: CellErrorScope }>;
   /** Rows that created a new record (server-side import). */
   createdRows?: number;
   /** Rows that updated an existing record (server-side import). */
@@ -573,6 +575,17 @@ function rowErrorFieldLabel(field: string | undefined, fieldLabelByName: Map<str
   return fieldLabelByName.get(field) ?? field;
 }
 
+/** The row's own columns a scoped lookup cell was resolved within (`ValidateDataIssueSchema.scope`). */
+type CellErrorScope = NonNullable<NonNullable<ImportRowResult['errors']>[number]['scope']>;
+
+/**
+ * The `scope` of a failed row's first cell error, the one `field` / `code` /
+ * `error` name (`ImportRowResultSchema`): present only on `reference_out_of_scope`.
+ */
+function firstCellScope(r: Pick<ImportRowResult, 'errors'>): CellErrorScope | undefined {
+  return r.errors?.[0]?.scope;
+}
+
 /**
  * Turn one failed dry-run row into a friendly, localizable error line.
  *
@@ -586,7 +599,7 @@ function rowErrorFieldLabel(field: string | undefined, fieldLabelByName: Map<str
  * `<api-name>:` prefix — for codes we don't recognize.
  */
 function formatDryRunError(
-  r: Pick<ImportRowResult, 'field' | 'error' | 'code'>,
+  r: Pick<ImportRowResult, 'field' | 'error' | 'code'> & { scope?: CellErrorScope },
   fieldLabelByName: Map<string, string>,
   value: string | undefined,
   t: (key: string, vars?: Record<string, unknown>) => string,
@@ -600,6 +613,17 @@ function formatDryRunError(
       return { fieldLabel, message: t('grid.import.referenceNotFound', { value: shown }) };
     case 'reference_ambiguous':
       return { fieldLabel, message: t('grid.import.referenceAmbiguous', { value: shown }) };
+    case 'reference_out_of_scope': {
+      // [objectstack#36794] The value names a record under ANOTHER parent: say
+      // which of the row's own columns it was looked up within, from the
+      // structured `scope` (never the server sentence). With no scope to name,
+      // the server's own sentence (already in the caller's locale) is shown.
+      const scope = (r.scope ?? [])
+        .map((s) => t('grid.import.scopeEntry', { label: fieldLabelByName.get(s.field) ?? s.field, value: s.value }))
+        .join(', ');
+      if (scope) return { fieldLabel, message: t('grid.import.referenceOutOfScope', { value: shown, scope }) };
+      break;
+    }
     case 'invalid_boolean':
       return { fieldLabel, message: t('grid.import.invalidBoolean', { value: shown }) };
     case 'invalid_number':
@@ -1156,7 +1180,10 @@ function jobResultToImportResult(res: ImportJobResultsInfo): ImportResult {
     updatedRows: res.updated,
     errors: (res.results ?? [])
       .filter((r) => !r.ok)
-      .map((r) => ({ row: r.row, field: r.field ?? '', message: r.error ?? r.code ?? 'Import failed', code: r.code })),
+      .map((r) => ({
+        row: r.row, field: r.field ?? '', message: r.error ?? r.code ?? 'Import failed', code: r.code,
+        ...(firstCellScope(r) ? { scope: firstCellScope(r) } : {}),
+      })),
     resultsTruncated: res.resultsTruncated,
   };
 }
@@ -2675,7 +2702,10 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
   );
   const describeFinding: DescribeFinding = (finding) => {
     if (finding.source === 'server') {
-      return formatDryRunError(finding.result, fieldLabelByName, dryRunCellValue(finding.result.row, finding.result.field), t);
+      return formatDryRunError(
+        { ...finding.result, scope: firstCellScope(finding.result) },
+        fieldLabelByName, dryRunCellValue(finding.result.row, finding.result.field), t,
+      );
     }
     // Named the way formatDryRunError names a server finding's field, so the
     // two halves of one row read alike.
@@ -2936,7 +2966,10 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
           updatedRows: res.updated,
           errors: res.results
             .filter((r) => !r.ok)
-            .map((r) => ({ row: r.row, field: r.field ?? '', message: r.error ?? r.code ?? 'Import failed', code: r.code })),
+            .map((r) => ({
+        row: r.row, field: r.field ?? '', message: r.error ?? r.code ?? 'Import failed', code: r.code,
+        ...(firstCellScope(r) ? { scope: firstCellScope(r) } : {}),
+      })),
           serverResult: res,
         };
         setProgress(100);
@@ -3390,7 +3423,7 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
                     // server text for known codes) so the completion screen and
                     // the pre-check read identically (objectstack#3566).
                     const { fieldLabel, message } = formatDryRunError(
-                      { field: err.field, error: err.message, code: err.code },
+                      { field: err.field, error: err.message, code: err.code, scope: err.scope },
                       fieldLabelByName,
                       dryRunCellValue(err.row, err.field),
                       t,

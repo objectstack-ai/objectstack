@@ -89,6 +89,8 @@ export interface ImportRowResult {
   /**
    * [#25582] Every cell error of a failed row, one element per failed cell in
    * column order, each `{ field, code, message }` (`ImportRowResultSchema.errors`),
+   * plus `scope` on a `reference_out_of_scope` cell (the row's own columns the
+   * lookup was resolved within, #36794),
    * so one import names every bad cell instead of one per re-import. Filled
    * only from `coerceRow`'s cell errors, where `field` / `code` / `error` above
    * are element 0. ⛔ Never on a validate-verdict row or a refused write: their
@@ -997,6 +999,10 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       .filter((f) => !scope || !Object.prototype.hasOwnProperty.call(scope, f));
     const lookup = async (): Promise<RefMatch> => {
       let match: RefMatch = {};
+      // [#36794] Whether any candidate read ran to an answer. A scoped lookup
+      // none of whose reads did (the scope names a target field the engine
+      // cannot filter by, such as a formula) never asked its question.
+      let asked = false;
       for (const f of candidates) {
         try {
           const r = await p.findData(findArgsBase({
@@ -1006,6 +1012,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
             // more conditions on the same read, run as the same caller.
             query: { object: referenceObject, where: { [f]: display, ...(scope ?? {}) }, limit: 2 },
           }));
+          asked = true;
           const recs = findRows(r);
           if (recs.length === 0) continue;
           if (recs.length > 1) { match = { ambiguous: true, matchedField: f }; break; }
@@ -1019,6 +1026,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
           /* field absent on target object — try the next candidate */
         }
       }
+      if (scope && !asked && !match.scopeDenied) match = { scopeUnqueryable: true };
       return match;
     };
     let match = await lookup();

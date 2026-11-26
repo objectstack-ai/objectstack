@@ -306,3 +306,28 @@ describe('import_reference_out_of_scope — names the value and the scope in eve
     ).toBe('合同:在 Account = "Acme" 下未找到与“CTR-0006”匹配的记录');
   });
 });
+
+/**
+ * #36794 review — `import_reference_scope_unqueryable`: `reference_not_found`'s
+ * sentence for a scoped lookup none of whose reads ran (the scope names a target
+ * field the engine cannot filter by). Every locale names the value and the scope,
+ * and says why the lookup could not be made, never that nothing matched.
+ */
+describe('import_reference_scope_unqueryable — names the value and the scope in every locale', () => {
+  it('every locale interpolates {{value}} and {{scope}} and names dependsOn', () => {
+    for (const [locale, catalog] of Object.entries(BUILTIN_VALIDATION_MESSAGES)) {
+      const template = catalog.import_reference_scope_unqueryable;
+      expect(template, locale).toBeDefined();
+      expect(template, locale).toContain('{{value}}');
+      expect(template, locale).toContain('{{scope}}');
+      expect(template, locale).toContain('dependsOn');
+    }
+  });
+
+  it('renders the English sentence', () => {
+    const params = { value: 'Design review', scope: 'Project = "Gemini"' };
+    expect(renderValidationMessage({ messageKey: 'import_reference_scope_unqueryable', label: 'Task', params }))
+      .toBe('Task: "Design review" could not be looked up within Project = "Gemini": the lookup\'s target cannot be '
+        + 'filtered by that column, so the lookup field\'s dependsOn needs another one');
+  });
+});

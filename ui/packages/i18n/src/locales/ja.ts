@@ -776,6 +776,8 @@ const ja = {
       errorRowPrefix: "{{row}} 行目: ",
       referenceNotFound: "「{{value}}」に一致するレコードがありません",
       referenceAmbiguous: "「{{value}}」は複数のレコードに一致します — 一意の値かレコード ID を使用してください",
+      referenceOutOfScope: "「{{value}}」は見つかりましたが、{{scope}} の下にはありません",
+      scopeEntry: "{{label}}「{{value}}」",
       invalidBoolean: "「{{value}}」は有効な true/false の値ではありません",
       invalidNumber: "「{{value}}」は有効な数値ではありません",
       invalidDate: "「{{value}}」は有効な日付ではありません",
