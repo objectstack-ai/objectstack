@@ -57,18 +57,24 @@ async function generationRows(schema: string, sourceId: string) {
   return found.rows;
 }
 
-/** A data engine over a list of rows: `find` with a keyset on `id`, ordered by id. */
+/** A data engine over a list of rows: `find` with equality, `$and` and a keyset on `id`, ordered by id. */
 function rowsEngine(rows: Array<Record<string, unknown>>) {
-  const after = (where: Record<string, unknown> | undefined): string | undefined => {
-    const and = where?.$and as Array<Record<string, unknown>> | undefined;
-    const cond = (and ? and.find((c) => 'id' in c) : where) as { id?: { $gt?: unknown } } | undefined;
-    return cond?.id?.$gt === undefined ? undefined : String(cond.id.$gt);
+  const matches = (row: Record<string, unknown>, where: Record<string, unknown> | undefined): boolean => {
+    if (!where) return true;
+    return Object.entries(where).every(([k, v]) => {
+      if (k === '$and') return (v as Array<Record<string, unknown>>).every((w) => matches(row, w));
+      if (v !== null && typeof v === 'object') {
+        const cond = v as Record<string, unknown>;
+        if ('$gt' in cond) return String(row[k]) > String(cond.$gt);
+        throw new Error(`rowsEngine: condition ${JSON.stringify(v)} is not implemented`);
+      }
+      return row[k] === v;
+    });
   };
   return {
-    async find(_object: string, query: { where?: Record<string, unknown>; limit?: number }) {
-      const cursor = after(query?.where);
-      const out = rows.filter((r) => cursor === undefined || String(r.id) > cursor);
-      return query?.limit === undefined ? out : out.slice(0, query.limit);
+    async find(_object: string, query?: { where?: Record<string, unknown>; limit?: number }) {
+      const page = rows.filter((r) => matches(r, query?.where));
+      return (typeof query?.limit === 'number' ? page.slice(0, query.limit) : page).map((r) => ({ ...r }));
     },
     async count() {
       return rows.length;
