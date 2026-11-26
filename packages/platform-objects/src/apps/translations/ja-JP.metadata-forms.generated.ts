@@ -2236,11 +2236,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       joined_blocks: {
         label: "結合ブロック",
-        description: "1 つのレポートに結合する追加ブロック（joined レポートのみ）。"
+        description: "同じレポートに積み重ねる他のブロック。それぞれ独自のデータソースを持ちます（joined レポートのみ）。"
       },
       filter_and_chart: {
         label: "フィルターとチャート",
-        description: "レポートレベルのフィルターとチャート表示。"
+        description: "フィルター条件と、チャートの表示方法。"
       },
       period_and_export: {
         label: "期間とエクスポート",
@@ -2277,11 +2277,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       columns: {
         label: "列のグループ化",
-        helpText: "横方向のディメンション名（matrix のみ）"
+        helpText: "列方向に展開するグループ（matrix レポートのみ）。"
       },
       order: {
         label: "並び順",
-        helpText: "ソートキー（優先度の高い順）。rows/columns のディメンション、または values のメジャーを指定します。時間ディメンションは既定で時系列順です。"
+        helpText: "並べ替えの基準。重要なものから順に指定します（グループまたは指標）。時間のグループは既定で日付順に並びます。"
       },
       "order.by": {
         label: "並び替えキー"
@@ -2295,7 +2295,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       blocks: {
         label: "ブロック",
-        helpText: "データセットにバインドされたサブレポート（joined レポートのみ）"
+        helpText: "サブレポート。それぞれ独自のデータソースを持ちます（joined レポートのみ）。"
       },
       "blocks.name": {
         label: "名前"
@@ -2333,11 +2333,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       chart: {
         label: "チャート",
-        helpText: "チャート設定（type, legend, colors）"
+        helpText: "チャートの種類と設定。"
       },
       dateRange: {
         label: "日付範囲",
-        helpText: "既定の期間とカスタム範囲の切り替え。ディメンションはデータセットの日付ディメンションである必要があります。データセットに日付ディメンションが 1 つだけの場合は空欄のままにします。"
+        helpText: "レポートを開いたときに表示される期間と、利用者が自分で範囲を選べるかどうか。"
       },
       "dateRange.dimension": {
         label: "日付フィールド",
@@ -2353,7 +2353,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       exportOptions: {
         label: "エクスポートオプション",
-        helpText: "ダウンロード形式（csv, xlsx）とファイル名。ダウンロードできるユーザーは、データセットのオブジェクトのエクスポート権限で決まります。"
+        helpText: "ダウンロード形式（csv, xlsx）とファイル名。ダウンロードできるユーザーは、データソースのオブジェクトのエクスポート権限で決まります。"
       },
       "exportOptions.formats": {
         label: "形式",
