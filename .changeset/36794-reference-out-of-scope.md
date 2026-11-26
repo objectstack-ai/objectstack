@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/core': patch
 '@objectstack/runtime': patch
 ---
@@ -7,7 +7,8 @@
 feat(spec,core): an import lookup cell that names a record under another parent answers its own reason, `reference_out_of_scope`, with the scoping columns as data
 
 Clause-②: yes (widening)
-Metadata-protocol: none (a wire error code, no author-writable key)
+Metadata-protocol: added (`ValidateDataIssueSchema.scope`, a new optional key on the import cell error; the new `FieldErrorCode` value is a wire code, no author-writable key)
+Skills-docs: follow-up owed — skills/objectstack-data/rules/relationships.md
 
 `FieldErrorCode` (ADR-0114) gains `reference_out_of_scope`. The importer answers it for a SCOPED lookup cell (a `dependsOn` column, or the master the same row sets) whose value matches no record within the row's scope while it does match a record outside it: the row names a record that lives under another parent. Until now that cell answered `reference_not_found`, the same reason as a value no record has, and only the message told the two apart (`Contract: no record matches "CTR-0006" (Account = "Acme")`); a client that keys its text on the reason, such as the Import Wizard's dry run, could only say "no matching record". The message is unchanged in English and has its own catalog key, `import_reference_out_of_scope`, in all four platform locales (a deployment overrides it under `validation.field.import_reference_out_of_scope`).
 
