@@ -10,18 +10,28 @@
  * The headings a markdown value's `document` face draws (objectstack#37562).
  *
  * The value is run through the face's own pipeline: react-markdown with
- * `MARKDOWN_REMARK_PLUGINS` and `MARKDOWN_REHYPE_PLUGINS` (`./MarkdownContent.tsx`),
- * and the tree is read after the last of them, so the headings answered are the
+ * `MARKDOWN_REMARK_PLUGINS` and `MARKDOWN_REHYPE_PLUGINS`, the lists
+ * `./MarkdownContent.tsx` draws with, declared here once for both, and the
+ * tree is read after the last of them, so the headings answered are the
  * ones drawn, by construction: a setext heading, one inside a quote, a list item
  * or a footnote, and the `Footnotes` label the footnote section draws are
  * answered; a raw heading tag, a heading-shaped line in code and a line the
  * parse reads as something else are not.
  *
- * Loaded on demand (`loadDrawnMarkdownHeadings` in the package index), so
- * react-markdown stays in the lazy chunk the face lives in.
+ * Loaded on demand through `./MarkdownContent.tsx` (`loadDrawnMarkdownHeadings`
+ * in the package index), so react-markdown stays in the lazy chunk the face
+ * lives in.
  */
-import Markdown from 'react-markdown';
-import { MARKDOWN_REHYPE_PLUGINS, MARKDOWN_REMARK_PLUGINS } from './MarkdownContent.js';
+import Markdown, { type Options } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeSanitize from 'rehype-sanitize';
+import { RICH_TEXT_SANITIZE_SCHEMA } from './sanitizedHtml.js';
+
+/** The remark plugins a markdown value is parsed with: GitHub Flavored Markdown. */
+export const MARKDOWN_REMARK_PLUGINS: NonNullable<Options['remarkPlugins']> = [remarkGfm];
+
+/** The rehype plugins the parsed value is drawn through: sanitized, against the `html` / `richtext` schema. */
+export const MARKDOWN_REHYPE_PLUGINS: NonNullable<Options['rehypePlugins']> = [[rehypeSanitize, RICH_TEXT_SANITIZE_SCHEMA]];
 
 /** One drawn heading: its text as the face draws it, and where it starts in the value (none for a heading the pipeline adds). */
 export interface DrawnMarkdownHeading {

@@ -1,8 +1,6 @@
 import React from 'react';
-import ReactMarkdown, { type Components, type Options } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeSanitize from 'rehype-sanitize';
-import { RICH_TEXT_SANITIZE_SCHEMA } from './sanitizedHtml.js';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import { MARKDOWN_REHYPE_PLUGINS, MARKDOWN_REMARK_PLUGINS } from './markdownHeadings.js';
 import {
   RICH_TEXT_CELL_FACE_CLASS,
   RICH_TEXT_DOCUMENT_CLASS,
@@ -18,14 +16,13 @@ import {
 export type MarkdownFace = RichTextFace;
 
 /**
- * The remark plugins a markdown value is parsed with: GitHub Flavored Markdown.
- * `./markdownHeadings.ts` reads the drawn headings through the same list, so a
- * reader of the face and the face never disagree on what is a heading.
+ * The plugin lists this face draws with, and the reader of the headings it
+ * draws, which runs the same lists (objectstack#37562). They live in
+ * `./markdownHeadings.ts` and are answered from here, so the one module the
+ * package loads on demand for markdown is this one: a module both loaded on
+ * demand and imported statically would not leave the eager chunk.
  */
-export const MARKDOWN_REMARK_PLUGINS: NonNullable<Options['remarkPlugins']> = [remarkGfm];
-
-/** The rehype plugins the parsed value is drawn through: sanitized, against the `html` / `richtext` schema. */
-export const MARKDOWN_REHYPE_PLUGINS: NonNullable<Options['rehypePlugins']> = [[rehypeSanitize, RICH_TEXT_SANITIZE_SCHEMA]];
+export { MARKDOWN_REHYPE_PLUGINS, MARKDOWN_REMARK_PLUGINS, drawnMarkdownHeadings } from './markdownHeadings.js';
 
 /** In the cell face no heading element is drawn (see `cellFaceHeadings`). */
 const CELL_COMPONENTS: Components = cellFaceHeadings('data-markdown-heading');
