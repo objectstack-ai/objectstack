@@ -1262,7 +1262,10 @@ function builderLost(sourceId: string): Error {
       remedy:
         'The lock was let go after the build made no progress for its idle time, or its database session ended, and ' +
         'another process may be building the source. What this build wrote is kept and skipped by the next build; ' +
-        'start a reindex again if none is running.',
+        'start a reindex again if none is running. If every build stops this way at its first page, the store is ' +
+        'behind a transaction-mode connection pooler (PgBouncer transaction pooling, or a hosted pooled URL): its ' +
+        'session advisory lock does not stay with the session that took it, so the lock always reads as lost. Point ' +
+        "the store's url at a direct or session-mode PostgreSQL endpoint.
     },
   );
 }

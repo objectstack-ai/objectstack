@@ -602,7 +602,24 @@ export class KnowledgeService implements IKnowledgeService {
 
     // What the adapter holds before the walk: the skip's hashes, and the
     // purge's candidates once the walk is complete.
-    const listing = await listAdapterDocuments(source, adapter, plan.index);
+    // Raced against the build's bound like every call of the walk, so a store
+    // that never answers frees the source's chain.
+    let listing: Awaited<ReturnType<typeof listAdapterDocuments>>;
+    try {
+      listing = await fencedCall(fence, listAdapterDocuments(source, adapter, plan.index));
+    } catch (err) {
+      return {
+        ok: false,
+        object,
+        discovered: 0,
+        indexed: 0,
+        skipped: 0,
+        purged: null,
+        failed: 0,
+        failures: [],
+        message: `reindex of source '${source.id}' stopped before its first page: ${errorText(err)}`,
+      };
+    }
     const listed = listing.ok ? listing.documents : undefined;
     const listingNote = listing.ok || listing.reason === undefined
       ? undefined
@@ -762,19 +779,28 @@ export class KnowledgeService implements IKnowledgeService {
     };
     if (listingNote) return { ...done, message: failedNote === undefined ? listingNote : `${listingNote} ${failedNote}` };
     if (listed === undefined || cap !== undefined || (source.refresh?.onRecordChange ?? true) === false) {
-      return build ? this.completeBuild(source, adapter, ctx, done) : done;
+      return build ? this.completeBuild(source, adapter, ctx, done, fence) : done;
     }
 
     const candidates = [...listed.keys()].filter((id) => !seen.has(id));
-    const purge = await purgeDocuments({
-      source,
-      objSource,
-      adapter,
-      engine,
-      candidates,
-      serialize: (documentId, task) => chainAfter(this.recordSyncTails, documentId, task),
-      index: plan.index,
-    });
+    let purge: PurgeDocumentsOutcome;
+    try {
+      purge = await fencedCall(fence, purgeDocuments({
+        source,
+        objSource,
+        adapter,
+        engine,
+        candidates,
+        serialize: (documentId, task) => chainAfter(this.recordSyncTails, documentId, task),
+        index: plan.index,
+      }));
+    } catch (err) {
+      return {
+        ...done,
+        ok: false,
+        message: `reindex of source '${source.id}' walked every page, and stopped during its purge: ${errorText(err)}`,
+      };
+    }
     if (purge.failure !== undefined) {
       return {
         ...done,
@@ -793,9 +819,9 @@ export class KnowledgeService implements IKnowledgeService {
           `${purge.foreign} listed document(s) carry an id that is not one this source derives from a record ` +
           `('${source.id}:' and the record id); they were kept, because no row can confirm them.` +
           (failedNote === undefined ? '' : ` ${failedNote}`),
-      });
+      }, fence);
     }
-    return this.completeBuild(source, adapter, ctx, { ...done, purged: purge.purged });
+    return this.completeBuild(source, adapter, ctx, { ...done, purged: purge.purged }, fence);
   }
 
   /**
@@ -804,16 +830,28 @@ export class KnowledgeService implements IKnowledgeService {
    * carried. An adapter without it records nothing. One that throws turns the
    * walk's result into `ok: false`: every page was written, but the adapter
    * did not record what it holds, so the next complete walk builds again.
+   * Under a build's `fence`, a build that must stop (its lease lost during
+   * the purge, or its bound passed) completes nothing, and the call is raced
+   * against the bound.
    */
   private async completeBuild(
     source: KnowledgeSource,
     adapter: IKnowledgeAdapter,
     ctx: AdapterContext,
     done: KnowledgeReindexResult,
+    fence?: KnowledgeBuildFence,
   ): Promise<KnowledgeReindexResult> {
+    const halt = fence?.stop();
+    if (halt !== undefined) {
+      return {
+        ...done,
+        ok: false,
+        message: `reindex of source '${source.id}' walked every page, and stopped before its completion: ${halt.message}`,
+      };
+    }
     if (typeof adapter.completeBuild !== 'function') return done;
     try {
-      await adapter.completeBuild(ctx);
+      await fencedCall(fence, adapter.completeBuild(ctx));
       return done;
     } catch (err) {
       return {

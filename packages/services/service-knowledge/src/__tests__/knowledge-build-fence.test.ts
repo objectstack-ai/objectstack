@@ -34,19 +34,23 @@ function rows(count: number): Row[] {
   return Array.from({ length: count }, (_, i) => ({ id: `r${String(i + 1).padStart(4, '0')}`, title: `Row ${i + 1}`, body: `Body ${i + 1}` }));
 }
 
-/** A data-engine double: `find` honours `id: { $gt }` (alone or in `$and`), orders by id and takes `limit`. */
+/** A data-engine double: `find` honours equality, `$and` and `id: { $gt }`, orders by id and takes `limit`. */
 function makeEngine(initial: Row[]) {
   const all = [...initial].sort((a, b) => String(a.id).localeCompare(String(b.id)));
-  const after = (where: Record<string, unknown> | undefined): string | undefined => {
-    if (!where) return undefined;
-    const and = where.$and as Array<Record<string, unknown>> | undefined;
-    const cond = (and ? and.find((c) => 'id' in c) : where) as { id?: { $gt?: unknown } } | undefined;
-    const gt = cond?.id?.$gt;
-    return gt === undefined ? undefined : String(gt);
+  const matches = (row: Row, where: Record<string, unknown> | undefined): boolean => {
+    if (!where) return true;
+    return Object.entries(where).every(([key, value]) => {
+      if (key === '$and') return (value as Array<Record<string, unknown>>).every((c) => matches(row, c));
+      if (value !== null && typeof value === 'object') {
+        const gt = (value as { $gt?: unknown }).$gt;
+        if (gt === undefined) throw new Error(`engine double: condition on '${key}' is not implemented`);
+        return String(row[key]) > String(gt);
+      }
+      return row[key] === value;
+    });
   };
   const find = vi.fn(async (_object: string, query?: { where?: Record<string, unknown>; limit?: number }) => {
-    const cursor = after(query?.where);
-    const page = all.filter((r) => cursor === undefined || String(r.id) > cursor);
+    const page = all.filter((r) => matches(r, query?.where));
     return (typeof query?.limit === 'number' ? page.slice(0, query.limit) : page).map((r) => ({ ...r }));
   });
   const count = vi.fn(async () => all.length);
@@ -162,6 +166,29 @@ describe('a build whose lease lapses mid-walk stops before its next page', () =>
     expect(record.message).toMatch(/before its purge and completion/);
   });
 
+  it('a lease lost during the purge completes nothing', async () => {
+    const db = makeEngine(rows(50));
+    const { adapter, calls } = makeAdapter();
+    // The store holds one document whose row is gone: the purge removes it.
+    adapter.listDocuments = async () => ({ documents: [{ documentId: 'kb:gone', docHash: 'h' }] });
+    const { lock, state } = makeLock();
+    const removed: string[][] = [];
+    adapter.delete = async (ids) => {
+      removed.push(ids);
+      // The lease lapses while the purge deletes.
+      state.held = false;
+    };
+    const { service } = makeService(db.engine, adapter, lock);
+
+    const record = await service.rebuildSource('kb', { trigger: 'operator' });
+
+    expect(removed).toEqual([['kb:gone']]);
+    expect(calls.completeBuild).toBe(0);
+    expect(record).toMatchObject({ status: 'lease-lost', result: { ok: false } });
+    expect(record.message).toMatch(/stopped before its completion/);
+    expect(state.released).toBe(1);
+  });
+
   it('a lease no renewal kept alive within its term (a lock store that does not answer) reads as lost', async () => {
     vi.useFakeTimers();
     const db = makeEngine(rows(250));
@@ -255,11 +282,13 @@ describe('a build that stalls is cancelled at the bound', () => {
     expect(calls.completeBuild).toBe(1);
   });
 
-  it('a call outside the page loop that never answers (here completeBuild) is cancelled at the bound too', async () => {
+  it('a call outside the page loop that never answers (here completeBuild) is cancelled, and frees the source for the next build', async () => {
     vi.useFakeTimers();
     const db = makeEngine(rows(10));
-    const { adapter } = makeAdapter();
-    adapter.completeBuild = () => new Promise<void>(() => {});
+    const { adapter, calls } = makeAdapter();
+    const complete = adapter.completeBuild!.bind(adapter);
+    let hang = true;
+    adapter.completeBuild = (ctx) => (hang ? new Promise<void>(() => {}) : complete(ctx));
     const { lock, state } = makeLock();
     const { service } = makeService(db.engine, adapter, lock);
 
@@ -267,6 +296,47 @@ describe('a build that stalls is cancelled at the bound', () => {
     await vi.advanceTimersByTimeAsync(BUILD_STALL_LIMIT_MS + 1_000);
     expect((await pending).status).toBe('timed-out');
     expect(state.released).toBe(1);
+
+    // The walk stopped waiting on the hung completion, so the next build is not queued behind it.
+    hang = false;
+    state.held = true;
+    const next = await service.rebuildSource('kb', { trigger: 'operator' });
+    expect(next.status).toBe('done');
+    expect(calls.completeBuild).toBe(1);
+  });
+
+  it('a hung listing or a hung purge is cancelled at the bound, completes nothing, and frees the source', async () => {
+    for (const where of ['listing', 'purge'] as const) {
+      vi.useFakeTimers();
+      const db = makeEngine(rows(10));
+      const { adapter, calls } = makeAdapter();
+      let hang = true;
+      adapter.listDocuments = async () => {
+        if (hang && where === 'listing') return new Promise<never>(() => {});
+        return { documents: [{ documentId: 'kb:gone', docHash: 'h' }] };
+      };
+      adapter.delete = async () => {
+        if (hang && where === 'purge') return new Promise<void>(() => {});
+      };
+      const { lock, state } = makeLock();
+      const { service } = makeService(db.engine, adapter, lock);
+
+      const pending = service.rebuildSource('kb', { trigger: 'operator' });
+      await vi.advanceTimersByTimeAsync(BUILD_STALL_LIMIT_MS + 1_000);
+      expect((await pending).status, where).toBe('timed-out');
+      expect(state.released, where).toBe(1);
+      expect(calls.completeBuild, where).toBe(0);
+
+      hang = false;
+      state.held = true;
+      // The hung removal still holds that one document's own sync chain (a
+      // per-document chain, not the source's walk chain), so the next build
+      // is run against a store that no longer lists it.
+      if (where === 'purge') adapter.listDocuments = async () => ({ documents: [] });
+      expect((await service.rebuildSource('kb', { trigger: 'operator' })).status, where).toBe('done');
+      expect(calls.completeBuild, where).toBe(1);
+      vi.useRealTimers();
+    }
   });
 
   it('applies with no cluster service too (one node): the bound needs no lock', async () => {

@@ -20,8 +20,10 @@ import {
  * seconds and prints the build's progress until it ends. Exits 0 when the
  * build finished, 1 when it did not run or did not finish. With `--no-wait`
  * it exits 0 once the build has started and reports no outcome: the build
- * may still end `not-run` (another node holds the source's lock) or
- * `failed`, which only `os knowledge status` then shows.
+ * may still end `not-run` (another node holds the source's lock), `failed`,
+ * `lease-lost` (its cluster lease was lost mid-build) or `timed-out` (no page
+ * finished within the build's bound), which only `os knowledge status` then
+ * shows.
  *
  * A build sends the content fields of every row the source's `where` matches,
  * except those the index already holds unchanged, to the embedding provider,
@@ -64,7 +66,7 @@ export default class KnowledgeRebuild extends Command {
     const startedBuild = started.details.build as KnowledgeBuildView | null | undefined;
     if (!flags.wait) {
       // Exit 0 here says "started", never "built": the build can still end
-      // not-run (another node holds the lock) or failed.
+      // not-run (another node holds the lock), failed, lease-lost or timed-out.
       this.log('Not followed (--no-wait): the build may still not run or fail. Read its outcome with os knowledge status.');
       return;
     }
