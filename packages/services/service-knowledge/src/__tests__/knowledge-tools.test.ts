@@ -340,7 +340,7 @@ describe('search_knowledge — scope, granularity and groupBy: malformed argumen
     ['a groupBy over the length bound', { groupBy: long }, 'groupBy'],
     ['a groupBy with a NUL', { groupBy: 'pol\u0000icy' }, 'groupBy'],
     ['groupBy with granularity chunk', { groupBy: 'policy', granularity: 'chunk' }, 'groupBy'],
-  ])('refuses %s with VALIDATION_ERROR naming %s, and searches nothing', async (_case, args, named) => {
+  ])('refuses %s with VALIDATION_ERROR naming the argument, and searches nothing', async (_case, args, named) => {
     const { service, adapter } = setup();
     const err = await service.knowledgeTools().searchKnowledge({ query: 'q', ...args }, caller).catch((e) => e);
     expect(err).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
