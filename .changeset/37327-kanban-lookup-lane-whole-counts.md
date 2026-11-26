@@ -5,7 +5,7 @@
 
 fix(kanban): a list view board whose lanes come from the data counts and totals each whole lane, and a board laned by a lookup draws a lane whose records all sit past the first page
 
-Clause-②: no
+Clause-②: yes (widening) — @object-ui/i18n kanban.notLoaded
 Metadata-protocol: none
 
 A list view hands its board one page of records when it cannot know the lanes before the query: the lane field has no options (a lookup, or a text, number, boolean or date field). That board's lane header count and a foot `count` counted the page with no `+`, its `summarizeField` header total summed the page, and a lane whose records all sat past the first page was not drawn.

@@ -261,8 +261,9 @@ function numberOf(raw: unknown): number | null {
  * 0.2` reads `0.3`; a lane read's `SUM` over a float column, or a fold of
  * several groups' sums, arrives with the residue already in it
  * (`0.30000000000000004`) and no inputs to measure. Fifteen significant digits
- * is what a double holds exactly, so rounding there drops the residue and no
- * digit the column stored.
+ * is what a double holds exactly, so rounding there drops the residue. A
+ * non-integer sum of more than fifteen significant digits (ten trillion and
+ * up with two decimals) loses its last digit, which the page path kept.
  */
 export function withoutBinaryResidue(value: number): number {
   return Number.isInteger(value) ? value : Number(value.toPrecision(15));
