@@ -12,6 +12,13 @@
  * the route it calls, the payload it sends, that it follows a started build
  * to its end, and that a build which did not finish exits 1.
  *
+ * Behind a load balancer a progress read can land on a node that holds no
+ * record of the build (the record lives in memory on the node running it):
+ * `nodeWithoutRecord` answers such a poll. The command then reads the
+ * store's index state (the same on every node for a shared store; never
+ * read as the build's end on the per-process `memory` adapter), and never
+ * exits 1 for the poll alone.
+ *
  * The oclif `Config` is loaded at module scope, as in
  * `commands/datasource/envelope-unwrap.test.ts` (whose header says why).
  */
@@ -94,31 +101,40 @@ const running = (discovered: number) => ({
   trigger: 'operator', status: 'running', startedAt: STARTED_AT,
   progress: { pages: 1, discovered, indexed: discovered, skipped: 0, failed: 0 },
 });
-const statusOf = (build: unknown) => ok({
+const CURRENT = { state: 'current', due: false, detail: 'current.' };
+const NEVER_BUILT = { state: 'nothing', due: true, detail: 'never built.' };
+const UNREADABLE = { state: 'unreadable', due: false, detail: 'reading the adapter failed: connection reset.' };
+const statusOf = (build: unknown, index: unknown = CURRENT, adapter = 'pgvector') => ok({
   ok: true,
   message: '1 source(s)',
-  details: { sources: [{ id: 'kb', label: 'KB', adapter: 'pgvector', kind: 'object', index: { state: 'current', due: false, detail: 'current.' }, build }] },
+  details: { sources: [{ id: 'kb', label: 'KB', adapter, kind: 'object', index, build }] },
 });
+/** A poll answered by a node that is not running this build: no record there. */
+const nodeWithoutRecord = (index: unknown) => statusOf(null, index);
+const done = {
+  ...running(250),
+  status: 'done',
+  finishedAt: '2026-11-26T05:01:00.000Z',
+  progress: { pages: 3, discovered: 250, indexed: 240, skipped: 10, failed: 0 },
+  result: { ok: true, discovered: 250, indexed: 240, skipped: 10, purged: 2, failed: 0 },
+};
 
 const target = ['--url', SERVER, '--token', 'tok'];
 
 describe('os knowledge rebuild', () => {
   it('starts the rebuild through the settings action door and follows it to its end', async () => {
     const run = await drive(KnowledgeRebuild, ['kb', ...target], [
+      statusOf(null),
       ok({ ok: true, message: "Rebuild of source 'kb' started.", details: { source: 'kb', build: running(0) } }),
       statusOf(running(100)),
-      statusOf({
-        ...running(250),
-        status: 'done',
-        finishedAt: '2026-11-26T05:01:00.000Z',
-        progress: { pages: 3, discovered: 250, indexed: 240, skipped: 10, failed: 0 },
-        result: { ok: true, discovered: 250, indexed: 240, skipped: 10, purged: 2, failed: 0 },
-      }),
+      statusOf(done),
     ]);
 
     expect(run.failure).toBeUndefined();
-    expect(run.requests[0]).toEqual({ url: `${SERVER}/api/settings/knowledge/rebuild`, body: { source: 'kb' }, auth: 'Bearer tok' });
-    expect(run.requests.slice(1).map((r) => [r.url, r.body])).toEqual([
+    // The index state is read once before the rebuild: the baseline a poll on another node is judged against.
+    expect(run.requests[0]).toEqual({ url: `${SERVER}/api/settings/knowledge/index_status`, body: { source: 'kb' }, auth: 'Bearer tok' });
+    expect(run.requests[1]).toEqual({ url: `${SERVER}/api/settings/knowledge/rebuild`, body: { source: 'kb' }, auth: 'Bearer tok' });
+    expect(run.requests.slice(2).map((r) => [r.url, r.body])).toEqual([
       [`${SERVER}/api/settings/knowledge/index_status`, { source: 'kb' }],
       [`${SERVER}/api/settings/knowledge/index_status`, { source: 'kb' }],
     ]);
@@ -130,6 +146,7 @@ describe('os knowledge rebuild', () => {
 
   it('exits 1 when the build did not finish', async () => {
     const run = await drive(KnowledgeRebuild, ['kb', ...target], [
+      statusOf(null),
       ok({ ok: true, details: { source: 'kb', build: running(0) } }),
       statusOf({ ...running(10), status: 'failed', finishedAt: STARTED_AT, message: 'the adapter upsert failed: quota' }),
     ]);
@@ -137,18 +154,123 @@ describe('os knowledge rebuild', () => {
   });
 
   it('exits 1 with the server refusal text, and asks nothing more', async () => {
-    const run = await drive(KnowledgeRebuild, ['kb', ...target], [refused('A build of source \'kb\' is already running on this node.')]);
+    const run = await drive(KnowledgeRebuild, ['kb', ...target], [
+      statusOf(null),
+      refused('A build of source \'kb\' is already running on this node.'),
+    ]);
     expect(run.failure).toMatchObject({ message: "A build of source 'kb' is already running on this node.", exit: 1 });
-    expect(run.requests).toHaveLength(1);
+    expect(run.requests).toHaveLength(2);
   });
 
-  it('says so when the progress is answered by a node that is not running this build', async () => {
-    const run = await drive(KnowledgeRebuild, ['kb', ...target], [
-      ok({ ok: true, details: { source: 'kb', build: running(0) } }),
-      statusOf(null),
-    ]);
-    expect(run.failure?.exit).toBe(1);
-    expect(run.failure?.message).toContain('not running this build');
+  describe('a poll that lands on a node without the build record (behind a load balancer)', () => {
+    it('keeps following while the build is still running, and does not exit 1', async () => {
+      const run = await drive(KnowledgeRebuild, ['kb', ...target], [
+        nodeWithoutRecord(NEVER_BUILT),
+        ok({ ok: true, details: { source: 'kb', build: running(0) } }),
+        nodeWithoutRecord(NEVER_BUILT),
+        statusOf(running(100), NEVER_BUILT),
+        nodeWithoutRecord(NEVER_BUILT),
+        statusOf(done),
+      ]);
+      expect(run.failure).toBeUndefined();
+      expect(run.requests).toHaveLength(6);
+      const text = run.logs.join('\n');
+      expect(text).toContain("answered by a node that is not running this build; the store's index state: nothing");
+      expect(text).toContain('done (operator, ended 2026-11-26T05:01:00.000Z)');
+    });
+
+    it('exits 0 once the store reports the index current after the build succeeded', async () => {
+      const run = await drive(KnowledgeRebuild, ['kb', ...target], [
+        nodeWithoutRecord(NEVER_BUILT),
+        ok({ ok: true, details: { source: 'kb', build: running(0) } }),
+        nodeWithoutRecord(NEVER_BUILT),
+        nodeWithoutRecord(CURRENT),
+      ]);
+      expect(run.failure).toBeUndefined();
+      expect(run.requests).toHaveLength(4);
+      expect(run.logs.join('\n')).toContain('The index is current');
+    });
+
+    it('reads a record of an older build on the answering node as no record of this one', async () => {
+      const older = { ...done, startedAt: '2026-11-25T00:00:00.000Z' };
+      const run = await drive(KnowledgeRebuild, ['kb', ...target], [
+        nodeWithoutRecord(NEVER_BUILT),
+        ok({ ok: true, details: { source: 'kb', build: running(0) } }),
+        statusOf(older, NEVER_BUILT),
+        nodeWithoutRecord(CURRENT),
+      ]);
+      expect(run.failure).toBeUndefined();
+      expect(run.logs.join('\n')).not.toContain('ended 2026-11-25');
+    });
+
+    it('does not read an index that was already current as done; waits for the building node', async () => {
+      const run = await drive(KnowledgeRebuild, ['kb', ...target], [
+        nodeWithoutRecord(CURRENT),
+        ok({ ok: true, details: { source: 'kb', build: running(0) } }),
+        nodeWithoutRecord(CURRENT),
+        nodeWithoutRecord(CURRENT),
+        statusOf({ ...done, status: 'failed', message: 'the adapter upsert failed: quota' }),
+      ]);
+      // Only the recorded failure, read on the node that ran the build, exits 1.
+      expect(run.failure).toMatchObject({ message: 'the adapter upsert failed: quota', exit: 1 });
+      expect(run.requests).toHaveLength(5);
+      expect(run.logs.join('\n')).toContain('a build was not due before this rebuild');
+    });
+
+    it('does not read an unreadable baseline as a due build: a current index elsewhere is no exit 0', async () => {
+      // A transient adapter error on the baseline read answers `unreadable`
+      // (due: false). The index then reads `current` on another node because a
+      // same-fingerprint rebuild never leaves it; that is not this build's end.
+      const run = await drive(KnowledgeRebuild, ['kb', '--interval', '2', '--timeout', '4', ...target], [
+        nodeWithoutRecord(UNREADABLE),
+        ok({ ok: true, details: { source: 'kb', build: running(0) } }),
+        nodeWithoutRecord(CURRENT),
+        nodeWithoutRecord(CURRENT),
+      ]);
+      expect(run.failure?.exit).toBe(1);
+      expect(run.failure?.message).toContain('Stopped following after 4s');
+      expect(run.logs.join('\n')).not.toContain('The index is current');
+    });
+
+    it('never reads the per-process memory adapter\'s index as this build\'s end; waits for the building node', async () => {
+      const run = await drive(KnowledgeRebuild, ['kb', ...target], [
+        statusOf(null, NEVER_BUILT, 'memory'),
+        ok({ ok: true, details: { source: 'kb', build: running(0) } }),
+        statusOf(null, CURRENT, 'memory'),
+        statusOf(done, CURRENT, 'memory'),
+      ]);
+      expect(run.failure).toBeUndefined();
+      expect(run.requests).toHaveLength(4);
+      const text = run.logs.join('\n');
+      expect(text).not.toContain('The index is current');
+      expect(text).toContain('the memory adapter keeps its index per process');
+      expect(text).toContain('done (operator, ended 2026-11-26T05:01:00.000Z)');
+    });
+
+    it('exits 1 after --timeout seconds of polls that reach no record, and says the build may still run', async () => {
+      const run = await drive(KnowledgeRebuild, ['kb', '--interval', '2', '--timeout', '4', ...target], [
+        nodeWithoutRecord(NEVER_BUILT),
+        ok({ ok: true, details: { source: 'kb', build: running(0) } }),
+        nodeWithoutRecord(NEVER_BUILT),
+        nodeWithoutRecord(NEVER_BUILT),
+      ]);
+      expect(run.failure?.exit).toBe(1);
+      expect(run.failure?.message).toContain('Stopped following after 4s');
+      expect(run.failure?.message).toContain('may still be running');
+      expect(run.requests).toHaveLength(4);
+    });
+
+    it('starts the timeout again each time a read reaches the build record', async () => {
+      const run = await drive(KnowledgeRebuild, ['kb', '--interval', '2', '--timeout', '4', ...target], [
+        nodeWithoutRecord(NEVER_BUILT),
+        ok({ ok: true, details: { source: 'kb', build: running(0) } }),
+        nodeWithoutRecord(NEVER_BUILT),
+        statusOf(running(50), NEVER_BUILT),
+        nodeWithoutRecord(NEVER_BUILT),
+        statusOf(done),
+      ]);
+      expect(run.failure).toBeUndefined();
+    });
   });
 
   it('--no-wait returns once the build has started, and says its outcome is not reported', async () => {
@@ -180,7 +302,9 @@ describe('os knowledge status', () => {
     const text = run.logs.join('\n');
     expect(text).toContain('kb  (KB; adapter pgvector, object source)');
     expect(text).toContain('index: nothing — a build is due — never built.');
-    expect(text).toContain('last build on this node: none');
+    expect(text).toContain('last build on the node that answered: none recorded there');
+    expect(text).toContain('a build run on another node');
+    expect(text).toContain('not on the memory adapter');
   });
 
   it('exits 1 with the server refusal text', async () => {

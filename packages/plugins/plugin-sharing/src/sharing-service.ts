@@ -107,6 +107,20 @@ function makeShareId(): string {
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
 /**
+ * [#35934] How many records one chunk of a set-form write verdict
+ * (`SharingService.writeVerdicts`) reads at once: one `id IN (…)` read of
+ * their rows and, for an update, one `record_id IN (…)` read of the caller's
+ * write-level shares on them. 1,000 is the largest list every dialect this
+ * platform reads binds in one predicate: Oracle refuses an IN list over 1,000
+ * expressions (ORA-01795), and SQL Server's 2,100 bound parameters leave room
+ * for the rest of the share read beside it; SQLite, PostgreSQL and MySQL take
+ * far more. The predicate write that asks these verdicts already binds its
+ * whole candidate list, up to 10,000 ids, in one list of its own, so a chunk
+ * never sends a longer list than the write it serves.
+ */
+const WRITE_VERDICT_CHUNK = 1000;
+
+/**
  * [#25549] A grant recipient's standing in the record's organization, the one
  * recipient fact the D7 verdict reads ({@link SharingService} `inertGrantReason`).
  */
@@ -989,27 +1003,19 @@ export class SharingService implements ISharingService {
   }
 
   /**
-   * [ADR-0142 D3] Does `(object, recordId)` sit in a queue the caller belongs
-   * to? Membership is asked in the record's own organization (the active one
-   * when the row carries none, and never one the request is not in) — one
-   * holder check, not the caller's whole queue set.
+   * [ADR-0142 D3] Does the record `row` (read by {@link writeVerdicts}) sit in
+   * a queue the caller belongs to? Membership is asked in the record's own
+   * organization (the active one when the row carries none, and never one the
+   * request is not in) — one holder check per `(queue, organization)` pair,
+   * not the caller's whole queue set. `isMember` memoises that check for one
+   * call of {@link writeVerdicts}, so a chunk of rows in the same queue asks
+   * once.
    */
-  private async sitsInCallersQueue(
-    schema: any,
-    object: string,
-    recordId: string,
+  private sitsInCallersQueue(
+    row: Record<string, unknown> | undefined,
     context: ExecutionContext,
-  ): Promise<boolean> {
-    if (!hasQueueColumn(schema) || !context?.userId || isGuestPrincipal(context)) return false;
-    const queues = this.ownershipQueues?.();
-    if (!queues) return false;
-    const rows = await this.engine.find(object, {
-      where: { id: recordId },
-      fields: ['id', OWNER_FIELD, QUEUE_FIELD, 'organization_id'],
-      limit: 1,
-      context: SYSTEM_CTX,
-    });
-    const row = Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
+    isMember: (queue: string, organizationId: string | null) => Promise<boolean>,
+  ): Promise<boolean> | false {
     if (!row || (row[OWNER_FIELD] != null && row[OWNER_FIELD] !== '')) return false;
     const queue = row[QUEUE_FIELD];
     if (typeof queue !== 'string' || queue === '') return false;
@@ -1018,26 +1024,23 @@ export class SharingService implements ISharingService {
     const rowOrg = row.organization_id == null || row.organization_id === '' ? null : String(row.organization_id);
     const activeOrg = context.tenantId ? String(context.tenantId) : null;
     if (rowOrg && activeOrg && rowOrg !== activeOrg) return false;
-    return queues.isMember(String(context.userId), queue, rowOrg ?? activeOrg);
+    return isMember(queue, rowOrg ?? activeOrg);
   }
 
   /**
-   * Does the caller own `(object, recordId)` within their write DEPTH? The
-   * shared ownership fast-path behind both {@link canEdit} and
-   * {@link canDelete}. Returns `false` when the record has no owner value.
+   * Does the caller own the record `row` (read by {@link writeVerdicts})
+   * within their write DEPTH? The shared ownership fast-path behind both
+   * {@link checkEdit} and {@link checkDelete}. `false` when the record has no
+   * owner value, or no row was read. `owners` resolves the caller's owner set
+   * at most once per call of {@link writeVerdicts}, and only when a row with
+   * an owner reaches it.
    */
   private async matchesOwnerScope(
     object: string,
-    recordId: string,
+    row: Record<string, unknown> | undefined,
     context: ExecutionContext,
+    owners: () => Promise<ReadonlySet<string>>,
   ): Promise<boolean> {
-    const own = await this.engine.find(object, {
-      where: { id: recordId },
-      fields: ['id', OWNER_FIELD],
-      limit: 1,
-      context: SYSTEM_CTX,
-    });
-    const row = Array.isArray(own) ? (own[0] as Record<string, unknown> | undefined) : undefined;
     const owner = row ? row[OWNER_FIELD] : undefined;
     if (owner == null) {
       // [#8418] The refusal is unchanged — `return false` below is the same
@@ -1056,8 +1059,7 @@ export class SharingService implements ISharingService {
     // Middleware-stamped, not a field of the envelope — see buildReadFilter().
     const writeScope = (context as any).__writeScope as ('own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org' | undefined);
     if (writeScope === 'org') return true;
-    const owners = await this.resolveOwnerScopeIds(context, writeScope);
-    return owners.includes(String(owner));
+    return (await owners()).has(String(owner));
   }
 
   /**
@@ -1172,17 +1174,23 @@ export class SharingService implements ISharingService {
    * confusion that produced #5492's measured fail-open. Logged rather than
    * swallowed: a silently-denied write is indistinguishable from a legitimate
    * refusal, which is how a broken engine looks like a permissions problem.
+   *
+   * [#35934] A chunk of {@link writeVerdicts} fails as a whole: one line names
+   * the chunk, and every record in it is a `deny`.
    */
   private writeGateFailClosed(
     verb: 'update' | 'delete',
     object: string,
-    recordId: string,
+    recordIds: readonly string[],
     context: ExecutionContext,
     err: unknown,
   ): SharingWriteVerdict {
+    const records = recordIds.length === 1
+      ? `record '${recordIds[0]}'`
+      : `${recordIds.length} records ('${recordIds[0]}' to '${recordIds[recordIds.length - 1]}')`;
     this.logger?.error?.(
-      `[sharing] the ${verb} gate could not resolve a verdict for '${object}' record `
-      + `'${recordId}' (user ${context?.userId ?? 'unknown'}) — DENYING (fail-closed): `
+      `[sharing] the ${verb} gate could not resolve a verdict for '${object}' ${records} `
+      + `(user ${context?.userId ?? 'unknown'}) — DENYING (fail-closed): `
       + 'a failed lookup is a refusal, never an abstention, because an abstention would hand the row '
       + 'to the other write authorities, which may admit it',
       err instanceof Error ? err : new Error(String(err)),
@@ -1217,51 +1225,25 @@ export class SharingService implements ISharingService {
     recordId: string,
     context: ExecutionContext,
   ): Promise<SharingWriteVerdict> {
-    const bypass = this.bypassVerdict(object, context);
-    if (bypass) return bypass;
+    // [#35934] The N = 1 case of the set form: one implementation, so the
+    // by-id verdict and the bulk one cannot drift. The reads a single record
+    // costs are the ones this gate always made (its owner, then its share,
+    // then the bypass probe), and a queue-sitting check now rides on the
+    // owner read instead of reading the row a second time.
+    return (await this.writeVerdicts('update', object, [recordId], context))[0];
+  }
 
-    try {
-      const schema = this.engine.getSchema?.(object);
-      if (!schema) return 'abstain';
-      // [ADR-0142 D3] A record sitting in a queue the caller belongs to is a
-      // POSITIVE basis of its own — tested before the public-OWD abstain, so on
-      // an open OWD too the answer is `allow` (which lifts the platform's
-      // `created_by` floor for a member), and apart from `matchesOwnerScope`,
-      // whose fast path `checkDelete` shares: the basis never reaches delete.
-      if (await this.sitsInCallersQueue(schema, object, recordId, context)) return 'allow';
-      // [Ruling of record 6355206139] The EXTERNAL OWD floor (buildReadFilter).
-      const model = owdForPrincipal(schema, context, object, 'write');
-      if (model === 'public') return 'abstain';
-      if (!hasOwnerField(schema)) return 'abstain';
-      if (!context.userId) return 'deny';
-
-      // 1) Ownership (write DEPTH widens the owner-set) — fast path.
-      if (await this.matchesOwnerScope(object, recordId, context)) return 'allow';
-
-      // 2) Explicit write-level share (`edit`, plus not-yet-normalised `full`),
-      // [ADR-0155 ② ruled R2] on an object where share grants count: where they
-      // do not, the read and bulk-write scopes carry no share arm, so this gate
-      // reads no grant row either, and the three cannot disagree.
-      const editGrants = this.shareGrantsInertReason(object) !== null ? [] : await this.engine.find('sys_record_share', {
-        where: {
-          object_name: object,
-          record_id: recordId,
-          recipient_type: 'user',
-          recipient_id: context.userId,
-          access_level: { $in: [...WRITE_ACCESS_LEVELS] },
-        },
-        fields: ['id'],
-        limit: 1,
-        context: SYSTEM_CTX,
-      });
-      if (Array.isArray(editGrants) && editGrants.length > 0) return 'allow';
-
-      // 3) [#4647] Modify All Data — the explicit bypass, asked LAST and
-      // answered by the same predicate `security/explain` reports.
-      return (await this.hasModifyAllBypass(object, context)) ? 'allow' : 'deny';
-    } catch (err) {
-      return this.writeGateFailClosed('update', object, recordId, context, err);
-    }
+  /**
+   * [#35934] The set form of {@link checkEdit} (`ISharingService.checkEditMany`):
+   * `answer[i]` is the verdict {@link checkEdit} answers for `recordIds[i]`.
+   * See {@link writeVerdicts} for how a list is read.
+   */
+  async checkEditMany(
+    object: string,
+    recordIds: readonly string[],
+    context: ExecutionContext,
+  ): Promise<SharingWriteVerdict[]> {
+    return this.writeVerdicts('update', object, recordIds, context);
   }
 
   /**
@@ -1310,26 +1292,254 @@ export class SharingService implements ISharingService {
     recordId: string,
     context: ExecutionContext,
   ): Promise<SharingWriteVerdict> {
-    const bypass = this.bypassVerdict(object, context);
-    if (bypass) return bypass;
+    // [#35934] The N = 1 case of the set form, as {@link checkEdit} is.
+    return (await this.writeVerdicts('delete', object, [recordId], context))[0];
+  }
 
+  /**
+   * [#35934] The set form of {@link checkDelete} (`ISharingService.checkDeleteMany`):
+   * `answer[i]` is the verdict {@link checkDelete} answers for `recordIds[i]`.
+   */
+  async checkDeleteMany(
+    object: string,
+    recordIds: readonly string[],
+    context: ExecutionContext,
+  ): Promise<SharingWriteVerdict[]> {
+    return this.writeVerdicts('delete', object, recordIds, context);
+  }
+
+  /**
+   * [#35934] THE write verdict, for a list of records — the one
+   * implementation behind {@link checkEdit} / {@link checkDelete} (a list of
+   * one) and {@link checkEditMany} / {@link checkDeleteMany}. `answer[i]` is
+   * the verdict for `recordIds[i]`.
+   *
+   * Per record, in this order (the order the by-id gates have always had):
+   *
+   * 1. system context `allow`; a bypass-listed object `abstain`
+   *    ({@link bypassVerdict});
+   * 2. no resolvable schema `abstain`;
+   * 3. UPDATE only — [ADR-0142 D3] a record sitting in a queue the caller
+   *    belongs to `allow`, tested before the public-OWD abstain, so on an open
+   *    OWD too the answer is `allow` (which lifts the platform's `created_by`
+   *    floor for a member); the basis never reaches delete;
+   * 4. [Ruling of record 6355206139] the EXTERNAL OWD floor: a write-open
+   *    object `abstain`; an object with no owner field `abstain`; a
+   *    principal-less context `deny`;
+   * 5. ownership, widened by write DEPTH, `allow` ({@link matchesOwnerScope});
+   * 6. UPDATE only — an explicit write-level share (`edit`, plus
+   *    not-yet-normalised `full`) `allow`, [ADR-0155 ② ruled R2] on an object
+   *    where share grants count: where they do not, the read and bulk-write
+   *    scopes carry no share arm, so this gate reads no grant row either, and
+   *    the three cannot disagree. DELETE has no share branch (ADR-0111 D3:
+   *    sharing widens rows, never verbs);
+   * 7. [#4647] Modify All Data, asked LAST and answered by the same predicate
+   *    `security/explain` reports: `allow`, otherwise `deny`.
+   *
+   * What a list changes is only the cost. Steps 1, 2 and 4 do not depend on
+   * the record, so they are decided once. The records are read in chunks of
+   * {@link WRITE_VERDICT_CHUNK}: one read of the chunk's rows (owner, and the
+   * queue columns where step 3 can apply) and, for UPDATE, one read of the
+   * caller's write-level shares on the chunk's undecided records. The caller's
+   * owner set (step 5) is resolved at most once per call, a queue membership
+   * (step 3) once per queue and organization, and the bypass probe (step 7)
+   * at most once per call. A list of one record reads exactly what the by-id
+   * gate always read, by the same `where`.
+   *
+   * **Fail-closed per chunk** (`ISharingService.checkEditMany`): a chunk whose
+   * lookup throws answers `deny` for each of its records, never `abstain`, and
+   * is logged once ({@link writeGateFailClosed}); the other chunks keep their
+   * answers. A failure before any record is read denies every record.
+   */
+  private async writeVerdicts(
+    verb: 'update' | 'delete',
+    object: string,
+    recordIds: readonly string[],
+    context: ExecutionContext,
+  ): Promise<SharingWriteVerdict[]> {
+    const count = recordIds.length;
+    if (count === 0) return [];
+    const bypass = this.bypassVerdict(object, context);
+    if (bypass) return recordIds.map(() => bypass);
+
+    // Steps 2 to 4, decided once: nothing in them depends on the record.
+    let queues: ReturnType<NonNullable<SharingServiceOptions['ownershipQueues']>> | undefined;
+    let objectLevel: SharingWriteVerdict | null = null;
+    // A failure deciding step 4 refuses every record that step 3 does not
+    // admit — exactly what the per-record gate did, which reached step 4 only
+    // for those records.
+    let objectLevelError: { error: unknown } | null = null;
     try {
       const schema = this.engine.getSchema?.(object);
-      if (!schema) return 'abstain';
-      // [Ruling of record 6355206139] The EXTERNAL OWD floor (buildReadFilter).
-      if (owdForPrincipal(schema, context, object, 'write') === 'public') return 'abstain';
-      if (!hasOwnerField(schema)) return 'abstain';
-      if (!context.userId) return 'deny';
-
-      // Ownership / write DEPTH only — no share branch. This is the whole
-      // difference from checkEdit.
-      if (await this.matchesOwnerScope(object, recordId, context)) return 'allow';
-
-      // [#4647] Modify All Data — the same explicit bypass checkEdit consults.
-      return (await this.hasModifyAllBypass(object, context)) ? 'allow' : 'deny';
+      if (!schema) return recordIds.map(() => 'abstain');
+      if (verb === 'update' && hasQueueColumn(schema) && context?.userId && !isGuestPrincipal(context)) {
+        queues = this.ownershipQueues?.() ?? undefined;
+      }
+      try {
+        if (owdForPrincipal(schema, context, object, 'write') === 'public') objectLevel = 'abstain';
+        else if (!hasOwnerField(schema)) objectLevel = 'abstain';
+        else if (!context.userId) objectLevel = 'deny';
+      } catch (error) {
+        objectLevelError = { error };
+      }
     } catch (err) {
-      return this.writeGateFailClosed('delete', object, recordId, context, err);
+      const verdict = this.writeGateFailClosed(verb, object, recordIds, context, err);
+      return recordIds.map(() => verdict);
     }
+    if (!queues) {
+      if (objectLevel) {
+        const verdict = objectLevel;
+        return recordIds.map(() => verdict);
+      }
+      if (objectLevelError) {
+        const verdict = this.writeGateFailClosed(verb, object, recordIds, context, objectLevelError.error);
+        return recordIds.map(() => verdict);
+      }
+    }
+
+    // Step 5's owner set and step 3's memberships, each resolved at most once.
+    const writeScope = (context as any).__writeScope as ('own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org' | undefined);
+    let ownerSet: Promise<ReadonlySet<string>> | undefined;
+    const owners = (): Promise<ReadonlySet<string>> =>
+      (ownerSet ??= this.resolveOwnerScopeIds(context, writeScope).then((ids) => new Set(ids.map(String))));
+    const memberships = new Map<string, Promise<boolean>>();
+    const isMember = (queue: string, organizationId: string | null): Promise<boolean> => {
+      const key = JSON.stringify([queue, organizationId]);
+      let pending = memberships.get(key);
+      if (!pending) {
+        pending = queues!.isMember(String(context.userId), queue, organizationId);
+        memberships.set(key, pending);
+      }
+      return pending;
+    };
+    let sharesCount: boolean | undefined;
+    const shareGrantsCount = (): boolean =>
+      (sharesCount ??= this.shareGrantsInertReason(object) === null);
+
+    const fields = queues ? ['id', OWNER_FIELD, QUEUE_FIELD, 'organization_id'] : ['id', OWNER_FIELD];
+    const verdicts: SharingWriteVerdict[] = new Array(count);
+    const levelRefused: string[] = [];
+    const awaitingBypass: number[] = [];
+    for (let start = 0; start < count; start += WRITE_VERDICT_CHUNK) {
+      const end = Math.min(count, start + WRITE_VERDICT_CHUNK);
+      const chunkIds = recordIds.slice(start, end);
+      try {
+        const rowOf = await this.readWriteVerdictRows(object, chunkIds, fields);
+        const chunkVerdicts: (SharingWriteVerdict | undefined)[] = new Array(chunkIds.length);
+        const chunkLevelRefused: string[] = [];
+        const undecided: number[] = [];
+        for (let k = 0; k < chunkIds.length; k += 1) {
+          const row = rowOf(chunkIds[k]);
+          if (queues && (await this.sitsInCallersQueue(row, context, isMember))) {
+            chunkVerdicts[k] = 'allow';
+          } else if (objectLevelError) {
+            chunkVerdicts[k] = 'deny';
+            chunkLevelRefused.push(chunkIds[k]);
+          } else if (objectLevel) {
+            chunkVerdicts[k] = objectLevel;
+          } else if (await this.matchesOwnerScope(object, row, context, owners)) {
+            chunkVerdicts[k] = 'allow';
+          } else {
+            undecided.push(k);
+          }
+        }
+        let afterShares = undecided;
+        if (verb === 'update' && undecided.length > 0 && shareGrantsCount()) {
+          const shared = await this.readWriteShares(object, undecided.map((k) => chunkIds[k]), String(context.userId));
+          afterShares = [];
+          for (const k of undecided) {
+            if (shared(chunkIds[k])) chunkVerdicts[k] = 'allow';
+            else afterShares.push(k);
+          }
+        }
+        chunkVerdicts.forEach((verdict, k) => {
+          if (verdict) verdicts[start + k] = verdict;
+        });
+        levelRefused.push(...chunkLevelRefused);
+        for (const k of afterShares) awaitingBypass.push(start + k);
+      } catch (err) {
+        const verdict = this.writeGateFailClosed(verb, object, chunkIds, context, err);
+        for (let i = start; i < end; i += 1) verdicts[i] = verdict;
+      }
+    }
+    if (levelRefused.length > 0 && objectLevelError) {
+      this.writeGateFailClosed(verb, object, levelRefused, context, objectLevelError.error);
+    }
+    if (awaitingBypass.length > 0) {
+      // Step 7, once for the whole list: the probe asks about the object and
+      // the caller, never the record. It fails closed on its own; a lookup of
+      // the security service that throws is a failed lookup like any other.
+      let verdict: SharingWriteVerdict;
+      try {
+        verdict = (await this.hasModifyAllBypass(object, context)) ? 'allow' : 'deny';
+      } catch (err) {
+        verdict = this.writeGateFailClosed(verb, object, awaitingBypass.map((i) => recordIds[i]), context, err);
+      }
+      for (const i of awaitingBypass) verdicts[i] = verdict;
+    }
+    return verdicts;
+  }
+
+  /**
+   * [#35934] One read of the rows {@link writeVerdicts} judges in a chunk, as
+   * a lookup by record id (`undefined` for a record the read did not return).
+   * A chunk of one reads by the by-id gate's own `where` and takes the row it
+   * gets, as that gate always did.
+   */
+  private async readWriteVerdictRows(
+    object: string,
+    recordIds: readonly string[],
+    fields: string[],
+  ): Promise<(recordId: string) => Record<string, unknown> | undefined> {
+    const single = recordIds.length === 1;
+    const rows = await this.engine.find(object, {
+      where: single ? { id: recordIds[0] } : { id: { $in: [...recordIds] } },
+      fields,
+      limit: recordIds.length,
+      context: SYSTEM_CTX,
+    });
+    const list = Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
+    if (single) {
+      const row = list[0];
+      return () => row;
+    }
+    const byId = new Map<string, Record<string, unknown>>();
+    for (const row of list) {
+      if (row && row.id != null && !byId.has(String(row.id))) byId.set(String(row.id), row);
+    }
+    return (recordId) => byId.get(String(recordId));
+  }
+
+  /**
+   * [#35934] One read of the caller's write-level ({@link WRITE_ACCESS_LEVELS})
+   * user shares on `recordIds` of `object`, as a membership test. A list of
+   * one asks the by-id gate's own question (`limit: 1`, any row answers).
+   */
+  private async readWriteShares(
+    object: string,
+    recordIds: readonly string[],
+    userId: string,
+  ): Promise<(recordId: string) => boolean> {
+    const single = recordIds.length === 1;
+    const grants = await this.engine.find('sys_record_share', {
+      where: {
+        object_name: object,
+        record_id: single ? recordIds[0] : { $in: [...recordIds] },
+        recipient_type: 'user',
+        recipient_id: userId,
+        access_level: { $in: [...WRITE_ACCESS_LEVELS] },
+      },
+      fields: single ? ['id'] : ['record_id'],
+      ...(single ? { limit: 1 } : {}),
+      context: SYSTEM_CTX,
+    });
+    const list = Array.isArray(grants) ? (grants as Record<string, unknown>[]) : [];
+    if (single) {
+      const shared = list.length > 0;
+      return () => shared;
+    }
+    const sharedIds = new Set(list.map((row) => String(row?.record_id)));
+    return (recordId) => sharedIds.has(String(recordId));
   }
 
   /**

@@ -287,19 +287,22 @@ function fieldNoConsumers(stack: AnyRec): { validate: string[]; lint: string[] }
  *    platform's Starter app, and so the blank starter, places every field,
  *    #36945);
  *  - its name in the object's `highlightFields` (the record header);
- *  - its name in a related list's `columns`, on ANY object. A related list of
- *    this object, declared on another, shows the field on that object's record
- *    page. The rule also credits a related list's column names to the object
- *    that DECLARES the list (measured: the blank starter's `company.phone`
- *    stays credited by the company's related list of contacts, whose `phone`
- *    column is the contact's), so the name is dropped from every related list,
- *    not only from those of this object.
+ *  - its name in the `columns` of a related list of THIS object, declared on
+ *    any object: the list shows the field on the declaring object's record
+ *    page. A column is a field of the child object the entry names (its
+ *    `list`, `child` or `child.field`), and the rule credits it there, so a
+ *    related list of another object keeps its columns: the blank starter's
+ *    company lists its contacts with a `phone` column, which is the
+ *    contact's `phone` and never the company's.
  */
 function withoutPlacement(objects: readonly AnyRec[], objectIndex: number, field: string): AnyRec[] {
   const drop = (list: unknown) => (Array.isArray(list) ? (list as string[]).filter((f) => f !== field) : list);
+  const child = String(objects[objectIndex].name);
+  const listsThisChild = (r: unknown): r is AnyRec =>
+    isRec(r) && typeof r.list === 'string' && r.list.split('.')[0] === child && 'columns' in r;
   const withoutRelatedListColumn = (obj: AnyRec): AnyRec =>
     Array.isArray(obj.relatedLists)
-      ? { ...obj, relatedLists: (obj.relatedLists as AnyRec[]).map((r) => ('columns' in r ? { ...r, columns: drop(r.columns) } : r)) }
+      ? { ...obj, relatedLists: (obj.relatedLists as unknown[]).map((r) => (listsThisChild(r) ? { ...r, columns: drop(r.columns) } : r)) }
       : obj;
   return objects.map((obj, i) => {
     if (i === objectIndex) {

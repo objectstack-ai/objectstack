@@ -34,6 +34,8 @@ import {
   ROLLUP_NON_NUMERIC_AGGREGAND,
 } from './data-model-rules.js';
 import { explainRule } from './rule-explanations.js';
+import { runAuthoringRules } from './authoring-rules.js';
+import { runRuntimeAuthoringRules } from './runtime-gate.js';
 
 const RULE = 'rollup/non-numeric-aggregand';
 
@@ -303,4 +305,137 @@ describe('[#22161] one-line verdicts — rollup/non-numeric-aggregand', () => {
     }
   });
 
+});
+
+// #35143: the relation arm, a child with no reference back to the parent.
+
+const CHILD_WITHOUT_PARENT_REFERENCE = 'rollup/child-without-parent-reference';
+const rulesOf = (findings: readonly { rule: string }[]) => findings.map((f) => f.rule);
+type AnyRec = Record<string, any>;
+
+const ORDER = (fields: AnyRec = {}): AnyRec => ({
+  name: 'order',
+  label: 'Order',
+  fields: {
+    name: { type: 'text', label: 'Name' },
+    line_count: {
+      type: 'summary',
+      label: 'Lines',
+      summaryOperations: { object: 'order_line', function: 'count' },
+    },
+    ...fields,
+  },
+});
+
+const ORDER_LINE = (fields: AnyRec = {}): AnyRec => ({
+  name: 'order_line',
+  label: 'Order line',
+  fields: {
+    name: { type: 'text', label: 'Name' },
+    amount: { type: 'number', label: 'Amount' },
+    ...fields,
+  },
+});
+
+const ORDER_FK = { order: { type: 'master_detail', label: 'Order', reference: 'order', required: true } };
+
+describe('rollup/child-without-parent-reference', () => {
+  it('refuses a summary whose child has no lookup or master_detail back to the parent', () => {
+    const findings = lintSummaryRollups([ORDER(), ORDER_LINE()]);
+    const hit = findings.filter((f) => f.rule === CHILD_WITHOUT_PARENT_REFERENCE);
+    expect(hit).toHaveLength(1);
+    expect(hit[0]).toMatchObject({
+      severity: 'error',
+      path: 'objects[0].fields.line_count.summaryOperations.object',
+      where: 'object "order" · field \'line_count\'',
+    });
+    expect(hit[0].fix).toContain("reference: 'order'");
+  });
+
+  it('refuses a relationshipField that names no field of the child', () => {
+    const order = ORDER({
+      line_total: {
+        type: 'summary',
+        label: 'Total',
+        summaryOperations: { object: 'order_line', function: 'sum', field: 'amount', relationshipField: 'order_ref' },
+      },
+    });
+    const hit = lintSummaryRollups([order, ORDER_LINE(ORDER_FK)]).filter((f) => f.rule === CHILD_WITHOUT_PARENT_REFERENCE);
+    expect(hit).toHaveLength(1);
+    expect(hit[0]).toMatchObject({ severity: 'error', path: 'objects[0].fields.line_total.summaryOperations.relationshipField' });
+  });
+
+  it('is silent when the child points back, by lookup or master_detail, or names a real relationshipField', () => {
+    expect(rulesOf(lintSummaryRollups([ORDER(), ORDER_LINE(ORDER_FK)]))).not.toContain(CHILD_WITHOUT_PARENT_REFERENCE);
+    const viaLookup = ORDER_LINE({ order: { type: 'lookup', label: 'Order', reference: 'order' } });
+    expect(rulesOf(lintSummaryRollups([ORDER(), viaLookup]))).not.toContain(CHILD_WITHOUT_PARENT_REFERENCE);
+    const named = ORDER({
+      line_count: {
+        type: 'summary',
+        label: 'Lines',
+        summaryOperations: { object: 'order_line', function: 'count', relationshipField: 'order_code' },
+      },
+    });
+    const withText = ORDER_LINE({ order_code: { type: 'text', label: 'Order code' } });
+    expect(rulesOf(lintSummaryRollups([named, withText]))).not.toContain(CHILD_WITHOUT_PARENT_REFERENCE);
+  });
+
+  it('is silent when the child is not in the walk (an unmanaged install writes the parent first)', () => {
+    expect(rulesOf(lintSummaryRollups([ORDER()]))).not.toContain(CHILD_WITHOUT_PARENT_REFERENCE);
+  });
+
+  it('reads an injected column as the foreign key, as the engine does (a roll-up onto sys_user)', () => {
+    const user = {
+      name: 'sys_user',
+      label: 'User',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        owned_lines: { type: 'summary', label: 'Owned lines', summaryOperations: { object: 'order_line', function: 'count' } },
+      },
+    };
+    expect(rulesOf(lintSummaryRollups([user, ORDER_LINE()]))).not.toContain(CHILD_WITHOUT_PARENT_REFERENCE);
+  });
+
+  it('reads a foreign key an object extension adds to the child, on the CLI', () => {
+    const extended = {
+      objects: [ORDER(), ORDER_LINE()],
+      objectExtensions: [{ extend: 'order_line', fields: { order: ORDER_FK.order } }],
+    };
+    const cli = runAuthoringRules('validate', { normalized: extended, parsed: extended } as never);
+    expect(rulesOf(cli)).not.toContain(CHILD_WITHOUT_PARENT_REFERENCE);
+    const bare = { objects: [ORDER(), ORDER_LINE()] };
+    expect(rulesOf(runAuthoringRules('validate', { normalized: bare, parsed: bare } as never))).toContain(
+      CHILD_WITHOUT_PARENT_REFERENCE,
+    );
+  });
+
+  it('a served child field whose reference is not a string does not point back, and throws nothing (as the engine\'s scan)', () => {
+    // At the door the child is the registry's served object, which can hold a
+    // carrier the parse would refuse. The engine's scan catches it and reads
+    // on; so does the relation arm, and the aggregand refusal of the same
+    // write still holds.
+    const unreadable = { type: 'lookup', label: 'Legacy', reference: { name: 'order' } };
+    const order = ORDER({
+      latest_line: { type: 'summary', label: 'Latest', summaryOperations: { object: 'order_line', function: 'max', field: 'shipped_at' } },
+    });
+    const servedChild = ORDER_LINE({ legacy: unreadable, ...ORDER_FK, shipped_at: { type: 'datetime', label: 'Shipped' } });
+    const verdict = runRuntimeAuthoringRules({ type: 'object', item: order, context: { objects: [servedChild] } });
+    expect(rulesOf(verdict.advisories)).not.toContain('authoring-rule-threw');
+    expect(rulesOf(verdict.errors)).not.toContain(CHILD_WITHOUT_PARENT_REFERENCE);
+    expect(rulesOf(verdict.errors)).toContain(RULE);
+    const onlyUnreadable = runRuntimeAuthoringRules({
+      type: 'object',
+      item: ORDER(),
+      context: { objects: [ORDER_LINE({ legacy: unreadable })] },
+    });
+    expect(rulesOf(onlyUnreadable.advisories)).not.toContain('authoring-rule-threw');
+    expect(rulesOf(onlyUnreadable.errors)).toContain(CHILD_WITHOUT_PARENT_REFERENCE);
+  });
+
+  it('the runtime publish gate refuses the object write, and passes it once the child points back', () => {
+    const refused = runRuntimeAuthoringRules({ type: 'object', item: ORDER(), context: { objects: [ORDER_LINE()] } });
+    expect(rulesOf(refused.errors)).toContain(CHILD_WITHOUT_PARENT_REFERENCE);
+    const passed = runRuntimeAuthoringRules({ type: 'object', item: ORDER(), context: { objects: [ORDER_LINE(ORDER_FK)] } });
+    expect(rulesOf(passed.errors)).not.toContain(CHILD_WITHOUT_PARENT_REFERENCE);
+  });
 });

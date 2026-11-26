@@ -22,11 +22,14 @@ import {
   STUDIO_MENU_ADVANCED_COOKIE,
   STUDIO_MENU_ALWAYS_TYPES,
   STUDIO_MENU_GROUPS,
+  STUDIO_MENU_OVERVIEW_KEY,
   buildStudioMenu,
   readStudioMenuAdvancedCookie,
   studioMenuAllTypesEntry,
   studioMenuCurrentKey,
   studioMenuEntryMatches,
+  studioMenuOverviewEntry,
+  studioMenuOverviewMatches,
   studioMenuScope,
   studioMenuTiers,
 } from './studioMenuModel';
@@ -361,5 +364,52 @@ describe('全部类型 All types: the 高级 fold\'s last row, under no group (o
     expect(keys).toContain('type:hook');
     expect(keys).not.toContain('type:email_template');
     expect(keys).not.toContain('type:doc');
+  });
+});
+
+describe('概览 Overview: the package\'s own page, the menu\'s first row (objectstack#37454)', () => {
+  it('is a package\'s, opening its overview on Info; none on ~org or ~all', () => {
+    expect(studioMenuOverviewEntry(studioMenuScope(PKG), null)).toEqual({
+      key: STUDIO_MENU_OVERVIEW_KEY,
+      to: `/studio/${PKG}/overview`,
+      pendingTo: `/studio/${PKG}/overview?tab=pending`,
+    });
+    expect(studioMenuOverviewEntry(studioMenuScope('~org'), 3)).toBeNull();
+    expect(studioMenuOverviewEntry(studioMenuScope('~all'), 3)).toBeNull();
+  });
+
+  it('carries the pending count as its badge only while something is pending', () => {
+    expect(studioMenuOverviewEntry(studioMenuScope(PKG), 3)?.pending).toBe(3);
+    // Nothing pending, and a count not read yet: no badge, not a zero.
+    expect(studioMenuOverviewEntry(studioMenuScope(PKG), 0)).not.toHaveProperty('pending');
+    expect(studioMenuOverviewEntry(studioMenuScope(PKG), null)).not.toHaveProperty('pending');
+    expect(studioMenuOverviewEntry(studioMenuScope(PKG), undefined)).not.toHaveProperty('pending');
+  });
+
+  it('is in no group and no tier: the groups never list it', () => {
+    const menu = buildStudioMenu({ scope: studioMenuScope(PKG), types: SERVED, counts: {} });
+    const tiers = studioMenuTiers(menu);
+    const keys = [...menu.flatMap((g) => g.entries), ...tiers.common.flatMap((g) => g.entries), ...tiers.advanced.flatMap((g) => g.entries)].map(
+      (e) => e.key,
+    );
+    expect(keys).not.toContain(STUDIO_MENU_OVERVIEW_KEY);
+  });
+
+  it('a search matches it by its name alone; an empty search lists it', () => {
+    expect(studioMenuOverviewMatches('概览', '')).toBe(true);
+    expect(studioMenuOverviewMatches('Overview', 'VIEW')).toBe(true);
+    expect(studioMenuOverviewMatches('概览', '概')).toBe(true);
+    expect(studioMenuOverviewMatches('Overview', 'flow')).toBe(false);
+  });
+
+  it('its page, on either tab, is the current entry; CONTROL: the OWD overview stays its own', () => {
+    const current = (path: string) => {
+      const [pathname, query = ''] = path.split('?');
+      return studioMenuCurrentKey({ segment: PKG, pathname, search: query ? `?${query}` : '' });
+    };
+    expect(current(`/studio/${PKG}/overview`)).toBe(STUDIO_MENU_OVERVIEW_KEY);
+    expect(current(`/studio/${PKG}/overview?tab=pending`)).toBe(STUDIO_MENU_OVERVIEW_KEY);
+    expect(current(`/studio/${PKG}/owd`)).toBe('owd');
+    expect(current(`/studio/${PKG}/overviews`)).toBeNull();
   });
 });

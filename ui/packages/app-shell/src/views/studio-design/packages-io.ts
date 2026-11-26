@@ -167,6 +167,15 @@ export interface ListedPackageManifest {
   name: string;
   writable: boolean;
   manifest: Record<string, unknown>;
+  /**
+   * objectstack#37454 — the row's `enabled`, as served (the installed
+   * package's switch, turned in Setup → Packages); absent when the row
+   * carries no boolean there. Never guessed: 概览 draws no 使用中 / 已停用
+   * chip without it.
+   */
+  enabled?: boolean;
+  /** objectstack#37454 — the row's served `source` (`code`, `marketplace`, `authored`), read as is; absent when not a string. */
+  source?: string;
 }
 
 /**
@@ -187,7 +196,14 @@ export function parseListedPackageManifests(payload: unknown): ReadonlyMap<strin
     // The verdict rule of `parsePackages`: the server's, else the heuristic.
     const writable = typeof p.writable === 'boolean' ? p.writable : scope !== 'project';
     const name = typeof m.name === 'string' && m.name.trim() ? m.name : id;
-    out.set(id, { id, name, writable, manifest: m });
+    out.set(id, {
+      id,
+      name,
+      writable,
+      manifest: m,
+      ...(typeof p.enabled === 'boolean' ? { enabled: p.enabled } : {}),
+      ...(typeof p.source === 'string' && p.source ? { source: p.source } : {}),
+    });
   }
   return out;
 }

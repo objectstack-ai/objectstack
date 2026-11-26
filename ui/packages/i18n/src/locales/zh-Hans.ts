@@ -1146,6 +1146,7 @@ const zh = {
     addColumn: '添加列',
     moveCard: '移动卡片',
     noCards: '暂无卡片',
+    notLoaded: '未加载的卡片：{{count}}',
     columnCards: '{{column}} 的卡片',
     laneCards: '{{column}} - {{lane}} 的卡片',
     dropBlocked: '{{from}} 中的卡片不能移到 {{to}}。',
