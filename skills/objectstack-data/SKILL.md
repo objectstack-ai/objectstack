@@ -35,7 +35,7 @@ metadata:
 - **[Field Types](./rules/field-types.md)** — All field types and configs
 - **[Relationships](./rules/relationships.md)** — lookup vs master_detail, junction patterns, delete behaviors
 - **[Validation Rules](./rules/validation.md)** — All validation types, script inversion, severity levels
-- **[Index Strategy](./rules/indexing.md)** — btree/gin/gist/fulltext, composite indexes, partial indexes
+- **[Index Strategy](./rules/indexing.md)** — btree/gin/gist/fulltext, composite indexes
 - **[Data Lifecycle & Retention](./rules/lifecycle.md)** — `lifecycle` classes, retention/TTL/rotation/archive policies (not *hooks*); plus the **save notice** a hook hands the saver (`ctx.notice`)
 - **[Lifecycle Hooks](./references/data-hooks.md)** — the lifecycle events, the sandboxed `body` (ctx + capability contract; the inline `handler` is deprecated), registration, canonical patterns
 - **[Datasources & Federation](./rules/datasources.md)** — `defineDatasource`, external/federated objects (`remoteName`/`columnMap`), auto-connect gating, credentials; ❌ no `field.columnName` on external objects
@@ -382,11 +382,11 @@ declaration. Every field the pair adds ends in `__c` (`region__c`). The suffix i
 reserved to the pair, so a `__c` field in any other package, or an unsuffixed
 field in a `.custom` extension, is refused at save, publish and install and by
 `os validate` / `os build`.
-Only the pair's extension may also write `fieldGroups` and `relatedLists`, shaped
-as on an object. A written key replaces that arrangement whole (the owner's and
-every `place`): an unlisted field shows after the last group, an unnamed tab
-still shows after the listed ones, and `{ list: 'crm_note', hidden: true }` hides
-a tab. Outside a `.custom` package both keys are refused at those doors: use `place`.
+Only the pair's extension also writes `fieldGroups`, `relatedLists` and `actionLayout`
+(**objectstack-ui**), shaped as on an object. A written key replaces that arrangement
+whole (the owner's and every `place`): an unlisted field shows after the last group,
+an unnamed tab after the listed ones, and `{ list: 'crm_note', hidden: true }` hides
+a tab. Outside a `.custom` package they are refused at those doors: use `place`.
 Studio's **Add field** on a base object writes the same extension, as an
 `object_extension` item of the pair.
 

@@ -322,10 +322,10 @@ Most are caught by `objectstack build`:
 
 4. **A `select` is compared and written by its option `value`, never its label.**
    The request says "Lost"; the row stores `lost`.
-   A start `condition: "record.status == 'Lost'"` or `fields: { status: 'Lost' }`
-   is refused at publish (inline options), else matches no row or fails the
-   run (`invalid_option`). A label in a `filter` or an edge `condition` is never
-   checked: it silently matches nothing. Read the field's `options`.
+   A start or edge `condition: "record.status == 'Lost'"`, or `filter` /
+   `fields: { status: 'Lost' }`, is refused at publish (inline options), else
+   matches no row or fails the run (`invalid_option`); a filter meant to find
+   the label takes a CEL envelope operand. Read the field's `options`.
 
 ---
 
