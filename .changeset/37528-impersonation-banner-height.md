@@ -1,6 +1,7 @@
 ---
 '@object-ui/app-shell': patch
 '@object-ui/layout': patch
+'@object-ui/console': patch
 ---
 
 fix(app-shell): a full-height console page gives the impersonation banner its height back
