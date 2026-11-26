@@ -840,6 +840,50 @@ function wholeLaneCount(
 }
 
 /**
+ * objectstack#37326 — a column's count on the swimlane layout, across every
+ * swimlane: the whole lane's where the host hands them (`wholeLaneCount`),
+ * else the cards it holds, marked over a windowed fetch (`laneCountLabel`).
+ * The same figure the flat header writes, so the two layouts never disagree.
+ */
+function swimlaneColumnCount(
+  laneCounts: Readonly<Record<string, number>> | null | undefined,
+  column: { id: string | number; cards: readonly unknown[] },
+  countsAreWindowed?: boolean,
+): { count: number; atLeast: boolean } {
+  return wholeLaneCount(laneCounts, String(column.id), column.cards.length)
+    ?? { count: column.cards.length, atLeast: countsAreWindowed === true }
+}
+
+/** A count as a header writes it: `12`, or `12+` where it is a floor. */
+function countText(count: { count: number; atLeast: boolean }): string {
+  return `${count.count}${count.atLeast ? '+' : ''}`
+}
+
+/**
+ * objectstack#37326 — may a swimlane row write the cards it holds as its
+ * count, unmarked? No read groups by the swimlane field, so a row's count is
+ * always the cards drawn. That is the whole count only when the board holds
+ * every record of its query: not a windowed fetch, and, on a board its host
+ * hands one page (`laneCounts`), only when the grouped read answered and every
+ * lane it counted is drawn with all its records. Otherwise the row's count is
+ * a floor and carries `+`.
+ */
+function swimlaneCountIsWhole(
+  laneCounts: Readonly<Record<string, number>> | null | undefined,
+  columns: ReadonlyArray<{ id: string | number; cards: readonly unknown[] }>,
+  countsAreWindowed?: boolean,
+): boolean {
+  if (countsAreWindowed) return false
+  if (laneCounts === undefined) return true
+  if (laneCounts === null) return false
+  const drawn = new Map(columns.map((col) => [String(col.id), col.cards.length]))
+  for (const [laneId, count] of Object.entries(laneCounts)) {
+    if (count > (drawn.get(laneId) ?? 0)) return false
+  }
+  return true
+}
+
+/**
  * What a lane header shows IN PLACE OF its count while the board's records
  * have not settled (objectstack#30431).
  *
@@ -940,9 +984,13 @@ function LaneTotal({
  * (lanes over a lookup field) one page of rows and that query, so its figures
  * are the whole lane's too, never the page's. Only over cards a host hands in
  * WITHOUT its query (rows handed in whole) is a `sum` added up here, and the
- * other three draw nothing there. A board drawn in swimlanes (a view with
- * grouping) draws no lane foot. Renders nothing without the statistic, or
- * while the figure is pending or unknowable.
+ * other three draw nothing there. objectstack#37326 — a board drawn in
+ * swimlanes (a view with grouping, or `swimlaneField`) draws it once per
+ * column, in a foot row under every swimlane (`SwimlaneFootRow`): the figure
+ * is the column's across every swimlane, the one the flat board draws. No
+ * read groups by the swimlane field, so no cell draws one of its own.
+ * Renders nothing without the statistic, or while the figure is pending or
+ * unknowable.
  */
 function LaneFootStatistic({
   laneId,
@@ -1397,6 +1445,8 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
    * measured reproduction and the settle contract live on the context.
    */
   const recordsSettled = useKanbanRecordsSettled()
+  // objectstack#37326 — whether the swimlane layout draws its foot row.
+  const columnSummary = useKanbanColumnSummary()
 
   /**
    * Container-aware column sizing — replaces hard-coded `w-[85vw] sm:w-80`
@@ -2157,11 +2207,11 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
                       records like the flat header's do (`LaneCountPending`). */}
                   {!collapsed && (
                     <span className="ml-2 text-xs text-muted-foreground">
-                      {recordsSettled ? `(${laneCountLabel(col.cards.length, countsAreWindowed)})` : <LaneCountPending />}
+                      {recordsSettled ? `(${countText(swimlaneColumnCount(laneCounts, col, countsAreWindowed))})` : <LaneCountPending />}
                     </span>
                   )}
                   {!collapsed && recordsSettled && (
-                    <LaneTotal cards={col.cards} countsAreWindowed={countsAreWindowed} className="ml-2" />
+                    <LaneTotal laneId={String(col.id)} cards={col.cards} countsAreWindowed={countsAreWindowed} className="ml-2" />
                   )}
                 </div>
               )
@@ -2187,7 +2237,7 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
                   <span className={cn("transition-transform text-xs", isCollapsed ? "" : "rotate-90")}>▶</span>
                   <span className=" text-xs font-medium text-muted-foreground uppercase tracking-wider">{laneLabel}</span>
                   <span className=" text-xs text-muted-foreground">
-                    {recordsSettled ? `(${laneCountLabel(laneCardCount, countsAreWindowed)})` : <LaneCountPending />}
+                    {recordsSettled ? `(${laneCountLabel(laneCardCount, !swimlaneCountIsWhole(laneCounts, boardColumns, countsAreWindowed))})` : <LaneCountPending />}
                   </span>
                 </button>
 
@@ -2238,6 +2288,40 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
               </div>
             )
           })}
+
+          {/* objectstack#37326 — the view's lane statistic (`kanban.summary`),
+              once per column under every swimlane: the column's figure across
+              all of them, the one the flat board draws at each lane's foot.
+              The row joins the board's ONE horizontal axis (objectui#8448) and
+              takes each cell's width from `laneBox`, like the title row, so a
+              figure sits under its column. `shrink-0` for the reason the title
+              row carries it (objectui#7303). A collapsed column draws an empty
+              cell, as it withholds its cards in every swimlane. */}
+          {recordsSettled && columnSummary?.placement === 'foot' && columnSummary.type && (
+            <div
+              className={`flex shrink-0 gap-3 sm:gap-4 overflow-x-auto ${SWIMLANE_AXIS_X_PADDING}`}
+              ref={adoptSwimlaneScroll}
+              onScroll={syncSwimlaneScroll}
+              data-swimlane-scroll-row=""
+              data-kanban-swimlane-foot=""
+            >
+              {boardColumns.map(col => {
+                const collapsed = isColumnCollapsed(col)
+                const box = laneBox(columnInlineStyle, collapsed)
+                return (
+                  <div key={col.id} style={box.style} className={box.className}>
+                    {!collapsed && (
+                      <LaneFootStatistic
+                        laneId={String(col.id)}
+                        cards={col.cards}
+                        count={swimlaneColumnCount(laneCounts, col, countsAreWindowed)}
+                      />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       ) : (
         /* Standard flat layout */
