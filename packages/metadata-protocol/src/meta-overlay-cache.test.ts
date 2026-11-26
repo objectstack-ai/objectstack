@@ -797,11 +797,10 @@ describe('[#10757 leg 6] §10 a write to any OTHER object does not retire the ov
     });
 });
 
-describe('[ADR-0067 D2] §11 a transaction that rolls back retires the rows read inside it', () => {
+describe('[ADR-0067 D2] §11 after a transaction that does not commit, the reads answer only committed rows', () => {
     /**
      * One transaction over the harness: a `sys_metadata` insert of `gamma`
-     * through the seam, a read inside it (which caches the uncommitted row),
-     * then the callback's outcome; a failure undoes the insert BELOW the seam,
+     * through the seam, a read inside it, then the callback's outcome; a failure undoes the insert BELOW the seam,
      * as a driver rollback does, and rethrows.
      */
     const transaction = (h: ReturnType<typeof makeHarness>, rows: StoredRow[], fail: Error | null, write = true) =>
@@ -816,7 +815,7 @@ describe('[ADR-0067 D2] §11 a transaction that rolls back retires the rows read
         });
     const names = (answer: { items: unknown[] }) => (answer.items as Array<{ name?: string }>).map((i) => i.name);
 
-    it('rolled back: the generation moves, the next read misses and serves the committed rows, the error is rethrown as it came', async () => {
+    it('rolled back: the next read answers the committed rows, and the error is rethrown as it came', async () => {
         const rows = clone(OVERLAY_ROWS);
         const h = makeHarness(rows);
         await h.protocol.getMetaItems({ type: 'object' });
@@ -835,7 +834,7 @@ describe('[ADR-0067 D2] §11 a transaction that rolls back retires the rows read
         expect(h.finds.length).toBeGreaterThan(perCall);
     });
 
-    it('CONTROL: committed, the row read inside it keeps serving with zero reads', async () => {
+    it('CONTROL: committed, the committed row is answered with zero reads', async () => {
         const rows = clone(OVERLAY_ROWS);
         const h = makeHarness(rows);
         await transaction(h, rows, null);

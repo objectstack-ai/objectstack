@@ -887,7 +887,7 @@ export class SysMetadataRepository implements MetadataRepository {
    */
   private async withTxn<T>(cb: (ctx: any) => Promise<T>): Promise<T> {
     if (typeof this.engine.transaction === 'function') {
-      // ADR-0067 D2: a rollback retires the overlay rows read inside it.
+      // ADR-0067 D2: after a transaction that does not commit, the reads answer only committed rows.
       return retireOverlayCacheOnRollback(this.engine, () => this.engine.transaction!(cb));
     }
     return cb(undefined);

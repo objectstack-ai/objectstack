@@ -376,7 +376,7 @@ describe('[ADR-0159 D6] the form doors read both types: a withdrawal in either c
     await closedOnBothDoors(b);
   });
 
-  it('narrowing only: an open `form` override cannot re-open a form the base\'s old shape withdraws', async () => {
+  it('narrowing only: a form the base\'s old shape withdraws stays closed under an open `form` override', async () => {
     const b = await booted({ views: [container(false)] });
     await closedOnBothDoors(b);
     await b.install(PAIR);
@@ -1223,8 +1223,8 @@ describe('[ADR-0159 D5, ADR-0067 D2 and D3] the undo of a `form` publish puts ba
 describe('[ADR-0067 D2] a package publish refused part-way on an engine that can roll back leaves nothing of the batch served', () => {
   const engines: ObjectQL[] = [];
   beforeAll(() => {
-    // The overlay read cache ON, at its shipped default bound: the rows a
-    // refused batch read while it was open must not outlive its rollback.
+    // The overlay read cache ON, at its shipped default bound: after a refused
+    // batch the doors answer only committed state.
     vi.stubEnv('OS_METADATA_OVERLAY_CACHE_TTL_MS', '30000');
   });
   afterAll(async () => {
