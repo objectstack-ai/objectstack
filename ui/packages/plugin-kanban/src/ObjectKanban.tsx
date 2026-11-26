@@ -2095,9 +2095,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   // card as not movable; the conditional half is judged per card at the drop,
   // in `handleCardMove`. Before this the board read no field lock at all, so a
   // `readonly` lane field took the drop and its write was silently stripped.
-  const laneFieldDef = schema.groupBy
-    ? (objectDef?.fields as Record<string, Record<string, unknown> | undefined> | undefined)?.[schema.groupBy]
-    : undefined;
+  // `laneFieldDef` is the lane field's definition, read above for its lane titles.
   const laneFieldLocked = fieldStaticallyReadOnlyByHand(laneFieldDef);
 
   // The board's drop gate (#25933): a lane is a value of `groupBy`, so when the
