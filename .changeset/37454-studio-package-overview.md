@@ -15,6 +15,6 @@ Studio has a page for the open package itself, 概览 Overview, at `/studio/<pac
 - 信息 Info lists the name, description, source, version and the package's app, read-only. The id, namespace and type are folded under 技术信息 (Technical details).
 - 待发布 Pending (`?tab=pending`) is the pending-changes panel drawn in place, with its Publish all. It publishes through the same request, with the same review, notes, refusals and read-only rule as the top bar's Publish, which stays for now. Its tab shows how many drafts wait.
 
-The Studio menu's 概览 row with its pending badge needs one more change to the menu and is not drawn yet; the page is reached by its address.
+The Studio menu's first row, above its groups, is 概览 Overview. While drafts wait for a publish it carries their count as a badge, and one click on the badge opens the Pending tab. A search lists it when its name matches.
 
 `DraftChangesPanel` takes two optional props, `embedded` (draw the panel in place instead of as a sheet) and `reloadKey` (read the drafts again when it changes); without them it behaves as before. New locale keys in the studio catalogue (en, zh): `engine.studio.menu.overview`, `engine.studio.menu.overviewPending` and `engine.studio.overview.*`.
