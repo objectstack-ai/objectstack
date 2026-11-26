@@ -5,7 +5,7 @@
 
 feat(lint): refuse a `transferBehavior: 'cascade'` the Change Owner action can never offer
 
-Clause-②: no
+Clause-②: no (narrowing)
 Metadata-protocol: narrowed
 
 <!-- adr-0087: registered transfer-cascade-never-offered-refused -->
