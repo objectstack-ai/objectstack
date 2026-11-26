@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { recordNotFoundError, wrapRecordMaterial } from '@objectstack/core';
+import { isServerFault, mapDataError } from '@objectstack/types';
 import {
   AI_CONTEXT_BODY_FIELD_TYPES,
   AI_CONTEXT_MAX_RELATED_ROWS,
@@ -76,9 +77,10 @@ import { sentencesFor, type Sentences } from './sentences.js';
  * definition lacks is an author defect and states nothing.
  *
  * A read of a related object that FAILS rather than refuses (a throw that is
- * no coded refusal, {@link isCodedRefusal}: an outage, a bug) is no answer
- * about the caller, so it is never answered as a refusal: the call fails
- * `SERVICE_UNAVAILABLE` (503), naming the pack and the root only.
+ * no coded refusal, {@link isCodedRefusal}, or at the child list query one
+ * the `/data` door answers as a fault: an outage, a bug) is no answer about
+ * the caller, so it is never answered as a refusal: the call fails
+ * `INTERNAL_ERROR` (500), naming the pack and the root only.
  *
  * ## A related list's `where`, `orderBy` and `limit` (D1, D3: second amendment)
  *
@@ -153,11 +155,13 @@ function refusal(code: string, status: number, message: string): Coded {
  * alone cannot tell.
  *
  * The one line, drawn once for both of its readers: the executor asks it at
- * every read of a related object it judges ({@link executeGetRecordContext},
- * step 4a, the published definitions, the child list query), and the
- * citation verifier asks it of the executor's own throw
- * (`verifyRecordCitations`). So what the executor refuses, the verifier
- * drops without a report, and what fails, it reports.
+ * the object-level reads of a related object ({@link executeGetRecordContext},
+ * step 4a and the published definitions), and the citation verifier asks it
+ * of the executor's own throw (`verifyRecordCitations`). So what the executor
+ * refuses there, the verifier drops without a report, and what fails, it
+ * reports. The child list query alone asks the `/data` door's classifier
+ * instead, since the doors classified that read's throw before the executor
+ * caught it, and a refusal there is rethrown as the door reads it.
  */
 export function isCodedRefusal(err: unknown): boolean {
   if (err == null || typeof err !== 'object') return false;
@@ -421,19 +425,31 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
   // a failure at the reads of a related object this executor judges: step
   // 4a's exposure check and served definition, a published definition
   // (`publishedOf`), and the child list query. A coded refusal
-  // ({@link isCodedRefusal}) answers as `refused` says, as it always has. Any
+  // ({@link isCodedRefusal}; at the child list query, what the `/data` door
+  // answers below 500) answers as `refused` says, as it always has. Any
   // other throw is a failure, which says nothing about what this caller may
-  // read, so it is not answered as a refusal: the call fails
-  // `SERVICE_UNAVAILABLE` (503) in the executor's own sentence, which names
-  // the pack and the root only. No door renders the original error, so
-  // nothing it says can name an object, a field or a package the caller is
-  // not shown; it rides on `cause`, which no door puts on the wire, for the
-  // host (the citation verifier hands it to `onError`).
-  const refusedOrFailed = async (err: unknown, refused: () => Promise<never>): Promise<never> => {
-    if (isCodedRefusal(err)) return refused();
+  // read, so it is not answered as a refusal: the call fails `INTERNAL_ERROR`
+  // (500) in the executor's own sentence, which names the pack and the root
+  // only. No door renders the original error, so nothing it says can name an
+  // object, a field or a package the caller is not shown; it rides on
+  // `cause`, which no door puts on the wire. The doors withhold a 5xx's
+  // sentence too (`Internal server error`), so the sentence is read
+  // in-process only (the citation verifier's host, through `onError`).
+  //
+  // ⛔ Not `SERVICE_UNAVAILABLE`: with a 5xx that code is a declared
+  // capability absence (`CAPABILITY_ABSENCE_CODES`, `@objectstack/types`
+  // `server-fault-log.ts`), which the doors' fault log prints once per route
+  // per process at `warn`, without the error. An outage is a fault: logged at
+  // `error`, with the thrown error and its `cause`, on every call.
+  const refusedOrFailed = async (
+    err: unknown,
+    refused: () => Promise<never>,
+    isRefusal: (err: unknown) => boolean = isCodedRefusal,
+  ): Promise<never> => {
+    if (isRefusal(err)) return refused();
     throw Object.assign(new Error(say.readFailed(pack.name, root)), {
-      code: 'SERVICE_UNAVAILABLE',
-      status: 503,
+      code: 'INTERNAL_ERROR',
+      status: 500,
       cause: err,
     });
   };
@@ -651,12 +667,20 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
         limit: probe,
       });
     } catch (err) {
-      // The child is one this caller is served (step 4a), so the door's own
-      // coded refusal of the query is answered as the door wrote it, as it
-      // always was; a query that failed fails the call, naming nothing.
-      return refusedOrFailed(err, async () => {
-        throw err;
-      });
+      // The child is one this caller is served (step 4a). Its list read is the
+      // one read whose throw the doors classified before this line existed,
+      // so what the `/data` door answers below 500 stays the door's refusal,
+      // rethrown as the door reads it (a sandboxed `beforeFind` hook's plain
+      // throw: `400 HOOK_ABORTED`; a `PERMISSION_DENIED` with no status: 403),
+      // asked of the door's own classifier, never a copy of it. A throw the
+      // door answers as a fault fails the call, naming nothing.
+      return refusedOrFailed(
+        err,
+        async () => {
+          throw err;
+        },
+        (thrown) => !isServerFault(mapDataError(thrown, plan.object).status),
+      );
     }
     const rows = rowsOf(read);
     const truncated = rows.length > cap;

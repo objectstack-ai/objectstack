@@ -237,7 +237,7 @@ describe('[ADR-0160 D9] a refusal and a failure', () => {
     expect(failed.reported).toHaveLength(1);
     expect(failed.reported[0].call).toEqual({ object: 'policy', id: 'p1' });
     // The executor's failure, naming nothing, with the outage on its cause.
-    expect(failed.reported[0].error).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503, cause: outage });
+    expect(failed.reported[0].error).toMatchObject({ code: 'INTERNAL_ERROR', status: 500, cause: outage });
     expect((failed.reported[0].error as Error).message).not.toContain('policy_revision');
 
     const refusal = Object.assign(new Error("Object 'policy_revision' not found"), { code: 'OBJECT_NOT_FOUND', status: 404 });

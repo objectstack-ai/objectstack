@@ -435,9 +435,9 @@ describe('get_record_context — a read of a related object that fails is a fail
     return door;
   };
 
-  /** The failure's answer: `SERVICE_UNAVAILABLE` 503, naming the pack and the root and nothing the outage said. */
+  /** The failure's answer: `INTERNAL_ERROR` 500, naming the pack and the root and nothing the outage said. */
   const expectFailureNamingNothing = (failed: Awaited<ReturnType<typeof failureOf>>, original: unknown) => {
-    expect(failed).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    expect(failed).toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
     expect(failed.message).toBe(sentencesFor([]).readFailed('policy_document', 'policy'));
     for (const word of ['policy_revision', 'secret_note', 'acme_private', 'store down']) {
       expect(failed.message).not.toContain(word);
@@ -451,7 +451,7 @@ describe('get_record_context — a read of a related object that fails is a fail
     ['step 4a: the served-definition read', 'servedObjectDefinitionOf'],
     ['publishedOf: the published-definition read', 'publishedObjectDefinitionOf'],
     ['the child list query', 'query'],
-  ] as const)('%s throwing an uncoded error fails the call SERVICE_UNAVAILABLE, naming nothing', async (_site, member) => {
+  ] as const)('%s throwing an uncoded error fails the call INTERNAL_ERROR, naming nothing', async (_site, member) => {
     const thrown = outage();
     const door = throwingAt(member, () => thrown);
     expectFailureNamingNothing(await failureOf(executeGetRecordContext(CALL, door)), thrown);
@@ -476,7 +476,24 @@ describe('get_record_context — a read of a related object that fails is a fail
   });
 
   it.each<[string, () => unknown]>([
-    ['a driver errno on `.code` with no status', () => Object.assign(new Error(OUTAGE), { code: 'SQLITE_BUSY' })],
+    ['a sandboxed beforeFind hook\'s plain throw (no code; the door answers 400 HOOK_ABORTED)', () =>
+      Object.assign(new Error("beforeFind hook 'step_gate' threw: Steps are closed for review"), { innerMessage: 'Steps are closed for review' })],
+    ['a PERMISSION_DENIED with no status (the door answers 403)', () => Object.assign(new Error('denied'), { code: 'PERMISSION_DENIED' })],
+  ])('the child list query: %s stays the door\'s refusal, rethrown as main left it', async (_label, thrown) => {
+    const refusal = thrown();
+    const door = throwingAt('query', () => refusal);
+    await expect(executeGetRecordContext(CALL, door)).rejects.toBe(refusal);
+    // Control: at an object-level read, the same throw is no coded refusal, so it fails the call.
+    expectFailureNamingNothing(await failureOf(executeGetRecordContext(CALL, throwingAt('servedObjectDefinitionOf', () => refusal))), refusal);
+  });
+
+  it('the child list query: a sandboxed body that CRASHED (a native error name) is a fault at the door, so it fails the call', async () => {
+    const crash = Object.assign(new Error("beforeFind hook 'step_gate' threw: TypeError: x is not a function"), { innerMessage: 'TypeError: x is not a function' });
+    expectFailureNamingNothing(await failureOf(executeGetRecordContext(CALL, throwingAt('query', () => crash))), crash);
+  });
+
+  it.each<[string, () => unknown]>([
+    ['a driver errno on `.code` with no status',() => Object.assign(new Error(OUTAGE), { code: 'SQLITE_BUSY' })],
     ['a coded 5xx', () => Object.assign(new Error(OUTAGE), { code: 'SERVICE_UNAVAILABLE', status: 503 })],
     ['a status with no code', () => Object.assign(new Error(OUTAGE), { status: 404 })],
     ['a thrown value that is not an object', () => OUTAGE],
