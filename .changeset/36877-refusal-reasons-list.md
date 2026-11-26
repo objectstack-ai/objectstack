@@ -8,7 +8,6 @@ feat(refusals): one refusal names several declared reasons, each in the person's
 
 Clause-②: yes
 Metadata-protocol: added
-Skills-docs: follow-up owed — skills/objectstack-data/references/data-hooks.md, skills/objectstack-ui/rules/actions.md
 
 A hook or a `script` action that declares `refusals` can now refuse with several declared sentences at once, for example when it checks a whole selection and refuses all of it. Under one declared code it throws an ordered list of the code's declared reasons, each with its own `params`, instead of one `reason`:
 
