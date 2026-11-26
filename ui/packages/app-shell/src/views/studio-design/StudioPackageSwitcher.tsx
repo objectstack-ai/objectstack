@@ -40,6 +40,7 @@ import {
 import { useMetadata } from '@object-ui/react';
 import { Boxes, Building2, Check, ChevronsUpDown, KeyRound, Lock, Plus, Search } from 'lucide-react';
 import { toast } from 'sonner';
+import type { I18nLabel } from '@objectstack/spec/ui';
 import { AppMark, type AppMarkApp } from '../../layout/AppMark.js';
 import { navItemLabelText } from '../metadata-admin/previews/navItemLabel.js';
 import { t, tFormat } from '../metadata-admin/i18n.js';
@@ -49,7 +50,7 @@ import { foldCustomizationPairs } from './StudioRailCustomizations.js';
 import { PACKAGE_LIST_TOAST_ID } from './PackageSwitcher.js';
 
 /** A served app's fields the switcher reads: the spec's, plus the package the server says it ships in. */
-type ServedApp = AppMarkApp & { name?: string; label?: unknown; active?: boolean; _packageId?: unknown };
+export type ServedApp = AppMarkApp & { name?: string; label?: I18nLabel; active?: boolean; _packageId?: unknown };
 
 /** One package as the switcher draws it. */
 export interface StudioSwitcherRow {
@@ -57,7 +58,7 @@ export interface StudioSwitcherRow {
   /** The app's name where the package publishes one, else the package's own. */
   label: string;
   /** The package's app, for its logo; `null` draws the neutral tile. */
-  app: AppMarkApp | null;
+  app: ServedApp | null;
   writable: boolean;
   /** The folded `<base>.custom`, when the package has one. */
   pair: string | null;
@@ -75,7 +76,7 @@ export function studioSwitcherRows(
   const folded = foldCustomizationPairs(pkgs.filter((p) => !p.kernel));
   return folded.rows.map((p) => {
     const app = studioPackageApp(p.id, apps);
-    const appLabel = app ? navItemLabelText(app.label as never, locale) || app.name || '' : '';
+    const appLabel = app ? navItemLabelText(app.label, locale) || app.name || '' : '';
     return {
       id: p.id,
       label: appLabel || p.name || p.id,
@@ -169,7 +170,7 @@ export function StudioPackageSwitcher({
     packageId === null
       ? t(scope === 'all' ? 'engine.studio.menu.environment' : 'engine.studio.menu.orgFlows', locale)
       : (listed?.label ??
-        (openApp ? navItemLabelText(openApp.label as never, locale) || openApp.name : null) ??
+        (openApp ? navItemLabelText(openApp.label, locale) || openApp.name : null) ??
         (openEntry?.id === packageId ? openEntry.name : null) ??
         packageId);
   const ScopeIcon = scope === 'all' ? KeyRound : Building2;
