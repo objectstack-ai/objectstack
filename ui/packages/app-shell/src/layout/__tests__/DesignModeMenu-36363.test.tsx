@@ -1355,13 +1355,18 @@ function Here() {
   return <span data-testid="here" data-at={`${pathname}${search}`} data-state={JSON.stringify(state ?? null)} />;
 }
 
-/** A second arrival into the app on screen: Studio's New, taken again. */
+/** A second arrival into the app on screen: Studio's New, taken again; and the browser's Back. */
 function ArriveAgain() {
   const navigate = useNavigate();
   return (
-    <button type="button" onClick={() => navigate('/apps/crm', { state: designModeAddDashboardArrival(STUDIO_LIST) })}>
-      arrive again
-    </button>
+    <>
+      <button type="button" onClick={() => navigate('/apps/crm', { state: designModeAddDashboardArrival(STUDIO_LIST) })}>
+        arrive again
+      </button>
+      <button type="button" onClick={() => navigate(-1)}>
+        browser back
+      </button>
+    </>
   );
 }
 
@@ -1488,6 +1493,40 @@ describe("the arrival from a Studio dashboard list's New (objectstack#36907)", (
     expect(screen.queryByTestId('design-menu-picker')).toBeNull();
     expect(toastError).not.toHaveBeenCalled();
     expect(here()).toEqual({ at: '/apps/crm', state: null });
+  });
+
+  it('the arrival entry is replaced, not stacked: Back from it goes to the page before, and enters nothing', async () => {
+    render(
+      <MemoryRouter
+        initialEntries={['/apps/crm/home', { pathname: '/apps/crm', state: designModeAddDashboardArrival(STUDIO_LIST) }]}
+        initialIndex={1}
+      >
+        <ArrivalHarness />
+        <Here />
+      </MemoryRouter>,
+    );
+    await flush();
+    expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('design-mode-cancel'));
+    fireEvent.click(screen.getByText('browser back'));
+    await flush();
+    expect(here()).toEqual({ at: '/apps/crm/home', state: null });
+    expect(screen.queryByTestId('design-mode-bar')).toBeNull();
+    expect(screen.queryByTestId('design-menu-picker')).toBeNull();
+  });
+
+  it('an arrival read on a phone holds nothing: the window widening later opens no mode', async () => {
+    const { rerender } = arrive({ enabled: false });
+    await flush();
+    rerender(
+      <MemoryRouter initialEntries={['/apps/crm']}>
+        <ArrivalHarness enabled />
+        <Here />
+      </MemoryRouter>,
+    );
+    await flush();
+    expect(screen.queryByTestId('design-mode-bar')).toBeNull();
+    expect(screen.queryByTestId('design-menu-picker')).toBeNull();
   });
 
   it('CONTROL — the menu door enters the mode with no picker open', async () => {

@@ -858,6 +858,22 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     `${routeLocation.pathname}?${search}`,
     !loading && filtered.length > 0,
   );
+  // What an empty list says under its title. objectstack#36907 — a dashboard
+  // list whose New is withheld never falls through to the read-only hint: the
+  // package is writable. While its apps are read it says nothing yet; on a
+  // phone it says where a dashboard is made; with no app, why there is no New.
+  const emptyHint: string | null =
+    (scopedItems.length === 0 || hintedEmpty ? host?.emptyListHint : undefined) ??
+    config.emptyStateHint ??
+    (canCreate
+      ? tFormat('engine.list.createHint', locale, { type: typeLabel })
+      : dashboardNew === 'no-app'
+        ? t('engine.list.dashboardNewNoApp', locale)
+        : dashboardNew === 'phone'
+          ? t('engine.list.dashboardNewWiderScreen', locale)
+          : dashboardNew === 'pending'
+            ? null
+            : t('engine.list.readOnlyHint', locale));
   const createButton = (canCreate && (
     <Button
       size="sm"
@@ -1471,15 +1487,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
                 ? tFormat('engine.list.emptyType', locale, { type: typeLabel })
                 : tFormat('engine.list.emptyQuery', locale, { query })}
             </EmptyTitle>
-            <EmptyDescription>
-              {(scopedItems.length === 0 || hintedEmpty ? host?.emptyListHint : undefined) ??
-                config.emptyStateHint ??
-                (canCreate
-                  ? tFormat('engine.list.createHint', locale, { type: typeLabel })
-                  : dashboardNew === 'no-app'
-                    ? t('engine.list.dashboardNewNoApp', locale)
-                    : t('engine.list.readOnlyHint', locale))}
-            </EmptyDescription>
+            {emptyHint !== null && <EmptyDescription data-testid="metadata-list-empty-hint">{emptyHint}</EmptyDescription>}
             {scopedItems.length === 0 && canCreate && (
               <div className="mt-4">
                 <Button onClick={handleCreate}>

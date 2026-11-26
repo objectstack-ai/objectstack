@@ -32,13 +32,17 @@ import { MetadataAreaHostContext, type MetadataAreaHost } from './metadataAreaHo
 const BASE = 'hotcrm';
 
 /** objectstack#36907 — the published apps per package (unset: one app), and the app reads asked. */
-const APPS = { byPackage: new Map<string, unknown[]>(), reads: [] as string[] };
+const APPS = { byPackage: new Map<string, unknown[]>(), reads: [] as string[], hold: null as Promise<void> | null };
+/** Types whose list is empty, for the empty state's hint. */
+const EMPTY_TYPES = new Set<string>();
 const CLIENT = {
   list: async (type: string, options?: { packageId?: string }) => {
     if (type === 'app') {
       APPS.reads.push(options?.packageId ?? '');
+      if (APPS.hold) await APPS.hold;
       return APPS.byPackage.get(options?.packageId ?? '') ?? [{ name: 'crm_app_one', label: 'One app' }];
     }
+    if (EMPTY_TYPES.has(type)) return [];
     return type === 'package'
       ? [{ manifest: { id: BASE, name: 'HotCRM', scope: 'installed' } }]
       : [{ name: `crm_${type}_one`, label: `One ${type}`, _packageId: BASE }];
@@ -98,6 +102,8 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   APPS.byPackage = new Map();
   APPS.reads = [];
+  APPS.hold = null;
+  EMPTY_TYPES.clear();
 });
 afterEach(() => {
   cleanup();
@@ -240,5 +246,53 @@ describe("a dashboard list's 「新建」 in the area opens an app's design mode
     expect(newButton()).not.toBeNull();
     expect(reason()).toBeNull();
     expect(APPS.reads).toEqual([]);
+  });
+});
+
+describe("an empty dashboard list's hint never says a writable package is read-only (objectstack#36907)", () => {
+  const WRITABLE: MetadataAreaHost = { packageId: BASE, readOnly: false, basePath: `/studio/${BASE}/metadata` };
+  const hint = () => screen.queryByTestId('metadata-list-empty-hint');
+  const settle = () =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+  beforeEach(() => {
+    EMPTY_TYPES.add('dashboard');
+  });
+
+  it('on a phone it says a dashboard is made in an app\'s design mode on a wider screen', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 390 });
+    mount(WRITABLE, 'dashboard');
+    expect(await screen.findByTestId('metadata-list-empty-hint')).toHaveTextContent(
+      t('engine.list.dashboardNewWiderScreen', 'en-US'),
+    );
+    expect(hint()).not.toHaveTextContent(t('engine.list.readOnlyHint', 'en-US'));
+    expect(screen.queryByTestId('metadata-list-create')).toBeNull();
+  });
+
+  it("while the package's apps are read it says nothing yet, then the create hint once the New is offered", async () => {
+    let release!: () => void;
+    APPS.hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mount(WRITABLE, 'dashboard');
+    await settle();
+    // The empty state is drawn (its title), with no description under it yet.
+    expect(screen.getByText(/^No .+ items registered$/)).toBeInTheDocument();
+    expect(hint()).toBeNull();
+    expect(screen.queryByTestId('metadata-list-create')).toBeNull();
+    await act(async () => {
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(await screen.findByTestId('metadata-list-empty-hint')).toHaveTextContent(/New/);
+    expect(screen.getByTestId('metadata-list-create')).toBeInTheDocument();
+  });
+
+  it('CONTROL — with no app, the hint is the no-app reason', async () => {
+    APPS.byPackage.set(BASE, []);
+    mount(WRITABLE, 'dashboard');
+    await waitFor(() => expect(hint()).toHaveTextContent(t('engine.list.dashboardNewNoApp', 'en-US')));
   });
 });

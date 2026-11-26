@@ -4090,6 +4090,8 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#36907 — a Studio dashboard list's New opens an app's design mode.
   'engine.list.dashboardNewNoApp':
     'A new dashboard is made in an app\'s design mode, so that it hangs in a menu. This package has no app to make it in.',
+  'engine.list.dashboardNewWiderScreen':
+    'A new dashboard is made in an app\'s design mode, on a wider screen.',
   'engine.list.readOnlyHint':
     'This type is read-only — instances are defined by code artifacts in packages.',
   // objectui#7611 — the environment scope (Setup catalog). See `catalog-scope.ts`.
