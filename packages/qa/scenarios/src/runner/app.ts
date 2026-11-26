@@ -480,10 +480,22 @@ export async function mintAuthoringToken(baseUrl: string, cookie: string, scope:
   const challenge = createHash('sha256').update(verifier).digest('base64url');
   const qs = new URLSearchParams({ client_id: clientId, redirect_uri: DOOR_REDIRECT_URI, response_type: 'code', scope, state: 'scenario', code_challenge: challenge, code_challenge_method: 'S256', resource });
   const az = await fetch(`${baseUrl}/api/v1/auth/oauth2/authorize?${qs}`, { headers: { cookie }, redirect: 'manual' });
-  const loc = az.headers.get('location') ?? '';
-  let code = loc ? new URL(loc, baseUrl).searchParams.get('code') : null;
+  // The redirect comes in one of two shapes: a 302 with a `Location`, or a 200
+  // `{ redirect: true, url }`, which the authorization server answers to a
+  // browser-style fetch (Node's fetch sends `sec-fetch-mode: cors`) or to
+  // `accept: application/json`. Either one is followed the same way.
+  let loc = az.headers.get('location') ?? '';
+  if (!loc) {
+    const azBody = await read(az);
+    if (az.ok && isBag(azBody) && azBody.redirect === true && typeof azBody.url === 'string') loc = azBody.url;
+    else return refused('authorization', az, azBody);
+  }
+  const back = new URL(loc, baseUrl).searchParams;
+  // A refusal comes back the same way, as a redirect carrying `error`: it is the answer, not a consent screen.
+  const azError = back.get('error');
+  if (azError) return { ok: false, status: az.status, body: null, code: azError, message: `authorization: ${back.get('error_description') ?? azError}`.slice(0, 500) };
+  let code = back.get('code');
   if (!code) {
-    if (!loc) return refused('authorization', az, await read(az));
     // The consent screen: the person accepts, as they would in the browser.
     const consent = await fetch(`${baseUrl}/api/v1/auth/oauth2/consent`, {
       method: 'POST',

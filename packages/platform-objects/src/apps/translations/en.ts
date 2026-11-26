@@ -121,6 +121,7 @@ export const en: TranslationData = {
         // list; the label is the short form of that object's `pluralLabel`.
         nav_scim_credentials: { label: 'SCIM Credentials' },
         nav_api_keys: { label: 'API Keys' },
+        nav_access_directory: { label: 'Positions and Permissions' },
 
         // Approvals. `nav_approvals_inbox` is the working surface (#7234); the
         // three below it are the engine's raw tables, kept as the admin view.
@@ -190,7 +191,7 @@ export const en: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'Metadata workbench for developers, analysts, and implementers',
       navigation: {
         group_overview: { label: 'Overview' },

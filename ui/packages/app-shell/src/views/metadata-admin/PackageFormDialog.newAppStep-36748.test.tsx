@@ -273,7 +273,7 @@ describe('PackageFormDialog with a new-app step: one confirm creates the package
       () => expect(within(header).getByTestId('studio-back-app-name')).toHaveAttribute('data-names', 'app'),
       { timeout: 8000 },
     );
-    expect(within(header).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Visits·Studio$/);
+    expect(within(header).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Visits·App Studio$/);
     // The app is live: no Create app is offered, and the back link opens it.
     expect(within(header).queryByRole('button', { name: /Create app/ })).toBeNull();
     fireEvent.click(within(header).getByTestId('studio-back-to-app'));
@@ -385,7 +385,7 @@ describe('CreatePackageDialog: ticked creates the package and its app; unticked 
       () => expect(within(header).getByTestId('studio-back-app-name')).toHaveAttribute('data-names', 'app'),
       { timeout: 8000 },
     );
-    expect(within(header).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Visits·Studio$/);
+    expect(within(header).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Visits·App Studio$/);
   });
 
   it('unticked: only the package is created, as before', async () => {

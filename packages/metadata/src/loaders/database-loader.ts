@@ -1929,7 +1929,14 @@ export class DatabaseLoader implements MetadataLoader {
     // registration alone: a rollback never restores it (a restored body is
     // written without the platform's mark, so the row would stop being the
     // platform's record). Refused before anything is written.
-    refusePlatformRecordRestore(type, name, existing);
+    // [#37604] …nor writes a version the platform registered into a package's
+    // row: the row this rollback writes is the slot's (or, for any other type,
+    // the name's row), and the version is judged by its history row.
+    refusePlatformRecordRestore(type, name, existing, {
+      historyRow: slot ? slot.recorded : await this.historyVersionRow(type, name, targetVersion),
+      version: targetVersion,
+      intoPackageId: slot ? slot.packageId : (existing ? storedRowColumnPackageId(existing) : null),
+    });
     if (restoresBinding) {
       // [#32540 C8] Refused before any write: an object the column cannot
       // store, or an object-less binding whose place an unnameable row holds.
@@ -2039,7 +2046,7 @@ export class DatabaseLoader implements MetadataLoader {
     targetVersion: number,
     restoredData: unknown,
     packageId: string | null | undefined,
-  ): Promise<{ rows: Array<Record<string, unknown>>; packageId?: string } | undefined> {
+  ): Promise<{ rows: Array<Record<string, unknown>>; packageId?: string; recorded?: Record<string, unknown> } | undefined> {
     const bySlot = await this.rowSlots(type, name);
     if (bySlot.size === 0) return { rows: [] };
     let key: string;
@@ -2072,7 +2079,7 @@ export class DatabaseLoader implements MetadataLoader {
       }
       refuseSlotNotHeld(bySlot, type, name, versionOwner);
     }
-    return { rows: bySlot.get(key) ?? [], packageId: slotPackage };
+    return { rows: bySlot.get(key) ?? [], packageId: slotPackage, recorded };
   }
 
   /**
@@ -2690,26 +2697,69 @@ function generateId(): string {
 }
 
 /**
- * [#37013, #37130] Refuse a rollback or restore whose target `row` (a
- * `sys_metadata` row, its body read with {@link storedRowBodyOf}) is the
- * platform's own record: `409 RESOURCE_CONFLICT`, naming the fix, before
- * anything is written. Only the platform's registration writes that record; a
- * rollback restores a package's or the environment's item. The one rule the
- * metadata service's `rollback` ({@link DatabaseLoader.registerRollback}) and
- * the metadata protocol's restore doors (`rollbackMetaItem` and the restore
- * limb of `revertCommit`, through `SysMetadataRepository.restoreVersion`)
- * share: a row the platform's record does not hold passes.
+ * [#37013, #37604 N5] Whether a stored row is the platform's own record: its
+ * `package_id` column names no package (empty, or the environment's history
+ * mark), and its stored body carries the platform's mark and names no package
+ * ({@link isPlatformOrigin}). Read off a `sys_metadata` row, it says whether
+ * the row is the record the platform's registration writes; off a
+ * `sys_metadata_history` row, whether the version is one the platform
+ * registered. A row bound to a package by its column is that package's,
+ * whatever its body keeps. The one reader of the fact: the restore refusal
+ * ({@link refusePlatformRecordRestore}), the metadata protocol's overlay
+ * census and its adoption of orphans ask it, so they cannot disagree.
  */
-export function refusePlatformRecordRestore(type: string, name: string, row: Record<string, unknown> | null | undefined): void {
-  if (!row || !isPlatformOrigin(storedRowBodyOf(row))) return;
-  const err = new Error(
-    `${type}/${name}: the row this rollback would restore is the platform's own record, which only the platform's registration writes. ` +
-    'It is not rolled back: the platform registers it again at its next boot. To restore an earlier version of a package\'s item of the name, name that package; ' +
-    'to make an earlier version the environment\'s own item of the name, save that version\'s body again.',
-  ) as Error & { code?: string; status?: number };
+export function isPlatformRecordRow(row: Record<string, unknown> | null | undefined): boolean {
+  if (!row || storedRowColumnPackageId(row) !== null) return false;
+  return isPlatformOrigin(storedRowBodyOf(row));
+}
+
+/**
+ * [#37013, #37130] Refuse a rollback or restore whose target `row` (a
+ * `sys_metadata` row) is the platform's own record ({@link isPlatformRecordRow}):
+ * `409 RESOURCE_CONFLICT`, naming the fix, before anything is written. Only
+ * the platform's registration writes that record; a rollback restores a
+ * package's or the environment's item. The one rule the metadata service's
+ * `rollback` ({@link DatabaseLoader.registerRollback}) and the metadata
+ * protocol's restore doors (`rollbackMetaItem` and the restore limb of
+ * `revertCommit`, through `SysMetadataRepository.restoreVersion`) share: a
+ * row the platform's record does not hold passes.
+ *
+ * [#37604] `restored`, when stated, is the version the restore would write:
+ * its history row, its number, and the package whose row it writes (`null`:
+ * the package-less row). A version the platform registered (its history row
+ * read by {@link isPlatformRecordRow}) is never written into a package's row,
+ * refused with the same envelope: after the platform withdraws its record,
+ * a name's one remaining holder may be a package, whose slot the
+ * environment's versions then belong to, and the platform's body would
+ * become that package's item.
+ */
+export function refusePlatformRecordRestore(
+  type: string,
+  name: string,
+  row: Record<string, unknown> | null | undefined,
+  restored?: { historyRow: Record<string, unknown> | null | undefined; version: number; intoPackageId: string | null | undefined },
+): void {
+  if (isPlatformRecordRow(row)) {
+    throw platformRecordConflict(
+      `${type}/${name}: the row this rollback would restore is the platform's own record, which only the platform's registration writes. ` +
+      'It is not rolled back: the platform registers it again at its next boot. To restore an earlier version of a package\'s item of the name, name that package; ' +
+      'to make an earlier version the environment\'s own item of the name, save that version\'s body again, which holds until the platform\'s next registration at boot writes its record back.',
+    );
+  }
+  const into = restored?.intoPackageId;
+  if (restored && typeof into === 'string' && into !== '' && isPlatformRecordRow(restored.historyRow)) {
+    throw platformRecordConflict(
+      `${type}/${name}: version ${restored.version} is a version the platform registered, and this rollback would write it into package '${into}''s row. ` +
+      `It is not restored: a package's rollback restores that package's own versions. To make that body package '${into}''s item, save it again naming the package.`,
+    );
+  }
+}
+
+function platformRecordConflict(message: string): Error {
+  const err = new Error(message) as Error & { code?: string; status?: number };
   err.code = 'RESOURCE_CONFLICT';
   err.status = 409;
-  throw err;
+  return err;
 }
 
 /**

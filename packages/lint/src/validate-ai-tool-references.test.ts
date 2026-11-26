@@ -3,6 +3,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   validateAiToolReferences as validateAiToolReferencesUnrecorded,
+  AI_SKILL_CONTEXT_OMITTED,
+  AI_SKILL_CONTEXT_UNKNOWN,
   AI_SKILL_TOOL_UNRESOLVED,
 } from './validate-ai-tool-references.js';
 import {
@@ -613,5 +615,66 @@ describe('[#22161] one-line fixes — ai-skill-tool-unresolved', () => {
     // The ask tools the explanation names are exactly the ones the door lacks.
     const askOnly = (PLATFORM_TOOLS_BY_PACKAGE['service-ai'] ?? []).filter((n) => !MCP_DOOR_TOOL_NAMES.includes(n));
     expect(text).toContain(`(${askOnly.sort().map((n) => `\`${n}\``).join(', ')})`);
+  });
+});
+
+describe('[ADR-0160 D8] a skill\'s context pack reference', () => {
+  const policyPack = { name: 'policy_document', label: 'Policy document', object: 'policy' };
+  const reviewPack = { name: 'policy_review', label: 'Policy review', object: 'policy' };
+  const casePack = { name: 'case_brief', label: 'Case brief', object: 'case' };
+  const skill = (extra: Record<string, unknown>) => ({
+    name: 'policy_inquiry',
+    label: 'Policy inquiry',
+    instructions: 'Answer questions about one policy.',
+    tools: ['get_record_context'],
+    ...extra,
+  });
+  const contextFindings = (stack: Record<string, unknown>) =>
+    validateAiToolReferences(stack).filter((f) => f.rule !== AI_SKILL_TOOL_UNRESOLVED);
+
+  it('reports a context that names no pack the stack defines, located on the key', () => {
+    const findings = contextFindings({ aiContexts: [policyPack], skills: [skill({ context: 'policy_documnt' })] });
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([[AI_SKILL_CONTEXT_UNKNOWN, 'warning', 'skills[0].context']]);
+    expect(findings[0].message).toContain('"policy_documnt"');
+    expect(findings[0].message).toContain('Did you mean "policy_document"?');
+  });
+
+  it('CONTROL — a context that names a pack the stack defines is clean, even beside a second pack on its object', () => {
+    expect(contextFindings({ aiContexts: [policyPack, reviewPack], skills: [skill({ context: 'policy_document' })] })).toEqual([]);
+  });
+
+  it('a stack with no packs reports the reference as unknown', () => {
+    expect(contextFindings({ skills: [skill({ context: 'policy_document' })] }).map((f) => f.rule)).toEqual([AI_SKILL_CONTEXT_UNKNOWN]);
+  });
+
+  it('advises a skill that binds get_record_context without context when an object has several packs (ADR-0160 D1, point 1)', () => {
+    const findings = contextFindings({ aiContexts: [policyPack, casePack, reviewPack], skills: [skill({})] });
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([[AI_SKILL_CONTEXT_OMITTED, 'warning', 'skills[0]']]);
+    expect(findings[0].message).toContain("object 'policy' has 2 packs (policy_document, policy_review)");
+    expect(findings[0].message).not.toContain('case');
+  });
+
+  it('a wildcard that matches get_record_context is a binding for the advisory too', () => {
+    const findings = contextFindings({ aiContexts: [policyPack, reviewPack], skills: [skill({ tools: ['get_*'] })] });
+    expect(findings.map((f) => f.rule)).toEqual([AI_SKILL_CONTEXT_OMITTED]);
+  });
+
+  it('CONTROL — no advisory when every object has one pack, or when the skill does not bind the tool', () => {
+    expect(contextFindings({ aiContexts: [policyPack, casePack], skills: [skill({})] })).toEqual([]);
+    expect(contextFindings({ aiContexts: [policyPack, reviewPack], skills: [skill({ tools: ['get_record'] })] })).toEqual([]);
+  });
+
+  it('each verdict and fix is one line of at most 200 characters', () => {
+    const findings = contextFindings({
+      aiContexts: [policyPack, reviewPack],
+      skills: [skill({ context: 'policy_documnt' }), skill({ name: 'other' })],
+    });
+    expect(findings.map((f) => f.rule).sort()).toEqual([AI_SKILL_CONTEXT_OMITTED, AI_SKILL_CONTEXT_UNKNOWN]);
+    for (const f of findings) {
+      for (const line of [f.message, f.hint]) {
+        expect(line).not.toContain('\n');
+        expect(line.length, line).toBeLessThanOrEqual(200);
+      }
+    }
   });
 });

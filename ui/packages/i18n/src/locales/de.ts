@@ -2143,7 +2143,7 @@ const de = {
   },
   console: {
     studio: {
-      title: "Studio",
+      title: "App Studio",
       accessRequired: "Sie benötigen Studio-Zugriff, um Studio zu öffnen. Ein Administrator kann ihn unter Einrichtung → Berechtigungssatz-Zuweisung mit einem Berechtigungssatz erteilen.",
     },
     saveAdvisoryTitle: "Gespeichert — die Autorenprüfung ergab {{count}} Hinweis(e)",
@@ -3730,11 +3730,11 @@ const de = {
       tooltip: "Diese Plattform befindet sich in der Vorschau — Funktionen können sich ändern.",
     },
     aiAssistant: "KI-Assistent",
-    designInStudio: "Im Studio gestalten",
+    designInStudio: "Im App Studio gestalten",
     designLayout: "Layout gestalten",
     editApp: "App bearbeiten",
-    openAppInStudio: "{{app}} im Studio ansehen",
-    viewInStudio: "Im Studio ansehen",
+    openAppInStudio: "{{app}} im App Studio ansehen",
+    viewInStudio: "Im App Studio ansehen",
   },
   home: {
     build: {
@@ -3874,8 +3874,8 @@ const de = {
       backToAppHome: "Zurück zum App-Menü",
       appsAvailable: "{{count}} Apps verfügbar",
       allApps: "Alle Apps",
-      editAppInStudio: "{{app}} im Studio bearbeiten",
-      openAppInStudio: "{{app}} im Studio ansehen",
+      editAppInStudio: "{{app}} im App Studio bearbeiten",
+      openAppInStudio: "{{app}} im App Studio ansehen",
       backToHome: "Zurück zur Startseite der App",
       settings: "Einstellungen",
       productHome: "{{product}} Startseite",
@@ -5619,6 +5619,8 @@ const de = {
     completed: 'Flow „{{flow}}“ abgeschlossen',
     alreadySubmitted: 'Ihre vorherige Eingabe wurde übernommen. Der Flow ist zu diesem Schritt weitergegangen.',
     noLongerWaiting: 'Dieser Schritt wurde möglicherweise bereits verarbeitet. Schließen Sie diesen Dialog und prüfen Sie den Datensatz, bevor Sie es erneut versuchen.',
+    invalidScreenInput: 'Einige Werte in diesem Schritt wurden nicht akzeptiert. Prüfen Sie sie und versuchen Sie es erneut.',
+    fieldNotAccepted: '{{field}}: Dieser Wert wird nicht akzeptiert',
   },
   appManagement: {
     title: "Anwendungen",

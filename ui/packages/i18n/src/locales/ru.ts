@@ -2263,7 +2263,7 @@ const ru = {
   },
   console: {
     studio: {
-      title: "Studio",
+      title: "App Studio",
       accessRequired: "Чтобы открыть Studio, нужен доступ к Studio. Администратор может выдать его набором разрешений в разделе «Настройка → Назначение наборов разрешений».",
     },
     saveAdvisoryTitle: "Сохранено — проверка авторинга выдала рекомендаций: {{count}}",
@@ -3899,11 +3899,11 @@ const ru = {
       tooltip: "Платформа в предварительной версии — функции могут измениться.",
     },
     aiAssistant: "ИИ-ассистент",
-    designInStudio: "Дизайн в Studio",
+    designInStudio: "Дизайн в App Studio",
     designLayout: "Дизайн макета",
     editApp: "Редактировать приложение",
-    openAppInStudio: "Открыть {{app}} в Studio",
-    viewInStudio: "Открыть в Studio",
+    openAppInStudio: "Открыть {{app}} в App Studio",
+    viewInStudio: "Открыть в App Studio",
   },
   home: {
     build: {
@@ -4048,8 +4048,8 @@ const ru = {
       backToAppHome: "Назад к меню приложения",
       appsAvailable: "Доступно приложений: {{count}}",
       allApps: "Все приложения",
-      editAppInStudio: "Редактировать {{app}} в Studio",
-      openAppInStudio: "Открыть {{app}} в Studio",
+      editAppInStudio: "Редактировать {{app}} в App Studio",
+      openAppInStudio: "Открыть {{app}} в App Studio",
       backToHome: "Вернуться на стартовую страницу приложения",
       settings: "Настройки",
       productHome: "Главная {{product}}",
@@ -5954,6 +5954,8 @@ const ru = {
     completed: 'Поток «{{flow}}» завершён',
     alreadySubmitted: 'Предыдущая отправка выполнена. Поток перешёл к этому шагу.',
     noLongerWaiting: 'Возможно, этот шаг уже обработан. Закройте диалог и проверьте запись, прежде чем повторить попытку.',
+    invalidScreenInput: 'Некоторые значения на этом шаге не приняты. Проверьте их и повторите попытку.',
+    fieldNotAccepted: '{{field}}: это значение не принимается',
   },
   appManagement: {
     title: "Приложения",

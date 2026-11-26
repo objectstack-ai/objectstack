@@ -29,6 +29,10 @@ export {
   // [#37130] The platform's record is never restored: the one refusal the
   // metadata service's rollback and the metadata protocol's restore doors ask.
   refusePlatformRecordRestore,
+  // [#37604 N5] …and the one reader of whether a stored row is the platform's
+  // own record, which that refusal, the protocol's overlay census and its
+  // adoption of orphans ask.
+  isPlatformRecordRow,
   type DatabaseLoaderOptions,
   type MetadataHistoryAddress,
 } from './loaders/database-loader.js';

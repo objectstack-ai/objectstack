@@ -102,6 +102,20 @@
  *     reads no pending draft (the buffer is then the live row) takes the
  *     fresh read's pin. A reload over a discarded draft re-reads the live row
  *     and is pinned to it at once, as before.
+ * 10. objectstack#37440 — the Save's publish is also pinned to the DRAFT it
+ *     promotes when its caller passes `draftVersion`: the version its own
+ *     draft save's receipt returned (`heldDraftVersion` right after a guarded
+ *     save), ⛔ never a fresh re-read, which would pin another writer's draft.
+ *     A draft another writer changed in between is refused
+ *     `409 METADATA_CONFLICT` and nothing is published. That refusal carries
+ *     the same code as the published row's (rule 8) and does not say which
+ *     pin refused, so the guard reads the draft at the address once: still
+ *     the pinned version, the live row moved and rule 8 asks; moved, gone, or
+ *     unreadable, the refusal is the draft's, nothing is asked, and it is
+ *     thrown marked ({@link isPublishDraftMoved}): the caller ⛔ never
+ *     discards that draft — it now holds the other writer's change — and the
+ *     next Save's draft write, still pinned to the old receipt, is refused and
+ *     asked about by rule 4.
  */
 
 import * as React from 'react';
@@ -121,7 +135,9 @@ import { t, tFormat, translateMetadataType, useMetadataLocale } from './i18n.js'
 
 export {
   isPublishConflictKeptEditing,
+  isPublishDraftMoved,
   isDraftVersionConflict,
+  draftReceiptVersion,
   draftPinOf,
   publishedPinOf,
   isDraftReadRefused,
@@ -174,6 +190,9 @@ export function useDraftSaveGuard(client: Pick<MetadataClient, 'save'>, onReload
   React.useLayoutEffect(() => {
     guard.bind({ client: () => client, reload: onReload, notSaved: notSavedIn(locale) });
   });
+  // objectstack#37440 — one function for the guard's life, as the guard's own
+  // members are: a Save callback may name it among its dependencies.
+  const [heldDraftVersion] = React.useState(() => heldDraftVersionOf(guard));
   // A dialog left open by an unmount answers "keep editing": nothing is sent.
   const pendingRef = React.useRef(pending);
   React.useLayoutEffect(() => {
@@ -191,7 +210,7 @@ export function useDraftSaveGuard(client: Pick<MetadataClient, 'save'>, onReload
     forget: guard.forget,
     recordPublished: guard.recordPublished,
     publish: guard.publish,
-    heldDraftVersion: heldDraftVersionOf(guard),
+    heldDraftVersion,
     dialog: <DraftConflictDialog conflict={pending?.conflict ?? null} onChoose={choose} />,
   };
 }

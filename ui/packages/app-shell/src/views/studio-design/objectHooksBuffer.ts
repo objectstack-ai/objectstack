@@ -35,7 +35,13 @@
 import * as React from 'react';
 import { authoredPublished, extractDraftBody, formatMetadataError } from '@object-ui/data-objectstack';
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
-import { publishedPinOf, readDraftForSave, useDraftSaveGuard, type DraftPin } from '../metadata-admin/DraftConflictDialog.js';
+import {
+  draftReceiptVersion,
+  publishedPinOf,
+  readDraftForSave,
+  useDraftSaveGuard,
+  type DraftPin,
+} from '../metadata-admin/DraftConflictDialog.js';
 import type { HookTargetScope } from '../metadata-admin/inspectors/HookDefaultInspector.js';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { loadPackageSurfaces } from './packageSurfaces.js';
@@ -155,6 +161,8 @@ export function useObjectHooksBuffer({
     // objectstack#36726 — the published hook each buffer was loaded at, for the Save's publish.
     recordPublished: recordHookPublished,
     publish: publishHook,
+    // objectstack#37440 — the version the buffer's own Save wrote, which pins its publish.
+    heldDraftVersion: heldHookDraftVersion,
     dialog,
   } = useDraftSaveGuard(client, reloadHooks);
   React.useEffect(() => {
@@ -390,20 +398,26 @@ export function useObjectHooksBuffer({
     setSaving(true);
     setError(null);
     try {
+      // objectstack#37440 — the version this Save's own draft write returned, which pins its publish.
+      let draftVersion: string | undefined;
       if (isNew) {
         // objectui#11773 — a create is the first-write pin: refused where the
         // name already holds a draft, instead of written over it.
-        await client.save('hook', name, body, { mode: 'draft', packageId, ifNoneMatch: '*', surface: 'studio' });
+        draftVersion = draftReceiptVersion(
+          await client.save('hook', name, body, { mode: 'draft', packageId, ifNoneMatch: '*', surface: 'studio' }),
+        );
       } else if (
         (await saveHookDraft('hook', name, body, { mode: 'draft', packageId, surface: 'studio' })) === 'reloaded'
       ) {
         // The author chose the saved version: the list re-read installs it.
         setEdited(false);
         return { kind: 'declined' };
+      } else {
+        draftVersion = heldHookDraftVersion('hook', name, packageId);
       }
       // objectstack#36726 — a new hook's publish asserts no published row of its name.
       if (isNew) recordHookPublished('hook', name, packageId, { ifNoneMatch: '*' });
-      const outcome = await publishSavedItem(client, { type: 'hook', name, packageId }, hadDraft, publishHook);
+      const outcome = await publishSavedItem(client, { type: 'hook', name, packageId, draftVersion }, hadDraft, publishHook);
       // The published hook moved and the author chose to reload: the list re-read installs it.
       if (!outcome.ok && 'reloaded' in outcome) {
         if (isNew) setCreated(null);
@@ -450,7 +464,7 @@ export function useObjectHooksBuffer({
     } finally {
       setSaving(false);
     }
-  }, [client, draft, draftFor, created, drafted, packageId, objectName, saveHookDraft, recordHookRead, recordHookPublished, publishHook]);
+  }, [client, draft, draftFor, created, drafted, packageId, objectName, saveHookDraft, recordHookRead, recordHookPublished, publishHook, heldHookDraftVersion]);
 
   const cancel = React.useCallback(() => {
     setError(null);

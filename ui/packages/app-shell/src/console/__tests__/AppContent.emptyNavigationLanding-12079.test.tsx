@@ -30,10 +30,32 @@
 // (scripts/check-test-source-alias.mjs).
 import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
+
+// objectstack#37565 — the viewer's capability set, as `usePermissions()` answers it: a holder of
+// Setup's entry capability unless a case says otherwise (`undefined`: no reported set).
+const HOLDER = ['studio.access', 'setup.access'];
+const held = vi.hoisted(() => ({ capabilities: ['studio.access', 'setup.access'] as string[] | undefined }));
+vi.mock('@object-ui/permissions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/permissions')>();
+  // One object per answer, as the hook's own identity is (objectui#6724).
+  const answers = new Map<string[] | undefined, ReturnType<typeof actual.usePermissions>>();
+  return {
+    ...actual,
+    usePermissions: () => {
+      const base = actual.usePermissions();
+      let answer = answers.get(held.capabilities);
+      if (!answer) answers.set(held.capabilities, (answer = { ...base, systemPermissions: held.capabilities }));
+      return answer;
+    },
+  };
+});
+afterEach(() => {
+  held.capabilities = HOLDER;
+});
 
 // AGENTS.md §测试纪律 — the lazy page modules are stubbed so no unbounded
 // `import()` races a bounded `findBy` window.
@@ -269,10 +291,12 @@ describe('AppContent — an app with empty navigation lands on an empty state (o
     renderConsoleAt('/apps/studio');
 
     // `metadata:directory` resolves to the app's `metadata` route, which since
-    // objectstack ADR-0146 D1 (N-28) opens Studio's "All metadata" area: the
-    // landing reached the entry, not the empty state.
-    expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
-    expect(screen.getByTestId('pathname').textContent).toBe('/studio/~all/metadata');
+    // objectstack ADR-0146 D1 (N-28) opened Studio's "All metadata" area and
+    // since objectstack#37565 opens Setup → Access Control → Positions and
+    // Permissions: the landing reached the entry, not the empty state.
+    await waitFor(() =>
+      expect(screen.getByTestId('pathname').textContent).toBe('/apps/setup/component/security/access-directory'),
+    );
     expect(screen.queryByTestId('app-no-access-empty-state')).not.toBeInTheDocument();
   });
 });

@@ -85,6 +85,8 @@
  *     ^ a bulk param spells its hint `help`; an ACTION param spells the same
  *       idea `helpText` (`ui/bulk-action.zod.ts`'s known divergence)
  *   objects.<name>._validations.<rule>.message
+ *   objects.<name>._milestones.<field>.<value>.summary   (an `activityMilestones`
+ *                                                entry's summary template)
  *   objects.<name>._relatedLists.<list>.label   (an object-form `relatedLists`
  *                                                entry that authors a `label`)
  *   objects.<name>._actions.<action>.label
@@ -1003,6 +1005,28 @@ function pushValidationMessages(
 }
 
 /**
+ * Emit `objects.<object>._milestones.<field>.<value>.summary` for each
+ * `activityMilestones` entry (ADR-0052 §5b.2), seeded with its authored
+ * template, `{field}` tokens and all. Only the first entry of a `field` +
+ * `value` pair is emitted: the writer fires the first match, so a later
+ * entry's template is never rendered.
+ */
+function pushMilestoneSummaries(out: ExpectedEntry[], objectName: string, milestones: unknown): void {
+  if (!Array.isArray(milestones)) return;
+  const seen = new Set<string>();
+  for (const m of milestones) {
+    if (!m || typeof m !== 'object') continue;
+    const field = (m as any).field;
+    const value = (m as any).value;
+    if (typeof field !== 'string' || field.length === 0 || typeof value !== 'string' || value.length === 0) continue;
+    const pair = `${field}\u0000${value}`;
+    if (seen.has(pair)) continue;
+    seen.add(pair);
+    pushEntry(out, ['objects', objectName, '_milestones', field, value, 'summary'], (m as any).summary, 'object', { objectName });
+  }
+}
+
+/**
  * Emit `objects.<object>._relatedLists.<list>.label` for every object-form
  * `relatedLists` entry of an object that authors a `label` (the record page's
  * tab title and table heading for that list, which wins over the child FK's
@@ -1652,6 +1676,12 @@ export function collectExpectedEntries(
 
     // Custom validation-rule rejection messages (`_validations.<rule>.message`).
     pushValidationMessages(out, objectName, obj.validations, 0);
+
+    // Activity-milestone summary templates (`_milestones.<field>.<value>.summary`,
+    // #37524): keyed by the watched field and the value the milestone fires on,
+    // the address `resolveObjectMilestoneSummary` reads. The first milestone
+    // declared for a pair is the one that fires, so a later duplicate gets no key.
+    pushMilestoneSummaries(out, objectName, obj.activityMilestones);
 
     // Record-page related-list titles (`_relatedLists.<list>.label`): the
     // `label` an object-form `relatedLists` entry authors on this parent,
@@ -2723,6 +2753,7 @@ function walkHookTexts(config: any, out: ExpectedEntry[]): void {
  *   metadataForms.<type>.fields.<dotPath>.label
  *   metadataForms.<type>.fields.<dotPath>.helpText
  *   metadataForms.<type>.fields.<dotPath>.placeholder
+ *   metadataForms.<type>.fields.<dotPath>.options.<value>
  *
  * Section names follow the same normalization rule the resolver uses when
  * `section.name` is absent: `label.toLowerCase().replace(/&/g,'and').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')`.
@@ -2789,6 +2820,14 @@ function walkFormField(field: any, type: string, parentPath: string, out: Expect
     pushEntry(out, ['metadataForms', type, 'fields', path, 'label'], inlineText(field.label) ?? humanizeFieldPath(path), 'metadataFormField', { metadataType: type });
     pushOptional(out, ['metadataForms', type, 'fields', path, 'helpText'], field.helpText, 'metadataFormField', { metadataType: type });
     pushOptional(out, ['metadataForms', type, 'fields', path, 'placeholder'], field.placeholder, 'metadataFormField', { metadataType: type });
+    // A select's choices, keyed by value — the key `translateFormField`
+    // overlays onto `options[].label`.
+    if (Array.isArray(field.options)) {
+      for (const option of field.options) {
+        if (!option || typeof option !== 'object' || typeof option.value !== 'string') continue;
+        pushEntry(out, ['metadataForms', type, 'fields', path, 'options', option.value], option.label, 'metadataFormField', { metadataType: type });
+      }
+    }
   }
   if (Array.isArray(field.fields)) {
     for (const child of field.fields) walkFormField(child, type, path, out);

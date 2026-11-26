@@ -82,7 +82,7 @@ const result = AIModelConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **maxIterations** | `integer` | optional (default: `10`) | Maximum planning loop iterations |
+| **maxIterations** | `integer` | optional (default: `10`) | Runaway fuse counted in model calls (one call plus its tool batch), 1 to 1000; not a quality knob |
 
 ### Nested Shape: `Agent.memory`
 

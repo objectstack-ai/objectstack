@@ -39,12 +39,14 @@ import { Link, Navigate, Outlet, Route, useParams } from 'react-router-dom';
 import { Lock } from 'lucide-react';
 import { Button, Empty, EmptyTitle } from '@object-ui/components';
 import {
+  ACCESS_DIRECTORY_PATH,
   LoadingFallback,
   LoadingScreen,
   STUDIO_ALL_PACKAGES_SEGMENT,
   STUDIO_METADATA_AREA,
   STUDIO_ORG_SCOPE_SEGMENT,
   StudioEntryPermissionsProvider,
+  holdsSetupAccess,
   studioMetadataAreaPath,
   studioOrgScopePath,
   studioPackagePath,
@@ -248,6 +250,17 @@ function StudioPackageBuilder({ area }: { area?: typeof STUDIO_METADATA_AREA }) 
  * included) redirects to the page that replaced it in one hop; any other
  * segment renders `children`. The redirect rides in the builder's chunk.
  */
+/**
+ * A `~all` URL outside the area (objectstack#37565): Setup's environment
+ * directory for a principal who may open Setup, else the cross-package leg's
+ * root, where the directory still is for them.
+ */
+function StudioAllLegAddress() {
+  const systemPermissions = useStudioEntryPermissions();
+  const to = holdsSetupAccess(systemPermissions) ? ACCESS_DIRECTORY_PATH : studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT);
+  return <Navigate to={to} replace />;
+}
+
 function StudioPillarAddress({ children }: { children?: ReactNode }) {
   return (
     <Suspense fallback={<LoadingFallback />}>
@@ -267,7 +280,8 @@ function StudioPillarAddress({ children }: { children?: ReactNode }) {
  *
  *   `/studio`                         Studio's entry: the last package, else the package list
  *   `/studio/~org`                    the package-less scope lands on its flow list
- *   `/studio/~all/*`                  lands on the "All metadata" area across packages
+ *   `/studio/~all/*`                  lands on Setup's environment directory (objectstack#37565),
+ *                                     or the cross-package area for one who may not open Setup
  *   `/studio/:packageId`              a package lands on its object list
  *   `/studio/:packageId/metadata/*`   a package's "All metadata" area, in the builder
  *   `/studio/:packageId/:tab`         a retired pillar redirects; any other segment is
@@ -286,14 +300,16 @@ function StudioPillarAddress({ children }: { children?: ReactNode }) {
  * `/studio/crm/metadata/flow` would match no route at all. The static
  * `metadata` segment outranks `:tab`. `~all` is the area's reserved
  * cross-package segment (`metadataArea.ts` in app-shell says why it is not
- * `~org`); every `~all` URL outside the area lands on it, so none reaches the
- * builder as a package id.
+ * `~org`); every `~all` URL outside the area lands on Setup's environment
+ * directory, the leg's root's page since it moved out of Studio
+ * (objectstack#37565), so none reaches the builder as a package id.
  *
  * objectstack#36899 — the cross-package leg (`/studio/~all/metadata/*`) is
  * served by the generic area route: the SAME `StudioDesignSurface`, which
  * reads `~all` as "no package" and draws the area alone, under the left menu
  * every Studio page draws. The more specific `:packageId/metadata/*` outranks
- * `~all/*` for an area URL; every other `~all` URL still lands on the area.
+ * `~all/*` for an area URL; the area sends its root and the directory's lists
+ * to Setup, and keeps the items, which still open in Studio.
  *
  * objectstack#36909 — no pillar draws a page any more. Each retired pillar
  * address (`data`, `automations`, `access`, `interfaces`, and the bare package
@@ -308,7 +324,7 @@ export const studioRoutes = (
     <Route path={STUDIO_ORG_SCOPE_SEGMENT} element={<Navigate to={studioOrgScopePath()} replace />} />
     <Route
       path={`${STUDIO_ALL_PACKAGES_SEGMENT}/*`}
-      element={<Navigate to={studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT)} replace />}
+      element={<StudioAllLegAddress />}
     />
     <Route path=":packageId" element={<StudioPillarAddress />} />
     <Route

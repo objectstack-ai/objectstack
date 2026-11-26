@@ -18,6 +18,7 @@ const emitMetadataRefresh = vi.fn();
 
 import { recordTabsCatalog, type RecordTabsDraft } from '../recordTabsConfigModel';
 import { resolveRecordTabsSaveTarget, saveRecordTabs, type RecordTabsSaveDoors } from '../recordTabsConfigSave';
+import { draftPublishDoor } from './draftPublishDoor-37440';
 
 const TEXTS = { notListed: 'not listed', pendingDraft: 'pending draft', notWritable: 'not writable', pairNotWritable: 'pair not writable' };
 const PKG = 'app.crm';
@@ -125,5 +126,40 @@ describe("saving the record page's tabs (objectstack#36499)", () => {
     expect(resolveRecordTabsSaveTarget(PKG, new Map([[PKG, { writable: true }]]))).toEqual({ kind: 'package', packageId: PKG });
     expect(resolveRecordTabsSaveTarget(PKG, new Map([[PKG, { writable: false }]]))).toEqual({ kind: 'pair', basePackageId: PKG });
     expect(resolveRecordTabsSaveTarget(PKG, new Map())).toBeNull();
+  });
+});
+
+describe('the tabs Save publishes only the draft it wrote (objectstack#37440)', () => {
+  function doorDoors() {
+    const door = draftPublishDoor();
+    door.seedLive('object', 'account', PKG, { name: 'account', label: 'Account (live)' });
+    const code = { name: 'account', label: 'Account', fields: {}, relatedLists: [{ list: 'contact', columns: ['name'] }], _packageId: PKG };
+    const d: RecordTabsSaveDoors = {
+      listPackages: async () => new Map([[PKG, { writable: true }]]),
+      ensureCustomization: async (base) => ({ packageId: `${base}.custom`, writable: false }),
+      client: { ...door.client, get: async () => null, layered: async () => ({ code, effective: code }) },
+      refreshed: emitMetadataRefresh,
+    };
+    return { door, d };
+  }
+
+  it("PIN: another writer's draft write between the save and its publish is refused, published by nobody, and kept", async () => {
+    const { door, d } = doorDoors();
+    door.interleave('object', 'account', PKG, { name: 'account', label: 'theirs' });
+    await expect(saveRecordTabs({ objectName: 'account', packageId: PKG, draft: DRAFT, catalog }, TEXTS, d)).rejects.toThrow(
+      'pending draft',
+    );
+    // Nothing unreviewed went live, and the other writer's draft is not discarded.
+    expect(door.liveOf('object', 'account', PKG)).toEqual({ name: 'account', label: 'Account (live)' });
+    expect(door.draftOf('object', 'account', PKG)).toEqual({ name: 'account', label: 'theirs' });
+    const publish = door.calls.find(([c]) => c === 'publish');
+    expect(publish?.[3]).toMatchObject({ packageId: PKG, draftVersion: expect.any(String) });
+  });
+
+  it('CONTROL: with no write in between, the same pinned publish takes the saved tabs live', async () => {
+    const { door, d } = doorDoors();
+    await saveRecordTabs({ objectName: 'account', packageId: PKG, draft: DRAFT, catalog }, TEXTS, d);
+    expect(door.liveOf('object', 'account', PKG)).toMatchObject({ relatedLists: ['task', { list: 'contact', columns: ['name'] }] });
+    expect(door.draftOf('object', 'account', PKG)).toBeUndefined();
   });
 });

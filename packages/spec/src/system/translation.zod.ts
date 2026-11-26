@@ -562,6 +562,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
     // and the un-prefixed spelling is the one an author reaches for first.
     views: '_views', actions: '_actions', sections: '_sections', validations: '_validations',
     validationRules: '_validations', rules: '_validations', relatedLists: '_relatedLists',
+    milestones: '_milestones', activityMilestones: '_milestones',
     plural: 'pluralLabel', labelPlural: 'pluralLabel', name: 'label', title: 'label',
     columns: 'fields', properties: 'fields', attributes: 'fields',
   },
@@ -965,6 +966,28 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
     message: z.string().optional()
       .describe("Translated rejection message — overlays the rule's authored `message` on every rejected write"),
   })).optional().describe('Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`)'),
+
+  /**
+   * Activity-milestone summaries (ADR-0052 §5b.2), keyed by the milestone's
+   * watched `field`, then by the `value` it fires on:
+   *
+   *   objects.<object>._milestones.<field>.<value>.summary
+   *
+   * A milestone declares no name, and `field` + `value` is what fires it (the
+   * first declared milestone for the pair wins), so the pair is its address.
+   * The translated template carries the same `{field}` tokens as the authored
+   * `summary`; the record timeline composes it in the reader's language, and a
+   * token naming a select value is rendered with that option's label in the
+   * same language. A milestone with no entry keeps its authored `summary`.
+   */
+  _milestones: z.record(z.string(), z.record(z.string(), strictObject({
+    surface: 'this activity milestone translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { message: 'summary', template: 'summary', text: 'summary', title: 'summary' },
+  }, {
+    summary: z.string().optional()
+      .describe("Translated milestone summary template — the same `{field}` tokens as the milestone's authored `summary`"),
+  }))).optional().describe('Activity-milestone summary translations keyed by the watched field, then by the value the milestone fires on'),
 }).describe('Translation data for a single object'));
 
 export type ObjectTranslationData = z.input<typeof ObjectTranslationDataSchema>;
@@ -2487,6 +2510,14 @@ const appTranslationDataShape = () => ({
    *   metadataForms.<type>.fields.<field_path>.label
    *   metadataForms.<type>.fields.<field_path>.helpText
    *   metadataForms.<type>.fields.<field_path>.placeholder
+   *   metadataForms.<type>.fields.<field_path>.options.<value>
+   *
+   * `options.<value>` overlays the `label` of the form field's `options[]`
+   * entry whose `value` matches — the name a select on the form shows for
+   * that choice. It is keyed by value, as
+   * `objects.<object>.fields.<field>.options` is, so a choice is named the
+   * same wherever the row is rendered; a value the row does not offer is
+   * never shown.
    *
    * `field_path` uses dot-notation for nested composite/repeater fields,
    * e.g. `"name"`, `"capabilities.trackHistory"`, and a repeater ROW property
@@ -2535,11 +2566,12 @@ const appTranslationDataShape = () => ({
     fields: z.record(z.string(), strictObject({
       surface: 'this metadata-form field translation',
       history: TRANSLATION_HISTORY,
-      aliases: { name: 'label', title: 'label', help: 'helpText', hint: 'helpText', description: 'helpText' },
+      aliases: { name: 'label', title: 'label', help: 'helpText', hint: 'helpText', description: 'helpText', choices: 'options', values: 'options' },
     }, {
       label: z.string().optional().describe('Translated field label'),
       helpText: z.string().optional().describe('Translated field help/hint text'),
       placeholder: z.string().optional().describe('Translated field placeholder text'),
+      options: z.record(z.string(), z.string()).optional().describe('Option value to translated label map — overlays the label of the form field option whose value matches'),
     })).optional().describe('Field translations keyed by field path (dot-notation for nested fields)'),
   })).optional().describe('Translations for metadata-type configuration forms keyed by metadata type'),
 

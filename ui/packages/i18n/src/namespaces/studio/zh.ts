@@ -3105,7 +3105,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.desktopHint': 'Studio 专为桌面屏幕设计。',
   'engine.studio.notFound.package': '未找到包。本部署没有安装 ID 为“{id}”的包，因此无处可构建。',
   'engine.studio.notFound.packageList': '打开软件包列表',
-  'engine.studio.notFound.allMetadata': '打开「全部元数据」',
+  'engine.studio.notFound.allMetadata': '打开「组织流程」',
   'engine.studio.notFound.pillar': '页面不存在。Studio 没有“{pillar}”这一栏，请在上方选择数据、自动化、界面、权限或全部元数据。',
   'engine.studio.aiCopilot': 'AI 助手',
   // objectui#12725 — Studio 右栏：属性或 AI 助手二选一。
@@ -3139,6 +3139,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.menu.owd': '默认共享',
   'engine.studio.menu.diagnostics': '诊断',
   'engine.studio.menu.environment': '岗位与权限',
+  'engine.setup.accessDirectory.notAllowed': '打开此页需要 {capability} 权限，即进入 Studio 所需的权限。',
   // objectstack#37201 — the 「高级」 fold (ADR-0084, amended 2026-11-25), and a 常用 type with no item yet.
   'engine.studio.menu.advanced': '高级',
   'engine.studio.menu.emptyType': '还没有：打开列表新建第一项',
@@ -3178,7 +3179,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.backToApp': '返回应用',
   'engine.studio.backToAppTitle': '离开 Studio，回到 {app}',
   'engine.studio.backToAppTitleNoApp': '离开 Studio，回到你的应用',
-  'engine.studio.mark': 'Studio',
+  'engine.studio.mark': '应用搭建',
   // objectstack#37139 — 应用名或包名右侧的「⋯」软件包菜单。
   'engine.studio.packageMenu.trigger': '软件包操作',
   'engine.studio.packageMenu.editInfo': '编辑软件包信息',
@@ -3988,6 +3989,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.bookPreview.tree': '解析后的目录树',
   'engine.bookPreview.audience.public': '公开',
   'engine.bookPreview.audience.permissionSet': '权限集：{name}',
+  'engine.bookPreview.audience.systemPermission': '系统权限：{name}',
   'engine.bookPreview.audience.org': '组织',
   'engine.bookPreview.slug': 'URL 标识：{slug}',
   'engine.bookPreview.noGroups': '尚无分组',

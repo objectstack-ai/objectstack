@@ -58,6 +58,18 @@ export function isPublishConflictKeptEditing(err: unknown): boolean {
   return typeof err === 'object' && err !== null && KEPT_EDITING.has(err);
 }
 
+const DRAFT_MOVED = new WeakSet<object>();
+
+/**
+ * objectstack#37440 — `err` is a guarded publish's refusal of the DRAFT pin
+ * (rule 10): the draft the Save wrote was changed by another writer before
+ * its publish, so nothing went live and the draft now holds that writer's
+ * change. The caller keeps it pending, ⛔ never discards it.
+ */
+export function isPublishDraftMoved(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && DRAFT_MOVED.has(err);
+}
+
 /**
  * The version-conflict refusal of the `/meta` draft door, told apart from the
  * door's OTHER 409 (`DESTRUCTIVE_CHANGE`) by its code, never by its prose.
@@ -191,6 +203,44 @@ function receiptVersion(receipt: unknown): string | null {
   return typeof version === 'string' && version.length > 0 ? version : null;
 }
 
+/**
+ * objectstack#37440 — the version a draft save's receipt returned, as the
+ * `draftVersion` its publish is pinned to (and the `If-Match` a take-back of
+ * that draft is pinned to); `undefined` when the receipt carries none, and
+ * both then go unpinned, as before.
+ */
+export function draftReceiptVersion(receipt: unknown): string | undefined {
+  return receiptVersion(receipt) ?? undefined;
+}
+
+/**
+ * objectstack#37440 — whether the draft at the publish's address still is the
+ * version `draftVersion` names (rule 10). Read once, after a refusal, only to
+ * tell which pin refused; ⛔ never a pin. A draft that moved, a draft no longer
+ * pending and a read that fails all answer `false`: a refusal that cannot be
+ * told apart is treated as the draft's, so nothing is asked and nothing is
+ * discarded.
+ */
+async function draftStillAt(
+  client: Pick<MetadataClient, 'getDraft'>,
+  type: string,
+  name: string,
+  options: { packageId?: string; member?: string },
+  draftVersion: string,
+): Promise<boolean> {
+  try {
+    const pin = draftPinOf(
+      await client.getDraft(type, name, {
+        ...(options.packageId ? { packageId: options.packageId } : {}),
+        ...(options.member ? { member: options.member } : {}),
+      }),
+    );
+    return !!pin && 'ifMatch' in pin && pin.ifMatch === draftVersion;
+  } catch {
+    return false;
+  }
+}
+
 /** `options` sent with `pin` in place of whatever precondition they carried. */
 function pinned(options: MetadataClientSaveOptions, pin: DraftPin | null): MetadataClientSaveOptions {
   if (!pin) return options;
@@ -299,10 +349,11 @@ export class DraftVersionGuard {
    * ({@link BeforeReloadOutcome}); one that answers nothing is `'discarded'`.
    */
   publish = async (
-    client: Pick<MetadataClient, 'publish'>,
+    client: Pick<MetadataClient, 'publish' | 'getDraft'>,
     type: string,
     name: string,
-    options: { packageId?: string; member?: string } = {},
+    // objectstack#37440 — `draftVersion`: the draft the caller's own save wrote (rule 10).
+    options: { packageId?: string; member?: string; draftVersion?: string } = {},
     beforeReload?: () => Promise<BeforeReloadOutcome | void>,
   ): Promise<'published' | 'reloaded'> => {
     const key = itemKey(type, name, options.packageId);
@@ -318,6 +369,11 @@ export class DraftVersionGuard {
         return 'published';
       } catch (err) {
         if (!isDraftVersionConflict(err)) throw err;
+        // objectstack#37440 — rule 10: the draft pin refused, not the live row's.
+        if (options.draftVersion && !(await draftStillAt(client, type, name, options, options.draftVersion))) {
+          DRAFT_MOVED.add(err as object);
+          throw err;
+        }
         const conflict: DraftConflict = { type, name, layer: 'published' };
         const choice = await this.deps.ask(conflict);
         if (choice === 'reload') {

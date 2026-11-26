@@ -13,9 +13,8 @@
  *     recent items the Studio route records (`StudioRoute`), still named by
  *     the package list — opens in Studio;
  *  2. otherwise the package list: Setup → Packages for a principal who may
- *     open it, and Studio's "All metadata" area across packages
- *     (`/studio/~all/metadata`) for one who may enter Studio and not that
- *     Setup page (`studioEntryFallbackPath`).
+ *     open it, and Studio's package-less scope (`/studio/~org`) for one who
+ *     may enter Studio and not that Setup page (`studioEntryFallbackPath`).
  *
  * The retired `/studio?new=package` bookmark is forwarded to Setup's New
  * Package (`studioNewPackage.ts`) for a principal who may open Setup →

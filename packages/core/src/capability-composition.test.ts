@@ -11,7 +11,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { composeStacks, defineStack } from '@objectstack/spec';
 import { PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
-import { resolveCapabilityArgument, resolveServedCapabilities } from './capability-composition.js';
+import {
+  resolveCapabilityArgument,
+  resolveCapabilityExtras,
+  resolveKnowledgeStore,
+  resolveServedCapabilities,
+} from './capability-composition.js';
+import { CAPABILITY_PROVIDERS, KNOWLEDGE_STORE_PROVIDERS } from './capability-providers.js';
 import { stackDeclaredCapabilities } from './stack-collections.js';
 
 const SLATE = [...PLATFORM_ALWAYS_ON_CAPABILITIES];
@@ -208,5 +214,107 @@ describe('resolveCapabilityArgument — what each provider is constructed with',
         argument: undefined,
       });
     }
+  });
+});
+
+/**
+ * ADR-0161 — `requires: ['knowledge']` mounts the knowledge service and ONE
+ * vector store, chosen by the platform database. One case per arm, each
+ * against the answer that arm changes.
+ */
+describe('resolveKnowledgeStore — which store the knowledge token mounts', () => {
+  const root = '/srv/app';
+  const PG = 'postgres://u:p@db:5432/app';
+
+  it('PostgreSQL by the resolved driver or URL: pgvector, handed the platform URL', () => {
+    expect(resolveKnowledgeStore({ stack: {}, packageRoot: root, database: { driver: 'postgres', url: PG } })).toEqual({
+      store: KNOWLEDGE_STORE_PROVIDERS.pgvector,
+      argument: { url: PG },
+    });
+    expect(resolveKnowledgeStore({ stack: {}, packageRoot: root, database: { url: 'postgresql://db/app' } }).store.adapterId).toBe('pgvector');
+    // A driver id alone, with a URL the store cannot read: the store reads its own env.
+    expect(resolveKnowledgeStore({ stack: {}, packageRoot: root, database: { driver: 'postgres', url: 'pg://db/app' } })).toEqual({
+      store: KNOWLEDGE_STORE_PROVIDERS.pgvector,
+      argument: {},
+    });
+  });
+
+  it('any other database: turso on a file under the app root, its URL configurable in settings', () => {
+    for (const database of [
+      { driver: 'sqlite', url: 'file:/srv/app/.objectstack/data/objectstack.db' },
+      { driver: 'turso', url: 'libsql://x.turso.io' },
+      { driver: 'mysql', url: 'mysql://db/app' },
+      { driver: 'mongodb', url: 'mongodb://db/app' },
+    ]) {
+      expect(resolveKnowledgeStore({ stack: {}, packageRoot: root, env: {}, database })).toEqual({
+        store: KNOWLEDGE_STORE_PROVIDERS.turso,
+        argument: { projectRoot: root, urlFromSettings: true },
+      });
+    }
+  });
+
+  it('OS_HOME moves the store with the platform database: the store is handed the state directory', () => {
+    // `os start --home` sets OS_HOME; the default database is `<OS_HOME>/data/objectstack.db`.
+    const database = { driver: 'sqlite', url: 'file:/var/lib/os/data/objectstack.db' };
+    expect(resolveKnowledgeStore({ stack: {}, packageRoot: root, env: { OS_HOME: ' /var/lib/os ' }, database })).toEqual({
+      store: KNOWLEDGE_STORE_PROVIDERS.turso,
+      argument: { projectRoot: root, stateDir: '/var/lib/os', urlFromSettings: true },
+    });
+    // Unset or empty: the app's own `.objectstack/`, as before.
+    expect(resolveKnowledgeStore({ stack: {}, packageRoot: root, env: { OS_HOME: '  ' }, database }).argument).toEqual({
+      projectRoot: root,
+      urlFromSettings: true,
+    });
+    // The other two arms take no directory.
+    expect(resolveKnowledgeStore({ stack: {}, packageRoot: root, env: { OS_HOME: '/h' }, database: { url: ':memory:' } }).argument).toEqual({ url: ':memory:' });
+  });
+
+  it('an in-memory platform database: an in-memory store', () => {
+    for (const database of [{ driver: 'sqlite-wasm', url: ':memory:' }, { driver: 'memory' }]) {
+      expect(resolveKnowledgeStore({ stack: {}, packageRoot: root, database })).toEqual({
+        store: KNOWLEDGE_STORE_PROVIDERS.turso,
+        argument: { url: ':memory:' },
+      });
+    }
+  });
+
+  it('no resolved database: OS_DATABASE_URL, else DATABASE_URL, decides', () => {
+    const pick = (env: Record<string, string | undefined>) =>
+      resolveKnowledgeStore({ stack: {}, packageRoot: root, env }).store.adapterId;
+    expect(pick({ OS_DATABASE_URL: PG })).toBe('pgvector');
+    expect(pick({ DATABASE_URL: PG })).toBe('pgvector');
+    expect(pick({ OS_DATABASE_URL: 'file:./x.db', DATABASE_URL: PG })).toBe('turso');
+    expect(pick({})).toBe('turso');
+    // A resolved database wins over the environment.
+    expect(
+      resolveKnowledgeStore({ stack: {}, packageRoot: root, env: { OS_DATABASE_URL: PG }, database: { driver: 'sqlite' } }).store.adapterId,
+    ).toBe('turso');
+  });
+});
+
+describe('resolveCapabilityExtras — what a boot mounts after a main provider', () => {
+  it('knowledge: exactly one store, with its argument; never the in-memory one', () => {
+    const extras = resolveCapabilityExtras('knowledge', { stack: {}, packageRoot: '/a', database: { driver: 'postgres', url: 'postgres://h/d' } });
+    expect(extras).toEqual([
+      {
+        pkg: '@objectstack/knowledge-pgvector',
+        export: 'KnowledgePgvectorPlugin',
+        identities: ['com.objectstack.plugin.knowledge-pgvector', 'KnowledgePgvectorPlugin'],
+        argument: { url: 'postgres://h/d' },
+      },
+    ]);
+    expect(Object.values(KNOWLEDGE_STORE_PROVIDERS).map((s) => s.pkg)).not.toContain('@objectstack/knowledge-memory');
+  });
+
+  it("any other token: its row's extras, each with no argument", () => {
+    const extras = resolveCapabilityExtras('triggers', { stack: {}, packageRoot: '/a' });
+    expect(extras.map((e) => e.export)).toEqual((CAPABILITY_PROVIDERS.triggers.extras ?? []).map((e) => e.export));
+    expect(extras.every((e) => e.argument === undefined)).toBe(true);
+    expect(resolveCapabilityExtras('cache', { stack: {}, packageRoot: '/a' })).toEqual([]);
+  });
+
+  it('the knowledge row names the service, never a store: the store is the database\'s choice', () => {
+    expect(CAPABILITY_PROVIDERS.knowledge).toMatchObject({ pkg: '@objectstack/service-knowledge', export: 'KnowledgeServicePlugin' });
+    expect(CAPABILITY_PROVIDERS.knowledge.extras).toBeUndefined();
   });
 });

@@ -25,12 +25,18 @@
  *    would be re-read as the buffer and published by the next Save.
  *  - Every path tells the ledger (`emitMetadataRefresh`), so Changes and the
  *    app re-read what went live.
+ *  - objectstack#37440 — `draftVersion`, the version the Save's OWN draft
+ *    write returned, pins the publish to that draft: a draft another writer
+ *    changed in between is refused and nothing is published on their behalf.
+ *    That draft now holds the other writer's change and is ⛔ never taken
+ *    back; every take-back of the Save's own draft is pinned to the same
+ *    version (`If-Match`), so the server removes only that draft.
  */
 
 import type { DraftChange, MetadataClient } from '@object-ui/data-objectstack';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { isAgentDraftSurface } from '../studio-design/StudioDraftMark.js';
-import type { DraftSaveGuard } from './draftVersionGuard.js';
+import { isDraftVersionConflict, isPublishDraftMoved, type DraftSaveGuard } from './draftVersionGuard.js';
 
 /** The item a Save wrote, at the address its draft save wrote it. */
 export interface DetailPublishTarget {
@@ -40,6 +46,12 @@ export interface DetailPublishTarget {
   packageId?: string;
   /** The bundle member the draft belongs to; absent for the canonical one. */
   member?: string;
+  /**
+   * objectstack#37440 — the version the Save's own draft write returned (its
+   * receipt's `version`), which pins the publish to that draft. Absent, the
+   * publish goes unpinned, as before.
+   */
+  draftVersion?: string;
 }
 
 /** What {@link publishDetailSave} did. */
@@ -53,7 +65,7 @@ export type DetailPublishOutcome =
 
 /** Make the draft a Save just wrote live (see the module docblock). */
 export async function publishDetailSave(
-  client: Pick<MetadataClient, 'publish' | 'reset'>,
+  client: Pick<MetadataClient, 'publish' | 'reset' | 'getDraft'>,
   target: DetailPublishTarget,
   hadDraft: boolean,
   pinned?: DraftSaveGuard['publish'],
@@ -62,23 +74,33 @@ export async function publishDetailSave(
     ...(target.packageId ? { packageId: target.packageId } : {}),
     ...(target.member ? { member: target.member } : {}),
   };
+  const { draftVersion } = target;
+  const publishScope = draftVersion ? { ...scope, draftVersion } : scope;
+  // The refusal is the draft pin's: the guard said so, or no other pin was sent.
+  const draftMoved = (error: unknown): boolean =>
+    isPublishDraftMoved(error) || (!pinned && !!draftVersion && isDraftVersionConflict(error));
   let draftDiscarded = false;
   const takeBack = async (): Promise<void> => {
-    await client.reset(target.type, target.name, { state: 'draft', ...scope });
+    await client.reset(target.type, target.name, {
+      state: 'draft',
+      ...scope,
+      ...(draftVersion ? { ifMatch: draftVersion } : {}),
+    });
     draftDiscarded = true;
   };
   try {
     if (pinned) {
-      const outcome = await pinned(client, target.type, target.name, scope, hadDraft ? undefined : takeBack);
+      const outcome = await pinned(client, target.type, target.name, publishScope, hadDraft ? undefined : takeBack);
       if (outcome === 'reloaded') {
         emitMetadataRefresh();
         return { kind: 'reloaded', draftDiscarded };
       }
     } else {
-      await client.publish(target.type, target.name, scope);
+      await client.publish(target.type, target.name, publishScope);
     }
   } catch (error) {
-    if (!hadDraft && !draftDiscarded) {
+    // objectstack#37440 — another writer's change is in the draft now: kept.
+    if (!hadDraft && !draftDiscarded && !draftMoved(error)) {
       try {
         await takeBack();
       } catch (discardError) {
