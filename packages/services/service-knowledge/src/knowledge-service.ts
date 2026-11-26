@@ -46,9 +46,12 @@ import { readSearchScope, scopeCheck, scopeTermsFor, type SearchScopeEntry } fro
 import {
   BUILD_LEASE_MS,
   BUILD_PROGRESS_LOG_INTERVAL_MS,
+  BUILD_STALL_LIMIT_MS,
   buildLockKey,
   emptyBuildProgress,
-  keepBuildLeaseAlive,
+  fencedCall,
+  startBuildFence,
+  type KnowledgeBuildFence,
   type KnowledgeBuildLock,
   type KnowledgeBuildLockHandle,
   type KnowledgeBuildProgress,
@@ -468,11 +471,16 @@ export class KnowledgeService implements IKnowledgeService {
     return this.reindexWith(this.requireSource(sourceId), opts);
   }
 
-  /** {@link reindexSource}, with a sink a build's progress is reported to after each page. */
+  /**
+   * {@link reindexSource}, with a sink a build's progress is reported to after
+   * each page, and the build's fence (`knowledge-build.ts`) the walk asks
+   * before each page.
+   */
   private async reindexWith(
     source: KnowledgeSource,
     opts: KnowledgeReindexOptions,
     progress?: (step: KnowledgeBuildProgress) => void,
+    fence?: KnowledgeBuildFence,
   ): Promise<KnowledgeReindexResult> {
     const adapter = this.getAdapter(source.adapter);
 
@@ -507,11 +515,20 @@ export class KnowledgeService implements IKnowledgeService {
     }
 
     return chainAfter(this.reindexTails, source.id, () =>
-      this.walkObjectSource(source, source.source as ObjectKnowledgeSource, adapter, engine, opts, progress),
+      this.walkObjectSource(source, source.source as ObjectKnowledgeSource, adapter, engine, opts, progress, fence),
     );
   }
 
-  /** The paged walk of {@link reindexSource}; runs inside that source's chain. */
+  /**
+   * The paged walk of {@link reindexSource}; runs inside that source's chain.
+   * Under a build's `fence` it stops before a page once the fence says so
+   * (and before its purge and completion), and stops waiting on a read, a
+   * write, the listing, the purge or `beginBuild` once the build is
+   * cancelled, so the source's chain is not held by such a call that never
+   * answers. Each page and each purge deletion restarts the fence's bound.
+   * The completion is not raced: the chain stays held until it settles (see
+   * {@link completeBuild}).
+   */
   private async walkObjectSource(
     source: KnowledgeSource,
     objSource: ObjectKnowledgeSource,
@@ -519,6 +536,7 @@ export class KnowledgeService implements IKnowledgeService {
     engine: IDataEngine,
     opts: KnowledgeReindexOptions,
     progress?: (step: KnowledgeBuildProgress) => void,
+    fence?: KnowledgeBuildFence,
   ): Promise<KnowledgeReindexResult> {
     const object = objSource.object;
     // `limit` keeps its meaning: a cap on the TOTAL rows the walk takes. A
@@ -585,7 +603,7 @@ export class KnowledgeService implements IKnowledgeService {
     const build = cap === undefined;
     if (build && typeof adapter.beginBuild === 'function') {
       try {
-        await adapter.beginBuild(ctx);
+        await fencedCall(fence, adapter.beginBuild(ctx));
       } catch (err) {
         return {
           ok: false,
@@ -603,7 +621,24 @@ export class KnowledgeService implements IKnowledgeService {
 
     // What the adapter holds before the walk: the skip's hashes, and the
     // purge's candidates once the walk is complete.
-    const listing = await listAdapterDocuments(source, adapter, plan.index);
+    // Raced against the build's bound like every call of the walk, so a store
+    // that never answers frees the source's chain.
+    let listing: Awaited<ReturnType<typeof listAdapterDocuments>>;
+    try {
+      listing = await fencedCall(fence, listAdapterDocuments(source, adapter, plan.index));
+    } catch (err) {
+      return {
+        ok: false,
+        object,
+        discovered: 0,
+        indexed: 0,
+        skipped: 0,
+        purged: null,
+        failed: 0,
+        failures: [],
+        message: `reindex of source '${source.id}' stopped before its first page: ${errorText(err)}`,
+      };
+    }
     const listed = listing.ok ? listing.documents : undefined;
     const listingNote = listing.ok || listing.reason === undefined
       ? undefined
@@ -636,11 +671,15 @@ export class KnowledgeService implements IKnowledgeService {
         failures: [...failures],
         message: `reindex of source '${source.id}' stopped at page ${page}${after}: ${what}`,
       });
+      // A build that lost its lease, or was cancelled, reads and embeds no
+      // further page (the fence, `knowledge-build.ts`).
+      const halt = fence?.stop();
+      if (halt !== undefined) return stopped(halt.message);
 
       const byCursor = cursor === undefined ? undefined : { id: { $gt: cursor } };
       let rows: Array<Record<string, unknown>>;
       try {
-        rows = await engine.find(
+        rows = await fencedCall(fence, engine.find(
           object,
           {
             where:
@@ -651,7 +690,7 @@ export class KnowledgeService implements IKnowledgeService {
             limit: want,
           },
           { context },
-        );
+        ));
       } catch (err) {
         return stopped(`the read failed: ${errorText(err)}`);
       }
@@ -684,7 +723,7 @@ export class KnowledgeService implements IKnowledgeService {
       const prepared = this.prepareDocuments(plan, changed);
       if (prepared.ready.length > 0) {
         try {
-          await adapter.upsert(prepared.ready, ctx);
+          await fencedCall(fence, adapter.upsert(prepared.ready, ctx));
         } catch (err) {
           return stopped(`the adapter upsert failed: ${operatorText(err)}`);
         }
@@ -694,7 +733,7 @@ export class KnowledgeService implements IKnowledgeService {
       // reported, never truncated.
       if (prepared.failed.length > 0) {
         try {
-          await adapter.delete(prepared.failed.map((f) => f.documentId), ctx);
+          await fencedCall(fence, adapter.delete(prepared.failed.map((f) => f.documentId), ctx));
         } catch (err) {
           return stopped(`removing the page's documents that cannot be indexed failed: ${operatorText(err)}`);
         }
@@ -722,6 +761,23 @@ export class KnowledgeService implements IKnowledgeService {
       cursor = lastId;
     }
 
+    // A build that lost its lease after its last page neither purges nor
+    // completes: another node may be building the source.
+    const halted = fence?.stop();
+    if (halted !== undefined) {
+      return {
+        ok: false,
+        object,
+        discovered,
+        indexed,
+        skipped,
+        purged: null,
+        failed,
+        failures: [...failures],
+        message: `reindex of source '${source.id}' read every page, and stopped before its purge and completion: ${halted.message}`,
+      };
+    }
+
     // The purge runs only after a COMPLETE walk: a `limit` walk saw part of
     // the source, so "not seen" there means nothing (a failed page returned
     // above; `dryRun` returned before the walk).
@@ -742,19 +798,34 @@ export class KnowledgeService implements IKnowledgeService {
     };
     if (listingNote) return { ...done, message: failedNote === undefined ? listingNote : `${listingNote} ${failedNote}` };
     if (listed === undefined || cap !== undefined || (source.refresh?.onRecordChange ?? true) === false) {
-      return build ? this.completeBuild(source, adapter, ctx, done) : done;
+      return build ? this.completeBuild(source, adapter, ctx, done, fence) : done;
     }
 
     const candidates = [...listed.keys()].filter((id) => !seen.has(id));
-    const purge = await purgeDocuments({
-      source,
-      objSource,
-      adapter,
-      engine,
-      candidates,
-      serialize: (documentId, task) => chainAfter(this.recordSyncTails, documentId, task),
-      index: plan.index,
-    });
+    let purge: PurgeDocumentsOutcome;
+    try {
+      purge = await fencedCall(fence, purgeDocuments({
+        source,
+        objSource,
+        adapter,
+        engine,
+        candidates,
+        // Each settled deletion (or confirmed keep) is progress: a large,
+        // healthy purge restarts the fence's bound as it goes.
+        serialize: async (documentId, task) => {
+          const outcome = await chainAfter(this.recordSyncTails, documentId, task);
+          fence?.progressed();
+          return outcome;
+        },
+        index: plan.index,
+      }));
+    } catch (err) {
+      return {
+        ...done,
+        ok: false,
+        message: `reindex of source '${source.id}' walked every page, and stopped during its purge: ${errorText(err)}`,
+      };
+    }
     if (purge.failure !== undefined) {
       return {
         ...done,
@@ -773,9 +844,9 @@ export class KnowledgeService implements IKnowledgeService {
           `${purge.foreign} listed document(s) carry an id that is not one this source derives from a record ` +
           `('${source.id}:' and the record id); they were kept, because no row can confirm them.` +
           (failedNote === undefined ? '' : ` ${failedNote}`),
-      });
+      }, fence);
     }
-    return this.completeBuild(source, adapter, ctx, { ...done, purged: purge.purged });
+    return this.completeBuild(source, adapter, ctx, { ...done, purged: purge.purged }, fence);
   }
 
   /**
@@ -784,14 +855,31 @@ export class KnowledgeService implements IKnowledgeService {
    * carried. An adapter without it records nothing. One that throws turns the
    * walk's result into `ok: false`: every page was written, but the adapter
    * did not record what it holds, so the next complete walk builds again.
+   * Under a build's `fence`, a build that must stop (its lease lost during
+   * the purge, or its bound passed) completes nothing. Once the completion
+   * begins it is not a page: the fence's bound is disarmed
+   * (`fence.completing()`) and the call is awaited however long it takes, so
+   * a switch that began still commits and the record never reads
+   * `timed-out` over it. The source's walk chain stays held until it settles,
+   * so no rebuild on this node begins a build beside it.
    */
   private async completeBuild(
     source: KnowledgeSource,
     adapter: IKnowledgeAdapter,
     ctx: AdapterContext,
     done: KnowledgeReindexResult,
+    fence?: KnowledgeBuildFence,
   ): Promise<KnowledgeReindexResult> {
+    const halt = fence?.stop();
+    if (halt !== undefined) {
+      return {
+        ...done,
+        ok: false,
+        message: `reindex of source '${source.id}' walked every page, and stopped before its completion: ${halt.message}`,
+      };
+    }
     if (typeof adapter.completeBuild !== 'function') return done;
+    fence?.completing();
     try {
       await adapter.completeBuild(ctx);
       return done;
@@ -925,6 +1013,13 @@ export class KnowledgeService implements IKnowledgeService {
    *   only when a build is still due; an `operator` build always walks.
    * - The walk is {@link reindexSource} with no `limit` and no `dryRun`: a
    *   complete build, with `beginBuild` and `completeBuild`.
+   * - The walk runs under the build's fence (`knowledge-build.ts`): a lost
+   *   lease stops it before its next page (`lease-lost`), and a build that
+   *   finishes no page for {@link BUILD_STALL_LIMIT_MS} is cancelled
+   *   (`timed-out`); either way the lease is released and nothing is purged
+   *   or completed. The completion is not bounded: once it has begun the
+   *   build waits for it, so a switch that began before the bound passed
+   *   still commits, and the record reads `done` or `failed`.
    *
    * Progress is logged at `info` when the build starts (with what it costs),
    * at most every {@link BUILD_PROGRESS_LOG_INTERVAL_MS} while it walks, and
@@ -982,15 +1077,19 @@ export class KnowledgeService implements IKnowledgeService {
         return finish('not-run', message);
       }
     }
-    const stopLease = handle
-      ? keepBuildLeaseAlive(handle, BUILD_LEASE_MS, (err, held) => {
+    const fence = startBuildFence({
+      handle,
+      leaseMs: BUILD_LEASE_MS,
+      stallMs: BUILD_STALL_LIMIT_MS,
+      onRenewFailure: (err, held) => {
         logger?.warn(
-          `${label}: the cluster lease could not be renewed (${errorText(err)}). The build continues; once the lease ` +
-            "lapses another node's boot or an operator rebuild may build the same source. " +
-            (held ? 'Renewal is retried.' : 'The lease is lost; renewal stops for this build.'),
+          `${label}: the cluster lease could not be renewed (${errorText(err)}). ` +
+            (held
+              ? 'Renewal is retried; the build stops before its next page if the lease lapses.'
+              : 'The lease is lost; the build stops before its next page.'),
         );
-      })
-      : () => {};
+      },
+    });
     try {
       if (opts.trigger === 'boot') {
         const reading = await this.readIndexState(sourceId);
@@ -1005,7 +1104,10 @@ export class KnowledgeService implements IKnowledgeService {
           'adapter does not already hold unchanged are sent to the embedding provider, which bills for them.',
       );
       let lastLogged = Date.now();
-      const result = await this.reindexWith(source, {}, (step) => {
+      const walk = this.reindexWith(source, {}, (step) => {
+        // A walk the build stopped waiting on writes no progress into its ended record.
+        if (record.status !== 'running') return;
+        fence.progressed();
         record.progress = { ...step };
         const now = Date.now();
         if (now - lastLogged < BUILD_PROGRESS_LOG_INTERVAL_MS) return;
@@ -1014,7 +1116,19 @@ export class KnowledgeService implements IKnowledgeService {
           `${label}: page ${step.pages}, ${step.discovered} row(s) read, ${step.indexed} written, ` +
             `${step.skipped} unchanged, ${step.failed} cannot be indexed.`,
         );
-      });
+      }, fence);
+      // Cancelled at the stall bound: the walk is no longer waited on (it
+      // stops at its next page if the call it waits on ever answers).
+      walk.catch(() => undefined);
+      const raced = await Promise.race([walk, fence.cancelled.then((stop) => ({ stop }))]);
+      if ('stop' in raced) {
+        logger?.warn(
+          `${label} was cancelled: ${raced.stop.message} The adapter keeps what it held; ` +
+            'the next boot or an operator rebuild builds again.',
+        );
+        return finish(raced.stop.reason, raced.stop.message);
+      }
+      const result = raced;
       record.progress = {
         pages: record.progress.pages,
         discovered: result.discovered,
@@ -1025,12 +1139,13 @@ export class KnowledgeService implements IKnowledgeService {
       const totals =
         `${result.discovered} row(s) read, ${result.indexed} written, ${result.skipped ?? 0} unchanged, ` +
         `${result.purged ?? 'none'} purged, ${result.failed ?? 0} cannot be indexed`;
+      const stop = result.ok ? undefined : fence.stop();
       if (!result.ok) {
         logger?.warn(
           `${label} did not finish (${totals}): ${result.message ?? 'no reason given'} ` +
             'The adapter keeps what it held; the next boot or an operator rebuild builds again.',
         );
-        return finish('failed', result.message, result);
+        return finish(stop?.reason ?? 'failed', result.message, result);
       }
       logger?.info?.(`${label} finished: ${totals}.${result.message === undefined ? '' : ` ${result.message}`}`);
       return finish('done', result.message, result);
@@ -1039,7 +1154,7 @@ export class KnowledgeService implements IKnowledgeService {
       logger?.warn(`${label} did not finish: ${message} The adapter keeps what it held; the next boot or an operator rebuild builds again.`);
       return finish('failed', message);
     } finally {
-      stopLease();
+      fence.close();
       if (handle) {
         try {
           await handle.release();
