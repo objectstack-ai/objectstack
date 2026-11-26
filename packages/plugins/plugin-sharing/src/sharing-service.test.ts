@@ -2522,7 +2522,11 @@ function makeVerdictEngine(schemas: Record<string, any>, inert: ReadonlySet<stri
   async function storeFind(object: string, options?: any) {
     const where = (options?.where ?? {}) as Record<string, unknown>;
     const source = object === 'sys_record_share' ? shares : rowsNamed(object, where);
-    const out = source.filter((row) => Object.entries(where).every(([key, wanted]) => valueMatches(row[key], wanted)));
+    const out = source.filter((row) => Object.entries(where).every(([key, wanted]) => {
+      // The verdict reads are plain field conjunctions; a combinator is refused, never read as a field name.
+      if (key.startsWith('$')) throw new Error(`verdict engine double: combinator ${key} is not implemented`);
+      return valueMatches(row[key], wanted);
+    }));
     return typeof options?.limit === 'number' ? out.slice(0, options.limit) : out;
   }
 }
