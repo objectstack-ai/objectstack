@@ -465,6 +465,9 @@ export const fieldForm = defineForm({
         },
         // UI & Visibility
         { field: 'readonly', colSpan: 1, helpText: 'Field is read-only in forms' },
+        // #36806 — the hand lock: read by every console surface a person edits
+        // through, never by the engine. The parse refuses it beside `readonly`.
+        { field: 'uiReadonly', colSpan: 1, helpText: 'People cannot edit this field in the console (dialogs, the record page, grids, kanban and calendar drag), while actions, imports, the API and flows still write it, each write judged by the object\'s validations. Leave it off when Read-only is on: that one already keeps every client write out.' },
         { field: 'hidden', colSpan: 1, helpText: 'Hide field from default UI views' },
         // #36425 — whether a create asks for the field; read by every create
         // surface of the Console (the create dialog, the full-page create, an
@@ -478,6 +481,9 @@ export const fieldForm = defineForm({
         // that row: `type: 'code'`, `language: 'expression'`.
         { field: 'visibleWhen', type: 'code', language: 'expression', colSpan: 2, helpText: "CEL predicate over the record (e.g. record.type == 'invoice') — the form shows this field only while it is TRUE." },
         { field: 'readonlyWhen', type: 'code', language: 'expression', colSpan: 2, helpText: "CEL predicate over the record (e.g. record.status == 'paid') — the field is read-only while it is TRUE, enforced server-side: an update's change to a locked field is dropped and the stored value kept. Reads the record's own columns; objectstack validate refuses a read through a reference field." },
+        // #36806 — the hand lock's predicate: the console locks the field while it
+        // is TRUE; writes from actions, imports, the API and flows keep it.
+        { field: 'uiReadonlyWhen', type: 'code', language: 'expression', colSpan: 2, helpText: "CEL predicate over the record (e.g. record.status != 'draft') — people cannot edit the field in the console while it is TRUE; actions, imports, the API and flows still write it, judged by the object's validations. Reads the record's own columns, as Read-only when does." },
         { field: 'requiredWhen', type: 'code', language: 'expression', colSpan: 2, helpText: "CEL predicate over the record — the field is required while it is TRUE, enforced server-side as a transition gate: a write that leaves the value missing is refused when the record complied before it, so a row already missing the value keeps passing unrelated edits. For a rule every write must meet, use a validations script rule. Refused beside storage.notNull." },
         // Partial masking (#8993): a preset name or a {keepHead, keepTail} JSON
         // object; the runtime FieldMasker enforces it on read AND export.

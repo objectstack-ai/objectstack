@@ -893,6 +893,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "読み取り専用",
         helpText: "フォームでフィールドを読み取り専用にする"
       },
+      uiReadonly: {
+        label: "画面上で読み取り専用",
+        helpText: "コンソールではこのフィールドを手で編集できません（ダイアログ、レコードページ、グリッド、かんばんとカレンダーのドラッグ）。アクション、インポート、API、フローは引き続き書き込めて、各書き込みはオブジェクトの検証ルールで判定されます。「読み取り専用」がオンのときはオフのままにしてください。そちらがすでにすべてのクライアント書き込みを拒否します。"
+      },
       hidden: {
         label: "非表示",
         helpText: "既定 UI ビューからフィールドを非表示"
@@ -916,6 +920,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       readonlyWhen: {
         label: "読み取り専用条件",
         helpText: "レコードに対する CEL 述語（例：record.status == 'paid'）。TRUE の間はフィールドが読み取り専用になり、サーバー側で強制されます。ロック中のフィールドへの更新による変更は破棄され、保存済みの値が保持されます。レコード自身の列だけを読み、参照フィールドを経由した読み取りは objectstack validate が拒否します。"
+      },
+      uiReadonlyWhen: {
+        label: "画面上で読み取り専用の条件",
+        helpText: "レコードに対する CEL 述語（例: record.status != 'draft'）。TRUE の間はコンソールでこのフィールドを編集できません。アクション、インポート、API、フローは引き続き書き込めて、オブジェクトの検証ルールで判定されます。「読み取り専用条件」と同じく、レコード自身の列を読みます。"
       },
       requiredWhen: {
         label: "必須条件",

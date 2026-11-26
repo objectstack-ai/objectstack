@@ -893,6 +893,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "只读",
         helpText: "在表单中只读"
       },
+      uiReadonly: {
+        label: "界面只读",
+        helpText: "用户无法在控制台中编辑此字段（对话框、记录页、表格、看板和日历拖动），而动作、导入、API 和流程仍可写入，每次写入都由对象的校验规则裁决。已开启“只读”时请保持关闭：只读已经阻止所有客户端写入。"
+      },
       hidden: {
         label: "隐藏",
         helpText: "在默认界面视图中隐藏"
@@ -916,6 +920,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       readonlyWhen: {
         label: "只读条件",
         helpText: "基于记录的 CEL 谓词（例如 record.status == 'paid'）——为 TRUE 时字段只读，并在服务器端强制执行：更新中对已锁定字段的修改会被丢弃，保留已存储的值。只读取记录自身的列；objectstack validate 会拒绝经由引用字段的读取。"
+      },
+      uiReadonlyWhen: {
+        label: "界面只读条件",
+        helpText: "基于记录的 CEL 谓词（例如 record.status != 'draft'）——为 TRUE 时用户无法在控制台中编辑该字段；动作、导入、API 和流程仍可写入，并由对象的校验规则裁决。与“只读条件”一样读取记录自身的列。"
       },
       requiredWhen: {
         label: "必填条件",

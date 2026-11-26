@@ -893,6 +893,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Solo lectura",
         helpText: "El campo es de solo lectura en formularios"
       },
+      uiReadonly: {
+        label: "Solo lectura en la interfaz",
+        helpText: "Nadie puede editar este campo a mano en la consola (diálogos, página del registro, cuadrículas, arrastre en kanban y calendario), mientras que las acciones, las importaciones, la API y los flujos siguen escribiéndolo, y las validaciones del objeto juzgan cada escritura. Déjelo desactivado cuando Solo lectura esté activado: ese ya impide toda escritura de cliente."
+      },
       hidden: {
         label: "Oculto",
         helpText: "Oculta el campo en las vistas UI predeterminadas"
@@ -916,6 +920,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       readonlyWhen: {
         label: "Condición de solo lectura",
         helpText: "Predicado CEL sobre el registro (p. ej., record.status == 'paid'): el campo es de solo lectura mientras sea TRUE, y se aplica en el servidor: el cambio de una actualización sobre un campo bloqueado se descarta y se conserva el valor almacenado. Lee las columnas propias del registro; objectstack validate rechaza una lectura a través de un campo de referencia."
+      },
+      uiReadonlyWhen: {
+        label: "Condición de solo lectura en la interfaz",
+        helpText: "Predicado CEL sobre el registro (p. ej., record.status != 'draft'): mientras sea TRUE, nadie puede editar el campo en la consola; las acciones, las importaciones, la API y los flujos siguen escribiéndolo, juzgados por las validaciones del objeto. Lee las columnas propias del registro, como Condición de solo lectura."
       },
       requiredWhen: {
         label: "Condición de obligatoriedad",

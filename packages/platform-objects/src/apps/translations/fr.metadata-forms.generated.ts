@@ -893,6 +893,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Lecture seule",
         helpText: "Le champ est en lecture seule dans les formulaires"
       },
+      uiReadonly: {
+        label: "Lecture seule dans l'interface",
+        helpText: "Personne ne peut modifier ce champ à la main dans la console (boîtes de dialogue, page de l'enregistrement, grilles, glisser-déposer du kanban et du calendrier), tandis que les actions, les imports, l'API et les flux continuent de l'écrire, chaque écriture étant jugée par les validations de l'objet. Laissez-le désactivé lorsque Lecture seule est activé : celui-ci bloque déjà toute écriture client."
+      },
       hidden: {
         label: "Masqué",
         helpText: "Masquer le champ dans les vues d’interface par défaut"
@@ -916,6 +920,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       readonlyWhen: {
         label: "Lecture seule si",
         helpText: "Prédicat CEL sur l’enregistrement (par ex. record.status == 'paid') — le champ est en lecture seule tant qu’il est TRUE, ce qui est appliqué côté serveur : la modification d’un champ verrouillé par une mise à jour est ignorée et la valeur stockée est conservée. Lit les colonnes propres de l’enregistrement ; objectstack validate refuse une lecture via un champ de référence."
+      },
+      uiReadonlyWhen: {
+        label: "Lecture seule dans l'interface si",
+        helpText: "Prédicat CEL sur l'enregistrement (par ex. record.status != 'draft') : tant qu'il vaut TRUE, personne ne peut modifier le champ dans la console ; les actions, les imports, l'API et les flux continuent de l'écrire, jugés par les validations de l'objet. Lit les colonnes propres de l'enregistrement, comme Lecture seule si."
       },
       requiredWhen: {
         label: "Obligatoire si",

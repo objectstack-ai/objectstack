@@ -893,6 +893,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Schreibgeschützt",
         helpText: "Das Feld ist in Formularen schreibgeschützt"
       },
+      uiReadonly: {
+        label: "In der Oberfläche schreibgeschützt",
+        helpText: "Niemand kann dieses Feld in der Konsole von Hand bearbeiten (Dialoge, Datensatzseite, Tabellen, Ziehen im Kanban und Kalender), während Aktionen, Importe, die API und Flows es weiterhin schreiben; jeder Schreibvorgang wird von den Validierungen des Objekts beurteilt. Ausgeschaltet lassen, wenn Schreibgeschützt eingeschaltet ist: Das hält bereits jeden Client-Schreibvorgang fern."
+      },
       hidden: {
         label: "Ausgeblendet",
         helpText: "Feld in den Standardansichten der Oberfläche ausblenden"
@@ -916,6 +920,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       readonlyWhen: {
         label: "Schreibgeschützt wenn",
         helpText: "CEL-Prädikat über den Datensatz (z. B. record.status == 'paid') – das Feld ist schreibgeschützt, solange es TRUE ist, serverseitig durchgesetzt: Die Änderung eines gesperrten Felds durch eine Aktualisierung wird verworfen und der gespeicherte Wert behalten. Liest die eigenen Spalten des Datensatzes; objectstack validate lehnt ein Lesen über ein Referenzfeld ab."
+      },
+      uiReadonlyWhen: {
+        label: "In der Oberfläche schreibgeschützt wenn",
+        helpText: "CEL-Prädikat über den Datensatz (z. B. record.status != 'draft') – solange es TRUE ist, kann niemand das Feld in der Konsole bearbeiten; Aktionen, Importe, die API und Flows schreiben es weiterhin, beurteilt von den Validierungen des Objekts. Liest die eigenen Spalten des Datensatzes, wie Schreibgeschützt wenn."
       },
       requiredWhen: {
         label: "Erforderlich wenn",
