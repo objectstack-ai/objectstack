@@ -244,8 +244,10 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
         (await adapter.search('harbour rules', { source: s, topK: 5, scope })).map((h) => h.documentId).sort();
       // A dotted name is a key, never a JSON path into a nested object.
       expect(await ids([{ kind: 'metadata', field: 'policy.id', ids: ['p1'] }])).toEqual([`${s.id}:1`]);
-      // A boolean matches no id; the string 'true' does.
+      // A boolean matches no id, by either spelling; the string 'true' does. An object matches nothing.
       expect(await ids([{ kind: 'metadata', field: 'flag', ids: ['true'] }])).toEqual([`${s.id}:2`]);
+      expect(await ids([{ kind: 'metadata', field: 'flag', ids: ['1'] }])).toEqual([]);
+      expect(await ids([{ kind: 'metadata', field: 'policy', ids: ['{"id":"p1"}'] }])).toEqual([]);
       // A quote in a name is a value; a number in a list matches its text.
       expect(await ids([{ kind: 'metadata', field: "it's", ids: ['7.5'] }])).toEqual([`${s.id}:3`]);
       expect(await ids([{ kind: 'record', ids: ["1' OR '1'='1"] }])).toEqual([]);
@@ -290,6 +292,72 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       expect((await adapter.search('copper', { source: source('a_g1'), topK: 5 })).map((h) => h.snippet)).toEqual(['copper wire']);
     });
 
+    it("the store's own generation table is never taken for a legacy table, whatever the source is called", async () => {
+      const client = store.client();
+      const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() });
+      const other = source('other');
+      await adapter.upsert([doc(other, '1', 'amber lamp')], ctx(other));
+      // `knowledge_generation` is the legacy name a source `generation` would have.
+      const s = source('generation');
+      expect(await adapter.search('amber', { source: s, topK: 5 })).toEqual([]);
+      const svc = new KnowledgeService({ dataEngine: rowsEngine([{ id: 'r1', body: 'amber resin', status: 'published' }]) });
+      svc.registerAdapter('under_test', adapter);
+      svc.registerSource(s);
+      expect(await svc.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 1 });
+      expect(await tables(client, 'knowledge_generation')).toEqual(['knowledge_generation']);
+      expect((await adapter.search('amber', { source: other, topK: 5 })).map((h) => h.snippet)).toEqual(['amber lamp']);
+      expect((await adapter.search('amber', { source: s, topK: 5 })).map((h) => h.documentId)).toEqual([`${s.id}:r1`]);
+    });
+
+    it('a table the store did not make is never dropped, under a legacy name or a generation name', async () => {
+      const client = store.client();
+      const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() });
+      // A database shared with an application that keeps a table of its own.
+      await client.execute('CREATE TABLE knowledge_articles (id TEXT PRIMARY KEY, body TEXT)');
+      await client.execute("INSERT INTO knowledge_articles VALUES ('a1', 'kept')");
+      const s = source('articles');
+      expect(await adapter.search('kept', { source: s, topK: 5 })).toEqual([]);
+      const svc = new KnowledgeService({ dataEngine: rowsEngine([{ id: 'r1', body: 'slate roof', status: 'published' }]) });
+      svc.registerAdapter('under_test', adapter);
+      svc.registerSource(s);
+      expect(await svc.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 1 });
+      expect((await client.execute('SELECT body FROM knowledge_articles')).rows.map((r) => r.body)).toEqual(['kept']);
+      // Under the name of a generation table it is refused, and left as it is.
+      await client.execute('CREATE TABLE knowledge_notes_g1 (id TEXT PRIMARY KEY, body TEXT)');
+      const notes = source('notes');
+      await expect(adapter.upsert([doc(notes, '1', 'x')], ctx(notes))).rejects.toThrow(/did not make/);
+      expect(await tables(client, 'knowledge_notes_g1')).toEqual(['knowledge_notes_g1']);
+    });
+
+    it('a write planned for a generation switched while it embedded is refused, never written into another', async () => {
+      const client = store.client();
+      const s = source('switched');
+      const FP_B = { fingerprint: 'fp-test:b', recipeHash: 'rh-test:1' };
+      const other = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() });
+      await other.upsert([doc(s, '1', 'birch bark')], ctx(s));
+      // While this adapter's embedder answers, another builder switches the source to FP_B.
+      const switching = new (class extends FakeEmbedder {
+        override async embed(texts: string[]): Promise<number[][]> {
+          await other.beginBuild(ctx(s, FP_B));
+          await other.completeBuild(ctx(s, FP_B));
+          return super.embed(texts);
+        }
+      })();
+      const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: switching });
+      expect(await refusal(adapter.upsert([doc(s, '2', 'birch twig')], ctx(s)))).toMatchObject({ code: KNOWLEDGE_REBUILD_REQUIRED });
+      expect(await other.search('birch', { source: s, topK: 5, index: FP_B })).toEqual([]);
+    });
+
+    it('a first generation is made afresh: a passage table left without its generation row is never adopted', async () => {
+      const client = store.client();
+      const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() });
+      const s = source('fresh');
+      await adapter.upsert([doc(s, 'old', 'cedar chest')], ctx(s));
+      await client.execute({ sql: 'DELETE FROM knowledge_generation WHERE source_id = ?', args: [s.id] });
+      await adapter.upsert([doc(s, 'new', 'cedar fence')], ctx(s));
+      expect((await adapter.search('cedar', { source: s, topK: 5 })).map((h) => h.documentId)).toEqual([`${s.id}:new`]);
+    });
+
     it('concurrent calls on one client are queued, never refused for a held connection', async () => {
       const adapter = store.adapter();
       const s = source('queue');
@@ -328,6 +396,46 @@ describe('knowledge-turso without a database or an embedder', () => {
     const adapter = store.adapter({ embedder: () => undefined });
     expect(await refusal(adapter.search('x', { source: source('e'), topK: 1 }))).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
     expect(adapter.embedding).toBeUndefined();
+    store.closeAll();
+  });
+
+  it('bounds a request that never answers: SERVICE_UNAVAILABLE, and the queue moves on', async () => {
+    let stalls = true;
+    const store = storeOf('memory');
+    const real = store.client();
+    // A client whose next request hangs, as a remote database can.
+    const client = new Proxy(real, {
+      get(target, key, receiver) {
+        if (key === 'execute') {
+          return (...args: Parameters<Client['execute']>) => {
+            if (stalls) {
+              stalls = false;
+              return new Promise(() => undefined);
+            }
+            return target.execute(...args);
+          };
+        }
+        const value = Reflect.get(target, key, receiver) as unknown;
+        return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    }) as Client;
+    const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder(), requestTimeoutMs: 50 });
+    const health = await adapter.healthCheck();
+    expect(health).toMatchObject({ ok: false, message: expect.stringContaining('did not answer in time') });
+    expect(await adapter.healthCheck()).toEqual({ ok: true, message: 'libSQL vectors ready' });
+    expect(() => new TursoKnowledgeAdapter({ client, embedder: new FakeEmbedder(), requestTimeoutMs: 0 })).toThrow(RangeError);
+    store.closeAll();
+  });
+
+  it('answers listDocuments SERVICE_UNAVAILABLE without an embedder, never KNOWLEDGE_REBUILD_REQUIRED', async () => {
+    const store = storeOf('memory');
+    const client = store.client();
+    const s = source('listed');
+    await new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() }).upsert([doc(s, '1', 'x')], ctx(s));
+    const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: () => undefined });
+    // Without an embedder the service's fingerprint is another one: answered 503, not 409.
+    const other = { fingerprint: 'fp-test:no-embedder', recipeHash: 'rh-test:1' };
+    expect(await refusal(adapter.listDocuments(ctx(s, other), { limit: 5 }))).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
     store.closeAll();
   });
 });

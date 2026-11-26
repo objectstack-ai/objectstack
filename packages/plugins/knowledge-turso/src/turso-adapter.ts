@@ -17,6 +17,8 @@ import {
   GENERATION_TABLE,
   METADATA_VALUE_JSON,
   SCOPE_SCALAR_TYPES,
+  type TableShape,
+  tableShape,
   assertSourceId,
   generationDdl,
   generationTable,
@@ -52,6 +54,15 @@ export interface TursoKnowledgeAdapterOptions {
    * the index fingerprint (ADR-0161 K8, item 15).
    */
   queryPrefix?: string;
+  /**
+   * The longest one turn of database work may take, in milliseconds, before
+   * the call answers `SERVICE_UNAVAILABLE` and the queue moves on. For a
+   * remote database (`libsql://`), whose requests have no bound of their
+   * own: one stalled request would otherwise hold every source of the client,
+   * and the boot that awaits the health check. Absent: no bound (a `file:`
+   * store waits only for the busy timeout).
+   */
+  requestTimeoutMs?: number;
 }
 
 /** The ADR-0112 code of a write or a search refused under another fingerprint (ADR-0161 K7, rules 4 and 5). */
@@ -59,6 +70,9 @@ export const KNOWLEDGE_REBUILD_REQUIRED = 'KNOWLEDGE_REBUILD_REQUIRED';
 
 /** How many times {@link TursoKnowledgeAdapter.upsert} plans a batch again when a concurrent write removed a passage it meant to keep. */
 const UPSERT_ATTEMPTS = 3;
+
+/** How many times {@link TursoKnowledgeAdapter.search} runs again when the active generation was switched under it. */
+const SEARCH_ATTEMPTS = 3;
 
 /** A generation row: one index of one source under one fingerprint. */
 interface GenerationRow {
@@ -85,11 +99,32 @@ interface SourceGenerations {
  */
 const queues = new WeakMap<Client, Promise<unknown>>();
 
-function serial<T>(client: Client, work: () => Promise<T>): Promise<T> {
+function serial<T>(client: Client, work: () => Promise<T>, timeoutMs?: number): Promise<T> {
   const before = queues.get(client) ?? Promise.resolve();
-  const run = before.then(work, work);
+  const bounded = timeoutMs === undefined ? work : () => withTimeout(work(), timeoutMs);
+  const run = before.then(bounded, bounded);
   queues.set(client, run.then(() => undefined, () => undefined));
   return run;
+}
+
+/** `work`, or `SERVICE_UNAVAILABLE` when it has not settled within `ms`. */
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          notReady(
+            'its database did not answer in time',
+            `A request to the libSQL database took longer than ${ms} ms; check that the database is reachable.`,
+          ),
+        ),
+      ms,
+    );
+  });
+  // The stalled request settles on its own later; nothing waits for it.
+  work.catch(() => undefined);
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }
 
 /**
@@ -122,7 +157,10 @@ function serial<T>(client: Client, work: () => Promise<T>): Promise<T> {
  *
  * A source holds an active generation and, while a build under another
  * fingerprint runs, one generation under construction — at most one per
- * source, by a unique index on the generation table (the lock row). A write
+ * source, by a unique index on the generation table. That index does not
+ * refuse a second builder: a second build under the same fingerprint joins
+ * the one under way, and one under another fingerprint replaces it (the first
+ * builder's writes are then refused). A write
  * carrying `ctx.index` goes to the generation of that fingerprint and is
  * refused `KNOWLEDGE_REBUILD_REQUIRED` when neither holds it; a search
  * carrying another fingerprint than the active one's is refused the same way
@@ -161,6 +199,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
   private readonly unavailable?: string;
   private readonly resolveEmbedder: () => IEmbedder | undefined;
   private readonly queryPrefix: string;
+  private readonly requestTimeoutMs?: number;
   private isReady = false;
   /** Sources whose legacy table is known to be absent. */
   private readonly noLegacy = new Set<string>();
@@ -172,6 +211,15 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     const embedder = opts.embedder;
     this.resolveEmbedder = typeof embedder === 'function' ? embedder : () => embedder;
     this.queryPrefix = opts.queryPrefix ?? '';
+    if (opts.requestTimeoutMs !== undefined && (!Number.isFinite(opts.requestTimeoutMs) || opts.requestTimeoutMs <= 0)) {
+      throw new RangeError(`knowledge-turso: requestTimeoutMs must be a positive number, got ${String(opts.requestTimeoutMs)}`);
+    }
+    this.requestTimeoutMs = opts.requestTimeoutMs;
+  }
+
+  /** `work` on the client's queue, within the request bound when there is one. */
+  private queued<T>(client: Client, work: () => Promise<T>): Promise<T> {
+    return serial(client, work, this.requestTimeoutMs);
   }
 
   /** What the adapter reports about its embedder (ADR-0161 K8, item 6), read now. */
@@ -196,13 +244,13 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     // document removed it), the write is rolled back and planned again, so the
     // passage is embedded and inserted rather than lost.
     for (let attempt = 1; ; attempt++) {
-      const target = await serial(client, () => this.writeTarget(ctx, embedder, true));
+      const target = await this.queued(client, () => this.writeTarget(ctx, embedder, true));
       const missing = await this.writePassages(docs, ctx.source.id, target!, embedder);
       if (missing === undefined) return;
       if (attempt >= UPSERT_ATTEMPTS) {
         throw new Error(
-          `knowledge-turso: passage '${missing}' of source '${ctx.source.id}' was removed by a concurrent write ` +
-            `${UPSERT_ATTEMPTS} times while this write ran; nothing of this batch was written. Retry the write.`,
+          `knowledge-turso: a concurrent write to source '${ctx.source.id}' removed passages this write meant to keep, ` +
+            `${UPSERT_ATTEMPTS} times while it ran; nothing of this batch was written. Retry the write.`,
         );
       }
     }
@@ -228,7 +276,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     }));
     const ids = docs.map((d) => d.id);
     const stored = new Map<string, string>();
-    const existing = await serial(client, () =>
+    const existing = await this.queued(client, () =>
       client.execute({
         sql: `SELECT chunk_id, chunk_hash FROM ${table} WHERE document_id IN (SELECT value FROM json_each(?))`,
         args: [JSON.stringify(ids)],
@@ -256,7 +304,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       vectorOf.set(p.id, v);
     });
 
-    return serial(client, () =>
+    return this.queued(client, () =>
       this.transaction(async (tx) => {
         // The generation may have been switched or abandoned while the embedder
         // answered: write only into the one that was planned.
@@ -319,7 +367,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     assertSourceId(ctx.source.id);
     await this.ready();
     // From every generation of the source: a removed document leaves them all.
-    await serial(client, async () => {
+    await this.queued(client, async () => {
       const { active, building } = await this.generations(ctx.source.id);
       for (const g of [active, building]) {
         if (!g) continue;
@@ -342,7 +390,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     // healthy index as one to rebuild. No embedder is SERVICE_UNAVAILABLE.
     const embedder = this.requireEmbedder();
     await this.ready();
-    return serial(client, async () => {
+    return this.queued(client, async () => {
       // The generation the writes go to (ADR-0161 K8, item 1).
       const target = await this.writeTarget(ctx, embedder, false);
       if (!target) return { documents: [] };
@@ -365,7 +413,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     });
   }
 
-  async search(query: string, opts: AdapterSearchOptions): Promise<KnowledgeHit[]> {
+  async search(query: string, opts: AdapterSearchOptions, attempt = 1): Promise<KnowledgeHit[]> {
     // An empty organization set ranks nothing (ADR-0161 K8, item 9).
     if (opts.organizationIds !== undefined && opts.organizationIds.length === 0) return [];
     // A record scope with no term that has ids ranks nothing (ADR-0161 K8, item 17).
@@ -377,9 +425,9 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     // rebuild. No embedder is SERVICE_UNAVAILABLE, as on every other call.
     const embedder = this.requireEmbedder();
     await this.ready();
-    const { active, building } = await serial(client, () => this.generations(opts.source.id));
+    const { active, building } = await this.queued(client, () => this.generations(opts.source.id));
     if (!active) {
-      if (await serial(client, () => this.hasLegacy(opts.source.id))) {
+      if (await this.queued(client, () => this.hasLegacy(opts.source.id))) {
         throw rebuildRequired(opts.source.id, building !== undefined);
       }
       return [];
@@ -442,7 +490,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     }
     args.push(topK);
     const table = quoted(generationTable(opts.source.id, active.generation));
-    const result = await serial(client, async () => {
+    const result = await this.queued(client, async () => {
       // The generation may have been switched while the query was embedded.
       const now = await this.generations(opts.source.id);
       if (now.active?.generation !== active.generation) return undefined;
@@ -459,7 +507,16 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         args: args as InArgs,
       });
     });
-    if (result === undefined) return this.search(query, opts);
+    if (result === undefined) {
+      // Switched while the query was embedded: searched again, a bounded number of times.
+      if (attempt >= SEARCH_ATTEMPTS) {
+        throw notReady(
+          "its source's index was switched while it searched",
+          `The active generation of source '${opts.source.id}' changed ${SEARCH_ATTEMPTS} times during one search; retry it.`,
+        );
+      }
+      return this.search(query, opts, attempt + 1);
+    }
     return result.rows.map((r) => {
       const headingPath = parseJson(r.heading_path);
       return {
@@ -484,7 +541,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     const client = this.requireClient();
     assertSourceId(ctx.source.id);
     await this.ready();
-    const { active, building } = await serial(client, () => this.generations(ctx.source.id));
+    const { active, building } = await this.queued(client, () => this.generations(ctx.source.id));
     const status: AdapterIndexStatus = {};
     if (active?.fingerprint != null) status.fingerprint = active.fingerprint;
     if (active?.recipeHash != null) status.recipeHash = active.recipeHash;
@@ -498,7 +555,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     assertSourceId(ctx.source.id);
     const embedder = this.requireEmbedder();
     await this.ready();
-    await serial(client, async () => {
+    await this.queued(client, async () => {
       const legacy = await this.hasLegacy(ctx.source.id);
       await this.transaction(async (tx) => {
         const { active, building } = await this.generations(ctx.source.id, tx);
@@ -507,7 +564,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         // Rebuilt inside the active generation, or the build under way taken up.
         if (fits(active) || fits(building)) return { commit: true, value: undefined };
         if (building) {
-          // A build of another fingerprint left unfinished: one builder per source.
+          // A build of another fingerprint left unfinished: replaced, one per source.
           await tx.execute(`DROP TABLE IF EXISTS ${quoted(generationTable(ctx.source.id, building.generation))}`);
           await tx.execute({
             sql: `DELETE FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ? AND generation = ?`,
@@ -528,7 +585,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     const client = this.requireClient();
     assertSourceId(ctx.source.id);
     await this.ready();
-    await serial(client, async () => {
+    await this.queued(client, async () => {
       const legacy = await this.hasLegacy(ctx.source.id);
       await this.transaction(async (tx) => {
         const { active, building } = await this.generations(ctx.source.id, tx);
@@ -602,7 +659,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
   private async ready(): Promise<void> {
     if (this.isReady) return;
     const client = this.requireClient();
-    await serial(client, async () => {
+    await this.queued(client, async () => {
       if (this.isReady) return;
       try {
         await client.execute('SELECT 1');
@@ -661,19 +718,22 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
 
   /**
    * Whether the source still has a table of the store's earlier releases: a
-   * `knowledge_<source>` table without a `chunk_hash` column (a generation
-   * table of another source can share the name, never the shape).
+   * `knowledge_<source>` table with exactly their columns (`tableShape`).
+   * Any other table under that name, the store's own generation table or a
+   * table the store did not make, is never taken for one, so never dropped.
    */
   private async hasLegacy(sourceId: string): Promise<boolean> {
     if (this.noLegacy.has(sourceId)) return false;
     const table = legacyTable(sourceId);
-    const columns = await this.requireClient().execute({
-      sql: 'SELECT name FROM pragma_table_info(?)',
-      args: [table],
-    });
-    const legacy = columns.rows.length > 0 && !columns.rows.some((r) => r.name === 'chunk_hash');
+    const legacy = table !== GENERATION_TABLE && (await this.shapeOf(this.requireClient(), table)) === 'legacy';
     if (!legacy) this.noLegacy.add(sourceId);
     return legacy;
+  }
+
+  /** The shape of the table under `table`, if any (`tableShape`). */
+  private async shapeOf(db: Pick<Client, 'execute'>, table: string): Promise<TableShape> {
+    const columns = await db.execute({ sql: 'SELECT name, type FROM pragma_table_info(?)', args: [table] });
+    return tableShape(columns.rows.map((r) => ({ name: r.name, type: r.type })));
   }
 
   /** Opens the next generation of a source: its row, and its table made afresh. */
@@ -690,13 +750,16 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     });
     const generation = Number(next.rows[0].n);
     const table = generationTable(sourceId, generation);
-    // Never drop what is not a generation table: a legacy table of another
-    // source can share this name (`knowledge_<a>_g1` is source `a_g1`'s).
-    const shape = await tx.execute({ sql: 'SELECT name FROM pragma_table_info(?)', args: [table] });
-    if (shape.rows.length > 0 && !shape.rows.some((r) => r.name === 'chunk_hash')) {
+    // A table already under this name is made afresh only when it is one of
+    // this store's passage tables (left behind by a generation row deleted
+    // by hand). Anything else is never dropped: a legacy table of another
+    // source can share the name (`knowledge_<a>_g1` is source `a_g1`'s), and
+    // so can a table the store did not make, in a shared database.
+    const shape = await this.shapeOf(tx, table);
+    if (shape === 'legacy' || shape === 'other') {
       throw new Error(
-        `knowledge-turso: table '${table}' is a table of the store's earlier releases (source '${table.slice('knowledge_'.length)}'); ` +
-          `source '${sourceId}' cannot open generation ${generation} under that name. Reindex or remove that source first.`,
+        `knowledge-turso: a table '${table}' that this store did not make as a generation table is in the database; ` +
+          `source '${sourceId}' cannot open generation ${generation} under that name.`,
       );
     }
     for (const statement of passageTableDdl(table, embedder.dimensions)) await tx.execute(statement);

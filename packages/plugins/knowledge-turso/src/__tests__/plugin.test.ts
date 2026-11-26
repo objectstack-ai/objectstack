@@ -70,6 +70,14 @@ describe('resolveStoreUrl', () => {
     expect(
       resolveStoreUrl({ url: 'file:/var/data/app.db', env: { OS_DATABASE_URL: 'sqlite:///var/data/app.db' } }),
     ).toMatchObject({ reason: expect.stringContaining("platform's own database file") });
+    // Percent-encoded and differently cased spellings name the same file; a bare path is a platform URL too.
+    for (const url of ['file:/srv/app/objectstack%2Edb', 'file:/srv/app/ObjectStack.db', 'file:/srv/app/%64ev.db']) {
+      expect(resolveStoreUrl({ url, env: {} })).toMatchObject({ reason: expect.stringContaining("platform's own database file") });
+    }
+    expect(resolveStoreUrl({ url: 'file:/var/data/App.db', env: { OS_DATABASE_URL: '/var/data/app.db' } })).toMatchObject({
+      reason: expect.stringContaining("platform's own database file"),
+    });
+    expect(resolveStoreUrl({ url: 'file:/var/data/%zz.db', env: {} })).toMatchObject({ reason: expect.stringContaining('not a valid file: URL') });
     expect(resolveStoreUrl({ url: 'file:/var/data/knowledge.db', env: { OS_DATABASE_URL: 'file:/var/data/app.db' } })).toEqual({
       url: 'file:/var/data/knowledge.db',
       from: 'the plugin option `url`',

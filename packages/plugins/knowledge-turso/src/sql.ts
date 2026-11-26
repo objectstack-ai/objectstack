@@ -10,10 +10,10 @@
 
 /**
  * A source id this module puts into a table name: the spec's snake_case
- * source id (`KnowledgeSource.id`), at most 48 characters. Anything else is
+ * source id (`KnowledgeSource.id`), the spec's own pattern. Anything else is
  * refused before it reaches a string.
  */
-export const SAFE_SOURCE_ID = /^[a-z_][a-z0-9_]{0,47}$/;
+export const SAFE_SOURCE_ID = /^[a-z_][a-z0-9_]*$/;
 
 /** The generation table: one row per generation of a source. */
 export const GENERATION_TABLE = 'knowledge_generation';
@@ -21,9 +21,12 @@ export const GENERATION_TABLE = 'knowledge_generation';
 /** Refuses a source id that cannot be put into a table name. */
 export function assertSourceId(sourceId: string): void {
   if (!SAFE_SOURCE_ID.test(sourceId)) {
-    throw new Error(
-      `knowledge-turso: source id '${sourceId}' cannot name a table (snake_case: lower-case letters, digits and ` +
-        'underscores, at most 48 characters).',
+    throw Object.assign(
+      new Error(
+        `knowledge-turso: source id '${sourceId}' cannot name a table (snake_case: lower-case letters, digits and ` +
+          'underscores).',
+      ),
+      { code: 'VALIDATION_ERROR', status: 400 },
     );
   }
 }
@@ -48,6 +51,45 @@ export function legacyTable(sourceId: string): string {
   return `knowledge_${sourceId}`;
 }
 
+/** The columns of a table of the cloud-repo releases, exactly, in no order. */
+const LEGACY_COLUMNS = ['chunk_id', 'content', 'document_id', 'embedding', 'metadata', 'source_record_id', 'title'];
+
+/** The columns of a generation's passage table, exactly, in no order. */
+const PASSAGE_COLUMNS = [
+  'chunk_hash',
+  'chunk_id',
+  'content',
+  'doc_hash',
+  'document_id',
+  'embedding',
+  'heading_path',
+  'metadata',
+  'organization_id',
+  'source_record_id',
+  'title',
+];
+
+/** What a table found under a name is, read from `pragma_table_info` rows. */
+export type TableShape = 'none' | 'legacy' | 'passage' | 'other';
+
+/**
+ * Reads a table's shape from its columns (`name`, `type`): `legacy` only for
+ * the exact column set of the cloud-repo releases with an `F32_BLOB` vector,
+ * `passage` only for the exact set this module makes, `other` for anything
+ * else (a table the store did not make, never dropped or served), `none` for
+ * no table.
+ */
+export function tableShape(columns: ReadonlyArray<{ name: unknown; type: unknown }>): TableShape {
+  if (columns.length === 0) return 'none';
+  const names = columns.map((c) => String(c.name)).sort();
+  const vector = columns.find((c) => c.name === 'embedding');
+  const isVector = vector !== undefined && /^F32_BLOB\(\d+\)$/i.test(String(vector.type).replace(/\s+/g, ''));
+  const same = (want: string[]) => names.length === want.length && names.every((n, i) => n === want[i]);
+  if (isVector && same(LEGACY_COLUMNS)) return 'legacy';
+  if (isVector && same(PASSAGE_COLUMNS)) return 'passage';
+  return 'other';
+}
+
 /** `"name"`, for a name built by this module. */
 export function quoted(table: string): string {
   return `"${table}"`;
@@ -68,9 +110,9 @@ export function generationDdl(): string[] {
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   PRIMARY KEY (source_id, generation)
 )`,
-    // One active generation per source, and one under construction: the
-    // second index is the lock row that keeps one builder per source (libSQL
-    // has no advisory locks).
+    // One active generation per source, and one under construction. The
+    // second keeps one generation under construction, not one builder: a
+    // second build joins it (same fingerprint) or replaces it (another).
     `CREATE UNIQUE INDEX IF NOT EXISTS "knowledge_generation_active" ON ${t} (source_id) WHERE state = 'active'`,
     `CREATE UNIQUE INDEX IF NOT EXISTS "knowledge_generation_building" ON ${t} (source_id) WHERE state = 'building'`,
   ];

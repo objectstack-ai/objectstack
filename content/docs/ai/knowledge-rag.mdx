@@ -214,7 +214,7 @@ Details — the tables, an approximate index as an operator's step, rebuilds —
 
 ## Local vector store: a libSQL file
 
-`@objectstack/knowledge-turso` keeps passages and vectors in a libSQL file of its own — by default `knowledge.db` under the project's `.objectstack/data/`, never the platform database's file — so `os dev` on SQLite gets semantic search, Chinese text included, with nothing to install. Point a source at it with `adapter: 'turso'`:
+`@objectstack/knowledge-turso` keeps passages and vectors in a libSQL file of its own — by default `knowledge.db` under the project's `.objectstack/data/`, never the platform database's file — so a deployment on SQLite gets semantic search, Chinese text included, with no database server to run. Until `os dev` mounts it for you, add the package and register `KnowledgeTursoPlugin` beside the knowledge service yourself. Point a source at it with `adapter: 'turso'`:
 
 ```ts
 new KnowledgeTursoPlugin(), // or { url: 'file:/var/lib/app/knowledge.db' }, ':memory:', a libsql:// URL

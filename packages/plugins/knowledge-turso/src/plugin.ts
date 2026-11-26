@@ -42,6 +42,14 @@ export interface KnowledgeTursoPluginOptions {
    * milliseconds (SQLite's busy timeout; `file:` URLs only). @default 5000
    */
   busyTimeoutMs?: number;
+  /**
+   * The longest one turn of database work may take before the call answers
+   * `SERVICE_UNAVAILABLE`, for a remote database (`libsql://`, `https://`,
+   * `wss://`), whose requests have no bound of their own. Applies to a
+   * `client` given as it is only when set.
+   * @default 10000 for a remote URL; none for a file or `:memory:`
+   */
+  requestTimeoutMs?: number;
   /** Text put before every query before it is embedded (see the adapter's option). */
   queryPrefix?: string;
   /** The embedder to call. Absent: the kernel's `embedder` service, read at each call. */
@@ -57,6 +65,9 @@ export function defaultStoreUrl(projectRoot: string = process.cwd()): string {
   return `file:${resolvePath(projectRoot, '.objectstack', 'data', DEFAULT_KNOWLEDGE_FILE)}`;
 }
 
+/** The bound on one turn of database work against a remote database (`requestTimeoutMs`). */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+
 /** The local file a `file:` URL names, or `undefined` for any other URL. */
 export function fileOf(url: string): string | undefined {
   if (!/^file:/i.test(url)) return undefined;
@@ -68,7 +79,22 @@ export function fileOf(url: string): string | undefined {
       return undefined;
     }
   }
-  return resolvePath(rest);
+  try {
+    // libSQL percent-decodes the path it opens; so is the name compared here.
+    return resolvePath(decodeURIComponent(rest));
+  } catch {
+    return undefined;
+  }
+}
+
+/** The file a platform database URL names: a `file:` / `sqlite:` URL, or a bare path. */
+function platformFileOf(url: string): string | undefined {
+  const trimmed = url.trim();
+  if (trimmed === '' || trimmed === ':memory:') return undefined;
+  if (/^sqlite:/i.test(trimmed)) return fileOf(trimmed.replace(/^sqlite:(\/\/)?/i, 'file:'));
+  if (/^file:/i.test(trimmed)) return fileOf(trimmed);
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return undefined;
+  return resolvePath(trimmed);
 }
 
 /** The libSQL URL the store opens, and where it was read from — or why there is none. */
@@ -82,12 +108,17 @@ export function resolveStoreUrl(
     return { reason: 'its `url` option is not a file:, :memory: or libsql:// URL.' };
   }
   const file = fileOf(url);
+  if (file === undefined && /^file:/i.test(url)) {
+    return { reason: 'its `url` option is not a valid file: URL.' };
+  }
   if (file !== undefined) {
     const env = opts.env ?? process.env;
+    // Compared without case: on a case-insensitive file system two spellings are one file.
     const platform = [env.OS_DATABASE_URL, env.DATABASE_URL]
-      .map((u) => (u === undefined ? undefined : fileOf(u.replace(/^sqlite:(\/\/)?/i, 'file:'))))
-      .filter((f): f is string => f !== undefined);
-    if (platform.includes(file) || PLATFORM_DATABASE_FILES.includes(basename(file))) {
+      .map((u) => (u === undefined ? undefined : platformFileOf(u)))
+      .filter((f): f is string => f !== undefined)
+      .map((f) => f.toLowerCase());
+    if (platform.includes(file.toLowerCase()) || PLATFORM_DATABASE_FILES.includes(basename(file).toLowerCase())) {
       return {
         reason:
           `its URL names the platform's own database file (${basename(file)}). The store keeps a libSQL file of its ` +
@@ -137,11 +168,13 @@ export class KnowledgeTursoPlugin implements Plugin {
 
     let client: Client | undefined = this.opts.client;
     let unavailable: string | undefined;
+    let requestTimeoutMs = this.opts.requestTimeoutMs;
     if (!client) {
       const target = resolveStoreUrl(this.opts);
       if (target.url === undefined) {
         unavailable = target.reason;
       } else {
+        if (fileOf(target.url) === undefined && target.url !== ':memory:') requestTimeoutMs ??= DEFAULT_REQUEST_TIMEOUT_MS;
         const opened = await openClient(target.url, this.opts);
         if ('client' in opened) client = this.owned = opened.client;
         else unavailable = opened.reason;
@@ -164,6 +197,7 @@ export class KnowledgeTursoPlugin implements Plugin {
       ...(client ? { client } : { unavailable }),
       embedder,
       queryPrefix: this.opts.queryPrefix,
+      ...(requestTimeoutMs === undefined ? {} : { requestTimeoutMs }),
     });
     svc.registerAdapter(adapter.id, adapter);
 

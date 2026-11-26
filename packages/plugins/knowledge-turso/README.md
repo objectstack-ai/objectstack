@@ -24,6 +24,7 @@ kernel.use(new KnowledgeTursoPlugin()); // .objectstack/data/knowledge.db
 | `authToken` | — | The token of a `libsql://` URL. |
 | `client` | — | A libSQL client to use as it is (not configured, not closed by the plugin). |
 | `busyTimeoutMs` | `5000` | How long a write waits for another process's lock on a `file:` store. |
+| `requestTimeoutMs` | `10000` for a remote URL | The longest one turn of database work may take on a remote database before the call answers `SERVICE_UNAVAILABLE`. None for a file or `:memory:`; for a `client` given as it is, only when set. |
 | `projectRoot` | `process.cwd()` | The directory the default file is under. |
 | `queryPrefix` | `''` | Text put before every query before it is embedded. Passages are embedded as they are. |
 | `embedder` | the kernel's `embedder` service | The embedder to call, read at each call. |
@@ -36,7 +37,7 @@ On a file the store sets WAL and a busy timeout: without them a second process w
 
 ## Tables
 
-- `knowledge_generation` — one row per source and generation: the index fingerprint it was built under, the recipe hash, the vector width, the model, and whether it is active or being built. At most one of each per source (a unique index: one builder per source).
+- `knowledge_generation` — one row per source and generation: the index fingerprint it was built under, the recipe hash, the vector width, the model, and whether it is active or being built. At most one of each per source, by a unique index. It does not refuse a second builder: a second build under the same fingerprint joins the one under way, and one under another fingerprint replaces it, after which the first builder's writes are refused `KNOWLEDGE_REBUILD_REQUIRED`. No generation mixes two fingerprints.
 - `knowledge_<source>_g<n>` — the passages of one generation of one source, with an `F32_BLOB(<width>)` vector column sized for that generation.
 
 ## Search
@@ -47,7 +48,7 @@ An exact scan by cosine distance (`vector_distance_cos`). The organization filte
 
 Every source's index is built under one index fingerprint (the embedding model and dimensions, the split, the content list — ADR-0161 K7). A write or a search under another fingerprint is refused `KNOWLEDGE_REBUILD_REQUIRED` (409) and never served from the stored vectors. A complete reindex under a new fingerprint builds a new generation table beside the active one (the old one keeps answering its own fingerprint meanwhile) and switches to it when the reindex completes; the old table is then dropped. A passage whose text is unchanged is not embedded again within a generation.
 
-A table written by this package's earlier releases (`knowledge_<source>`, from the cloud repository) is never served: a search answers "reindex needed", and the table is dropped when the first complete reindex finishes.
+A table written by this package's earlier releases (`knowledge_<source>`, from the cloud repository) is never served: a search answers "reindex needed", and the table is dropped when the first complete reindex finishes. It is recognised by its exact columns: a table of any other shape under a store's table name, one the store did not make in a shared database, is never served and never dropped.
 
 ## When it cannot run
 

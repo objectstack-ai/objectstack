@@ -593,9 +593,11 @@ the `embedder` it is given), and answers a search by an exact scan.
   store runs its database work one at a time.
 - **Tables.** `knowledge_generation`, one row per source and generation
   (fingerprint, recipe hash, width, model, active or being built; at most one
-  of each per source), and one passage table per source and generation,
+  of each per source, by a unique index — a second build joins the one under
+  way when its fingerprint is the same, and replaces it otherwise, so the
+  first builder's writes are then refused), and one passage table per source and generation,
   `knowledge_<source>_g<n>`, its vector column sized for that generation. A
-  source id that is not snake_case (at most 48 characters) is refused before
+  source id that is not snake_case is refused before
   any SQL.
 - **Search.** An exact scan by cosine distance; the organization filter, the
   [record scope](#record-scope) and the metadata `filter` (JSON equality per
@@ -609,9 +611,10 @@ the `embedder` it is given), and answers a search by an exact scan.
   one, which keeps answering its own fingerprint, and switches at the end of
   the build; the old table is dropped. A build of a third fingerprint
   abandons one left unfinished. A table of the package's earlier releases
-  (`knowledge_<source>`, no generation) is never served: a search answers
-  `KNOWLEDGE_REBUILD_REQUIRED`, and the table is dropped when the first
-  complete reindex finishes.
+  (`knowledge_<source>` with exactly their columns) is never served: a search
+  answers `KNOWLEDGE_REBUILD_REQUIRED`, and the table is dropped when the first
+  complete reindex finishes. A table of any other shape under one of the
+  store's names is neither served nor dropped.
 - **Re-embedding.** A passage whose text is unchanged (its `chunk_hash`) is
   not embedded again within a generation.
 - **When it cannot run.** A database that cannot be opened, or a platform
