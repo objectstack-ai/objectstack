@@ -1,6 +1,6 @@
-# 车道岗位说明:domain:skills
+# 域参考:domain:skills
 
-见 seat-lifecycle.md 与 SKILL.md 域车道表;本文是岗位说明,现值状态恒在座位贴,⛔ 不迁入。
+见 SKILL.md 域表;域席已退役:本文作域参考,「本席」「本车道」读作接卡席,去留待重组。
 
 ## 范围
 

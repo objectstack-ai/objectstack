@@ -1,6 +1,6 @@
 # 协调者(Coordinator;维护者本机的专题负责人 epic lead 另是一席,⛔ 不用本文)
 
-它不是 `domain:*` 席:不坐座位贴、不认领卡;席位线程照 SKILL.md 与 `execution-duties.md` 跑循环。
+它不是执行席:不坐座位贴、不认领卡;席位线程照 SKILL.md 与 `execution-duties.md` 跑循环。
 
 ## 一、车道归属登记在座位贴(coordinator 开席位线程前读;席位线程坐席时读)
 
@@ -19,7 +19,7 @@
 - 取卡面 = 各车道 open 卡,次序现读 `card-pick.mjs --order <序>`;判据照 `execution-duties.md`。
 - 维护者只说改级 ⇒ 只落级,评论照 `filing-gate.md` 引原话;⛔ 不借此开线程,照取卡全序。
 - 每张卡交其车道的席位线程;车道无席位线程而座位贴空着 ⇒ 先开席位线程再交卡。
-- 维护者 ⛔ 不逐卡点名车道:车道读卡的 `domain:*`;S/M 分流见 `dispatch-runbook.md` 卡线程节。
+- 维护者 ⛔ 不逐卡点名车道:车道读卡 `area:*` 与父单;S/M 分流见 `dispatch-runbook.md` 卡线程节。
 
 ## 三、全项目一个上限,p1 先(coordinator 调度读;席位交候选时读)
 

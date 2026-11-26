@@ -4,10 +4,8 @@
 
 ## 候选与批次
 
-- 整车道一次读全,本地求交:`list_issues` 带 `labels: [domain:X]` + 最小字段拿回全车道 open 集。
+- 整车道一次读全,本地求交:按接卡行点名的 `area:*` 与 epic 子树 + 最小字段拿回全车道 open 集。
 - 候选 = open、未 assign、无 `needs-user-decision`、无 `pm:retriage`;⛔ 排除三门皆无的 `tooling` 卡。
-- 席改标:卡余项实测路径整落本席包树 ⇒ 本席改 `domain:*`,审计评论列路径与新旧标同笔。
-- 席改标限未派发卡;带 `needs-user-decision`、open `Blocked-by:` 或 `security` 的 ⛔ 不改,仍问分诊。
 - 每张候选读全文 + 全部评论,写派发词前做决策复读:评论读到最后一页。
 - 裁决区与过时检查先跑 `check-prior-rulings.mjs --card <n> --paths <面>`;引现状 ⛔ 不引裁决旧述。
 - 本卡与命中所引裁决逐字入区(id+原句)作约束;零命中才写无裁决,命中无裁决写命中数。
@@ -49,6 +47,7 @@
 - 定「等 #N」即同笔写卡 `Blocked-by: #N`+`pm:blocked`;⛔ 只记记忆或评论,无读者即漏派。
 - 标签序 = NORTH-STAR「Priority」第 3 条(无级殿后),本车道开放卡现读 `card-pick.mjs --order <序>`。
 - 开放 = 未派发(无 `pm:dispatched`、无 assignee);在飞的 P0/P1 不挡任何候选,只余取卡全序。
+- `card-pick.mjs` 仍印每行 `domain:*` 与 lane ownership 页脚,脚本行为未改:`domain:*` 读作文件归属,cloud 与安全卡照旧不认领。
 - 取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/lanes/spec.md`)> 标签序。
 - 云车道同按专题派,⛔ 不按 `cloud/ROADMAP.md` 行序;细则照 `lanes/cloud.md` 所指的 cloud 仓文件。
 - 全序每级现读/现算,零逐卡维护;无级/无 area/无 type 轮报记分诊缺口。
@@ -102,7 +101,7 @@
 - ADR 记账行(resolved by/修订注记)归落地席:ACCEPT 记 `carrier:` 注,合并后同轮在 open「ADR revisions, week of …」卡
   追加一行(ADR、节、原文所说、现在实情、落地 PR),无 open 卡则开下周卡;周卡以一个受管 `docs/adr/**` PR 落地。
 - 只收与 `main` 矛盾的 ADR 文本;纯补记 ⛔ 不立。
-- 强制条款②:放宽接受集或扩大公开面的卡默认判断档施工;命中即 spec 车道的活。
+- 强制条款②:放宽接受集或扩大公开面的卡默认判断档施工。
 - 负边界:运行时权限/安全行为变更不是条款②,归人工地板安全/权限边界类。
 - 条款②只指已发布契约面,拉回已声明契约不触它;卡面复述仍是条款②。
 - 收窄已发布接受集的卡是 `Clause-②: no`,不移车道;入队前欠一次契约审核档 L2 审核。
