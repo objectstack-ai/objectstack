@@ -4,7 +4,7 @@
  * objectstack#37456 — Studio's top left, as the author meets it (ADR-0084,
  * amended 2026-11-26, `#amendment-2026-11-26-frame`):
  *
- *  1. Two rows: Studio's (its mark and name, App Studio, and the collapse
+ *  1. Two rows: Studio's (its mark and display name, and the collapse
  *     control), then the package row (the way back first, then the switcher).
  *  2. The switcher names the open package by its app where the package ships
  *     one, by its own name where it does not.
@@ -136,7 +136,7 @@ describe('Studio top left — two rows (objectstack#37456)', () => {
   it('draws Studio’s row, then the package row with the way back first', () => {
     renderTopLeft();
     const brand = screen.getByTestId('studio-brand-row');
-    expect(within(brand).getByTestId('studio-brand-name')).toHaveTextContent('App Studio');
+    expect(within(brand).getByTestId('studio-brand-name')).toHaveTextContent('Studio');
     expect(within(brand).getByTestId('studio-menu-toggle')).toBeInTheDocument();
     const row = screen.getByTestId('studio-package-row');
     const buttons = within(row).getAllByRole('button');

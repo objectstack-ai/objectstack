@@ -6,9 +6,9 @@
  * rows that open its left column are where a person reads what they are in and
  * where they go back from.
  *
- *  1. **Studio's row** ({@link StudioBrandRow}): Studio's mark and name, 应用搭建
- *     in a Chinese interface and App Studio otherwise, then the control that
- *     collapses the left column.
+ *  1. **Studio's row** ({@link StudioBrandRow}): Studio's mark and name (its
+ *     display name, `engine.studio.mark`), then the control that collapses
+ *     the left column.
  *  2. **The package row** ({@link StudioPackageRow}): the way back
  *     (`StudioBackButton`, where `studioBackTarget` says), then the open
  *     package as the package switcher (`StudioPackageSwitcher`), with its lock
@@ -49,7 +49,7 @@ export function StudioBrandRow({ locale }: { locale: string }): React.ReactEleme
     <div className="flex min-w-0 items-center gap-2 px-1" data-testid="studio-brand-row">
       <StudioBrandMark />
       <span data-testid="studio-brand-name" className="min-w-0 flex-1 truncate text-sm font-semibold text-sidebar-foreground">
-        {t('engine.studio.brand', locale)}
+        {t('engine.studio.mark', locale)}
       </span>
       <StudioMenuTrigger locale={locale} />
     </div>

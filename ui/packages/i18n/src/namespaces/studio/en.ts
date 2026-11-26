@@ -3572,10 +3572,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.backToAppTitle': 'Leave Studio and go back to {app}',
   'engine.studio.backToAppTitleNoApp': 'Leave Studio and go back to your apps',
   'engine.studio.mark': 'Studio',
-  // objectstack#37456 — the top left's two rows (ADR-0084, amended 2026-11-26):
-  // Studio's row (its mark and name, and the collapse control), then the
-  // package row (the way back, then the package switcher).
-  'engine.studio.brand': 'App Studio',
+  // objectstack#37456 — the package row of the top left (ADR-0084, amended
+  // 2026-11-26): the way back, then the package switcher. Studio's row reads
+  // `engine.studio.mark` for its name.
   'engine.studio.pkg.switcher': 'Switch package',
   'engine.studio.pkg.search': 'Search packages',
   'engine.studio.pkg.noMatches': 'No package matches',
