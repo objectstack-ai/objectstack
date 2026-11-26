@@ -7,9 +7,9 @@
  * re-exports every name here.
  *
  * ⛔ No component and no designer string table here. The running app's save
- * paths (a list's view save, the record page's tabs and arrangement saves,
- * the design-mode menu and header-pin saves) import these, and those modules
- * load with a list or record page; reading them through
+ * paths that load with a list or record page (a list's view save, the record
+ * page's tabs and arrangement saves, the header-pin save) import these;
+ * reading them through
  * `DraftConflictDialog.tsx` statically pulled the designer's English
  * catalogue (`@object-ui/i18n/namespaces/studio`, through `./i18n.ts`) into
  * those pages' first load (objectstack#37444). The dialog and

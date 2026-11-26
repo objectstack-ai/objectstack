@@ -6,9 +6,9 @@
  * door's walled verdict, and a base object's extension body.
  *
  * ⛔ No component, no designer string table and no Studio chrome here. The
- * running app's save paths (a list's view save, the record page's tabs and
- * arrangement saves, the design-mode menu save) read these, and those modules
- * load with a list or record page; importing the names from
+ * running app's save paths that load with a list or record page (a list's
+ * view save, the record page's tabs and arrangement saves) read these;
+ * importing the names from
  * `StudioCustomizeControls.tsx` statically pulled that component module, the
  * Studio header and the designer's English catalogue
  * (`@object-ui/i18n/namespaces/studio`) into those pages' first load
