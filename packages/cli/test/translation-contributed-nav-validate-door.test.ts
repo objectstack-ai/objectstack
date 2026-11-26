@@ -47,7 +47,7 @@ const stackOf = (navCase: Record<string, string>) => ({
     name: 'Contributed navigation translation door probe',
     version: '1.0.0',
     type: 'module',
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
     navigationContributions: [{
       app: 'crm_enterprise',
       items: [{ id: 'nav_case', type: 'object', objectName: 'svc_case', label: 'Cases' }],

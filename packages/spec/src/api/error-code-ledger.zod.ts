@@ -1670,6 +1670,11 @@ export const ERROR_CODE_LEDGER = {
   '@objectstack/knowledge-pgvector': [
     'KNOWLEDGE_REBUILD_REQUIRED',
   ],
+  // [#37107] The libSQL store, moved in from the cloud repo: the same refusal,
+  // and also for a source whose only index is a table of its earlier releases.
+  '@objectstack/knowledge-turso': [
+    'KNOWLEDGE_REBUILD_REQUIRED',
+  ],
   '@objectstack/plugin-audit': [
     'FEEDS_DISABLED',
     'FILES_DISABLED',

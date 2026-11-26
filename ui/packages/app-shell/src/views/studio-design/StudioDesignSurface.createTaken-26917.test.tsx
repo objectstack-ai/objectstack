@@ -125,6 +125,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { ListFlowCreate } from './__tests__/listFlowCreateHost';
 import { MetadataListCreateDialog } from '../metadata-admin/MetadataListCreateDialog';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
@@ -350,7 +351,7 @@ describe('objectstack#26917 — Create app over a taken identifier', () => {
     render(
       <MemoryRouter initialEntries={[`/studio/${PKG}/owd`]}>
         <Routes>
-          <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+          <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
         </Routes>
       </MemoryRouter>,
     );

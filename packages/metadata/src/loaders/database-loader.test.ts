@@ -4734,3 +4734,215 @@ describe('[#37013] the mark has one place on an item, and every write and serve 
     });
   });
 });
+
+// ---------- [#37039] a stored row's package binding is its column, never its body's stamp ----------
+
+/**
+ * [#37039, cloud ADR-0118 D2] The protocol records an item's package on its
+ * stored row's package column. `loadRowBindings` answers that column alone,
+ * and `listPackageBindings` binds every item `list` answers: a stored row's
+ * item (the registry's primed copy included) to the row's column, any other
+ * item to its registration.
+ *
+ * BEFORE (main `a10345ab`): no read answered the column. `list('skill')`
+ * answered bodies, and the binding a caller read off a body's `_packageId`
+ * stamp was the one the row's author wrote, not the one the store recorded.
+ */
+describe('[#37039] a stored row\'s package binding is read from its package column', () => {
+  const ALPHA = 'com.alpha.app';
+  const BETA = 'com.beta.app';
+  let driver: IDataDriver;
+
+  /** A stored skill row: `column` in `package_id`, `stamp` as the body's `_packageId` (`null`: absent). */
+  const seed = (name: string, column: string | null, stamp: string | null) =>
+    driver.create('sys_metadata', {
+      id: `skill_${name}`, type: 'skill', name, state: 'active', version: 1, checksum: `skill_${name}`, source: 'database',
+      package_id: column, metadata: JSON.stringify({ name, label: name, instructions: name, ...(stamp ? { _packageId: stamp } : {}) }),
+    });
+  /** A process over the rows, primed as the boot pass primes it (`MetadataPlugin`). */
+  async function booted(): Promise<MetadataManager> {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [new DatabaseLoader({ driver })] });
+    for (const item of await manager.loadMany<Record<string, unknown>>('skill')) {
+      await manager.register('skill', item.name as string, item, { notify: false, skipSourceLoader: true });
+    }
+    return manager;
+  }
+  const bindingsOf = async (manager: MetadataManager) =>
+    (await manager.listPackageBindings('skill')).items.map((entry) => [entry.name, entry.packageId, entry.source]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  it('loadRowBindings: a row whose body stamp differs from its column answers the column; a legacy row with an empty column answers null; a row with neither answers null', async () => {
+    await seed('differs', ALPHA, BETA);
+    await seed('legacy', null, BETA);
+    await seed('neither', null, null);
+    const entries = await new DatabaseLoader({ driver }).loadRowBindings('skill');
+    expect(entries.map((entry) => [entry.name, entry.rowPackageId]).sort()).toEqual([['differs', ALPHA], ['legacy', null], ['neither', null]]);
+    // CONTROL: the slot each entry is keyed under is `loadManySlots`' — the column, else the body's package.
+    expect(entries.map((entry) => [entry.name, entry.packageId ?? null]).sort()).toEqual([['differs', ALPHA], ['legacy', BETA], ['neither', null]]);
+  });
+
+  it('loadRowBindings of a type outside the by-package set reads the column too', async () => {
+    await driver.create('sys_metadata', {
+      id: 'view_v', type: 'view', name: 'v', state: 'active', version: 1, checksum: 'v', source: 'database',
+      package_id: ALPHA, metadata: JSON.stringify({ name: 'v', _packageId: BETA }),
+    });
+    expect((await new DatabaseLoader({ driver }).loadRowBindings('view')).map((entry) => [entry.name, entry.rowPackageId])).toEqual([['v', ALPHA]]);
+  });
+
+  it('listPackageBindings(skill) after the boot pass: each primed row\'s item answers its row\'s column (BEFORE: only the body stamp was readable); a code-registered skill answers its registration', async () => {
+    await seed('differs', ALPHA, BETA);
+    await seed('legacy', null, BETA);
+    await seed('neither', null, null);
+    const manager = await booted();
+    await manager.register('skill', 'code_only', { name: 'code_only', label: 'code_only', instructions: 'x', _packageId: ALPHA }, { notify: false });
+    await manager.register('skill', 'platform_only', { name: 'platform_only', label: 'p', instructions: 'p' }, { notify: false, origin: 'platform' });
+    // `code_only` and `platform_only` were written through to the row loader by their register: the store
+    // recorded each one's column. [#37130] `differs` is listed once, as `list` lists it: the registry's primed
+    // copy is filed under the row's ALPHA column, the key the row loader lists it by (BEFORE #37130: twice,
+    // the copy keyed by its body's BETA stamp beside the row; before #37039 the copy answered BETA).
+    expect(await bindingsOf(manager)).toEqual([
+      ['code_only', ALPHA, 'row'],
+      ['differs', ALPHA, 'row'],
+      ['legacy', null, 'row'],
+      ['neither', null, 'row'],
+      ['platform_only', null, 'row'],
+    ]);
+    // The bodies are `list`'s, in its order: the legacy row's body still carries the stamp the column does not record.
+    const listed = await manager.list('skill');
+    const read = await manager.listPackageBindings('skill');
+    expect(read.items.map((entry) => entry.data)).toEqual(listed);
+    expect(read.degraded).toBe(false);
+    expect((read.items.find((entry) => entry.name === 'legacy')!.data as { _packageId?: string })._packageId).toBe(BETA);
+  });
+
+  it('[#37130] list() after the boot pass lists a row whose body stamp differs from its column once, under its column: a read naming the column\'s package answers it, the stamp\'s answers nothing (BASE: listed twice, the primed copy under the stamp)', async () => {
+    await seed('differs', ALPHA, BETA);
+    const manager = await booted();
+    const listed = (await manager.list('skill')) as Array<{ name?: string; _packageId?: string }>;
+    expect(listed.map((item) => [item.name, item._packageId])).toEqual([['differs', BETA]]);
+    expect(((await manager.get('skill', 'differs', ALPHA)) as { label?: string } | undefined)?.label).toBe('differs');
+    expect(await manager.get('skill', 'differs', BETA)).toBeUndefined();
+    // CONTROL: an unprimed process over the same rows answers the same: the loader keys the row by its column.
+    const cold = new MetadataManager({ formats: ['json'], loaders: [new DatabaseLoader({ driver })] });
+    expect(((await cold.list('skill')) as unknown[])).toHaveLength(1);
+    expect(await cold.get('skill', 'differs', BETA)).toBeUndefined();
+  });
+
+  it('listPackageBindings: an item no stored row holds answers its registration\'s binding, marked `registration`', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [new MemoryLoader()] });
+    await manager.register('skill', 'pkg_skill', { name: 'pkg_skill', label: 'a', instructions: 'a', _packageId: ALPHA }, { notify: false });
+    await manager.register('skill', 'env_skill', { name: 'env_skill', label: 'e', instructions: 'e' }, { notify: false });
+    expect(await bindingsOf(manager)).toEqual([['env_skill', null, 'registration'], ['pkg_skill', ALPHA, 'registration']]);
+  });
+
+  it('listPackageBindings: a row loader whose rows cannot be read degrades the answer; a primed copy still answers the column of the row it was read from', async () => {
+    await seed('legacy', null, BETA);
+    const manager = await booted();
+    const loader = [...(manager as unknown as { loaders: Map<string, MetadataLoader> }).loaders.values()][0]!;
+    loader.loadRowBindings = async () => { throw new Error('sys_metadata unreachable'); };
+    const read = await manager.listPackageBindings('skill');
+    expect(read.degraded).toBe(true);
+    expect(read.errors.some((error) => error.includes('sys_metadata unreachable'))).toBe(true);
+    expect(read.items.map((entry) => [entry.name, entry.packageId, entry.source])).toEqual([['legacy', null, 'row']]);
+  });
+
+  /**
+   * The `[#31699 R7-A]` scenario above, then read: the priming pass binds the
+   * legacy row's empty column to the package its own body names, and the primed
+   * copy answers the column as the pass left it. BEFORE: the copy answered the
+   * column as the plural read found it (`null`) for the rest of the process.
+   */
+  it('listPackageBindings(agent) after the boot pass bound a legacy row\'s column: the primed copy answers the bound package, `row`', async () => {
+    await driver.create('sys_metadata', {
+      id: 'legacy', type: 'agent', name: 'helper', state: 'active', version: 1, checksum: 'legacy', source: 'database',
+      package_id: null, metadata: JSON.stringify({ name: 'helper', label: 'Helper', packageId: ALPHA }),
+    });
+    const manager = new MetadataManager({ formats: ['json'], loaders: [new DatabaseLoader({ driver })] });
+    for (const item of await manager.loadMany<Record<string, unknown>>('agent')) {
+      await manager.register('agent', item.name as string, item, { notify: false, skipSourceLoader: true });
+    }
+    expect(vi.mocked(driver.update).mock.calls).toEqual([['sys_metadata', 'legacy', { package_id: ALPHA }]]);
+    const read = await manager.listPackageBindings('agent');
+    expect(read.degraded).toBe(false);
+    expect(read.items.map((entry) => [entry.name, entry.packageId, entry.source])).toEqual([['helper', ALPHA, 'row']]);
+    // A later plural read of the row agrees with the column it now holds.
+    expect((await new DatabaseLoader({ driver }).loadRowBindings('agent')).map((entry) => [entry.name, entry.rowPackageId])).toEqual([['helper', ALPHA]]);
+  });
+
+  /**
+   * [#37130 N2] A loader of stored rows (`datasource:`) that cannot read its
+   * rows' package column leaves every item it holds answering its
+   * registration's binding: the answer is `degraded`, naming the loader, so a
+   * consumer that gates on the binding treats it as unknown. BEFORE: the same
+   * items, `degraded: false`. No such loader ships in this repository.
+   */
+  it('[#37130 N2] listPackageBindings over a `datasource:` loader without loadRowBindings is degraded, naming the loader (BEFORE: an undegraded `registration` answer)', async () => {
+    const rowsWithoutColumns: MetadataLoader = {
+      contract: { name: 'columnless', protocol: 'datasource:', capabilities: { read: true, write: false, watch: false, list: true } },
+      async load(_type: string, name: string) { return name === 'pkg_skill' ? { data: { name, label: 'a', instructions: 'a', _packageId: ALPHA }, source: 'columnless', format: 'json', loadTime: 0 } : { data: null }; },
+      async loadMany<T>() { return [{ name: 'pkg_skill', label: 'a', instructions: 'a', _packageId: ALPHA }] as T[]; },
+      async list() { return ['pkg_skill']; },
+      async exists(_type: string, name: string) { return name === 'pkg_skill'; },
+      async stat() { return null; },
+    } as unknown as MetadataLoader;
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerLoader(rowsWithoutColumns);
+    const read = await manager.listPackageBindings('skill');
+    expect(read.degraded).toBe(true);
+    expect(read.errors.some((error) => error.startsWith('columnless:') && error.includes('loadRowBindings'))).toBe(true);
+    expect(read.items.map((entry) => [entry.name, entry.packageId, entry.source])).toEqual([['pkg_skill', ALPHA, 'registration']]);
+    // CONTROL: the same item from a loader of no rows answers `registration` undegraded.
+    const memory = new MetadataManager({ formats: ['json'], loaders: [new MemoryLoader()] });
+    await memory.register('skill', 'pkg_skill', { name: 'pkg_skill', label: 'a', instructions: 'a', _packageId: ALPHA }, { notify: false });
+    expect((await memory.listPackageBindings('skill')).degraded).toBe(false);
+  });
+
+  /**
+   * [#37130 N7] Two nodes over the same rows, on a first boot: both read the
+   * legacy agent row with its column empty, and the first node's priming pass
+   * binds the column. The second node's pass finds the row already bound and
+   * writes nothing; its primed copy answers the column as the row now holds
+   * it. BEFORE: `null`, the column as it read it, until that node restarted
+   * (fail-closed: a gating consumer saw no binding).
+   */
+  it('[#37130 N7] two nodes priming the same legacy row: the node that finds it already bound answers the bound package, `row` (BEFORE: null until restart)', async () => {
+    await driver.create('sys_metadata', {
+      id: 'legacy', type: 'agent', name: 'helper', state: 'active', version: 1, checksum: 'legacy', source: 'database',
+      package_id: null, metadata: JSON.stringify({ name: 'helper', label: 'Helper', packageId: ALPHA }),
+    });
+    const winner = new MetadataManager({ formats: ['json'], loaders: [new DatabaseLoader({ driver })] });
+    const loser = new MetadataManager({ formats: ['json'], loaders: [new DatabaseLoader({ driver })] });
+    // Both read before either binds.
+    const winnerItems = await winner.loadMany<Record<string, unknown>>('agent');
+    const loserItems = await loser.loadMany<Record<string, unknown>>('agent');
+    for (const item of winnerItems) await winner.register('agent', item.name as string, item, { notify: false, skipSourceLoader: true });
+    for (const item of loserItems) await loser.register('agent', item.name as string, item, { notify: false, skipSourceLoader: true });
+    expect(vi.mocked(driver.update).mock.calls).toEqual([['sys_metadata', 'legacy', { package_id: ALPHA }]]);
+    for (const node of [winner, loser]) {
+      const read = await node.listPackageBindings('agent');
+      expect(read.degraded).toBe(false);
+      expect(read.items.map((entry) => [entry.name, entry.packageId, entry.source])).toEqual([['helper', ALPHA, 'row']]);
+    }
+  });
+
+  /**
+   * A row whose stored body is a JSON primitive is not an object the loader can
+   * record a column against. The plural read serves the other rows as before
+   * the column was recorded. BEFORE: recording it threw, and the whole type's
+   * read failed.
+   */
+  it('a row whose body is a JSON primitive does not fail the plural read: the other row is still served', async () => {
+    await driver.create('sys_metadata', {
+      id: 'skill_primitive', type: 'skill', name: 'primitive', state: 'active', version: 1, checksum: 'skill_primitive', source: 'database',
+      package_id: null, metadata: '42',
+    });
+    await seed('normal', ALPHA, null);
+    const loader = new DatabaseLoader({ driver });
+    expect(await loader.loadMany<Record<string, unknown>>('skill')).toContainEqual({ name: 'normal', label: 'normal', instructions: 'normal' });
+    const manager = new MetadataManager({ formats: ['json'], loaders: [new DatabaseLoader({ driver })] });
+    expect(await manager.list('skill')).toContainEqual({ name: 'normal', label: 'normal', instructions: 'normal' });
+  });
+});

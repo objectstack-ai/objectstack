@@ -798,6 +798,30 @@ const beta = defineStack({
 /** The artifact as `os build` writes it and a boot reads it back: composed, then through JSON. */
 const jsonLoaded = (stacks: unknown[]) =>
     JSON.parse(JSON.stringify(composeStacks(stacks as never[], { manifest: 'preserve' }))) as Record<string, any>;
+/** The stand-in suffix {@link handBuilt} gives each input's job names, and takes back off. */
+const STAND_IN = '__hand_built_';
+/**
+ * The artifact a build emitted before composition judged a job name enabled in two holders — the binder's
+ * backstop case, an artifact `composeStacks` did not build. `composeStacks` now refuses that pair, so it is
+ * composed with each input's job names made unique and the names restored in the JSON a boot reads: the
+ * layout {@link jsonLoaded} emits (the body copies at the top level, the residual's own jobs beside them),
+ * name for name. Pinned equal to {@link jsonLoaded} on a composition that still composes, below.
+ */
+const handBuilt = (stacks: unknown[]) => {
+    const tagged = stacks.map((stack, i) => {
+        const plain = JSON.parse(JSON.stringify(stack)) as { jobs?: Array<{ name: string }> };
+        if (!Array.isArray(plain.jobs)) return stack;
+        return defineStack({ ...plain, jobs: plain.jobs.map((job) => ({ ...job, name: `${job.name}${STAND_IN}${i}` })) } as never);
+    });
+    const bundle = jsonLoaded(tagged);
+    const restore = (jobs: unknown) => {
+        if (!Array.isArray(jobs)) return;
+        for (const job of jobs as Array<{ name: string }>) job.name = job.name.replace(new RegExp(`${STAND_IN}\\d+$`), '');
+    };
+    restore(bundle.jobs);
+    for (const entry of (bundle.packages ?? []) as Array<{ manifest?: { jobs?: unknown } }>) restore(entry.manifest?.jobs);
+    return bundle;
+};
 
 /**
  * Schedule `bundle` as `appId` on a real job service (`CronJobAdapter` unless `makeAdapter` says otherwise), then fire every job it holds:
@@ -845,12 +869,21 @@ async function scheduleAndRun(bundle: unknown, appId: string, makeAdapter: () =>
  * was pulled as the body before. [#32411] With both jobs enabled the binder now
  * refuses the name at bind and schedules neither; a run meets the attribution
  * refusal when the name's twin is disabled (the fail-closed pin below).
+ * Composition now refuses an ENABLED pair, so an enabled pair here is an artifact it did not build
+ * ({@link handBuilt}): the binder is the backstop for it.
  */
 describe('[#32355] a job name a package body declares and the residual carries is attributed to neither', () => {
     withPosture(undefined);
 
+    it('`handBuilt` is the layout a build emits: on compositions that still compose, it equals `jsonLoaded`', () => {
+        const withResidual = [alpha([pullJob('sync', 'alpha_map'), pullJob('alpha_only', 'alpha_map')]), host([pullJob('host_sync', 'host_map')]), beta];
+        expect(handBuilt(withResidual)).toEqual(jsonLoaded(withResidual));
+        const bodiesOnly = [alpha([pullJob('sync', 'alpha_map')]), beta];
+        expect(handBuilt(bodiesOnly)).toEqual(jsonLoaded(bodiesOnly));
+    });
+
     it('the artifact a build emits carries the pair: the body job copied to the top level, and the residual\'s own job of the same name', () => {
-        const bundle = jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), beta]);
+        const bundle = handBuilt([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), beta]);
         expect(bundle.manifest.id).toBe('com.example.beta');
         expect(bundle.jobs.map((j: any) => [j.name, j.pull.mapping])).toEqual([['sync', 'alpha_map'], ['sync', 'host_map']]);
         expect(bundle.packages.map((p: any) => [p.manifest.id, (p.manifest.jobs ?? []).map((j: any) => j.name)]))
@@ -858,7 +891,7 @@ describe('[#32355] a job name a package body declares and the residual carries i
     });
 
     it('JSON-loaded, on a real job service: the name is attributed to neither, and both enabled jobs are refused at bind — never pulled as the body', async () => {
-        const bundle = jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), beta]);
+        const bundle = handBuilt([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), beta]);
         const { out, answers, pulls } = await scheduleAndRun(bundle, 'com.example.beta');
         // [#32411] Neither is scheduled: one key would have held only the later (the residual's, `host_map`).
         expect(out.pulls).toEqual([]);
@@ -889,7 +922,7 @@ describe('[#32355] a job name a package body declares and the residual carries i
 
     it('control: the residual\'s owner IS the one declaring body — one holder, that body; both enabled, refused at bind', async () => {
         // `alpha` last: the artifact's id is alpha's, so the residual runs as alpha, the body that declares `sync`.
-        const bundle = jsonLoaded([host([pullJob('sync', 'host_map')]), alpha([pullJob('sync', 'alpha_map')])]);
+        const bundle = handBuilt([host([pullJob('sync', 'host_map')]), alpha([pullJob('sync', 'alpha_map')])]);
         expect(bundle.manifest.id).toBe('com.example.alpha');
         // Attribution: one holder, alpha, for every job of the name — as before.
         const of = jobDeclaringPackages(bundle, 'com.example.alpha');
@@ -902,7 +935,7 @@ describe('[#32355] a job name a package body declares and the residual carries i
     });
 
     it('controls: a residual job with a name of its own binds as today, and a body job with no residual twin binds to its body', async () => {
-        const bundle = jsonLoaded([
+        const bundle = handBuilt([
             alpha([pullJob('sync', 'alpha_map'), pullJob('alpha_only', 'alpha_map')]),
             host([pullJob('host_sync', 'host_map'), pullJob('sync', 'host_map')]),
             beta,
@@ -974,9 +1007,9 @@ describe('[#32411] two enabled jobs of one name in one artifact are refused at b
     // or alpha's (the residual runs as alpha, the one body declaring `sync`).
     const ARRANGEMENTS = [
         ['the residual runs as a package that does not declare the name', (jobs: { body: unknown[]; residual: unknown[] }) =>
-            ({ bundle: jsonLoaded([alpha(jobs.body), host(jobs.residual), beta]), appId: 'com.example.beta' })],
+            ({ bundle: handBuilt([alpha(jobs.body), host(jobs.residual), beta]), appId: 'com.example.beta' })],
         ['the residual runs as the one body that declares the name', (jobs: { body: unknown[]; residual: unknown[] }) =>
-            ({ bundle: jsonLoaded([host(jobs.residual), alpha(jobs.body)]), appId: 'com.example.alpha' })],
+            ({ bundle: handBuilt([host(jobs.residual), alpha(jobs.body)]), appId: 'com.example.alpha' })],
     ] as const;
 
     /** The `error` calls that carry the coded refusal for `name`: the message, and the error's code and status. */
@@ -1024,7 +1057,7 @@ describe('[#32411] two enabled jobs of one name in one artifact are refused at b
         const tick = (note: string) => ({ name: 'tick', schedule: INTERVAL, body: { language: 'js', capabilities: [], source: `return; // ${note}` } });
         const gamma = defineStack({ manifest: { id: 'com.example.gamma', name: 'Gamma', version: '0.1.0', type: 'module' }, jobs: [tick('gamma')] } as never);
         const delta = defineStack({ manifest: { id: 'com.example.delta', name: 'Delta', version: '0.1.0', type: 'app' }, jobs: [tick('delta')] } as never);
-        const bundle = jsonLoaded([gamma, delta]);
+        const bundle = handBuilt([gamma, delta]);
         const { out, answers, logger } = await scheduleAndRun(bundle, 'com.example.delta', () => new IntervalJobAdapter());
         expect(out.bodies).toEqual([]);
         expect(out.refused).toEqual(['tick', 'tick']);
@@ -1108,7 +1141,7 @@ describe('[#32412] the residual-twin job refusal names the residual as a holder 
         mappings: [{ ...mappingOf('beta_map', 'beta_api'), targetObject: 'beta_record' }],
         jobs,
     } as never);
-    const twin = () => jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), beta]);
+    const twin = () => handBuilt([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), beta]);
 
     it('no body carries the artifact\'s id: two candidates — the declaring body and the residual — never one', () => {
         const bundle = twin();
@@ -1133,7 +1166,7 @@ describe('[#32412] the residual-twin job refusal names the residual as a holder 
     });
 
     it('the residual\'s owner is one of several declaring bodies: every body, then the residual', () => {
-        const bundle = jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), betaWith([pullJob('sync', 'beta_map')])]);
+        const bundle = handBuilt([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), betaWith([pullJob('sync', 'beta_map')])]);
         expect(bundle.manifest.id).toBe('com.example.beta');
         const of = jobDeclaringPackages(bundle, 'com.example.beta');
         for (const job of bundle.jobs) {
@@ -1175,9 +1208,9 @@ describe('[#32412] the residual-twin job refusal names the residual as a holder 
     });
 
     it('controls: the one holder (the residual\'s owner IS the one declaring body) and two bodies with no residual twin keep their answers', () => {
-        const owned = jsonLoaded([host([pullJob('sync', 'host_map')]), alpha([pullJob('sync', 'alpha_map')])]);
+        const owned = handBuilt([host([pullJob('sync', 'host_map')]), alpha([pullJob('sync', 'alpha_map')])]);
         for (const job of owned.jobs) expect(jobDeclaringPackages(owned, 'com.example.alpha')(job)).toBe('com.example.alpha');
-        const twoBodies = jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), betaWith([pullJob('sync', 'beta_map')])]);
+        const twoBodies = handBuilt([alpha([pullJob('sync', 'alpha_map')]), betaWith([pullJob('sync', 'beta_map')])]);
         // No residual job: met by name, the #32071 refusal names the two bodies and nothing else.
         expect((jobDeclaringPackages(twoBodies, 'com.example.beta')(pullJob('sync', 'alpha_map')) as { candidates?: unknown }).candidates)
             .toEqual([ALPHA, { kind: 'package', packageId: 'com.example.beta' }]);
@@ -1200,9 +1233,9 @@ describe('[#32572] collectJobNameCollisions answers the refusals the binder refu
 
     const ARRANGEMENTS = [
         ['a package body and the residual (the residual runs as no declaring body)',
-            () => ({ bundle: jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), beta]), appId: 'com.example.beta' })],
+            () => ({ bundle: handBuilt([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), beta]), appId: 'com.example.beta' })],
         ['a package body and the residual (the residual runs as that body)',
-            () => ({ bundle: jsonLoaded([host([pullJob('sync', 'host_map')]), alpha([pullJob('sync', 'alpha_map')])]), appId: 'com.example.alpha' })],
+            () => ({ bundle: handBuilt([host([pullJob('sync', 'host_map')]), alpha([pullJob('sync', 'alpha_map')])]), appId: 'com.example.alpha' })],
         ['a single-package artifact listing two names twice',
             () => ({ bundle: { id: APP_ID, version: '0.1.0', type: 'app', mappings: [MAPPING], jobs: [
                 { ...PULL_JOB, name: 'twice' }, { ...PULL_JOB, name: 'again' }, { ...PULL_JOB, name: 'twice' }, { ...PULL_JOB, name: 'again' },

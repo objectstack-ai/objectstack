@@ -292,7 +292,8 @@
 // agent performing the ablation, at one specific moment between "mutate" and
 // "run the suite". CI has no ablation in flight and nothing to assert. It is
 // dev-side agent tooling, invoked from the ablation procedure in
-// `.claude/agents/os-dev.md`, `.claude/skills/dogfood-verification/SKILL.md`
+// `.claude/skills/pm-dispatch/references/dev-ablation.md` (reached from
+// `.claude/agents/os-dev.md`), `.claude/skills/dogfood-verification/SKILL.md`
 // and `packages/qa/dogfood/README.md` step 4 -- keep those three and this
 // file's usage line in step. (Those three state the procedure scoped to the
 // dogfood suite; the true condition is the resolution one stated at the top.)

@@ -25,6 +25,12 @@
     - a list cut at its `limit` stated as a cut (21);
     - the cap on an outline's entries, in [D3](#d3), "The body" (22). This one is not about `related`. It is carried from the seat's review of PR objectstack#37222 (card objectstack#37178), nit N5; that PR has since merged.
   - Nothing else changes.
+- **Amended**: 2026-11-25, a third time, by the maintainer's ruling on card [objectstack#37144](https://github.com/objectstack-ai/objectstack/issues/37144), row 10's placeholder. The maintainer picked the option 「生成时核·D9加context·开主」 on that card's decision thread at 2026-11-25T23:18Z, after the four-axis analysis in its comment 7177223845; the ruling is recorded in its comment 7177410380, and this amendment is card [objectstack#37363](https://github.com/objectstack-ai/objectstack/issues/37363). Its readings of the tree were taken on `main` at `98bda0ac`. It records the following, all in [D9](#d9):
+  - **A citation gains an optional `context`**: the pack the record was read through, spelt as the tool's `context` argument takes it (`packages/spec/src/ai/record-context-tools.zod.ts#GetRecordContextInputSchema`). A citation without it on an object with several packs is not verified; on an object with one pack it verifies as before.
+  - **A citation is verified once, when the answer is produced**, by the platform as the asking user, against the data member of `get_record_context`'s answer (`#RecordContextDataSchema`). One whose `quote` is not found is dropped before the answer is shown; the verified list is persisted with the message, and no surface re-verifies on display. This replaces D9's sentence that left "whether a surface verifies before it renders" to row 10.
+  - **A quote from a related row names the root record.** `object` and `id` are the pack's root; the quote is matched across the whole data member, related-list cells included; the surface opens the root record; `anchor` keeps its one meaning, a heading of the root record's body.
+  - The TL;DR's point 9 and [Not decided here](#not-decided-here) say the same. The ruling's words are the three answers above; the text adds one point of its own, point 23 of [Points that go past the card's words](#points-that-go-past-the-cards-words).
+  - Nothing else changes.
 - **Decided by**: the maintainer, 2026-11-24, verbatim and untranslated, as epic [objectstack#36996](https://github.com/objectstack-ai/objectstack/issues/36996) records them: 「先立专题 ① 记录范围 AI 问询 ；⑤ 应用技能进入应用内 AI ，M0 那几项知识服务缺陷 也立专题，目前开发的策略是按专题派」 and 「需要拍板的事项 都同意」. The six rulings the epic sets over every child are quoted in [Provenance](#provenance); ⛔ none of them is re-opened here.
 - **Card**: [objectstack#36997](https://github.com/objectstack-ai/objectstack/issues/36997). It lists ten items; D1–D9 decide items 1–9 in the card's order and [Not decided here](#not-decided-here) carries item 10.
 - **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (its ai row: a behavioural contract takes no environment overlay), [ADR-0011](./0011-actions-as-ai-tools.md) (an action reaches AI only through its `ai` exposure block), [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce or remove), [ADR-0088](./0088-metadata-kind-admission-and-retirement.md) (the kind admission test), [ADR-0090](./0090-permission-model-v2-concept-convergence.md) D10 (the agent ceiling over reads), [ADR-0106](./0106-metadata-plane-fls-object-schema-masking.md) (the caller's served schema), [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) (the error envelope and its catalogue), [ADR-0149](./0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md) D2 and M1 (one definition, one executor, every transport; guidance sentences belong to the executor), [ADR-0159](./0159-forms-are-their-own-metadata-type-public-forms-are-form-items-view-is-lists-only.md) (the latest kind admission; the form of D1).
@@ -67,7 +73,7 @@
 6. **`ToolExecutionContext.focus`** ([D6](#d6)) is written as objectstack#36999 fixes it.
 7. **`ask_ai` is an action type** ([D7](#d7)) that focuses the assistant on the record. It has no server dispatch, is never an AI tool, and is absent where there is no in-app assistant.
 8. **The skill key `context`** ([D8](#d8)) names a pack, and a skill that declares it binds `get_record_context`. Its reader in this repository is the MCP skill prompt, which gains a record argument.
-9. **A citation** ([D9](#d9)) is `{ object, id, anchor?, quote }`. Shape only; no schema lands before its reader.
+9. **A citation** ([D9](#d9)) is `{ object, id, context?, anchor?, quote }`, verified once when the answer is produced, as the asking user, and never re-verified on display (third amendment, 2026-11-25). No schema lands before its reader.
 10. **Not decided**: field egress, and the rest of [Not decided here](#not-decided-here).
 
 ## Context
@@ -320,15 +326,20 @@ A `context` that names no pack is an authoring error, reported where skills are 
 
 ### D9 — The citation shape {#d9}
 
-An answer may carry citations. One citation is `{ object: string, id: string, anchor?: string, quote: string }`:
+An answer may carry citations. One citation is `{ object: string, id: string, context?: string, anchor?: string, quote: string }` (`context` joined by the third amendment, 2026-11-25):
 
-- `object`, `id`: the record the statement rests on.
-- `anchor`: a place in that record's body — an anchor the body outline issued (D3). Omitted when the citation is to the record as a whole or to a field.
+- `object`, `id`: the record the statement rests on — the root record of the pack the statement was read through. A quote taken from a related row still names the root ("A quote from a related row", below).
+- `context`: the pack the record was read through, by name, spelt as `get_record_context`'s `context` argument takes it (`packages/spec/src/ai/record-context-tools.zod.ts#GetRecordContextInputSchema`; [D4](#d4), "Pack selection"). Omitted when the object has one pack, as the argument may be. On an object with several packs a citation without `context` is not verified: the verifier's call meets [D4](#d4)'s several-packs refusal, and the refusal stands — no pack is picked for the citation.
+- `anchor`: a place in the root record's body — an anchor the body outline issued ([D3](#d3)). Omitted when the citation is to the record as a whole or to a field. This is its one meaning; a quote from a related row does not change it.
 - `quote`: the passage relied on, verbatim from text the tool returned.
 
-It is the record sibling of what dataset answers carry — `sourceLine` on `packages/spec/src/ai/dataset-tools.zod.ts#QueryDatasetOutputSchema` and `#DatasetProvenanceSchema` — with one difference that shapes it. Those are composed by the tool and never typed by the model. A citation is written by the model, so it is a claim. The shape lets a reader check the claim without a model: `quote` must be found verbatim in what `get_record_context` returns for `object`, `id` and `anchor` to the reading user.
+It is the record sibling of what dataset answers carry — `sourceLine` on `packages/spec/src/ai/dataset-tools.zod.ts#QueryDatasetOutputSchema` and `#DatasetProvenanceSchema` — with one difference that shapes it. Those are composed by the tool and never typed by the model. A citation is written by the model, so it is a claim. The shape lets a reader check the claim without a model: `quote` must be found verbatim in what `get_record_context` returns for `object`, `id`, `context` and `anchor` to the asking user.
 
-Shape only. No schema lands with this record or with row 5: the shape enters spec with its first reader (row 10, ADR-0049). Which member of an answer carries the list, whether a surface verifies before it renders, and how a citation opens the record are row 10's.
+**When a citation is verified (third amendment, 2026-11-25).** Once, when the answer is produced, by the platform as the asking user. The platform calls `get_record_context` with the citation's `object`, `id`, `context` and `anchor`, as that user, and looks for `quote` verbatim in the data member of the answer (`packages/spec/src/ai/record-context-tools.zod.ts#RecordContextDataSchema`). A citation whose quote is not found is dropped before the answer is shown. A call the tool refuses answers no data member, so its citation is dropped the same way: a `context` no pack has, several packs and no `context`, an `anchor` that does not resolve (point 23). The citations that survive are persisted with the message as its verified list, and a surface never re-verifies on display: what it draws later is what was verified when the answer was produced, no more and no fewer.
+
+**A quote from a related row (third amendment, 2026-11-25).** A pack carries related-list cells ([D3](#d3)), and a model may rest a statement on one. The citation names the pack's root record in `object` and `id`, and no related row: the quote is matched across the whole data member of that record's answer, related-list cells included, and the surface opens the root record. `anchor` keeps its one meaning, a heading of the root record's body.
+
+No schema lands with this record or with row 5: the shape enters spec with its first reader (row 10, ADR-0049). Which member of an answer carries the list, which strings of the data member the quote is matched against and how a value that is not text is compared, and how a surface opens the root record at `anchor`, are row 10's.
 
 ## Not decided here
 
@@ -336,7 +347,7 @@ Shape only. No schema lands with this record or with row 5: the shape enters spe
 - Vector retrieval and the knowledge platform (objectstack#37000, objectstack#37001), and with them the fallback from a long body to knowledge search.
 - More than one focused record; a pack over more than one root record.
 - How the in-app assistant keeps the focus on a conversation and pre-reads the pack (cloud, row 9), beyond that the pre-read is a `get_record_context` tool call.
-- Citation rendering and verification (row 10).
+- Citation rendering (row 10): which member of an answer carries the list, and how a surface opens the root record at `anchor`. Verification is decided in [D9](#d9) (third amendment, 2026-11-25).
 - Audit, pattern masking and AI-identity narrowing (cloud ADR-0119 D3; cloud#4969, cloud#4970).
 - Adoption of the data wrapper by any tool other than `get_record_context`.
 
@@ -369,6 +380,10 @@ Each is this record's settlement, taken from the tree's precedent. Points 1, 2 a
 20. **A `where` or `orderBy` field the published definition lacks leaves the section out** (D1, D3). It is an author defect, reported at save and by `os validate`, and the answer states nothing. The alternative not taken is to run the filter without that condition, which would carry rows the author excluded.
 21. **A list cut at its own `limit` is a stated cut** (D3), like a list cut at the cap, so the model knows that more rows matched than it was given.
 22. **The cap on an outline's entries is named** (D3, "The body"). This point is not about `related` and is not from the maintainer's word. The seat's review of PR objectstack#37222 (card objectstack#37178), nit N5, asked this record to name that cap as a further constant of the service and a further stated cut. The record sets no number.
+
+**The third amendment's point (2026-11-25).** The maintainer's ruling for the third amendment is the three answers recorded in comment 7177410380 of card objectstack#37144: a citation is verified once when the answer is produced, as the asking user, and never re-verified on display; the shape gains an optional `context`; a quote from a related row names the root record. The text goes past them in one place.
+
+23. **A refused verifying call drops the citation** (D9). The ruling says a citation without `context` on an object with several packs is not verified, because the tool's refusal stands. The text reads every refusal the same way: the verifier's call answers no data member, so the quote is not found and the citation is dropped — a `context` no pack has and an `anchor` that does not resolve, as much as the several-packs case. The alternative not taken is a second call without the offending argument, which would pick a pack or a body the model did not cite.
 
 ## Implementation split (after acceptance)
 

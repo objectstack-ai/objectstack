@@ -13,7 +13,7 @@
 // side-channel, because all three call this function.
 
 import { describe, it, expect } from 'vitest';
-import { declaredUserMessage, packageScopedRefusalCandidates, resolveThrownHttpError } from './thrown-http-error.js';
+import { declaredRefusalLines, declaredUserMessage, packageScopedRefusalCandidates, resolveThrownHttpError } from './thrown-http-error.js';
 import { thrownAnswerOf } from './actions-door-answer.js';
 import { mapDataError } from './data-error-classification.js';
 
@@ -202,5 +202,51 @@ describe('[#32250] resolveThrownHttpError carries a package-scoped refusal\'s ca
     it('CONTROL: a refusal\'s candidates sit beside the context the resolver already carried', () => {
         const thrown = Object.assign(shaped(), { issues: [{ path: ['x'], message: 'y' }] });
         expect(resolveThrownHttpError(thrown).details).toEqual({ issues: [{ path: ['x'], message: 'y' }], candidates: CANDIDATES });
+    });
+});
+
+describe('[#36877] declaredRefusalLines — a declared refusal thrown as a reasons list', () => {
+    const LINES = [
+        { reason: 'on_report', message: '费用 Taxi 12 已在报销单上。' },
+        { reason: 'approved', message: '费用 Hotel 7 已审批。' },
+    ];
+    const refusal = (extra: Record<string, unknown> = {}) => Object.assign(new Error('x'), {
+        code: 'SUBMIT_REFUSED',
+        status: 409,
+        userMessage: `${LINES[0]!.message}\n${LINES[1]!.message}\n未提交任何费用。`,
+        refusals: LINES,
+        ...extra,
+    });
+
+    it('reads the lines off a refusal that carries them beside its userMessage', () => {
+        expect(declaredRefusalLines(refusal())).toEqual(LINES);
+    });
+
+    it.each([
+        ['no userMessage', { userMessage: undefined }],
+        ['an empty list', { refusals: [] }],
+        ['not a list', { refusals: { reason: 'a', message: 'b' } }],
+        ['an element missing its message', { refusals: [{ reason: 'a' }] }],
+        ['an element whose reason is not a string', { refusals: [{ reason: 1, message: 'b' }] }],
+    ])('answers no list for %s', (_name, extra) => {
+        expect(declaredRefusalLines(refusal(extra))).toBeUndefined();
+    });
+
+    it('copies only reason and message', () => {
+        const [first] = declaredRefusalLines(refusal({ refusals: [{ reason: 'a', message: 'b', secret: 'host' }] }))!;
+        expect(first).toEqual({ reason: 'a', message: 'b' });
+    });
+
+    it('every door carries it as details.refusals: the dispatcher composition and the /data classification', () => {
+        expect(resolveThrownHttpError(refusal(), 500).details).toEqual({ refusals: LINES });
+        expect(thrownAnswerOf(refusal(), 500).details).toEqual({ refusals: LINES });
+        const data = mapDataError(refusal(), 'expense');
+        expect(data.status).toBe(409);
+        expect(data.body.details).toEqual({ refusals: LINES });
+    });
+
+    it('CONTROL: a refusal with no list carries no details on either door', () => {
+        expect(resolveThrownHttpError(refusal({ refusals: undefined }), 500).details).toBeUndefined();
+        expect(mapDataError(refusal({ refusals: undefined }), 'expense').body.details).toBeUndefined();
     });
 });

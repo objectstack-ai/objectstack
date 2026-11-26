@@ -1671,7 +1671,7 @@ function refuseMalformedLookupFilterEntry(
  * ⛔ Runtime text — no tracker numbers (`check:doc-authoring`).
  */
 const INLINE_EDIT_BOOLEAN_RETIRED =
-  '`field.inlineEdit: true` and `field.inlineEdit: false` were removed in @objectstack/spec 18.7.0 '
+  '`field.inlineEdit: true` and `field.inlineEdit: false` were removed in @objectstack/spec 19.0.0 '
   + '(ADR-0049 enforce-or-remove) — neither boolean had an effect: a field group of the parent '
   + '(`fieldGroups[].relatedList`) decides whether the parent\'s form inlines this child, and both '
   + '`true` and `false` read as an absent key, the form factor picked from the child\'s shape. '

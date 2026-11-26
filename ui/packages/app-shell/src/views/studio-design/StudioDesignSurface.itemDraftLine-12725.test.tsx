@@ -110,6 +110,7 @@ import '@objectstack/lint';
 // `lazy()` detail entry: its first load is paid here too, not in a test's clock.
 import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { emitMetadataRefresh } from '../../assistant/assistantBus';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
@@ -168,7 +169,7 @@ async function openTask() {
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/metadata/object/acme_task`]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -250,7 +251,7 @@ describe('the item header\'s draft line after the copilot\'s undo, the object op
       <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/metadata/object/acme_task`]}>
         <Routes>
           <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-          <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+          <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
         </Routes>
       </MemoryRouter>,
     );

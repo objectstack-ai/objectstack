@@ -77,6 +77,7 @@ import { t, useMetadataLocale } from './i18n';
 import { newAppStep } from '../studio-design/newAppDoor';
 import { studioHomePath } from '../studio-design/studioAddress';
 import { StudioDesignSurface } from '../studio-design/StudioDesignSurface';
+import { StudioPillarRedirect } from '../studio-design/StudioPillarRedirect';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -201,7 +202,7 @@ function renderDoor() {
       <Routes>
         <Route path="/host" element={<NewAppHost />} />
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
         <Route path="/apps/*" element={<RunningApp />} />
       </Routes>
     </MemoryRouter>,
@@ -324,7 +325,7 @@ function renderCreatePackage() {
       <Routes>
         <Route path="/host" element={<CreatePackageHost />} />
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
         <Route path="/apps/*" element={<RunningApp />} />
       </Routes>
     </MemoryRouter>,

@@ -4,7 +4,7 @@
 
 ## 分不分区,动态定
 
-- 区是席内的文件簇租约;`area:*` 是卡的产品专题标签,由席的座位贴接卡行点名;一个 `area:*` 可切成几区,也可并入现有区。
+- 区是席内的文件簇租约,只防两个 dev 同时改同一批文件,⛔ 不定席取哪张卡:取卡照座位贴点名的专题(`area:*`、epic)与级。一个 `area:*` 可切成几区,也可并入现有区。
 - 坐席、每次交接或换班时席位重判三件:分不分、分几区、边界;⛔ 不沿用上一班的表。
 - 分区阈值(经验):可认领卡 ≥15 张且跨 ≥3 个互不相干的模块簇;不足即照常按卡认领。
 - 边界按卡触及的文件与包聚类,让两区极少改同一函数;⛔ 不按卡标题或词汇分。
@@ -31,7 +31,7 @@
 - 区会话署本席签名,签名第三位与 `Session:` 皆填区会话 ID;开轮互斥读法照 `seat-lifecycle.md`。
 - 认领前重读标签、assignee 与末条评论:他人 assignee、他人 `Claim:` 或他区 `Area:` 行 ⇒ 不碰。
 - 认领前三查必过,各写认领评论一行;任一不过或遇大卡 ⇒ 不认领、不派 dev,当即交席位:
-  - `Pre-claim lane:` 修复所改路径属哪条车道,点名依据路径(碰他道路径照下文留道行)。
+  - `Pre-claim lane:` 修复所改路径的 `domain:*`(只记文件归属),点名依据路径;交出只照留道行闭集。
   - `Pre-claim deps:` 卡点名的 `Blocked-by:`、「after #N」逐个已合;热文件照下文重叠检查。
   - `Prior rulings read:` 照 `decision-analysis.md`;grep `docs/adr/**`、链卡(⛔ 行在内)与反向 pin 测试;记录冲突,或路线改门的可见行为超出本卡裁决,同作不过。
 - 重叠检查:认领前与每次推前跑 `scripts/pm/overlap-check.mjs`;exit 1 排所列 PR 后,3 补前提重跑。
@@ -44,7 +44,7 @@
 - 每区 dev 位空即补;逐位上张 PR 入合并队列才领下张,此前跑修复轮;Tier H 或待裁 PR 让位。
 - 席每轮逐区查,核认领 Container & model 行;取卡照点名范围次序,p0/p1 插队;p3 留收口或搭同文件 PR 成批(每 PR ≤5 卡)。
 - 认领必答:同区卡过 `execution-duties.md` 折叠五门即默认合一 PR,否则串行;额度墙亦照该文。
-- 留道:修法已清的卡碰 `ui/**`、`packages/spec/**` 仍在本道开发、本席 L1/L2;他道席在线只通知;本条先于条款②行(`execution-duties.md`)、移道的 `lanes/spec.md` 与 `--tier` 提示;交出闭集:他道在线席已认领、cloud 路由、披露纪律卡、ADR。
+- 留道:域席已退役,修法已清的卡碰哪个域的路径都在本席开发、本席 L1/L2,先于 `lanes/spec.md` 的移道与 `--tier` 提示;交出闭集:他席已认领、cloud 路由、披露纪律卡、ADR。
 - 送审:≤50 行、只改文本或测试、`Clause-②: no` 且无他契约面 PR 由区照 `l1-review-checklist.md` 自审落地,ACCEPT 点名自审;余者由 L1 线程 ACCEPT 读,先于 `contract-review.md` 不起第二个 agent。
 - 契约记录只欠 `contract-review.md` 四面,head 移动照其例外;同 patch-id 干净合 main 只保 ACCEPT。
 - 落地:区先读 `check-governed-merges.mjs --pr N`;非受管 PR 照 `landing-operations.md` 自落,受拒报原文。

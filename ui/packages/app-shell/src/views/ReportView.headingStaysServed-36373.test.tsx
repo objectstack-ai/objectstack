@@ -153,9 +153,10 @@ function mountReport() {
 /** A client whose served reads translate and whose layered read is the stored row. */
 function makeClient({ draft }: { draft: typeof SOURCE | null }) {
   return {
-    // The served draft read (`RuntimeDraftBar`): translated, like every served read.
+    // The served draft read: translated, like every served read.
     get: vi.fn(async () => (draft ? served(draft) : null)),
-    // The served draft read the editor hands `authoredBuffer` (objectstack#35054): the envelope, translated.
+    // The served draft read the editor hands `authoredBuffer` (objectstack#35054), and the draft bar's
+    // (`getDraft(type, name)`, objectstack#36350: the envelope keeps the version its Publish pins): translated.
     getDraft: vi.fn(async () => (draft ? { type: 'report', name: draft.name, item: served(draft) } : null)),
     layered: vi.fn(async () => ({ code: null, overlay: null, overlayScope: null, effective: SOURCE, draft })),
     save: vi.fn(async () => ({})),
@@ -167,7 +168,8 @@ function makeClient({ draft }: { draft: typeof SOURCE | null }) {
 async function openEditor() {
   fireEvent.click(await screen.findByTestId('report-edit-button'));
   await screen.findByTestId('report-config-panel');
-  await waitFor(() => expect(client.value.get).toHaveBeenCalled());
+  // The draft bar's read (`getDraft(type, name)`; the editor's names its package).
+  await waitFor(() => expect(client.value.getDraft).toHaveBeenCalledWith('report', 'task_overview'));
   await act(async () => {});
 }
 

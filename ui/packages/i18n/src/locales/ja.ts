@@ -4871,6 +4871,7 @@ const ja = {
   },
   chatbotQuota: {
     title: "アップグレードが必要です",
+    limitTitle: "AI の利用上限に達しました",
     fallbackMessage: "AI の利用上限に達しました。",
     buyCredits: "クレジットパックを購入",
     upgradePlan: "プランをアップグレード",

@@ -67,7 +67,7 @@ import { boundObjectOf } from '@objectstack/metadata/stored-item-package';
 // [ruling 6677709817 (c)] The snapshot body both history writers store: the
 // written body without what the type's redactor marks not carried forward.
 import { historySnapshotBody } from '@objectstack/metadata/history-snapshot';
-import { ENVIRONMENT_HISTORY_MARK, PACKAGE_SLOTTED_STORE_TYPES, historyRowAttribution } from '@objectstack/metadata';
+import { ENVIRONMENT_HISTORY_MARK, PACKAGE_SLOTTED_STORE_TYPES, historyRowAttribution, refusePlatformRecordRestore } from '@objectstack/metadata';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import type {
   MetadataRepository,
@@ -1939,6 +1939,17 @@ export class SysMetadataRepository implements MetadataRepository {
        * version of the name, as before.
        */
       versionOf?: HistoryVersionOwner;
+      /**
+       * [#37130] Refuse the restore when the active row it would write is the
+       * platform's own record (`refusePlatformRecordRestore`,
+       * `@objectstack/metadata`: `409 RESOURCE_CONFLICT`, the metadata
+       * service's `rollback` prescription), read where the write reads it,
+       * before anything is written. The protocol's two restore doors
+       * (`rollbackMetaItem`, the restore limb of `revertCommit`) state it.
+       * Omitted → no such check: an undo write puts back what the same
+       * operation found, byte for byte.
+       */
+      refusePlatformRecord?: boolean;
     },
   ): Promise<{ version: string; seq: number; item: MetadataItem }> {
     this.assertOpen();
@@ -2011,6 +2022,8 @@ export class SysMetadataRepository implements MetadataRepository {
       where: this.whereFor(ref, 'active', 'packageId' in opts ? (opts.packageId ?? null) : undefined, member),
       context: { isSystem: true },
     });
+    // [#37130] The row this restore writes, judged before the write.
+    if (opts.refusePlatformRecord === true) refusePlatformRecordRestore(ref.type, ref.name, activeRow as Record<string, unknown> | null);
     const activePackageId =
       (activeRow as { package_id?: string | null } | null)?.package_id ?? null;
     const currentActive = activeRow ? this.rowToItem(ref, activeRow) : null;

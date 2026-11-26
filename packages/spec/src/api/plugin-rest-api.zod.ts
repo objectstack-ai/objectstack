@@ -951,16 +951,22 @@ export const DEFAULT_METADATA_ROUTES: RestApiRouteRegistration = {
         'Promotes the item\'s pending DRAFT overlay to the live `active` row and records an '
         + '`op=\'publish\'` history event. The sibling write door of `PUT /:type/:name` — the '
         + 'ADR-0033 two-step spelling, where `?mode=draft` stages a body and this makes it live. '
-        + '404 `NO_DRAFT` when there is nothing to publish; 409 `METADATA_CONFLICT` when the '
-        + 'published row advanced while the draft was held. The route was served for a long time with no '
+        + '404 `NO_DRAFT` when there is nothing to publish. 409 `METADATA_CONFLICT` when a pin the '
+        + 'caller sent does not hold: the body\'s `draftVersion` (the draft moved, or is no longer '
+        + 'pending; judged first, `currentVersion` names the draft\'s token or `null`), or `If-Match` / '
+        + '`If-None-Match: *` (the published row advanced; `currentVersion` names the active row\'s '
+        + 'token), or the store lost a race. 400 `VALIDATION_ERROR` when `draftVersion` is present and '
+        + 'not a string, or the precondition headers are malformed. The route was served for a long time with no '
         + 'declaration behind it — this entry is what makes its response contract nameable, the same '
         + 'declared-equals-returned rule the save door follows.',
       tags: ['Metadata'],
-      // No `requestSchema` (#3899): the body is optional and its only read key
-      // is `message`, taken only when it is already a string and ignored
-      // otherwise — the route cannot 400 a malformed body, so declaring a
-      // schema here would advertise a gate that does not run. Every other
-      // input (`:type`, `:name`) is path-bound.
+      // No `requestSchema` (#3899): the body is optional and is not one
+      // schema. It has two read keys: `message`, taken only when it is a
+      // string and ignored otherwise, and `draftVersion`
+      // (`PublishMetaItemRequestSchema.draftVersion`), refused 400
+      // `VALIDATION_ERROR` when present and not a string, never read as
+      // absent. `parentVersion` arrives as the `If-Match` / `If-None-Match`
+      // headers; `:type` and `:name` are path-bound.
       responseSchema: 'PublishMetaItemResponseSchema',
       permissions: ['metadata.write'],
       cacheable: false,

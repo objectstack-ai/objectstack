@@ -120,8 +120,8 @@ export const RecordContextRelatedListSchema = lazySchema(() => z.object({
   object: z.string().describe('The child object'),
   label: z.string().describe('The child object\'s plural label at the caller\'s locale'),
   field: z.string().describe('The child\'s field that points at the record'),
-  rows: z.array(RecordContextRelatedRowSchema).describe('The rows the caller may read, up to the row cap'),
-  truncated: z.literal(true).optional().describe('Present when more rows existed past the row cap'),
+  rows: z.array(RecordContextRelatedRowSchema).describe('The rows the caller may read, up to the list\'s `limit` (the row cap when it names none), or fewer when the door\'s page cap is lower'),
+  truncated: z.literal(true).optional().describe('Present when more rows existed past the rows given: at the list\'s `limit`, at the row cap, or below either at the door\'s page cap'),
 }));
 
 /** One heading of a body outline. */
@@ -175,7 +175,8 @@ export const RecordContextDataSchema = lazySchema(() => z.object({
  * - `outline_truncated` — the outline was cut at the service's outline bounds:
  *   its sentence says how many headings are not listed (every heading's anchor
  *   still reads its section);
- * - `related_truncated` — the related list on `object` was cut at the row cap;
+ * - `related_truncated` — the related list on `object` was cut: at its entry's
+ *   `limit`, at the row cap, or below either at the door's page cap;
  * - `narrowed` — the agent ceiling narrows what the caller reads on `object`
  *   (the security service's sentence, relayed as the probe returns it).
  */

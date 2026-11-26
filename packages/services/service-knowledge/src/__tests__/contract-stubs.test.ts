@@ -11,7 +11,10 @@
  *   handed exactly as given, one hit per passage.
  *
  * Neither implements `listDocuments`, so the suite also runs its
- * "without listDocuments" cases against them.
+ * "without listDocuments" cases against them. Neither applies
+ * `AdapterSearchOptions.scope` (ADR-0161 K8, item 17), and their hits carry no
+ * `metadata`: an adapter written before the member, over which the service's
+ * check after the answer still answers no out-of-scope hit.
  */
 
 import type { AdapterContext, AdapterSearchOptions, IKnowledgeAdapter } from '@objectstack/spec/contracts';
@@ -106,6 +109,7 @@ runKnowledgeAdapterContract({
     builds: false,
     refusesOtherFingerprint: false,
     generations: false,
+    scope: false,
   },
 });
 
@@ -120,5 +124,6 @@ runKnowledgeAdapterContract({
     builds: false,
     refusesOtherFingerprint: false,
     generations: false,
+    scope: false,
   },
 });

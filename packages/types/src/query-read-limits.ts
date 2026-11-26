@@ -158,6 +158,22 @@ export function resolveQueryReadLimits(
   };
 }
 
+/**
+ * The most rows one read starting at offset 0 may ask for on this deployment:
+ * the smaller of {@link QueryReadLimits.maxPageSize} and
+ * {@link QueryReadLimits.rowBudget}, `undefined` when neither is set. The data
+ * door refuses, never clamps, a read past either, so a caller that cuts its
+ * own read to fit (ADR-0160 D3's record-context page cap) asks this one value
+ * on every door, and the doors cut at the same row.
+ */
+export function resolveQueryReadPageCap(
+  env: Record<string, string | undefined> = typeof process !== 'undefined' ? process.env : {},
+): number | undefined {
+  const { maxPageSize, rowBudget } = resolveQueryReadLimits(env);
+  const caps = [maxPageSize, rowBudget].filter((n): n is number => n !== undefined);
+  return caps.length > 0 ? Math.min(...caps) : undefined;
+}
+
 /** One read, as the window planner sees it. */
 export interface QueryReadRequest {
   readonly surface: QueryReadSurface;

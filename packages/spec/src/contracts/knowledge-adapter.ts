@@ -95,6 +95,46 @@ export interface AdapterSearchOptions {
   /** Adapter-specific filter (e.g. `{ status: 'active' }`). */
   filter?: Record<string, unknown>;
   /**
+   * The record scope of this search (ADR-0161 K8, item 17, as its dated note
+   * of 2026-11-25 shapes it): a list of {@link AdapterScopeTerm}s the knowledge
+   * service builds from `KnowledgeSearchOptions.scope` for this source. The
+   * term's shape is the service's, never the caller's `{ object, ids }`:
+   * turning an object into a field needs the object's registered definition,
+   * which is the platform's. A `metadata` term's `field` is a name from the
+   * source's `metadataFields`. A term's `ids` are the caller's strings as
+   * given, checked only against the bounds below, so an adapter binds them as
+   * query parameters and never splices them into a query's text.
+   *
+   * - **Absent** (`undefined`): no scope. Rank every document of the source,
+   *   as before this member.
+   * - **Present**: rank only the documents some term holds for, and filter
+   *   BEFORE ranking, so `topK` is filled from in-scope documents alone. The
+   *   terms are a union: a document is in scope when any one of them holds.
+   * - **Empty** (`[]`), or a term whose `ids` is empty: that holds for no
+   *   document. Never read as "no filter".
+   *
+   * `organizationIds`, `scope` and the opaque `filter` all apply: a document is
+   * ranked only when it passes each one that is present.
+   *
+   * **Bounds an adapter can rely on.** The service refuses a scope past its
+   * bounds before any adapter is called, so a search hands at most 10 terms,
+   * each with at most 500 ids, every id a non-empty string. A `metadata` term's
+   * ids can go into one `IN` list on a stored column.
+   *
+   * **The service checks every hit after the adapter answers**, whatever the
+   * adapter did: a `record` term on `KnowledgeHit.sourceRecordId`, a `metadata`
+   * term on `KnowledgeHit.metadata[field]`, and a hit that does not carry the
+   * value is dropped (fail closed). So an adapter returns the document's
+   * `metadata` on its hits. An adapter that ignores this member keeps working:
+   * out-of-scope documents then take ranking places the check empties, so its
+   * scoped searches may answer fewer than `topK`, and the service logs that
+   * once for the adapter.
+   *
+   * A ranking scope, not the access decision: the service still re-reads every
+   * object-source hit as the caller.
+   */
+  scope?: AdapterScopeTerm[];
+  /**
    * The caller's organizations (ADR-0161 K8, item 9), computed by the knowledge
    * service from the caller's identity and the deployment's tenancy posture
    * (ADR-0105 D1) — never taken from a caller's input: under `isolated` the
@@ -129,6 +169,23 @@ export interface AdapterSearchOptions {
   /** Trace id for correlation. */
   traceId?: string;
 }
+
+/**
+ * One term of `AdapterSearchOptions.scope` (ADR-0161 K8, item 17). Values are
+ * compared as strings: a stored string or number `v` matches when `String(v)`
+ * is one of `ids` (a record id stored as the number `7` matches the id `'7'`).
+ * Any other stored value (an object, `null`, a boolean) matches no id.
+ *
+ * - `record`: holds for a document whose `sourceRecordId` is in `ids` — a
+ *   scope entry that names the object the source indexes.
+ * - `metadata`: holds for a document whose `metadata[field]` is in `ids`, or
+ *   is a list with an element in `ids` (a lookup declared `multiple: true` is
+ *   stored as a list of record ids) — a scope entry that names a parent object
+ *   the source reaches through `field`, a lookup it lists in `metadataFields`.
+ */
+export type AdapterScopeTerm =
+  | { kind: 'record'; ids: string[] }
+  | { kind: 'metadata'; field: string; ids: string[] };
 
 /** Options accepted by `IKnowledgeAdapter.listDocuments`. */
 export interface AdapterListDocumentsOptions {

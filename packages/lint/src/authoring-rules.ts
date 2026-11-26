@@ -101,6 +101,7 @@ import { runStackExpressionPasses } from './validate-expressions.js';
 import { validateListViewMode } from './validate-list-view-mode.js';
 import { validateFunctionalCompleteness } from './validate-functional-completeness.js';
 import { validateManagedApiMethods } from './validate-managed-api-methods.js';
+import { validateTransferCascades } from './validate-transfer-cascades.js';
 import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
 import { validateDatasetMeasureAggregates } from './validate-dataset-measure-aggregates.js';
@@ -995,6 +996,36 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['object'],
     run: (stack) => validateManagedApiMethods(stack),
+  },
+  // [ruling 7000907189 point 4 · ADR-0049] A `transferBehavior: 'cascade'`
+  // the Change Owner action can never offer: the parent does not offer Change
+  // Owner, an extension's field cascades onto an object that cannot take a
+  // cascade (the `ObjectSchema` refinement judges only the object's own
+  // fields), or the child's declared exposure does not serve `update`. The
+  // runtime re-judges each relationship and offers none of these, silently;
+  // this puts the same verdicts, from the same spec predicates, where the
+  // author is. Gating for the `validateManagedApiMethods` reason above: the
+  // verdict is decidable from the stack, and the declaration is a key nothing
+  // honours.
+  {
+    name: 'validateTransferCascades',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-transfer-cascades.ts',
+    surfaces: CLI_ONLY,
+    // The crossing is follow-up #37397. The number lives in this comment, not in the string below: a
+    // string literal under packages/ carries no tracker number (`pnpm check:doc-authoring`).
+    surfaceReason:
+      'Not yet crossed, pending a measurement: at the runtime publish gate the snapshot\'s objects are the '
+      + 'registry\'s served definitions, which carry the injected system columns (owner_id among them) as '
+      + 'declared fields, and the Change Owner eligibility predicate this rule reads judges a declared '
+      + 'owner_id (its readonly flag, and on an external object whether it is declared at all). Judging '
+      + 'served definitions with it is unmeasured, and a false 422 on the only door a Studio or MCP author '
+      + 'has is worse than the gap. Crossing owes that measurement, or reading the served objects back to '
+      + 'their authored shape as lintDuplicateFieldLabels does at the object_extension door, and its own '
+      + 'rollout decision; never a bare `runtimeTypes` edit.',
+    run: (stack) => validateTransferCascades(stack),
   },
   // A view container in `views: []` that registers zero views: nothing appears
   // in the Console, and the schema step cannot tell it from an intentionally

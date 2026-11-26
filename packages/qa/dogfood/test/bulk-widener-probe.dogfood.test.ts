@@ -122,7 +122,7 @@ const probeApp = defineStack({
     version: '0.0.1',
     type: 'app',
     name: 'Bulk Widener Probe',
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
   },
   objects: [ProbeNote],
   permissions: [ProbeWidenerSet],

@@ -84,6 +84,8 @@ delegates the rest to plugins.
 │  • Event sync (record.* → upsert)    │    │      (reference impl, REST)  │
 │  • Audit + metrics                   │    │  • knowledge-pgvector │
 │                                      │    │      (PostgreSQL + pgvector) │
+│                                      │    │  • knowledge-turso    │
+│                                      │    │      (libSQL file, local)    │
 │  Registers `knowledge` service       │    │  (llamaindex / dify: planned)│
 └──────────────────────────────────────┘    └──────────────────────────────┘
               ▲
@@ -334,7 +336,9 @@ K8): an adapter that lacks one keeps working, and the service does what it
 did before that member existed. `AdapterSearchOptions.organizationIds` is the
 caller's organizations; an adapter that reads it ranks only those
 organizations' documents, filtering before it ranks — see
-[Organization scope](#organization-scope). `listDocuments` lists the documents the
+[Organization scope](#organization-scope). `AdapterSearchOptions.scope` holds a
+search to chosen records the same way — see [Record scope](#record-scope).
+`listDocuments` lists the documents the
 adapter holds for a source, a page of at most `limit` entries at a time, each
 with the `docHash` it was stored with; `nextCursor` is absent once the
 listing is complete. A document written while a listing runs may be missing
@@ -354,6 +358,7 @@ runKnowledgeAdapterContract({
   implements: {
     listDocuments: true, chunks: true, organizationIds: true,
     indexStatus: true, builds: true, refusesOtherFingerprint: true, generations: true,
+    scope: true,
   },
 });
 ```
@@ -371,7 +376,8 @@ keeps generations, the switch at the end of a build. `implements` declares the o
 checks the declaration against the adapter. `./testing` is a test-only,
 ESM-only entry that imports `vitest`; nothing in the runtime entry reaches it.
 `knowledge-memory` runs it as the reference implementation; `knowledge-pgvector`
-runs it against a live PostgreSQL in CI.
+runs it against a live PostgreSQL in CI; `knowledge-turso` runs it on libSQL
+`:memory:` and on a `file:` URL in its own unit tests.
 
 ### 3.5 The split
 
@@ -482,6 +488,7 @@ import { KnowledgeServicePlugin } from '@objectstack/service-knowledge';
 import { KnowledgeMemoryPlugin } from '@objectstack/knowledge-memory';
 import { KnowledgeRagflowPlugin } from '@objectstack/knowledge-ragflow';
 import { KnowledgePgvectorPlugin } from '@objectstack/knowledge-pgvector';
+import { KnowledgeTursoPlugin } from '@objectstack/knowledge-turso';
 
 defineStack({
   plugins: [
@@ -492,6 +499,7 @@ defineStack({
       apiKey: process.env.RAGFLOW_KEY!,
     }),
     new KnowledgePgvectorPlugin(),                      // self-hosted, PostgreSQL + pgvector
+    new KnowledgeTursoPlugin(),                         // local / not on PostgreSQL, a libSQL file
   ],
 });
 ```
@@ -543,8 +551,9 @@ an exact scan.
   no SQL. A caller reads one sentence; the driver's text and the SQL go only
   to the operator — the health check, the boot warning and the log.
 - **Search.** An exact scan by cosine distance, so any width works —
-  including a 3072-wide model. The organization filter and the metadata
-  `filter` (equality per key) run in the same `WHERE`, before ranking.
+  including a 3072-wide model. The organization filter, the
+  [record scope](#record-scope) and the metadata `filter` (equality per key)
+  run in the same `WHERE`, before ranking.
   `queryPrefix` is put before every query before it is embedded, for a model
   that embeds questions and passages differently.
 - **Re-embedding.** A passage whose text is unchanged (its `chunk_hash`) is
@@ -564,6 +573,56 @@ an exact scan.
 - **The text is stored.** Each row holds its passage's text: it is as
   sensitive as the record it came from, and it is in every backup of the
   database.
+
+### 4.2 `knowledge-turso` — the open vector store in a libSQL file
+
+`@objectstack/knowledge-turso` keeps a source's passages and vectors in a
+[libSQL](https://github.com/tursodatabase/libsql) database of its own, with
+libSQL's native vectors (`F32_BLOB`, `vector32`, `vector_distance_cos`): the
+store for local development and for a deployment not on PostgreSQL. It takes
+the service's passages, embeds them with the kernel's `embedder` service (or
+the `embedder` it is given), and answers a search by an exact scan.
+
+- **Which database.** The `url` option (`file:`, `:memory:` or a
+  `libsql://` Turso URL), else `knowledge.db` under the project's
+  `.objectstack/data/`, beside the platform database. Never the platform's
+  own file: two engines writing one SQLite file in one process lose rows, so a
+  URL naming `objectstack.db`, `dev.db`, `standalone.db` or the file
+  `OS_DATABASE_URL` names is refused. On a file the store sets WAL and a busy
+  timeout (`busyTimeoutMs`, default 5000); in one process every call of the
+  store runs its database work one at a time.
+- **Tables.** `knowledge_generation`, one row per source and generation
+  (fingerprint, recipe hash, width, model, active or being built; at most one
+  of each per source, by a unique index — a second build joins the one under
+  way when its fingerprint is the same, and replaces it otherwise, so the
+  first builder's writes are then refused), and one passage table per source and generation,
+  `knowledge_<source>_g<n>`, its vector column sized for that generation. A
+  source id that is not snake_case is refused before
+  any SQL.
+- **Search.** An exact scan by cosine distance; the organization filter, the
+  [record scope](#record-scope) and the metadata `filter` (JSON equality per
+  key) run in the same `WHERE`, before ranking. The store creates no DiskANN index: `vector_top_k` ranks
+  before it filters, and with one, 1,000 vectors of 1,536 dimensions grew a
+  file from 8.2 MB to 329 MB and took 21.8 s to index. Without it the same
+  1,000 passages take 8.3 MB and a search about 5 ms; 10,000 take 82 MB and
+  about 50 ms. A larger source belongs on `knowledge-pgvector`.
+- **Rebuilds.** A changed fingerprint is refused (§3.6). A complete reindex
+  under a new fingerprint builds a new generation table beside the active
+  one, which keeps answering its own fingerprint, and switches at the end of
+  the build; the old table is dropped. A build of a third fingerprint
+  abandons one left unfinished. A table of the package's earlier releases
+  (`knowledge_<source>` with exactly their columns) is never served: a search
+  answers `KNOWLEDGE_REBUILD_REQUIRED`, and the table is dropped when the first
+  complete reindex finishes. A table of any other shape under one of the
+  store's names is neither served nor dropped.
+- **Re-embedding.** A passage whose text is unchanged (its `chunk_hash`) is
+  not embedded again within a generation.
+- **When it cannot run.** A database that cannot be opened, or a platform
+  with no native libSQL build (there is none for Windows on ARM): the plugin
+  still registers and boot goes on; it warns with the reason, `healthCheck`
+  answers `ok: false`, and every call answers `SERVICE_UNAVAILABLE`.
+- **The text is stored.** Each row holds its passage's text, as sensitive as
+  the record it came from, and in every copy of the file.
 
 ---
 
@@ -634,6 +693,63 @@ wall, a filtered search does not rank them until a complete reindex writes
 them again. The organization is part of `docHash`, so the reindex does not
 skip them. Under `single` nothing changes: a document without an organization
 hashes as before, and the reindex skips it as before.
+
+### Record scope
+
+A search can be held to chosen records (ADR-0161 K8, item 17): "only inside
+this policy". `KnowledgeSearchOptions.scope` is a list of `{ object, ids }`
+entries.
+
+```ts
+const hits = await knowledge.search('notice period', {
+  topK: 5,
+  scope: [{ object: 'policy', ids: [policyId] }],
+  executionContext: ctx,
+});
+```
+
+- **The object a source indexes.** An entry naming it holds that source to
+  those records.
+- **A parent object.** An entry naming another object reaches a source that
+  lists, in its `metadataFields`, a `lookup` or `master_detail` field pointing
+  at that object. The source is then held to the documents whose stored value
+  of that field is one of the ids (any one of them, for a lookup declared
+  `multiple`). A `user` field is not a parent link. A source that lists no such
+  field is not reached by the entry, and neither is one that lists two or more
+  of them (logged once at `warn`, naming the fields). A parent two hops away
+  (policy → chapter → clause) is not reached.
+- **Several entries** are a union. A source no entry reaches is not searched,
+  and a `file` / `http` source answers nothing under a scope.
+- **Empty.** `scope: []`, or an entry whose `ids` is empty, answers no hits; it
+  never means "no scope". Without `scope`, nothing changes.
+- **Bounds.** At most 10 entries, each with at most 500 ids; `object` and every
+  id a non-empty string, and no other key on an entry. Past them the call is
+  refused before any adapter is asked, with `code: 'VALIDATION_ERROR'`,
+  `status: 400` and a message naming the bound.
+
+The service turns the entries into terms for each source and hands them to the
+adapter as `AdapterSearchOptions.scope`: `{ kind: 'record', ids }`, judged on
+the document's `sourceRecordId`, or `{ kind: 'metadata', field, ids }`, judged
+on its stored `metadata[field]`, values compared as strings. An adapter that
+reads the member filters before it ranks, so `topK` is filled from in-scope
+documents; `organizationIds`, `scope` and the opaque `filter` all apply.
+Whatever the adapter does, the service checks every hit after it answers and
+drops a hit no term holds for, a hit without the value included, so an adapter
+returns the document's `metadata` on its hits. An adapter written before the
+member keeps working: out-of-scope documents then take ranking places, its
+scoped searches may answer fewer than `topK`, and the service logs that once
+for the adapter. The contract suite pins both halves: each term kind on the
+adapter alone, and the service's check over the adapter with the member
+stripped.
+
+The scope is judged on the index copy and only narrows. Every hit is still
+re-read as the caller, so a caller who cannot read a scoped record gets
+nothing from it. Source admission already requires each `metadataFields`
+member to be queryable by the caller, and the parent record is never read. A
+document indexed before its source listed the lookup is in no parent scope
+until a complete reindex writes it again. How many hits the scope removed is
+logged, never returned, and an entry that reaches no source answers the same
+empty result a source withheld from the caller gives.
 
 ### Source admission: exposure and field-level rules
 
@@ -866,7 +982,8 @@ up.
 | Audit + metrics | ⏳ Phase 2 |  |
 | `knowledge-llamaindex` | ⏳ Phase 2 |  |
 | `knowledge-dify` | ⏳ Phase 3 / community |  |
-| `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan, organization and metadata filter in SQL, index fingerprint (§4.1) |
+| `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan, organization, record scope and metadata filter in SQL, index fingerprint (§4.1) |
+| `knowledge-turso` | ✅ | A libSQL file of its own; exact scan, organization, record scope and metadata filter in SQL, a generation built beside the active one (§4.2) |
 
 ### 7.1 Non-goals for Phase 1
 

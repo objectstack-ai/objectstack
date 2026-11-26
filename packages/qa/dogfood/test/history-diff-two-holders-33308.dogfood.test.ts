@@ -26,9 +26,9 @@
 //    package (M1): the environment's versions are its sole slot's;
 //  - `?package=` naming a package that neither holds nor ships the name is
 //    refused `409` naming the holders, in the protocol's order with their
-//    `kind` at the wire; the environment's slot addressed through a package
-//    (the read falls back to the package-less row) compares that row's
-//    versions alone, its own active row the `to` side;
+//    `kind` at the wire, [#37130] the package-less row beside a package's
+//    included: a read naming it falls back to that row, and it never
+//    addresses it;
 //  - `?package=` on a type not stored per package is refused 400, never
 //    accepted and dropped.
 
@@ -167,18 +167,19 @@ describe('the /meta diff door of a flow name two packages hold (ADR-0150 D3/D4, 
     expect(res.json.changed).toBeUndefined();
   });
 
-  it('the environment\'s slot addressed through a package: the package-less row\'s versions alone, its own active row the to side', async () => {
+  it('[#37130] beside the environment\'s own row, a package that neither holds nor ships the name is refused 409 at the history and diff doors, never addressed at that row', async () => {
     const bare = await call('GET', `/meta/flow/${ENV_BESIDE}/diff`);
     expect(bare.status, JSON.stringify(bare.json)).toBe(409);
     // The bound package first, then the environment's own row.
     expect(holdersOf(bare.json)).toEqual([{ kind: 'package', packageId: ALPHA_PAIR }, { kind: 'environment' }]);
-    // A read naming beta's pair (no row of the name, nothing shipped) falls back to the package-less row.
-    const env = await ownVersions(ENV_BESIDE, BETA_PAIR);
-    expect(env).toHaveLength(2);
-    const res = await call('GET', `/meta/flow/${ENV_BESIDE}/diff?package=${BETA_PAIR}`);
-    expect(res.status, JSON.stringify(res.json)).toBe(200);
-    expect([res.json.fromVersion, res.json.toVersion]).toEqual(env);
-    expect(diffLabel(res.json)).toEqual({ path: 'label', from: 'env beside r1', to: 'env beside r2' });
+    // A read naming beta's pair (no row of the name, nothing shipped) falls back to the package-less row;
+    // the history family refuses it instead of addressing that row (BASE: the environment's versions, 200).
+    for (const door of ['history', 'diff']) {
+      const res = await call('GET', `/meta/flow/${ENV_BESIDE}/${door}?package=${BETA_PAIR}`);
+      expect(res.status, `${door}: ${JSON.stringify(res.json)}`).toBe(409);
+      expect(codeOf(res.json)).toBe('RESOURCE_CONFLICT');
+      expect(holdersOf(res.json)).toEqual([{ kind: 'package', packageId: ALPHA_PAIR }, { kind: 'environment' }]);
+    }
     // Alpha's own slot beside it: its one version, no earlier one of its own.
     const [alphaOnly] = await ownVersions(ENV_BESIDE, ALPHA_PAIR);
     const alpha = await call('GET', `/meta/flow/${ENV_BESIDE}/diff?package=${ALPHA_PAIR}`);

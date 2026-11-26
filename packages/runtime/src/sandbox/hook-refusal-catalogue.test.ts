@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { mapDataError } from '@objectstack/types';
+import { mapDataError, thrownAnswerOf } from '@objectstack/types';
 
 import { hookBodyRunnerFactory, withInProcessHookTitle } from './body-runner.js';
 import { QuickJSScriptRunner, SandboxError } from './quickjs-runner.js';
@@ -488,5 +488,160 @@ describe('[#33214] the in-process seam answers the catalogue with the body path\
     it('resolveInProcessHookRefusal returns a SandboxError unchanged — a nested body\'s, or the platform\'s', () => {
         const nested = new SandboxError("hook 'inner' threw: x", 'x', { code: 'ANY' });
         expect(resolveInProcessHookRefusal({ name: 'plan_gate', refusals: PLAN_REFUSALS } as any, nested, planCtx())).toBe(nested);
+    });
+});
+
+// ── #36877 (ruling 7178348458 letter A): one throw, several declared reasons ──
+
+/** A catalogue whose code holds two reasons with params and a closing entry sentence. */
+const LIST_REFUSALS = {
+    SUBMIT_REFUSED: {
+        message: 'Nothing was submitted ({{ count }} selected).',
+        status: 409,
+        params: ['name', 'count'],
+        reasons: {
+            on_report: { message: 'Expense {{ name }} is already on an expense report.' },
+            approved: { message: 'Expense {{ name }} is already approved.' },
+        },
+    },
+    PLAIN: { message: 'Refused.' },
+};
+
+const LIST_ZH = {
+    'hooks.expense_gate.refusals.SUBMIT_REFUSED.message': '未提交任何费用（已选 {{ count }} 条）。',
+    'hooks.expense_gate.refusals.SUBMIT_REFUSED.reasons.on_report.message': '费用 {{ name }} 已在报销单上。',
+    'hooks.expense_gate.refusals.SUBMIT_REFUSED.reasons.approved.message': '费用 {{ name }} 已审批。',
+};
+
+function listI18n(): HookRefusalI18nService {
+    return { t: (key, locale) => (locale === 'zh-CN' ? (LIST_ZH as Record<string, string>)[key] ?? key : key), getLocales: () => ['en', 'zh-CN'] };
+}
+
+const LIST_HOOK = { name: 'expense_gate', object: 'expense', events: ['beforeUpdate'], refusals: LIST_REFUSALS };
+
+function listBody(source: string) {
+    return hookBodyRunnerFactory(runner, { ql: {}, appId: 'crm', i18n: () => listI18n() })({
+        ...LIST_HOOK,
+        body: { language: 'js', source, capabilities: [] },
+    } as any)!;
+}
+
+function listHandler(handler: (ctx: any) => unknown) {
+    return withInProcessHookTitle(handler, {}, LIST_HOOK as any, { i18n: () => listI18n() });
+}
+
+const LIST_THROW = "throw Object.assign(new Error('internal detail'), { code: 'SUBMIT_REFUSED', params: { count: 3 }, "
+    + "reasons: [{ reason: 'on_report', params: { name: 'Taxi 12' } }, { reason: 'approved', params: { name: 'Hotel 7' } }] });";
+const listCtx = (locale?: string) => ({
+    object: 'expense', event: 'beforeUpdate', input: {}, session: locale ? { userId: 'u1', locale } : { userId: 'u1' },
+});
+
+describe('[#36877] a reasons list is answered line by line — the body path', () => {
+    it('each listed sentence in the order thrown, the entry\'s own sentence last, and the list on details.refusals', async () => {
+        const err = await rejectionOf(listBody(LIST_THROW)(listCtx()));
+        expect(err).toBeInstanceOf(SandboxError);
+        const wire = mapDataError(err, 'expense');
+        expect(wire.status).toBe(409);
+        expect(wire.body.declaredCode).toBe('SUBMIT_REFUSED');
+        expect(wire.body.userMessage).toBe(
+            'Expense Taxi 12 is already on an expense report.\nExpense Hotel 7 is already approved.\nNothing was submitted (3 selected).',
+        );
+        expect(wire.body.details).toEqual({
+            refusals: [
+                { reason: 'on_report', message: 'Expense Taxi 12 is already on an expense report.' },
+                { reason: 'approved', message: 'Expense Hotel 7 is already approved.' },
+            ],
+        });
+        expect(JSON.stringify(wire.body)).not.toContain('internal detail');
+    });
+
+    it('every line translated in the caller\'s locale and filled from its own params', async () => {
+        const err = await rejectionOf(listBody(LIST_THROW)(listCtx('zh-CN')));
+        const wire = mapDataError(err, 'expense');
+        expect(wire.body.userMessage).toBe('费用 Taxi 12 已在报销单上。\n费用 Hotel 7 已审批。\n未提交任何费用（已选 3 条）。');
+        expect((wire.body.details as any).refusals.map((l: any) => l.message)).toEqual(['费用 Taxi 12 已在报销单上。', '费用 Hotel 7 已审批。']);
+    });
+
+    it('a list assigned onto the thrown error (`e.reasons = […]`) is read the same way', async () => {
+        const err = await rejectionOf(listBody(
+            "const e = new Error('x'); e.code = 'SUBMIT_REFUSED'; e.reasons = [{ reason: 'approved', params: { name: 'A' } }]; throw e;",
+        )(listCtx()));
+        expect(mapDataError(err, 'expense').body.userMessage).toBe('Expense A is already approved.\nNothing was submitted ( selected).');
+    });
+
+    it('the /actions and dispatcher composition carries the same list', async () => {
+        const err = await rejectionOf(listBody(LIST_THROW)(listCtx()));
+        const answer = thrownAnswerOf(err, 500);
+        expect(answer.status).toBe(409);
+        expect(answer.declaredCode).toBe('SUBMIT_REFUSED');
+        expect(answer.details).toEqual({ refusals: (mapDataError(err, 'expense').body.details as any).refusals });
+    });
+});
+
+describe('[#36877] a list the catalogue cannot answer makes the whole throw the loud fault', () => {
+    const cases: Array<[string, string, string]> = [
+        ['an undeclared listed reason (computed)', "const r = 'no' + 'pe'; throw { code: 'SUBMIT_REFUSED', reasons: [{ reason: 'approved' }, { reason: r }] };", "with reason 'nope'"],
+        ['a listed reason under a code that declares no reasons', "const r = 'appr' + 'oved'; throw { code: 'PLAIN', reasons: [{ reason: r }] };", "code 'PLAIN' with reason 'approved'"],
+        ['a single reason beside a list', "throw { code: 'SUBMIT_REFUSED', reason: 'approved', reasons: [{ reason: 'approved' }] };", 'both a `reason` and a `reasons` list'],
+        ['an empty list', "throw { code: 'SUBMIT_REFUSED', reasons: [] };", 'names no reason'],
+        ['an element with no reason', "throw { code: 'SUBMIT_REFUSED', reasons: [{ reason: 'approved' }, { params: {} }] };", 'not a list of'],
+        ['a reasons value that is not a list', "throw { code: 'SUBMIT_REFUSED', reasons: 'approved' };", 'not a list of'],
+        ['an element whose params is a list', "throw { code: 'SUBMIT_REFUSED', reasons: [{ reason: 'approved', params: ['A'] }] };", 'not a list of'],
+    ];
+    it.each(cases)('%s', async (_name, source, text) => {
+        const err = await rejectionOf(listBody(source)(listCtx()));
+        expect(err).toBeInstanceOf(SandboxError);
+        expect(err.innerMessage).toBeUndefined();
+        expect(err.message).toContain("hook 'expense_gate' threw code");
+        expect(err.message).toContain(text);
+        const wire = mapDataError(err, 'expense');
+        expect(wire.status).toBe(500);
+        expect(wire.body.userMessage).toBeUndefined();
+        expect(wire.body.details).toBeUndefined();
+    });
+});
+
+describe('[#36877] the in-process handler answers a list byte-identically to the sandboxed body (parity pin)', () => {
+    const thrownList = () => Object.assign(new Error('internal detail'), {
+        code: 'SUBMIT_REFUSED',
+        params: { count: 3 },
+        reasons: [{ reason: 'on_report', params: { name: 'Taxi 12' } }, { reason: 'approved', params: { name: 'Hotel 7' } }],
+    });
+
+    it.each([undefined, 'zh-CN'])('locale %s: /data envelope and dispatcher answer identical', async (locale) => {
+        const viaBody = await rejectionOf(listBody(LIST_THROW)(listCtx(locale)));
+        const viaHandler = await rejectionOf(listHandler(async () => { throw thrownList(); })(listCtx(locale)));
+        expect(viaHandler).toBeInstanceOf(SandboxError);
+        expect(JSON.stringify(mapDataError(viaHandler, 'expense'))).toBe(JSON.stringify(mapDataError(viaBody, 'expense')));
+        expect(JSON.stringify(thrownAnswerOf(viaHandler, 500))).toBe(JSON.stringify(thrownAnswerOf(viaBody, 500)));
+        expect((mapDataError(viaHandler, 'expense').body.details as any).refusals).toHaveLength(2);
+    });
+
+    it('the same faults: an undeclared listed reason, both forms, an empty list', async () => {
+        const cases: Array<[() => never, string]> = [
+            [() => { throw { code: 'SUBMIT_REFUSED', reasons: [{ reason: 'nope' }] }; }, "with reason 'nope'"],
+            [() => { throw { code: 'SUBMIT_REFUSED', reason: 'approved', reasons: [{ reason: 'approved' }] }; }, 'both a `reason`'],
+            [() => { throw { code: 'SUBMIT_REFUSED', reasons: [] }; }, 'names no reason'],
+        ];
+        for (const [thrower, text] of cases) {
+            const err = await rejectionOf(listHandler(async () => thrower())(listCtx()));
+            expect(err).toBeInstanceOf(SandboxError);
+            expect(err.innerMessage).toBeUndefined();
+            expect(err.message).toContain(text);
+            expect(mapDataError(err, 'expense').status).toBe(500);
+        }
+    });
+
+    it('CONTROL: a single declared reason carries no details.refusals on either path', async () => {
+        const viaBody = await rejectionOf(listBody("throw { code: 'SUBMIT_REFUSED', reason: 'approved', params: { name: 'A' } };")(listCtx()));
+        const viaHandler = await rejectionOf(listHandler(async () => {
+            throw { code: 'SUBMIT_REFUSED', reason: 'approved', params: { name: 'A' } };
+        })(listCtx()));
+        for (const err of [viaBody, viaHandler]) {
+            const wire = mapDataError(err, 'expense');
+            expect(wire.body.userMessage).toBe('Expense A is already approved.');
+            expect(wire.body.details).toBeUndefined();
+            expect(err.refusals).toBeUndefined();
+        }
     });
 });
