@@ -893,6 +893,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "只读",
         helpText: "在表单中只读"
       },
+      uiReadonly: {
+        label: "界面只读",
+        helpText: "用户无法在控制台中编辑此字段（对话框、记录页、表格、看板和日历拖动），而动作、导入、API 和流程仍可写入，每次写入都由对象的校验规则裁决。已开启“只读”时请保持关闭：只读已经阻止所有客户端写入。"
+      },
       hidden: {
         label: "隐藏",
         helpText: "在默认界面视图中隐藏"
@@ -916,6 +920,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       readonlyWhen: {
         label: "只读条件",
         helpText: "基于记录的 CEL 谓词（例如 record.status == 'paid'）——为 TRUE 时字段只读，并在服务器端强制执行：更新中对已锁定字段的修改会被丢弃，保留已存储的值。只读取记录自身的列；objectstack validate 会拒绝经由引用字段的读取。"
+      },
+      uiReadonlyWhen: {
+        label: "界面只读条件",
+        helpText: "基于记录的 CEL 谓词（例如 record.status != 'draft'）——为 TRUE 时，用户无法在控制台中编辑已有记录的该字段（编辑对话框、记录页、表格、看板和日历拖动）；新建记录的创建对话框不做判断。动作、导入、API 和流程仍可写入，并由对象的校验规则裁决。与“只读条件”一样读取记录自身的列。"
       },
       requiredWhen: {
         label: "必填条件",
@@ -1282,7 +1290,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       compactToolbar: {
         label: "紧凑工具栏",
-        helpText: "将分组 / 颜色 / 密度 / 隐藏字段收进同一个“视图设置”弹出框"
+        helpText: "将分组 / 颜色 / 密度 / 隐藏字段收进同一个“视图设置”弹出框。默认开启：省略或为 `true` 时，渲染器绘制这个紧凑工具栏；为 `false` 时绘制宽工具栏，每个控件一个按钮。紧凑工具栏不绘制刷新按钮，因此 `userActions.refresh` 只作用于宽工具栏；下拉刷新不受这两个键影响。"
       },
       rowHeight: {
         label: "行高",

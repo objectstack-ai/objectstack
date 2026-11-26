@@ -1374,6 +1374,13 @@ const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
   // the honest cell until it does; re-measure and write the slot's own cell
   // then, as #6716 did for the other three.
   settledWhen: FIELD_RULE_SLOT_CONSEQUENCE_GENERIC,
+  // [#36806] The console hand lock: no server reads it, and the console's one
+  // verdict (`fieldReadOnlyByHand`, `@object-ui/core`) resolves a fault to
+  // LOCKED (`UI_READONLY_WHEN_FAULTED`), while the edit dialog refuses to save.
+  uiReadonlyWhen:
+    'the predicate faults wherever that root is unbound, and the console resolves a hand lock it ' +
+    'cannot evaluate to LOCKED: no person can edit the field there, and the edit dialog refuses to ' +
+    'save until the predicate is fixed — while actions, imports, the API and flows keep writing it',
   // [#26646] A field group's section predicate takes the field `visibleWhen`
   // slot's verdict, with its own fault direction: the form renderer's
   // section gate (`sectionGateVisible`) evaluates it with the same engine,
@@ -4267,7 +4274,17 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // root verdict over FIELD_RULE_BOUND_ROOTS. Like `visibleWhen` it is
       // display only, so the server-side gates further down (the `parent`
       // gate, the null guard, the traversal refusal) do not apply to it.
-      for (const key of ['requiredWhen', 'readonlyWhen', 'visibleWhen', 'settledWhen'] as const) {
+      //
+      // [#36806] `uiReadonlyWhen` — the console hand lock (ruling 7180466652,
+      // the two-tier field-lock model) — is the sixth slot, judged as
+      // `readonlyWhen` is at this site: the `record`-scoped `check` and the
+      // root verdict over FIELD_RULE_BOUND_ROOTS (the spec gives it the same
+      // scope). No server ever evaluates it, so a fault has no judge but this
+      // pass (ADR-0137 D2): the console locks the field and the edit dialog
+      // refuses to submit. Display only as far as the write path goes, so it
+      // carries no write gate and the server-side gates further down (the
+      // `parent` gate, the null guard, the traversal refusal) do not apply.
+      for (const key of ['requiredWhen', 'readonlyWhen', 'visibleWhen', 'settledWhen', 'uiReadonlyWhen'] as const) {
         const where = `object '${objectName}' · field '${fname}' ${key}`;
         const raw = (f as AnyRec)[key];
         // [#13935] Verdict FIRST, emitted second. `check` needs to know which

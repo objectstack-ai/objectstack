@@ -39,6 +39,8 @@ import {
   deriveRecordPageHref,
 } from '@object-ui/plugin-detail';
 import {
+  fieldReadOnlyByHand,
+  fieldStaticallyReadOnlyByHand,
   extractRecords,
   buildExpandFields,
   convertSortToQueryParams,
@@ -2213,6 +2215,15 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     perms,
   }).allowed;
 
+  // A drag writes the lane field, so the field's own lock closes it: the one
+  // hand-lock verdict of `@object-ui/core` (`readonly`, `uiReadonly`, and the
+  // conditional `readonlyWhen` / `uiReadonlyWhen`). The static half draws every
+  // card as not movable; the conditional half is judged per card at the drop,
+  // in `handleCardMove`. Before this the board read no field lock at all, so a
+  // `readonly` lane field took the drop and its write was silently stripped.
+  // `laneFieldDef` is the lane field's definition, read above for its lane titles.
+  const laneFieldLocked = fieldStaticallyReadOnlyByHand(laneFieldDef);
+
   // The board's drop gate (#25933): a lane is a value of `groupBy`, so when the
   // object's blocking `state_machine` rule governs that same field, a card may
   // enter only the lanes its column's value may move to. The read is the one
@@ -2285,6 +2296,14 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       const record = (Array.isArray(rawData) ? rawData : []).find(
         (r) => String(r?.id ?? r?._id) === String(cardId),
       );
+      // The lane field's conditional lock over THIS record (`readonlyWhen`, the
+      // hand lock `uiReadonlyWhen`): no write, and the card goes back — a fresh
+      // array identity re-buckets the board from the unchanged rows.
+      const laneDef = (objectDef?.fields as Record<string, Record<string, unknown> | undefined> | undefined)?.[groupBy];
+      if (fieldReadOnlyByHand(laneDef, record, { fieldContext: `field '${groupBy}'`, scope: predicateScope })) {
+        setFetchedData((prev) => prev.map((r) => r));
+        return { kind: 'refused', message: tt('grid.readOnlyReason.readonly', 'This field is read-only.') };
+      }
       const fields = collectRequiredWhenPromptFields(
         objectDef?.fields,
         record,
@@ -2302,7 +2321,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
 
       return persistCardMove(cardId, fromColumnId, toColumnId);
     },
-    [schema.groupBy, rawData, objectDef, persistCardMove],
+    [schema.groupBy, rawData, objectDef, persistCardMove, tt, predicateScope],
   );
 
   // Label + localized options for each prompted field, resolved with the same
@@ -2524,7 +2543,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         // objectui#12082: handed only when `kanbanCardMove` allows the write,
         // and the cards are drawn not movable otherwise (see `cardMoveGranted`).
         onCardMove={cardMoveGranted ? handleCardMove : undefined}
-        cardsMovable={cardMoveGranted}
+        cardsMovable={cardMoveGranted && !laneFieldLocked}
         // objectstack#33548 — the host's answer to "does a card click open
         // anything"; absent ⇒ every card as before.
         rowOpensRecord={rowOpensRecord}

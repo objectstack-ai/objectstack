@@ -197,6 +197,7 @@ const pt = {
     uploadInFlight: "Aguarde a conclusão do upload antes de salvar.",
     clearedOnHide: "O que não se aplica mais aos valores atuais foi limpo: {{fields}}",
     visibleWhenFaulted: "Não é possível enviar: não foi possível avaliar a regra visibleWhen de {{fields}}. A regra precisa ser corrigida antes que este formulário possa ser enviado.",
+    uiReadonlyWhenFaulted: "Não é possível enviar: não foi possível avaliar a regra uiReadonlyWhen de {{fields}}. A regra precisa ser corrigida antes que este formulário possa ser enviado.",
     discardTitle: "Descartar as alterações?",
     discardMessage: "Você tem alterações não salvas. Se fechar este formulário agora, suas edições serão perdidas.",
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
@@ -2657,6 +2658,7 @@ const pt = {
       savedCleared: "Valor salvo limpo",
       deprecatedBadge: "Obsoleto",
       deprecatedBadgeReplacedBy: "Obsoleto → {{replacedBy}}",
+      selectValueRetired: "{{value}} (não está mais disponível)",
       unsupportedSpecifierType: "Tipo de configuração não suportado: {{type}}",
       mapAddRow: "Adicionar uma linha",
       mapRemoveRow: "Remover {{key}}",

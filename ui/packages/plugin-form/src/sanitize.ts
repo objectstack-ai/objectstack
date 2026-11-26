@@ -6,6 +6,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+import { fieldStaticallyReadOnlyByHand } from '@object-ui/core';
+
 /**
  * The refused-field roster: every field name the SERVER owns on write.
  *
@@ -199,7 +201,9 @@ function stripUnwritable(
       const t = String(fieldDef.type || '').toLowerCase();
       if (COMPUTED_FIELD_TYPES.has(t)) continue;
       if (fieldDef.computed === true) continue;
-      if (fieldDef.readOnly === true || fieldDef.readonly === true) continue;
+      // A hand-locked field (`uiReadonly`) is never in a dialog's payload
+      // either: a person cannot edit it, so a dialog never writes it.
+      if (fieldDef.readOnly === true || fieldStaticallyReadOnlyByHand(fieldDef)) continue;
     }
 
     out[key] = value;
