@@ -50,7 +50,7 @@ import {
   isDeclaredFieldType, isMultiValuedColumn, refuseRejectedReferenceAlias, refuseUndeclaredFieldType,
 } from './sql-driver-top-level.js';
 import type { RowWidthContribution } from './sql-driver-top-level.js';
-import { emitsDeclaredColumnDefault } from './sql-driver-schema-sync.js';
+import { declaresSqliteNowColumnDefault, emitsDeclaredColumnDefault } from './sql-driver-schema-sync.js';
 import { isNowDefaultValue, SqlDriverStatics as SqlDriver } from './sql-driver.js';
 import type { SqlDriver as SqlDriverClass } from './sql-driver.js';
 
@@ -705,7 +705,7 @@ export class ColumnCreationFacet {
   }
 
   /** The body of `SqlDriver#createColumn`; the method's docblock there is its contract. */
-  static createColumn(this: Pick<ColumnCreationHost, 'applyDeclaredColumnDefault' | 'declaredVarcharLength' | 'isMysql' | 'jsonColumn' | 'keyableTextLength' | 'mediaColumnIsJson'>, table: Knex.CreateTableBuilder, name: string, field: any, keyed?: { unique: boolean }, tenantColumn: boolean = false, addedToPopulatedTable: boolean = false) {
+  static createColumn(this: Pick<ColumnCreationHost, 'applyDeclaredColumnDefault' | 'declaredVarcharLength' | 'isMysql' | 'isSqlite' | 'jsonColumn' | 'keyableTextLength' | 'mediaColumnIsJson'>, table: Knex.CreateTableBuilder, name: string, field: any, keyed?: { unique: boolean }, tenantColumn: boolean = false, addedToPopulatedTable: boolean = false) {
     // [#37258] `storage.notNull` on a column ADDED to a table that already
     // holds rows: every existing row would hold NULL in it, so the database
     // refuses `ADD COLUMN … NOT NULL` with no DEFAULT (SQLite: `Cannot add a
@@ -717,12 +717,20 @@ export class ColumnCreationFacet {
     // (backfill first)". So the column is added nullable, the differ — which
     // compares the column against `storage.notNull` — reports
     // `tighten_not_null`, and the ceremony imposes the constraint after the
-    // backfill. A literal or NOW() DEFAULT the existing rows take
+    // backfill. A literal DEFAULT the existing rows take
     // ({@link emitsDeclaredColumnDefault}) leaves nothing to defer, and an
     // empty table nothing to declare over: both keep the constraint here.
     // `required`, the engine's write contract, is not read here at all.
+    //
+    // [#37413] The `NOW()` DEFAULT on SQLite is the exception: SQLite refuses a
+    // non-constant DEFAULT on `ADD COLUMN` to a table that holds a row, so that
+    // column is added nullable with NO DEFAULT, the schema sync fills the
+    // existing rows in one statement (`sqliteNowBackfillSql`), and the differ
+    // reports `set_column_default` (plus `tighten_not_null` under
+    // `storage.notNull`) for the ceremony's rebuild to impose.
+    const withholdsNowDefault = addedToPopulatedTable && this.isSqlite && declaresSqliteNowColumnDefault(field);
     const notNull = declaresColumnNotNull(field)
-      && !(addedToPopulatedTable && !emitsDeclaredColumnDefault(field));
+      && !(addedToPopulatedTable && (!emitsDeclaredColumnDefault(field) || withholdsNowDefault));
     // [#11567] Stated BEFORE the `multiple` short-circuit and before the type
     // switch, because the spec's refusal is gated on neither: `FieldSchema`
     // answers `unrecognized_keys` for `reference_to` on ANY field, whatever its
@@ -1225,7 +1233,7 @@ export class ColumnCreationFacet {
       // added to a populated table with no DEFAULT its rows can take — see the
       // head of this method.
       if (notNull || tenantColumn) col.notNullable();
-      this.applyDeclaredColumnDefault(col, field, type, mysqlTextDefault);
+      if (!withholdsNowDefault) this.applyDeclaredColumnDefault(col, field, type, mysqlTextDefault);
     }
   }
 }

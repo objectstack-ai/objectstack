@@ -38,8 +38,10 @@
  * 3. `ADD COLUMN` to an existing, EMPTY table: the same DEFAULTs, `NOW()`
  *    included, through each `ADD COLUMN` door, and no drift.
  * 4. `ADD COLUMN` to a POPULATED table: every literal DEFAULT is emitted (the
- *    existing row takes it); a `NOW()` DEFAULT is withheld (#37413) and the
- *    column added nullable with none; no drift either way.
+ *    existing row takes it); a `NOW()` DEFAULT is withheld (#37413), the
+ *    column added nullable with none and the existing row filled in the same
+ *    sync; either face's differ then reports exactly the owed
+ *    `set_column_default` for each `NOW()` column, and nothing else.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -218,7 +220,7 @@ describe('ADD COLUMN to an existing, empty table: the same DEFAULTs, NOW() inclu
 });
 
 describe('ADD COLUMN to a populated table: every literal DEFAULT, never the NOW() expression (#37413)', () => {
-  it.each<Door>(['syncSchemasBatch', 'syncSchema'])('synced through %s: the row takes each literal, NOW() columns get none, no drift', async (door) => {
+  it.each<Door>(['syncSchemasBatch', 'syncSchema'])('synced through %s: the row takes each literal, NOW() columns get none and are filled, only their DEFAULT is owed', async (door) => {
     const reference = await localReference();
     const file = nextFile();
     const remote = await remoteOver(file);
@@ -233,6 +235,17 @@ describe('ADD COLUMN to a populated table: every literal DEFAULT, never the NOW(
 
     const row = await remote.findOne(OBJECT.name, { where: { id: 'r1' } });
     expect(row).toMatchObject({ s: 'd', quoted: "it's", n: 5, i: 7, yes: true, no: false, day: '2024-01-02', required_nn: 'x' });
-    await noDriftEitherFace(remote, file, WITH_BARE);
+    for (const name of NOW_NAMES) expect((row as Record<string, unknown>)[name], name).not.toBeNull();
+    await ownedNowDefaultsEitherFace(remote, file, WITH_BARE);
   });
 });
+
+/** [#37413] Each face's differ reports exactly a `set_column_default` per withheld `NOW()` column, and nothing else. */
+async function ownedNowDefaultsEitherFace(remote: TursoDriver, file: string, object: { name: string; fields: object }) {
+  const owed = (entries: readonly { op: { type: string }; column?: string }[]) => entries.map((e) => `${e.op.type}:${e.column}`).sort();
+  const expected = NOW_NAMES.map((n) => `set_column_default:${n}`).sort();
+  expect(owed(await remote.detectManagedDrift([object as never]))).toEqual(expected);
+  const local = await localOver(file);
+  local.registerObjectMetadata([object as never]);
+  expect(owed(await local.detectManagedDrift([object as never]))).toEqual(expected);
+}

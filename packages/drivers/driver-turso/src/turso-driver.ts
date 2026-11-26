@@ -39,6 +39,7 @@ import {
   latestPerDirectiveOf,
   findMisplacedFixedReadLeaf,
   misplacedFixedReadLeafMessage,
+  quoteSqliteIdentifier,
   type DeclaredRenameCarry,
   type DeclaredRenamePlan,
   type DriftOp,
@@ -743,8 +744,8 @@ function remoteIntrospectedColumn(row: Record<string, unknown>): IntrospectedCol
   } as IntrospectedColumn;
 }
 
-/** A SQLite identifier, quoted, with any embedded quote doubled. */
-const quoteRemoteIdentifier = (name: string): string => `"${String(name).replace(/"/g, '""')}"`;
+/** A SQLite identifier, quoted, with any embedded quote doubled — `driver-sql`'s one spelling of it. */
+const quoteRemoteIdentifier = quoteSqliteIdentifier;
 
 /** [#23816] The catalog statements the remote drift reads send, one spelling each. */
 const REMOTE_TABLE_INFO_SQL = 'SELECT cid, name, type, "notnull", dflt_value FROM pragma_table_info(?) ORDER BY cid';
