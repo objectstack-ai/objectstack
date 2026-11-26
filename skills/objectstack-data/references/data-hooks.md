@@ -785,9 +785,8 @@ A throw aborts the operation and rolls back its transaction; `onError: 'log'`
 
 A hook that enforces a business rule declares a `refusals` catalogue, one
 SCREAMING_SNAKE code per rule, and throws the code. Without one, a `body`'s
-throw is answered `HOOK_ABORTED`, the platform's code: fine for a failure you did not
-plan, not for a rule the user can act on. A cross-object guard a validation rule
-cannot read:
+throw is answered `HOOK_ABORTED`, the platform's code: fine for an unplanned failure, not
+for a rule the user can act on. A cross-object guard a validation rule cannot read:
 
 <!-- os:check -->
 ```typescript
@@ -829,14 +828,14 @@ export default defineHook({
 - For several reasons throw `reasons: [{ reason: 'on_loan', params: { due } }, …]`, not
   `reason`: one translated line each, filled from its own `params`. `userMessage` joins
   them by newlines and ends with the entry's `message`, filled from the throw's
-  top-level `params` (else its holes are empty); every door answers
+  top-level `params` (else its holes are empty); the HTTP doors answer
   `details.refusals: [{ reason, message }]`, absent for a single `reason`.
 - Translated via `hooks.<hook>.refusals.<CODE>.message` (or
   `….<CODE>.reasons.<REASON>.message`); the thrown text and `status` are unused.
 - An undeclared code (or none), or a reason missing from a code's `reasons` (a listed
   one even when the code declares none), is refused: at save if thrown literally, else
-  as a `500`. `reason` beside `reasons`, an empty list or an element not
-  `{ reason, params? }` is a `500`. Unchanged `ctx.api` errors and crashes pass through.
+  as a `500`. A `reasons` not a non-empty list of `{ reason, params? }`, or beside
+  `reason`, is a `500`. Unchanged `ctx.api` errors and crashes pass through.
 
 ### Declared texts (`texts`)
 
