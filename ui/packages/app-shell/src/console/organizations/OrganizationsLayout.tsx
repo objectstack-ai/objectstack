@@ -12,6 +12,7 @@ import React, { useEffect } from 'react';
 import { useNavigationContext } from '../../context/NavigationContext.js';
 import { AppHeader } from '../../layout/AppHeader.js';
 import { CONSOLE_TOP_BAR } from '../../layout/consoleTopBar.js';
+import { CONSOLE_FULL_HEIGHT } from '../../layout/chromeBannerHost.js';
 
 interface OrganizationsLayoutProps {
   children: React.ReactNode;
@@ -25,7 +26,7 @@ export function OrganizationsLayout({ children }: OrganizationsLayoutProps) {
   }, [setContext]);
 
   return (
-    <div className="flex min-h-svh w-full flex-col bg-background" data-testid="organizations-layout">
+    <div className={`flex ${CONSOLE_FULL_HEIGHT.minSvh} w-full flex-col bg-background`} data-testid="organizations-layout">
       <header className={CONSOLE_TOP_BAR}>
         <AppHeader variant="orgs" />
       </header>

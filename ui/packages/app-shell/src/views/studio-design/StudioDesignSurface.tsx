@@ -31,6 +31,7 @@ import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
 import { StudioChatDock, type StudioCopilotStatus, type StudioSurfaceLabel } from './StudioAiCopilot.js';
 import { StudioRightSlot } from './StudioRightSlot.js';
+import { CONSOLE_FULL_HEIGHT } from '../../layout/chromeBannerHost.js';
 import { StudioTitleRowProvider } from './studioTitleRow.js';
 import { useStudioAccentOnBody } from './studioAccent.js';
 import { AssistantTopBarButton } from '../../layout/AssistantTopBarButton.js';
@@ -1351,7 +1352,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
           sidebar's, under Studio's own collapse cookie (`StudioMenu.tsx`). */}
       {/* objectstack#37455 — Studio's graphite on its root: nothing Studio
           draws takes the app's theme colour (decision 4 of #37424). */}
-      <StudioMenuProvider className={cn('h-screen min-h-0 overflow-hidden bg-background text-foreground', STUDIO_ACCENT)}>
+      <StudioMenuProvider className={cn(CONSOLE_FULL_HEIGHT.screen, 'min-h-0 overflow-hidden bg-background text-foreground', STUDIO_ACCENT)}>
         {/* The ADR-0080 `aiSlot` seam — a cloud edition may still inject its own
           * left copilot panel; the built-in copilot is the RIGHT dock below. */}
         {/* objectstack#32615 — not beside a package that is not there. */}
