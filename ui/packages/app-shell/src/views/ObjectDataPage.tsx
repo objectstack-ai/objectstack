@@ -35,6 +35,7 @@
 import * as React from 'react';
 import { Link, useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { ListView, conditionCandidatesOf, conditionOptionsOf, useLookupValueNames } from '@object-ui/plugin-list';
+import { relatedCreateSeedOf } from '@object-ui/plugin-detail/core';
 import { useNavigationOverlay, useRowPredicate } from '@object-ui/react';
 import {
   Button,
@@ -55,7 +56,7 @@ import { formatMetadataError } from '@object-ui/data-objectstack';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { usePermissions, useFieldPermissions } from '@object-ui/permissions';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
-import { optionDisplayLabel, resolveAffordance, resolveFilterPlaceholders, type SchemaLike } from '@object-ui/core';
+import { optionDisplayLabel, parentRelationshipFieldDef, resolveAffordance, resolveFilterPlaceholders, type SchemaLike } from '@object-ui/core';
 import { normalizeFilterOperator, ViewFilterRuleSchema } from '@objectstack/spec/ui';
 import type { ViewFilterRule } from '@objectstack/spec/ui';
 import {
@@ -961,8 +962,27 @@ export function ObjectDataPage({ dataSource, objects }: any) {
           const sp = new URLSearchParams(searchParams);
           sp.set(RECORD_FORM_PARAM, 'new');
           sp.set(RECORD_FORM_OBJECT_PARAM, objectDef.name);
-          sp.set(RECORD_FORM_LINK_PARAM, `${sourceField}:${source.i}`);
-          setSearchParams(sp);
+          sp.delete(RECORD_FORM_LINK_PARAM);
+          sp.append(RECORD_FORM_LINK_PARAM, `${sourceField}:${source.i}`);
+          // objectstack#37290 — and seeded as the related tab's New seeds it
+          // (objectstack#37246): each `dependsOn` field of the link takes the
+          // source record's value, or the form gates the lookup. The trail
+          // carries the record's id alone, so the record is read once, and
+          // only when the link declares a `dependsOn` to seed.
+          const dependsOn = (parentRelationshipFieldDef(objectDef.fields, sourceField) as { dependsOn?: unknown } | undefined)?.dependsOn;
+          const open = (parentRecord?: Record<string, unknown>) => {
+            for (const [field, value] of Object.entries(relatedCreateSeedOf(objectDef.fields, sourceField, parentRecord))) {
+              sp.append(RECORD_FORM_LINK_PARAM, `${field}:${value}`);
+            }
+            setSearchParams(sp);
+          };
+          if (Array.isArray(dependsOn) && dependsOn.length > 0 && typeof dataSource?.findOne === 'function') {
+            Promise.resolve(dataSource.findOne(source.o, source.i))
+              .then((rec: unknown) => open(rec && typeof rec === 'object' ? (rec as Record<string, unknown>) : undefined))
+              .catch(() => open(undefined));
+            return;
+          }
+          open(undefined);
           return;
         }
         navigate('../new', { relative: 'path' });
