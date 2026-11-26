@@ -144,11 +144,13 @@ export const RecordContextBodySchema = lazySchema(() => z.object({
   anchor: z.string().optional().describe('The section `text` holds, when the call named one'),
   outline: z.array(RecordContextOutlineEntrySchema).optional().describe(
     'The body\'s headings in body order, when the body is past the bound and is not carried whole. One page, held '
-    + 'to the service\'s outline bounds: the pages run through every heading shallowest level first, so a cut '
-    + 'leaves the deepest headings to later pages, and is stated by an `outline_truncated` note',
+    + 'to the service\'s outline bounds: the pages run through every heading short enough to list, shallowest level '
+    + 'first, so a cut leaves the deepest headings to later pages, and is stated by an `outline_truncated` note, '
+    + 'which also counts any heading too long for any page to list',
   ),
   outlineNext: z.number().int().min(1).optional().describe(
-    'Present when headings remain past this outline page: pass it as `outlineFrom` to list the next page',
+    'Present when a heading a later page lists remains past this outline page: pass it as `outlineFrom` to list '
+    + 'the next page. Absent on the last page, even when headings too long to list remain',
   ),
   truncated: z.literal(true).optional().describe(
     'Present when `text` was cut at the bound: a long body with no headings, or a section past the bound',

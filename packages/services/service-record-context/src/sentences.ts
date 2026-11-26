@@ -63,7 +63,7 @@ const WRITTEN = {
       + 'absent, and do not guess it.',
     bodyOutline: (field: string) =>
       `The body (${field}) is long, so only its outline is given. To read a section, call get_record_context again `
-      + 'with the same arguments and that section\'s anchor.',
+      + 'with the same objectName, recordId and context, plus that section\'s anchor and no outlineFrom.',
     bodyTruncated: (field: string) =>
       `The text of ${field} was cut at the length this tool returns; what follows the cut is not given.`,
     relatedTruncated: (object: string, cap: number) =>
@@ -75,9 +75,11 @@ const WRITTEN = {
         ? 'No later page lists more.'
         : `To list the next page, call get_record_context again with the same arguments and outlineFrom ${next}. `
           + 'Each heading\'s anchor is given on the page that lists it.')
-      + (unlistable > 0
-        ? ` ${unlistable} of the headings are too long for any page to list, so their anchors are not given.`
-        : ''),
+      + (unlistable === 1
+        ? ' 1 heading is too long for any page to list, so its anchor is not given.'
+        : unlistable > 1
+          ? ` ${unlistable} headings are too long for any page to list, so their anchors are not given.`
+          : ''),
     // Refusals.
     noPackNamed: (context: string, object: string) =>
       `No context pack named '${context}' reads object '${object}', so nothing was read. Omit 'context' to use the `
@@ -116,7 +118,7 @@ const WRITTEN = {
       `以下字段对你不可见，因此没有给出它们的值：${fields.join(', ')}。请说明它们对你不可见，不要说它们是空的。`,
     notVisible: '这个资料包涵盖的部分内容对你不可见，因此没有给出。不要把它当作空的或不存在，也不要猜测它。',
     bodyOutline: (field: string) =>
-      `正文（${field}）较长，因此只给出了大纲。要读其中一节，请用相同的参数和该节的 anchor 再调用一次 get_record_context。`,
+      `正文（${field}）较长，因此只给出了大纲。要读其中一节，请用相同的 objectName、recordId 和 context，加上该节的 anchor（不带 outlineFrom）再调用一次 get_record_context。`,
     bodyTruncated: (field: string) => `${field} 的文本在本工具返回的长度处被截断，截断之后的内容没有给出。`,
     relatedTruncated: (object: string, cap: number) =>
       `${object} 上的相关列表超过已给出的 ${cap} 行，其余的行没有给出。`,

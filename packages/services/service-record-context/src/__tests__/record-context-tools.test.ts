@@ -6,6 +6,7 @@ import {
   AI_CONTEXT_MAX_RELATED,
   AI_CONTEXT_MAX_RELATED_FIELDS,
   GET_RECORD_CONTEXT_TOOL_NAME,
+  GetRecordContextInputSchema,
   GetRecordContextOutputSchema,
 } from '@objectstack/spec/ai';
 import {
@@ -937,6 +938,33 @@ describe('get_record_context — the outline in pages (ADR-0160 D3: every sectio
     expect(cut?.text).not.toContain('outlineFrom');
   });
 
+  it('a section listed on page 2 is read exactly as that page\'s body_outline note says, in en and zh-Hans; the same arguments plus the anchor are the control, refused', async () => {
+    for (const locales of [undefined, ['zh-CN']]) {
+      const app = withBody(flat(), locales ? { locales } : {});
+      const first = await run(app);
+      const page2Args = { ...CALL, outlineFrom: first.data.body!.outlineNext! };
+      const page2 = await run(app, page2Args);
+      const note = page2.notes.find((n) => n.kind === 'body_outline')!.text;
+      // The note names what to repeat and that outlineFrom is left out.
+      for (const word of ['objectName', 'recordId', 'context', 'anchor', 'outlineFrom']) expect(note).toContain(word);
+      const anchor = page2.data.body!.outline![0].anchor;
+      // As the note says: the record's arguments, the anchor, no outlineFrom.
+      const { outlineFrom: _dropped, ...asTheNoteSays } = page2Args;
+      const section = await run(app, { ...asTheNoteSays, anchor });
+      expect(section.data.body).toMatchObject({ anchor, text: expect.stringMatching(/^## Clause \d+\n/) });
+      // Control: "the same arguments" of page 2 plus the anchor is the refused pair.
+      expect(await refusalOf(run(app, { ...page2Args, anchor }))).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    }
+  });
+
+  it('a count of headings too long to list reads in the singular for one and the plural for more', async () => {
+    const tooLong = (n: number) => Array.from({ length: n }, (_, i) => `## ${'x'.repeat(RECORD_CONTEXT_BODY_MAX_CHARS)}${i}\n`).join('');
+    const one = await run(withBody(tooLong(1) + flat()));
+    expect(one.notes.find((n) => n.kind === 'outline_truncated')?.text).toContain('1 heading is too long for any page to list, so its anchor is not given.');
+    const two = await run(withBody(tooLong(2) + flat()));
+    expect(two.notes.find((n) => n.kind === 'outline_truncated')?.text).toContain('2 headings are too long for any page to list, so their anchors are not given.');
+  });
+
   it('outlineFrom 0 is the first page', async () => {
     const app = withBody(flat());
     expect(await run(app, { ...CALL, outlineFrom: 0 })).toEqual(await run(app));
@@ -962,7 +990,10 @@ describe('get_record_context — the outline in pages (ADR-0160 D3: every sectio
   it('a call naming both anchor and outlineFrom is refused before anything is read', async () => {
     const app = withBody(flat());
     const door = fakeDoor(app);
-    const refused = await refusalOf(executeGetRecordContext({ ...CALL, anchor: 'clause-1', outlineFrom: 80 }, door));
+    const pair = { ...CALL, anchor: 'clause-1', outlineFrom: 80 };
+    // The spec's schema admits the pair (record-context-tools.zod.test.ts); the executor refuses it.
+    expect(GetRecordContextInputSchema.safeParse(pair).success).toBe(true);
+    const refused = await refusalOf(executeGetRecordContext(pair, door));
     expect(refused).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
     expect(door.reads).toEqual([]);
   });

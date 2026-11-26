@@ -41,6 +41,10 @@ describe('[ADR-0160 D3] get_record_context — outlineFrom', () => {
     expect(firstIssue(GetRecordContextInputSchema, { ...CALL, outlineFrom: '80' })).toEqual({ code: 'invalid_type', path: ['outlineFrom'] });
   });
 
+  it('is admitted beside `anchor`: the pair is the executor\'s refusal (service-record-context), not the schema\'s', () => {
+    expect(GetRecordContextInputSchema.safeParse({ ...CALL, anchor: 'scope', outlineFrom: 80 }).success).toBe(true);
+  });
+
   it('is in the tool\'s JSON Schema parameters as an integer of at least 0', () => {
     const { parameters } = getRecordContextToolJsonSchemas()[GET_RECORD_CONTEXT_TOOL_NAME];
     expect((parameters as { properties: Record<string, unknown> }).properties.outlineFrom).toMatchObject({ type: 'integer', minimum: 0 });
