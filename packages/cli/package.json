@@ -79,6 +79,9 @@
       "i18n": {
         "description": "Scaffold translation skeletons from a stack, and check translation coverage"
       },
+      "knowledge": {
+        "description": "Rebuild a knowledge source's index on the server and read each source's index state and last build"
+      },
       "mcp": {
         "description": "Connect an MCP client to your environment's MCP server"
       },

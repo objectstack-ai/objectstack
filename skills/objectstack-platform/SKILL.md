@@ -108,7 +108,7 @@ export default defineStack({ manifest: {
   type: 'app', // app | plugin | driver | module | ...
   name: 'Acme CRM', // Human-readable display name
   description: 'CRM system', // Optional
-  engines: { protocol: '^18' },
+  engines: { protocol: '^19' },
 } });
 ```
 
