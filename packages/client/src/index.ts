@@ -1285,6 +1285,22 @@ function metaDeleteHeaders(options?: DeleteMetaItemOptions): Record<string, stri
 }
 
 /**
+ * [#37440] The live-row pin of `meta.publishItem`
+ * (`PublishMetaItemRequestSchema.parentVersion`) as the publish door reads it:
+ * a token as `If-Match`, verbatim and unquoted as {@link metaSaveHeaders}
+ * sends it, and `null` ("no live row is stored") as `If-None-Match: *`. The
+ * door takes `*` alone and never beside `If-Match`, which one argument cannot
+ * produce. `undefined` (never `{}`) when unset or empty, so the call site
+ * omits the `headers` key and an unpinned publish is byte-identical to what
+ * it sent before.
+ */
+function metaPublishHeaders(parentVersion: string | null | undefined): Record<string, string> | undefined {
+    if (parentVersion === null) return { 'If-None-Match': '*' };
+    if (!parentVersion) return undefined;
+    return { 'If-Match': String(parentVersion) };
+}
+
+/**
  * An OAuth client application exactly as `@better-auth/oauth-provider` puts it
  * on the wire: RFC 7591 §2 client metadata, snake_case, served BARE — these
  * routes carry no ObjectStack envelope (`auth-route-ledger.ts` records all six
@@ -2725,6 +2741,15 @@ export class ObjectStackClient {
      * holds no draft and another package's draft is stored. Pass the package
      * whose draft you mean as `opts.packageId` (`?package=` on the wire), as
      * `saveItem` and `deleteItem` name the row they act on.
+     *
+     * PIN WHAT YOU PUBLISH when you wrote or read the draft first
+     * (`PublishMetaItemRequestSchema`'s two ADR-0008 pins): `draftVersion`
+     * names the draft you mean to promote, so a draft another writer changed
+     * after you wrote or read it is refused `409 METADATA_CONFLICT` and
+     * nothing is published on their behalf; `parentVersion` names the live
+     * row you mean to replace. Pass your own draft save's receipt `version`
+     * (or the draft read's) as `draftVersion` — never a fresh re-read, which
+     * would pin whatever draft is pending now, someone else's included.
      */
     publishItem: async (
         type: string,
@@ -2751,6 +2776,31 @@ export class ObjectStackClient {
              * it.
              */
             packageId?: string;
+            /**
+             * `PublishMetaItemRequestSchema.draftVersion` — the version token
+             * of the pending draft this publish means to promote: a draft
+             * save's receipt `version` (`saveItem` in draft mode) or the
+             * draft read's `version`. Sent as the `draftVersion` member of
+             * the publish body, beside `message`. A draft that moved since is
+             * refused `409 METADATA_CONFLICT`, its `currentVersion` naming the
+             * draft's current token (`null` when no draft is pending any
+             * more), and nothing is promoted. Omitted, whichever draft is
+             * pending is promoted, as before. An empty string pins nothing and
+             * is not sent.
+             */
+            draftVersion?: string;
+            /**
+             * `PublishMetaItemRequestSchema.parentVersion` — the version token
+             * of the LIVE row this publish means to replace (a publish
+             * receipt's `version`, a read's `version`), sent as `If-Match`.
+             * `null` asserts that no live row is stored, sent as
+             * `If-None-Match: *`. A live row that does not match is refused
+             * `409 METADATA_CONFLICT` and nothing is promoted. Omitted, the
+             * publish replaces whatever is live, as before. It pins the live
+             * row only; the draft's own pin is `draftVersion`, and the two
+             * may be sent together (the door judges the draft first).
+             */
+            parentVersion?: string | null;
         },
     ): Promise<PublishMetaItemResponse> => {
         const route = this.getRoute('metadata');
@@ -2764,9 +2814,20 @@ export class ObjectStackClient {
         // `query`, not `qs` — it carries its own `?`; see `saveItem`'s note on
         // the three meanings `qs` holds in this file.
         const query = search ? `?${search}` : '';
+        // [#37440] The two ADR-0008 pins. `draftVersion` rides the BODY,
+        // beside `message` (the REST door reads it there); `parentVersion`
+        // rides a HEADER, as on the save and delete doors: a token as
+        // `If-Match`, `null` as `If-None-Match: *`. Each is omitted when
+        // unset, so an unpinned publish hands `fetch` the same `init` it
+        // always did.
+        const headers = metaPublishHeaders(opts?.parentVersion);
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/publish${query}`, {
             method: 'POST',
-            body: JSON.stringify(opts?.message ? { message: opts.message } : {}),
+            ...(headers ? { headers } : {}),
+            body: JSON.stringify({
+                ...(opts?.message ? { message: opts.message } : {}),
+                ...(opts?.draftVersion ? { draftVersion: opts.draftVersion } : {}),
+            }),
         });
         return this.unwrapResponse<PublishMetaItemResponse>(res);
     },
