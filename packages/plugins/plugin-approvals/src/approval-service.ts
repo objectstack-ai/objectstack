@@ -152,6 +152,7 @@ import {
   type NoApproverNote,
   type SubmitterApprovalRefusal,
 } from './no-approver-note.js';
+import { RECORD_DELETED_CANCEL_REASON, recordDeletedCancelNoteText } from './record-deleted-cancel-note.js';
 import {
   flowNameOfProcess,
   localizeRequestLabels,
@@ -7341,14 +7342,16 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
           id: uid('aact'), request_id: requestId, organization_id: org,
           step_name: nodeId, step_index: 0, action: 'cancel',
           actor_id: null,
-          comment: `Auto-cancelled: the ${object} record '${record}' this request is about was deleted`,
+          // [#37531] The catalog's English; a reader with a locale is served it
+          // re-composed from the request's columns (`localizeActionRows`).
+          comment: recordDeletedCancelNoteText({ object, record }),
           created_at: now,
         }), { context: SYSTEM_CTX });
 
         await this.engine.update('sys_approval_request', {
           id: requestId,
           status: 'cancelled',
-          cancel_reason: 'record_deleted',
+          cancel_reason: RECORD_DELETED_CANCEL_REASON,
           pending_approvers: null, pending_approver_labels: null,
           completed_at: now,
           updated_at: now,
@@ -11867,53 +11870,101 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       const toName = a.reassign_to ? names.get(String(a.reassign_to)) : undefined;
       if (toName) a.reassign_to_name = toName;
     }
-    await this.localizeRoutingNotes(requestId, actions, context);
+    await this.localizeActionRows(actions as unknown as Array<Record<string, unknown>>, context);
     return actions;
   }
 
   /**
-   * [#25576] The administrators' routing note, in the reader's language —
-   * and [#25573] its sibling, the submitter exclusion note
-   * (`submitter-exclusion-note.ts`), read the same way.
+   * The text a reader reads on an approval action row, in the reader's
+   * language: the ONE render both doors serve an action row by — the
+   * approvals door's timeline ({@link listActions}) and [#37531] the generic
+   * data door (`action-locale-middleware.ts`: Setup's Approval Actions list,
+   * the action's record page, the export).
    *
-   * The note's code and parameters ride the request's node-config snapshot,
-   * naming the timeline row they explain (`admin-rescue-note.ts`); that row's
-   * `comment` is overlaid, in place, with the note as the reader's locale
-   * renders it — the shape {@link readerLabels} gives the request's own labels.
-   * A read, never a write. Nothing is overlaid, and the stored English stands,
-   * when the read carries no locale or no `i18n` service is registered, when
-   * the request carries no note (a request that never routed to its
-   * administrators, or one opened before the note was stored as data), or
-   * when the pack holds no note sentence.
+   *  - `step_label`, where the row carries the column: the step's label from
+   *    the reader's pack (`flows.<flow>.approvals.<step_name>.label`, the key
+   *    the request's own labels are picked by), the flow named by the parent
+   *    request's `process_name`;
+   *  - the `comment` of a system row (no actor) that is a note the platform
+   *    wrote: [#25576] the administrators' routing note, [#25573] the
+   *    submitter exclusion note and the no-approver note, each stored as data
+   *    on the request's node-config snapshot and naming the row it explains;
+   *    [#37531] the record-deleted cancellation, re-composed from the
+   *    request's `cancel_reason`, `object_name` and `record_id`
+   *    (`record-deleted-cancel-note.ts`).
+   *
+   * In place, a read, never a write. A text nothing is picked for keeps the
+   * stored value: no locale or no `i18n` service, a parent request that is
+   * gone, a row the request carries no note for (a comment a person wrote is
+   * never one), or a pack without the sentence. The parent requests are read
+   * as the system for their label facts alone; the rows were already narrowed
+   * to the reader by the door that read them.
    */
-  private async localizeRoutingNotes(
-    requestId: string,
-    actions: ApprovalActionRow[],
-    context: ExecutionContext,
-  ): Promise<void> {
-    // Only a system comment can be the note: no read for any other timeline.
-    if (!actions.some((a) => a.action === 'comment' && !a.actor_id)) return;
+  async localizeActionRows(rows: Array<Record<string, unknown>>, context: ExecutionContext): Promise<void> {
+    const isSystemRow = (row: Record<string, unknown>): boolean => row.actor_id == null || row.actor_id === '';
+    const wantsStep = (row: Record<string, unknown>): boolean =>
+      'step_label' in row && typeof row.step_name === 'string' && row.step_name !== '';
+    const wantsNote = (row: Record<string, unknown>): boolean =>
+      isSystemRow(row) && (row.action === 'comment' || row.action === 'cancel') && typeof row.id === 'string';
+    const targets = rows.filter((row) => row && typeof row === 'object'
+      && typeof row.request_id === 'string' && row.request_id !== '' && (wantsStep(row) || wantsNote(row)));
+    if (targets.length === 0) return;
     const labels = this.readerLabels(context);
     if (!labels) return;
-    const tenantOrg = (context as any)?.organizationId ?? context?.tenantId;
-    const raw = await findRequestRow(this.engine, requestId, tenantOrg ?? null);
-    const snapshot = parseJson<unknown>(raw?.node_config_json, undefined);
-    const overlay = (actionId: string, render: () => string | undefined): void => {
-      const row = actions.find((a) => a.id === actionId && a.action === 'comment' && !a.actor_id);
-      const text = row ? render() : undefined;
-      if (row && text) row.comment = text;
-    };
-    const rescue = adminRescueNoteOf(snapshot);
-    if (rescue) {
-      const positionLabels = await this.notePositionLabels(adminRescuePositions(rescue), labels);
-      overlay(rescue.action_id, () => adminRescueNoteText(rescue, labels.sentence, (name) => positionLabels.get(name)));
+
+    const requestIds = [...new Set(targets.map((row) => String(row.request_id)))];
+    const found = await this.engine.find('sys_approval_request', {
+      where: { id: requestIds.length === 1 ? requestIds[0] : { $in: requestIds } },
+      fields: ['id', 'process_name', 'node_config_json', 'cancel_reason', 'object_name', 'record_id'],
+      limit: requestIds.length,
+      context: SYSTEM_CTX,
+    });
+    const requests = new Map<string, any>();
+    for (const r of Array.isArray(found) ? found : []) if (r?.id != null) requests.set(String(r.id), r);
+
+    /** Each request's notes, keyed by the action row each one explains. */
+    const notes = new Map<string, (positionLabel: (name: string) => string | undefined) => string | undefined>();
+    const positions = new Set<string>();
+    for (const r of requests.values()) {
+      const snapshot = parseJson<unknown>(r.node_config_json, undefined);
+      const rescue = adminRescueNoteOf(snapshot);
+      if (rescue) {
+        for (const name of adminRescuePositions(rescue)) positions.add(name);
+        notes.set(rescue.action_id, (label) => adminRescueNoteText(rescue, labels.sentence, label));
+      }
+      const exclusion = submitterExclusionNoteOf(snapshot);
+      if (exclusion) notes.set(exclusion.action_id, () => submitterExclusionNoteText(exclusion, labels.sentence));
+      const noApprover = noApproverNoteOf(snapshot);
+      if (noApprover) {
+        for (const name of noApproverPositions(noApprover)) positions.add(name);
+        notes.set(noApprover.action_id, (label) => noApproverNoteText(noApprover, labels.sentence, label));
+      }
     }
-    const exclusion = submitterExclusionNoteOf(snapshot);
-    if (exclusion) overlay(exclusion.action_id, () => submitterExclusionNoteText(exclusion, labels.sentence));
-    const noApprover = noApproverNoteOf(snapshot);
-    if (noApprover) {
-      const positionLabels = await this.notePositionLabels(noApproverPositions(noApprover), labels);
-      overlay(noApprover.action_id, () => noApproverNoteText(noApprover, labels.sentence, (name) => positionLabels.get(name)));
+    const positionLabels = positions.size > 0 ? await this.notePositionLabels([...positions], labels) : new Map<string, string>();
+    const positionLabel = (name: string): string | undefined => positionLabels.get(name);
+
+    for (const row of targets) {
+      const request = requests.get(String(row.request_id));
+      if (!request) continue;
+      if (wantsStep(row)) {
+        const flow = flowNameOfProcess(request.process_name);
+        const stepLabel = flow ? labels.stepLabel(flow, String(row.step_name)) : undefined;
+        if (stepLabel) row.step_label = stepLabel;
+      }
+      if (!wantsNote(row)) continue;
+      let text: string | undefined;
+      if (row.action === 'comment') {
+        text = notes.get(String(row.id))?.(positionLabel);
+      } else if (request.cancel_reason === RECORD_DELETED_CANCEL_REASON
+        && typeof request.object_name === 'string' && request.object_name
+        && request.record_id != null && request.record_id !== '') {
+        const object = String(request.object_name);
+        text = recordDeletedCancelNoteText(
+          { object: labels.objectLabel(object) ?? object, record: String(request.record_id) },
+          labels.sentence,
+        );
+      }
+      if (text) row.comment = text;
     }
   }
 
