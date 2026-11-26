@@ -3145,6 +3145,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ツール",
         helpText: "ツール名（ワイルドカード対応: action_*）"
       },
+      context: {
+        label: "Context",
+        helpText: "Context pack this skill works from (its name). Requires get_record_context in Tools. Over MCP the prompt then takes an optional record id"
+      },
       triggerConditions: {
         label: "トリガー条件",
         helpText: "プログラム条件（例: objectName == \"case\"）"

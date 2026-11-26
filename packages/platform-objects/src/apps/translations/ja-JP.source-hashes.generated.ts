@@ -18,6 +18,8 @@
  */
 
 export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "metadataForms.skill.fields.context.helpText": "9044f0cc4416a4f6",
+  "metadataForms.skill.fields.context.label": "984d16efc3c62426",
   "objects.sys_email.fields.bcc_addresses.label": "8674899b7b6d5126",
   "objects.sys_email.fields.cc_addresses.label": "02946d952cf15623",
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",

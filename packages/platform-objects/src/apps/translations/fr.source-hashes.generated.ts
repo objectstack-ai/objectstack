@@ -149,6 +149,8 @@ export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.report.fields.type.label": "901bb552898b2cab",
   "metadataForms.seed.fields.mode.label": "74dde5013435abdc",
   "metadataForms.skill.fields.active.label": "eee107cf4e466779",
+  "metadataForms.skill.fields.context.helpText": "9044f0cc4416a4f6",
+  "metadataForms.skill.fields.context.label": "984d16efc3c62426",
   "metadataForms.skill.fields.description.label": "779a4342c8eb6707",
   "metadataForms.skill.fields.instructions.label": "ed1cc73e669573d0",
   "metadataForms.skill.fields.surface.label": "5f41277948ff2598",

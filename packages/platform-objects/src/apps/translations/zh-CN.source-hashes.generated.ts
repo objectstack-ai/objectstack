@@ -18,6 +18,8 @@
  */
 
 export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "metadataForms.skill.fields.context.helpText": "9044f0cc4416a4f6",
+  "metadataForms.skill.fields.context.label": "984d16efc3c62426",
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",
   "objects.sys_email_template.fields.id.label": "00b0385c9c152888",
   "objects.sys_exchange_rate.fields.id.label": "00b0385c9c152888",

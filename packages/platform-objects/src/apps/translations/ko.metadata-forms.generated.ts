@@ -3145,6 +3145,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "도구",
         helpText: "도구 이름(와일드카드 지원: action_*)"
       },
+      context: {
+        label: "Context",
+        helpText: "Context pack this skill works from (its name). Requires get_record_context in Tools. Over MCP the prompt then takes an optional record id"
+      },
       triggerConditions: {
         label: "트리거 조건",
         helpText: "프로그래밍 방식 조건(예: objectName == \"case\")"
