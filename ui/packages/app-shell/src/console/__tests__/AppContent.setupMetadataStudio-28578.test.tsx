@@ -216,8 +216,8 @@ describe.each([
     metadataApps = [...apps];
     const chain = renderAt(`${base}${from}`);
 
-    await waitFor(() => expect(chain[1]).toBe(to));
-    expect(chain[0]).toBe(`${base}${from}`);
+    // Two entries: one `<Navigate>`, no stop on Setup's canonical route or Studio's leg.
+    await waitFor(() => expect(chain).toEqual([`${base}${from}`, to]));
     expect(chain.some((entry) => entry.startsWith('/studio'))).toBe(false);
     expect(screen.queryByTestId('studio-probe')).not.toBeInTheDocument();
   });

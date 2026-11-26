@@ -200,6 +200,19 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useWorkspaceAdminStatus: () => ({ isAdmin: true, isResolved: true }),
 }));
 
+// The viewer holds Studio's entry capability, which Setup's directory page asks
+// for (objectstack#37565). No provider is mounted, so the answer is stubbed: the
+// no-provider defaults, plus a reported capability set holding it.
+vi.mock('@object-ui/permissions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/permissions')>();
+  let answer: ReturnType<typeof actual.usePermissions> | undefined;
+  return {
+    ...actual,
+    // One object for every render, as the hook's own answer is (objectui#6724).
+    usePermissions: () => (answer ??= { ...actual.usePermissions(), systemPermissions: ['studio.access'] }),
+  };
+});
+
 const dataSourceStub = {
   onConnectionStateChange: () => () => {},
   getConnectionState: () => 'connected',
@@ -371,8 +384,7 @@ describe('the catalog entries reach the catalog, on Setup\'s directory page (obj
   ])('%s reaches %s in ONE hop', async (url, target) => {
     renderConsoleAt(url);
 
-    await waitFor(() => expect(chain[1]).toBe(target));
-    expect(chain[0]).toBe(url);
+    await waitFor(() => expect(chain).toEqual([url, target]));
     expect(chain.some((entry) => entry.startsWith('/studio'))).toBe(false);
     // Never the row page the URL used to land on: the type's environment list, on Setup's page.
     expect(screen.queryByTestId('object-view')).not.toBeInTheDocument();
@@ -391,8 +403,7 @@ describe('the catalog entries reach the catalog, on Setup\'s directory page (obj
     metadataApps = [];
     renderConsoleAt(url);
 
-    await waitFor(() => expect(chain[1]).toBe(target));
-    expect(chain[0]).toBe(url);
+    await waitFor(() => expect(chain).toEqual([url, target]));
   });
 });
 
