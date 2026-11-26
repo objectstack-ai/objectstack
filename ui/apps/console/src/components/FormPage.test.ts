@@ -3,7 +3,7 @@
 /**
  * Pure-function tests for FormPage helpers. These cover the bulk of
  * the renderer's spec-merging logic — buildSections, readPrefill,
- * normalizeColumns, normalizeOptions — without needing a DOM.
+ * declaredSectionColumns, normalizeOptions — without needing a DOM.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -13,7 +13,7 @@ import {
   buildSections,
   FORM_RECORD_ID_PARAM,
   FORM_RECORD_OBJECT_PARAM,
-  normalizeColumns,
+  declaredSectionColumns,
   normalizeOptions,
   readCreatedRecordId,
   readFormRecordTarget,
@@ -23,24 +23,41 @@ import {
   resolveSubmitBehavior,
 } from './FormPage';
 
-describe('normalizeColumns', () => {
-  it('passes through valid numeric literals', () => {
-    expect(normalizeColumns(1)).toBe(1);
-    expect(normalizeColumns(2)).toBe(2);
-    expect(normalizeColumns(3)).toBe(3);
-    expect(normalizeColumns(4)).toBe(4);
+describe('declaredSectionColumns', () => {
+  it('reads the spec\'s string arm as the number its parse transforms it to', () => {
+    expect(declaredSectionColumns('1')).toBe(1);
+    expect(declaredSectionColumns('4')).toBe(4);
   });
 
-  it('parses numeric strings', () => {
-    expect(normalizeColumns('1')).toBe(1);
-    expect(normalizeColumns('4')).toBe(4);
+  it('passes anything else through as written, defaulting nothing', () => {
+    expect(declaredSectionColumns(3)).toBe(3);
+    expect(declaredSectionColumns(undefined)).toBeUndefined();
+    expect(declaredSectionColumns('5')).toBe('5');
+    expect(declaredSectionColumns('foo')).toBe('foo');
+  });
+});
+
+describe('buildSections — a section draws what the shared layout rule answers (#37665)', () => {
+  const objectSchema = { name: 'lead', fields: { a: { type: 'text' }, b: { type: 'text' } } };
+  const counts = (form: Record<string, unknown>) =>
+    buildSections({ type: 'simple', ...form } as any, objectSchema).map((s) => s.columns);
+
+  it('the form view\'s `columns: 1` caps a `columns: 2` section at one', () => {
+    expect(counts({ columns: 1, sections: [{ columns: 2, fields: ['a', 'b'] }] })).toEqual([1]);
   });
 
-  it('defaults to 2 for invalid or missing values', () => {
-    expect(normalizeColumns(undefined)).toBe(2);
-    expect(normalizeColumns(0)).toBe(2);
-    expect(normalizeColumns(5)).toBe(2);
-    expect(normalizeColumns('foo')).toBe(2);
+  it('the form view\'s `columns: 3` is what an undeclared section draws', () => {
+    expect(counts({ columns: 3, sections: [{ fields: ['a'] }, { fields: ['b'] }] })).toEqual([3, 3]);
+  });
+
+  it('a declared section narrower than the form keeps its own count', () => {
+    expect(counts({ columns: 3, sections: [{ columns: 1, fields: ['a'] }, { fields: ['b'] }] })).toEqual([1, 3]);
+  });
+
+  it('CONTROL: no form `columns` — each section as declared, an undeclared one at two', () => {
+    expect(
+      counts({ sections: [{ columns: 1, fields: ['a'] }, { columns: '3', fields: ['b'] }, { fields: [] }] }),
+    ).toEqual([1, 3, 2]);
   });
 });
 
