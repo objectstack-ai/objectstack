@@ -64,7 +64,6 @@ export const RecordCitationSchema = lazySchema(() => strictObject(
       objectName: 'object',
       table: 'object',
       recordId: 'id',
-      record_id: 'id',
       pack: 'context',
       contextName: 'context',
       section: 'anchor',
