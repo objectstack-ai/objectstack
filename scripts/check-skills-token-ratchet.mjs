@@ -870,17 +870,19 @@ export const CEILINGS = new Map([
   // are absorbed and the ceiling moves 6148 -> 6149 (+1). Pinned AT the
   // measurement.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24594 / 4)
-  // 6149 -> 6152 (card #37102): the enumeration row for the new `knowledge`
+  // 6149 -> 6151 (card #37102): the enumeration row for the new `knowledge`
   // capability token, in the same cell of the same `requires:` table and under
   // the same standing enumeration-row case (ruling A on #32584, record
   // 6819475461; #32673 letter A, record 6840575378). Raised by the row's own
   // measured delta and by no more; nothing else in the file is cut and nothing
   // rides along. Arithmetic in priced bytes (stamp line excluded): on the base
-  // the text was 24593 bytes (6149 tokens, headroom 0); the row adds 12 bytes,
-  // so the LANDED priced text is 24605 bytes -> 6152 tokens (+3). Pinned AT the
-  // measurement.
-  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24605 / 4)
-  ['skills/objectstack-platform/SKILL.md', 6152],
+  // (after #37568 took 2 bytes out of the file and left this row at 6149) the
+  // text is 24591 bytes (6148 tokens, headroom 1); the row adds 12 bytes, so
+  // the LANDED priced text is 24603 bytes -> 6151 tokens: the 1 token of
+  // headroom is absorbed and the ceiling moves 6149 -> 6151 (+2). Pinned AT
+  // the measurement.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24603 / 4)
+  ['skills/objectstack-platform/SKILL.md', 6151],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
