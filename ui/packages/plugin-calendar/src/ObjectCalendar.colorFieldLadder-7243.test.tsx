@@ -19,12 +19,10 @@
  * first, so a select field's option colour arrives as a hex and
  * `resolveEventColor` paints THAT.
  *
- * The hash is NOT retired — it stays as the last rung, unchanged, for values
- * no option colours it (a category label on a schemaless / inline-data
- * calendar). That is deliberate: retiring it would repaint every existing
- * calendar whose `colorField` points at a plain categorical field, which is a
- * behaviour change well beyond this card, and `CalendarView`'s soft-tint class
- * pairs are theme-aware where a derived solid hex would not be.
+ * The hash that once stood as the last rung is retired (objectstack#36882,
+ * option A): a value no option colours — a category label on a schemaless /
+ * inline-data calendar — is still handed on raw, and `resolveEventColor`
+ * paints it the default event colour. No colour is derived from a value.
  *
  * ---
  *
@@ -223,8 +221,8 @@ describe('objectui#7243 — calendar colorField ladder', () => {
     expect(resolveEventColor('open').inlineColor).toBeUndefined();
   });
 
-  it('last rung: a value no option colours still reaches the hash unchanged', async () => {
+  it('last rung: a value no option colours is handed on raw and paints the default event colour', async () => {
     expect(await colorsFor('category')).toEqual(['email']);
-    expect(resolveEventColor('email').className).toMatch(/^bg-/);
+    expect(resolveEventColor('email')).toEqual({ className: 'bg-blue-100 text-blue-900 border border-blue-200' });
   });
 });

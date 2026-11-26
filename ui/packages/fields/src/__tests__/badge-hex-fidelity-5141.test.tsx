@@ -16,8 +16,10 @@
  *   2. The label must stay readable against the surface actually rendered, in BOTH
  *      themes, including for declarations that are unreadable as declared. Honoring
  *      author metadata must not turn legibility loose across every list view.
- *   3. Non-hex declarations (family names, the semantic value map, the hash
- *      fallback) must be untouched.
+ *   3. Non-hex declarations (family names) must be untouched. An option with
+ *      no declared colour renders the neutral badge: no colour is derived from
+ *      its value (objectstack#36882, option A), so those cases below assert
+ *      the declared path beside the neutral one.
  *
  * The colour math here is written out independently of the implementation on
  * purpose: a contrast pin that reuses the code under test would agree with that
@@ -226,6 +228,29 @@ describe('objectui#5141 — appearance: dot honours the declaration too', () => 
   });
 });
 
+describe('objectstack#36882 — appearance: dot is the declared colour, else gray', () => {
+  function dotFor(option: Record<string, unknown>, value: string): HTMLElement {
+    const field = { type: 'select', appearance: 'dot', options: [option] } as any;
+    const { container } = render(<SelectCellRenderer value={value} field={field} />);
+    const dot = container.querySelector('[aria-hidden="true"]') as HTMLElement;
+    expect(dot).not.toBeNull();
+    return dot;
+  }
+
+  it('an option with no declared colour gets the gray dot, whatever its value', () => {
+    for (const value of ['critical', 'won', 'some_unmapped_value']) {
+      const dot = dotFor({ label: value, value }, value);
+      expect(dot.className).toContain('bg-gray-400');
+      expect(dot.className).toContain('dark:bg-gray-500');
+      expect(dot.className).not.toMatch(/(^|\s)bg-(red|orange|yellow|green|blue|indigo|purple|pink)-/);
+    }
+  });
+
+  it('a declared family paints that family dot', () => {
+    expect(dotFor({ label: 'Won', value: 'won', color: 'green' }, 'won').className).toContain('bg-green-500');
+  });
+});
+
 describe('objectui#5141 — every non-hex path is untouched', () => {
   it('family names still resolve to their exact palette classes', () => {
     expect(getBadgeColorClasses('green')).toBe(
@@ -236,17 +261,20 @@ describe('objectui#5141 — every non-hex path is untouched', () => {
     );
   });
 
-  it('the semantic value map still wins when no colour is declared', () => {
-    // '完成' maps to green in SEMANTIC_COLOR_MAP.
-    expect(getBadgeColorClasses(undefined, '完成')).toContain('bg-green-50');
-    expect(getBadgeColorClasses(undefined, '已取消')).toContain('bg-red-50');
+  it('a value once read by a value table takes its colour from the declaration only', () => {
+    // Declared: the family the author wrote.
+    expect(getBadgeColorClasses('green', '已完成')).toContain('bg-green-50');
+    expect(getBadgeColorClasses('red', '已取消')).toContain('bg-red-50');
+    // Undeclared: neutral, whatever the value says.
+    expect(getBadgeColorClasses(undefined, '已完成')).toBe('bg-muted text-muted-foreground border-border');
+    expect(getBadgeColorClasses(undefined, '已取消')).toBe('bg-muted text-muted-foreground border-border');
   });
 
-  it('the deterministic hash fallback is still deterministic', () => {
-    const first = getBadgeColorClasses(undefined, 'some_unmapped_value');
-    const second = getBadgeColorClasses(undefined, 'some_unmapped_value');
-    expect(first).toBe(second);
-    expect(first).toMatch(/^bg-/);
+  it('an unmapped value with no declared colour is neutral, never a hashed family', () => {
+    expect(getBadgeColorClasses(undefined, 'some_unmapped_value')).toBe(
+      'bg-muted text-muted-foreground border-border',
+    );
+    expect(getBadgeColorClasses('purple', 'some_unmapped_value')).toContain('bg-purple-50');
   });
 
   it('an empty value still renders the muted pill', () => {
@@ -275,11 +303,22 @@ describe('objectui#5141 — every non-hex path is untouched', () => {
     expect(getSemanticColorName('#808080')).toBe('gray');
   });
 
-  it('a field with no declared colour renders exactly the family classes', () => {
+  it('a field with no declared colour renders the neutral badge, light and dark', () => {
     const field = { type: 'select', options: [{ label: 'Open', value: 'open' }] } as any;
     render(<SelectCellRenderer value="open" field={field} />);
     const badge = screen.getByTitle('Open');
     expect(badge.getAttribute('style')).toBeFalsy();
-    expect(badge.className).toMatch(/bg-\w+-50/);
+    expect(badge.className).toContain('bg-muted');
+    expect(badge.className).not.toMatch(/(^|\s)(dark:)?(bg|text|border)-(gray|red|orange|yellow|green|blue|indigo|purple|pink)-\d/);
+  });
+
+  it('the same field with a declared family renders exactly the family classes', () => {
+    const field = { type: 'select', options: [{ label: 'Open', value: 'open', color: 'blue' }] } as any;
+    render(<SelectCellRenderer value="open" field={field} />);
+    const badge = screen.getByTitle('Open');
+    expect(badge.getAttribute('style')).toBeFalsy();
+    expect(badge.className).toContain(
+      'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900/60',
+    );
   });
 });

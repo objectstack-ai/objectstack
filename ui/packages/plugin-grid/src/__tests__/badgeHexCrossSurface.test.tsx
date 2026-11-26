@@ -62,6 +62,9 @@ const OPTIONS = [
   { value: 'forest', label: 'Forest', color: FOREST },
 ];
 
+/** The options the data source serves; one describe below swaps them. */
+let fieldOptions: Array<Record<string, unknown>> = OPTIONS;
+
 const ROWS = [
   { id: 'r1', name: 'Row one', stage: 'emerald' },
   { id: 'r2', name: 'Row two', stage: 'forest' },
@@ -82,7 +85,7 @@ function makeDataSource() {
       fields: {
         id: { type: 'text' },
         name: { type: 'text', label: 'Name' },
-        stage: { type: 'select', label: 'Stage', options: OPTIONS },
+        stage: { type: 'select', label: 'Stage', options: fieldOptions },
       },
     })),
   } as any;
@@ -102,6 +105,7 @@ beforeAll(() => {
 
 afterEach(() => {
   Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: ORIGINAL_INNER_WIDTH });
+  fieldOptions = OPTIONS;
   cleanup();
 });
 
@@ -217,5 +221,40 @@ describe('objectui#5183 — a declared hex renders the same on every grid surfac
     expect(emerald?.['--os-badge-bg']).toBeTruthy();
     expect(forest?.['--os-badge-bg']).toBeTruthy();
     expect(emerald!['--os-badge-bg']).not.toBe(forest!['--os-badge-bg']);
+  });
+});
+
+/** Any palette-family utility, light or `dark:`. */
+const FAMILY_CLASS = /(^|\s)(dark:)?(bg|text|border)-(gray|red|orange|yellow|green|blue|indigo|purple|pink)-\d/;
+
+describe('objectstack#36882 — an option with no declared colour renders neutral on the grid', () => {
+  // `emerald` and `forest` both hit nothing but the retired value hash; one
+  // declares a family, the other declares nothing.
+  const MIXED_OPTIONS = [
+    { value: 'emerald', label: 'Emerald' },
+    { value: 'forest', label: 'Forest', color: 'green' },
+  ];
+
+  it('group header pill: undeclared is neutral (light and dark), a declared family keeps its classes', async () => {
+    fieldOptions = MIXED_OPTIONS;
+    const { container } = renderGrid(gridSchema({ grouping: { fields: [{ field: 'stage' }] } }));
+    await waitFor(() => expect(groupPills(container).length).toBeGreaterThan(1));
+    const pill = (label: string) => groupPills(container).find((el) => el.textContent?.trim() === label)!;
+
+    expect(pill('Emerald').className).toContain('bg-muted text-muted-foreground border-border');
+    expect(pill('Emerald').className).not.toMatch(FAMILY_CLASS);
+    expect(pill('Forest').className).toContain('bg-green-50');
+    expect(pill('Forest').className).toContain('dark:bg-green-950/40');
+  });
+
+  it('desktop cell: undeclared is neutral, a declared family keeps its classes', async () => {
+    fieldOptions = MIXED_OPTIONS;
+    renderGrid(gridSchema());
+    await waitFor(() => expect(screen.getAllByTitle('Emerald').length).toBeGreaterThan(0));
+    for (const badge of screen.getAllByTitle('Emerald')) {
+      expect(badge.className).toContain('bg-muted');
+      expect(badge.className).not.toMatch(FAMILY_CLASS);
+    }
+    expect(screen.getAllByTitle('Forest')[0].className).toContain('bg-green-50');
   });
 });

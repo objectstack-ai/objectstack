@@ -1450,7 +1450,11 @@ describe('ObjectGantt.ruleArrayFilter-10767', () => {
  *
  *   1. the field's own option `color` for the record's value;
  *   2. else the value when it already IS a colour literal (#hex / rgb / hsl);
- *   3. else the existing semantic-token derivation — never a raw value.
+ *   3. else nothing: `color` stays undefined and `GanttView` paints its
+ *      default bar colour — never a raw value, and never a colour derived
+ *      from the value or from the record's status (objectstack#36882,
+ *      option A, which retired the semantic-token rung and the status
+ *      fallback).
  *
  * The assertions read the `tasks` prop `ObjectGantt` hands `GanttView` rather
  * than the painted bar: that prop IS the colour contract between the two
@@ -1660,27 +1664,25 @@ describe('ObjectGantt.colorFieldLadder-7243', () => {
       expect(await colorsFor('accent')).toEqual(['#123456']);
     });
 
-    it('rung 3: a value with no option colour derives a colour, never the raw value', async () => {
+    it('no rung 3: a value with no option colour leaves the default bar, never a derived colour or the raw value', async () => {
       const rows = [{ ...ROWS[0], status: 'in_progress' }];
       const schemaless = {
         ...OBJECT_SCHEMA,
         fields: { ...OBJECT_SCHEMA.fields, status: { name: 'status', type: 'text' } },
       };
       const tasks = await tasksFor({ colorField: 'status' }, rows, schemaless);
-      // `in_progress` is a SEMANTIC_COLOR_MAP key -> blue -> that palette's hex.
-      expect(tasks[0].color).toBe('#3b82f6');
-      expect(tasks[0].color).not.toBe('in_progress');
+      expect(tasks[0].color).toBeUndefined();
     });
 
-    it('rung 3: a palette token resolves to that palette colour, not a raw CSS name', async () => {
+    it('no rung 3: a palette-name value is no colour literal, so the bar takes the default colour', async () => {
       const rows = [{ ...ROWS[0], accent: 'red' }];
-      expect(await colorsFor('accent', rows)).toEqual(['#ef4444']);
+      expect(await colorsFor('accent', rows)).toEqual([undefined]);
     });
 
-    it('an empty colorField value still falls back to the record status story', async () => {
+    it('no status fallback: an empty colorField value leaves the default bar whatever the record status', async () => {
       const rows = [{ ...ROWS[0], accent: '' }];
-      // `status: 'open'` -> SEMANTIC_COLOR_MAP blue.
-      expect(await colorsFor('accent', rows)).toEqual(['#3b82f6']);
+      // The record carries `status: 'open'`; it no longer colours the bar.
+      expect(await colorsFor('accent', rows)).toEqual([undefined]);
     });
 
     it('borderColorField takes rung 1 too — the alert stroke honours option colours', async () => {
