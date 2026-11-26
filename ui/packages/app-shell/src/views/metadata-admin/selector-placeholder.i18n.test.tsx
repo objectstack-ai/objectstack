@@ -1,5 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+// The field picker's module graph reaches two dynamic imports (`celAuthoring.ts`);
+// their first load is paid at collection, never inside a clocked case (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { WIDGETS } from './widgets';

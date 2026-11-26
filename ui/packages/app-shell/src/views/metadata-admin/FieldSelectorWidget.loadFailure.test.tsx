@@ -58,6 +58,10 @@
  * arm by its disabled input, the completed arms by the combobox they render.
  */
 
+// The field picker's module graph reaches two dynamic imports (`celAuthoring.ts`);
+// their first load is paid at collection, never inside a clocked case (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
