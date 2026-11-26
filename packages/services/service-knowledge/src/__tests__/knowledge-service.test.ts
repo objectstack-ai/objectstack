@@ -332,6 +332,94 @@ describe('KnowledgeService — reindex', () => {
     expect(adapter.upsertSpy).not.toHaveBeenCalled();
   });
 
+  it("a refusal's remedy (operator text) reaches the warn log, never refused[].message or the thrown message", async () => {
+    const http = (id: string, adapter: string): KnowledgeSource => ({
+      id, label: id, adapter, source: { kind: 'http', urls: ['https://x.test'] } as KnowledgeSource['source'],
+    });
+    const remedy = 'Run as a database owner:\nDELETE FROM "os_knowledge"."knowledge_generation" WHERE source_id = \'refusing\';';
+    const refusing = Object.assign(makeAdapter('refusing'), {
+      search: vi.fn(async () => {
+        throw Object.assign(new Error("Knowledge source 'refusing' needs a rebuild."), {
+          code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409, remedy,
+        });
+      }),
+    });
+    const answering = makeAdapter('answering', [{ chunkId: 'c1', documentId: 'd1', sourceId: 'answering', score: 0.9, snippet: 'ok' }]);
+    const warn = vi.fn();
+    const svc = new KnowledgeService({ logger: { warn } as never });
+    svc.registerAdapter('refusing', refusing);
+    svc.registerAdapter('answering', answering);
+    svc.registerSource(http('refusing', 'refusing'));
+    svc.registerSource(http('answering', 'answering'));
+
+    // Some sources answer: the refused one is named, its message alone.
+    const report = await svc.searchWithRefusals('q');
+    expect(report.hits.map((h) => h.documentId)).toEqual(['d1']);
+    expect(report.refused).toEqual([
+      { sourceId: 'refusing', code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409, message: "Knowledge source 'refusing' needs a rebuild." },
+    ]);
+    expect(warn.mock.calls.some(([line]) => String(line).includes('DELETE FROM'))).toBe(true);
+
+    // None answers: the thrown refusal carries no remedy either.
+    const thrown = await svc.searchWithRefusals('q', { sourceIds: ['refusing'] }).then(
+      () => undefined,
+      (e: unknown) => e as { code?: string; message: string; refused?: Array<{ message: string }> },
+    );
+    expect(thrown).toMatchObject({ code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409 });
+    expect(thrown?.message).not.toContain('DELETE');
+    expect(thrown?.refused?.every((r) => !r.message.includes('DELETE'))).toBe(true);
+  });
+
+  it('a refused beginBuild stops a complete reindex before any listing or write: ok:false, the remedy carried', async () => {
+    const find = vi.fn(async () => [{ id: 'r1', title: 'T1', notes: 'N1' }]);
+    const listDocuments = vi.fn(async () => ({ documents: [] }));
+    const completeBuild = vi.fn(async () => undefined);
+    const adapter = Object.assign(makeAdapter('memory'), {
+      listDocuments,
+      completeBuild,
+      beginBuild: vi.fn(async () => {
+        throw Object.assign(new Error("Knowledge source 's1' needs a rebuild."), {
+          code: 'KNOWLEDGE_REBUILD_REQUIRED',
+          status: 409,
+          remedy: 'DELETE FROM "os_knowledge"."knowledge_generation" WHERE source_id = \'s1\';',
+        });
+      }),
+    });
+    const svc = new KnowledgeService({ dataEngine: { find } as unknown as IDataEngine });
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(objectSource('s1', 'task'));
+    const res = await svc.reindexSource('s1');
+    expect(res).toMatchObject({ ok: false, indexed: 0, purged: null });
+    expect(res.message).toContain('needs a rebuild');
+    expect(res.message).toContain('DELETE FROM');
+    expect(listDocuments).not.toHaveBeenCalled();
+    expect(find).not.toHaveBeenCalled();
+    expect(adapter.upsertSpy).not.toHaveBeenCalled();
+    expect(adapter.deleteSpy).not.toHaveBeenCalled();
+    expect(completeBuild).not.toHaveBeenCalled();
+  });
+
+  it('a completeBuild that throws turns a complete reindex into ok:false, though every page was written', async () => {
+    const find = vi.fn(async (_obj: string, query: { where?: unknown }) =>
+      (query.where === undefined ? [{ id: 'r1', title: 'T1', notes: 'N1' }] : []));
+    const adapter = Object.assign(makeAdapter('memory'), {
+      listDocuments: vi.fn(async () => ({ documents: [] })),
+      beginBuild: vi.fn(async () => undefined),
+      completeBuild: vi.fn(async () => {
+        throw new Error('the generation row could not be written');
+      }),
+    });
+    const svc = new KnowledgeService({ dataEngine: { find } as unknown as IDataEngine });
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(objectSource('s1', 'task'));
+    const res = await svc.reindexSource('s1');
+    expect(res).toMatchObject({ ok: false, indexed: 1 });
+    expect(res.message).toContain('did not complete the build');
+    expect(res.message).toContain('the generation row could not be written');
+    expect(adapter.upsertSpy).toHaveBeenCalledOnce();
+    expect(adapter.completeBuild).toHaveBeenCalledOnce();
+  });
+
   it('returns ok:false when no dataEngine is bound', async () => {
     const svc = new KnowledgeService();
     svc.registerAdapter('memory', makeAdapter('memory'));
@@ -1617,6 +1705,240 @@ describe('KnowledgeService — search refills after the permission filter', () =
 // ADR-0161 K5: the title a document carries is declared — the object's display
 // field (ADR-0079 `resolveDisplayField`), never a field that happens to be
 // named `title`.
+describe('KnowledgeService — search scope (ADR-0161 K8, item 17)', () => {
+  const MEMBER = { userId: 'u1', positions: ['member'], permissions: [], isSystem: false };
+  const SYSTEM = { positions: [], permissions: [], isSystem: true };
+  type Term = { kind: 'record'; ids: string[] } | { kind: 'metadata'; field: string; ids: string[] };
+
+  /**
+   * Twenty records of `task`, three passages each, every passage best first.
+   * The passages of `rec_3` and `rec_7` score below every other record's;
+   * record `rec_i` belongs to policy `p${i % 4}` through the lookup `policy`.
+   */
+  function corpus(sourceId: string): KnowledgeHit[] {
+    const hits: KnowledgeHit[] = [];
+    for (let i = 0; i < 20; i++) {
+      const low = i === 3 || i === 7;
+      for (let p = 0; p < 3; p++) {
+        hits.push({
+          chunkId: `${sourceId}:rec_${i}#${p}`, documentId: `${sourceId}:rec_${i}`, sourceId,
+          sourceRecordId: `rec_${i}`, score: (low ? 0.4 : 0.9) - i / 1000 - p / 10000, snippet: `passage ${p} of ${i}`,
+          metadata: { status: 'open', policy: `p${i % 4}` },
+        });
+      }
+    }
+    return hits.sort((a, b) => b.score - a.score);
+  }
+
+  /** Whether a term of `scope` holds for `hit` — the adapter's own reading, written apart from the service's. */
+  const holds = (hit: KnowledgeHit, scope: Term[]): boolean =>
+    scope.some((t) => (t.kind === 'record' ? t.ids.includes(String(hit.sourceRecordId)) : t.ids.includes(String(hit.metadata?.[t.field]))));
+
+  /** An adapter that ranks `hits` of the source asked; `honours` applies the scope before ranking, else ignores it. */
+  function adapterOver(hits: Record<string, KnowledgeHit[]>, honours: boolean) {
+    const searchSpy = vi.fn(async (_q: string, opts: { source: KnowledgeSource; topK: number; scope?: Term[] }) => {
+      const all = hits[opts.source.id] ?? [];
+      const ranked = honours && opts.scope !== undefined ? all.filter((h) => holds(h, opts.scope!)) : all;
+      return ranked.slice(0, opts.topK);
+    });
+    return { id: 'memory', upsert: vi.fn(async () => undefined), delete: vi.fn(async () => undefined), search: searchSpy, searchSpy };
+  }
+
+  /** An engine whose re-check as a non-system caller admits only `readable`, answering `schemas` from `getSchema`. */
+  function engineOver(readable: (id: string) => boolean, schemas: Record<string, unknown> = {}) {
+    const find = vi.fn(async (_obj: string, q: { where?: { id?: { $in?: string[] } }; context?: { isSystem?: boolean } }) =>
+      (q.where?.id?.$in ?? []).filter((id) => q.context?.isSystem || readable(id)).map((id) => ({ id })));
+    return { find, getSchema: (name: string) => schemas[name] } as unknown as IDataEngine & { find: typeof find };
+  }
+
+  const TASK_SCHEMA = {
+    name: 'task',
+    fields: {
+      title: { type: 'text' }, notes: { type: 'textarea' }, status: { type: 'select' },
+      policy: { type: 'lookup', reference: 'policy' },
+      cited_policy: { type: 'lookup', reference: 'policy' },
+    },
+  };
+
+  function taskSource(id: string, metadataFields: string[] = ['status', 'policy'], object = 'task'): KnowledgeSource {
+    return {
+      id, label: id, adapter: 'memory',
+      source: { kind: 'object', object, contentFields: ['title', 'notes'], metadataFields } as ObjectKnowledgeSource,
+    };
+  }
+
+  function setup(opts: {
+    honours?: boolean;
+    readable?: (id: string) => boolean;
+    sources?: KnowledgeSource[];
+    /** More hits of the first source, ranked with its corpus. */
+    extra?: KnowledgeHit[];
+  } = {}) {
+    const sources = opts.sources ?? [taskSource('s1')];
+    const hits = Object.fromEntries(sources.map((s, i) => [
+      s.id,
+      [...corpus(s.id), ...(i === 0 ? opts.extra ?? [] : [])].sort((a, b) => b.score - a.score),
+    ]));
+    const adapter = adapterOver(hits, opts.honours ?? true);
+    const engine = engineOver(opts.readable ?? (() => true), { task: TASK_SCHEMA });
+    const warn = vi.fn();
+    const svc = new KnowledgeService({ dataEngine: engine, logger: { warn, debug: vi.fn(), error: vi.fn() } });
+    svc.registerAdapter('memory', adapter);
+    for (const s of sources) svc.registerSource(s);
+    const handed = () => adapter.searchSpy.mock.calls.map((c) => (c[1] as { scope?: Term[] }).scope);
+    return { svc, adapter, engine, warn, handed };
+  }
+
+  const records = (hits: KnowledgeHit[]) => [...new Set(hits.map((h) => h.sourceRecordId))].sort();
+
+  it('20 records, two of them in scope, topK 5: every hit is one of the two, and the page is full', async () => {
+    const { svc, handed } = setup();
+    const out = await svc.search('q', { topK: 5, scope: [{ object: 'task', ids: ['rec_3', 'rec_7'] }], executionContext: MEMBER });
+    expect(out).toHaveLength(5);
+    expect(records(out)).toEqual(['rec_3', 'rec_7']);
+    expect(handed()).toEqual([[{ kind: 'record', ids: ['rec_3', 'rec_7'] }]]);
+  });
+
+  it('an adapter that ignores the scope: no out-of-scope hit is answered, and the service logs once for the adapter', async () => {
+    const { svc, warn } = setup({ honours: false });
+    const scope = [{ object: 'task', ids: ['rec_3', 'rec_7'] }];
+    // A person: the refill after the permission filter reaches past the out-of-scope ranks.
+    const asMember = await svc.search('q', { topK: 5, scope, executionContext: MEMBER });
+    expect(records(asMember)).toEqual(['rec_3', 'rec_7']);
+    // The system identity gets one round: the out-of-scope ranks are emptied, never answered.
+    const asSystem = await svc.search('q', { topK: 5, scope, executionContext: SYSTEM });
+    expect(asSystem).toEqual([]);
+    const reports = warn.mock.calls.map(([m]) => String(m)).filter((m) => m.includes("outside the search's scope"));
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toContain("adapter 'memory'");
+  });
+
+  it('ids are compared as strings: a lookup value stored as the number 7 is in scope for the id "7"', async () => {
+    const numeric: KnowledgeHit = {
+      chunkId: 's1:rec_n#0', documentId: 's1:rec_n', sourceId: 's1', sourceRecordId: 'rec_n', score: 0.1, snippet: '',
+      metadata: { status: 'open', policy: 7 },
+    };
+    const { svc } = setup({ extra: [numeric] });
+    const out = await svc.search('q', { topK: 5, scope: [{ object: 'policy', ids: ['7'] }], executionContext: MEMBER });
+    expect(out.map((h) => h.chunkId)).toEqual(['s1:rec_n#0']);
+  });
+
+  it('a parent scope: the adapter is handed a metadata term on the listed lookup, and only that parent\'s records answer', async () => {
+    const { svc, handed } = setup();
+    const out = await svc.search('q', { topK: 5, scope: [{ object: 'policy', ids: ['p1'] }], executionContext: MEMBER });
+    expect(handed()).toEqual([[{ kind: 'metadata', field: 'policy', ids: ['p1'] }]]);
+    expect(out).toHaveLength(5);
+    for (const hit of out) expect(hit.metadata?.policy).toBe('p1');
+  });
+
+  it('a parent scope asks the engine nothing about the parent object, and an adapter that changes the terms it was handed does not change the check', async () => {
+    const held = corpus('s1');
+    const handed: unknown[] = [];
+    // An adapter that widens the terms it is handed to every policy and every record, then ranks by them.
+    const search = vi.fn(async (_q: string, opts: { source: KnowledgeSource; topK: number; scope?: Term[] }) => {
+      handed.push(structuredClone(opts.scope));
+      const scope = opts.scope ?? [];
+      for (const term of scope) term.ids.push('p0', 'p2', 'p3');
+      scope.push({ kind: 'record', ids: held.map((h) => String(h.sourceRecordId)) });
+      return held.filter((h) => holds(h, scope)).slice(0, opts.topK);
+    });
+    // Every call the service makes on the engine, by method and arguments.
+    const asked: Array<{ method: string; args: unknown[] }> = [];
+    const inner = engineOver(() => true, { task: TASK_SCHEMA });
+    const engine = new Proxy(inner, {
+      get(target, prop, receiver) {
+        const value: unknown = Reflect.get(target, prop, receiver);
+        if (typeof value !== 'function') return value;
+        return (...args: unknown[]) => {
+          asked.push({ method: String(prop), args });
+          return (value as (...a: unknown[]) => unknown).apply(target, args);
+        };
+      },
+    });
+    const warn = vi.fn();
+    const svc = new KnowledgeService({ dataEngine: engine, logger: { warn, debug: vi.fn(), error: vi.fn() } });
+    svc.registerAdapter('memory', { id: 'memory', upsert: vi.fn(async () => undefined), delete: vi.fn(async () => undefined), search });
+    svc.registerSource(taskSource('s1'));
+    const scope = [{ object: 'policy', ids: ['p1'] }];
+
+    for (const executionContext of [SYSTEM, MEMBER]) {
+      const out = await svc.search('q', { topK: 5, scope, executionContext });
+      expect(out.length).toBeGreaterThan(0);
+      for (const hit of out) expect(hit.metadata?.policy).toBe('p1');
+    }
+    // Every round was handed the service's own terms, whatever the adapter did with the last ones.
+    expect(handed.length).toBeGreaterThan(2);
+    for (const terms of handed) expect(terms).toEqual([{ kind: 'metadata', field: 'policy', ids: ['p1'] }]);
+    expect(scope).toEqual([{ object: 'policy', ids: ['p1'] }]);
+    // The indexed object's definition was read; nothing of the parent object was asked.
+    expect(asked.some((c) => c.method === 'getSchema' && c.args[0] === 'task')).toBe(true);
+    expect(asked.filter((c) => c.args[0] === 'policy')).toEqual([]);
+    expect(warn.mock.calls.map(([m]) => String(m)).filter((m) => m.includes("outside the search's scope"))).toHaveLength(1);
+  });
+
+  it('a scope with groupBy, or with granularity record, over an adapter that ignores it: every round is handed the terms, and no out-of-scope record answers', async () => {
+    const scope = [{ object: 'task', ids: ['rec_1', 'rec_3'] }];
+    for (const shape of [{ groupBy: 'policy' }, { granularity: 'record' as const }]) {
+      const { svc, handed } = setup({ honours: false });
+      const out = await svc.search('q', { topK: 5, scope, executionContext: MEMBER, ...shape });
+      expect(out.length).toBeGreaterThan(0);
+      for (const record of records(out)) expect(['rec_1', 'rec_3']).toContain(record);
+      expect(handed().length).toBeGreaterThan(0);
+      for (const terms of handed()) expect(terms).toEqual([{ kind: 'record', ids: ['rec_1', 'rec_3'] }]);
+    }
+  });
+
+  it('an object no searched source reaches: no adapter is asked, and the answer is empty', async () => {
+    const { svc, adapter } = setup();
+    expect(await svc.search('q', { topK: 5, scope: [{ object: 'invoice', ids: ['i1'] }], executionContext: MEMBER })).toEqual([]);
+    expect(adapter.searchSpy).not.toHaveBeenCalled();
+  });
+
+  it('an empty scope, and an entry with no ids, answer nothing — never read as "no scope"', async () => {
+    const { svc, adapter } = setup();
+    expect(await svc.search('q', { topK: 5, scope: [], executionContext: MEMBER })).toEqual([]);
+    expect(await svc.search('q', { topK: 5, scope: [{ object: 'task', ids: [] }], executionContext: MEMBER })).toEqual([]);
+    expect(adapter.searchSpy).not.toHaveBeenCalled();
+  });
+
+  it('a source the scope reaches is searched; one it does not reach is not', async () => {
+    const { svc, adapter } = setup({ sources: [taskSource('s1'), taskSource('s2', ['status'], 'note')] });
+    const out = await svc.search('q', { topK: 5, scope: [{ object: 'policy', ids: ['p1'] }], executionContext: MEMBER });
+    expect(adapter.searchSpy.mock.calls.map((c) => (c[1] as { source: KnowledgeSource }).source.id)).toEqual(['s1']);
+    expect(new Set(out.map((h) => h.sourceId))).toEqual(new Set(['s1']));
+  });
+
+  it('a source listing two lookups to the scoped object is not searched, reported once naming both fields', async () => {
+    const { svc, adapter, warn } = setup({ sources: [taskSource('s1', ['status', 'policy', 'cited_policy'])] });
+    for (let i = 0; i < 2; i++) {
+      expect(await svc.search('q', { topK: 5, scope: [{ object: 'policy', ids: ['p1'] }], executionContext: MEMBER })).toEqual([]);
+    }
+    expect(adapter.searchSpy).not.toHaveBeenCalled();
+    const reports = warn.mock.calls.map(([m]) => String(m)).filter((m) => m.includes("fields pointing at 'policy'"));
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toContain('policy, cited_policy');
+  });
+
+  it('a caller who cannot read one of the scoped records gets no hit from it', async () => {
+    const { svc } = setup({ readable: (id) => id !== 'rec_3' });
+    const out = await svc.search('q', { topK: 5, scope: [{ object: 'task', ids: ['rec_3', 'rec_7'] }], executionContext: MEMBER });
+    expect(out.length).toBeGreaterThan(0);
+    expect(records(out)).toEqual(['rec_7']);
+  });
+
+  it.each([
+    ['11 entries', Array.from({ length: 11 }, () => ({ object: 'task', ids: ['rec_1'] })), /at most 10 entries/],
+    ['501 ids', [{ object: 'task', ids: Array.from({ length: 501 }, (_, i) => `rec_${i}`) }], /at most 500 ids/],
+  ])('bounds exceeded (%s): a coded refusal naming the bound, before any adapter or engine is asked', async (_label, scope, message) => {
+    const { svc, adapter, engine } = setup();
+    const refused = svc.search('q', { topK: 5, scope, executionContext: MEMBER });
+    await expect(refused).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    await expect(refused).rejects.toThrow(message);
+    expect(adapter.searchSpy).not.toHaveBeenCalled();
+    expect(engine.find).not.toHaveBeenCalled();
+  });
+});
+
 describe('recordToDocument reads the title from the object\'s display field', () => {
   const src: KnowledgeSource = {
     id: 's1', label: 's1', adapter: 'memory',

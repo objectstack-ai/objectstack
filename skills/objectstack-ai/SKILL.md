@@ -36,10 +36,6 @@ Agent  →  Skill  →  Tool
   └─ Autonomous actor with role, instructions, and guardrails
 ```
 
-**Skills are your entry point** — agents are platform-internal (reference
-section at the bottom), so you extend the platform by authoring skills, and a
-skill reaches tools by naming them.
-
 ---
 
 ## Skill Configuration
@@ -73,8 +69,7 @@ A `skill.tools[]` entry resolves against the union of four sources
    tools, flattened from `PLATFORM_TOOLS_BY_PACKAGE` in
    `packages/spec/src/system/constants/platform-tool-names.ts`: data /
    knowledge tools from `service-ai`, schema / metadata / package tools from
-   `service-ai-studio`. Read that file for the exact set: it is the registry
-   the lint rule checks against.
+   `service-ai-studio`.
 3. **`action_<name>`** — one tool per AI-exposed Action of your own stack
    (`PLATFORM_TOOL_FAMILY_PREFIXES`). **The default path** for anything your app
    does.
@@ -85,9 +80,7 @@ A `skill.tools[]` entry resolves against the union of four sources
    own hint: no in-product turn registers it.
 
 A name none of them resolves raises **`ai-skill-tool-unresolved`** (warning,
-ADR-0078 advisory-first). The rule exists because one audited app shipped 10
-fictional tools across 6 skills through `validate` / `lint` clean, and became a
-copilot claiming abilities it did not have.
+ADR-0078 advisory-first).
 
 ### Skill Example
 
@@ -149,7 +142,7 @@ You usually **don't author tool definitions by hand** for action invocation. An
 tool named `action_<actionName>` **only when it opts in** — `ai.exposed: true`
 (default `false`) plus an `ai.description` of ≥ 40 chars, refused by the parse
 without it (ADR-0011). `registerActionsAsTools()` walks the opted-in ones;
-exposure is never automatic, and there is no opt-out key.
+there is no opt-out key.
 
 Three action types dispatch headlessly:
 
@@ -184,6 +177,32 @@ outcome). Whether *your* action is queued is
 decided entirely by the skip rule above — `actionSkipReason(action, ctx)` and
 `actionRequiresApproval(action)` (from `@objectstack/service-ai`) answer both
 questions, and Studio's "AI exposure" diagnostics use the same predicates.
+
+### The **Ask AI** button — `type: 'ask_ai'` ☁️
+
+Pins the assistant's conversation to the record the action runs on and opens
+it, sending no message. Declare it on the object, in
+`locations: ['record_header']` or `['record_more']`:
+
+<!-- os:check -->
+```typescript
+import { defineAction } from '@objectstack/spec';
+
+export default defineAction({
+  name: 'ask_about_contract',
+  label: 'Ask AI',
+  objectName: 'contract',
+  type: 'ask_ai',
+  locations: ['record_header'],
+});
+```
+
+It names nothing and is never a tool: the parse refuses a `target`,
+`ai.exposed: true`, and `actionType: 'ask_ai'` on a dashboard header (a header
+runs on no record). Nothing serves it headless: `list_actions` skips it,
+`run_action` refuses it, and no `action_` tool exists for it. The console draws
+it only where the assistant surface is on **and** the AI service honours a
+conversation focus; elsewhere it is absent, not disabled.
 
 ---
 
@@ -243,8 +262,7 @@ collection for them — they are registered at runtime, and the ☁️
 `@objectstack/service-knowledge` registers `IKnowledgeService` with the kernel and
 each source at boot (`service.registerSource` still works later). The `adapter`
 id resolves against an adapter plugin — `@objectstack/knowledge-memory`
-(`'memory'`, dev/test) or `@objectstack/knowledge-ragflow` (`'ragflow'`);
-without one the id is unresolvable.
+(`'memory'`, dev/test) or `@objectstack/knowledge-ragflow` (`'ragflow'`).
 
 | Property | Purpose |
 |:---------|:--------|
@@ -260,7 +278,7 @@ without one the id is unresolvable.
 
 | `source.kind` | Fields | Hygiene |
 |:--------------|:-------|:--------|
-| `object` | `object`, `contentFields[]` (min 1; `*` = every readable text field), `metadataFields?`, `where?` (ObjectQL `where` syntax) | `where` keeps drafts and archived rows out of the index; `contentFields` takes meaningful text only (never system fields or ids, `*` sparingly); project what you will filter on at query time (`status`, `owner_id`, `tags`) into `metadataFields` |
+| `object` | `object`, `contentFields[]` (min 1; `*` = every readable text field), `metadataFields?`, `where?` (ObjectQL `where` syntax), `split?` (below) | `where` keeps drafts and archived rows out of the index; `contentFields` takes meaningful text only (never system fields or ids, `*` sparingly); project what you will filter on at query time (`status`, `owner_id`, `tags`) into `metadataFields` |
 | `file` | `prefix` (storage prefix, e.g. `kb/handbooks/`), `mimeTypes?` | narrow the prefix instead of indexing a whole bucket |
 | `http` | `urls[]`, `userAgent?` | enumerate URLs explicitly — there is no crawler |
 
@@ -283,17 +301,37 @@ export const supportKb: KnowledgeSource = KnowledgeSourceSchema.parse({
 });
 ```
 
-> **Chunking, top-K, score thresholds and rerankers are NOT platform metadata.**
-> The spec scopes them out deliberately (`embedding.zod.ts`): they belong to the
-> adapter (`adapterConfig`) or application code. The platform carries only the
-> embed + vector primitives, so any RAG strategy can be built on top.
+**Splitting (`split`, object sources only).** The knowledge service cuts each
+document into passages for an adapter declaring `capabilities.chunks`
+(`memory`). Any other adapter (`ragflow`) receives whole documents; `split` has
+no effect on it. `split: { strategy, maxChars?, minChars? }`:
+
+- `recursive` (default): cuts at blank lines, then line breaks, then sentence
+  ends. For prose.
+- `markdown`: one section per heading, each passage embedded with its heading
+  path. For documents with headings.
+- `whole`: one passage per document. For short records only: a document over
+  the embedder's input budget is removed from the index and reported, never
+  truncated.
+
+`maxChars`, the longest passage in characters (`whole` ignores it), overrides
+the **Target chunk size** setting (`knowledge.chunk_target`, else 800); the
+embedder's input limit can lower it. Adjacent pieces shorter than `minChars`
+(default 200) are merged. Changing `split` re-splits a document only when it
+next changes.
+
+Retired and refused: the `knowledge.chunk_overlap` setting (`400 UNKNOWN_KEY`;
+passages never overlap) and `KnowledgeChunk.metadata` (parse error; a passage
+takes its document's `metadata`).
+
+Top-K, score thresholds and rerankers are not source metadata: they belong to
+the adapter or application code.
 
 ---
 
 ## Tool metadata (`defineTool`) — not the default path
 
-**Default: declare no tool records.** A skill names a platform tool or an
-`action_<name>` (ladder above). ADR-0109: a `stack.tools` record "exists only for
+**Default: declare no tool records.** ADR-0109: a `stack.tools` record "exists only for
 AI-presentation refinement (Phase 2: LLM description, parameter narrowing, flow
 exposure) and has no runtime reader until that lands"
 (`packages/spec/src/stack.zod.ts:595-602`). Author one only to refine how an
@@ -337,9 +375,9 @@ there is **no top-level `temperature` / `maxTokens`** on an agent
 1. **Mistaking `guardrails` for a gate.** `guardrails` is enforced per user turn
    by the AI runtime ☁️ — token and time limits, blocked tool names and categories
    refused — but it is a limit, not an approval; `memory` is enforced by the AI
-   runtime ☁️ too — long-term notes are recalled and reflected on, `maxEntries`
-   and `reflectionInterval` are required once `longTerm.enabled` is true, and
-   there is no storage backend to choose — and neither is a gate. For a gate
+   runtime ☁️ too (`maxEntries` and `reflectionInterval` are required once
+   `longTerm.enabled` is true; there is no storage backend to choose), and is
+   no gate either. For a gate
    that is **enforced**, use
    `enableActionApproval: true` (approval queue ☁️), `ai.requiresConfirmation` on
    the **action** (its door only, pitfall 2), or `approval: 'always'` on an MCP
@@ -362,20 +400,6 @@ there is **no top-level `temperature` / `maxTokens`** on an agent
    door; a `state_machine` dead-end (`closed: []`) still makes the reached
    state final for every writer (**objectstack-automation**
    `references/state-machines-and-approvals.md`).
-3. **Indexing everything.** A knowledge source without a `where` filter and
-   curated `contentFields` fills the index with drafts and boilerplate that
-   pollute retrieval. Source hygiene is the metadata's job; relevance tuning
-   belongs to the adapter.
-
----
-
-## App AI Blueprint
-
-| Layer | File | Pattern |
-|:--|:--|:--|
-| Reusable skill | `src/skills/lead-qualification.skill.ts` | `defineSkill` — `instructions` + trigger conditions + a toolset where every name resolves; pick a `surface` |
-| Knowledge source | `src/knowledge/sales-kb.ts` | `KnowledgeSourceSchema` metadata, registered at boot via `KnowledgeServicePlugin({ sources })` |
-| Central registration | `defineStack({ skills: [...] })` | `agents` / `tools` / `skills` are the only AI stack collections — knowledge sources have none, agents are platform-supplied, and `tools` is not the default path |
 
 ---
 
@@ -384,23 +408,18 @@ there is **no top-level `temperature` / `maxTokens`** on an agent
 The `agent` type is **closed** to third parties (`allowRuntimeCreate:false`,
 `allowEnvironmentOverlay:false`; ADR-0063 §2) and `os g agent` is retired: a
 stack-authored agent is filtered out of `listAgents()`, refused outright by
-`loadAgent()`, and 404s on chat. `AgentSchema`'s full field list is in
-[references/_index.md](./references/_index.md).
+`loadAgent()`, and 404s on chat.
 
-The runtime ships **exactly two** agents, bound by *surface* — the user never
-picks from a roster, the surface they are in selects the agent. **`ask`** is the
-data product (≈ Claude Chat): conversational read / query / explore over records
+The runtime ships **exactly two** agents, bound by *surface*. **`ask`** is the
+data product: conversational read / query / explore over records
 plus running the business actions the app exposes, end-user audience,
 RLS-bounded, canonical id `ask` (`ASK_AGENT_NAME`), and the implicit copilot for
 any app that does not pin `app.defaultAgent`. **`build`** is the authoring
-product (≈ Claude Code): agentic authoring of *metadata* through plan → draft →
+product: agentic authoring of *metadata* through plan → draft →
 verify → publish, builder audience, governance-gated, pinned by Studio via
 `app.defaultAgent`. There is **no per-turn intent classifier** — a `build`-shaped
 request arriving at `ask` is declined and redirected, never silently re-routed
-into authoring (ADR-0063 §1/§5). `data_chat`→`ask` and
-`metadata_assistant`→`build` resolve through the alias table for old bookmarks
-and persisted `agent_id`s; they are **not** vocabulary — always write `ask` /
-`build`.
+into authoring (ADR-0063 §1/§5).
 
 An agent's tool set is the **union of its surface-compatible skills' tools** —
 there is no global fall-through (ADR-0064), so `ask` cannot author by
@@ -451,8 +470,7 @@ os validate     # Zod schema + CEL predicate validation + bindings (no artifact)
 # or: os build  # the same gates, plus emits dist/
 ```
 
-It confirms the skill / tool metadata conforms to the protocol. This
-domain has no CEL site — a model-registry `promptTemplate.system` / `.user` is
+This domain has no CEL site — a model-registry `promptTemplate.system` / `.user` is
 the `template` dialect (`{{var}}`); `ToolSchema` carries no expression field of
 any kind. In a scaffolded project the gate is `npm run validate`. See
 objectstack-platform → **Verify your work**.

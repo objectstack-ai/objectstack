@@ -2,6 +2,9 @@
 
 import { createHash } from 'node:crypto';
 import type {
+  AdapterContext,
+  AdapterIndexExpectation,
+  AdapterScopeTerm,
   IDataEngine,
   IKnowledgeAdapter,
   IKnowledgeService,
@@ -23,7 +26,8 @@ import {
 } from '@objectstack/core';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { createKnowledgeTools, refusal, type KnowledgeTools } from './knowledge-tools.js';
-import { resolveSplit, splitDocument } from './split/index.js';
+import { resolveSplit, splitDocument, type ResolvedSplit } from './split/index.js';
+import { indexExpectation } from './knowledge-index-fingerprint.js';
 import {
   documentOrganizationId,
   searchOrganizationIds,
@@ -38,6 +42,7 @@ import {
   type KnowledgeSourceAdmission,
   type ObjectAdmission,
 } from './knowledge-source-admission.js';
+import { readSearchScope, scopeCheck, scopeTermsFor, type SearchScopeEntry } from './knowledge-search-scope.js';
 
 /**
  * Minimal logger shape; falls back to no-op when none is provided.
@@ -123,6 +128,10 @@ export class KnowledgeService implements IKnowledgeService {
   private readonly adapters = new Map<string, IKnowledgeAdapter>();
   private readonly sources = new Map<string, KnowledgeSource>();
   private readonly defaultTopK: number;
+  /** Adapters whose answer the scope check has already dropped a hit from — reported once each ({@link searchRound}). */
+  private readonly scopeIgnoredReported = new Set<string>();
+  /** `${source id}\u0000${object}` pairs a scope entry did not reach for two or more parent links — reported once each. */
+  private readonly scopeAmbiguousReported = new Set<string>();
   /**
    * The tail of each document's record-sync chain, keyed by document id
    * (`${source.id}:${recordId}`) — see {@link serializeRecordSync}. A key
@@ -231,15 +240,53 @@ export class KnowledgeService implements IKnowledgeService {
           "splitter from the content, by the source's split; omit them.",
       );
     }
-    const prepared = await this.prepareDocuments(source, adapter, [{ ...doc, docHash: computeDocHash(doc) }]);
+    const plan = await this.planIndex(source, adapter);
+    const ctx = plan.context('manual');
+    const prepared = this.prepareDocuments(plan, [{ ...doc, docHash: computeDocHash(doc) }]);
     if (prepared.failed.length > 0) {
       const failure = prepared.failed[0];
-      await adapter.delete([doc.id], { source, reason: 'manual' });
+      await adapter.delete([doc.id], ctx);
       throw new Error(
         `[knowledge] indexDocument did not index document '${doc.id}' and removed it from the index: ${failure.reason}`,
       );
     }
-    await adapter.upsert(prepared.ready, { source, reason: 'manual' });
+    await adapter.upsert(prepared.ready, ctx);
+  }
+
+  /**
+   * What every adapter call for `source` carries, read now (ADR-0161 K7; K8,
+   * item 8): the split the service applies for this adapter — resolved from
+   * the source's `split`, the settings page's `knowledge.chunk_target` and the
+   * adapter's reported `embedding.maxInputTokens`, absent for an adapter that
+   * does not take chunks — and the index fingerprint and recipe hash computed
+   * over that same split, the adapter's descriptor and the source. One read
+   * feeds both, so the fingerprint is always the fingerprint of the split the
+   * documents were cut by. Never cached: the settings, the descriptor and the
+   * object definition may each change between two calls.
+   */
+  private async planIndex(
+    source: KnowledgeSource,
+    adapter: IKnowledgeAdapter,
+    chunkTarget: () => Promise<number | undefined> = () => this.readChunkTarget(),
+  ): Promise<IndexPlan> {
+    const split = adapter.capabilities?.chunks === true
+      ? resolveSplit({
+        split: source.source.kind === 'object' ? (source.source as ObjectKnowledgeSource).split : undefined,
+        chunkTarget: await chunkTarget(),
+        maxInputTokens: adapter.embedding?.maxInputTokens,
+      })
+      : undefined;
+    const index = indexExpectation(
+      { source, embedding: adapter.embedding, ...(split === undefined ? {} : { split }) },
+      { source, schema: source.source.kind === 'object' ? this.schemaFor((source.source as ObjectKnowledgeSource).object) : undefined },
+    );
+    return {
+      source,
+      adapter,
+      ...(split === undefined ? {} : { split }),
+      index,
+      context: (reason) => ({ source, reason, index }),
+    };
   }
 
   /**
@@ -247,27 +294,22 @@ export class KnowledgeService implements IKnowledgeService {
    * K1). An adapter that does not declare `capabilities.chunks` gets the
    * documents as they are, without `chunks` — it splits them itself, as
    * before. One that does gets each document with the passages of
-   * {@link splitDocument}, under the source's `split` (an object source's
-   * key; any other source splits `recursive`), the settings page's
-   * `knowledge.chunk_target`, and the adapter's reported
-   * `embedding.maxInputTokens` — both read now, for this batch, never cached.
-   * A document the split cannot index (a `whole` document over the budget)
-   * is answered in `failed`, never truncated; the caller removes it.
+   * {@link splitDocument}, under the split {@link planIndex} resolved for
+   * this call: the source's `split` (an object source's key; any other source
+   * splits `recursive`), the settings page's `knowledge.chunk_target`, and the
+   * adapter's reported `embedding.maxInputTokens` — read for this call, never
+   * cached. A document the split cannot index (a `whole` document over the
+   * budget) is answered in `failed`, never truncated; the caller removes it.
    */
-  private async prepareDocuments(
-    source: KnowledgeSource,
-    adapter: IKnowledgeAdapter,
+  private prepareDocuments(
+    plan: IndexPlan,
     docs: KnowledgeDocument[],
-  ): Promise<{
+  ): {
     ready: KnowledgeDocument[];
     failed: Array<{ documentId: string; reason: string; estimate: number; budget: number }>;
-  }> {
-    if (adapter.capabilities?.chunks !== true || docs.length === 0) return { ready: docs, failed: [] };
-    const split = resolveSplit({
-      split: source.source.kind === 'object' ? (source.source as ObjectKnowledgeSource).split : undefined,
-      chunkTarget: await this.readChunkTarget(),
-      maxInputTokens: adapter.embedding?.maxInputTokens,
-    });
+  } {
+    const split = plan.split;
+    if (split === undefined || docs.length === 0) return { ready: docs, failed: [] };
     const ready: KnowledgeDocument[] = [];
     const failed: Array<{ documentId: string; reason: string; estimate: number; budget: number }> = [];
     for (const doc of docs) {
@@ -296,7 +338,7 @@ export class KnowledgeService implements IKnowledgeService {
   async deleteDocument(sourceId: string, documentId: string): Promise<void> {
     const source = this.requireSource(sourceId);
     const adapter = this.getAdapter(source.adapter);
-    await adapter.delete([documentId], { source, reason: 'manual' });
+    await adapter.delete([documentId], (await this.planIndex(source, adapter)).context('manual'));
   }
 
   // ── Reindex ───────────────────────────────────────────────────────
@@ -364,6 +406,19 @@ export class KnowledgeService implements IKnowledgeService {
    * indexer owns its index), or an adapter without `listDocuments` — which
    * also skips nothing, the walk otherwise as before. A listing that fails
    * skips and purges nothing either; the result's `message` says so.
+   *
+   * ## The build (ADR-0161 K7, rule 3; K8, item 8)
+   *
+   * Every adapter call of the walk carries the index fingerprint and recipe
+   * hash ({@link planIndex}), computed once per walk. A COMPLETE walk is a
+   * build: before it the service calls the adapter's `beginBuild`, and after
+   * the walk and its purge it calls `completeBuild` once, so the adapter
+   * records what it now holds. A walk with a `limit` or a `dryRun` is not a
+   * build and makes neither call. `beginBuild` refusing stops the walk before
+   * any write (`ok: false`, its message carried). A walk that fails, a purge
+   * that stops, or a listing that failed (the purge could not run, so stale
+   * documents may remain) is not completed: the adapter keeps what it held,
+   * and the next complete walk builds again.
    */
   async reindexSource(
     sourceId: string,
@@ -470,9 +525,35 @@ export class KnowledgeService implements IKnowledgeService {
       };
     }
 
+    // One plan for the whole walk: the split every page is cut by, and the
+    // fingerprint and recipe hash every adapter call carries.
+    const plan = await this.planIndex(source, adapter);
+    const ctx = plan.context('reindex');
+
+    // A complete walk is a build (K7, rule 3): the adapter is told before the
+    // first write, and may open a generation for a new fingerprint — or refuse.
+    const build = cap === undefined;
+    if (build && typeof adapter.beginBuild === 'function') {
+      try {
+        await adapter.beginBuild(ctx);
+      } catch (err) {
+        return {
+          ok: false,
+          object,
+          discovered: 0,
+          indexed: 0,
+          skipped: 0,
+          purged: null,
+          failed: 0,
+          failures: [],
+          message: `reindex of source '${source.id}' refused: the adapter did not begin the build, and nothing was written. ${operatorText(err)}`,
+        };
+      }
+    }
+
     // What the adapter holds before the walk: the skip's hashes, and the
     // purge's candidates once the walk is complete.
-    const listing = await listAdapterDocuments(source, adapter);
+    const listing = await listAdapterDocuments(source, adapter, plan.index);
     const listed = listing.ok ? listing.documents : undefined;
     const listingNote = listing.ok || listing.reason === undefined
       ? undefined
@@ -550,12 +631,12 @@ export class KnowledgeService implements IKnowledgeService {
           return stored === undefined || stored !== doc.docHash;
         });
       // One split per changed document, for an adapter that takes chunks.
-      const prepared = await this.prepareDocuments(source, adapter, changed);
+      const prepared = this.prepareDocuments(plan, changed);
       if (prepared.ready.length > 0) {
         try {
-          await adapter.upsert(prepared.ready, { source, reason: 'reindex' });
+          await adapter.upsert(prepared.ready, ctx);
         } catch (err) {
-          return stopped(`the adapter upsert failed: ${errorText(err)}`);
+          return stopped(`the adapter upsert failed: ${operatorText(err)}`);
         }
       }
       // A document the split cannot index is removed — an older passage of it
@@ -563,9 +644,9 @@ export class KnowledgeService implements IKnowledgeService {
       // reported, never truncated.
       if (prepared.failed.length > 0) {
         try {
-          await adapter.delete(prepared.failed.map((f) => f.documentId), { source, reason: 'reindex' });
+          await adapter.delete(prepared.failed.map((f) => f.documentId), ctx);
         } catch (err) {
-          return stopped(`removing the page's documents that cannot be indexed failed: ${errorText(err)}`);
+          return stopped(`removing the page's documents that cannot be indexed failed: ${operatorText(err)}`);
         }
         for (const f of prepared.failed) {
           failed += 1;
@@ -609,7 +690,9 @@ export class KnowledgeService implements IKnowledgeService {
       ...(failedNote === undefined ? {} : { message: failedNote }),
     };
     if (listingNote) return { ...done, message: failedNote === undefined ? listingNote : `${listingNote} ${failedNote}` };
-    if (listed === undefined || cap !== undefined || (source.refresh?.onRecordChange ?? true) === false) return done;
+    if (listed === undefined || cap !== undefined || (source.refresh?.onRecordChange ?? true) === false) {
+      return build ? this.completeBuild(source, adapter, ctx, done) : done;
+    }
 
     const candidates = [...listed.keys()].filter((id) => !seen.has(id));
     const purge = await purgeDocuments({
@@ -619,6 +702,7 @@ export class KnowledgeService implements IKnowledgeService {
       engine,
       candidates,
       serialize: (documentId, task) => chainAfter(this.recordSyncTails, documentId, task),
+      index: plan.index,
     });
     if (purge.failure !== undefined) {
       return {
@@ -631,16 +715,44 @@ export class KnowledgeService implements IKnowledgeService {
       };
     }
     if (purge.foreign > 0) {
-      return {
+      return this.completeBuild(source, adapter, ctx, {
         ...done,
         purged: purge.purged,
         message:
           `${purge.foreign} listed document(s) carry an id that is not one this source derives from a record ` +
           `('${source.id}:' and the record id); they were kept, because no row can confirm them.` +
           (failedNote === undefined ? '' : ` ${failedNote}`),
+      });
+    }
+    return this.completeBuild(source, adapter, ctx, { ...done, purged: purge.purged });
+  }
+
+  /**
+   * The end of a complete build (ADR-0161 K8, item 8 c): the adapter's
+   * `completeBuild`, once, with the fingerprint and recipe hash the walk
+   * carried. An adapter without it records nothing. One that throws turns the
+   * walk's result into `ok: false`: every page was written, but the adapter
+   * did not record what it holds, so the next complete walk builds again.
+   */
+  private async completeBuild(
+    source: KnowledgeSource,
+    adapter: IKnowledgeAdapter,
+    ctx: AdapterContext,
+    done: KnowledgeReindexResult,
+  ): Promise<KnowledgeReindexResult> {
+    if (typeof adapter.completeBuild !== 'function') return done;
+    try {
+      await adapter.completeBuild(ctx);
+      return done;
+    } catch (err) {
+      return {
+        ...done,
+        ok: false,
+        message:
+          `reindex of source '${source.id}' walked every page, but the adapter did not complete the build ` +
+          `(${operatorText(err)}).${done.message === undefined ? '' : ` ${done.message}`}`,
       };
     }
-    return { ...done, purged: purge.purged };
   }
 
   // ── The `search_knowledge` AI tool (ADR-0149 D2) ──────────────────
@@ -661,6 +773,18 @@ export class KnowledgeService implements IKnowledgeService {
    * Search every source the caller is admitted to, re-check each object-source
    * hit as the caller ({@link applyPermissionFilter}), and answer the best
    * `topK` hits by score — passages, or records under `granularity: 'record'`.
+   *
+   * ## The record scope (`scope`, ADR-0161 K8, item 17)
+   *
+   * A scope is held to its bounds before anything else is done
+   * ({@link readSearchScope}: a coded refusal past them), then turned into the
+   * terms of each admitted source ({@link sourcesInScope}). A source no entry
+   * reaches is not searched, so an empty scope answers no hits and asks no
+   * adapter. Each searched adapter is handed its source's terms, and every hit
+   * it answers is checked against them, whatever the adapter did
+   * ({@link searchRound}). The refill below counts the hits that passed both
+   * that check and the re-check; whether a source may hold more is still judged
+   * on how many hits its adapter answered.
    *
    * ## The refill after the permission filter
    *
@@ -704,8 +828,39 @@ export class KnowledgeService implements IKnowledgeService {
    * The answer is at most `topK` hits (`KnowledgeSearchOptions.topK`). How
    * many hits the re-check removed is logged at `debug`, never returned: the
    * count is an oracle on rows the caller may not read.
+   *
+   * ## A refused source is never an empty answer (ADR-0161 K7, rule 5)
+   *
+   * Each source is searched under the fingerprint the service expects of its
+   * index ({@link planIndex}). An adapter whose index holds another — the
+   * source needs a rebuild, or is being rebuilt — refuses with an ADR-0112
+   * coded error, and so may any adapter for a reason it codes. A coded refusal
+   * is not logged and dropped like a failure: the sources that can be searched
+   * answer, and when NONE can, the call is refused whole — this method throws
+   * a coded error naming each refused source with its code. When some answer,
+   * the hits are theirs. A source that answers the first round and refuses the
+   * refill is refused for the whole search, its first-round hits dropped: no
+   * source is both answered and named as refused. A refused source is named
+   * with its code and the adapter's one-sentence message; the adapter's
+   * `remedy`, operator text such as the SQL to run, goes to the `warn` log
+   * with it and never to the caller. The
+   * return type of `IKnowledgeService.search` has no place to name them, so a
+   * caller that must name them to its own caller (the `search_knowledge` tool)
+   * reads {@link searchWithRefusals}.
    */
   async search(query: string, opts: KnowledgeSearchOptions = {}): Promise<KnowledgeHit[]> {
+    return (await this.searchWithRefusals(query, opts)).hits;
+  }
+
+  /**
+   * {@link search}, answering the refused sources beside the hits: each
+   * source whose adapter refused with an ADR-0112 coded error, with its code.
+   * Throws a coded error when no source could be searched and at least one
+   * refused (the call refused whole, ADR-0161 K7, rule 5); the thrown error's
+   * `refused` lists them all.
+   */
+  async searchWithRefusals(query: string, opts: KnowledgeSearchOptions = {}): Promise<KnowledgeSearchReport> {
+    const scope = readSearchScope(opts.scope);
     const topK = opts.topK ?? this.defaultTopK;
     const groupBy = opts.groupBy;
     if (groupBy !== undefined) {
@@ -730,9 +885,12 @@ export class KnowledgeService implements IKnowledgeService {
     }
     const byRecord = opts.granularity === 'record' || groupBy !== undefined;
     const ctx = opts.executionContext;
-    let sources = await this.admitSources(this.resolveSearchTargets(opts.sourceIds), ctx);
-    if (groupBy !== undefined) sources = this.sourcesGroupableBy(sources, groupBy);
-    if (sources.length === 0) return [];
+    let admitted: Array<{ source: KnowledgeSource; organizationIds?: string[]; scope?: AdapterScopeTerm[] }> =
+      await this.admitSources(this.resolveSearchTargets(opts.sourceIds), ctx);
+    if (scope !== undefined) admitted = this.sourcesInScope(admitted, scope);
+    if (groupBy !== undefined) admitted = this.sourcesGroupableBy(admitted, groupBy);
+    if (admitted.length === 0) return { hits: [], refused: [] };
+    const sources = await this.planSearches(admitted);
 
     const filtered = ctx !== undefined && ctx.isSystem !== true && this.options.dataEngine !== undefined;
     const widened = (source: KnowledgeSource): boolean =>
@@ -742,7 +900,9 @@ export class KnowledgeService implements IKnowledgeService {
     const groupOf = byRecord
       ? (hit: KnowledgeHit): string | undefined => this.groupKeyOf(hit, groupBy)
       : recordKeyOf;
-    const first = await this.searchRound(query, sources, firstAsk, opts.filter);
+    const refused: KnowledgeSearchRefusal[] = [];
+    const first = await this.searchRound(query, sources, firstAsk, opts.filter, refused);
+    if (first.size === 0 && refused.length > 0) throw wholeRefusal(refused);
     const raw = [...first.values()].flatMap((answer) => answer.hits);
     let kept = await this.applyPermissionFilter(raw, ctx, byRecord);
     let removed = raw.length - kept.length;
@@ -753,7 +913,8 @@ export class KnowledgeService implements IKnowledgeService {
         return widened(source) && answer !== undefined && answer.answered >= firstAsk(source);
       });
       if (saturated.length > 0) {
-        const refill = await this.searchRound(query, saturated, () => topK * SEARCH_REFILL_FACTOR, opts.filter);
+        const refusedBefore = refused.length;
+        const refill = await this.searchRound(query, saturated, () => topK * SEARCH_REFILL_FACTOR, opts.filter, refused);
         // A refilled source's second answer is a superset of its first: its
         // first-round survivors are dropped and the whole answer re-checked.
         const refilledHits = [...refill.values()].flatMap((answer) => answer.hits);
@@ -762,6 +923,14 @@ export class KnowledgeService implements IKnowledgeService {
         const firstKept = kept.filter((hit) => refill.has(hit.sourceId)).length;
         kept = [...kept.filter((hit) => !refill.has(hit.sourceId)), ...refilledKept];
         removed += refilledHits.length - refilledKept.length - (firstRaw - firstKept);
+        // A source that refused the refill (its index changed between the two
+        // rounds) is refused for the whole search: its first-round hits are
+        // dropped, so no source is both answered and named as refused.
+        const refusedInRefill = new Set(refused.slice(refusedBefore).map((r) => r.sourceId));
+        if (refusedInRefill.size > 0) {
+          kept = kept.filter((hit) => !refusedInRefill.has(hit.sourceId));
+          if ([...first.keys()].every((id) => refusedInRefill.has(id))) throw wholeRefusal(refused);
+        }
       }
     }
 
@@ -772,7 +941,7 @@ export class KnowledgeService implements IKnowledgeService {
       );
     }
     kept.sort((a, b) => b.score - a.score);
-    if (!byRecord) return kept.slice(0, topK);
+    if (!byRecord) return { hits: kept.slice(0, topK), refused };
     const { hits: answer, capped } = await this.answerByRecord(kept, topK, groupOf);
     if (answer.length < topK && !capped) {
       this.options.logger?.debug?.(
@@ -781,7 +950,7 @@ export class KnowledgeService implements IKnowledgeService {
           `(topK × ${SEARCH_REFILL_FACTOR} passages per source).`,
       );
     }
-    return answer;
+    return { hits: answer, refused };
   }
 
   /**
@@ -790,10 +959,7 @@ export class KnowledgeService implements IKnowledgeService {
    * `metadataFields`. Any other object source answers no hits for this search
    * — its hits carry no group value, and a hit is never answered ungrouped.
    */
-  private sourcesGroupableBy(
-    sources: Array<{ source: KnowledgeSource; organizationIds?: string[] }>,
-    groupBy: string,
-  ): Array<{ source: KnowledgeSource; organizationIds?: string[] }> {
+  private sourcesGroupableBy<T extends { source: KnowledgeSource }>(sources: T[], groupBy: string): T[] {
     return sources.filter(({ source }) => {
       if (source.source.kind !== 'object') return true;
       if (((source.source as ObjectKnowledgeSource).metadataFields ?? []).includes(groupBy)) return true;
@@ -996,20 +1162,55 @@ export class KnowledgeService implements IKnowledgeService {
   }
 
   /**
+   * Each admitted source paired with the fingerprint its search carries
+   * ({@link planIndex}); a source whose adapter is not registered carries none
+   * (the round skips it, as before).
+   */
+  private async planSearches(
+    admitted: Array<{ source: KnowledgeSource; organizationIds?: string[]; scope?: AdapterScopeTerm[] }>,
+  ): Promise<SearchTarget[]> {
+    const out: SearchTarget[] = [];
+    // The settings page's chunk target, read at most once for the whole search.
+    let target: Promise<number | undefined> | undefined;
+    const chunkTarget = (): Promise<number | undefined> => (target ??= this.readChunkTarget());
+    for (const entry of admitted) {
+      const adapter = this.adapters.get(entry.source.adapter);
+      if (!adapter) {
+        out.push(entry);
+        continue;
+      }
+      const plan = await this.planIndex(entry.source, adapter, chunkTarget);
+      out.push({ ...entry, fingerprint: plan.index.fingerprint });
+    }
+    return out;
+  }
+
+  /**
    * One round of {@link search}: ask each source's adapter for `ask(source)`
    * hits. Answers, per source that answered, the hits it serves and how many
-   * the adapter returned (`answered`, before a hit naming another source is
-   * dropped — what decides whether the adapter may hold more). A source whose
-   * adapter is unknown or throws is absent from the answer, logged.
+   * the adapter returned (`answered`, before a hit naming another source or
+   * outside the scope is dropped — what decides whether the adapter may hold
+   * more). A source whose adapter is unknown or throws is absent from the
+   * answer: a coded refusal (ADR-0112 `code` and `status`) is added to
+   * `refused`, anything else is logged.
+   *
+   * Under a scope, the adapter is handed the source's terms, and every hit it
+   * answers is checked against them ({@link scopeCheck}, fail closed). The first
+   * time the check drops a hit of an adapter, that is reported once for the
+   * adapter, at `warn`: it does not apply the scope before ranking, or answers
+   * hits without the document's metadata, so its scoped searches may answer
+   * fewer than `topK` (ADR-0161 K8, rule 2). How many hits were dropped is
+   * logged, never returned.
    */
   private async searchRound(
     query: string,
-    sources: Array<{ source: KnowledgeSource; organizationIds?: string[] }>,
+    sources: SearchTarget[],
     ask: (source: KnowledgeSource) => number,
     filter: Record<string, unknown> | undefined,
+    refused: KnowledgeSearchRefusal[],
   ): Promise<Map<string, { hits: KnowledgeHit[]; answered: number }>> {
     const out = new Map<string, { hits: KnowledgeHit[]; answered: number }>();
-    for (const { source, organizationIds } of sources) {
+    for (const { source, organizationIds, fingerprint, scope } of sources) {
       const adapter = this.adapters.get(source.adapter);
       if (!adapter) {
         this.options.logger?.warn?.(
@@ -1023,6 +1224,8 @@ export class KnowledgeService implements IKnowledgeService {
           topK: ask(source),
           filter,
           ...(organizationIds === undefined ? {} : { organizationIds }),
+          ...(fingerprint === undefined ? {} : { index: { fingerprint } }),
+          ...(scope === undefined ? {} : { scope: scope.map((term) => ({ ...term, ids: [...term.ids] })) }),
         });
         // A hit is served as the source it was searched for. One whose
         // `sourceId` names another source (an adapter answering from a store
@@ -1037,14 +1240,87 @@ export class KnowledgeService implements IKnowledgeService {
               'another source; dropped — a hit is served only as the source it was searched for.',
           );
         }
-        out.set(source.id, { hits: served, answered: hits.length });
+        out.set(source.id, {
+          hits: scope === undefined ? served : this.checkScope(served, scope, source),
+          answered: hits.length,
+        });
       } catch (err) {
+        const coded = codedRefusalOf(err);
+        if (coded !== undefined) {
+          // The caller reads the code and the adapter's one-sentence message;
+          // the operator reads its remedy (the SQL to run, say) here.
+          refused.push({ sourceId: source.id, ...coded });
+          this.options.logger?.warn?.(
+            `[knowledge] source '${source.id}' refused this search and was not searched (${coded.code}): ${operatorText(err)}`,
+          );
+          continue;
+        }
         this.options.logger?.error?.(
           `[knowledge] adapter '${source.adapter}' search failed for source '${source.id}': ${(err as Error).message}`,
         );
       }
     }
     return out;
+  }
+
+  /**
+   * [ADR-0161 K8, item 17] Pair each admitted source with the terms `scope`
+   * gives it ({@link scopeTermsFor}): a `record` term for an entry naming the
+   * object the source indexes, a `metadata` term for an entry naming a parent
+   * object the source reaches through the one parent link it lists in
+   * `metadataFields`, read from the object's registered definition. A source
+   * no entry reaches — every `file` / `http` source among them — is not
+   * searched, logged at `debug`. A source that lists two or more parent links
+   * to an entry's object is not reached by that entry, reported once per
+   * source and object at `warn`, naming the fields.
+   */
+  private sourcesInScope<T extends { source: KnowledgeSource }>(
+    sources: T[],
+    scope: readonly SearchScopeEntry[],
+  ): Array<T & { scope: AdapterScopeTerm[] }> {
+    const out: Array<T & { scope: AdapterScopeTerm[] }> = [];
+    for (const entry of sources) {
+      const { terms, ambiguous } = scopeTermsFor(entry.source, scope, (object) => this.schemaFor(object));
+      for (const { object, fields } of ambiguous) {
+        const key = `${entry.source.id}\u0000${object}`;
+        if (this.scopeAmbiguousReported.has(key)) continue;
+        this.scopeAmbiguousReported.add(key);
+        this.options.logger?.warn?.(
+          `[knowledge] source '${entry.source.id}' lists ${fields.length} fields pointing at '${object}' ` +
+            `(${fields.join(', ')}); a search scoped to '${object}' records does not reach it — ` +
+            'it is not told which field the scope means.',
+        );
+      }
+      if (terms.length === 0) {
+        this.options.logger?.debug?.(
+          `[knowledge] source '${entry.source.id}' not searched: no entry of the search's scope reaches it.`,
+        );
+        continue;
+      }
+      out.push({ ...entry, scope: terms });
+    }
+    return out;
+  }
+
+  /**
+   * The hits of `source` that some scope term holds for ({@link scopeCheck});
+   * the rest are dropped, and the first time an adapter's answer loses a hit
+   * here it is reported once, at `warn` ({@link searchRound}).
+   */
+  private checkScope(hits: KnowledgeHit[], terms: readonly AdapterScopeTerm[], source: KnowledgeSource): KnowledgeHit[] {
+    const inScope = scopeCheck(terms);
+    const kept = hits.filter(inScope);
+    const dropped = hits.length - kept.length;
+    if (dropped > 0 && !this.scopeIgnoredReported.has(source.adapter)) {
+      this.scopeIgnoredReported.add(source.adapter);
+      this.options.logger?.warn?.(
+        `[knowledge] adapter '${source.adapter}' answered ${dropped} hit(s) for source '${source.id}' outside the ` +
+          "search's scope; dropped. The adapter does not apply AdapterSearchOptions.scope before ranking, or answers " +
+          "hits without the document's metadata, so its scoped searches may answer fewer than topK. " +
+          'Reported once for this adapter.',
+      );
+    }
+    return kept;
   }
 
   // ── Sync entrypoints (called by the host plugin's event bridge) ───
@@ -1149,7 +1425,8 @@ export class KnowledgeService implements IKnowledgeService {
         const doc = recordToDocument(source, objSource, row, this.schemaFor(object), await this.readTenancyPosture());
         await this.writeSynced(source, adapter, doc, recordId);
       } else {
-        await adapter.delete([documentIdFor(source.id, String(recordId))], { source, reason: 'event-sync' });
+        const plan = await this.planIndex(source, adapter);
+        await adapter.delete([documentIdFor(source.id, String(recordId))], plan.context('event-sync'));
       }
     } catch (err) {
       this.options.logger?.warn?.(
@@ -1172,10 +1449,12 @@ export class KnowledgeService implements IKnowledgeService {
     doc: KnowledgeDocument,
     recordId: unknown,
   ): Promise<void> {
-    const prepared = await this.prepareDocuments(source, adapter, [doc]);
-    if (prepared.ready.length > 0) await adapter.upsert(prepared.ready, { source, reason: 'event-sync' });
+    const plan = await this.planIndex(source, adapter);
+    const ctx = plan.context('event-sync');
+    const prepared = this.prepareDocuments(plan, [doc]);
+    if (prepared.ready.length > 0) await adapter.upsert(prepared.ready, ctx);
     for (const f of prepared.failed) {
-      await adapter.delete([f.documentId], { source, reason: 'event-sync' });
+      await adapter.delete([f.documentId], ctx);
       const limit = adapter.embedding?.maxInputTokens;
       const message =
         `[knowledge] record '${String(recordId)}' of source '${source.id}' is no longer in the index and search ` +
@@ -1238,7 +1517,7 @@ export class KnowledgeService implements IKnowledgeService {
       await this.serializeRecordSync(docId, async () => {
         try {
           const adapter = this.getAdapter(source.adapter);
-          await adapter.delete([docId], { source, reason: 'event-sync' });
+          await adapter.delete([docId], (await this.planIndex(source, adapter)).context('event-sync'));
         } catch (err) {
           this.options.logger?.warn?.(
             `[knowledge] event-sync delete failed for source '${source.id}': ${(err as Error).message}`,
@@ -1529,6 +1808,75 @@ export class KnowledgeService implements IKnowledgeService {
 // ── Helpers ─────────────────────────────────────────────────────────
 
 /**
+ * A source that refused a search (ADR-0161 K7, rule 5): its adapter answered
+ * an ADR-0112 coded error — `KNOWLEDGE_REBUILD_REQUIRED` when its index holds
+ * another fingerprint than the one the search carried.
+ */
+export interface KnowledgeSearchRefusal {
+  sourceId: string;
+  /** The adapter's error code. */
+  code: string;
+  /** The adapter's HTTP-shaped status. */
+  status: number;
+  /** The adapter's message, which says what to do. */
+  message: string;
+}
+
+/** What {@link KnowledgeService.searchWithRefusals} answers. */
+export interface KnowledgeSearchReport {
+  /** The hits of the sources that answered, as {@link KnowledgeService.search} returns them. */
+  hits: KnowledgeHit[];
+  /** The sources that refused, each with its code; empty when none did. */
+  refused: KnowledgeSearchRefusal[];
+}
+
+/**
+ * One source a search round asks: its organizations scope, the fingerprint its
+ * search carries, and the record scope's terms for it (ADR-0161 K8, item 17).
+ */
+interface SearchTarget {
+  source: KnowledgeSource;
+  organizationIds?: string[];
+  fingerprint?: string;
+  scope?: AdapterScopeTerm[];
+}
+
+/** An ADR-0112 coded refusal's code, status and message, or `undefined` for any other thrown value. */
+function codedRefusalOf(err: unknown): Omit<KnowledgeSearchRefusal, 'sourceId'> | undefined {
+  if (err === null || typeof err !== 'object') return undefined;
+  const { code, status } = err as { code?: unknown; status?: unknown };
+  if (typeof code !== 'string' || !/^[A-Z][A-Z0-9_]*$/.test(code)) return undefined;
+  if (typeof status !== 'number' || !Number.isInteger(status) || status < 400 || status > 599) return undefined;
+  return { code, status, message: errorText(err) };
+}
+
+/**
+ * The refusal of a search no source could answer (ADR-0161 K7, rule 5): the
+ * first refusal's code and status — the one every refusal shares, when they
+ * share one — and a message naming each refused source with its code. The
+ * thrown error carries `refused`.
+ */
+function wholeRefusal(refused: KnowledgeSearchRefusal[]): Error {
+  const [first] = refused;
+  const message =
+    `[knowledge] no source could be searched: ` +
+    refused.map((r) => `source '${r.sourceId}' refused (${r.code}): ${r.message}`).join('; ');
+  return Object.assign(new Error(message), { code: first.code, status: first.status, refused: [...refused] });
+}
+
+/** What {@link KnowledgeService.planIndex} resolves for one call against one source's adapter. */
+interface IndexPlan {
+  source: KnowledgeSource;
+  adapter: IKnowledgeAdapter;
+  /** The split applied for an adapter that takes chunks; absent for one that does not. */
+  split?: ResolvedSplit;
+  /** The fingerprint and recipe hash every adapter call carries. */
+  index: AdapterIndexExpectation;
+  /** The adapter context of a call made for `reason`, carrying `index`. */
+  context(reason: NonNullable<AdapterContext['reason']>): AdapterContext;
+}
+
+/**
  * Rows one reindex page reads, and so the most documents one reindex `upsert`
  * carries. A memory and request-size bound for the walk, not an embedder
  * limit: an embedder that caps inputs per request splits a larger upsert into
@@ -1670,7 +2018,11 @@ type AdapterListing =
  * listing that throws or answers a malformed page or a cursor it already gave
  * (a listing that would never end) answers `{ ok: false, reason }`.
  */
-async function listAdapterDocuments(source: KnowledgeSource, adapter: IKnowledgeAdapter): Promise<AdapterListing> {
+async function listAdapterDocuments(
+  source: KnowledgeSource,
+  adapter: IKnowledgeAdapter,
+  index: AdapterIndexExpectation,
+): Promise<AdapterListing> {
   if (typeof adapter.listDocuments !== 'function') return { ok: false };
   const documents = new Map<string, string | undefined>();
   const cursors = new Set<string>();
@@ -1678,7 +2030,7 @@ async function listAdapterDocuments(source: KnowledgeSource, adapter: IKnowledge
   try {
     for (;;) {
       const page = await adapter.listDocuments(
-        { source, reason: 'reindex' },
+        { source, reason: 'reindex', index },
         cursor === undefined ? { limit: LIST_DOCUMENTS_PAGE_SIZE } : { cursor, limit: LIST_DOCUMENTS_PAGE_SIZE },
       );
       if (!page || !Array.isArray(page.documents)) return { ok: false, reason: 'a page carried no documents list' };
@@ -1694,7 +2046,7 @@ async function listAdapterDocuments(source: KnowledgeSource, adapter: IKnowledge
       cursor = page.nextCursor;
     }
   } catch (err) {
-    return { ok: false, reason: errorText(err) };
+    return { ok: false, reason: operatorText(err) };
   }
 }
 
@@ -1715,6 +2067,8 @@ export interface PurgeDocumentsInput {
   serialize: <T>(documentId: string, task: () => Promise<T>) => Promise<T>;
   /** Diagnostics tag on the adapter's `delete`. @default 'reindex' */
   reason?: string;
+  /** The fingerprint and recipe hash the adapter's `delete` carries (ADR-0161 K8, item 8 a). */
+  index?: AdapterIndexExpectation;
 }
 
 /** Outcome of {@link purgeDocuments}. */
@@ -1767,13 +2121,17 @@ export async function purgeDocuments(input: PurgeDocumentsInput): Promise<PurgeD
     try {
       const deleted = await input.serialize(documentId, async () => {
         if (await rereadRow(engine, objSource, recordId)) return false;
-        await adapter.delete([documentId], { source, reason: input.reason ?? 'reindex' });
+        await adapter.delete([documentId], {
+          source,
+          reason: input.reason ?? 'reindex',
+          ...(input.index === undefined ? {} : { index: input.index }),
+        });
         return true;
       });
       if (deleted) outcome.purged++;
       else outcome.kept++;
     } catch (err) {
-      outcome.failure = `document '${documentId}': ${errorText(err)}`;
+      outcome.failure = `document '${documentId}': ${operatorText(err)}`;
       return outcome;
     }
   }
@@ -1832,6 +2190,17 @@ function describeValue(value: unknown): string {
 /** A thrown value's text: an `Error`'s message, anything else as a string. */
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * An adapter error as an operator reads it: its message, then its `remedy`
+ * when it carries one — operator text such as the SQL to run, which an adapter
+ * keeps out of the message (ADR-0161 K7, rule 5). For a reindex result and the
+ * log; a search caller reads the message alone.
+ */
+function operatorText(err: unknown): string {
+  const remedy = err !== null && typeof err === 'object' ? (err as { remedy?: unknown }).remedy : undefined;
+  return typeof remedy === 'string' && remedy !== '' ? `${errorText(err)} ${remedy}` : errorText(err);
 }
 
 /** A record id the event sync can re-read by: a non-empty string or a finite number. */

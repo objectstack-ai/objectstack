@@ -3361,6 +3361,36 @@ export async function resolveActionConfirmationService(
 }
 
 /**
+ * [#34325] What the door that asked knows about its caller's client, passed
+ * beside the hand-off and never on it (the host's service is not told).
+ * Structurally `McpActionCallDoorFacts` (`@objectstack/mcp`), which this
+ * package does not depend on.
+ */
+export interface ActionConfirmationDoor {
+    /**
+     * The door would ask a client that advertised `elicitation` (it read the
+     * client's `initialize` and can carry a request to it), and this call's
+     * client did not advertise it. Absent: nothing is known, or the door asks
+     * no client.
+     */
+    elicitsCapableClients?: boolean;
+}
+
+/**
+ * [#34325] The `no_confirmation_service` refusal's routes. On every door: a
+ * person performs it in the app, and the caller makes no such change through
+ * another tool. Before it, only for a door that would ask a client that
+ * supports confirmation: that client (step 3 of the amended contract).
+ */
+const NO_SERVICE_IN_APP_ROUTE = 'a person performs it in the app: do not make the same change with another tool.';
+function noServiceRoutes(door: ActionConfirmationDoor): string {
+    return door.elicitsCapableClients === true
+        ? 'A client that supports confirmation (MCP elicitation) is asked in place on this server: use one to '
+            + `confirm it here. Otherwise ${NO_SERVICE_IN_APP_ROUTE}`
+        : `${NO_SERVICE_IN_APP_ROUTE.charAt(0).toUpperCase()}${NO_SERVICE_IN_APP_ROUTE.slice(1)}`;
+}
+
+/**
  * [#33690] Hand a declared-gated call off to the person it runs as (step 2 of
  * the amended contract), or refuse it when the host has no service to hand it
  * to (step 3). Runs nothing either way.
@@ -3373,9 +3403,17 @@ export async function resolveActionConfirmationService(
  *   approver with every gate re-checked, a rejection, a lapse — is the
  *   host's (`IActionConfirmationService`).
  * - None: `428 ACTION_CONFIRMATION_REQUIRED`, `details.reason:
- *   'no_confirmation_service'`. The message names the one route that works on
- *   this server — performing the action in the app — and no retry: no request
- *   this caller can send runs the action here.
+ *   'no_confirmation_service'`. The message names the routes that work for
+ *   the door that asked, and no retry of this call: no request this caller
+ *   sends from this client runs the action here. [#34325] On every door a
+ *   person performs it in the app, and the caller is told not to make the
+ *   same change through another tool (an agent that read only "in the app"
+ *   completed it with a raw record update). Where `door.elicitsCapableClients`
+ *   says the door would have asked a client that supports confirmation (the
+ *   stdio door, for a client that advertised no `elicitation`), the message
+ *   also names that route (step 3 of the amended contract). Without it (the
+ *   Streamable HTTP door, which asks no client, or a caller that says
+ *   nothing about its door) that sentence would be false and is left out.
  *
  * A service that answers no `pendingId` is a broken host, never a hand-off
  * that happened: thrown, so the caller is not told a person was asked.
@@ -3386,6 +3424,7 @@ export async function handOffActionConfirmation(
     envId: string | undefined,
     handOff: ActionConfirmationHandOff,
     ec: any,
+    door: ActionConfirmationDoor = {},
 ): Promise<{ pending: ActionConfirmationPending } | { refused: ActionConfirmationRefusal }> {
     const on = confirmationSubjectOn(handOff.objectName);
     const declared = `Action '${handOff.actionName}'${on} declares ai.requiresConfirmation: true, so a person confirms it`;
@@ -3395,7 +3434,7 @@ export async function handOffActionConfirmation(
             refused: confirmationRefusalOf(
                 handOff.actionName, handOff.objectName,
                 `${declared} — nothing was run. This server has no pending-confirmation service to ask them through, `
-                    + `and a confirmation sent on the request does not count. Perform the action in the app instead.`,
+                    + `and a confirmation sent on the request does not count. ${noServiceRoutes(door)}`,
                 'no_confirmation_service',
             ),
         };
@@ -5273,9 +5312,16 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
          * handed off; see {@link elicitActionConfirmation}.
          */
         elicitConfirmation?: ActionConfirmationElicitor;
+        /**
+         * [#34325] Set by the MCP door, without an elicitor, when it would ask
+         * a client that supports confirmation and this call's client does not
+         * ({@link ActionConfirmationDoor}): a `no_confirmation_service`
+         * refusal then names that route.
+         */
+        elicitsCapableClients?: boolean;
     },
 ): Promise<any> {
-    const { driver, envId, ec, getMeta, readObjects, readActions, callData, elicitConfirmation } = wiring;
+    const { driver, envId, ec, getMeta, readObjects, readActions, callData, elicitConfirmation, elicitsCapableClients } = wiring;
     const meta: any = await getMeta();
     const params = input?.params && typeof input.params === 'object' ? input.params : {};
     const recordId = typeof input?.recordId === 'string' && input.recordId.length > 0 ? input.recordId : undefined;
@@ -5366,6 +5412,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
             door: 'mcp',
             ...(namespace !== undefined ? { namespace } : {}),
             ...(elicitConfirmation ? { elicitConfirmation } : {}),
+            ...(elicitsCapableClients === true ? { elicitsCapableClients: true } : {}),
         },
         ql: engine,
         wiring: {

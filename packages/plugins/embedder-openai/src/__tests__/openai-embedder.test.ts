@@ -4,6 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   OpenAIEmbedder,
   createOpenAIEmbedder,
+  documentedMaxBatchSize,
   OPENAI_COMPATIBLE_PRESETS,
 } from '../index';
 import { estimateTokens } from '@objectstack/spec/shared';
@@ -26,6 +27,16 @@ describe('OpenAIEmbedder', () => {
     const e = new OpenAIEmbedder({ apiKey: 'k', fetch: mockFetch({ data: [] }) });
     expect(e.id).toBe('openai');
     expect(e.dimensions).toBe(1536);
+  });
+
+  it('reports the model it sends as IEmbedder.model, for the knowledge index fingerprint (ADR-0161 K8, item 7)', async () => {
+    const fetchImpl = mockFetch({ data: [{ index: 0, embedding: [0.1, 0.2] }] });
+    expect(new OpenAIEmbedder({ apiKey: 'k', fetch: fetchImpl }).model).toBe('text-embedding-3-small');
+    const e = new OpenAIEmbedder({ apiKey: 'k', model: 'BAAI/bge-m3', fetch: fetchImpl });
+    expect(e.model).toBe('BAAI/bge-m3');
+    await e.embed(['x']);
+    const sent = JSON.parse(String((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body));
+    expect(sent.model).toBe(e.model);
   });
 
   it('looks up dimensions for known Chinese models', () => {
@@ -195,6 +206,24 @@ describe('OpenAIEmbedder batching (per-request input cap)', () => {
     const out = await e.embed(inputs(7));
     expect(sentSizes(f)).toEqual([3, 3, 1]);
     expect(out).toEqual(Array.from({ length: 7 }, (_, i) => [i]));
+  });
+
+  it('documentedMaxBatchSize answers the cap the embedder batches by, and nothing for an unknown model', async () => {
+    expect(documentedMaxBatchSize('text-embedding-v3')).toBe(10);
+    expect(documentedMaxBatchSize('text-embedding-3-small')).toBe(2048);
+    expect(documentedMaxBatchSize('my-gateway-model')).toBeUndefined();
+    expect(documentedMaxBatchSize('constructor')).toBeUndefined();
+    // The same table: with no maxBatchSize, the embedder batches at exactly that cap.
+    const f = echoFetch();
+    await new OpenAIEmbedder({ apiKey: 'k', model: 'text-embedding-v3', fetch: f as unknown as typeof fetch }).embed(inputs(12));
+    expect(sentSizes(f)).toEqual([documentedMaxBatchSize('text-embedding-v3'), 2]);
+  });
+
+  it('an explicit maxBatchSize above the documented cap is still used as given', async () => {
+    const f = echoFetch();
+    const e = new OpenAIEmbedder({ apiKey: 'k', model: 'text-embedding-v3', maxBatchSize: 25, fetch: f as unknown as typeof fetch });
+    await e.embed(inputs(30));
+    expect(sentSizes(f)).toEqual([25, 5]);
   });
 
   it('refuses a maxBatchSize that is not a positive integer', () => {
