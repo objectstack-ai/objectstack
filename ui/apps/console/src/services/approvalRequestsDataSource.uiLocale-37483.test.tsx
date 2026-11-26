@@ -5,20 +5,21 @@
  * The approval history (`/approvals/requests/:id/actions`) holds a system note
  * the server renders in the request's locale, and the request
  * (`/approvals/requests/:id`) carries `process_label` / `step_label` the same
- * way. With no `fetch` passed, the source reads through the console's
- * authenticated fetch, which stamps the active UI language (`<html lang>`) as
- * `Accept-Language`. Control: no UI language chosen leaves the header unset,
- * so the browser's own language applies as before.
+ * way. `AppContent` routes the console adapter's record-page reads through
+ * `routeApprovalRecordReads(adapter)` with no `fetch` of its own, so they
+ * read through the console's authenticated fetch, which stamps the active UI
+ * language (`<html lang>`) as `Accept-Language`. The control is on the stamp
+ * itself: an empty `<html lang>` adds no header, rather than a guessed one.
+ * (In the console it is never empty: `index.html` ships `lang="en"` and the
+ * i18n provider always writes the chosen language.)
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DataSource } from '@object-ui/types';
 import {
   APPROVAL_ACTION_OBJECT,
   APPROVAL_REQUEST_OBJECT,
-  createApprovalRequestsDataSource,
+  routeApprovalRecordReads,
 } from './approvalRequestsDataSource';
-
-const BASE = 'http://test.local/api/v1';
 
 let fetchSpy: ReturnType<typeof vi.fn>;
 let originalLang: string;
@@ -34,9 +35,10 @@ function acceptLanguageOf(match: RegExp): string | null {
   return headers.get('Accept-Language');
 }
 
+/** As `AppContent` wires it: the console adapter, routed, with no `fetch` of its own. */
 function source(): DataSource {
   const host = { find: vi.fn(), findOne: vi.fn() } as unknown as DataSource;
-  return createApprovalRequestsDataSource({ host, scope: { kind: 'all' }, baseUrl: BASE });
+  return routeApprovalRecordReads(host);
 }
 
 beforeEach(() => {
@@ -67,7 +69,7 @@ describe('approvals request page reads carry the UI language (objectstack#37483)
     expect(acceptLanguageOf(/\/approvals\/requests\/req_1(\?|$)/)).toBe('en');
   });
 
-  it('control: no UI language chosen leaves the header to the browser', async () => {
+  it('control: an empty <html lang> adds no header', async () => {
     document.documentElement.lang = '';
     await source().find(APPROVAL_ACTION_OBJECT, { $filter: { request_id: 'req_1' } } as never);
     expect(acceptLanguageOf(/\/approvals\/requests\/req_1\/actions/)).toBeNull();
