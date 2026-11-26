@@ -39,8 +39,9 @@ const PACKAGES_DIR = join(REPO_ROOT, 'packages');
 /**
  * Packages whose `*.object.ts` files are FIXTURES, not platform contributions:
  * a downstream-contract QA harness and the `create-objectstack` scaffolding
- * templates (the `blank` starter's `note.object.ts`). Neither ships objects
- * into a running platform, so neither belongs in the registry.
+ * templates (the `blank` starter's `company.object.ts` and `contact.object.ts`).
+ * Neither ships objects into a running platform, so neither belongs in the
+ * registry.
  */
 const FIXTURE_PACKAGES = new Set(['qa', 'create-objectstack']);
 

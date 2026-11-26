@@ -370,20 +370,24 @@ describe('[#14087] the flow scaffold binds its trigger where the engine reads it
 describe('[#32153] the generators write the starter\'s style, and each new variant passes every gate', () => {
   it('`os g object` declares its field through the `Field.*` builder, in a field group, exported by name', async () => {
     const source = target('object').generate(PREREQUISITE_STEM.object, NS);
-    // The starter's `note.object.ts` style: a builder, never a raw `type:` literal…
+    // The starter's style (the blank template's `company.object.ts`): a
+    // builder, never a raw `type:` literal…
     expect(source).toContain("import { ObjectSchema, Field } from '@objectstack/spec/data';");
     expect(source).toMatch(/name: Field\.text\(\{/);
     expect(source).not.toMatch(/type: 'text'/);
     // …a named export (the barrel re-exports it by name)…
     expect(source).toContain(`export const probeTarget = ObjectSchema.create({`);
     expect(target('object').exportsByName).toBe(true);
-    // …and the field placed in a declared group.
+    // …and the field placed in a declared group the way the starter places
+    // it: named in the group's `fields` list, with no per-field `group`.
     const artifact = (await loadScaffold('object', source)) as {
-      fieldGroups?: { key: string }[];
+      fieldGroups?: { key: string; fields?: string[] }[];
       fields: Record<string, { type?: string; group?: string }>;
     };
     expect(artifact.fieldGroups?.map((g) => g.key)).toEqual(['details']);
-    expect(artifact.fields.name).toMatchObject({ type: 'text', group: 'details' });
+    expect(artifact.fieldGroups?.[0]?.fields).toEqual(['name']);
+    expect(artifact.fields.name).toMatchObject({ type: 'text' });
+    expect(artifact.fields.name.group).toBeUndefined();
   });
 
   it('`os g action` in a stack that declares no flow writes a declarative update, with zero findings', async () => {
