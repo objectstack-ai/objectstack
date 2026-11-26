@@ -2,7 +2,7 @@
 '@object-ui/fields': minor
 '@object-ui/plugin-calendar': minor
 '@object-ui/plugin-gantt': minor
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 ---
 
 feat(fields,plugins): a select option is coloured only when its author declared a colour
