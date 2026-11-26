@@ -44,7 +44,8 @@ are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
 There is **no** top-level `workflows` or `approvals` collection:
 an approval is a flow with Approval nodes, and record
 state machines are a `state_machine` validation rule on each object.
-A phantom key (`roles:`, `policies:`) is refused (below).
+A phantom key (`roles:`, `policies:`) is no silent no-op:
+the top level refuses it and the stack fails to load.
 
 `queues` declares ownership queues (`defineQueue`, `@objectstack/spec/security`;
 objectstack-data): named sets of people a new record of an `ownership: 'user'`
@@ -117,7 +118,7 @@ checks it **before it loads anything** and refuses an out-of-range app at the
 boundary with the exact migration command. Change it when you deliberately move
 to a new protocol major — never to silence a mismatch.
 
-**Object naming:** The object `name` is the canonical identifier and equals the physical table name. Embed any domain prefix directly in the name (e.g. `name: 'crm_account'`); the object-level `namespace` *field* is retired (ADR-0129 D3) and refused at load. Never set `tableName`, and never add a `sys_metadata` object to a runtime manifest.
+**Object naming:** The object `name` is the canonical identifier and equals the physical table name. The object-level `namespace` *field* is retired (ADR-0129 D3) and refused at load. Never set `tableName`, and never add a `sys_metadata` object to a runtime manifest.
 
 **`manifest.namespace` (ADR-0048):** Optional, but **enforced once set**. When a package declares `manifest.namespace: 'crm'`, every `object.name` must start with `crm_` or `defineStack` errors (`validateNamespacePrefix` in `@objectstack/spec`); the legacy `<ns>__<short>` double-underscore form is rejected, and `sys_`-prefixed names are platform-reserved and exempt. The namespace is also a package-ownership key — installing two packages that both claim `crm` fails with `NamespaceConflictError` (downgrade to a warning with `OS_METADATA_COLLISION=warn`). Never `actions`, `connectors`, `global`, `hooks`, `oauth`, `runs`, `trigger` (route literals; `os validate` and build refuse).
 
@@ -300,7 +301,7 @@ token through the `CAPABILITY_PROVIDERS` registry in
 | Token | Provider package |
 |:--|:--|
 | `automation` | `@objectstack/service-automation` — flows, and any declarative `connectors:` entry |
-| `analytics`° `cache`° `storage`° `queue`° `job`° `messaging`° `realtime` `settings`° `sms`° `push` `record-context` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)); `record-context` serves `get_record_context`, [context packs](../objectstack-ai/references/context-packs.md) |
+| `analytics`° `cache`° `storage`° `queue`° `job`° `messaging`° `realtime` `settings`° `sms`° `push` `record-context` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)); `record-context` serves `get_record_context`, **objectstack-ai** [context packs](../objectstack-ai/references/context-packs.md) |
 | `mailbox` | `@objectstack/service-mailbox` — inbound mail |
 | `marketplace` `package-registry`° | `@objectstack/service-package` |
 | `audit` `email`° `sharing`° `approvals` `webhooks` | `@objectstack/plugin-` + the token |
