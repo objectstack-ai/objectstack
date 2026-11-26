@@ -2,7 +2,7 @@
   "number": 37555,
   "kind": "pull_request",
   "title": "fix(qa): shorten the order_to_cash card title.en under the 128-char displayName cap",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -23,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-26T13:09:13Z",
-  "updated_at": "2026-11-26T14:03:50Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-26T14:35:55Z",
+  "closed_at": "2026-11-26T14:35:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T14:35:52Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37555",

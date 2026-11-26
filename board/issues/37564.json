@@ -20,13 +20,13 @@
     "os-bill"
   ],
   "milestone": null,
-  "type": null,
+  "type": "Feature",
   "created_at": "2026-11-26T13:28:12Z",
-  "updated_at": "2026-11-26T14:17:21Z",
+  "updated_at": "2026-11-26T20:04:12Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37564",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbL6Nn3scsU8yvLyU4\n\nFiling gate: ③ · Source: `docs/adr/0084` on main, `#amendment-2026-11-26-moves`: dataset and position are placed in 常用 by name (question 4, ruled yes; record 7187264388 on #37451). On 2026-11-26 at 13:25Z the maintainer asked to bring phase 3 forward (「这些很简单吧？」). Sub-issue of #37424 (phase 3).\nGrade: area:ux · Feature · p2 · evidence: `packages/spec/src/kernel/metadata-plugin.zod.ts:977` registers `dataset` with `domain: 'ui'`. `studioMenuPlacement.ts` already carries the 常用 / 高级 tiers (ruling on #37192).\nReader: area `ux-37424`.\n\n## 维护者速读\n\n- 用户能看到什么变化：Studio 菜单里的「数据集」从「界面」组挪到「数据」组，紧跟在对象后面，并且常驻显示。「岗位」在「访问」组里常驻显示。\n- 为什么：数据集是图表和 AI 问数共用的语义层，属于数据。\n- 注意：要改 spec 注册表，需要合约审查。ADR-0084 的菜单表有测试盯着，必须在同一个 PR 里一起改，所以走 Tier H 审批。\n- 需要你做的：这个 Tier H PR 由你合并。\n\n## What\n\n- `DEFAULT_METADATA_TYPE_REGISTRY`: change `dataset` from `domain: 'ui'` to `'data'`. Update every consumer of the domain: group labels, directory grouping, the menu model. This is a spec contract change, so L2 runs at the contract tier.\n- `studioMenuPlacement.ts`:\n  - `dataset` goes in 常用, directly after `object`.\n  - `position` goes in 常用, directly after `permission`.\n  - Both are placements by name, each with its reason in a comment: dataset's schema requires one object; position is one slot per environment (ADR-0150 D7).\n- `docs/adr/0084`: rewrite the type→group table rows in the same PR. `studioMenuPlacement.test.ts` scans every ADR line of that row shape and pins it to the registry and the placement list, so never add a second table of that shape. Carry N8 in the same edit (#37424 comment 7189717418): link the 2026-11-24 note's mark to `#amendment-2026-11-26-position`.\n- `form` (ADR-0159, #37086) is not registered yet. If it lands first, its row follows the amendment: 常用, 界面 UI, after `report`.\n\n## Acceptance\n\n- The menu draws dataset under 数据 right after 对象, and position under 访问 right after 权限集, both outside the 高级 fold. Screenshots in light and dark.\n- The pin test is green with the rewritten rows, and a spec test covers the registry domain change.\n- Sequencing: #37454 (PR #37546) also edits `studioMenuModel.ts`. Merge main after it lands."

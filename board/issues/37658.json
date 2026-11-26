@@ -1,0 +1,31 @@
+{
+  "number": 37658,
+  "kind": "issue",
+  "title": "37598 跟进：可观测性包的控制台与 JSON 日志器也打印被包装的原始错误",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T17:58:05Z",
+  "updated_at": "2026-11-26T19:54:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37658",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37598. The source is the card thread's os-dev report on PR #37652 (comment 7199875525, out-of-scope finding \"noted, not filed\"). The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Bug · p3 · reach: every host that logs through `@objectstack/observability`'s `ConsoleLogger` or `JsonLogger` an error wrapped on `cause` · evidence: read.\n\n## 维护者速读\n- 做什么：上一张卡让服务器故障日志打印被包装的原始错误。可观测性包里另外两个日志器（控制台、JSON）还是不打印。让它们用同样的方式打出原始错误。\n- 谁受益：用这两个日志器排障的运维。\n- 不做会怎样：换了日志器，根因又看不到了。\n- 需要你做的：无。\n\n## What\n`packages/observability/src/loggers.ts` — `ConsoleLogger` and `JsonLogger` serialize an error without its `cause`. After PR #37652, `logServerFault` (`faultCauseChain`, `packages/types`) and `ObjectLogger` (`packages/core`) record the chain (5 links, cycle-safe, operator-only). Give both observability loggers the same shape, reading the existing helper if `@objectstack/observability` can reach it without a new edge, else pin a copy to it with a parity test as `core` does.\n\n## Acceptance\n- A test per logger: a wrapped error logs each cause's message and stack; a cycle and a deep chain are bounded; parity with `faultCauseChain`'s output.\n- `Clause-②: no`, `Metadata-protocol: none`.\n\nBlocked-by: #37598 (PR #37652)\nParent: #37598\nSize: XS\nDedupe (objectstack, is:issue): `ConsoleLogger cause` 0 · `JsonLogger Error.cause` 0.\n"
+}

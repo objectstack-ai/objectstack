@@ -1,0 +1,32 @@
+{
+  "number": 37683,
+  "kind": "issue",
+  "title": "Setup → AI: several providers enabled at once, a model list per provider, one default and one structured-output model; legacy settings read unchanged",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T20:10:26Z",
+  "updated_at": "2026-11-26T20:10:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37683",
+  "body": "epic:#5055#1 · hotlong · session_01Q4EjjMmczBEaeiAQ48oDtz\n\nFiling gate: ③ maintainer-directed task · Source: objectstack-ai/cloud#5055 — Jack 2026-11-26: 「分阶段实施，第一阶段先能把多个模型配置上。」「开专区派发 AI 模型档位方案」\nGrade: p2 · area:ai · Task · evidence: read (objectstack main dedc16c1)\nReader: epic:#5055 seat (objectstack-ai/cloud#5055) → card thread. Milestone M1.\nDedupe: open objectstack issues on `ai.manifest` multi-provider → checked, none with this mechanism.\n\n## 维护者速读\n- 是什么：私有部署企业版的 Setup → AI 现在是“选一个供应商”的单选表单。改成可以同时启用多个供应商，每个供应商填多个模型，再选一个默认模型和一个结构化输出模型；每个供应商可以单独测试连接、单独关掉。\n- 影响：企业版多模型的设置界面。老部署升级后设置照读、行为不变。\n- 要你做什么：无。\n\n## Current state (objectstack main dedc16c1)\n- `packages/services/service-settings/src/manifests/ai.manifest.ts`: scope `global` (`:31`); a single `select` key `provider` (`:51`) chooses one provider; each provider group shows only when selected (`visible: \"${data.provider === '…'}\"`) and has its own `*_api_key` (`password`, `encrypted: true`), `*_model` and for some `*_base_url`.\n- Specifier kinds are closed (`packages/spec/src/system/settings-manifest.zod.ts:36`); the `map` specifier's column kinds are only `duration` and `positive_integer` (`:84`), so a free-form list of providers with an encrypted key per row is not expressible without an ADR-0007 amendment.\n- The cloud consumer reads these keys (`objectstack-ai/cloud` `packages/service-ai/src/plugin.ts` settings builds, live action `ai/test` at `:1875`).\n\nRe-check: `git grep -n \"key: 'provider'\" -- packages/services/service-settings/src/manifests/ai.manifest.ts` → 1 hit.\n\n## What to do\n1. Let several providers be enabled at once over the existing per-provider groups (keys stay one encrypted `password` field per provider, never echoed): a per-provider on/off, and per provider a list of model ids.\n2. One default model and one structured-output model (separate knob, cloud#797), both chosen from the enabled providers' models; saving refuses a default that is not among them.\n3. Legacy settings read unchanged: a stored single `provider` + `<provider>_model` with no new keys means \"that provider enabled, that model as its only model and the default\". No data rewrite is required for an upgraded deployment to behave as before.\n4. A test-connection action per provider group (the cloud host registers the live handler).\n5. Use only the existing specifier kinds. If the shape cannot be expressed without a new specifier kind or `map` column kind, stop with `needs_decision` (ADR-0007 contract change).\n\n## Acceptance\n- Manifest tests: two providers enabled with two models each validate; a default outside the enabled models is refused with a named error; a legacy single-provider value set reads as one enabled provider with that model as default.\n- No key value appears in any read of the settings.\n- `Metadata-protocol:` line per AGENTS.md (settings manifests are platform metadata; likely `none` or `added`, the dev decides from the diff), changeset for `@objectstack/service-settings`.\n\n## Fences\n- File surface: `packages/services/service-settings/**` (manifest, its tests, translations if the manifest's labels are translated), one changeset. ⛔ No `packages/spec` change; stop if one is needed.\n- Cloud consumes this after a pin move; that is a separate cloud card of objectstack-ai/cloud#5055.\n\n## References\nPlan: https://claude.ai/artifact/3sJqSZVv3Lf3NoViD9Q4cU (section 方案 4). Parent objectstack-ai/cloud#5055."
+}

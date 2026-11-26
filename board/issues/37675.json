@@ -1,0 +1,33 @@
+{
+  "number": 37675,
+  "kind": "pull_request",
+  "title": "docs(skills,spec): name the dispatcher as the owner of the i18n routes",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T19:55:49Z",
+  "updated_at": "2026-11-26T19:57:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37675",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuPE7uyDAJyqjwwMzomWv5ff)_\n\nFixes #37625\n\nClause-②: no (published prose and comments only; no behaviour changes)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：多语言技能文档里，「语言接口由翻译服务自己注册」这句话改成了「由运行时的 HTTP 分发器挂载，数据来自翻译服务」，同时在方法清单里补上 `getSourceLocale()` / `setSourceLocale()`。两处 spec 代码注释也做了同样的更正。代码和平台行为都不变。\n- 为什么做：#37614 的审核发现这句话与 main 不符：翻译服务从 #23347 起就不再挂任何 HTTP 路由。自己手工组装内核的开发者照旧文档做，会以为装了翻译服务就有这三个接口，实际上没有。\n- 出错会怎样：只改文字，撤回即可。为了不超出技能篇幅上限，同一文件里压缩了四处措辞，没有删掉事实。\n- 要你做什么：这是受管的技能文件，需要审批人批准后才能合并。\n\n## What changes\n\n- **`skills/objectstack-i18n/SKILL.md`, Registration.** Before: \"It self-registers `GET /api/v1/i18n/locales`, `/translations/:locale` and `/labels/:object/:locale`; …\". After: \"The runtime's HTTP dispatcher, which `os serve` composes, mounts `GET /api/v1/i18n/locales`, `/translations/:locale` and `/labels/:object/:locale`, served from the i18n service; …\". The rest of the sentence (the `isDefault` / `sourceLocale` clause) is unchanged. Checked on `main`: `packages/services/service-i18n/src/i18n-service-plugin.ts:27-39` (\"It mounts NO HTTP route\", naming `createDispatcherPlugin` the one owner); `packages/runtime/src/dispatcher-plugin.ts:1752`, `:1761`, `:1770` mount the three paths; `packages/cli/src/commands/serve.ts` composes `createDispatcherPlugin`.\n- **Same file, methods list (the card's optional item).** The `getLocales()` bullet gains `getSourceLocale()` / `setSourceLocale()`: both shipped implementations provide them (`file-i18n-adapter.ts:302`, `:307`; `core/src/fallbacks/memory-i18n.ts:275`, `:280`). `getFallbackLocale()` is left out: the file adapter has it (`:285`) but the in-memory fallback deliberately does not (its docblock at `:254`), and the list is \"methods both shipped adapters implement\".\n- **Paid in the same file, no fact removed** (6306 → 6333 tokens, ceiling 6333): \"is not in `node_modules` to read\" → \"is not in `node_modules`\"; \"Methods implemented by both shipped adapters\" → \"Methods both shipped adapters implement\"; \"full snapshot for a locale\" → \"a locale's full snapshot\"; \"You do not wire this plugin\" → \"Don't wire this plugin\".\n- **Spec comments.** The `GetLocalesResponseSchema` docblock (`packages/spec/src/api/protocol.zod.ts`) said the descriptor helper is shared by the dispatcher's `/i18n` domain \"and `service-i18n`'s autonomous route\"; it now names the dispatcher as the route's one owner (`service-i18n` mounts none since #23347). The `toLocaleDescriptors` comment (`packages/spec/src/system/i18n-resolver.ts`) now says both once served the route and the dispatcher owns it. Comments only: no schema, describe or export changes.\n- **Changeset**: `@objectstack/skills` and `@objectstack/spec` patch.\n\nSmall calls made here (no card): the skill names \"the runtime's HTTP dispatcher, which `os serve` composes\" rather than the internal `createDispatcherPlugin` name, which a client author cannot act on.\n\n## Why\n\nReview N1 of PR #37614 (contract record 7197064778): a shipped skill stated a wrong fact about where the i18n routes come from.\n\n## Verification\n\nRun at `a359107dd`, each exit 0:\n- `node scripts/check-skills-token-ratchet.mjs` (`skills/objectstack-i18n/SKILL.md` 6333/6333).\n- `node scripts/check-skill-links.mjs`, `node scripts/check-skill-identifier-liveness.mjs`, `node scripts/check-skill-top-level-keys.mjs`.\n- `pnpm --filter @objectstack/spec check:skill-refs`, `check:skill-docs`.\n- `node scripts/pm/overlap-check.mjs`: clean (#37422 and #37366 share `i18n-resolver.ts` and merge cleanly).\n\nThe skill edit was drafted by a contract-tier subagent, as `dispatch-gates --tier` requires for `skills/**`, and checked here against the cited lines; the spec comments were edited here.\n\nContract review (L2) is owed before landing: `skills/**` is a governed surface (Tier H).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed (comments only; none change).\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUpnvPnJ1hR74pUrVj\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUpnvPnJ1hR74pUrVj)_\n\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgUpnvPnJ1hR74pUrVj -->\n"
+}

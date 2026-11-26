@@ -1,0 +1,37 @@
+{
+  "number": 37628,
+  "kind": "issue",
+  "title": "draft door: a first draft save of a published item with the ifMatch that get_metadata_item returned is refused METADATA_CONFLICT (current is null)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T16:05:33Z",
+  "updated_at": "2026-11-26T18:44:05Z",
+  "closed_at": "2026-11-26T18:42:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37628",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjR8PEo6YbHGktD3s5a\n\nFiling gate: ③ maintainer-directed task. Milestone 1 child of the cloud epic objectstack-ai/cloud#5027.\n\n## 维护者速读\n- 是什么：用轻门改一个已发布、还没有草稿的项时，按工具说明带上读到的 version 作为 ifMatch，第一次保存必然被拒（409）。\n- 影响：实测 12 次改已发布项有 9 次撞上；模型每次都靠去掉 ifMatch 过关，白费一轮，乐观锁也被绕开。\n- 要你做什么：不需要，按队列排期即可。\n\n## Bug\nChange an item that is published and has no draft: `get_metadata_item` returns the published `version` token (`hmac-sha256:…`). Passing it as `ifMatch` to `save_metadata_draft`, as the tool description says (\"the `version` a read or a save answered\"), is refused:\n\n```\nMETADATA_CONFLICT · object/mcrm_customer has been modified since you loaded it. The version token sent is not the current version (current is null).\n```\n\nThere is no draft head yet, so the comparison is against `null`. Hit in 9 of 12 trial sessions (Haiku 5.5, 2026-11-26, main @6c290d3a); every time the model retried without `ifMatch`.\n\n## What to do\n1. On a first draft save, compare `ifMatch` with the published head when no draft head exists.\n2. Still refuse when the published item changed after the read, naming the current version.\n3. Align the `version` / `ifMatch` wording of `get_metadata_item` and `save_metadata_draft` with the fixed behaviour.\n\n## Acceptance\n- Read a published item, save it unchanged with that `ifMatch`: accepted first time.\n- Another caller saves a draft after the read; a save with the old `ifMatch` is refused.\n\n## References\n- `packages/runtime/src/domains/mcp-authoring.ts:342-346` (`ifMatch` description), `:811-836` (save path)\n- `packages/metadata-protocol/src/protocol-save-conflict.ts`\n\nSuggested-grade: p1 · every edit through the door wastes a round and teaches clients to drop the concurrency check.\nDedupe: \"ifMatch draft\", \"METADATA_CONFLICT current is null\" found no open card."
+}

@@ -13,7 +13,7 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "priority:p0"
+    "priority:p1"
   ],
   "assignees": [
     "os-bill"
@@ -21,7 +21,7 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T06:13:11Z",
-  "updated_at": "2026-11-26T08:13:27Z",
+  "updated_at": "2026-11-26T19:27:08Z",
   "closed_at": "2026-11-26T08:11:05Z",
   "closed_by": {
     "login": "objectstack-fleet[bot]",
@@ -29,7 +29,7 @@
     "type": "Bot"
   },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37460",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nFollow-up of #37229 (closed when PR #37314 merged, 2026-11-26T06:03Z). Released to the queue by seat repo:objectstack#4 on the maintainer's wind-down order: 「你不接的卡放回队列」.\n\nResume-from: `claude/issue-37229-skills-protocol-19@c9ad209e24dd7810875aff1ddfe1abaad1a5508c`\n\n## 维护者速读\n- 用户能看到什么变化：平台协议已升到 19（PR #37314 已合入），但技能包还在教 AI 写 `engines.protocol: '^18'`。照着写的新项目启动时会被拒（报错里带修复命令）。这张卡把技能包改成教 `'^19'`。\n- 为什么做：#37229 的第二步。改动已经写好在 PR #37298 里，只差一句变更说明的修正和合并主干。\n- 出错会怎样：只改技能包文字和考题；技能包是受管面，合入要维护者批准。\n- 要你做什么：接手的座位复核、契约审核通过后会请你批准。\n\n## What is left on PR #37298 (head `c9ad209e`)\n- **Seat L1 7170084508: REWORK, one item, S1.** The changeset's last sentence ends \"…so the chain an author replays still ends at 18\". That is false now that PR #37314 is on main: the chain terminus is 19, and the CLI prints `protocol 18 → 19`. The sentence ships in `@objectstack/skills`' CHANGELOG. Fix it in the changeset only: drop the tail clause, or say that step 19 carries no conversion and one semantic entry (`protocol-18-range-refused`).\n- **K hold.** `landing-k` read K = 21 against a hold of 15, and the skills token ratchet is a shared budget with main. Merge `origin/main` in the same push as the S1 fix.\n- **Contract review 7170101896: PASS at `c9ad209e`.** The new head owes a delta L1 plus a same-head contract review, at `CONTRACT_REVIEW_TIER`, since `skills/**` is governed.\n- **Landing.** Tier H (`skills/**`), so it is a hand-off to the maintainer with `label-write --handoff`; the seat does not land it.\n\n## Done when\n- PR #37298 merges with the S1 sentence corrected and main merged.\n- The three skill files (`skills/objectstack-platform/SKILL.md`, `skills/objectstack-platform/evals/config-plugins-ops.json`, `skills/objectstack-upgrade/SKILL.md`) teach `'^19'`.\n\nGoverning text: AGENTS.md Post-Task Checklist (skills follow-up for a narrowing); PR #37314's `Skills-docs: follow-up #37298`."

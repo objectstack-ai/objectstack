@@ -22,11 +22,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T09:19:17Z",
-  "updated_at": "2026-11-26T13:28:17Z",
+  "updated_at": "2026-11-26T16:20:03Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37503",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CY2uhJ1AYNPw5TUSVS\n\nFiling gate: ① owed follow-up of PR #37428 (#36945), family card. Source: fleet. Found in contract review 7187700473 (S3); the seat ordered it filed under #36945 (REWORK 7187715426).\n\nGrading: area:build · Bug · docs/comments wrong after a template change, plus one open dialect question → suggested p2 · evidence: read.\n\n## What is wrong\n\nPR #37428 replaces the blank template's `note` object with the Starter's company and contact. These sites still describe the old template or a promise that no longer holds:\n\n1. `packages/cli/src/commands/generate.ts:295` — the comment names a file that no longer exists and says the generators write the starter's style. `os g object` places a field with a per-field `group: 'details'` (pinned in `generate-scaffold-validates.test.ts` ~373-386 under \"the generators write the starter's style\"), while the starter now places every field through a group's `fields` list. Both spellings are valid; the #32153 promise of one dialect no longer holds for placement. Someone has to decide which way it goes (generator follows the starter, or the promise is narrowed).\n2. `content/docs/deployment/cli.mdx:1091` and `:1103` — public transcript showing `my_app_note (2 fields, user)`.\n3. Getting-started pages (`your-first-project.mdx`, `build-with-claude-code.mdx`) describe companies and contacts, while `npm create objectstack` on `latest` (18.6.0) still produces the `note` project until 19.0 GA. Say so on the pages, or time the text with GA.\n4. Stale comments only: `init-scaffold-file-name-registry-parity.test.ts:36`, `platform-object-names.test.ts:42`, the header of `blank-template-console-disclosure.test.ts` (~26-28), comments in `starter-comments-self-contained.test.ts`.\n\nNot owed: the `note.object.ts` path strings in `scripts/check-changeset-no-major.mjs` are fixtures that read no file. The two comments in `scaffold-e2e.yml` are carried by #37441.\n\n## Done when\n\nItem 1 decided and applied (one placement dialect, or the promise narrowed and its pin renamed); items 2 to 4 corrected.\n\nDedupe: `generate.ts starter style`, `my_app_note cli.mdx` → no open card.\n\nParent: objectstack-ai/objectstack#36945."

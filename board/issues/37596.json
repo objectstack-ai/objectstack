@@ -1,0 +1,37 @@
+{
+  "number": 37596,
+  "kind": "pull_request",
+  "title": "fix(lint): field-no-consumers credits a related list's columns to the child object it lists",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T14:37:06Z",
+  "updated_at": "2026-11-26T15:33:30Z",
+  "closed_at": "2026-11-26T15:33:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T15:33:28Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37596",
+  "body": "Fixes #37502\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:搭建者运行校验或检查命令时,父对象上一个没有任何地方显示的字段,如果恰好和子对象关联列表里的某列同名,现在会被正确提示;子对象被关联列表显示的字段不再被误报。\n- 为什么做:属于“字段无人使用”检查规则的后续修补,替使用空白模板起步的搭建者解决漏报问题。\n- 出错会怎样:最坏情况是多出或少出一条警告,规则仍只是警告、不拦截任何保存或发布,可直接撤回。\n- 要你做什么:无\n\n## What changes\n\n- `field-no-consumers` (`@objectstack/lint`, run by `os validate` and `os lint`) now reads an object-form `relatedLists` entry against the CHILD object its `list` names (`child`, or the head of `child.field`), never against the object that declares the list. The entry's `columns` are the child's field names (`RelatedListEntryObjectSchema`), so each column is a display site of the child's field.\n- Before: a column was credited to the declaring parent's field of the same name. On the blank starter, the company's related list of contacts has a `phone` column, which kept an undisplayed `company.phone` silent, and the contact's own `phone` got no credit from the column.\n- A list naming a child this stack does not declare credits no object (the columns count as unresolved, like any other field-shaped token that lands nowhere).\n- Side effect, same mechanism: the `child.field` spelling in `list` now credits that relationship field on the child as a read (the list joins on it); before, the token was tried against the parent.\n- The test helper `withoutPlacement` in `packages/cli/test/starter-field-consumers.test.ts` is narrowed back: it strips the control field only from related lists of the control's OWN object, so the blank-template control `blank_company.phone` now exercises the fixed rule instead of the helper hiding the defect.\n- The rule stays `warning`. ADR check: the dispatch named ADR-0139 D4; that decision governs the plugin-audit read gates (parent-record leaves, no pre-scan) and does not touch this rule, so there is no conflict. No ADR governs field-consumer crediting beyond the module header, which is updated.\n\n## Files to read first\n\n1. `packages/lint/src/validate-field-consumers.ts` — `isRelatedListEntry` / `relatedListChildOf` and the one changed line in `walk` (the risk hunk: which records switch context).\n2. `packages/lint/src/validate-field-consumers.test.ts` — the new `[#37502]` describe (both directions pinned).\n3. `packages/cli/test/starter-field-consumers.test.ts` — `withoutPlacement`, narrowed.\n\n## Tests\n\nHead `bc95079f7`, worktree of `objectstack-ai/objectstack`.\n\n<details><summary>lint: new pins, full suite, typecheck</summary>\n\n- `pnpm --filter @objectstack/lint exec vitest run --maxWorkers=2 src/validate-field-consumers.test.ts`: Tests 201 passed (201).\n- `pnpm --filter @objectstack/lint test`: Test Files 236 passed (236), Tests 9687 passed (9687).\n- `pnpm --filter @objectstack/lint typecheck`: exit 0 (test layer: test-typecheck OK, debt unchanged).\n- Ablation (fix committed first, `scripts/ablation-replace.mjs`, anchor hit 1 to 0, restored to the HEAD blob, `git diff HEAD` empty): with the walk reading the entry against the parent again, 4 of the 7 new cases go red (parent `phone` still reported; child column counts; `child.field`; undeclared child), 197 others pass.\n\n</details>\n\n<details><summary>cli: the blank-template control, red before and green after</summary>\n\n- With the narrowed helper against the unfixed lint `dist` (built from `origin/main` c385d3bd1): Tests 1 failed, 24 passed (25). The failure: `npm create objectstack: blank_company.phone without its group is reported by both commands`, `os validate: expected [] to deeply equal [ 'objects[0].fields.phone' ]`. This is the premise, measured on current main.\n- After `pnpm --filter @objectstack/lint build` (dist carries the fix): Tests 25 passed (25).\n- `pnpm --filter @objectstack/cli typecheck`: exit 0.\n\n</details>\n\n<details><summary>Sweep: shipped apps and the blank template, old rule vs new rule</summary>\n\nEvery finding of `validateFieldConsumers` over each loaded stack, with the lint dist built from the fix and from an ablated copy (old reading):\n\n- `examples/app-crm`: 0 and 0. `examples/app-starter`: 0 and 0. Blank template: 0 and 0. `examples/app-todo`: the same 5 pre-existing `todo_task` findings both ways.\n- `examples/app-showcase` and `examples/app-multi-package` did not load in this container (unbuilt dependencies). Neither declares an object-form `relatedLists` entry, and the change only alters the subtree of such an entry, so neither can move.\n- No new warning in any shipped app or template, so nothing that passed `os lint --strict` before refuses now.\n\n</details>\n\n## Acceptance notes\n\n- A related list entry with no `columns` draws the child FK's `relatedListColumns` or the child's derived columns; the rule credits neither of those derived columns (unchanged behaviour, under-crediting direction, outside this card).\n\n## Verification\n\nTwo minutes: `pnpm --filter @objectstack/lint exec vitest run src/validate-field-consumers.test.ts -t 37502` — expect 7 passed, including \"a column credits the CHILD's field: the parent's same-name phone is still reported\".\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cyyekQEqLjtrCLLAeV)_\n"
+}

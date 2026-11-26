@@ -1,0 +1,37 @@
+{
+  "number": 37610,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37594",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T15:20:05Z",
+  "updated_at": "2026-11-26T19:12:33Z",
+  "closed_at": "2026-11-26T18:55:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37610",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (Contract review record 7196010986 on PR #37594, N1 and out-of-diff notes, adopted at ACCEPT 7196077328)\n\n## What happens\n\nPR #37594 (Fixes #37352) makes the personal-view and attachment own-door `501` follow the request's language, like the print door. Its review read three more places on `main` where the same failure still answers in English only, or could again:\n\n- [ ] **Two sibling doors still answer a fixed English `501`.** `packages/runtime/src/domains/comments.ts` (about :164-177, \"The comment doors are not available: …\") and `packages/runtime/src/domains/webhooks.ts` (about :120-133, \"Webhook redelivery is not available: …\") do not go through `OwnDoorBridge` and carry no catalog key. A `zh-CN`, `ja-JP` or `es-ES` request reads English there while the print, personal-view and attachment doors on the same kernel answer in its language. Expected: both sentences come from the operation-message catalog in the four locales, with English byte-identical.\n- [ ] **`OwnDoorBridge.nounKey` is optional.** `packages/runtime/src/domains/own-door-bridge.ts`: all three shipped bridges now name one, so the English-only arm is reached only by the test's synthetic bridge. Expected: the field is required, so a fourth bridge cannot ship English-only.\n- [ ] **English verb agreement.** The attachment sentence reads \"The attachment removal and rename doors is not available\". #37594 kept it byte-identical on purpose. Expected: \"are\", changed together in the bridge's `noun`, the catalog's `en` value and the test pins, with a changeset line saying the English moved.\n\nCategory ①: each item is a user-visible sentence in the wrong language or wrong grammar, or the type hole that let it ship.\nPriority: p2. A missing-service `501` is an operator-facing edge, not a common user path.\nBusiness reason: a non-English console user who hits one of these doors reads English where sibling doors answer in their language.\nReader: the ux i18n area (seat 2, s2-ux-T).\nDedupe: searched `own-door 501 language comments webhooks` and `review follow-ups of PR #37594` (open issues), 0 hits.\nRelated: #37352, PR #37594, #37273."
+}

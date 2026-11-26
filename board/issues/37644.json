@@ -1,0 +1,31 @@
+{
+  "number": 37644,
+  "kind": "issue",
+  "title": "service-knowledge: check the build fence before beginBuild and on each purge deletion",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T17:01:12Z",
+  "updated_at": "2026-11-26T17:20:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37644",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb4BAjgQ43tqy1DvVJ\n\nFiling gate: ② follow-up out of #37465 (PR #37570, seat delta record 7198334769 nits N6 + N7, ACCEPT 7198343717), filed by the owning zone ai-37000 under #37465 at the seat's direction, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · domain:server · Task · p3 (seat-directed) · reach: knowledge source rebuild in a cluster · evidence: read, not run.\n\n## 维护者速读\n\n- 做什么：知识源重建的“围栏”检查再提前两处：排队中已取消的构建不再开始；清理阶段丢了租约能马上停下，而不是等清理结束。\n- 谁受益：多节点部署少占一会儿 pgvector 构建锁，少做一段无用清理。\n- 不做会怎样：最坏多占锁到空闲超时、多做一段清理；结果正确性不受影响。\n- 需要你做的：无。\n\n## What\n\n- N6: a build cancelled while queued behind another walk still calls `beginBuild` once the earlier walk ends. On pgvector that takes the builder lock, which is then held until it goes idle.\n- N7: a lease lost during the purge is noticed only at the end of the purge (the S1 check in the private `completeBuild` helper), not at the next deletion.\n\n## Acceptance\n\n- `fence?.stop()` is checked before `beginBuild`; a build cancelled or lease-lost while queued never calls `beginBuild` and ends with its stop status.\n- The per-deletion hook in `walkObjectSource` (the `serialize` tick added by #37570) also checks `fence?.stop()`; a lease lost mid-purge stops before the next deletion, and nothing is completed.\n- A test pins each, and each is ablated red."
+}

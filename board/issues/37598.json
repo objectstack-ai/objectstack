@@ -1,0 +1,36 @@
+{
+  "number": 37598,
+  "kind": "issue",
+  "title": "37463 跟进：服务器 5xx 故障日志不打印被包装的原始错误（cause）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T14:40:00Z",
+  "updated_at": "2026-11-26T19:53:38Z",
+  "closed_at": "2026-11-26T19:52:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37598",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37463. The source is the os-dev rework report on PR #37550 (comment 7195114149, out-of-scope finding, class a). The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Bug · p2 · reach: every operator reading a 5xx fault line from a producer that wraps a driver error on `cause` (record-context outages on both MCP doors; any other wrapper) · evidence: measured (real-kernel harness, `packages/runtime/src/mcp-record-context-tools-bridge.test.ts`, before PR #37550's stack suffix).\n\n## 维护者速读\n- 做什么：服务器记录 5xx 故障日志时，只打印外层错误的信息和堆栈，不打印它包着的原始错误（`cause`）。运维看日志时找不到真正的故障原因。让故障日志把原始错误一起打出来。\n- 谁受益：排障的运维和开发。\n- 不做会怎样：每个把底层错误包一层再抛出的地方，日志里都丢了根因；各处只能各自把原因拼进堆栈来绕开。\n- 需要你做的：无。\n\n## What\n- `packages/types/src/server-fault-log.ts#logServerFault` prints `console.error(message, { ...meta, stack })` and `logger.error(message, err, meta)`.\n- `packages/core/src/logger.ts` `write()` serializes an error as `{ message, stack }`.\n- Neither reads `Error.cause`, so a 5xx thrown with the original on `cause` logs without it. PR #37550 worked around this for record-context by appending `Caused by:` and the original's stack to the failure's own stack.\n1. Print the `cause` chain in both sinks: message and stack of each cause, bounded in depth, and never on the wire (the fault log is operator-only).\n2. Then drop the record-context stack suffix of PR #37550, so there is one place that renders a cause.\n\n## Acceptance\n- A test per sink: a 5xx with a nested `cause` logs each cause's message and stack; a cycle or a deep chain is bounded.\n- The record-context harness outage case still finds the original in the fault line after the suffix is removed.\n- No change to any response body.\n- `Clause-②: no`, `Metadata-protocol: none`.\n\nParent: #37463\nSize: S\nDedupe (objectstack, is:issue): `logServerFault cause` 0 · `fault log Error.cause` 0 · `ObjectLogger cause dropped` 0.\n"
+}

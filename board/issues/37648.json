@@ -1,0 +1,32 @@
+{
+  "number": 37648,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37637: the runtime draft bar keeps a stale token after \"reload\", publishItem pin docs",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T17:09:05Z",
+  "updated_at": "2026-11-26T17:20:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37648",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (nit N6 of #37387's review, carried on card #37440 and not taken by PR #37637; contract review record 7198547999 on PR #37637, nits N1 and N2, adopted at ACCEPT)\n\n## What happens\n\nPR #37637 (Fixes #37440) pins every draft-then-publish Save to its own draft receipt. Merging it closes #37440, which is the only card that recorded these items:\n\n- [ ] **The runtime draft bar keeps the old token after \"reload\"** (N6 from #37387's review). After a refused Save is resolved with \"reload\" in `DraftConflictDialog`, the runtime draft bar (`RuntimeDraftBar` / `ViewConfigPanel`) still holds the token from before the reload. Its Publish then fails closed until the panel is reopened. Expected: the reload hands the bar the reloaded draft's version.\n- [ ] **`parentVersion` JSDoc** (N1): the `draftVersion` JSDoc on `client.meta.publishItem` says an empty string pins nothing; the `parentVersion` JSDoc does not, though `''` is treated the same.\n- [ ] **SDK page** (N2): the `publishItem` example in `content/docs/api/client-sdk.mdx` shows only `message`; it does not show the two pins.\n\nCategory ①: a user-visible Publish that fails until the panel is reopened, plus doc gaps on a shipped client method.\nPriority: p3. The Publish fails closed (nothing wrong goes live), and reopening the panel recovers it.\nBusiness reason: an administrator who resolves a draft conflict by reloading, then clicks Publish in the draft bar, sees the publish refused for no visible reason.\nReader: the ux lane that next touches the metadata-admin draft bar (seat 2, s2-ux-S).\nDedupe: searched open issues for `\"PR #37637\"` and `RuntimeDraftBar reload token`: 0 hits.\nRelated: #37440, PR #37637, #37387, #36350.\n\n## Grade\n\narea:ux · Bug · minor · reach: read (review of #37387) · evidence: read → p3"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 37678,
+  "kind": "issue",
+  "title": "Knowledge settings: the Turso fields are contributed by the store that reads them, not shown on PostgreSQL deployments",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T20:00:45Z",
+  "updated_at": "2026-11-26T20:13:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37678",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb4BAjgQ43tqy1DvVJ\n\nFiling gate: ② follow-up out of #37104 (PR #37668, contract record 7202143564 nit N1, seat ACCEPT 7202157381), filed by the owning zone ai-37000 under #37104 at the seat's direction, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · domain:server · Task · p3 (seat-directed) · reach: knowledge settings page · evidence: read.\n\n## 维护者速读\n\n- 做什么：设置页里的 Turso 连接字段只在真的用 Turso 存储时出现；平台库是 PostgreSQL 时不显示。\n- 谁受益：PostgreSQL 部署的管理员不会看到一组不起作用的字段。\n- 不做会怎样：PostgreSQL 部署多显示一组字段，说明文字写明不读取；功能不受影响。\n- 需要你做的：无。\n\n## What\n\nAfter PR #37668 the Turso group in `packages/services/service-settings/src/manifests/knowledge.manifest.ts` is always shown, with a description saying it is read only when the platform database is not PostgreSQL. The store that reads `turso_url` / `turso_auth_token` (knowledge-turso) should contribute those fields instead, so a deployment that does not mount it does not show them.\n\n## Acceptance\n\n- On a deployment that mounts pgvector (no knowledge-turso), the Knowledge settings page shows no Turso fields; with knowledge-turso mounted, it shows them and they still reach plugin.ts's reader.\n- Stored Turso values survive either way; tests pin both cases."
+}

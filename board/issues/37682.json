@@ -1,0 +1,33 @@
+{
+  "number": 37682,
+  "kind": "issue",
+  "title": "Remove the build agent's chat UI from the console and Studio (build retirement, cloud#5024)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T20:10:26Z",
+  "updated_at": "2026-11-26T20:13:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37682",
+  "body": "epic:#5024#1 · hotlong · session_01Q4EjjPTfYJJKJmzZ3By7a7\n\nFiling gate: ③ maintainer-directed task · Source: epic objectstack-ai/cloud#5024 — maintainer, 2026-11-26T20:06Z: 「对话组件清理也要考虑，等 build 退役后一起删」 then 「实际现在 build 已经关闭了，已经可以排期删了」; scope 2026-11-26T20:09Z: 「先删 build 的部分 可以先处理」, 「拆分组件 之后的部分先不派发」.\nGrade: p2 · area:ai · domain:ui · Task · evidence: read (objectstack main 6d106a1a; inventory by the project's EE-AI discussion thread, file sizes re-measured by the seat)\nReader: seat `epic:#5024#1` → card thread.\nDedupe: open objectstack issues for `BuildDebugDrawer` / `PendingDraftsBar` / `StudioAiCopilot` → none.\n\n## 维护者速读\n- 是什么：build 对话退役后，控制台和 Studio 里只为 build 服务的前端组件（调试抽屉、未发布改动条、改动卡、Excel 建应用条、Studio 副驾等）和混在 ask 对话组件里的 build 分支一起删掉。\n- 影响：只删 build 专用的界面；ask 对话、附件、审批确认、模型选择器等保持不变。build 现在已关闭，删掉不会让用户少功能。\n- 要你做什么：无。\n\n## Current state (`ui/packages`, objectstack main 6d106a1a)\n\n**Build-only, delete whole files**\n- `app-shell/src/console/ai/BuildDebugDrawer.tsx` (280) + `buildDebugApi.ts` (93) — call `GET /api/v1/ai/conversations/:id/debug` (cloud `service-ai-studio`, removed in cloud PR3b).\n- `app-shell/src/console/ai/PendingDraftsBar.tsx` (152) — build's \"unpublished changes\" bar; the most scattered importers.\n- `app-shell/src/console/ai/changeCardLabels.ts` (136), `mainAreaDraft.ts` (107), `artifactStudioPath.ts` (49) — build change cards, draft main area, jump-to-Studio.\n- `app-shell/src/console/ai/ExcelImportBar.tsx` (257) — Excel-to-app (cloud#797). ⛔ Keep `chatAttachments.ts`'s in-page spreadsheet-to-text path: ask uses it.\n- `plugin-chatbot/src/publishHealth.ts` (137) — re-exported from the core entry and `ChatbotEnhanced`; fix the exports with it.\n- `app-shell/src/views/studio-design/StudioAiCopilot.tsx` (366) — Studio's build copilot, referenced from DataPillar, AutomationsPillar, StudioMetadataArea, StudioDesignSurface, StudioPermissionSetPage, useSurfaceDeepLink; remove the Studio side-panel entry with it.\n\n**Mixed ask/build, remove only the build branches**\n- `plugin-chatbot/src/ChatbotEnhanced.tsx` (7,643): build parts `isProposalResult`, `resolveProposalCardState`, `resolvePlanBuildStates`, `applyBlueprintOutcome`, `ChangePlanBody`, `AppliedDraftCard`, `isBuildProposalTool`, `withoutSupersededPlan`, `isUnstructuredBuildProposal`, `classifyAssumptions`, `PublishHealthLine`, `BuildProposalProgressHint`, `selectDesignHintIndex`, types `ChatBuildProgress`, `ChatBlueprintProgress`. Ask keeps: messages, tool status, reasoning, charts, `AnswerSource`, `RecordCitations`, approval confirm, model picker, turn-alive hint.\n- `app-shell/src/console/ai/AiChatPage.tsx` (3,549): `ChatPane` is exported here and used by ChatDock; drop the build hand-off, draft and blueprint-progress branches, keep ask's conversation and attachment logic.\n- `app-shell/src/layout/ChatDockConversation.tsx` (492): drop the build thread bound to an app package (`app:PKG:build`) and the Builder hand-off.\n- `app-shell/src/console/ai/ConversationsSidebar.tsx` (528): the cloud#1674 side-by-side ask/build history simplifies to ask.\n\n**Easy-to-miss breakpoints**\n- i18n keys under `console.ai.*` for build / publish / draft, and build strings in `ChatbotLabels`.\n- `plugin-chatbot` `index.tsx` and the core exports.\n\n## Do\n1. Premise first: confirm on current main that nothing in objectstack's own runtime (OSS, no cloud) serves the endpoints these components call, so the UI is cloud-build-only; and that no ask path imports the build-only files (quoted exact-name grep per symbol).\n2. Delete the build-only files and their tests; remove the build branches from the four mixed files; remove the Studio copilot entry; prune i18n keys and exports.\n3. ⛔ Not in scope: splitting `ChatbotEnhanced.tsx` into smaller files, approval-card or question-card redesign (the agent chat UI improvement plan follows after this card); the cloud server side (cloud PR3b, objectstack-ai/cloud#5046).\n4. Changesets for every touched published `@object-ui/*` package (removed exports are a breaking change to those packages: say so in the changeset).\n\n## Acceptance\n- Console ask chat (dock and full page) and Studio still render and work; existing ask tests pass unchanged except imports.\n- No remaining reference to the deleted symbols (exact-name grep over `ui/`), no dead i18n keys for them.\n- Typecheck, lint and the affected `ui/` test suites green; console build (`pnpm console:build` per AGENTS.md) succeeds.\n\n## Avoid\n- Priority: epic objectstack-ai/cloud#5027 goes first. Run `node scripts/pm/overlap-check.mjs` before every push; on a textual conflict with a #5027 PR, that PR lands first. At filing no #5027 PR touched these files; open PRs objectstack-ai/objectstack#37599 and #37579 touch `views/studio-design/` — rebase over them if they land first.\n\n## References\n- Inventory: project file `ai-chat/build-ui-cleanup.md`. Parent epic objectstack-ai/cloud#5024; server-side delete objectstack-ai/cloud#5046."
+}

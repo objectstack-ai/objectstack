@@ -2,7 +2,7 @@
   "number": 37511,
   "kind": "pull_request",
   "title": "fix(kanban): a list view board laned by a lookup counts and totals each whole lane, and draws a lane past the first page",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -23,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-26T09:34:32Z",
-  "updated_at": "2026-11-26T14:05:58Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-26T14:35:55Z",
+  "closed_at": "2026-11-26T14:35:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T14:35:52Z",
   "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37511",

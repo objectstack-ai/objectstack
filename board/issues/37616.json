@@ -1,0 +1,32 @@
+{
+  "number": 37616,
+  "kind": "issue",
+  "title": "App Studio 改版（follow-up of 3-1）：dataset 的 schema 文件从 spec 的 ui 目录挪到 data 目录，与注册表的 domain 一致",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T15:40:52Z",
+  "updated_at": "2026-11-26T16:24:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37616",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbL6Nn3scsU8yvLyU4\n\nFiling gate: ③ · Source: seat 5's L1 on PR #37599 (#37564), contract record 7196507657 and seat check 7196525264, carrier note from the card thread. Sub-issue of #37424.\nGrade: area:ux · Chore · p3 · evidence: after #37564, `DEFAULT_METADATA_TYPE_REGISTRY` registers `dataset` with `domain: 'data'`, but its schema file still lives under `packages/spec/src/ui/`.\nReader: area `ux-37424` or whoever holds `domain:spec`.\n\n## 维护者速读\n\n- 用户能看到什么变化：没有。只是把 dataset 的定义文件放到和它的分类一致的位置。\n- 为什么：#37564 已把 dataset 归到「数据」，代码目录还在「界面」下，容易让后来的人误判。\n- 需要你做的：无。\n\n## What\n\n- Move the `dataset` schema module(s) from `packages/spec/src/ui/` to the `data` folder, keeping every public export path working. If the package's `exports` map or barrels expose the old path, re-export from the old location so no consumer breaks.\n- Update imports inside the repo. Run `check:generated`, `api-surface` and `authorable-surface`, which should not move.\n- Wait for PR #37599 to merge before starting.\n\n## Acceptance\n\n- `dataset`'s schema lives under spec's data folder, the public surface is byte-identical (the gates prove it), and no consumer import breaks."
+}

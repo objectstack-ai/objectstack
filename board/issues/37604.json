@@ -1,0 +1,37 @@
+{
+  "number": 37604,
+  "kind": "issue",
+  "title": "metadata platform record: follow-ups after #37130 (rollback-by-package edge, adoptOrphans, contract-review nits)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "bug",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T14:52:33Z",
+  "updated_at": "2026-11-26T19:00:02Z",
+  "closed_at": "2026-11-26T18:59:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37604",
+  "body": "repo:objectstack#6 · hotlong · session_01Q4EjjQkY5yXZrN9BEA3rEK\n\nFiling gate: ③ follow-up of an accepted delivery. Item 3 of os-warren's handoff on #37130 (7183559260): zone follow-ups with no card yet, after PR #37423 merged (`Fixes #37130`) and PR #37187 merged. Filed by the seat that took over that handoff (repo:objectstack#6, intake: area:cloud). One card covers the family.\n\n## 维护者速读\n- 是什么：平台自带记录（内置技能/智能体/工具）那一轮收尾后，还剩两处可能写错数据的边角，加上几条措辞小问题。\n- 影响：只在「平台撤回自己的记录后，再按包名回滚」或「领养孤儿元数据」时才会碰到，日常使用不受影响。\n- 要你做什么：不需要，按队列排期即可。\n\n## Behaviour (should-fix candidates)\n1. **Rollback naming a package after the platform withdraws its record** (round 4 of #37130, the other R21 reading). Once the platform has withdrawn its record of a name, a rollback that names a package can write a platform-registered version into that package's row. The restore doors now refuse the platform's own row (#37423), but this path writes a platform version into a row that is not the platform's. Decide: refuse, or restore only versions the package itself wrote; pin it either way.\n2. **`adoptOrphans` may rebind the platform's own package-less row** (`POST /packages/:id/adopt-orphans`, client `packages.adoptOrphans`). A package adopting orphans could take over the row the platform registers at boot. It should skip a row that carries the platform mark (the same reading `isPlatformRecordRow`, `protocol-diff-delete-load.ts`, uses).\n\n## Nits from PR #37423's contract review (7182526807)\n- N1 — the refusal's prescription \"save that version's body again\" (`database-loader.ts`, repeated in the 37130 note) does not say the result lasts only until the platform's next registration at boot.\n- N2 — the `revertCommit` door pin and the restart pin serve a commit row with no `package_id`, which `recordPackageCommit` never writes; add a pin on `rollbackMetaItem` (where a bare rollback reaches the scenario) or a commit that names its package.\n- N3 — \"of a failed batch row write\" in `.changeset/37013-platform-skill-own-slot.md` (only if that note is still pending; drop otherwise).\n- N4 — PR-body prose only; nothing to do now that #37423 merged. Listed so the set is complete.\n- N5 — `refusePlatformRecordRestore` reads the mark off the row body alone, while `isPlatformRecordRow` also requires an empty package column; on a package-bound row whose body keeps the mark they differ and the refusal would prescribe naming the package the caller already named. Share one reader.\n\n## Nits from PR #37187's contract review (7179564385, 7179776919)\n- N3 — when both walks lose the same loader, `listPackageBindings`' `errors` names it twice and `reportLoaderReadFailure` fires twice for one read.\n- N6 — `packages/spec/src/contracts/metadata-service.ts` (around line 462) says the primed copy answers \"the column it was read with\"; after the S1 fix a copy whose row the pass bound answers the column the pass wrote.\n\nSuggested-grade: p2 · items 1 and 2 can write the wrong row; the nits ride the same PR.\nDedupe: `refusePlatformRecordRestore`, `isPlatformRecordRow`, `adoptOrphans platform` found no open card."
+}

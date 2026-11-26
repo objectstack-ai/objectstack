@@ -1,0 +1,32 @@
+{
+  "number": 37618,
+  "kind": "issue",
+  "title": "App Studio 改版（follow-up of 3-3）：界面文案句子里的「Studio」统一改为「应用搭建 / App Studio」",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T15:44:58Z",
+  "updated_at": "2026-11-26T15:54:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37618",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbL6Nn3scsU8yvLyU4\n\nFiling gate: ③ · Source: os-dev report 7196663169 on #37566 (PR #37581), open question 1. #37566 renamed the brand, the app label and the doors into Studio only. Sub-issue of #37424.\nGrade: area:ux · Chore · p3 · evidence: in each UI pack about 30 prose strings still say \"Studio\", for example \"unpublished changes in Studio\", `common.editInStudio`, `console.studio.accessRequired`, the Studio-namespace refusal sentences, `console.ai.viewBuiltAppInStudio` and `empty.openInStudio`.\nReader: area `ux-37424` or the next holder of area:ux.\n\n## 维护者速读\n\n- 用户能看到什么变化：中文界面里句子中提到的「Studio」也改成「应用搭建」，英文改成「App Studio」。改完后，标志、入口和句子里的叫法一致。\n- 为什么：#37566 只改了标志、应用名和入口，句子里还是「Studio」，中文界面会两个名字混着出现。\n- 需要你做的：无。只改显示文字，地址、权限名和技能文档都不动。\n\n## What\n\n- Rename every prose mention of Studio in the UI packs: en and zh first, then the other packs as the en-drift gate requires. Keep each sentence's structure and change only the name.\n- Update the inline `defaultValue` literals that `check-i18n-call-site-keys` pairs with the en values, and any pin test that reads those strings (residue, call-site, untranslated-identity).\n- Out of scope: identifiers, the `/studio` address, `studio.access`, package names, and `skills/**`.\n\n## Acceptance\n\n- `grep` over the UI packs finds no user-facing \"Studio\" that does not belong to \"App Studio\" (or the zh 应用搭建 form), apart from identifiers. Pins are updated, not weakened.\n- Wait until PR #37581 merges before starting."
+}

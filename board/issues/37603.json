@@ -1,0 +1,35 @@
+{
+  "number": 37603,
+  "kind": "issue",
+  "title": "cli start-deployment-durability: the #30120 refusal tests spawn `os start` under vitest's default 5000 ms timeout and time out on a loaded shard",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T14:51:20Z",
+  "updated_at": "2026-11-26T15:23:37Z",
+  "closed_at": "2026-11-26T15:23:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37603",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbdHk3orAeensH6EzS\n\nFiling gate: ① · Source: fleet (CI on PR #37558 head `bd194d3f`, run 45834106255 attempt 1, job 139959698234 `Test Core (5/10)`). The finder files the flake (seat repo:objectstack#5, thread note 14:29Z).\n\nGrading: `area:devpath` · reach: CI only. The file is `packages/cli/test/start-deployment-durability.integration.test.ts`, and the test that failed is \"#30120 — with the image switch on, a start missing its settings refuses > only the database missing: names only OS_DATABASE_URL\" (line 291). It hit \"Test timed out in 5000ms\"; the file took 66,864 ms on that shard, and the other 2772 cli tests passed. The run was green on its one relay re-run (attempt 2). Evidence: measured once on CI, not reproduced locally. PR #37558 touches only spec contracts, plugin-sharing and plugin-security, so this test cannot reach its diff.\nSuggested-grade: p3 · a red shard on unrelated PRs, cleared by one re-run.\n\n## What\n\nThe three tests in the `#30120 … a start missing its settings refuses` describe (lines 281–305 at `0f6a1e518f`) run `os start` through `refuse()`, which is a `spawnSync` with `timeout: 120_000` (line 276). But the `it(…)` calls pass no per-test timeout, so vitest's default 5000 ms caps a child process that is allowed two minutes. The sibling `#31600` describe passes `LEG_TIMEOUT_MS` to each `it`, and its `beforeAll` passes 15_000.\n\nGive the three refusal tests the same explicit budget as their siblings, `LEG_TIMEOUT_MS` or one shared constant, with the reason in a comment. Do not raise the global `testTimeout`.\n\nRe-check: `grep -n \"it('none set\\|it('only the database missing\\|it('a switch value that is not a switch\" packages/cli/test/start-deployment-durability.integration.test.ts` shows `it(` lines whose closing `});` carries no timeout argument.\n\nRelated: #37494 (the other default-timeout flake found by area o5-D; sqlite-wasm in plugin-security).\nDedupe: searched issues for 'start-deployment-durability'. None track this timeout."
+}

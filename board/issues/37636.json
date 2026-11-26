@@ -1,0 +1,30 @@
+{
+  "number": 37636,
+  "kind": "issue",
+  "title": "4-hourly full run: red on main (CI)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p0"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T16:32:46Z",
+  "updated_at": "2026-11-26T17:14:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37636",
+  "body": "os-4-hourly-full-run-ci — machine-findable marker for this generated card. ⛔ Do not delete this line: it is how the 4-hourly full run finds this card instead of filing a new one every 4 hours.\n# 4-hourly full run: red on main (CI)\n_Swept 2026-11-26T16:32:40.980Z · [run log](https://github.com/objectstack-ai/objectstack/actions/runs/45855138029) · commit `54d6726c09019bd1d9da29b7aee3fb9e907dbb0a` · conclusion `failure`._\n`CI` runs the FULL battery on `main` every 4 hours (#16467, #25771). A `push` run on\n`main` tests only the packages the merge touched, and a merge-queue build tests only what the group\ncontained — so this scheduled run is the only thing that says whether the WHOLE tree is green, and\nthis card is the only channel that reports it. Nothing is blocked by it.\n⛔ The remedy is never to narrow, skip or delete the failing check to make the 4-hourly run green.\nFix what it names and let the next 4-hourly run refresh this card; a card nobody reopens is closed by\nthe next green run being uneventful, not by editing this one.\n## What landed since the last green 4-hourly run\nRange: `5dbcc02b84` (run 45816237442, the last green `CI` schedule run) .. `54d6726c09` — [compare](https://github.com/objectstack-ai/objectstack/compare/5dbcc02b84d57b982444cdbd2516761d3419defe...54d6726c09019bd1d9da29b7aee3fb9e907dbb0a)\n- `1af67b26cd` fix(mcp): the refusal-reasons relay withholds only the security gate's own refusal (#37537)\n- `021524cd0a` feat(spec,ui): a field can be read-only by hand at the console while writes keep it (uiReadonly / uiReadonlyWhen) (#37436)\n- `81c1ae9f75` fix(i18n): the compact toolbar hint says the same thing in every language (#37523)\n- `95824c0061` test(cli): the absent-database suite gives each command and door its own hook, its runs started together (#37540)\n- `1dd682c147` fix(console): a bulk run that settles after leaving the Approvals Inbox opens its failed rows back on the inbox (#37541)\n- `061e342242` fix(console): a stored settings select, radio or multiselect value the setting no longer offers reads as \"no longer available\" (#37536)\n- `75c68af4c7` docs: a default or create form an action opens by name is not reported; two checklist items re-audited (#37547)\n- `c385d3bd16` feat(console): a refusal that names several reasons lists every one in its alert box (#37538)\n- `4116465625` docs(skills): the UI skill says a default or create form an action opens by name is not reported (#37544)\n- `9f762cfbbd` test(app-shell,console): approvals and inbox reads carry the console's UI language (#37543)\n- `64c2fbb36b` fix(console): the approvals inbox's pinned Approve / Reject column covers no other column, and record names read in full at common desktop widths (#37560)\n- `b69f7157cd` fix(ui): the OWD overview's draft save goes through the draft guard (#37554)\n- `6c290d3af7` docs(skills): objectstack-data names actionLayout among the pair-only keys; objectstack-automation says an option label in a flow filter or edge condition is refused (#37551)\n- `a6e258c971` fix(qa): shorten the order_to_cash card title.en under the 128-char displayName cap (#37555)\n- `ebe35f4532` fix(chatbot): redraw record-citation chips after a reload; keep the cited-section scroll to new clicks (#37539)\n- `68b2430517` fix(kanban): a list view board laned by a lookup counts and totals each whole lane, and draws a lane past the first page (#37511)\n- `0f6a1e518f` docs(skills): objectstack-platform names the arrangements list of the package customizations read (#37568)\n- `083e040e89` fix(spec,test): unblock the 19 Version PR: open the major-19 registry regions, parse prerelease versions in the MCP save test, key the objectui pin claim on the spec major (#37557)\n- `4805d83c8a` perf(console): an object list and a record page no longer load the Studio designer's string table on first paint (#37589)\n- `eec10407ac` docs(adr): ADR-0160 amended — a body outline past its bounds comes in pages (outlineFrom / outlineNext) (#37573)\n- `758e145d50` docs(adr): ADR-0150 records the ruling on a knowledge source registered in code and on how code names a package's source (#37576)\n- `babd660232` fix(spec): name requiresObject when an app menu entry names an undeclared platform object (#37583)\n- `58570d8002` perf(sharing): ask record sharing for the write verdicts of a predicate write's candidates as one set (#37558)\n- `54d6726c09` fix(lint): field-no-consumers credits a related list's columns to the child object it lists (#37596)\n_Filed by `.github/workflows/scheduled-full-run-card.yml`. Generated by [Claude Code](https://claude.ai/code)_"
+}

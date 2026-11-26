@@ -1,0 +1,32 @@
+{
+  "number": 37685,
+  "kind": "issue",
+  "title": "ADR-0084：在「去处」表里补一行——组织级（~org）的变更与发布入口",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T20:11:17Z",
+  "updated_at": "2026-11-26T20:16:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37685",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbL6Nn3scsU8yvLyU4\n\nFiling gate: ③ · Source: seat 5's contract review 7202356468 on PR #37579 (#37456), finding S3. Sub-issue of #37424.\nGrade: area:ux · Documentation · p2 · evidence: ADR-0084's homes table sends Changes + Publish to 概览's Pending tab. The package-less `~org` scope has no 概览, so #37456 added a `~org`-only \"Changes · N\" row in the left column that opens the existing sheet. The ADR does not record that home.\nReader: a contract-tier (fable) thread. `docs/adr/**` makes this Tier H.\n\n## 维护者速读\n\n- 用户能看到什么变化：没有。只是把已经上线的做法写进设计文档：组织级流程没有「概览」，所以它的待发布入口放在左栏那一行「变更 N」。\n- 为什么：避免以后有人按文档把这一行删掉。\n- 需要你做的：合并这条文档修改（Tier H）。\n\n## What\n\n- In `docs/adr/0084-application-builder-information-architecture.md`, add one row to the homes table of `#amendment-2026-11-26-homes`: `~org` Changes + Publish → the left column's \"Changes · N\" row (`StudioScopePendingRow`), which opens the existing changes sheet and its publish.\n- Add a dated amendment mark in the ADR's own form. Do not add a second table of the pinned row shape.\n\n## Acceptance\n\n- The row is present, `studioMenuPlacement` and the ADR pin tests stay green, and the docs gates pass.\n- Wait until PR #37579 merges."
+}

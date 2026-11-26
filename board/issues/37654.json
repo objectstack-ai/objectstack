@@ -1,0 +1,37 @@
+{
+  "number": 37654,
+  "kind": "pull_request",
+  "title": "fix(app-shell): the AI chat object read rides the authenticated fetch, and the fetch ratchet follows a fetch alias",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T17:28:09Z",
+  "updated_at": "2026-11-26T18:15:37Z",
+  "closed_at": "2026-11-26T18:15:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T18:15:35Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37654",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuDJAbBe3iTrFcF7GZrucZ32)_\n\nFixes #37242\n\n## What changes\n\n- **N4 — the AI chat page's object read.** `appOfObject` (which app a record hand-off from the chat opens under) moves out of `AiChatPage.tsx` into `app-shell/src/console/ai/appOfObject.ts` and reads `/api/v1/meta/object/<name>` through `createAuthenticatedFetch()`, keeping `credentials: 'include'`. `AiChatPage.tsx` imports it; its three call sites are unchanged. The `AiChatPage.tsx` row leaves the shrink-only allow-list of `sameServerFetch.bearer.ratchet.test.ts` (its reason, an open PR on the file, no longer held).\n- **N1 — the ratchet sees through a fetch alias.** `bareCookieOnlyCalls` now also counts a call through a local name bound to the global `fetch`:\n  - `const f = fetch` (or `window.` / `globalThis.` / `self.fetch`) counts in every scanned tree;\n  - a name bound to a `?? fetch` / `|| fetch` fallback (`const doFetch = opts.fetchImpl ?? fetch`) counts in app-shell and the console only.\n\n## A decision made here\n\nThe fallback form is **not** followed in the renderer packages. There `const doFetch = apiFetch ?? fetch` is the documented channel (the ratchet's own header: the host's `apiFetch`, falling back to the global `fetch` only in a host that mounts none), and following it everywhere flags 17 conforming sites (`ShareDialog`, `ObjectChart`, `MePermissionsProvider`, `queueClaim`, `useRowApprovalLocks`, …). App-shell and the console build `createAuthenticatedFetch` per call, so there a `?? fetch` name is the bare fetch under another name. The header says so, and the detector's case table pins both sides (a renderer-tree `apiFetch ?? fetch` name reads 0, a plain alias reads 1).\n\n## Why\n\n`#37185` moved the shell's same-server calls onto the authenticated fetch and added the ratchet. Its L1 left two follow-ups: the ratchet did not see `flowDraftChecks.ts`'s `doFetch` alias, so reverting that conversion stayed green; and the chat page's object read was still cookie-only, so under a bearer-only session every record hand-off from the chat fell back to the Setup shell.\n\n## Verification\n\n- Ablations against this head (each restored after):\n  - `flowDraftChecks.ts:104` back to `opts.fetchImpl ?? fetch` — on `main` the ratchet stays 4/4 green; here it goes red, naming `flowDraftChecks.ts:114 :: doFetch(…)`.\n  - `appOfObject.ts` back to the bare `fetch` — red, naming `appOfObject.ts:19 :: fetch(…)` (no row allows it).\n- New `console/ai/__tests__/appOfObject.bearerSession-37242.test.ts`, against a server that answers only the bearer: with a token stored the read carries `Authorization: Bearer <token>` beside `credentials: 'include'` and returns the owning app; CONTROL, no token: the read goes out cookie-only and falls back to `setup`.\n- `pnpm --dir ui exec vitest run` over `packages/app-shell/src/console/ai/`, `packages/app-shell/src/preview/` and the ratchet: 780 tests green; the ratchet re-run on this head (rebased on `main` bdbe01e05): 4/4.\n- `type-check` for `@object-ui/app-shell`: clean. `eslint` on the changed files: 0 errors.\n- `overlap-check`: exit 0.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `eslint` on the changed files passes (the full `pnpm lint` runs in CI).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [ ] The *Before Submitting* list in CONTRIBUTING.md is done. (full local suite not run; CI carries it)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUuauSMJu1nVSQRQri)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUuauSMJu1nVSQRQri\n"
+}

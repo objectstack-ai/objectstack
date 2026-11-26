@@ -1,0 +1,38 @@
+{
+  "number": 37594,
+  "kind": "pull_request",
+  "title": "fix(runtime): the personal-view and attachment own-door 501s follow the request's language, like the print door's",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T14:32:06Z",
+  "updated_at": "2026-11-26T16:13:48Z",
+  "closed_at": "2026-11-26T16:13:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T16:13:45Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37594",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuPE7uyDAJyqjwwMzomWv5ff)_\n\nFixes #37352\n\nClause-②: yes (widening)\nMetadata-protocol: none\nSkills-docs: none (no page under `skills/**` names the own-door bridge or its `501` sentences)\n\n## 维护者速读\n\n- 用户能看到什么变化：在缺少个人视图服务或附件服务的环境里，删除个人视图、删除或重命名附件时弹出的「接口不可用」提示，现在和打印一样按界面语言（中文、日文、西班牙文）显示；英文界面一字不差。\n- 为什么做：同一个故障，打印接口已经显示中文，旁边这两个接口还显示整句英文，用户看到的语言取决于点了哪个按钮。\n- 出错会怎样：最坏是某种语言措辞不够好；错误码、状态码和服务名都不变，可直接撤回。\n- 要你做什么：无。\n\n## What changes\n\n- `packages/spec/src/system/operation-message.ts`: the operation-message catalog (`BUILTIN_OPERATION_MESSAGES`) gains the two doors' nouns, `own_door_personal_view_delete` and `own_door_attachment_mutate`, in `en`, `zh-CN`, `ja-JP` and `es-ES`. The English of each is the bridge's current `noun`, byte for byte. The catalog header names all three noun keys.\n- `packages/runtime/src/domains/personal-views.ts`, `attachments.ts`: each bridge sets `nounKey`, as `print.ts` does since #37336, so `notImplementedSentence` renders both `501` sentences (`own_door_service_unregistered`, `own_door_member_missing`) in the request's top `Accept-Language` tag.\n- No wire change: code `NOT_IMPLEMENTED`, status `501`, the slot, member and package names are unchanged, and no `userMessage` is added.\n\nSmall calls made here (no card): the Spanish attachment noun is singular (`el punto de acceso para eliminar y renombrar adjuntos`) so the catalog's singular `no está disponible` agrees with it; the English keeps its existing plural noun with `is`, since it must stay byte-identical.\n\n## Why\n\nAfter #37336 the print door answered its own-door `501` in the reader's language while the two sibling doors on the same bridge answered in English, so one failure mode read in two languages depending on the door.\n\n## Verification\n\n- `packages/runtime/src/domains/own-door-bridge.test.ts`, new describe `[#37352]`: for both doors (personal-view `DELETE`; attachment `DELETE` and `PATCH`), on a kernel with no service and with a service lacking its member, the `501 NOT_IMPLEMENTED` message is pinned in `en` (and with no header), `zh-CN`, `ja-JP` and `es-ES`, with no `userMessage`; the catalog English of all three noun keys equals each bridge's `noun`. Red first: with `nounKey` removed from the personal-view bridge, 3 of the 50 tests fail.\n- The `#37273` control \"a bridge that names no noun key keeps its English sentence\" now takes a shipped bridge with its key removed and hands it to `handleOwnDoorBridgeRequest` directly, since no shipped bridge lacks one any more.\n- Local runs at `9a610dc71`: `@objectstack/runtime` vitest `src/domains` 240 files / 7,024 tests pass; `@objectstack/spec` vitest `src/system` 78 files / 2,787 pass; `@objectstack/core` `operation-user-message.test.ts` 9/9; `pnpm --filter @objectstack/spec check:generated` exit 0; eslint on the touched files exit 0; `tsc --noEmit` for runtime exit 0; `node scripts/pm/overlap-check.mjs` exit 0.\n\nContract review (L2) is owed before landing: the diff changes `packages/spec/src/**` and declares `Clause-②: yes (widening)`.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed (`check:generated` reports nothing to regenerate).\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUpnvPnJ1hR74pUrVj\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUpnvPnJ1hR74pUrVj)_\n\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgUpnvPnJ1hR74pUrVj -->\n"
+}

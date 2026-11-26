@@ -1,0 +1,36 @@
+{
+  "number": 37588,
+  "kind": "pull_request",
+  "title": "fix(app-shell): a full-height console page gives the impersonation banner its height back",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T14:21:48Z",
+  "updated_at": "2026-11-26T16:03:42Z",
+  "closed_at": "2026-11-26T16:03:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T16:03:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37588",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuDJAbBe3iTrFcF7GZrucZ32)_\n\nFixes #37528\n\n## What changes\n\n- `ChromeBannerSlot` (`app-shell/src/layout/chromeBannerHost.tsx`): when the console's standing banners (impersonation, read rate, storage) are drawn **in place** above the routes, a `display: contents` wrapper measures them (`ResizeObserver` on each child, `MutationObserver` for banners that come and go) and publishes the summed height as `--os-chrome-banners` on the document root; cleared on unmount and while nothing is drawn. Drawn into an app layout's host (desktop, inside an app, objectstack#36112) nothing is published, as that host sits inside the content area.\n- The console's full-height shells take the viewport less that property, through `CONSOLE_FULL_HEIGHT` (module-local constants, literal Tailwind classes): `AppShell` in `@object-ui/layout` (height, and a `min-h-` that tailwind-merge puts in place of the sidebar wrapper's own `min-h-svh`), `StudioDesignSurface`, `HomeLayout`, `AiChatPage`, the two organization layouts, the app-unavailable / no-app screens in `AppContent`, and `StudioRoute`'s access-required screen. The property is unset outside the console and on an ordinary session, so every class there computes to the plain viewport height.\n- The banner keeps its place in flow (objectui#4467) and its `sticky`; nothing about where it is drawn changes.\n\n## Why\n\nWhile an administrator impersonates a user, the banner sat in flow above a shell that still took `100svh` / `100vh`, so the document was taller than the window by the banner's height: list footers and bulk action bars fell below the fold and the page grew a second scrollbar.\n\nMeasured on `main` (411646562) in a local console against `examples/app-crm` (`--fresh`), impersonating a seeded user, `document.documentElement.scrollHeight` against `innerHeight`:\n\n| page | 1280×768 before | 1280×768 after | 390×844 before | 390×844 after |\n|---|---|---|---|---|\n| `/home` | 768 / 768 (redirects into the app) | 768 / 768 | 921 / 844 | 844 / 844 |\n| an app list (`crm_lead`) | 768 / 768 (#36112 host) | 768 / 768 | 921 / 844 | 844 / 844 |\n| `/studio` | 821 / 768 | 768 / 768 | 921 / 844 | 844 / 844 |\n\nThe first push fixed `/home` only: the sidebar wrapper's own `min-h-svh` and Studio's access-required screen still overflowed, which the second commit covers.\n\n## Verification\n\n- New `layout/__tests__/chromeBannerHost.bannerHeight-37528.test.tsx` (5 cases: in place publishes the summed height and clears on unmount; no banner publishes nothing; a resize and a banner going away republish; drawn into the host publishes nothing; every full-height class reads the property with a `0px` fallback). With `chromeBannerHost.tsx` restored from `main`, 3 of the 5 go red (the two \"nothing published\" cases are controls).\n- `pnpm --dir ui exec vitest run` over `packages/layout/`, `packages/app-shell/src/layout/`, `src/console/__tests__/`, `src/console/home`, `src/console/ai`, `src/console/organizations`, `src/views/studio-design`, the print stylesheet pin, `apps/console/src/components` and the boot-redirect pins: all green (3,325 + 3,862 tests). `ai-surface-unavailable` in `ConsoleShell` is deliberately left on `h-screen`: `bootRedirectCoverage.test.tsx` reads that class as the full-viewport cover.\n- `type-check` for `@object-ui/app-shell` and `@object-ui/layout`: clean. `eslint` on the changed files: 0 errors.\n- The full UI suite runs in this PR's CI.\n- `overlap-check`: exit 0 (shares `StudioDesignSurface.tsx` with #37546 and `AiChatPage.tsx` with #37539, both merge cleanly).\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `eslint` on the changed files passes (the full `pnpm lint` runs in CI).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [ ] The *Before Submitting* list in CONTRIBUTING.md is done. (full local suite not run; CI carries it)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUuauSMJu1nVSQRQri)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUuauSMJu1nVSQRQri\n"
+}

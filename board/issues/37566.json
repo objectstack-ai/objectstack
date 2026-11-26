@@ -2,8 +2,8 @@
   "number": 37566,
   "kind": "issue",
   "title": "App Studio 改版（3-3）：显示名改为「应用搭建 / App Studio」——应用标签与多语言文案（只改界面显示）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -20,13 +20,17 @@
     "os-bill"
   ],
   "milestone": null,
-  "type": null,
+  "type": "Task",
   "created_at": "2026-11-26T13:29:57Z",
-  "updated_at": "2026-11-26T14:19:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T16:58:04Z",
+  "closed_at": "2026-11-26T16:58:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37566",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbL6Nn3scsU8yvLyU4\n\nFiling gate: ③ · Source: the maintainer's naming ruling on topic #37424: no 本体 / Ontology rename; the Chinese UI shows 应用搭建, the English UI App Studio (`docs/adr/0084` `#amendment-2026-11-26-position`). The maintainer asked on 2026-11-26 at 13:25Z to move phase 3 forward, and ruled at 13:26Z that the rename is display-only (「改个名字为什么还要改技能文档」). Sub-issue of #37424 (phase 3).\nGrade: area:ux · Task · p2 · evidence: the product label today is \"Studio\" (`packages/platform-objects/src/apps/studio.app.ts:32`).\nReader: area `ux-37424`.\n\n## 维护者速读\n\n- 用户能看到什么变化：Studio 的显示名在中文界面是「应用搭建」，英文界面是「App Studio」。应用切换器、左上角标志和页面标题都统一。\n- 只改界面显示：地址 `/studio`、代码里的名字都不动；技能文档里的说法留到第五阶段收口时一起改。\n- 需要你做的：无。\n\n## What\n\n- Display text only:\n  - the `studio.app.ts` label and its translations in every locale pack;\n  - the Studio brand in the top-left (#37456 draws it; reuse its i18n key);\n  - page titles.\n- ⛔ Not changed: routes, ids, package and API names (`/studio` stays), and `skills/**` (moved to phase 5, #36910).\n\n## Acceptance\n\n- The Chinese and English UI show the new name wherever the app is named, with screenshots.\n- Translation tests and generated-docs checks are green."

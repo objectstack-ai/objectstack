@@ -1,0 +1,32 @@
+{
+  "number": 37638,
+  "kind": "issue",
+  "title": "[Decision] FormViewSchema.columns (form-level) is read only by the Setup preview: enforce it on the form page, or retire it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T16:37:01Z",
+  "updated_at": "2026-11-26T18:43:12Z",
+  "closed_at": "2026-11-26T18:43:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37638",
+  "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nRuled: 7200681767 · letter A · 2026-11-26T18:38Z\n\nCarries the enforce-or-remove fork found while working #37629; #37629 keeps the skill-text fix that holds under both outcomes. Filed by the seat of epic objectstack-ai/cloud#5027 from its card thread's measurement (read-only, `origin/main` @33a31dc7, no server booted).\nFiling gate: class c · reach: named producer = the 2026-11-26 Haiku 5.5 draft-door trial, case 2 run 1 wrote `columns: 2` on a form view; accepted, publishable, and silently not read by the named form page.\nDedupe: `FormViewSchema columns`, `FormPage columns`, `form view columns preview`, `form.columns liveness` — no open card.\n\n## 维护者速读\n- 是什么：表单视图上的顶层 `columns`（整张表单几列）只有 Setup 的预览画布会读；上线后的命名表单页和公开表单都不读，只读每个分组自己的 `columns`。作者在画布上看到两列，发布后不是。\n- 要你定：A 让表单页也读它（只改 ui 渲染器，约 S）；B 按 ADR-0049 退役这个键（约 M，收窄契约）。\n- 席位推荐 A：spec 自己的退役处方文案和预览画布都已经在教作者写这个键，补一个读点比退役便宜。\n- #37629 不等这张卡：技能先改成两种结局下都成立的说法。\n\n## Measurement\n1. Form-level `columns` takes effect on no end-user surface. Its only reader is the Setup preview canvas (`ui/packages/app-shell/.../previews/ViewPreview.tsx`, `buildFormPreviewSchema` passes `columns: body.columns`). Named form pages and public forms both render through `ui/apps/console/src/components/FormPage.tsx`, which reads only each section's `columns` (`normalizeColumns(sec.columns)`, default 2) and never the form-level key; `/meta/view` and the public form payload do not fold it either.\n2. Section-level `columns` (1–4) takes effect on named and public forms.\n3. The object's default new/edit (modal or page) reads no form view (`recordFormNavigation.ts` `resolveRecordFormChrome`); it lays out by the object's `fieldGroups`, which have no columns key (renderer-derived: up to 6 fields 1 column, else 2–3).\n4. The liveness ledger row `view.json` `form.columns` reads `live`, citing ModalForm/DrawerForm, which no longer receive stored form views: the citation is stale.\n\n## Options\n| | What | Size | Contract |\n|:--|:--|:--|:--|\n| A (recommended) | `FormPage` reads form-level `columns` as the grid width through plugin-form's `sectionedGridLayout`, the canvas's rule; section `columns` still wins inside a section; tests | S, `ui/**` only | none (enforces a declared key) |\n| B | Retire the key per the spec-property-retirement playbook: tombstone, ADR-0087 conversion, ledger, canvas, and the `FORM_VIEW_LAYOUT_RETIRED` guidance that today says \"set columns\" | M | narrowing; owes a contract-review-tier L2 |\n\n## Four axes\n- **Real business need:** layout requests like \"two columns\" are common; the trial model reached for this key unprompted. Section columns already cover per-group layout, so the form-level key is a default, not a new capability.\n- **Long-term soundness:** declared ≠ enforced today (ADR-0049). Either option ends that; A keeps one rule shared by canvas and page, B removes a key the spec's own guidance prescribes.\n- **Preventing AI authoring errors:** today the key is accepted and silently ignored, the worst case. A makes the accepted value true; B makes it a loud refusal. Both fix it.\n- **Startup focus:** A is the smaller change and adds no surface; B costs more for the same end.\n\nGoverning text: ADR-0049 (enforce-or-remove); `packages/spec/src/ui/view.zod.ts` `FormViewSchema.columns` docblock (\"Number of columns for the form body\").\n"
+}

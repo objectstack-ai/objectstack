@@ -1,0 +1,32 @@
+{
+  "number": 37593,
+  "kind": "issue",
+  "title": "scenario runner: a run whose host app never boots (every turn not-run) still exits 0, so a dead round reads as a green exit",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T14:28:11Z",
+  "updated_at": "2026-11-26T15:24:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37593",
+  "body": "qa#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\nFound by the 2026-11-26 daily ask round (eval-run #37592, main `41164656`).\n\n**What happens:**\n- The ask host app failed to boot: `objectstack dev exited before it was ready`, `package 'com.example.hosttravel' targets protocol ^18 … this runtime is protocol 19.0.0`. The root cause is #37586.\n- On both arms, every question, dataset and operation is `not-run`: 0 ask turns, and the scorecard rows read `—`.\n- `run-scenarios` still **exited 0** on both arms. `packages/qa/scenarios/src/runner/cli.ts:650` returns 0 unconditionally once the card loop finishes. The only non-zero exits are argument errors (`return 2`) and a thrown error (`1`).\n\n**Why it matters:**\n- The daily round, the keep/drop rounds and any CI or patrol wrapper read the exit code.\n- A round that measured nothing is indistinguishable from a clean one until someone reads the scorecard. Today only the runner's own reading caught it.\n\n**Expected:** a card whose ask host never became ready, or whose ask phase ran 0 of N planned turns, makes the command exit non-zero. It keeps writing the record as it does now. A distinct code, as `skill-evals` uses `3` for its quota stop, would let wrappers tell \"nothing ran\" from a crash.\n\n**Not in scope:** the protocol mismatch itself (#37586).\n\nQA-source: #37592 · scenarios.run-scenarios · exit code on a host boot failure"
+}

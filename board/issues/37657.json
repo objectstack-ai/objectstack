@@ -1,0 +1,36 @@
+{
+  "number": 37657,
+  "kind": "issue",
+  "title": "App Studio 改版（follow-up of 3-2）：设置里旧的元数据目录别名按 setup.access 决定去设置还是留在 Studio",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-26T17:49:19Z",
+  "updated_at": "2026-11-26T19:00:13Z",
+  "closed_at": "2026-11-26T19:00:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37657",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbL6Nn3scsU8yvLyU4\n\nFiling gate: ③ · Source: seat 5's delta review 7199669663 on PR #37602 (#37565), finding S3, option (b). PR #37602 took option (a), a text fix. Sub-issue of #37565.\nGrade: area:ux · Feature · p3 · evidence: `setupMetadataRedirect.ts` sends Setup's old `/apps/*/metadata` catalog aliases to the Setup directory page unconditionally. Studio's `~all` addresses already check `setup.access` after #37565.\nReader: area `ux-37424`, or the next holder of area:ux.\n\n## 维护者速读\n\n- 用户能看到什么变化：没有「设置」权限的人，打开旧的设置元数据链接时，会留在 Studio 的目录，不会落到一个打不开的设置页。\n- 为什么：#37565 已让 Studio 里的旧地址按权限分流，设置那一侧的旧别名还没有。\n- 需要你做的：无。\n\n## What\n\n- Give the hosts of `setupMetadataRedirect.ts` (the AppContent alias routes) a fail-closed `setup.access` read, so that no answer counts as no access. Reuse `holdsSetupAccess` from #37565. Do not use `usePermissions().hasCapabilities`, which fails open.\n- Without `setup.access`, the alias lands on the Studio environment-scope list, as `~all` does after #37565.\n\n## Acceptance\n\n- Both branches are tested, along with the no-answer case. An ablation goes red. The full redirect chain is asserted.\n- Wait until PR #37602 merges."
+}

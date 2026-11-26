@@ -1,0 +1,37 @@
+{
+  "number": 37647,
+  "kind": "pull_request",
+  "title": "fix(scenarios): door mode mints its token from a 200 { redirect, url } authorize answer",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T17:05:27Z",
+  "updated_at": "2026-11-26T17:48:12Z",
+  "closed_at": "2026-11-26T17:48:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T17:48:10Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37647",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"hotlong\"} -->\n_Requested by **Jack** · [project thread](https://claude.ai/code/project/chan_01EF41AQooqveF2DGD8nqPzS?thread=cmsg_01EF41AQooqveF2DGD8nqPzSGEL3MyfCvK8gZfN89TKtXi)_\n\nFixes #37627\n\n## What changes\n\n`mintAuthoringToken` (`packages/qa/scenarios/src/runner/app.ts`) now follows the authorize redirect in either shape the authorization server sends it:\n\n- a 302 with a `Location` (as before), or\n- a 200 `{ \"redirect\": true, \"url\": \"…\" }`, whose `url` is followed exactly like a `Location`: to the consent step, then the token exchange.\n\nA redirect (either shape) whose URL carries `error` is now recorded as the refusal of the authorization step, with the OAuth error as its `code`, instead of being posted to the consent endpoint. Any other answer stays the authorization step's refusal, as before.\n\n## Why\n\nOn main, `--modes door` stopped at \"no token for the draft door … authorization\". The cause, measured in `@better-auth/oauth-provider` 1.7.12 (`handleRedirect`): it answers JSON instead of a 302 when the request carries `sec-fetch-mode: cors` or `accept: application/json`, and Node's `fetch` (undici) sends `sec-fetch-mode: cors` on every request. So the runner always got the 200 shape and read an empty `Location`. The card's premise re-measured on `origin/main` 33a31dc7: holds.\n\n## Verification\n\n- `pnpm --filter @objectstack/scenarios exec vitest run --maxWorkers=2 test/runner/door-token-mint.test.ts test/runner/app.test.ts test/runner/orchestrate.test.ts`: 3 files, 184 tests passed. The new file (5 tests) against a loopback authorization server: one test per shape (302 `Location`; 200 `{redirect,url}`, asserting the request carried `sec-fetch-mode: cors`), the error redirect, a 200 naming no redirect, and an unauthenticated authorize (asserts `code` and `status`). Against main's `app.ts` the 200-shape and error-redirect tests fail (2 of 5).\n- `pnpm --filter @objectstack/scenarios typecheck`: clean.\n- Derived gate families (`node scripts/pm/dispatch-gates.mjs --commands`, 63 commands): 62 exit 0 locally. `pnpm check:query-options-erasure` hit my 240 s local timeout and is left to CI (NOT MEASURED locally).\n- Acceptance run, no shim, `--packages workspace` on this branch; the blank template already reads `protocol: '^19'` on main, so no scratch-dir workaround for objectstack#37586 was needed:\n\n```\npnpm --filter @objectstack/scenarios run-scenarios --modes door --only crm_account_with_contacts --packages workspace --model haiku --effort medium --door-skills $PWD/skills\n\npackages: workspace @ 0c149b4b + uncommitted changes (unreleased)\n| Build | 37/38 ⚠ degraded |\n| Build · author | success · 31/80 turns · 1m 51s · claude-haiku-5-5 · effort medium |\n| Seed | 1/8 ⚠ seed: 7 refused |\n| Run-问数 | 4/6 · 10 not measured ⚠ 1 leaking |\n| Run-operations | 0/0 · 6 not measured |\n- door: package `com.scenario.democrm` created · client connected (openid metadata:write) · 7 drafts pending · publish: published, 7 published\n- door finding: build: the build denies partner_user the create on democrm_contact that the card gives it (operation contact_bad_email: its probe of the declared write was refused PERMISSION_DENIED (403))\n```\n\n(\"uncommitted changes\" at packing time were the test file and the error-redirect branch, both committed since; the token path the run took is the committed one.)\n\n## Acceptance notes\n\n- The Build half completes; the one lost point is the author's grant, a model result, not the runner.\n- Seed refused 7 of 8 and the Run half was mostly not measured in this single round. Not investigated here (outside this card's fence); the trial round on 6c290d3a seeded fine, so it may be worth a look by the eval seat.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Q4EjjMxVqpDWRdA6Yic97D\n"
+}

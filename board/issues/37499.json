@@ -2,8 +2,8 @@
   "number": 37499,
   "kind": "issue",
   "title": "metadata-protocol: while every holder of a name is disabled, a write to its package-unbound customization still lands unseen — bare save, draft save, delete and draft discard must refuse with \"enable the package first\"",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:package",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T09:12:52Z",
-  "updated_at": "2026-11-26T14:13:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T19:14:55Z",
+  "closed_at": "2026-11-26T19:13:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37499",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed · Source: the maintainer in the triage session, verbatim 「我觉得停用就该全部消失」 then 「同意」 to triage's split. Split out of #34348 (cell 1). Child of topic #36229 (\"after a package is disabled it is invisible everywhere\").\n\nTriage: lands in area:package · domain:server · Bug · priority:p1 · `pm:queue` · size M; rationale: while a package is disabled, its customization is hidden from every read, yet a write still succeeds unseen. The bare delete destroys the hidden row, so re-enabling no longer brings it back. That is silent data loss, so p1.\n\n## 维护者速读\n- 问题：包停用后，管理员对它做过的定制已经看不到了，但保存、存草稿、删除仍然显示成功；删除会把这条看不见的定制真删掉，包重新启用也回不来。\n- 要做的：停用期间这些操作一律拒绝，提示「请先启用该软件包」；重新启用后定制原样回来。\n- 需要你做的：无。\n\n## What happens (measured read-only on `main` `df0894a664`, a throwaway copy of `packages/runtime/src/domains/meta-disabled-holder-served-stack.test.ts`; dashboard type, both transports, both registration orders)\n\nA name shipped only by package D, plus a package-unbound stored row (D's customization under the #33401 seat ruling / PR #33995):\n\n- **D enabled:** bare read, `/published`, `/layers` and list serve the row (200). `_env` answers 409 \"not held by the environment\".\n- **D disabled:** bare read, `_env`, `/published` and `/layers` answer 404, and list omits the row. All correct.\n- **D disabled, writes:**\n  - the bare publish save answers 200 and the edit stays hidden;\n  - the bare draft save answers 200 and writes a hidden draft row;\n  - the bare draft read answers 404 `NO_DRAFT`, even after that save;\n  - `_env?state=draft` answers 409 (#34261);\n  - the bare **delete** answers 200 (\"Customization overlay deleted\") and destroys the hidden row.\n- **D re-enabled:** the row is served again, carrying any edit made while it was disabled.\n\nThe save skips ruling A's disabled-holder refusal whenever an unbound row is stored (`packages/metadata-protocol/src/protocol-save.ts` ~:3439, `if (address.unbound) return undefined;`).\n\n## Ruling\n\n- The maintainer: a disabled package disappears everywhere, and that includes its customizations.\n- Every write door (publish save, draft save, delete, draft discard) refuses a name whose only holders are disabled, **even when a package-unbound row is stored**.\n- The refusal is 409 `RESOURCE_CONFLICT` with the remedy \"enable the package first\". It is **not** ruling A's `?package=` remedy, which here would write a second, D-bound row beside the hidden one.\n- Reads stay 404. The draft read and `_env` answer 404, not 409, which settles #34261 the same way (fold candidate, same seam).\n- Re-enable serves the row untouched.\n\n## Done when\n\n- Each of the four write doors refuses in cell 1, through both transports and both registration orders. The existing CONTROL pin near test line 1443 splits: `env_only_dash` stays 200 and `d_unbound_dash` flips to 409.\n- An ablation pin: re-allowing the unbound skip turns the tests red.\n- A disable → write attempt → re-enable round trip serves the original row byte-identical.\n- ADR-0150 D3 carries a dated note that a package-less row at a held name is the holder's customization and hides, read and write, with it. #34260 / #36229's completion criteria gain \"no write lands on a hidden item\".\n- Not measured (the lane measures first): behaviour after a restart, the `action` and `doc` types (the doc type shares the ruling's old \"whether enabled\" clause, so its disabled-only cell should hide too), and `_env` writes.\n\nRelated: #34348 (keeps cell 2 only), #33401 / PR #33995, ruling A #34144 / PR #34324, #34452 (mixed case: a disabled holder counts for nothing).\n\nBlocked-by: none."

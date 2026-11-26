@@ -1,0 +1,37 @@
+{
+  "number": 37627,
+  "kind": "issue",
+  "title": "scenarios: door mode cannot mint its authoring token — the authorize endpoint answers 200 {redirect,url}, not a 302",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T16:05:02Z",
+  "updated_at": "2026-11-26T17:49:03Z",
+  "closed_at": "2026-11-26T17:48:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37627",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjR8PEo6YbHGktD3s5a\n\nFiling gate: ③ maintainer-directed task. Milestone 1 child of the cloud epic objectstack-ai/cloud#5027.\n\n## 维护者速读\n- 是什么：场景运行器的轻门模式在 main 上取不到 OAuth 令牌，整套 door 模式跑不起来。\n- 影响：今天的实测是在仓库外打补丁绕过的；不修，任何人都跑不了轻门评测。\n- 要你做什么：不需要，按队列排期即可。\n\n## Bug\nOn main @6c290d3a, `--modes door` fails at \"no token for the draft door … authorization: OK\". `mintAuthoringToken` (`packages/qa/scenarios/src/runner/app.ts`, around line 400–500) expects `/api/v1/auth/oauth2/authorize` to answer a 302 with a `Location`; it now answers **200** with JSON `{\"redirect\":true,\"url\":\".../_console/oauth/consent?...\"}`, so no code and no consent step is reached. Reproduced against `examples/app-starter` booted with `OS_OIDC_PROVIDER_ENABLED=true`. A fetch shim that turns that 200 into a 302 to `url` makes the whole door round run (3 control cards, all published).\n\n## What to do\n1. Accept both answers in `mintAuthoringToken`: a 302 `Location`, or a 200 `{redirect,url}` whose `url` is then followed (consent step as today).\n2. Pin both shapes with a test that uses the endpoint's real current answer.\n\n## Acceptance\n- On main, with no out-of-repo shim, `run-scenarios --modes door --only crm_account_with_contacts` completes its Build half.\n- One test per answer shape.\n\nSuggested-grade: p1 · door mode is unusable on main.\nDedupe: \"mintAuthoringToken\" found no open card."
+}

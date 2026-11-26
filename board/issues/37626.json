@@ -1,0 +1,37 @@
+{
+  "number": 37626,
+  "kind": "issue",
+  "title": "scenarios: the external driver can build through the MCP draft door (door mode), so the cloud agent can be scored on the same cards",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:devx",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-26T16:04:31Z",
+  "updated_at": "2026-11-26T18:57:43Z",
+  "closed_at": "2026-11-26T18:45:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37626",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjR8PEo6YbHGktD3s5a\n\nFiling gate: ③ maintainer-directed task. Milestone 1 child of the cloud epic objectstack-ai/cloud#5027 (\"make the cloud built-in agent reach the Claude Code + draft door result\"). Maintainer, 2026-11-26: 「用fable综合分析，立专题卡。扣额度暂时不是我最关心的，我最关心的是效果」.\n\n## 维护者速读\n- 是什么：场景运行器的外部驱动现在不能走轻门模式，云端内置智能体因此没法和 Claude Code 在同一批控制卡上打分对比。\n- 影响：专题里程碑一的评测台依赖这张卡。\n- 要你做什么：不需要，按队列排期即可。\n\n## Context\nDoor mode gives the client an MCP draft door and no project. Only the built-in `claude` driver can receive the door today; an external driver's door-mode authoring call is refused outright (`packages/qa/scenarios/src/runner/drivers/external.ts:307`). To compare the cloud agent with Claude Code on the same control cards, the cloud agent must be able to run as an external driver in door mode.\n\n## What to do\n1. Add a door authoring input to the driver contract: the door's MCP URL, the path of a 0600 config file holding the token, the skills directory and the limits. The token travels as it does for `ask` today: only through the file, never argv, environment or stdin.\n2. Bump the contract to `objectstack-scenario-driver/2`; a `/1` command that receives a door call is refused by the runner, naming why.\n3. Replace the refusal in `external.ts` with a check on the contract version.\n4. Update the contract section of the package README for command authors.\n\n## Acceptance\n- An echo command receives the door authoring input; the record's door arm (skills, hashes) has the same shape as the `claude` driver's.\n- A `/1` command in door mode gets a named failure, not a silent pass.\n- No token appears in the run record, scorecard or export.\n\n## References\n- `packages/qa/scenarios/src/runner/drivers/external.ts:305-319`; `packages/qa/scenarios/src/runner/door.ts:290-293`\n- Trial evidence (Haiku 5.5 through the draft door, 2026-11-26): 4 build cases × 3 reps all published; control cards door mode Build 108/110 in 6.5 min vs #34888 scratch 98/100 in 17.5 min.\n\nSuggested-grade: p1 · blocks the epic's cloud-agent baseline.\nDedupe: \"external driver door\", \"objectstack-scenario-driver\" found no open card."
+}

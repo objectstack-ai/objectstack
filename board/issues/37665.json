@@ -1,0 +1,34 @@
+{
+  "number": 37665,
+  "kind": "issue",
+  "title": "ui: the console form page ignores a form view's own columns, so a published form draws a different layout than its Setup preview (ruled #37638 A)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T18:42:11Z",
+  "updated_at": "2026-11-26T19:32:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37665",
+  "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ① user-visible defect with a named landing point. Source: maintainer — ruling on decision card objectstack-ai/objectstack#37638, option A 「让表单页照列数显示」 (ruling comment 7200681767, 2026-11-26). reach: a form view saved with `columns: 3` and undeclared sections previews as three columns in Setup (`ViewPreview.tsx:125` → plugin-form `sectionedGridLayout`) and publishes as two on `/forms/:name` and `/f/:slug` (`FormPage.tsx`, section default 2).\nReader: a `ui` lane thread, dispatched by the seat. Sequenced with #37087 (also edits `FormPage`, blocked on #37086): whichever lands second rebases.\nDedupe: `FormPage columns`, `sectionedGridLayout FormPage`, `form-level columns` — only #37638 (the decision, closed by this filing) and #37629 (skill text, closed).\n\n## 维护者速读\n- 是什么：表单视图自己写的列数，Setup 预览照着画，发布后的表单页却不读，固定按分组的两列画；你在 #37638 选了 A，让表单页照列数显示。\n- 做法：表单页改用预览、弹窗、记录表单已经共用的那套布局规则，不改契约。\n- 要你做什么：无。\n\n## Bug\nAt `origin/main` 33a31dc7 (measured on #37638's decision thread, comment 7198002852):\n- `ui/apps/console/src/components/FormPage.tsx` reads only section `columns` (`normalizeColumns(sec.columns)` ~:861, default 2 ~:669, grid classes ~:3345); the form view's own `columns` is never read. Both `/f/:slug` and `/forms/:name` mount it (`ui/apps/console/src/App.tsx:360,468`, `InternalFormRoute.tsx:97,125`).\n- The Setup canvas and the other form hosts lay out through `ui/packages/plugin-form/src/autoLayout.ts`: `sectionedFormColumns` makes the form's `columns` the grid width and `sectionedGridLayout` clamps each section to it; an undeclared section takes the form's count.\n\n## What to do\n1. `FormPage` lays out sections through `sectionedGridLayout` (the rule the canvas, `ModalForm`, the record form, tabbed and wizard layouts share); no hand-rolled grid left for sections.\n2. Tests on a named form and a public form for the two cases that change: form `columns: 1` + section `columns: 2` → one column; form `columns: 3` + undeclared sections → three. A form without `columns` keeps today's layout.\n3. Re-cite the ledger row `packages/spec/liveness/view.json` `form.columns` to `FormPage` and the canvas (its `ModalForm.tsx` / `DrawerForm.tsx` citation is stale).\n4. No contract change: the spec still accepts any integer from 1 while the renderer clamps at 4 (left as found).\n\n## Acceptance\n- The two cases above draw the same on the published page as in the Setup preview, on both routes.\n- Changeset (`ui` package patch).\n\nClause-②: no\nSuggested-grade: p2 · silent preview/publish mismatch on one key; one measured producer (AI drafts in the Haiku door trial), no first-party form declares it."
+}

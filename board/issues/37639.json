@@ -1,0 +1,38 @@
+{
+  "number": 37639,
+  "kind": "pull_request",
+  "title": "fix(runtime): the comment and webhook redelivery doors' 501 follows the request's language",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T16:42:19Z",
+  "updated_at": "2026-11-26T18:55:05Z",
+  "closed_at": "2026-11-26T18:55:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T18:55:03Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37639",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuPE7uyDAJyqjwwMzomWv5ff)_\n\nFixes #37610\n\nClause-②: yes (widening)\nMetadata-protocol: none\nSkills-docs: none (no page under `skills/**` names these doors' `501` sentences)\n\n## 维护者速读\n\n- 用户能看到什么变化：内核缺少评论服务或 webhook 服务时，评论接口和 webhook 重新投递接口返回的 501 提示，现在会按请求的语言（中文、日文、西班牙文）显示，和同一内核上的打印、个人视图、附件接口一致。英文请求看到的英文和以前一字不差。另外，附件接口那句英文原来写成 \"doors is not available\"，现在改成语法正确的 \"are\"。\n- 为什么做：#37594 的审核发现这两扇门还只说英文，附件那句英文语法也不对。\n- 出错会怎样：只影响服务没装好时的 501 提示文字，状态码和错误码都不变。英文只有附件那一句变了（is 改 are），西班牙文附件那句改成复数。\n- 要你做什么：无。`packages/spec` 的消息目录有改动，席位会安排契约审核。\n\n## What changes\n\n- **Catalog** (`packages/spec/src/system/operation-message.ts`, `BUILTIN_OPERATION_MESSAGES`), each in `en`, `zh-CN`, `ja-JP` and `es-ES`:\n  - `comment_doors_service_unregistered`, `comment_doors_member_missing`, `webhook_redeliver_service_unregistered`, `webhook_redeliver_member_missing`. The English is the sentence each door answered before, byte for byte; slot, member and package names are written in, untranslated.\n  - `own_door_service_unregistered_plural`, `own_door_member_missing_plural`: the bridge's two sentences with a plural verb (`are` / `no están disponibles`; `zh-CN` and `ja-JP` read as the singular pair).\n  - `es-ES` `own_door_attachment_mutate` becomes plural (\"los puntos de acceso para eliminar y renombrar adjuntos\"), to agree with the plural pair.\n- **`packages/runtime/src/domains/comments.ts`, `webhooks.ts`**: the two `501`s each answer `operationUserMessage(key, { locale })`, the locale read by the bridge's own reader, now exported (`requestLocaleOf`, `own-door-bridge.ts`). Code, status and the absence of `userMessage` are unchanged.\n- **`own-door-bridge.ts`**: `OwnDoorBridge.nounKey` is required (the type is internal: `packages/runtime/src/index.ts` exports none of it); the English-only arm is gone. A new optional `nounPlural: true` makes the bridge read the `_plural` pair. `attachments.ts` sets it, so the English reads \"The attachment removal and rename doors are not available: …\".\n- **Changeset**: `@objectstack/spec` and `@objectstack/runtime` patch, with a paragraph saying the English moved for the attachment doors.\n\nSmall calls made here (no card):\n- The card's third item suggested changing the attachment noun; the noun is already plural (\"the … doors\"), and the verb sits in the shared sentence, so the fix is a plural pair of sentences chosen by a bridge flag rather than a noun change. The English noun and its catalog value stay as they were.\n- The comment and webhook doors are not own-door bridges (each has its own sentence), so they get whole sentences in the catalog rather than the bridge's `{{door}}` template.\n- The old \"a bridge with no noun key stays English\" control test is removed with the arm it pinned.\n\n## Why\n\nReview of PR #37594 (record 7196010986, adopted at ACCEPT 7196077328) found the comment and webhook redelivery doors still answering English only, the optional `nounKey` that would let a fourth bridge ship English-only, and the attachment sentence's verb agreement.\n\n## Verification\n\nHead `e2708e28c`, under `os-verify-lock`:\n- `packages/runtime`: `own-door-bridge.test.ts`, `comments.test.ts`, `webhooks-redeliver.test.ts`: 3 files, 79 tests passed. New describes pin both `501`s of the comment doors (on every door) and of the redelivery door in en (and with no header), zh-CN, ja-JP and es-ES, with no `userMessage`; the attachment pins now read \"are\" and the plural `es-ES` sentence.\n- `tsc --noEmit -p packages/runtime`: exit 0.\n- `packages/spec` `src/system/operation-message.test.ts`: 60/60.\n- `eslint` on the 8 touched source and test files: exit 0.\n- `node scripts/pm/overlap-check.mjs`: clean.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed (none depend on this catalog).\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUpnvPnJ1hR74pUrVj\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUpnvPnJ1hR74pUrVj)_\n\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgUpnvPnJ1hR74pUrVj -->\n"
+}

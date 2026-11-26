@@ -1,0 +1,35 @@
+{
+  "number": 37669,
+  "kind": "issue",
+  "title": "37611 跟进：AI 技能评测加一道带 context 键的技能题",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:skills",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T19:23:36Z",
+  "updated_at": "2026-11-26T19:25:35Z",
+  "closed_at": "2026-11-26T19:25:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37669",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37611. The card thread asked whether `Skills-docs: updated here` should include an eval case; the area split it out so the docs PR stays inside its surface. The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p3 · reach: the `objectstack-ai` skill evals · evidence: read.\n\n## 维护者速读\n- 做什么：给 AI 技能文档的评测集加一道题，检验 AI 是否会写带 `context` 键的技能（并绑定 `get_record_context`）。\n- 谁受益：技能文档的质量把关。\n- 不做会怎样：新教的内容没有评测覆盖。\n- 需要你做的：无。\n\n## What\nAdd one case to `skills/objectstack-ai/evals/skills-tools-knowledge.json`: a `defineSkill` with `context` naming a pack and `get_record_context` in `tools`. The expected answer is what `skill.zod.ts` admits on `main`. Add a negative: `context` without the binding is refused at parse.\n\n## Acceptance\n- The eval file parses and the eval gates pass; the case's expected answer matches `main`.\n- `Clause-②: no`, `Metadata-protocol: none`.\n\nBlocked-by: #37611\nParent: #37611\nSize: XS\nDedupe (objectstack, is:issue): `eval skill context get_record_context` 0.\n"
+}

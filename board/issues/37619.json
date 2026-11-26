@@ -1,0 +1,38 @@
+{
+  "number": 37619,
+  "kind": "pull_request",
+  "title": "docs(skills): data hooks and actions teach the multi-reason refusal throw",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "security",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T15:48:50Z",
+  "updated_at": "2026-11-26T18:59:03Z",
+  "closed_at": "2026-11-26T18:59:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-26T18:59:01Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37619",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuPE7uyDAJyqjwwMzomWv5ff)_\n\nFixes #37407\n\nClause-②: no (published prose only; teaches the list throw already on main)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：AI 助手照技能文档写钩子或动作时，现在会写「一次拒绝、列出多条原因」的写法，每条原因按用户的语言显示一行，最后一行是总结句。以前文档只教一次一条原因，这个能力在 #37395 已经上线，文档没跟上。\n- 为什么做：#36877 的裁决要求配套技能文档；5 号座位审核时还留了两条要写进来：一条原因怎么声明，以及总结句里有占位符时要传顶层参数，否则占位处是空的。\n- 出错会怎样：只改技能文字，不动产品。两个文件原本都没有余量，为了不变长，同文件里压缩了一些说法，删了一个重复的条件示例和示例里的一个字段，没有删掉事实。写错的话撤回即可。\n- 要你做什么：这是受管的技能文件，需要审批人批准后才能合并。\n\n## What changes\n\n`skills/objectstack-data/references/data-hooks.md` and `skills/objectstack-ui/rules/actions.md`, plus a `patch` changeset for `@objectstack/skills`.\n\n- **data-hooks.md, Declared refusals:**\n  - The `reasons` bullet says how an entry declares them: a snake_case reason mapped to `{ message }` only, under the code's wire `code` and status; another status needs another code (zone o5-U note N1, comment 7181230894).\n  - The `params` bullet says a reason's holes follow the same rule.\n  - A new bullet teaches the list throw, `reasons: [{ reason, params? }, …]` instead of `reason`: one translated line each, filled from its own `params`; `userMessage` joins them by newlines and ends with the entry's `message`, filled from the throw's top-level `params`, else its holes are empty (note N3); the HTTP doors answer `details.refusals: [{ reason, message }]`, absent for a single `reason` (the MCP tool gives the lines as text beside its envelope, so the page does not say every door).\n  - The last bullet adds that a listed reason is judged even under a code that declares no `reasons`, and that a `reasons` that is not a non-empty list of `{ reason, params? }`, or one beside `reason`, is a `500`.\n- **actions.md, Refusing by code:** one sentence with the shape: \"For several reasons throw `reasons: [{ reason, params? }, …]`, not `reason`: `userMessage` is one line per reason, closed by the code's `message` (rules there).\" The rules stay a pointer to the hook section.\n- **Paid in the same files.** Both sat at zero token headroom, so every added byte is paid for nearby; net −13 lines. Removed: the third (\"Complex conditions\") `condition` example, two comments that restated the condition below them, `annual_revenue` from the insert `input` sample, the \"lifecycle events organized by operation type\" lead-in. The rest is tightened wording (data-hooks: What Are Hooks, `defineHook`, `has()`, `filter:`, `findOne`, unpredicated `find`, capabilities lead-in, `ctx.log`, `HookContext` note, `ctx.input`; actions: shorter example strings and one `params` array on one line). No other file pins any shortened string.\n\nChecked against `packages/runtime/src/sandbox/hook-refusal-catalogue.ts`, `quickjs-runner.ts` and `packages/spec/src/data/declared-entry.zod.ts` on `main`: the join order and closing line, top-level `params` filling the closing `message`, `details.refusals` only on a list throw, a listed reason judged under every code, `{ message }` as the reason value.\n\nSmall calls made here (no card):\n- The list form is shown inline in a bullet, not as a second throw in the example, to fit the byte budget. The assignment form (`e.reasons = [...]; throw e`) is not taught; the object-literal throw is the one the page already uses.\n- The three list faults are written as run-time `500`s: the source detects them in the runner, not at save.\n- actions.md describes `userMessage`, not how the console toast renders its newlines, which was not traced. The console's param-dialog listing of reasons (#37538) is not taught here.\n\n## Why\n\nPR #37395 (#36877) let one throw carry several declared reasons. Its `Skills-docs:` line points here: both pages taught the single `reason` form only, so an agent writing a hook or action that refuses a selection for several reasons had no pointer to the list.\n\n## Verification\n\nRun at `19b5b425d` (contract-review fixes; `f0fd20d1e` before), each exit 0:\n- `node scripts/check-skills-token-ratchet.mjs`: both files within their ceilings (data-hooks.md 10122/10122, actions.md 3880/3880).\n- `node scripts/check-skill-links.mjs`, `node scripts/check-skill-identifier-liveness.mjs`, `node scripts/check-skill-top-level-keys.mjs`.\n- `pnpm --filter @objectstack/spec check:skill-refs`, `check:skill-docs`.\n- `pnpm --filter @objectstack/spec check:skill-examples` (after building spec, client and client-react): 352 prose examples type-check, the edited `os:check` blocks included.\n- `node scripts/pm/overlap-check.mjs`: clean.\n\nThe edits were drafted by a contract-tier subagent, as `dispatch-gates --tier` requires for `skills/**`, and reviewed here (one claim narrowed). The contract-review fixes (S1, N1, N3 of 7197638051) were drafted the same way; the extra bytes in actions.md are paid by wording-only tightenings in the same file.\n\nContract review (L2) is owed before landing: `skills/**` is a governed surface (Tier H).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed (not touched).\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUpnvPnJ1hR74pUrVj\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUpnvPnJ1hR74pUrVj)_\n\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgUpnvPnJ1hR74pUrVj -->\n\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 37623,
+  "kind": "pull_request",
+  "title": "fix(approvals): the Approval Actions list names the step and the platform's own notes in the reader's language",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T15:51:41Z",
+  "updated_at": "2026-11-26T16:57:44Z",
+  "closed_at": "2026-11-26T16:57:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T16:57:42Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37623",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuQVQdf3PvoJbKFFCUA4gwJB)_\n\nFixes #37531\n\n## What changes\n\n`sys_approval_action` read through the generic data door (Setup's Approval Actions list, views `recent` / `by_actor` / `all_actions`; an action's record page; the export) now serves a reader with a locale the text the approvals door's timeline serves:\n\n- **`step_label`**: the step's label from the app's pack, `flows.<flow>.approvals.<step_name>.label`, the flow named by the parent request's `process_name` — the key the Approval Requests list is already translated by (#27041).\n- **`comment` on the rows the platform writes** (no actor):\n  - the administrators' routing note, the submitter exclusion note and the no-approver note, already stored as data on the request's node-config snapshot and already rendered on the timeline;\n  - the record-deleted cancellation (\"Auto-cancelled: the … record '…' this request is about was deleted\"), now the catalog sentence `approvalAutoCancelledRecordDeleted` (all eleven shipped `messages` locales), composed from the request's own `cancel_reason`, `object_name` and `record_id`. No stored shape moves: the row's `comment` is the sentence's `en` rendering with the object's name, byte-identical to what it stored before.\n\nOne render serves both doors: `ApprovalService.localizeActionRows` replaces the timeline's `localizeRoutingNotes`, and the new engine middleware `action-locale-middleware.ts` (bound beside `reader-locale-labels-middleware.ts`, same shape) hands the generic door's rows to it. A list that selects `step_label` or `comment` without the columns their text is picked by borrows them for the read and is served exactly the columns it selected.\n\nUnchanged: storage (the stored step label stays the authored snapshot, the stored comment the English); a system read, a reader with no locale and a language the pack does not hold are served the stored text; a comment a person wrote is served as written.\n\n**Out of scope, by the seat's claim (7196522515):** four other platform-written comments are still composed as English prose with parameters nobody stores as data — the revision-limit auto-reject, the dead-run abandon, the SLA escalation and the out-of-office substitution. The seat files the follow-up card at ACCEPT.\n\n## Why\n\nThe card: in a zh-CN console the Approval Requests list shows 销售经理审核, the Approval Actions list the same step as \"Sales Manager Review\", and the system notes as English sentences. The approvals door already localized the notes on its timeline (#25576 deliberately left the generic door on the stored English); this extends the same render to the generic door, the way #27041 did for the request's labels.\n\n## Verification\n\n- New `action-locale-data-door.integration.test.ts` (real `ObjectQL` over SQLite, real `AutomationEngine`, real plugin, real in-memory `i18n` with a zh-CN pack holding the flow's labels and this plugin's zh-CN `messages`; the door is `ObjectStackProtocolImplementation.findData` / `getData`): 8 tests green. zh-CN reader: step label and exclusion note in zh-CN on the `recent` projection, a person's comment as written, borrowed columns not served; a `step_label,comment`-only projection; the by-id read; the record-deleted cancellation in zh-CN with its stored English unchanged; parity with the approvals door's timeline. Fences: ja-JP / en / no-locale readers and a system read get the stored text; storage untouched.\n- Ablation: with the middleware unbound, 5 of 8 red (every zh-CN pin on the data door), 3 green (the fences).\n- `@objectstack/plugin-approvals` whole suite: 130 files / 1964 tests green after classifying the new `actor_id` presence test in `approver-address-readers.test.ts` (it replaced the `localizeRoutingNotes` entry, same role and reason).\n- `typecheck` (incl. `check:test-typecheck`) exit 0; eslint on the changed files 0 problems; `overlap-check` clean against `origin/main` 54d6726c and 0 PR heads.\n\nClause-②: no\nMetadata-protocol: none\n\nOwed: L1 (seat). L2: none named by me — no contract surface; the served text of a generic-door read changes for localized readers only, the same direction #27041 took.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgU7eeqHgQrtv5CeJK6\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgU7eeqHgQrtv5CeJK6)_\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgU7eeqHgQrtv5CeJK6 -->\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 37686,
+  "kind": "issue",
+  "title": "spec: an agent's model name becomes optional — absent means the environment's default model",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T20:11:44Z",
+  "updated_at": "2026-11-26T20:11:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37686",
+  "body": "epic:#5055#1 · hotlong · session_01Q4EjjMmczBEaeiAQ48oDtz\n\nFiling gate: ③ maintainer-directed task · Source: objectstack-ai/cloud#5055 — Jack 2026-11-26, decision card in the epic seat thread, chose 「框架允许省略 model」 (the agent's `model.model` becomes optional; absent = follow the environment's default model).\nGrade: p2 · area:ai · Task · evidence: read (objectstack main dedc16c1)\nReader: epic:#5055 seat (objectstack-ai/cloud#5055) → card thread. Milestone M1.\nDedupe: open objectstack issues on `AIModelConfigSchema` → none with this change.\n\n## 维护者速读\n- 是什么：agent 元数据里 `model.model`（具体模型名）现在必填，`temperature` 也只能写在同一个块里。改成可以省略模型名，省略就跟随部署的默认模型。\n- 影响：云端内置 agent 可以去掉残留的 `gpt-4`、保留 `temperature: 0.2`；AI 写自定义 agent 时也不必编一个模型名。第二阶段的档位字段接在这里。\n- 要你做什么：无（你已在决策卡上选定这条路）。\n\n## Current state (objectstack main dedc16c1)\n- `packages/spec/src/ai/agent.zod.ts:27-42` `AIModelConfigSchema` (strict object): `provider` enum default `'openai'`, `model: z.string()` required, `temperature` default 0.7, `maxTokens`, `topP`. `AgentSchema.model` is `AIModelConfigSchema.optional()` (`:340`).\n- So an agent that only wants `temperature` must still name a model; cloud's built-in ask and metadata-assistant declare `model: 'gpt-4'` for that reason (`objectstack-ai/cloud` `packages/service-ai-studio/src/agents/ask-agent.ts:116`, `metadata-assistant-agent.ts:79`), which the cloud chat route has to neutralise.\n- `packages/spec/src/system/metadata-list-registry.ts:203` lists `model.model` as a column; generated metadata-form translations carry `model.model`.\n\nRe-check: `git grep -n \"model: z.string().describe('Model name\" -- packages/spec/src/ai/agent.zod.ts` → 1 hit.\n\n## What to do\n1. Make `model` inside `AIModelConfigSchema` optional; its description says that absent means the host's default model for this environment.\n2. Regenerate whatever the spec change regenerates (JSON schema, forms, translations, baselines) per AGENTS.md; the list column shows an empty/\"default\" value for an agent with no model.\n3. Do not add a tier or sentinel value; tiers are phase 2 of objectstack-ai/cloud#5055.\n4. If `provider` turns out to be read by no runtime (declared, not enforced), note it in the PR's Acceptance notes for the seat; do not remove it here.\n\n## Acceptance\n- An agent with `model: { temperature: 0.2 }` parses; one with `model: { model: 'x' }` parses as before; unknown keys are still refused.\n- `Metadata-protocol:` line from the diff (this widens what an author may write; the dev names the kind per AGENTS.md) and the `Skills-docs:` line it owes; changeset for `@objectstack/spec`.\n- Spec gates per AGENTS.md (`pnpm check:all` phases the diff triggers).\n\n## Fences\n- File surface: `packages/spec/**` and the generated files the spec gates require, `skills/**` only if the docs line says `updated here` on a `domain:skills`-owned path (otherwise `follow-up`). Stop on breach.\n- Cloud picks this up after a pin move; the cloud card of objectstack-ai/cloud#5055 removes the built-ins' `gpt-4`.\n\n## References\nPlan: https://claude.ai/artifact/3sJqSZVv3Lf3NoViD9Q4cU (方案 5 框架). Parent objectstack-ai/cloud#5055."
+}

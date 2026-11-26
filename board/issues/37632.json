@@ -1,0 +1,32 @@
+{
+  "number": 37632,
+  "kind": "issue",
+  "title": "skills/objectstack-ui record-page evals: cases #1 and #4 ask for more than rules/record-page.md teaches (built-in tabs, an \"open tasks\" filter), and #3's forbidden string hits a before-comment",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:skills",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T16:12:32Z",
+  "updated_at": "2026-11-26T17:20:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37632",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\n立卡门 ① finding · Source: fleet · reach: measured — the #36535 eval round at `58570d80` (eval-run record filed alongside; 3 of 6 record-page cases fail with the skill loaded)\n\n## What the round read\n\nThe objectstack-ui bundle scored 33/40 with the skill and 3/40 without, at `58570d8002dd213f7f65525d881ac935583f4050` (sonnet, effort medium, 1 rep). Three of the seven with-skill misses are record-page cases where the answer follows the skill and the case disagrees, or the grader matches commentary:\n\n- **record-page#4** (drop the Attachments tab). The answer declares `relatedLists: ['quote', 'opportunity_contact_role']` and says approvals and the activity stream still follow. That is what `skills/objectstack-ui/rules/record-page.md` §2 says (\"Declared, only the named lists show, in order (unlisted approvals and the stream still follow)\"), and what the console does: `ui/packages/app-shell/src/views/studio-design/RelatedListsEditor.tsx:262-274` appends `sys_approval_request` and `sys_activity` when a declared list leaves them out. The case's `must_contain` requires `'sys_activity'`, and its `expected_output` says \"A declared list shows only the lists it names\". The case contradicts the rule and the code.\n- **record-page#1** (Tasks tab first, \"the open tasks\"). The answer lists `'task', 'event', 'sys_attachment'` in order, as §2 teaches, but writes no `relatedListFilter`. The case requires `relatedListFilter`. Whether \"our reps want the open tasks before anything else\" asks for a filter, or only for the tab order, is the case's wording to settle: either the prompt says \"only open tasks\", or the assertion drops `relatedListFilter`.\n- **record-page#3** (header shows every placed action). The answer's fix is the expected one (`placedActions: true` on `page:header`, no id list), but its code block keeps the old version in a `// before:` comment containing `actions: ['`, which `must_not_contain` forbids. Same shape as closed #31278 (a forbidden string a careful answer quotes). The same hit was on #34842 (2026-11-17).\n\n## Business reason\n\nThe eval round is how the fleet decides whether a skill PR stays (#36535's keep rule for PR #36527). A case that disagrees with the shipped rule reads as a skill failure, so the round says \"not met\" for text that is right; the next PR author either \"fixes\" correct skill text toward the case (teaching that approvals and activity must be named, which the console does not need) or ignores the eval. Developers and agents reading the skill are the ones who then get the wrong teaching.\n\n## Reader\n\nThe skills-lane dev who takes this card edits `skills/objectstack-ui/evals/record-page.json` only (governed `skills/**`, Tier H): #4's `must_contain` and `expected_output` to the §2 rule; #1's prompt or assertion so they agree; #3's forbidden string so a quoted before-line does not fail (for example `actions: ['open` or a check on the final block only). `node ui/scripts/check-skill-eval-tokens.mjs` green. The rule text needs no change unless the dev's read of `RelatedListsEditor.tsx` and the record page host shows §2 is wrong.\n\n## Dedupe\n\n`repo:objectstack-ai/objectstack is:issue` \"record-page eval\" 111 · \"record-page.json\" 73 · \"relatedListFilter\" 42 · \"objectstack-ui evals\" 176 · \"sys_activity relatedLists\" 11. Open hits: #36535 (the round card this run answers), #34842 (an earlier eval-run record), #37074 (a different case, kanban), #34770 / #37105 / #31112 (other skill text). None fixes these three cases. Closed #31278 is the #3 shape from an earlier sweep; #35692 / #35897 are the shipped rule and behaviour.\n\n## Grade\n\narea:ux · Bug · shipped-text wrong (eval cases under `skills/**`) · reach: measured on the eval round · evidence: measured (round records) and read (rule §2, `RelatedListsEditor.tsx:262-274`) → p2"
+}

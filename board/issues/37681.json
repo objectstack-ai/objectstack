@@ -1,0 +1,33 @@
+{
+  "number": 37681,
+  "kind": "pull_request",
+  "title": "fix(runtime): a refused action write answers with the localized message, not \"ValidationError: …\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T20:07:20Z",
+  "updated_at": "2026-11-26T20:16:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37681",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuQVQdf3PvoJbKFFCUA4gwJB)_\n\nFixes #37533\n\n## What changes\n\n- `packages/runtime/src/sandbox/quickjs-runner.ts`: a new `refusalSentence(sentence, info)` on the path that builds a body's `SandboxError.innerMessage`, the sentence every door serves.\n  - It applies only when the rejection carried `code` or `fields` (`__errorInfo`). There it drops a leading `<Name>Error: `, unless `isNativeErrorName` says the name is a native constructor's.\n  - A record `ValidationError` a host write rejected with now reaches the `/actions` envelope's `error.message` as the localized message alone.\n  - The nested-refusal relay (#22588) and the fault branch (#4431) are untouched.\n- Unchanged: `SandboxError.message`, the log line, still reads `action 'x' threw: ValidationError: …`. `error.code` (`VALIDATION_FAILED`) and `error.details.fields` are unchanged too.\n- Pins that asserted the class prefix now assert the message alone:\n  - `error-passthrough.test.ts` (real runner, `innerMessage`)\n  - `actions-validation-envelope.test.ts` (fixture and the toast-text assertion)\n  - `actions-fault-vs-rejection.test.ts` (fixture)\n  - Editing the last two brought them under `check:test-source-alias`, so they gain its module-top `import '@objectstack/metadata'`.\n- A new pin, `actions-refused-write-sentence-37533.test.ts`, and a changeset (`@objectstack/runtime` patch).\n\n## Why\n\nWhen a field validation refuses a write a script action made, the toast showed `ValidationError: 时长（分钟）的小数位数不能超过 0 位(当前 1 位)`. This was measured on 18.6.0 in a zh-CN console (HotCRM, Log a Call). A form save of the same refusal shows the message alone. The sandbox's reject handler flattens a throw to `<name>: <message>`, and `userFacingMessage` only ever dropped a default `Error: `.\n\n## Verification\n\n- New pin, driving the real QuickJS runner into the real `/actions` door:\n  - A refused write answers 400 with `error.message` equal to the localized message. `error.code` is `VALIDATION_FAILED` and `details.fields` is intact. The log line still names `ValidationError`.\n  - A body that catches and re-throws the refusal answers the same.\n  - CONTROLS: a crash keeps `TypeError: …` and answers 500. An uncoded `QuotaError` keeps its name. A plain `Error`'s message is the sentence, as before.\n- On `main`'s runner, the first two cases fail and the three controls pass. With the fix, all five pass.\n- `vitest run src/sandbox src/domains/action*` in `packages/runtime`: 64 files, 798 passed, 2 skipped.\n- Also: `eslint` is clean on the changed source, `tsc --noEmit` passes for `packages/runtime`, `check-test-source-alias` is OK, and `overlap-check` is clean against `origin/main`.\n\n## Small decisions\n\n- Only a coded throw (`code` or `fields`) loses its class name. An uncoded custom class keeps it, as before, because the card's ask is the validation refusal and nothing tells an uncoded class from a bug.\n- Only a name ending in `Error` is dropped, and never a native one, so the crash classification that reads `innerMessage` (`isNativeErrorName`, #17273) sees the same text as before.\n- The fix sits in the sandbox, not in the `/actions` door, so a hook's coded refusal on `/data` (which reads the same `innerMessage`) shows the same sentence.\n- The client and console mock fixtures that still carry `ValidationError: …` (`packages/client/src/actions-surface.test.ts`, `ui/packages/core/src/actions/__tests__/actionResponse.test.ts`) test pass-through of whatever text the door sends, so they are left as they are.\n\nClause-②: no\nMetadata-protocol: none\n\n## Owed\n\n- L1 (seat). Size XS, with no L2 owed by size or path.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgU7eeqHgQrtv5CeJK6\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgU7eeqHgQrtv5CeJK6)_\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgU7eeqHgQrtv5CeJK6 -->"
+}

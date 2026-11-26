@@ -1,0 +1,32 @@
+{
+  "number": 37615,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37595: os init field placement dialect, and the 18.6.0 callouts to remove at 19.0",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "documentation",
+    "domain:docs",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T15:40:33Z",
+  "updated_at": "2026-11-26T16:16:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37615",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4czzx9dtSEm3jWWL9c3\n\nFiling gate: owed follow-ups of landed review work (L1/L2 exception: one `review follow-ups of PR #N` card per PR, items ticked). Source: fleet. Found in the L1 read of PR #37595 (card #37503).\n\nGrading: area:build · Task · stale or inconsistent shipped text for newcomers, no wrong behaviour → suggested p3 · evidence: read on main.\n\n## Items\n\n- [ ] **`os init -t app` still places fields with a per-field `group`.** `packages/cli/src/commands/init.ts` ~1071-1094 on main writes `fieldGroups` plus `group: 'details'` on each field. After PR #37595, `os g object` and the `npm create objectstack` starter (blank template `company.object.ts` / `contact.object.ts`, `examples/app-starter`) all place fields through the group's `fields` list. #32153's promise is that a newcomer meets one dialect, and the CLI still writes two. Both spellings are valid, so this is style, not a defect. Re-check: `git grep -n \"group: 'details'\" -- packages/cli/src`.\n- [ ] **Remove the \"18.6.0 today\" callouts when 19.0 ships.** PR #37595 adds one callout each to `content/docs/getting-started/your-first-project.mdx` and `content/docs/getting-started/build-with-claude-code.mdx`: \"`npm create objectstack@latest` installs `create-objectstack` 18.6.0 today … ships with 19.0\". The sentence turns false on the 19.0 GA release. Restart-when: `npm view create-objectstack dist-tags.latest` answers 19.x. Re-check: `git grep -n \"18.6.0 today\" -- content/docs`.\n\n## Business reason\n\nNew builders and coding agents copy the first file they read. The scaffolds and getting-started pages should teach one placement style, and should not tell a reader a version fact that is no longer true.\n\n## Who acts\n\nThe seat that owns `area:build` CLI and getting-started docs (today area o1-A of repo:objectstack#1). Item 2 waits for the 19.0 release.\n\nDedupe: `review follow-ups of PR #37595` → 0 open; `\"group: 'details'\" init` → 1 hit (#37503, which covers `os g object` only and closes with PR #37595); `o1-A loose ends` → 0.\n\nParent: objectstack-ai/objectstack#37503."
+}

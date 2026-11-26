@@ -2,8 +2,8 @@
   "number": 37352,
   "kind": "issue",
   "title": "fix(runtime): the personal-view and attachment own-door 501s follow the request's language, like the print door's",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-25T21:05:01Z",
-  "updated_at": "2026-11-26T14:10:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T16:20:00Z",
+  "closed_at": "2026-11-26T16:13:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37352",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYnagJvGbCtNg2PhvgW\n\n**Follow-up of landed work** · Source: PR #37336 (#37273, merged at `ebac615f77`), which localized the print door's own-door `501`s.\n\n**Grading:** area:ux · bug · p3 · reach: any non-English user on a kernel where the personal-views or attachments service is missing or lacks its member · evidence: code read on `origin/main` @ `7f62348dfa`.\n\n**Business reason.** After #37336, a zh-CN / ja-JP / es-ES user who hits the print door on such a kernel reads the `501` in their own language. The same user, on the same kernel, still gets English on the two sibling doors that sit on the same bridge. One failure mode now answers in two languages, depending on which door was hit.\n\n**Who reads it.** The end user who sees the error toast on deleting a personal view, or on removing or renaming an attachment. Also the admin they forward it to.\n\n**Mechanism (origin/main).** `packages/runtime/src/domains/own-door-bridge.ts:242-247` localizes the two `501` sentences (`own_door_service_unregistered` / `own_door_member_missing`) only when the bridge names a `nounKey`:\n- `print.ts:39` sets `nounKey: 'own_door_print'`.\n- `personal-views.ts` (`PERSONAL_VIEWS_BRIDGE`, noun `the personal view delete door`) has no `nounKey`.\n- `attachments.ts:36` (noun `the attachment removal and rename doors`) has no `nounKey`.\n\nSo both keep the English fallback.\n\n**Fix (S).**\n- Add one catalog noun key per door, `own_door_personal_view_delete` and `own_door_attachment_mutate` (names are the dev's call), to the operation-message catalog in en / zh-CN / ja-JP / es-ES. The English must stay byte-identical to the current `noun`.\n- Set `nounKey` on the two bridges.\n- Extend the bridge tests that pin the print door's localized `501` to cover both doors.\n- No wire change: the code and status are unchanged, and only `message` follows the locale, as #37336 did (seat direction 7159533198).\n\n**Dedupe.**\n- `is:issue is:open own-door 501 locale` → 1 hit (#6015, the seat triage board, not a card).\n- `personal-views 501` → 1 (#36469, a reaction-undo 404, a different mechanism).\n- `attachments 501 English` → 1 (#6015).\n- `operationUserMessage nounKey` → 0."

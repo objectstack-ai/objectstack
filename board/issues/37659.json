@@ -1,0 +1,31 @@
+{
+  "number": 37659,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37643: screen-input refusal `fields` wording (one entry per finding, stale code jsdoc)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "documentation",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T18:01:21Z",
+  "updated_at": "2026-11-26T18:17:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37659",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (Contract review record 7199938860 on PR #37643, nits N1 and N2, adopted at ACCEPT)\n\n## What happens\n\nPR #37643 (Fixes #37526) returns the screen-input refusal's per-field findings as `error.details.fields` on flow resume (REST and MCP `resume_run`). Its review left these wording items open:\n\n- [ ] **\"one entry per violated field\" is really one entry per finding** (N1). The contract jsdoc and the `TriggerFlowResponseSchema.data.fields` describe say one entry per violated field, and the regenerated reference page, `content/docs/**/flows.mdx` and the changeset repeat it. A `required` `record_link` field sent `null`, or a field with `min` above `max`, yields two entries; for `unknown_field` the `field` is the caller's key, not a screen field name. Expected: say \"one entry per finding\" and name the `unknown_field` case.\n- [ ] **`ScreenInputIssue.code` jsdoc is stale** (N2). `screen-input-contract.ts` still says the codes \"ride inside the refusal's message\"; they now ride `fields`. Expected: point the comment at `error.details.fields`.\n\nCategory ①: published contract text (schema describe, reference page) that miscounts what a shipped response carries.\nPriority: p3, wording; no code reads the sentence.\nBusiness reason: an SDK or agent caller that sizes its error display by \"one per field\" shows duplicate rows on these two cases without knowing why.\nReader: the dev who next edits the automation screen-input contract (spec describe → regenerate the reference page).\nDedupe: searched open issues for `\"PR #37643\"`: 0 hits.\nRelated: #37526, PR #37643.\n\n## Grade\n\narea:ux · Bug · minor · reach: read (the head against the describe) · evidence: read → p3"
+}

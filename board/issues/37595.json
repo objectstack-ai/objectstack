@@ -1,0 +1,38 @@
+{
+  "number": 37595,
+  "kind": "pull_request",
+  "title": "fix(cli): os g object places its field through the group's fields list, as the starter does",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T14:34:37Z",
+  "updated_at": "2026-11-26T16:57:45Z",
+  "closed_at": "2026-11-26T16:57:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T16:57:41Z",
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37595",
+  "body": "Part of #37503\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 开发者用命令行新建对象时,生成的文件现在和新项目自带的公司、联系人对象写法一致:字段改由分组的字段清单放入分组;文档里的命令输出示例换成了公司和联系人,入门页说明当前正式版仍生成旧的笔记项目。\n- 为什么做:新项目模板已换成公司和联系人(上游模板替换的后续),生成器\"与模板同一写法\"的承诺在字段放置上失效了,文档和注释也还在讲旧的笔记对象。\n- 出错会怎样:只影响新生成的对象文件写法,两种写法含义相同、都能通过校验;已有项目不变,可直接撤回。\n- 要你做什么:无\n\n## What changes\n\n1. **`os g object` places its field the way the starter does.** The object generator now writes `fieldGroups: [{ key: 'details', label: 'Details', fields: ['name'] }]` after the field map, and the `name` field no longer carries `group: 'details'`. Measured on `origin/main` c385d3bd: `examples/app-starter/src/objects/company.object.ts` and the blank template's `company.object.ts` / `contact.object.ts` place every field through a group's `fields` list and carry no per-field `group` (zero `group:` lines). The spec calls the list \"the current spelling\" (`ObjectFieldGroupSchema.fields`: \"new metadata lists members here\"). The generated comment now tells the author to list each added field in a section, and the doc comment cites the starter's current files instead of `note.object.ts`. Route: the generator follows the starter, as the #32153 pin promises; the promise is not narrowed.\n2. **`content/docs/deployment/cli.mdx`**: the `os compile` and `os info` transcripts come from a real run of the current blank template plus the ticket object, view and action from Build with Claude Code (companies, contacts, the starter app, zero rows now printed, no plugins). The callout describing the fixture is rewritten to match. The \"Create a project\" step no longer says \"a sample object\".\n3. **Getting-started pages**: `your-first-project.mdx` and `build-with-claude-code.mdx` each get one callout sentence: `npm create objectstack@latest` installs `create-objectstack` 18.6.0 today, which still scaffolds the `note` project, and the companies-and-contacts template ships with 19.0. The stale \"One object, REST API\" template row in `your-first-project.mdx` now carries the template's real description.\n4. **Stale comments only** in `init-scaffold-file-name-registry-parity.test.ts` and `platform-object-names.test.ts`. The item-4 comments in `blank-template-console-disclosure.test.ts` and `starter-comments-self-contained.test.ts` follow in a separate PR after #37441, so this PR touches nothing under `packages/create-objectstack/**` and the card stays open for them.\n\nRead first, by risk:\n1. `packages/cli/src/commands/generate.ts`, the object template string (the only behaviour change).\n2. `packages/cli/test/generate-scaffold-validates.test.ts`, the #32153 pin's new expectations.\n3. `content/docs/deployment/cli.mdx`, the fixture callout under `os info`.\n\n## Tests\n\nAll readings on head 95d0446c0 (`claude/area-o1A-37503`), repo objectstack-ai/objectstack.\n\n- `pnpm --filter @objectstack/cli exec vitest run --project unit --maxWorkers=2`: Test Files 446 passed, Tests 6379 passed.\n- #32153 pin (`generate-scaffold-validates.test.ts`): 26/26 pass. Ablation: with `generate.ts` restored to c385d3bd the pin fails with `expected undefined to deeply equal [ 'name' ]`; restored to HEAD, green.\n- `OS_TEST_TIERS=nightly`, `generate-scaffold-gates.e2e.test.ts -t 'fresh os init project'`: 11 passed (the generated object, then `os validate` / `os build` / `os lint` with zero findings, and the updated text assertion).\n- The comment-only test files still in this PR: 14 + 8 pass.\n- `pnpm --filter @objectstack/cli typecheck`: exit 0.\n\n<details><summary>Real run behind the cli.mdx transcripts</summary>\n\nBlank template scaffolded with this branch's `create-objectstack` bin, the ticket object, view and action copied verbatim from Build with Claude Code section 3 and renamed to `my_app_`:\n\n```text\n  Data: 3 Objects  18 Fields\n  UI: 1 Apps  3 Views  1 Actions\n  Logic: 0 Flows\n  Security: 0 Positions  0 Permissions\n  Runtime: 0 plugins\n\n  Objects:\n    my_app_company (7 fields, user) — Company\n    my_app_contact (7 fields, user) — Contact\n    my_app_ticket (4 fields, user) — Ticket\n```\n\nThe walkthrough's three `os generate` commands on a copy: all exit 0, summary `Data: 4 Objects  19 Fields`, `UI: 1 Apps  3 Views  2 Actions`, `Logic: 1 Flows`; `os validate` passes. The generated `customer.object.ts` carries `{ key: 'details', label: 'Details', fields: ['name'] }` and no `group:` line.\n\n</details>\n\n## Acceptance notes\n\n- The ticket view in Build with Claude Code section 3 declares an internal create and edit form; a real compile prints one `form-view-internal-not-loaded` warning for it, while the page says the form is where `description` is entered. The cli.mdx callout says so and leaves the warning lines out of the transcript. Open PR #37422 (form type) edits that page; reported only.\n- `os init -t app` (`packages/cli/src/commands/init.ts`) still writes per-field `group: 'details'`. Out of this card's file surface; both spellings are valid.\n- The blank template's own comment says \"A field shows on the form only once a section lists it\", but `deriveFieldGroupLayout` renders ungrouped fields in a trailing untitled section. Read-only inference, not measured in a browser; the generated comment here does not repeat the claim.\n- `content/docs/deployment/validating-metadata.mdx` shows a support-desk summary with `Runtime: 3 plugins` and no zero rows; not re-run, outside this surface.\n\n## Verification\n\nTwo minutes: `node packages/cli/bin/run-dev.js generate object customer` in a scaffolded project, then open `src/objects/customer.object.ts`. Expect `{ key: 'details', label: 'Details', fields: ['name'] }` after `fields`, and no `group:` line on `name`.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cyyekQEqLjtrCLLAeV)_\n\n<!-- signed: repo:objectstack#1 · os-elon-musk · session_016WV4cyyekQEqLjtrCLLAeV -->\n"
+}

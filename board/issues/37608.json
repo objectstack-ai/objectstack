@@ -1,0 +1,32 @@
+{
+  "number": 37608,
+  "kind": "issue",
+  "title": "metadata-protocol: while a package is disabled, the per-item publish and rollback doors still write a package-less row at a name only disabled packages hold",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T15:02:59Z",
+  "updated_at": "2026-11-26T17:28:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37608",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ③ maintainer-directed topic child (#36229: 「我觉得停用就该全部消失」) · Source: fleet (finding S1 of the Contract review record 7195624788 on PR #37584, read from the tree and not yet run)\n\n## What happens\n\nPR #37584 (Fixes #37499) refuses the four doors that card named: save, draft save, delete and draft discard naming no package, over a name only disabled packages hold. Two more doors write that same hidden package-less row and are not asked the judgment (`packagelessHolderRefusal`), read at PR head 7e66896196:\n- **Per-item publish:** `POST /api/v1/meta/TYPE/NAME/publish` → `publishMetaItem` → `promoteDraftForPublish` in `packages/metadata-protocol/src/protocol-history-and-publish.ts`. It resolves through `packagelessDraftAddress` and calls no disabled-holder refusal. With a package-less draft of a name only a disabled package ships, the promotion would write the hidden package-less active row.\n- **Per-item rollback:** `rollbackMetaItem` in `packages/metadata-protocol/src/protocol-package-commits.ts` restores onto the package-less row, with no disabled-holder judgment there or in `protocol-history-slots.ts`.\n\nreach: not yet measured. The first step is to measure both doors on a disabled-only name with a package-less row (REST and in-process).\n\n## Expected\n\n- Both doors refuse as #37584's four do (`409 RESOURCE_CONFLICT`, the same sentence), and write nothing. Re-enabling serves the original row byte-identical.\n- An ablation pin per door, in the same served-stack test file #37584 adds.\n- The ADR-0150 D3 note's universal (\"every write naming no package\") holds once this lands. #37584 words its note as the four doors it closes and names this card for the other two.\n\nCategory ③: a child of maintainer-directed topic #36229, the same defect class as #37499 (p1).\nPriority: p1 — the grade of #37499. A write lands, unseen, on a row the disabled package hides.\nBusiness reason: an admin who disables a package expects its names to be untouched until re-enable. A publish or rollback now changes what re-enabling brings back.\nReader: seat 2 (repo:objectstack#2), as a card thread after #37584 merges (same files).\nBlocked-by: #37584 (merge)\nDedupe: searched `packagelessHolderRefusal publish rollback` and `disabled package publish rollback package-less` (open issues), 0 hits beyond #37499 / #36229.\nRelated: #37499, PR #37584, #36229, #34260."
+}

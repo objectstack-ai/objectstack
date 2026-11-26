@@ -1,0 +1,31 @@
+{
+  "number": 37609,
+  "kind": "issue",
+  "title": "37141 跟进：技能 context 指向依赖包资料包时误报，stdio MCP 未按工具绑定过滤技能",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T15:10:36Z",
+  "updated_at": "2026-11-26T18:57:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37609",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37141. The source is the os-dev report on PR #37552 (comment 7195831625, out-of-scope findings). The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Bug · p3 · reach: authors whose skill's `context` names a pack shipped by a dependency package; hosts on the long-lived stdio MCP door · evidence: read.\n\n## 维护者速读\n- 做什么：两处小偏差。一，技能的 `context` 指向依赖包里的资料包时，`os validate` 误报「资料包不存在」，而运行时其实能找到。二，长连接（stdio）的 MCP 入口不按工具绑定过滤技能，主机不提供 `get_record_context` 时也会列出带 `context` 的技能。\n- 谁受益：技能作者；用 stdio 接入的外部 AI。\n- 不做会怎样：作者看到误报；stdio 上可能列出用不了的技能。\n- 需要你做的：无。\n\n## What\n1. Lint: `ai-skill-context-unknown` in `packages/lint/src/validate-ai-tool-references.ts` judges `context` only against the stack's own `aiContexts`, while the runtime resolves the pack through the package closure (ADR-0150 D3, `resolvePackageScopedHolders`). Judge it the way the runtime resolves it, or say in the warning that a dependency's pack is not seen.\n2. MCP: the long-lived stdio `bridgePrompts` (`packages/mcp/src/plugin.ts` / `mcp-server-runtime.ts`) applies no tool-binding filter (pre-existing, documented in its own describe block), so a skill with `context` is listed whether or not the host serves `get_record_context`. Apply `skillBindingServed` there, or record why that door cannot know what is served.\n\n## Acceptance\n- Item 1: a test with a pack from a dependency package: no false warning, or the warning says so; a control with a truly unknown pack still warns.\n- Item 2: a parity test between the HTTP door and the stdio door for a host that does not serve `get_record_context`.\n- `Clause-②: no` for item 1; item 2 narrows a listing, so state the line in the PR.\n\nParent: #37141\nSize: S\nDedupe (objectstack, is:issue): `ai-skill-context-unknown dependency` 0 · `bridgePrompts skillBindingServed` 0.\n"
+}

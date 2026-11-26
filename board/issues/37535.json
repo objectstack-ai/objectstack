@@ -13,18 +13,18 @@
   "labels": [
     "area:data",
     "domain:server",
-    "pm:blocked",
+    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-26T11:11:57Z",
-  "updated_at": "2026-11-26T11:27:01Z",
+  "updated_at": "2026-11-26T15:23:58Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37535",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CYtTDvfPQDzMbZnN5X\n\nFiling gate: maintainer-directed. The key words are Bill's option on the decision card 「批量改记录时，要不要也认应用自己写的放行规则？」: 「现在定：批量也认」 (2026-11-26T11:07Z). Ruling record: #35934 comment 7190344023 (folded finding 7065565832, ruled **2a**). Analysis: 7187970489.\n\nOverturns: the deferral of 2026-08-08 on #5493 (Q2 = A1), and the reopen condition #6736 was closed on (5857477356), as the ruling names.\n\nBlocked-by: #35934 (its PR: both edit the sharing middleware's bulk branch; this lands after it).\n\n## Ruled terms (copied from 7190344023)\n\nThe security service gains an optional filter-shaped answer: the authored policies' own scope for an object, a verb and a caller, with the platform ownership floor taken out. The sharing middleware ORs it into its bulk write scope.\n\n- (i) Bulk scope = sharing scope OR authored scope, then ANDed into the write as today. plugin-security's own layers (tenant wall, floor OR authored policies, readable rows) are untouched and still decide.\n- (ii) Verb for verb: an authored update policy widens update only, and a delete policy widens delete only.\n- (iii) Not for a delegated write, where the by-id probe abstains too.\n- (iv) An absent member, no authored `using` policy, or any failure leaves today's scope.\n- (v) The relief pin's predicate expectation in `predicate-write-floor-deferral.test.ts` moves to r1 to r4, and the PR #7274 probe's two measure cases move with it.\n\n## Premise clause (copied from 7190344023)\n\nFirst, the dev re-runs premises 10 and 12 of comment 7187970489 and the PR #7274 probe.\n\nNamed, falsifiable premise: with the authored scope ORed into the middleware's bulk scope, the rows a predicate write changes equal the rows the by-id write admits, on the relief fixture and on the #7274 fixtures. No row changes for a caller who holds no authored `using` policy.\n\nIf the premise does not hold, the dev reports a fork. The dev does not widen `buildWriteFilter`, `checkEdit` or `checkDelete` themselves, and does not probe row by row on the bulk path.\n\n## Done when\n\n- The optional filter-shaped member exists on the security service, and the sharing middleware ORs it into the bulk write scope per (i) to (iv).\n- (v)'s pins are moved.\n- The premise is measured and stated in the PR.\n- A predicate update and a predicate delete each change exactly the rows the by-id path admits, with a control for a caller without an authored policy and for a delegated write."

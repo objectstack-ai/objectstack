@@ -1,0 +1,37 @@
+{
+  "number": 37624,
+  "kind": "pull_request",
+  "title": "fix(scenarios): an ISO date written with a Unicode hyphen states no figure",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T15:57:19Z",
+  "updated_at": "2026-11-26T16:57:44Z",
+  "closed_at": "2026-11-26T16:57:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T16:57:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37624",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuRFAatVcx79d6cbkTpzPfYU)_\n\nPart of #36206\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感：评测场景卡的评分器不再把回复里用排版连字符写的日期（如 2026‑09‑01）当成三个数字扣分，普通短横写法不变。\n- 属于「评测与场景卡」专题，修画廊重跑里报出的一处误判：正确的拒答被判成「说了数据支撑不了的数」。\n- 只影响评测打分，不碰平台运行时；出错最多是某轮评测分数读偏，撤回这个 PR 即恢复原样。\n- 无。\n\n## What changes\n\n- `packages/qa/scenarios/src/score/scenario-run-grade.ts`: `ISO_DATE`, the pattern `readingsIn` blanks before it reads a reply's figures, now joins a date's parts by the ASCII hyphen or by the two Unicode hyphens a typeset reply writes in its place (U+2010 hyphen, U+2011 non-breaking hyphen). Before, only the ASCII hyphen matched, so a date written as `2026`-U+2011-`09`-U+2011-`01` was read as the figures 2026, 9 and 1.\n- One pin in the existing ISO-date block of `test/score/scenario-run-grade.test.ts`: both hyphens read as a date, and a figure range joined by U+2011 (`12`-U+2011-`15`) still reads as two figures.\n- One changeset, `@objectstack/scenarios` patch.\n\n## Why\n\nThe 18.6.0 gallery re-run comment on the card (2026-11-22 22:56Z, item 2b evidence, \"Minor\") reports a reply that wrote `2026-09-01` with U+2011 non-breaking hyphens, so `ISO_DATE` missed it and 9, 1 and 30 were read as figures. A correct decline is then graded \"stated a figure the data cannot support\". The premise held at `origin/main` 54d6726c (`scenario-run-grade.ts:123`, pattern ASCII hyphen only).\n\nEvery other item of the card landed earlier: items 1, 2 (operands shown) and 4-8 in #36320; item 3 and PAY-0044 in #36503 and #37047; item 2b is answered by the maintainer ruling recorded on the card (read C, no grader change). This PR widens no total and does not touch that ruling: it only keeps a date from being read as figures.\n\n## Tests\n\n<details><summary>Package suite, typecheck, ablation (head 0eb6af383)</summary>\n\n- Through `os-verify-lock`: `pnpm --filter @objectstack/scenarios build && … typecheck && … exec vitest run --maxWorkers=2` → `VERDICT command-exit 0`; Test Files 43 passed (43), Tests 1345 passed (1345).\n- Ablation (`scripts/ablation-replace.mjs`, the test imports `src` by relative path, so no dist leg): `ISO_DATE`'s two hyphen classes put back to the ASCII `-`, anchor 1 → 0, blob `1854ffadf399` → `1ed8647e5c30`; `test/score/scenario-run-grade.test.ts`: 1 failed | 88 passed, the failing case being the new pin; restored blob `1854ffadf399` equals HEAD, `git diff HEAD` empty. A first attempt was an anchor miss the tool refused before running anything (the shell had turned the escape spelling in the anchor into the characters), so it measured nothing; the counted run built the anchor in a script.\n\n</details>\n\n## Acceptance notes\n\n- `IDENTIFIER_TOKEN` still joins an identifier's parts by the ASCII `-` and `_` only, so an id written with U+2011 (`INV`-U+2011-`003`) would read its digits as a figure. No run has shown it; noted, not changed.\n- The other observations on the card's re-run comments stay as they are, with zero measured pull: the `via` on the two same-shaped decide operations (asset_lifecycle `manager_approves_scrap`, order_to_cash `approve_discount`), the asset_lifecycle 23/6 count (the card holds no second source: its 30 laptops are 24 in use, 5 in stock, 1 in repair), and per-group totals (the ruling refuses that widening).\n- The card's done-when is a gallery re-run on 18.6.0, which belongs to the eval lane; this PR does not close the card.\n\n## Verification\n\n- Two minutes: `pnpm --filter @objectstack/scenarios exec vitest run test/score/scenario-run-grade.test.ts -t \"Unicode hyphen\"` → 1 passed.\n- Read first: the `ISO_DATE` line in `scenario-run-grade.ts` (the only behaviour change).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no new names)\n- [x] 3. No formatter ran; `pnpm lint` passes. (CI)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgTESANUPsJKDqEn4zY)_\n"
+}

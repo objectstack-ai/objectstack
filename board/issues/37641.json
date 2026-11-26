@@ -1,0 +1,34 @@
+{
+  "number": 37641,
+  "kind": "issue",
+  "title": "spec: AgentSchema planning.maxIterations caps at 100, so a cloud agent cannot declare the 300-round fuse the maintainer ruled",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T16:47:09Z",
+  "updated_at": "2026-11-26T19:53:43Z",
+  "closed_at": "2026-11-26T19:45:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37641",
+  "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nCarries the framework half of objectstack-ai/cloud#5029 item 1; cloud#5029 keeps the cloud half (agents declare 100 now, `AIService.DEFAULT_MAX_ITERATIONS` 300, follow-up sets 300 after this lands and the pin moves). Milestone-1 row of the cloud epic objectstack-ai/cloud#5027.\nFiling gate: ③ maintainer-directed. Maintainer, 2026-11-26, on the round limit: 「为什么不直接 300」 (recorded in objectstack-ai/cloud#5027 and #5029).\nSeam: spec:`AgentSchema.planning.maxIterations` `max(100)` → runtime: cloud `service-ai` `AgentRuntime.loadAgent` parse.\nDedupe: `planning.maxIterations`, `maxIterations max 100`, `agent.zod maxIterations` — no open card.\n\n## 维护者速读\n- 是什么：智能体声明里的 `planning.maxIterations` 在 spec 里上限是 100。cloud#5029 按你「直接 300」的话把 ask 和 build 改成 300，智能体就加载失败（cloud 测试里 ask 直接加载不起来）。\n- 要做什么：把上限放到至少 300（或去掉上限、只留正整数），框架发版后 cloud 升 pin 再把声明改成 300。\n- 要你做什么：不需要，这是执行你已经说过的话。\n\n## Bug / gap\n`packages/spec/src/ai/agent.zod.ts` (measured by the cloud#5029 card thread at objectstack `main` 33a31dc7 and at cloud's pin d5ae7a47, line ~418): `maxIterations: z.number().int().min(1).max(100)`. Declaring 300 makes cloud's `AgentRuntime.loadAgent` fail parse; `ask-agent-guardrails-calibration.test.ts` goes red with `agent \"data_chat\" did not load` (6 tests).\n\n## What to do\n1. Raise the bound to at least 300 (the epic's survey: Twenty 300, open-agents 500). State in the docblock that the value is a runaway fuse counted in model calls (one call plus its tool batch), not a quality knob.\n2. Keep `int().min(1)`; a test pins 300 accepted and 0 refused (`code` + `status`/issue path).\n3. Changeset; the cloud follow-up (declare 300, bump pin) is cloud#5029's Acceptance-notes item.\n\n## Acceptance\n- `AgentSchema.parse` accepts `planning.maxIterations: 300`.\n- Published JSON schema / generated artifacts updated by the normal regen.\n\nClause-②: yes (widens a published accept set).\nSuggested-grade: p1 · blocks the maintainer's ruled value in the epic."
+}

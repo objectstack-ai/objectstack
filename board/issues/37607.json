@@ -1,0 +1,32 @@
+{
+  "number": 37607,
+  "kind": "issue",
+  "title": "console: the curated page, report and dashboard inspectors show select options in English under zh-CN; their form overlay has no option slot",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T15:01:33Z",
+  "updated_at": "2026-11-26T15:24:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37607",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① · Source: fleet (out-of-diff note 1 of the Contract review record 7195508409 on PR #37569, reproduced by the s2-ux-T area thread)\n\n## What happens\n\nThe console's curated metadata inspectors for page, report and dashboard render the bundled spec form through `localizeMetadataForm`, over the console's own overlay tables:\n- `ui/packages/app-shell/src/views/metadata-admin/metadata-form-zh-cn.ts` for page and report;\n- `metadata-form-i18n.ts` for dashboard.\n\nThose tables translate field labels but have no slot for option names, so under zh-CN a select's options stay English. `default-period-labels.ts` renames Default Period for zh only, and its header says the overlay \"has no slot for option names\".\n\nreach: a probe test in app-shell (run by the area thread, not committed) read `getPageForm`, `getReportForm` and `getDashboardForm` under zh-CN:\n- page `type` is labelled 类型, with options `List / Interface page`, `Record page`;\n- page `interfaceConfig.recordAction` is labelled 记录操作, with options `Drawer (right-side peek)`, `Full page`;\n- report and dashboard `dateRange.defaultRange` are labelled 默认时间段, with options `Today`, `Yesterday`, ….\n\nPR #37569 (Fixes #36950) adds a `metadataForms … options` slot to the platform translation packs and the served `/meta/types` forms. The curated panels don't read that path, so these selects stay English after it merges. The platform zh-CN pack already carries these option names: 2 rows for page, 1 for report, 1 for dashboard.\n\n## Expected\n\n- Under zh-CN, the curated page, report and dashboard inspectors show the option names the platform pack carries. The preferred route is to read them from the served or bundled form's `options` slot rather than a third copy in the console tables. If they are copied in, a pin keeps the copy byte-equal to the pack.\n- Retire `default-period-labels.ts` (or reduce it to what the slot doesn't cover) and its stale header.\n- A pin per form asserting a zh-CN option name for one select.\n\nBlocked-by: #37569 (merge, if the route reads its slot)\nCategory ①: a user-visible untranslated string with a named place and a reproduction.\nPriority: p2 — the grade of #36950. Labels show in the reader's language, the options beside them don't, and no data is affected.\nBusiness reason: Chinese-speaking admins configuring pages, reports and dashboards in Studio see English choices beside Chinese labels, and #36950's fix does not reach these panels.\nReader: seat 2 area s2-ux-T (repo:objectstack#2), after #37569 merges.\nDedupe: searched `metadata-form-zh-cn options` and `default-period-labels` (open issues), 0 matching cards.\nRelated: #36950, PR #37569."
+}
