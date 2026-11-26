@@ -85,6 +85,23 @@ describe('approval status vocabulary (#7232)', () => {
     );
   });
 
+  it('the statuses the renderer coloured from its value table declare that colour (objectstack#36882)', () => {
+    // A select option is coloured only when its author declares a colour, so
+    // the colours these statuses rendered with now live on the options.
+    const declared = (SysApprovalRequest as any).fields.status.options as Array<{
+      value: string;
+      color?: string;
+    }>;
+    expect(Object.fromEntries(declared.map((o) => [o.value, o.color ?? null]))).toEqual({
+      pending: 'yellow',
+      approved: 'green',
+      rejected: 'red',
+      recalled: null,
+      returned: null,
+      cancelled: 'red',
+    });
+  });
+
   it('en humanizes every status instead of shipping the raw enum value', () => {
     expect(resolvedStatusLabels('en')).toEqual({
       pending: 'Pending',
