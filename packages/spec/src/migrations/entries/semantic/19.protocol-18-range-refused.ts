@@ -33,7 +33,8 @@ export const entry: SemanticMigration = {
     + 'engines.protocol range that does not admit 19. Run objectstack migrate meta --from 18 --write: it '
     + 'rewrites a root defineStack manifest\'s range to \'^19\', and for a manifest composed by '
     + 'composeStacks it writes nothing and lists the range left for a hand edit, so set each package '
-    + 'manifest to \'^19\' yourself. Then objectstack validate passes, the deployment boots without '
-    + 'OS_PROTOCOL_INCOMPATIBLE, and every package installs; a manifest already declaring \'^19\' loads '
-    + 'exactly as before.',
+    + 'manifest to \'^19\' yourself. Once every range admits 19, no door refuses the manifest with '
+    + 'OS_PROTOCOL_INCOMPATIBLE; a manifest already declaring \'^19\' passes the handshake exactly as before. '
+    + 'This hop edits or refuses the range and nothing else: a key retired in this release that the '
+    + 'metadata still carries is refused at parse by its own message, which names its own remedy.',
 };

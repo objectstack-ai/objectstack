@@ -29,7 +29,7 @@ export default defineStack({
     name: 'Starter',
     description: 'Companies and contacts, with the platform\'s tasks and notes in the menu.',
     // Protocol major this package is authored against (ADR-0087).
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
     // A starter is taken over by the organization that installs it: an
     // unmanaged install copies every item into the environment, where it is
     // edited like anything authored in Studio. `managed` stays permitted for
