@@ -6011,7 +6011,7 @@ const AI_CONTEXT_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
 
 const AI_CONTEXT_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
   rule: 'ai-context-field-unprovisioned',
-  covers: 'why a context pack reads nothing from an injected column of an external object',
+  covers: 'why a context pack reads nothing of an external anchor',
   paragraphs: [
     UNPROVISIONED_ANCHOR_CAUSE,
     'A context pack naming such an anchor reads a column that holds nothing, at the cost the message ' +
