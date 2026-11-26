@@ -226,7 +226,7 @@ describe('Studio right slot — its control ends the page\'s title row (objectst
     const ai = await screen.findByTestId('topbar-ai-assistant', undefined, { timeout: 4000 });
     expect(within(screen.getByTestId('studio-shell-header')).queryByTestId('topbar-ai-assistant')).toBeNull();
     expect(screen.getByTestId('studio-pillars-host')).toContainElement(ai);
-    expect(ai.closest('[data-slot="studio-title-row-assistant"]')).not.toBeNull();
+    expect(ai.closest('[data-slot="studio-title-row-end"]')).not.toBeNull();
     expect(screen.getAllByTestId('topbar-ai-assistant')).toHaveLength(1);
   });
 });

@@ -6,7 +6,9 @@
  * top-bar removal, epic objectstack#37424; the maintainer's 「按推荐启动」):
  *
  *  - Cancel and Save, in the item header's right-aligned action slot
- *    (`StudioItemHeader`): the page's Save, after the page's own actions;
+ *    (`StudioItemHeader`): the page's Save, after the page's own actions; on
+ *    a page that saves with no item header, at the right end of its own
+ *    title row ({@link StudioTitleRowEnd});
  *  - the AI assistant button (or, with no copilot served, the right slot's
  *    show / hide icon) at the very end of every title row, the list page's
  *    and the item header's, behind a hairline, as the front end's page
@@ -119,21 +121,27 @@ export function StudioTitleRowDivider(): React.ReactElement {
 }
 
 /**
- * The assistant at the end of a title row that is not an item header (the
- * list page's, the directory's): drop it after the row's last action. Draws
- * nothing outside the surface.
+ * The end of a title row that is not an item header (the list page's, the
+ * directory's, a page that saves with no item header): drop it after the
+ * row's last action. It draws the page's Cancel and Save while the page holds
+ * unsaved edits, then the assistant behind a hairline (`divider`: the row has
+ * actions of its own before it; Save always counts as one). Draws nothing
+ * outside the surface.
  */
-export function StudioTitleRowAssistant({ divider = true }: { divider?: boolean }): React.ReactElement | null {
+export function StudioTitleRowEnd({ divider = true }: { divider?: boolean }): React.ReactElement | null {
   const inSurface = React.useContext(StudioTitleRowContext) !== null;
   const anchor = React.useRef<HTMLSpanElement | null>(null);
   const controls = useStudioTitleRowControls(anchor);
   if (!inSurface) return null;
+  const save = controls?.save ?? null;
+  const assistant = controls?.assistant ?? null;
   return (
-    <span ref={anchor} className="contents" data-slot="studio-title-row-assistant">
-      {controls?.assistant ? (
+    <span ref={anchor} className="contents" data-slot="studio-title-row-end">
+      {save}
+      {assistant ? (
         <>
-          {divider && <StudioTitleRowDivider />}
-          {controls.assistant}
+          {(divider || save) && <StudioTitleRowDivider />}
+          {assistant}
         </>
       ) : null}
     </span>

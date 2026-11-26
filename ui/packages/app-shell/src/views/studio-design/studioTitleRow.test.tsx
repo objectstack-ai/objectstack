@@ -5,7 +5,8 @@
  * assistant) are drawn by the page's first title row, once:
  *
  *  - an item header ends its action slot with Save, then the assistant behind
- *    a hairline, after the pillar's own actions;
+ *    a hairline, after the pillar's own actions; a page that saves with no
+ *    item header ends its own title row the same way;
  *  - a header nested under the page's own, or a list row further down, draws
  *    neither: one page, one Save;
  *  - when the first row goes, the next one takes them;
@@ -18,7 +19,7 @@ import * as React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { StudioItemHeader } from './StudioItemHeader';
-import { StudioTitleRowAssistant, StudioTitleRowProvider } from './studioTitleRow';
+import { StudioTitleRowEnd, StudioTitleRowProvider } from './studioTitleRow';
 
 afterEach(cleanup);
 
@@ -80,7 +81,7 @@ describe('the page controls end the page\'s first title row (objectstack#37455)'
         <section>
           <StudioItemHeader testId="inner" title="Inner" actions={<StudioItemHeader testId="nested" title="Nested" />} />
           <div data-testid="list-row">
-            <StudioTitleRowAssistant />
+            <StudioTitleRowEnd />
           </div>
         </section>
       </Surface>,
@@ -109,7 +110,7 @@ describe('the page controls end the page\'s first title row (objectstack#37455)'
         <Surface>
           {withHeader && <StudioItemHeader testId="item" title="Task" />}
           <div data-testid="list-row" className="flex">
-            <StudioTitleRowAssistant />
+            <StudioTitleRowEnd />
           </div>
         </Surface>
       );
@@ -119,8 +120,35 @@ describe('the page controls end the page\'s first title row (objectstack#37455)'
     rerender(<Page withHeader={false} />);
     const row = screen.getByTestId('list-row');
     expect(within(row).getByTestId('topbar-ai-assistant')).toBeInTheDocument();
-    // The list row draws the assistant alone, behind its hairline.
-    expect(within(row).getByTestId('studio-title-row-divider')).toBeInTheDocument();
+    expect(screen.getAllByTestId('studio-save')).toHaveLength(1);
+  });
+
+  it('a page that saves with no item header: Save, then the hairline and the assistant, at the end of its own title row', () => {
+    render(
+      <Surface>
+        <div data-testid="page-row" className="flex">
+          <h1>Sharing</h1>
+          {pillarAction}
+          <StudioTitleRowEnd />
+        </div>
+      </Surface>,
+    );
+    const row = screen.getByTestId('page-row');
+    const order = Array.from(row.querySelectorAll('[data-testid]')).map((el) => el.getAttribute('data-testid'));
+    expect(order).toEqual(['pillar-action', 'studio-save', 'studio-title-row-divider', 'topbar-ai-assistant']);
+  });
+
+  it('a row with no actions of its own and nothing unsaved: the assistant with no hairline before it', () => {
+    render(
+      <Surface save={null}>
+        <div data-testid="page-row">
+          <StudioTitleRowEnd divider={false} />
+        </div>
+      </Surface>,
+    );
+    const row = screen.getByTestId('page-row');
+    expect(within(row).getByTestId('topbar-ai-assistant')).toBeInTheDocument();
+    expect(within(row).queryByTestId('studio-title-row-divider')).toBeNull();
     expect(within(row).queryByTestId('studio-save')).toBeNull();
   });
 
@@ -129,7 +157,7 @@ describe('the page controls end the page\'s first title row (objectstack#37455)'
       <>
         <StudioItemHeader testId="item" title="Task" actions={pillarAction} />
         <div data-testid="list-row">
-          <StudioTitleRowAssistant />
+          <StudioTitleRowEnd />
         </div>
       </>,
     );

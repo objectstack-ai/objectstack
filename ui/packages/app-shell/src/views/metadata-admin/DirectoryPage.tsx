@@ -58,7 +58,7 @@ import { ENVIRONMENT_SCOPE_QUERY } from './catalog-scope.js';
 import { usePackageCustomizations } from '../studio-design/CustomizationMark.js';
 import { customizationCountsByType, customizationTotal } from '../studio-design/customizationMarks.js';
 import { STUDIO_MENU_GROUPS } from '../studio-design/studioMenuModel.js';
-import { StudioTitleRowAssistant } from '../studio-design/studioTitleRow.js';
+import { StudioTitleRowEnd } from '../studio-design/studioTitleRow.js';
 
 /**
  * objectstack#37360 — on a package under Studio's area, the types this page
@@ -281,11 +281,11 @@ export function MetadataDirectoryPage() {
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div className="px-6 pt-5 pb-4 border-b bg-background">
-        {/* objectstack#37455 — under Studio, the AI assistant ends the title row. */}
+        {/* objectstack#37455 — under Studio, the page's Save and the AI assistant end the title row. */}
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-semibold">{t('engine.directory.title', locale)}</h1>
           <span className="ml-auto flex items-center gap-2">
-            <StudioTitleRowAssistant divider={false} />
+            <StudioTitleRowEnd divider={false} />
           </span>
         </div>
         <p className="text-sm text-muted-foreground mt-1 max-w-3xl" data-testid="directory-description">
