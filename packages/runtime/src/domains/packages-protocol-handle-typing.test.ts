@@ -57,6 +57,7 @@
  * bought with a behaviour change.
  */
 import { describe, expect, it } from 'vitest';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { PackagesDomainProtocol } from './packages.js';
 
@@ -196,4 +197,37 @@ describe('#13598 · 2 · a PARTIAL protocol host is still answered, never crashe
         expect(result.response?.status).toBe(501);
         expect(JSON.stringify(result.response?.body)).toContain('Customization package ensure not supported');
     });
+});
+
+// [#37811] This door's 501 sentence is the operation-message catalog's, in the
+// request's top `Accept-Language` tag: byte-identical English with no header,
+// the catalog's Japanese under `ja-JP`, and `Vary: Accept-Language` either way.
+const JA_37811 = { request: { headers: { 'accept-language': 'ja-JP,ja;q=0.9' } } };
+const LANGS_37811 = [['en', {}], ['ja-JP', JA_37811]] as const;
+const sentence37811 = (locale: 'en' | 'ja-JP', key: string, params: Record<string, string> = {}): string =>
+    BUILTIN_OPERATION_MESSAGES[locale][key].replace(/\{\{(\w+)\}\}/g, (_m, name: string) => params[name] ?? '');
+const vary37811 = (response: unknown): unknown => (response as any)?.headers?.Vary;
+
+describe('[#37811] each probe 501 follows the request\'s language', () => {
+    const cases: Array<[string, string, string]> = [
+        ['/crm/publish-drafts', 'POST', 'packages_draft_publish_unsupported'],
+        ['/crm/discard-drafts', 'POST', 'packages_draft_discard_unsupported'],
+        ['/crm/commits', 'GET', 'packages_commit_history_unsupported'],
+        ['/crm/commits/c1/revert', 'POST', 'packages_commit_revert_unsupported'],
+        ['/crm/rollback', 'POST', 'packages_commit_rollback_unsupported'],
+        ['/crm/adopt-orphans', 'POST', 'packages_orphan_adoption_unsupported'],
+        ['/crm/duplicate', 'POST', 'packages_duplication_unsupported'],
+        ['/crm/ensure-customization', 'POST', 'packages_customization_ensure_unsupported'],
+    ];
+    for (const [path, method, key] of cases) {
+        it(key, async () => {
+            for (const [locale, extra] of LANGS_37811) {
+                const body = path.endsWith('/ensure-customization') ? undefined : { commitId: 'c1', targetPackageId: 'crm_copy' };
+                const result = await partialProtocolDoor().handlePackages(path, method, body, {}, { ...PKG_ADMIN(), ...extra });
+                expect(result.response?.status).toBe(501);
+                expect(result.response?.body?.error?.message).toBe(sentence37811(locale, key));
+                expect(vary37811(result.response)).toBe('Accept-Language');
+            }
+        });
+    }
 });

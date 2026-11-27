@@ -42,6 +42,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import {
     ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
@@ -275,5 +276,26 @@ describe.each(FACES.filter((f) => f.malformed))('#22432 B — $face still answer
         expect(result.response.status).toBe(400);
         expect(result.response.body.success).toBe(false);
         expect(service.getTranslations).not.toHaveBeenCalled();
+    });
+});
+
+// [#37811] This door's 501 sentence is the operation-message catalog's, in the
+// request's top `Accept-Language` tag: byte-identical English with no header,
+// the catalog's Japanese under `ja-JP`, and `Vary: Accept-Language` either way.
+const JA_37811 = { request: { headers: { 'accept-language': 'ja-JP,ja;q=0.9' } } };
+const LANGS_37811 = [['en', {}], ['ja-JP', JA_37811]] as const;
+const sentence37811 = (locale: 'en' | 'ja-JP', key: string, params: Record<string, string> = {}): string =>
+    BUILTIN_OPERATION_MESSAGES[locale][key].replace(/\{\{(\w+)\}\}/g, (_m, name: string) => params[name] ?? '');
+const vary37811 = (response: unknown): unknown => (response as any)?.headers?.Vary;
+
+describe('[#37811] the empty-slot 501 follows the request\'s language', () => {
+    it('i18n_service_unavailable', async () => {
+        for (const [locale, extra] of LANGS_37811) {
+            const { deps } = makeDeps(undefined);
+            const result: any = await call(deps, FACES[0], { ...member(), ...extra } as unknown as HttpProtocolContext);
+            expect(result.response.status).toBe(501);
+            expect(result.response.body.error.message).toBe(sentence37811(locale, 'i18n_service_unavailable'));
+            expect(vary37811(result.response)).toBe('Accept-Language');
+        }
     });
 });

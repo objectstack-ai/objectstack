@@ -145,6 +145,8 @@ import { validationFailure } from '../validation-failure.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import { multiReplicaPairCreationRefusal, multiReplicaPackageChangeError } from '../multi-replica-package-refusal.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
+import { catalogNotImplemented } from './own-door-bridge.js';
+import { operationUserMessage } from '@objectstack/core';
 
 /** The door's first path segment under `/security`. */
 export const PERMISSION_SET_CLONE_SEGMENT = 'permission-sets';
@@ -324,6 +326,9 @@ export function permissionSetObjectNames(definition: Readonly<Record<string, unk
     return [...names];
 }
 
+/** [#37811] The catalog key of the landing's `501`: no paired customization package can be ensured. */
+const PAIR_UNSUPPORTED_KEY = 'permission_set_clone_pair_unsupported';
+
 /**
  * The package a clone lands in when its caller named none — the omitted rows
  * of the module doc's "Where the copy lands". Throws an ADR-0112 refusal
@@ -351,12 +356,12 @@ export async function resolveDefaultCloneLanding(
         return { packageId: null, created: false, kernelSource: sourcePackageId };
     }
     if (typeof protocol.ensureCustomizationPackage !== 'function') {
+        // [#37811] The English sentence is the error's message; the door's
+        // catch answers it in the request's language from `messageKey`.
+        const params = { name: source.name, packageId: sourcePackageId };
         throw Object.assign(
-            new Error(
-                `Permission set '${source.name}' is shipped by read-only package '${sourcePackageId}', so its copy belongs in `
-                + 'that package\'s paired customization package, and this deployment\'s metadata protocol cannot ensure one.',
-            ),
-            { statusCode: 501 },
+            new Error(operationUserMessage(PAIR_UNSUPPORTED_KEY, {}, params)),
+            { statusCode: 501, messageKey: PAIR_UNSUPPORTED_KEY, params },
         );
     }
     await beforeEnsure?.(sourcePackageId);
@@ -573,13 +578,7 @@ export async function handlePermissionSetCloneWrite(
         const protocol: Partial<Pick<ObjectStackProtocolImplementation, 'saveMetaItem' | 'ensureCustomizationPackage'>> | undefined =
             await deps.resolveServiceOrLoud(context, 'protocol');
         if (typeof protocol?.saveMetaItem !== 'function') {
-            return {
-                handled: true,
-                response: deps.error(
-                    'This deployment has no metadata protocol to save the copy through, so a permission set cannot be cloned here.',
-                    501,
-                ),
-            };
+            return catalogNotImplemented(deps, context, 'permission_set_clone_no_protocol');
         }
         // ── 6. landing ──────────────────────────────────────────────────────
         let landing: PermissionSetCloneLanding;
@@ -661,6 +660,12 @@ export async function handlePermissionSetCloneWrite(
             }),
         };
     } catch (err: unknown) {
+        // [#37811] The landing's 501 (no paired customization package can be
+        // ensured), in the request's language.
+        const thrown = err as { statusCode?: unknown; messageKey?: unknown; params?: Record<string, unknown> } | null;
+        if (thrown?.statusCode === 501 && thrown.messageKey === PAIR_UNSUPPORTED_KEY) {
+            return catalogNotImplemented(deps, context, PAIR_UNSUPPORTED_KEY, thrown.params);
+        }
         // A validation failure keeps its 400; a save refusal keeps its own
         // status and code (a precondition conflict 409, a schema refusal 422).
         return { handled: true, response: deps.errorFromThrown(err, 500) };

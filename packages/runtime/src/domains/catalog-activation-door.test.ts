@@ -17,6 +17,8 @@
 //     does not honour would be a switch that switches nothing.
 
 import { describe, it, expect } from 'vitest';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
+import { METADATA_ACTIVATION_TABLE } from '@objectstack/core';
 import { resolveUserAuthzGrants, securityCatalogReaderOf } from '@objectstack/core';
 import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 // Paid at collection, not inside a case's clocked window: the dispatcher's
@@ -1133,5 +1135,32 @@ describe('the catalog activation door — a declared assignment rule', () => {
         const unavailable = await flip(bare, TENANT_ADMIN(), `/_activation/assignment_rule/${RULE}`);
         expect(statusOf(unavailable)).toBe(503);
         expect([...h.writes, ...bare.writes]).toEqual([]);
+    });
+});
+
+// [#37811] This door's 501 sentence is the operation-message catalog's, in the
+// request's top `Accept-Language` tag: byte-identical English with no header,
+// the catalog's Japanese under `ja-JP`, and `Vary: Accept-Language` either way.
+const JA_37811 = { request: { headers: { 'accept-language': 'ja-JP,ja;q=0.9' } } };
+const LANGS_37811 = [['en', {}], ['ja-JP', JA_37811]] as const;
+const sentence37811 = (locale: 'en' | 'ja-JP', key: string, params: Record<string, string> = {}): string =>
+    BUILTIN_OPERATION_MESSAGES[locale][key].replace(/\{\{(\w+)\}\}/g, (_m, name: string) => params[name] ?? '');
+const vary37811 = (response: unknown): unknown => (response as any)?.headers?.Vary;
+
+describe('[#37811] the no-ledger 501 follows the request\'s language, its noun included', () => {
+    it('catalog_activation_ledger_missing_off / _on, with the catalog\'s noun for a position', async () => {
+        for (const [locale, extra] of LANGS_37811) {
+            for (const [enabled, key] of [[false, 'catalog_activation_ledger_missing_off'], [true, 'catalog_activation_ledger_missing_on']] as const) {
+                const h = boot('single', { omitLedger: true });
+                const res = await flip(h, { ...TENANT_ADMIN(), ...extra } as HttpProtocolContext, `/_activation/position/${POSITION}`, { enabled });
+                expect(statusOf(res)).toBe(501);
+                expect(messageOf(res)).toBe(sentence37811(locale, key, {
+                    table: METADATA_ACTIVATION_TABLE,
+                    noun: sentence37811(locale, 'catalog_activation_noun_position'),
+                    name: POSITION,
+                }));
+                expect(vary37811(res.response)).toBe('Accept-Language');
+            }
+        }
     });
 });
