@@ -1024,7 +1024,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
       // The row as written is what the parse now refuses …
       expect(JobSchema.safeParse(raw).success).toBe(false);
       // … and the seam's replay (stored-row rehydration) makes it load, three retries and all.
-      const converted = applyConversionsToStoredItem('job', structuredClone(raw));
+      const converted = applyConversionsToStoredItem('job', structuredClone(raw))!;
       expect(converted.retryPolicy).toEqual({ backoffMs: 5000, maxRetries: 3, backoffMultiplier: 2 });
       expect(JobSchema.safeParse(converted).success).toBe(true);
     });
@@ -1316,7 +1316,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
         name: 'crm_lead_detail',
         regions: [{ name: 'header', components: [{ type: 'page-header', properties: { title: 'Leads', description: 'All open leads' } }] }],
       };
-      const out = applyConversionsToStoredItem('page', row, { onNotice: (n) => notices.push(n) });
+      const out = applyConversionsToStoredItem('page', row, { onNotice: (n) => notices.push(n) })!;
       expect(out.regions[0]!.components[0]!.properties).toEqual({ title: 'Leads', subtitle: 'All open leads' });
       expect(notices.map((n) => n.conversionId)).toEqual(['page-header-subtitle-alias']);
     });
@@ -1583,7 +1583,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
         label: 'Contact',
         fields: { company_id: { type: 'lookup', label: 'Company', reference_to: 'crm_company' } },
       };
-      const out = applyConversionsToStoredItem('object', row, { onNotice: (n) => notices.push(n) });
+      const out = applyConversionsToStoredItem('object', row, { onNotice: (n) => notices.push(n) })!;
       expect(out.fields.company_id).toEqual({ type: 'lookup', label: 'Company', reference: 'crm_company' });
       expect(notices.map((n) => n.conversionId)).toEqual(['field-reference-to-alias']);
     });
