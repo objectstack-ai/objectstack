@@ -123,10 +123,12 @@ export interface RecordFlowSurface {
   container: RecordFlowContainer;
   surface: RecordSurface;
   /**
-   * The task-flow dialog's size: the console's create / edit dialog turns
-   * `'full'` into its full-screen sheet and lets `'auto'` size itself. The
-   * record drawer's width does not read it (that is `navigation.size`'s), and
-   * routes ignore it.
+   * The task-flow dialog's size. The console's create / edit dialog passes
+   * `'full'` to its form dialog as that dialog's `full` size (95vw from the
+   * `sm` breakpoint up; below it the dialog is a full-screen sheet whatever the
+   * size) and lets `'auto'` size itself. That host derives with no `viewport`,
+   * so it only ever receives `'auto'`. The record drawer's width does not read
+   * it (that is `navigation.size`'s), and routes ignore it.
    */
   size: 'auto' | 'full';
 }

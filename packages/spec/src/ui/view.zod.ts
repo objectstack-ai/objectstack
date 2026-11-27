@@ -3177,8 +3177,9 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
    *
    * `'auto'` (default) is the host's fixed default width, the same for every
    * object whatever its field count — nothing is derived from the object's
-   * fields. The console's record side panel (opened from an object's list, and
-   * the drawer level over a record page) opens at `min(92vw, 460px)`; a page
+   * fields. The console's record side panel (opened from an object's list, from
+   * the bare data page or an interface list page, and the drawer level over a
+   * record page) opens at `min(92vw, 460px)`; a page
    * block's drawer opens at that block's own default (`min(960px, 60vw)` for
    * the grid, kanban, calendar, gantt and tree; 42rem for the list, gallery,
    * map and timeline). A width the reader drags is remembered and wins over
