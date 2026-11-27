@@ -114,6 +114,7 @@ import {
 import { readPackageRemovalContents, type PackageRemovalState } from './packageRemovalContents.js';
 import { PackageRemovalSummary } from './PackageRemovalSummary.js';
 import { useAdapter } from '@object-ui/react';
+import { useObjectLabel } from '@object-ui/i18n';
 import { PageHeader } from '../../layout/PageHeader.js';
 import { errorCodeIs } from '@object-ui/types';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
@@ -489,9 +490,16 @@ function groupInstalledApps(rows: readonly PackageListRow[]): InstalledAppGroup[
   return rows.filter((r) => !folded.has(r.id)).map((r) => ({ row: r, modules: modulesOf.get(r.id) ?? [] }));
 }
 
-/** Whether the search text names a row, by id or name — the list's one rule. */
-function rowMatches(row: PackageListRow, q: string): boolean {
-  return row.id.toLowerCase().includes(q) || (row.pkg?.manifest.name || '').toLowerCase().includes(q);
+/**
+ * Whether the search text names a row, by id or name — the list's one rule.
+ * The name is the one the row shows (`shownName`, the translated package name
+ * where the bundle carries one, objectstack#35513) and the manifest's own, so
+ * a search in either language finds the row.
+ */
+function rowMatches(row: PackageListRow, q: string, shownName: (row: PackageListRow) => string): boolean {
+  return row.id.toLowerCase().includes(q)
+    || (row.pkg?.manifest.name || '').toLowerCase().includes(q)
+    || shownName(row).toLowerCase().includes(q);
 }
 
 /**
@@ -688,6 +696,7 @@ export function PackageDetailSheet({
   onChanged: () => void;
 }) {
   const locale = useMetadataLocale();
+  const { packageName } = useObjectLabel();
   // `ce986aafc` — the console's metadata client, for the ONE action on this
   // sheet that must report: "publish drafts" promotes metadata, and the runtime
   // authoring gate's findings for those promotions ride the response. This hook
@@ -830,8 +839,9 @@ export function PackageDetailSheet({
   // Delete.
   const authoring = face !== 'admin';
   // The name the delete dialog asks the author to type: the one the sheet's
-  // title shows.
-  const displayName = pkg.manifest.name || id;
+  // title shows — the package's name in the reader's language where its
+  // translation bundle carries one (objectstack#35513), else `manifest.name`.
+  const displayName = packageName({ id, name: pkg.manifest.name });
   const deleteArmed = deleteMode !== '' && deleteTyped.trim() === displayName.trim();
 
   // objectui#13339 — the sheet's one message line answers the action the
@@ -1137,7 +1147,7 @@ export function PackageDetailSheet({
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <PackageIcon className="h-4 w-4" />
-            {pkg.manifest.name || id}
+            {displayName}
           </SheetTitle>
           <SheetDescription className="font-mono text-xs">{id}</SheetDescription>
         </SheetHeader>
@@ -1605,6 +1615,15 @@ export function PackageDetailSheet({
 
 export function PackagesPage() {
   const locale = useMetadataLocale();
+  // A package's name in the reader's language (objectstack#35513): the
+  // `packages.<id>.name` row of the served translation document, else
+  // `manifest.name`. Display only — the edit and view dialogs keep reading
+  // the manifest as authored.
+  const { packageName } = useObjectLabel();
+  const rowName = React.useCallback(
+    (row: PackageListRow) => (row.pkg ? packageName({ id: row.id, name: row.pkg.manifest.name }) : row.id),
+    [packageName],
+  );
   // ADR-0141 D2 — the import door's `DEPENDENCY_MISSING` refusal, one line per
   // unmet dependency, from the locale packs (the `engine.*` table is en/zh only).
   const dependencyMissingText = useDependencyMissingText();
@@ -1803,12 +1822,9 @@ export function PackagesPage() {
       // show them, and nothing on them is the administrator's to change.
       if (kernel && (adminFace || !showKernel)) return false;
       if (!q) return true;
-      return (
-        r.id.toLowerCase().includes(q) ||
-        (r.pkg?.manifest.name || '').toLowerCase().includes(q)
-      );
+      return rowMatches(r, q, rowName);
     });
-  }, [rows, query, showKernel, sourceFilter.value, adminFace]);
+  }, [rows, query, showKernel, sourceFilter.value, adminFace, rowName]);
 
   // objectui#13166 — the Actions column follows the cells it sits over: it is
   // drawn only when a row IN VIEW carries an action. Gating it on the page-level
@@ -1840,11 +1856,11 @@ export function PackagesPage() {
     return groupInstalledApps(scoped)
       .map((g) => {
         if (!q) return { ...g, matchedModules: false };
-        const matchedModules = g.modules.some((m) => rowMatches(m, q));
-        return rowMatches(g.row, q) || matchedModules ? { ...g, matchedModules } : null;
+        const matchedModules = g.modules.some((m) => rowMatches(m, q, rowName));
+        return rowMatches(g.row, q, rowName) || matchedModules ? { ...g, matchedModules } : null;
       })
       .filter((g): g is InstalledAppGroup & { matchedModules: boolean } => g !== null);
-  }, [adminFace, rows, query, sourceFilter.value]);
+  }, [adminFace, rows, query, sourceFilter.value, rowName]);
   const [expandedApps, setExpandedApps] = React.useState<ReadonlySet<string>>(() => new Set());
   const moduleIdBase = React.useId();
   const toggleApp = (id: string) =>
@@ -2212,9 +2228,9 @@ export function PackagesPage() {
                               }
                               aria-label={
                                 open
-                                  ? tFormat('engine.packages.installedApps.hideModules', locale, { name: p?.manifest.name || rowId })
+                                  ? tFormat('engine.packages.installedApps.hideModules', locale, { name: p ? packageName({ id: rowId, name: p.manifest.name }) : rowId })
                                   : tFormat('engine.packages.installedApps.showModules', locale, {
-                                      name: p?.manifest.name || rowId,
+                                      name: p ? packageName({ id: rowId, name: p.manifest.name }) : rowId,
                                       count: modules.length,
                                     })
                               }
@@ -2228,7 +2244,7 @@ export function PackagesPage() {
                             </Button>
                           ) : null}
                           <div className="flex min-w-0 flex-col">
-                            <span>{p?.manifest.name || rowId}</span>
+                            <span>{p ? packageName({ id: rowId, name: p.manifest.name }) : rowId}</span>
                             {!module && modules.length > 0 && (
                               <span className="text-xs font-normal text-muted-foreground">
                                 {modules.length === 1
@@ -2304,7 +2320,7 @@ export function PackagesPage() {
                     onClick={p ? () => openDetail(p) : undefined}
                     data-testid={`pkg-row-${rowId}`}
                   >
-                    <TableCell className="font-medium">{p?.manifest.name || rowId}</TableCell>
+                    <TableCell className="font-medium">{p ? packageName({ id: rowId, name: p.manifest.name }) : rowId}</TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">
                       {rowId}
                     </TableCell>

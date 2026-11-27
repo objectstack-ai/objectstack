@@ -12,6 +12,7 @@ import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
+import { MANIFEST_ID_PATTERN } from '../kernel/address-grammar';
 import { textSlotTemplateRefusal } from '../automation/flow-text-slot-template';
 
 /**
@@ -2546,6 +2547,49 @@ const appTranslationDataShape = () => ({
   }, {
     label: z.string().optional().describe("Translated import mapping label — overlays the mapping's own `label`"),
   })).optional().describe('Import-mapping translations keyed by mapping name'),
+
+  /**
+   * Package translations keyed by the package's `manifest.id`
+   * (`kernel/manifest.zod.ts`, reverse-domain, e.g. `com.acme.crm`).
+   *
+   *   packages.<manifest id>.name         → the manifest's own `name`
+   *   packages.<manifest id>.description  → the manifest's own `description`
+   *
+   * A package is listed by its display name wherever the console lists
+   * packages — Setup's package list and Studio's package switcher — and that
+   * name is end-user copy: a zh-CN admin otherwise reads every package by its
+   * English `manifest.name` beside a launcher that already calls the same apps
+   * by their translated labels. The group follows `apps.<app>.label`: each
+   * package ships the row for its own id in the bundle it already carries,
+   * and the served document merges every package's rows into one tree.
+   *
+   * Keyed by `manifest.id`, not `namespace`: the id is the package's identity
+   * on every list row, while a `.custom` pair shares its base's namespace.
+   * The key is checked against the manifest id grammar, so a row keyed by a
+   * namespace or a display name is refused at parse instead of never
+   * rendering.
+   *
+   * A package's DISPLAY name only: `manifest.name` stays the authored value on
+   * every wire and in every editor, and a client overlays this row where it
+   * draws a package for a reader, falling back to `manifest.name`. Because
+   * the key carries dots, a client reads the row by direct property access,
+   * never through a dot-separated i18next key path.
+   */
+  packages: z.record(
+    z.string().regex(MANIFEST_ID_PATTERN, {
+      error: (iss) => `'${String(iss.input)}' is not a package id. \`packages\` translations are keyed by `
+        + "the package's `manifest.id`, in reverse-domain notation like 'com.acme.crm' — a namespace or a "
+        + 'display name never names a package, so a row keyed by one would never render.',
+    }),
+    strictObject({
+      surface: 'this package translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { label: 'name', title: 'name', displayName: 'name' },
+    }, {
+      name: z.string().optional().describe("Translated package display name — overlays the manifest's own `name`"),
+      description: z.string().optional().describe("Translated package description — overlays the manifest's own `description`"),
+    }),
+  ).optional().describe('Package translations keyed by manifest id'),
 
   /**
    * Translations for **metadata-type configuration forms** — the forms
