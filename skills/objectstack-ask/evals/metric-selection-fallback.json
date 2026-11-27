@@ -240,6 +240,16 @@
         "must_contain": ["?"],
         "must_not_contain": ["describe_object(", "aggregate_records(", "query_records(", "query_dataset("]
       }
+    },
+    {
+      "id": 25,
+      "prompt": "The user asked: \"What is the number of claims in each status?\" Your first call was `list_datasets` with `terms: ['claims', 'status']`. The answer has no match for \"claims\", two candidates for it (the measures Claimed amount and Claim count of the Reimbursement dataset) and `nextStep.decision` `candidates_only`; its `note` says that a word you cut out of a longer phrase the user wrote is not asked about and is sent once more as written, and that the user's own word is asked about. What do you do next?",
+      "expected_output": "The next step is one more `list_datasets` call with `terms: ['number of claims', 'status']`, and no question to the user yet. \"claims\" is not the user's word for the thing: the user wrote \"number of claims\", and the first call cut that phrase down to its last noun. A question about a word the user did not write would ask them to choose between readings of the caller's own shortening, so the note sends the phrase again as written before anything is asked. The phrase is sent as the user wrote it, not the whole question and not a synonym of the caller's choosing. If it equals exactly one measure, that measure is computed with `query_dataset`, grouped by status as the question asks, and the answer cites its source. If the phrase as written still has only candidates, or matches nothing, the user is asked which reading they mean, listing each one's label, dataset label and description. Neither candidate is picked from the first answer, and nothing is computed from it.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["list_datasets", "number of claims"],
+        "must_not_contain": ["describe_object(", "aggregate_records(", "query_records("]
+      }
     }
   ]
 }
