@@ -447,7 +447,10 @@ export const CEILINGS = new Map([
   // with `main`. Two retired-key rows name their replacements; one sample
   // instruction line left the skill example and over-paid by 4 tokens.
   // 6795 -> 6791 (#37782): the `agent.tools` row no longer teaches an aged-out migration; LOWERED to the measurement.
-  ['skills/objectstack-ai/SKILL.md', 6791], //          -18 (was 6824), then -5 A2′ (was 6806)
+  // 6791 -> 6609: the section that taught an authored AI button on a record
+  // page is replaced by one sentence (ADR-0160 D6, "Entry point": the shell's
+  // entry is the only one); the row follows the measurement down.
+  ['skills/objectstack-ai/SKILL.md', 6609], //          -18 (was 6824), then -5 A2′ (was 6806)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying
