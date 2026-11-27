@@ -608,7 +608,7 @@ describe('at the runtime publish gate, on a `permission` write', () => {
   /** The write: the set is the item, the two objects are the stored context. */
   const write = (item: Rec, context: Rec = {}) =>
     runRuntimeAuthoringRules({ type: 'permission', item, context: { objects: [invoice(), invoiceLine()], ...context } });
-  const rollupOnly = (findings: readonly { rule: string }[]) =>
+  const rollupOnly = <F extends { rule: string }>(findings: readonly F[]): F[] =>
     findings.filter((f) => f.rule === UNREADABLE || f.rule === ROW_SCOPED);
   const W_PATH_TOTAL = 'permissions.warehouse_staff.fields["invoice.total"]';
 
