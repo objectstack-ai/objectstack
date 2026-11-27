@@ -258,16 +258,16 @@ describe('[ADR-0161 K9] search_knowledge over the real definition — every tran
     { id: 'c3', body: 'travel', policy: 'P_travel' },
   ];
   const SOURCE: KnowledgeSource = {
-    id: 'clauses',
+    name: 'clauses',
     label: 'Clauses',
     adapter: 'memory',
-    source: { kind: 'object', object: 'clause', contentFields: ['body'], metadataFields: ['policy'] } as ObjectKnowledgeSource,
+    source: { kind: 'object', object: 'clause', content: ['body'], metadataFields: ['policy'] } as ObjectKnowledgeSource,
   };
 
   function indexHit(row: Row, n: number, score: number): KnowledgeHit {
     const doc = recordToDocument(SOURCE, SOURCE.source as ObjectKnowledgeSource, row);
     return {
-      chunkId: `${doc.id}#${n}`, documentId: doc.id, sourceId: SOURCE.id, sourceRecordId: row.id,
+      chunkId: `${doc.id}#${n}`, documentId: doc.id, sourceId: SOURCE.name, sourceRecordId: row.id,
       score, snippet: `${row.body as string} (${n})`, metadata: doc.metadata, docHash: doc.docHash,
     };
   }

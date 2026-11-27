@@ -50,7 +50,7 @@ vi.mock('@object-ui/fields', async (importOriginal) => ({
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  useObjectTranslation: () => ({ t: translate, offerableLanguages: ['en', 'zh'], appContentLanguages: null }),
+  useObjectTranslation: () => ({ t: translate, offerableLanguages: ['en', 'zh'] }),
 }));
 
 vi.mock('@object-ui/react', async (importOriginal) => ({

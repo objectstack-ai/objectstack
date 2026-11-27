@@ -20,10 +20,10 @@ import { SPLIT_ALGORITHM_VERSION, resolveSplit } from '../split/index.js';
 
 const source = (extra: Record<string, unknown> = {}): KnowledgeSource =>
   ({
-    id: 'kb_articles',
+    name: 'kb_articles',
     label: 'Articles',
     adapter: 'pgvector',
-    source: { kind: 'object', object: 'article', contentFields: ['title', 'body'], metadataFields: ['status'], ...extra },
+    source: { kind: 'object', object: 'article', content: ['title', 'body'], metadataFields: ['status'], ...extra },
   }) as KnowledgeSource;
 
 const embedding = { model: 'text-embedding-3-large', dimensions: 3072, maxInputTokens: 8191 };
@@ -47,7 +47,7 @@ describe('index fingerprint (ADR-0161 K7)', () => {
       computeIndexFingerprint({ source: source(), embedding, split: { ...split, maxChars: 400 } }),
       computeIndexFingerprint({ source: source(), embedding, split: { ...split, strategy: 'recursive' } }),
       computeIndexFingerprint({ source: source(), embedding }),
-      computeIndexFingerprint({ source: source({ contentFields: ['body', 'title'] }), embedding, split }),
+      computeIndexFingerprint({ source: source({ content: ['body', 'title'] }), embedding, split }),
       computeIndexFingerprint({ source: source({ object: 'faq' }), embedding, split }),
     ];
     for (const v of variants) expect(v).not.toBe(base);
@@ -89,6 +89,6 @@ describe('recipe hash (ADR-0161 K7)', () => {
   });
 
   it('does not change with the content list, which is the fingerprint\'s', () => {
-    expect(computeRecipeHash({ source: source({ contentFields: ['body'] }), schema })).toBe(computeRecipeHash({ source: source(), schema }));
+    expect(computeRecipeHash({ source: source({ content: ['body'] }), schema })).toBe(computeRecipeHash({ source: source(), schema }));
   });
 });

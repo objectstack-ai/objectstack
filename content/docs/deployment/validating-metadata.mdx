@@ -506,8 +506,8 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Filter placeholder resolvability (#3574) | ✓ | ✓ | ✓ | — |
 | Ordering comparands naming a date-range preset — `last_30_days` in a `>=` position (#8793) | ✓ | ✓ | ✓ | ✓ᵈᵛᵒᵖᶠʳ |
 | Empty filter combinators — `$and: []`, `$or: []`, `$not: {}` (#5330) | ✓ | ✓ | ✓ | ✓ᶠʳ |
-| Object & action name references (#3583) | ✓ | ✓ | ✓ | ✓ᶠᵈᵗ |
-| Reference integrity — flow node writes, template paths, read-only writes (#3583); at the publish door each write type runs only the members that declare it, and the flow members run on `flow` alone (#9313) | ✓ | ✓ | ✓ | ✓ᶠᵛᵒᵈᵗʳᵖ |
+| Object & action name references (#3583) — and the object a seed dataset, a flow `get_record` / `create_record` / `update_record` / `delete_record` / object-form `screen` node or a standalone action is bound to (`object-reference-unknown`, #35143); a flow node's miss is a warning on the CLI, where a declared dependency may define the object, and an error at the publish door; at the publish door a seed over an unknown object is the save door's own refusal (#34864) | ✓ | ✓ | ✓ | ✓ᶠᵈᵗᵃᶜ |
+| Reference integrity — flow node writes, template paths, read-only writes (#3583); at the publish door each write type runs only the members that declare it, and the flow members run on `flow` alone (#9313) | ✓ | ✓ | ✓ | ✓ᶠᵛᵒᵈᵗʳᵖᵃᶜ |
 | List-view field members — a list view's `sort` (a `sortable: false` field, a `formula`, an unknown name: `sort-field-unsortable`), its `searchableFields` (`searchable-field-unknown`) and its field references, columns, filter keys, grouping and the board bindings (`list-view-field-unknown`); the row merges three members, so its codes follow no one rule's order, and the `page` door runs the sort member only (#9313, #15495, #30095) | ✓ | ✓ | ✓ | ✓ᶠᵛᵒᵖ |
 | Page-component field bindings (#3583) | ✓ | ✓ | ✓ | ✓ᶠ |
 | React page block field bindings — §10 (#4340) | ✓ | ✓ | ✓ | ✓ᶠ |
@@ -520,6 +520,8 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Page variable declarations — each name once and never blank, a `defaultValue` of its declared type, a `source` naming a component the page holds (#28663, #28725) | ✓ | ✓ | ✓ | ✓ᵖ |
 | JSX / React page source parses (ADR-0080/0081) | ✓ | ✓ | ✓ | — |
 | Script action bodies compile in the runtime's wrapper — an L2 action's `body.source` that does not compile as the body of `(async (input, ctx) => { … })`, most often `const input = …` redeclaring a parameter; an object write runs it over its inline `actions[]`, so an object write cannot republish a refused body (`action-body-does-not-compile`, #34884) | ✓ | ✓ | ✓ | ✓ᵃᶜᵒ |
+| Script action bodies hold the grant they call — an L2 action body that calls a `ctx.api` write (`insert`, `update`, `delete`, `updateMany`, `deleteMany`, `upsert`) without `api.write` in its `body.capabilities`, which the sandbox refuses at every call (`action-body-write-capability-undeclared`, #35143) | ✓ | ✓ | ✓ | ✓ᵃᶜᵒ |
+| Seed record keys — a seed record key, or a seed `columns` key, that names no field of the dataset's object, no system column injected on it and none of `id` / `created_at` / `updated_at`; the engine's insert door refuses such a record and the seed load loads the rest (`seed-record-unknown-field`, #35143) | ✓ | ✓ | ✓ | ✓ˢ |
 | Hook and job bodies compile in the runtime's wrapper — an L2 hook or job `body.source` that does not compile as the body of `(async (ctx) => { … })`, most often `const ctx = …` redeclaring the parameter or one name declared twice; no door publishes a job, so the publish column is the `hook` write alone (`hook-body-does-not-compile`, `job-body-does-not-compile`, #34987) | ✓ | ✓ | ✓ | ✓ʰ |
 | Approval-node approvers (ADR-0090 D3) | ✓ | ✓ | ✓ | ✓ᶠ |
 | Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ | ✓ | ✓ˢᵖᵉᵇᵒ |
@@ -547,6 +549,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Advisory: credential literals in a flow — an `http` node's headers or url query, a node's `connectorConfig.input` (`flow-credential-literal`, #20698) | ✓ | ✓ | ✓ | ✓ᶠ |
 | Advisory: credential literals in a connector — its header and environment maps, and a stdio MCP credential route (`connector-credential-literal`, #29424) | ✓ | ✓ | ✓ | ✓ᶜ |
 | `views[]` and page-component conditional-visibility predicates — CEL syntax, parse budget, bare identifiers, binding-root layer; schema path refs on `views[]` only (ADR-0089 D3b, #7010; page components at the save door #24491); an app navigation entry's `visible` at the save door (#28663) | ✓ | ✓ | ✓ | ✓ᵛᵖᵃ |
+| Gated book claims — a book whose `audience` is `{ permissionSet }` or `{ systemPermission }` claiming docs by `include: '*'`, which also takes every doc bound to no package away from readers outside the audience (`book-gated-catch-all-include`, ADR-0046 §6.7) | ✓ | ✓ | ✓ | ✓ᵇ |
 | Advisory: record titles, semantic field pointers (ADR-0085), action placement, seed replay/state safety, capability references | ✓ | ✓ | ✓ | — |
 | Advisory: form-section layout | ✓ | ✓ | ✓ | ✓ᵛ |
 | Advisory: liveness | ✓ | ✓ | ✓ | ✓ᵉᵐᵈˢ |
@@ -867,7 +870,7 @@ A clean run walks the registry and reports timing:
   Config: /path/to/support-desk/objectstack.config.ts
   Load time: 21ms
   → Validating against ObjectStack Protocol...
-  → Running author-time rules (83)...
+  → Running author-time rules (86)...
   → Checking that every required capability has a provider installable in this edition...
   → Checking package docs (ADR-0046)...
 

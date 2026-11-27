@@ -19,6 +19,9 @@ import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+// Paid at collection, not inside a clocked case: the picker's closure loads
+// it lazily (check:test-source-alias).
+import '@objectstack/lint';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const h = vi.hoisted(() => {
@@ -214,14 +217,15 @@ describe('ObjectPicker — objectsOnly: a door that takes no expression (objects
     );
   });
 
-  it('a typed name that is no object clears a chosen one, on Enter and on blur alike', async () => {
+  it('a typed name that is no object keeps the chosen one and says it was refused, on Enter and on blur alike', async () => {
     const enter = renderPicker({ objectsOnly: true, value: 'showcase_account' });
     await openList(enter.input);
     await userEvent.clear(enter.input);
     await userEvent.type(enter.input, 'crm_custom_eval');
     await userEvent.keyboard('{Enter}');
-    expect(enter.onCommit).toHaveBeenCalledTimes(1);
-    expect(enter.onCommit).toHaveBeenCalledWith('');
+    expect(enter.onCommit).not.toHaveBeenCalled();
+    expect(enter.input).toHaveValue('showcase_account');
+    expect(refusal()).not.toBeNull();
     cleanup();
 
     const blur = renderPicker({ objectsOnly: true, value: 'showcase_account' });
@@ -229,9 +233,18 @@ describe('ObjectPicker — objectsOnly: a door that takes no expression (objects
     await userEvent.clear(blur.input);
     await userEvent.type(blur.input, 'crm_custom_eval');
     await userEvent.tab();
-    expect(blur.onCommit).toHaveBeenCalledTimes(1);
-    expect(blur.onCommit).toHaveBeenCalledWith('');
+    expect(blur.onCommit).not.toHaveBeenCalled();
     expect(refusal()).not.toBeNull();
+  });
+
+  it('an input cleared on purpose still commits no object', async () => {
+    const { input, onCommit } = renderPicker({ objectsOnly: true, value: 'showcase_account' });
+    await openList(input);
+    await userEvent.clear(input);
+    await userEvent.keyboard('{Enter}');
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith('');
+    expect(refusal()).toBeNull();
   });
 
   it('a name typed out in full is committed as itself', async () => {

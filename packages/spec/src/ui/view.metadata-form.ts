@@ -320,15 +320,25 @@ export const viewForm = defineMetadataForm({
         // second audience key. The hint restates the clauses of
         // `AUDIENCE_REQUIRED_PERMISSIONS_DESCRIPTION` (all of them, no any-of
         // form, enforced by the server) for the administrator who sets it.
+        // `ref-multi:capability` offers only the capabilities the environment
+        // knows (declared, or granted by a permission set) and previews which
+        // positions the picked set reaches; the list is closed, so a host that
+        // feeds no catalog offers nothing to add. It writes the names only —
+        // granting stays in Setup.
+        // The last sentence says what holds for the person setting the gate on
+        // every carrier: the switcher drops the view for them too. It does not
+        // promise the designer refuses it: a view item is refused on every door,
+        // but an entry kept in its object's view set stays open to that set's
+        // editors there.
         {
           field: 'requiredPermissions',
-          widget: 'string-tags',
+          widget: 'ref-multi:capability',
           helpText: 'Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant '
             + 'capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone '
             + 'who can see the list sees this view. To show it to several groups, pick one capability and grant it to '
             + 'each group\'s permission set. The server enforces it: anyone else does not find the view in the list and '
             + 'is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or '
-            + 'misspell one, and you can no longer open this view either.',
+            + 'misspell one, and you no longer see this view in the list either.',
         },
       ],
     },

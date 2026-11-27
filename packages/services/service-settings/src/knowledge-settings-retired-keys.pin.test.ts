@@ -18,10 +18,19 @@
  *     the stored retired rows (an encrypted one with a dangling secret handle
  *     included) neither fail the read nor appear in it, and a stored
  *     `enforce_rls = false` shows no toggle and is reported nowhere;
- *   - "Test connection" answers from the declared Turso fields, never from the
- *     stored `adapter`;
+ *   - "Test connection" never answers from the stored `adapter`;
  *   - saving a declared key works beside them, and leaves them stored;
- *   - a write naming a retired key is refused `400 UNKNOWN_KEY`.
+ *   - a write naming a retired key is refused `400 UNKNOWN_KEY`, and refused
+ *     WHOLE: no other key in that body is saved.
+ *
+ * Version 5 moves the Turso group (`turso_url`, `turso_auth_token`) to the
+ * store that reads it, `@objectstack/knowledge-turso`, which adds it to this
+ * page where it is mounted. The page this file boots is the one a deployment
+ * that does not mount that store serves (its store is pgvector): a saved
+ * `turso_url` stays stored and is not served, a write of either key is
+ * refused, and once a page declaring the group is registered again — what the
+ * store's contribution does — the same stored row is served as before.
+ * knowledge-turso's own tests pin the contribution on a real kernel.
  *
  * Refusals are pinned by envelope (status + `error.code`), what a console or
  * API caller reads.
@@ -29,6 +38,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { bootSettingsDoor } from './__tests__/settings-door.testkit.js';
+import type { SettingsManifest } from '@objectstack/spec/system';
 import { knowledgeSettingsManifest, knowledgeTestActionHandler } from './manifests/knowledge.manifest.js';
 
 const RETIRED_KEYS = [
@@ -40,6 +50,9 @@ const RETIRED_KEYS = [
   'ragflow_api_key',
   'ragflow_default_dataset',
 ] as const;
+
+/** The keys @objectstack/knowledge-turso contributes to this page where it is mounted (version 5). */
+const TURSO_KEYS = ['turso_url', 'turso_auth_token'] as const;
 
 async function bootWithRetiredRows() {
   const door = await bootSettingsDoor(knowledgeSettingsManifest);
@@ -66,12 +79,11 @@ describe('#37104 — the Knowledge page with stored values for its retired keys'
     const page = await request('GET /api/settings/:namespace', { namespace: 'knowledge' });
     expect(page.status).toBe(200);
     const values = page.body?.data?.values ?? {};
-    expect(Object.keys(values).sort()).toEqual(['chunk_target', 'turso_auth_token', 'turso_url']);
+    expect(Object.keys(values).sort()).toEqual(['chunk_target']);
     // Non-vacuity: the stored rows ARE read for the keys the page declares.
     expect(values.chunk_target).toMatchObject({ value: 500, source: 'global' });
-    expect(values.turso_url).toMatchObject({ value: 'file:./kb.db', source: 'global' });
     const served = (page.body?.data?.manifest?.specifiers ?? []) as Array<{ key?: string }>;
-    for (const key of RETIRED_KEYS) {
+    for (const key of [...RETIRED_KEYS, ...TURSO_KEYS]) {
       expect(values, key).not.toHaveProperty(key);
       expect(served.some((s) => s.key === key), key).toBe(false);
     }
@@ -86,17 +98,17 @@ describe('#37104 — the Knowledge page with stored values for its retired keys'
     expect(JSON.stringify(page.body?.data ?? {})).not.toMatch(/enforce_rls|Enforce RLS/);
   });
 
-  it('"Test connection" answers from the Turso fields, never from the stored adapter', async () => {
+  it('"Test connection" answers from the Turso fields it is sent, never from the stored adapter', async () => {
     const { request } = await bootWithRetiredRows();
     const answer = await request(
       'POST /api/settings/:namespace/:actionId',
       { namespace: 'knowledge', actionId: 'test' },
-      {},
+      { values: { turso_url: 'file:./sent.db' } },
     );
     // Before version 4 a stored `adapter = ragflow` answered "Unknown adapter".
     expect(answer.status).toBe(200);
     expect(answer.body?.data?.ok).toBe(true);
-    expect(String(answer.body?.data?.message)).toContain('file:./kb.db');
+    expect(String(answer.body?.data?.message)).toContain('file:./sent.db');
     expect(String(answer.body?.data?.message)).not.toMatch(/Unknown adapter|ragflow/i);
   });
 
@@ -106,6 +118,7 @@ describe('#37104 — the Knowledge page with stored values for its retired keys'
     expect(write.status).toBe(200);
     expect(stored('chunk_target')).toMatchObject({ value: 600 });
     for (const key of RETIRED_KEYS) expect(stored(key), key).toBeDefined();
+    expect(stored('turso_url')).toMatchObject({ value: 'file:./kb.db' });
   });
 
   it('a write naming a retired key is refused as an undeclared key', async () => {
@@ -118,5 +131,67 @@ describe('#37104 — the Knowledge page with stored values for its retired keys'
     // The refused writes changed nothing stored.
     expect(stored('enforce_rls')).toMatchObject({ value: false });
     expect(stored('adapter')).toMatchObject({ value: 'ragflow' });
+  });
+
+  // The migration note's claim: a body carrying a retired key is refused
+  // whole, so a script that still sends `adapter` beside a real change saves
+  // neither until it drops the retired key.
+  it('a write naming a retired key beside chunk_target is refused whole: chunk_target is not saved', async () => {
+    const { save, stored } = await bootWithRetiredRows();
+    for (const [key, value] of [['adapter', 'turso'], ['over_fetch', 4], ['enforce_rls', true]] as const) {
+      const write = await save({ [key]: value, chunk_target: 600 });
+      expect(write.status, key).toBe(400);
+      expect(write.body?.error?.code, key).toBe('UNKNOWN_KEY');
+      expect(stored('chunk_target'), key).toMatchObject({ value: 500 });
+    }
+    // Control: the same chunk_target alone is saved, so the refusal above is
+    // the retired key's, not the value's.
+    expect((await save({ chunk_target: 600 })).status).toBe(200);
+    expect(stored('chunk_target')).toMatchObject({ value: 600 });
+  });
+});
+
+/** The Turso group as @objectstack/knowledge-turso adds it: the same keys, in front of the page. */
+function withTursoSection(page: SettingsManifest): SettingsManifest {
+  return {
+    ...page,
+    specifiers: [
+      { type: 'group', id: 'turso', label: 'Turso / libSQL', required: false },
+      { type: 'text', key: 'turso_url', label: 'Connection URL', required: false },
+      { type: 'password', key: 'turso_auth_token', label: 'Auth token', required: false, encrypted: true },
+      ...page.specifiers,
+    ] as SettingsManifest['specifiers'],
+  };
+}
+
+describe('version 5 — the Turso fields where knowledge-turso is not mounted, and their stored values', () => {
+  it('a saved turso_url is kept and not served; a write of either Turso key is refused', async () => {
+    const { request, save, stored } = await bootWithRetiredRows();
+    const page = await request('GET /api/settings/:namespace', { namespace: 'knowledge' });
+    expect(page.status).toBe(200);
+    expect(page.body?.data?.values ?? {}).not.toHaveProperty('turso_url');
+    for (const [key, value] of [['turso_url', 'file:./other.db'], ['turso_auth_token', 'tok']] as const) {
+      const write = await save({ [key]: value });
+      expect(write.status, key).toBe(400);
+      expect(write.body?.error?.code, key).toBe('UNKNOWN_KEY');
+    }
+    expect(stored('turso_url')).toMatchObject({ value: 'file:./kb.db' });
+    expect(stored('turso_auth_token')).toBeUndefined();
+  });
+
+  it('once the store contributes the group again, the same stored turso_url is served, and saves', async () => {
+    const { svc, request, save, stored } = await bootWithRetiredRows();
+    svc.registerManifest(withTursoSection(knowledgeSettingsManifest));
+    const page = await request('GET /api/settings/:namespace', { namespace: 'knowledge' });
+    expect(page.status).toBe(200);
+    expect(page.body?.data?.values?.turso_url).toMatchObject({ value: 'file:./kb.db', source: 'global' });
+    // The door that refused the key above takes it now.
+    const write = await save({ turso_url: 'file:./other.db' });
+    expect(write.status).toBe(200);
+    expect(stored('turso_url')).toMatchObject({ value: 'file:./other.db' });
+    // And the page's test action is still answered: re-registering a page keeps its handlers.
+    const answer = await request('POST /api/settings/:namespace/:actionId', { namespace: 'knowledge', actionId: 'test' }, {});
+    expect(answer.status).toBe(200);
+    expect(String(answer.body?.data?.message)).toContain('file:./other.db');
   });
 });

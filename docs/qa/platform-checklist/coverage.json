@@ -215,6 +215,9 @@
         "integration-system.job-package-key"
       ]
     },
+    "knowledge_source": {
+      "waived": "WAIVED 2026-11-26 — the kind is new (ADR-0161 K4, #37304) and no item has been run against it yet. What exists: the showcase declares one source (examples/app-showcase/src/ai/task-notes.knowledge-source.ts) and mounts the knowledge service with the in-memory store, so a booted showcase indexes its tasks and serves `search_knowledge`; the loader's rules (boot read, add, change, remove with the index dropped) are pinned in packages/services/service-knowledge/src/__tests__/knowledge-source-loader.test.ts, one name per source in knowledge-source-registry.test.ts beside it, and the two authoring guards in packages/rest/src/meta-type-write-capability.test.ts and packages/rest/src/meta-write-door-capability-enumeration.test.ts. WHAT RETIRES THIS WAIVER — the next coverage sweep authors an `ai.` item that boots the showcase, searches the task-notes source as an admin and as a member, saves a second source in Studio with and without `manage_knowledge_sources`, removes it and reads that its index is gone; the same edit replaces this waiver with `items` naming it."
+    },
     "manifest": {
       "items": [
         "platform-core.manifest-install-contract",

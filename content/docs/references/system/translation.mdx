@@ -212,6 +212,7 @@ Platform translation data — the per-app groups plus the platform-only `setting
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
 | **mappings** | `Record<string, { label?: string }>` | optional | Import-mapping translations keyed by mapping name |
+| **packages** | `Record<string, { name?: string; description?: string }>` | optional | Package translations keyed by manifest id |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
@@ -363,6 +364,13 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated import mapping label — overlays the mapping's own `label` |
 
+### Nested Shape: `PlatformTranslationData.packages[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Translated package display name — overlays the manifest's own `name` |
+| **description** | `string` | optional | Translated package description — overlays the manifest's own `description` |
+
 ### Nested Shape: `PlatformTranslationData.metadataForms[string]`
 
 | Property | Type | Required | Description |
@@ -416,6 +424,7 @@ Served translation data — the platform groups the browser reads, without the s
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
 | **mappings** | `Record<string, { label?: string }>` | optional | Import-mapping translations keyed by mapping name |
+| **packages** | `Record<string, { name?: string; description?: string }>` | optional | Package translations keyed by manifest id |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
 
@@ -566,6 +575,13 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated import mapping label — overlays the mapping's own `label` |
 
+### Nested Shape: `ServedTranslationData.packages[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Translated package display name — overlays the manifest's own `name` |
+| **description** | `string` | optional | Translated package description — overlays the manifest's own `description` |
+
 ### Nested Shape: `ServedTranslationData.settingsCommon`
 
 | Property | Type | Required | Description |
@@ -682,6 +698,7 @@ Per-app translation data for objects, apps, and UI messages
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
 | **mappings** | `Record<string, { label?: string }>` | optional | Import-mapping translations keyed by mapping name |
+| **packages** | `Record<string, { name?: string; description?: string }>` | optional | Package translations keyed by manifest id |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 
@@ -832,6 +849,13 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated import mapping label — overlays the mapping's own `label` |
 
+### Nested Shape: `TranslationData.packages[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Translated package display name — overlays the manifest's own `name` |
+| **description** | `string` | optional | Translated package description — overlays the manifest's own `description` |
+
 ### Nested Shape: `TranslationData.metadataForms[string]`
 
 | Property | Type | Required | Description |
@@ -906,6 +930,7 @@ One locale of translations — the `translation` metadata type
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
 | **mappings** | `Record<string, { label?: string }>` | optional | Import-mapping translations keyed by mapping name |
+| **packages** | `Record<string, { name?: string; description?: string }>` | optional | Package translations keyed by manifest id |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **locale** | `string` | ✅ | BCP-47 locale this item translates (e.g. "zh-CN") |
@@ -1066,6 +1091,13 @@ Translation data for a single object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated import mapping label — overlays the mapping's own `label` |
+
+### Nested Shape: `TranslationItem.packages[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Translated package display name — overlays the manifest's own `name` |
+| **description** | `string` | optional | Translated package description — overlays the manifest's own `description` |
 
 ### Nested Shape: `TranslationItem.metadataForms[string]`
 

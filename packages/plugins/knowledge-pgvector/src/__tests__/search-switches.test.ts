@@ -12,7 +12,7 @@ import type { KnowledgeSource } from '@objectstack/spec/ai';
 import { PgvectorKnowledgeAdapter, type PgClientLike, type PgPoolLike } from '../index.js';
 import { FakeEmbedder } from './live-pg.testkit.js';
 
-const source = { id: 'switching', label: 'switching', adapter: 'pgvector', source: { kind: 'object', object: 'a', contentFields: ['b'] } } as KnowledgeSource;
+const source = { name: 'switching', label: 'switching', adapter: 'pgvector', source: { kind: 'object', object: 'a', content: ['b'] } } as KnowledgeSource;
 
 /** A store whose active generation is a new one at every read of the generations, and whose ranking finds nothing. */
 function switchingPool(): { pool: PgPoolLike; rankings: () => number } {

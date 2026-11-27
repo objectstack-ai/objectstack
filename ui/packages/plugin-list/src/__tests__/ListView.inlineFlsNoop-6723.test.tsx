@@ -156,11 +156,14 @@ describe('ListView-hosted grid — the #6723 inline-data FLS gate is a no-op her
     const { container } = renderList(listSchema(), DENY_AMOUNT);
 
     await waitFor(() => expect(screen.getByText('Acme expansion')).toBeInTheDocument());
-    const headers = await waitFor(() => {
-      const h = dataHeaders(container);
-      expect(h.length).toBeGreaterThan(0);
-      return h;
-    });
+    // The rows can paint before the object schema arrives. Until it does,
+    // `objectSchema` is null, so the grid answers from the row keys on the
+    // inline-data path (`Id` shown, `Amount` dropped by the #6723 gate). The
+    // first non-empty header set is therefore NOT the mechanism under test:
+    // wait for the object-schema set itself. A grid that stays on the
+    // inline-data path never reaches it, so this wait is what reds that case.
+    await waitFor(() => expect(dataHeaders(container)).toEqual(['Opportunity Name']));
+    const headers = dataHeaders(container);
 
     expect(headers).toContain('Opportunity Name');
     // The pre-existing object-schema gate dropped it.

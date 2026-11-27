@@ -257,10 +257,12 @@ beforeAll(async () => {
   runs.dry = await runCommand(dir, mainDb, ['--json']);
   archivedAfterDry = auditRows(archiveDb);
   hotAfterDry = auditRows(mainDb);
-  runs.apply = await runCommand(dir, mainDb, ['--apply', '--yes', '--json']);
+  // [#31908] sys_audit_log declares lifecycle.seal, and SQLite offers no session lock: an --apply run
+  // needs --sealer-stopped (ADR-0154 D3 amended, B). No server seals this fixture while the command runs.
+  runs.apply = await runCommand(dir, mainDb, ['--apply', '--yes', '--sealer-stopped', '--json']);
   archivedAfterApply = auditRows(archiveDb);
   hotAfterApply = auditRows(mainDb);
-  runs.again = await runCommand(dir, mainDb, ['--apply', '--yes', '--json']);
+  runs.again = await runCommand(dir, mainDb, ['--apply', '--yes', '--sealer-stopped', '--json']);
   archivedAfterAgain = auditRows(archiveDb);
 
   ageDetail = sweep('age');
@@ -271,7 +273,7 @@ beforeAll(async () => {
   runtimeRowDir = mkdtempSync(join(tmpdir(), 'os-24899-runtime-row-'));
   runtimeRowDb = join(runtimeRowDir, 'main.db');
   writeArtifact(runtimeRowDir, []);
-  noArchiveRun = await runCommand(runtimeRowDir, runtimeRowDb, ['--apply', '--yes', '--json']);
+  noArchiveRun = await runCommand(runtimeRowDir, runtimeRowDb, ['--apply', '--yes', '--sealer-stopped', '--json']);
   const db = new Database(runtimeRowDb);
   try {
     db.prepare("INSERT INTO sys_metadata (id, name, type, scope, metadata, state, version) VALUES ('md_24899', 'archive', 'datasource', 'platform', ?, 'active', 1)")
@@ -290,7 +292,7 @@ beforeAll(async () => {
   writeArtifact(unreachableDir, [
     { name: 'archive', driver: 'postgres', config: { host: '127.0.0.1', port: 1, database: 'archive', username: 'os24899' }, autoConnect: true },
   ]);
-  unreachableRun = await runCommand(unreachableDir, join(unreachableDir, 'main.db'), ['--apply', '--yes', '--json']);
+  unreachableRun = await runCommand(unreachableDir, join(unreachableDir, 'main.db'), ['--apply', '--yes', '--sealer-stopped', '--json']);
 }, HOOK_TIMEOUT_MS);
 
 afterAll(() => {

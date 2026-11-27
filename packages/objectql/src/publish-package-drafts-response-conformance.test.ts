@@ -144,6 +144,9 @@ async function makeProtocol() {
     await engine.init();
     engine.registry.registerObject(sysMetadataObject, 'test-package');
     for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) engine.registry.registerObject(o as any, 'test-package');
+    // [#35143] The object the advisory flow's delete node is bound to: the flow
+    // door refuses a CRUD node bound to an object the deployment does not serve.
+    engine.registry.registerObject({ name: 'audit_logs', label: 'Audit logs', fields: { name: { type: 'text', label: 'Name' } } } as any, PKG);
     // The base every draft here is bound to is INSTALLED: a flow may be saved
     // only into a package the registry holds (#20863). Its manifest declares
     // no namespace, so the ADR-0028 prefix pre-flight is unchanged.

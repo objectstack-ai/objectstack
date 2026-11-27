@@ -2,8 +2,9 @@
 
 import type { AIToolDefinition, IKnowledgeService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { KnowledgeHit, KnowledgeSource, ObjectKnowledgeSource } from '@objectstack/spec/ai';
+import type { KnowledgeHit, KnowledgeSource } from '@objectstack/spec/ai';
 import { SEARCH_SCOPE_MAX_ENTRIES, SEARCH_SCOPE_MAX_IDS } from './knowledge-search-scope.js';
+import { packageIdOfItem, resolveSourceRef } from './knowledge-source-registry.js';
 
 /**
  * The knowledge AI tool, `search_knowledge`, defined once with one executor
@@ -28,7 +29,19 @@ import { SEARCH_SCOPE_MAX_ENTRIES, SEARCH_SCOPE_MAX_IDS } from './knowledge-sear
  * sources whose `aiExposed` is not `false`, and a `sourceIds` entry naming
  * any other id, an unexposed source included, is refused `NOT_FOUND` with the
  * same sentence an unknown id gets, so the refusal never tells an agent that a
- * withheld source exists. `IKnowledgeService.search` itself keeps searching
+ * withheld source exists. A `sourceIds` entry is read among the exposed
+ * sources only, for the same reason.
+ *
+ * ## How a source is named (ADR-0150 D6, addendum of 2026-11-25)
+ *
+ * An answer names a source by its **face**: `NAMESPACE-NAME` for a source a
+ * package ships, the bare name for one no package holds. `sources[].id` and a
+ * hit's `sourceId` carry it, and `sourceIds` takes it. A `sourceIds` entry is
+ * read by one rule (`resolveSourceRef`): a face answers its one source, else
+ * a bare name answers the source no package holds, else the one package's
+ * source of that name; a name two packages' sources share is refused
+ * `409 RESOURCE_CONFLICT`, naming each by its face. A hit's `documentId` is
+ * the stored document's id, opaque. `IKnowledgeService.search` itself keeps searching
  * an explicitly named source whatever its `aiExposed`: that service also
  * serves the platform's own callers, which are not agents, and `aiExposed`
  * governs what the AGENT tool may expose.
@@ -50,9 +63,8 @@ import { SEARCH_SCOPE_MAX_ENTRIES, SEARCH_SCOPE_MAX_IDS } from './knowledge-sear
  * ## No second gate, none bypassed (ADR-0090 D10)
  *
  * Every call reaches data only through `IKnowledgeService.search` with the
- * caller's `ExecutionContext`, which re-checks each object-source hit against
- * the caller's row-level security and drops object-source hits when no
- * identity is passed. The executor adds no permission of its own and removes
+ * caller's `ExecutionContext`, which re-checks each hit against the caller's
+ * row-level security and serves no hit when no identity is passed. The executor adds no permission of its own and removes
  * none: a delegated agent's context reads what its delegating person reads.
  */
 
@@ -107,6 +119,7 @@ export interface SearchKnowledgeInput {
 
 /** One searchable source, as a `search_knowledge` answer names it. */
 export interface SearchKnowledgeSourceSummary {
+  /** The source's face: `NAMESPACE-NAME` for a package's source, the bare name otherwise. */
   id: string;
   label: string;
   description?: string;
@@ -114,9 +127,9 @@ export interface SearchKnowledgeSourceSummary {
 
 /** One hit of a `search_knowledge` answer. */
 export interface SearchKnowledgeHit {
-  /** The source the hit came from. */
+  /** The source the hit came from, as `sources` lists it. */
   sourceId: string;
-  /** The document the hit is part of. */
+  /** The document the hit is part of: the stored document's id, opaque. */
   documentId: string;
   /** The document's title, where the source gives one. */
   title?: string;
@@ -124,15 +137,14 @@ export interface SearchKnowledgeHit {
   snippet: string;
   /** Relevance, higher is better. */
   score: number;
-  /** The record the passage was indexed from, for an object source: read it with the record tools. */
+  /** The record the passage was indexed from: read it with the record tools. */
   record?: { object: string; id: string };
   /** The headings the passage sits under, outermost first, where its document has headings. */
   headingPath?: string[];
   /**
    * Under `groupBy`: the value of that field the hit's record holds — the
    * group the hit stands for — as the index stores it (a string, a number, a
-   * list for a `multiple` lookup). Absent on a hit of a `file` / `http`
-   * source, which answers under `groupBy` one hit per document.
+   * list for a `multiple` lookup).
    */
   groupValue?: unknown;
 }
@@ -178,7 +190,8 @@ export interface KnowledgeTools {
    * Run one `search_knowledge` call AS `context`. Refuses, by throwing an
    * ADR-0112 coded error (`code` and `status`), malformed arguments
    * (`VALIDATION_ERROR`, 400, naming the argument) and a `sourceIds` entry
-   * that names no source this tool may search (`NOT_FOUND`, 404). A caller's
+   * that names no source this tool may search (`NOT_FOUND`, 404) or more than
+   * one (`RESOURCE_CONFLICT`, 409). A caller's
    * string a refusal repeats is quoted and cut to 64 characters.
    */
   searchKnowledge(input: unknown, context?: ExecutionContext): Promise<SearchKnowledgeOutput>;
@@ -201,9 +214,8 @@ const SEARCH_KNOWLEDGE_DESCRIPTION =
   + '`granularity: "record"`: one hit per record, its best passage, and `topK` counts records. To group by a '
   + 'field the source indexes with its passages instead (one hit per policy for a search over clauses, say), send '
   + '`groupBy` with that field\'s name: one hit per value, which the hit carries as `groupValue` (the value as the '
-  + 'index stores it: a string, a number or a list). A source of indexed records that does not index that field '
-  + 'answers nothing for that search; a file or web source still answers, one hit per document and with no '
-  + '`groupValue`. To look inside records you already know (one '
+  + 'index stores it: a string, a number or a list). A source that does not index that field '
+  + 'answers nothing for that search. To look inside records you already know (one '
   + 'policy, say), send `scope`: a list of `{ object, ids }` entries, at most '
   + `${SEARCH_KNOWLEDGE_MAX_SCOPE_ENTRIES} entries of at most ${SEARCH_KNOWLEDGE_MAX_SCOPE_IDS} ids. An entry naming `
   + 'the object a source indexes searches those records\' passages; an entry naming a parent object searches the '
@@ -430,14 +442,40 @@ function parseInput(input: unknown): SearchKnowledgeInput {
   return parsed;
 }
 
-/** The sources `search_knowledge` may search: every registered source whose `aiExposed` is not `false`. */
-function searchableSources(service: IKnowledgeService): KnowledgeSource[] {
-  return service.listSources().filter((source) => source.aiExposed !== false);
+/** A source with the face an answer names it by. */
+interface NamedSource {
+  id: string;
+  source: KnowledgeSource;
+  packageId?: string;
 }
 
-function summarize(source: KnowledgeSource): SearchKnowledgeSourceSummary {
+/** A knowledge service that answers each source with its face (`KnowledgeService.describeSources`). */
+interface SourceDescribingService {
+  describeSources(): NamedSource[];
+}
+
+function describesSources(service: IKnowledgeService): service is IKnowledgeService & SourceDescribingService {
+  return typeof (service as Partial<SourceDescribingService>).describeSources === 'function';
+}
+
+/**
+ * The sources `search_knowledge` may search: every registered source whose
+ * `aiExposed` is not `false`, each with its face. A service that does not
+ * describe its sources is one whose sources are named by their bare names.
+ */
+function searchableSources(service: IKnowledgeService): NamedSource[] {
+  const named: NamedSource[] = describesSources(service)
+    ? service.describeSources().map(({ id, source, packageId }) => ({ id, source, ...(packageId === undefined ? {} : { packageId }) }))
+    : service.listSources().map((source) => {
+      const packageId = packageIdOfItem(source);
+      return { id: source.name, source, ...(packageId === undefined ? {} : { packageId }) };
+    });
+  return named.filter(({ source }) => source.aiExposed !== false);
+}
+
+function summarize({ id, source }: NamedSource): SearchKnowledgeSourceSummary {
   return {
-    id: source.id,
+    id,
     label: source.label,
     ...(source.description ? { description: source.description } : {}),
   };
@@ -448,7 +486,7 @@ function summarize(source: KnowledgeSource): SearchKnowledgeSourceSummary {
  * else of the service's hit reaches the agent — not its `chunkId`, not the
  * stored `docHash` the record-level freshness check compares, and not its
  * `metadata`, of which only the `groupBy` field's value is answered, and only
- * for an object source that lists that field (source admission holds every
+ * for a source that lists that field (source admission holds every
  * listed field queryable by the caller, ADR-0161 K8).
  */
 function hitOf(
@@ -456,8 +494,7 @@ function hitOf(
   sources: ReadonlyMap<string, KnowledgeSource>,
   groupBy: string | undefined,
 ): SearchKnowledgeHit {
-  const source = sources.get(hit.sourceId);
-  const objSource = source?.source.kind === 'object' ? (source.source as ObjectKnowledgeSource) : undefined;
+  const objSource = sources.get(hit.sourceId)?.source;
   const object = objSource?.object;
   const headingPath = Array.isArray(hit.headingPath) && hit.headingPath.every((h) => typeof h === 'string')
     ? [...hit.headingPath]
@@ -502,10 +539,17 @@ export function createKnowledgeTools(service: IKnowledgeService | (() => IKnowle
       const { query, sourceIds, topK, scope, granularity, groupBy } = parseInput(input);
       const knowledge = resolve();
       const searchable = searchableSources(knowledge);
-      const byId = new Map(searchable.map((source) => [source.id, source] as const));
+      const byId = new Map(searchable.map((named) => [named.id, named.source] as const));
       const summaries = searchable.map(summarize);
+      let named: string[] | undefined;
       if (sourceIds) {
-        const unknown = sourceIds.filter((id) => !byId.has(id));
+        // Each entry read among the exposed sources, by the one rule: a name
+        // several of them have is refused 409 by `resolveSourceRef`.
+        const resolved = sourceIds.map((id) =>
+          resolveSourceRef(searchable, id, (s) => ({ face: s.id, name: s.source.name, packageId: s.packageId })),
+        );
+        named = [...new Set(resolved.filter((s): s is NamedSource => s !== undefined).map((s) => s.id))];
+        const unknown = sourceIds.filter((_id, index) => resolved[index] === undefined);
         if (unknown.length > 0) {
           throw refusal(
             'NOT_FOUND',
@@ -517,7 +561,7 @@ export function createKnowledgeTools(service: IKnowledgeService | (() => IKnowle
           );
         }
       }
-      const targets = sourceIds ?? [...byId.keys()];
+      const targets = named ?? [...byId.keys()];
       if (targets.length === 0) return { hits: [], sources: summaries };
       // [ADR-0090 D10] As the caller: the service re-checks every object-source
       // hit against this context's row-level security.

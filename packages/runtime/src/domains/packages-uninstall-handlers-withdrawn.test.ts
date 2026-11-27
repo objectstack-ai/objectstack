@@ -172,7 +172,12 @@ const holdersOf = (name: string) => ql.listRegisteredActions()
 
 /** An authored package: installed through `POST /packages`, an action and a body hook saved under it through the metadata door. */
 async function authorPackage(id: string, by: string) {
-    const installed = await http('POST', '/packages', { manifest: { id, name: id.replace(/\./g, '_'), version: '1.0.0', type: 'app', namespace: `qauh${by}` } });
+    // The action binds `TICKET`, which the host package owns, so the authored
+    // package declares the host: the publish gate refuses an action bound to an
+    // object outside the package's closure (#35143), as it refuses a flow.
+    const installed = await http('POST', '/packages', {
+        manifest: { id, name: id.replace(/\./g, '_'), version: '1.0.0', type: 'app', namespace: `qauh${by}`, dependencies: { [HOST]: '*' } },
+    });
     expect(installed.status, JSON.stringify(installed.body)).toBe(201);
     const savedAction = await http('PUT', `/meta/action/qa_uh_run_${by}`, action(`qa_uh_run_${by}`, by), { package: id });
     expect(savedAction.status, JSON.stringify(savedAction.body)).toBe(200);

@@ -1,5 +1,29 @@
 # @object-ui/collaboration
 
+## 19.0.0-next.1
+
+### Patch Changes
+
+- Updated dependencies [81c68b3]
+- Updated dependencies [f722411]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [adb65d1]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [4e10d4b]
+- Updated dependencies [4111380]
+- Updated dependencies [712df42]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [3eb778d]
+- Updated dependencies [6e8f663]
+- Updated dependencies [2980483]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e50ab8f]
+- Updated dependencies [21ad7c5]
+- Updated dependencies [d1139f9]
+  - @object-ui/i18n@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Patch Changes

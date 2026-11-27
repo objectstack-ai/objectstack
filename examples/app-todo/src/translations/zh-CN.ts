@@ -12,6 +12,10 @@ type TaskTranslation = StrictObjectTranslation<typeof Task>;
  * Per-locale file: one file per language, following the `per_locale` convention.
  */
 export const zhCN: TranslationData = {
+  // The package's own name, keyed by its manifest id (objectstack#35513).
+  packages: {
+    'com.example.todo': { name: '待办管理', description: '一个全面的待办应用，演示 ObjectStack 协议的自动化、仪表盘与报表等特性' },
+  },
   objects: {
     todo_task: {
       label: '任务',

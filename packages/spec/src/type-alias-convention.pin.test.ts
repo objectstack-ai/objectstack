@@ -76,7 +76,6 @@ type Assert<T extends true> = T;
 
 import type * as M0 from './ai/agent.zod.js';
 import type * as M1 from './ai/conversation.zod.js';
-import type * as M2 from './ai/embedding.zod.js';
 import type * as M3 from './ai/knowledge-document.zod.js';
 import type * as M4 from './ai/knowledge-source.zod.js';
 import type * as M5 from './ai/mcp.zod.js';
@@ -306,7 +305,7 @@ import type * as M205 from './ai/object-query-source.zod.js';
 import type * as M207 from './api/ai-answer.zod.js';
 
 // ---------------------------------------------------------------------------
-// 887 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 881 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -399,10 +398,6 @@ export type Iso_ai_datasetTools__QueryDatasetOutputSchema = Assert<Eq< z.input< 
 // ai/object-query-source.zod.ts -- plain objects, enums, literals and the filter tree, no default and no transform
 export type Iso_ai_objectQuerySource__ObjectQuerySourceSchema = Assert<Eq< z.input< typeof M205.ObjectQuerySourceSchema >, z.infer< typeof M205.ObjectQuerySourceSchema > >>;
 
-// ai/embedding.zod.ts
-export type Iso_ai_embedding__EmbeddingModelSchema = Assert<Eq< z.input< typeof M2.EmbeddingModelSchema >, z.infer< typeof M2.EmbeddingModelSchema > >>;
-export type Iso_ai_embedding__VectorStoreProviderSchema = Assert<Eq< z.input< typeof M2.VectorStoreProviderSchema >, z.infer< typeof M2.VectorStoreProviderSchema > >>;
-export type Iso_ai_embedding__VectorStoreSchema = Assert<Eq< z.input< typeof M2.VectorStoreSchema >, z.infer< typeof M2.VectorStoreSchema > >>;
 
 // ai/knowledge-document.zod.ts
 export type Iso_ai_knowledgeDocument__KnowledgeChunkSchema = Assert<Eq< z.input< typeof M3.KnowledgeChunkSchema >, z.infer< typeof M3.KnowledgeChunkSchema > >>;
@@ -410,9 +405,6 @@ export type Iso_ai_knowledgeDocument__KnowledgeDocumentSchema = Assert<Eq< z.inp
 export type Iso_ai_knowledgeDocument__KnowledgeHitSchema = Assert<Eq< z.input< typeof M3.KnowledgeHitSchema >, z.infer< typeof M3.KnowledgeHitSchema > >>;
 
 // ai/knowledge-source.zod.ts
-export type Iso_ai_knowledgeSource__FileKnowledgeSourceSchema = Assert<Eq< z.input< typeof M4.FileKnowledgeSourceSchema >, z.infer< typeof M4.FileKnowledgeSourceSchema > >>;
-export type Iso_ai_knowledgeSource__HttpKnowledgeSourceSchema = Assert<Eq< z.input< typeof M4.HttpKnowledgeSourceSchema >, z.infer< typeof M4.HttpKnowledgeSourceSchema > >>;
-export type Iso_ai_knowledgeSource__KnowledgeSourceKindSchema = Assert<Eq< z.input< typeof M4.KnowledgeSourceKindSchema >, z.infer< typeof M4.KnowledgeSourceKindSchema > >>;
 export type Iso_ai_knowledgeSource__ObjectKnowledgeSourceSchema = Assert<Eq< z.input< typeof M4.ObjectKnowledgeSourceSchema >, z.infer< typeof M4.ObjectKnowledgeSourceSchema > >>;
 
 // ai/mcp.zod.ts
@@ -1866,7 +1858,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 887 isomorphic pins', () => {
+  it('still declares all 881 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2991,7 +2983,14 @@ describe('ADR-0122 type-alias convention', () => {
     // (`ActionSchema`), both of which carry defaults, so the response gained a
     // parsed shape and takes `GetMetaTypesResponseParsed` instead
     // (Iso_api_protocol__GetMetaTypesResponseSchema removed). -1.
-    expect(pins).toHaveLength(887);
+    // 887 -> 881 is #37304 (ADR-0161 K4, K6): the knowledge source's `file`
+    // and `http` kinds leave with the union they sat in
+    // (Iso_ai_knowledgeSource__FileKnowledgeSourceSchema,
+    // __HttpKnowledgeSourceSchema, __KnowledgeSourceKindSchema), and
+    // `ai/embedding.zod.ts` leaves whole, its only composer having been the
+    // removed `embedding` and `vectorStore` keys (Iso_ai_embedding__*, three
+    // pins; RETIRED_DEFS_BY_MAJOR[19]). -6.
+    expect(pins).toHaveLength(881);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

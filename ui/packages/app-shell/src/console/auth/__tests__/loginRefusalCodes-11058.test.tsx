@@ -76,7 +76,12 @@ async function submitRefused(
   config?: unknown,
   extra?: Record<string, unknown>,
 ): Promise<string> {
-  const client = createAuthClient({ baseURL: AUTH_URL, fetchFn: refusingServer(status, code, message, config, extra) });
+  return submitAgainst(refusingServer(status, code, message, config, extra));
+}
+
+/** Submit the zh form against `fetchFn`; return the banner text. */
+async function submitAgainst(fetchFn: typeof fetch): Promise<string> {
+  const client = createAuthClient({ baseURL: AUTH_URL, fetchFn });
   render(
     <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }} persistLanguage={false}>
       <AuthProvider authUrl={AUTH_URL} client={client}>
@@ -188,5 +193,48 @@ describe('DefaultLoginPage — a SCIM-deactivated sign-in is not shown as a ban 
   it('CONTROL: an administrator\'s ban (no details) keeps the ban wording', async () => {
     const text = await submitRefused(403, 'BANNED_USER', BAN_MESSAGE);
     expect(text).toBe(BAN_MESSAGE);
+  });
+});
+
+// objectstack#34171 — a cloud-managed runtime refuses the password sign-in with
+// 409 `RESOURCE_CONFLICT` in the ADR-0112 envelope, `{ success: false, error:
+// { code, message } }` (plugin-auth `cloudManagedRefusal`, and the hosted relay
+// in front of it), not in better-auth's flat body. The whole read path runs:
+// `createAuthClient` reads the envelope's code, `LoginForm` looks it up in this
+// package's map, and the page shows the zh sentence that points at the
+// identity provider's button, never the server's English sentence or the
+// client's status line.
+describe('DefaultLoginPage — a cloud-managed password refusal is localized (objectstack#34171)', () => {
+  const HOSTED_SENTENCE =
+    'This environment is hosted: everyone signs in through the cloud, with their own cloud account, and no local password '
+    + 'is kept here for anyone. Sign in with ObjectOS Cloud. No password was set or accepted.';
+
+  function envelopeServer(status: number, code: string, message: string): typeof fetch {
+    const json = (s: number, body: unknown) =>
+      new Response(JSON.stringify(body), { status: s, headers: { 'Content-Type': 'application/json' } });
+    return (async (input: string | URL | Request) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/sign-in/email')) return json(status, { success: false, error: { code, message } });
+      if (url.endsWith('/config')) return json(200, {});
+      return json(200, null);
+    }) as typeof fetch;
+  }
+
+  it('the zh pack translates the managed sign-in sentence', () => {
+    expect(zhErrors.managedPasswordSignIn).toBeTruthy();
+    expect(zhErrors.managedPasswordSignIn).not.toBe(enErrors.managedPasswordSignIn);
+  });
+
+  it('409 RESOURCE_CONFLICT in the envelope shows the localized sentence, not the server or status text', async () => {
+    const text = await submitAgainst(envelopeServer(409, 'RESOURCE_CONFLICT', HOSTED_SENTENCE));
+    expect(text).toBe(zhErrors.managedPasswordSignIn);
+    expect(screen.queryByText(HOSTED_SENTENCE)).toBeNull();
+    expect(screen.queryByText(/Auth request failed/)).toBeNull();
+  });
+
+  it('CONTROL: another code in the envelope still shows its own server message', async () => {
+    const raw = 'The server refused this sign-in for a reason the page has no text for.';
+    const text = await submitAgainst(envelopeServer(400, 'UNMAPPED_REFUSAL_FOR_TEST', raw));
+    expect(text).toBe(raw);
   });
 });

@@ -1069,7 +1069,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonly: {
         label: "Lecture seule dans l'interface",
-        helpText: "Personne ne peut modifier ce champ à la main dans la console (boîtes de dialogue, page de l'enregistrement, grilles, glisser-déposer du kanban et du calendrier), tandis que les actions, les imports, l'API et les flux continuent de l'écrire, chaque écriture étant jugée par les validations de l'objet. Laissez-le désactivé lorsque Lecture seule est activé : celui-ci bloque déjà toute écriture client."
+        helpText: "Personne ne peut modifier ce champ à la main dans la console (boîtes de dialogue, page de l'enregistrement, grilles, glisser-déposer du kanban, du calendrier et du Gantt, la feuille de temps), tandis que les actions, les imports, l'API et les flux continuent de l'écrire, chaque écriture étant jugée par les validations de l'objet. Laissez-le désactivé lorsque Lecture seule est activé : celui-ci bloque déjà toute écriture client. L’assistant intégré qui agit pour le compte d’une personne ne le respecte pas encore."
       },
       hidden: {
         label: "Masqué",
@@ -1097,7 +1097,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonlyWhen: {
         label: "Lecture seule dans l'interface si",
-        helpText: "Prédicat CEL sur l'enregistrement (p. ex. record.status != 'draft') : tant qu'il vaut TRUE, personne ne peut modifier le champ d'un enregistrement existant dans la console (la boîte d'édition, la page de l'enregistrement, les grilles, le glisser-déposer du kanban et du calendrier) ; la boîte de création d'un nouvel enregistrement ne l'évalue pas. Les actions, les imports, l'API et les flux continuent de l'écrire, jugés par les validations de l'objet. Lit les colonnes propres de l'enregistrement, comme Lecture seule si."
+        helpText: "Prédicat CEL sur l'enregistrement (p. ex. record.status != 'draft') : tant qu'il vaut TRUE, personne ne peut modifier le champ d'un enregistrement existant dans la console (la boîte d'édition, la page de l'enregistrement, les grilles, le glisser-déposer du kanban, du calendrier et du Gantt, la feuille de temps) ; la boîte de création d'un nouvel enregistrement ne l'évalue pas. Les actions, les imports, l'API et les flux continuent de l'écrire, jugés par les validations de l'objet. Lit les colonnes propres de l'enregistrement, comme Lecture seule si. L’assistant intégré qui agit pour le compte d’une personne ne le respecte pas encore."
       },
       requiredWhen: {
         label: "Obligatoire si",
@@ -1661,7 +1661,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       requiredPermissions: {
         label: "Required Permissions",
-        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this view either."
+        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you no longer see this view in the list either."
       },
       object: {
         label: "Objet"
@@ -3488,5 +3488,8 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "A long-text field of the root object (textarea, markdown, html, richtext). Any other field is reported when the pack is saved, and the pack then carries no body."
       }
     }
+  },
+  knowledge_source: {
+    label: "Source de connaissances"
   }
 };

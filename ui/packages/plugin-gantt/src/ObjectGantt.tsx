@@ -39,6 +39,7 @@ import {
   useDataInvalidation,
   useFilterScope,
   useResolvedFilter,
+  usePredicateScope,
   classifyLoadError,
 } from '@object-ui/react';
 import { useLocalization, useDisplayLocale, resolveFieldCurrency, formatDisplayNumber } from '@object-ui/i18n';
@@ -48,6 +49,7 @@ import {
   deriveRecordPageHref,
 } from '@object-ui/plugin-detail';
 import { usePermissions } from '@object-ui/permissions';
+import { ganttHandLockedInteractions, ganttPatchByHand, type GanttLockDefs } from './ganttHandLock';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -2106,6 +2108,19 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
     return () => { cancelled = true; };
   }, [drawerRec, recordDetailHref, resource, dataSource]);
 
+  // The host's predicate scope, as the edit dialog binds it: the hand lock's
+  // conditional half is judged with it (objectstack#37448).
+  const predicateScope = usePredicateScope();
+
+  // A write the field hand lock refuses (`ganttPatchByHand`): nothing is sent,
+  // a fresh array identity redraws every bar from the unchanged rows, and the
+  // toast says why — the in-place editor closed on Enter, so a silent snap-back
+  // would read as a lost edit.
+  const refuseLockedWrite = useCallback(() => {
+    setData((prev) => prev.slice());
+    toast.error(t('gantt.writeFailed'), { description: t('grid.readOnlyReason.readonly') });
+  }, [t]);
+
   // Persist a drag-driven reschedule back to the data source. Mirrors
   // ObjectCalendar.handleEventDropDefault: optimistic local patch, then
   // dataSource.update; on failure we revert and log.
@@ -2131,6 +2146,18 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
       if (typeof changes.progress === 'number' && progressField) patch[progressField] = changes.progress;
       if (Object.keys(patch).length === 0) return;
 
+      // Every commit path lands here — drag, resize, progress, the in-place
+      // editor, auto-schedule, the conflict reschedule, undo and redo — so the
+      // field hand lock is judged here, over the stored record: a locked field
+      // the write changes refuses it, one it only echoes is left out of it.
+      const verdict = ganttPatchByHand(patch, stored, objectSchema?.fields as GanttLockDefs, predicateScope);
+      if (verdict.kind === 'refused') {
+        refuseLockedWrite();
+        return;
+      }
+      for (const key of Object.keys(patch)) if (!(key in verdict.patch)) delete patch[key];
+      if (Object.keys(patch).length === 0) return;
+
       const recordId = (task as any).data?.id ?? (task as any).data?._id ?? task.id;
       if (recordId == null) return;
 
@@ -2154,7 +2181,7 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
         notifyWriteError(err);
       }
     },
-    [ganttConfig, effectiveDataSource, resource, data, reload, notifyWriteError, objectSchema],
+    [ganttConfig, effectiveDataSource, resource, data, reload, notifyWriteError, objectSchema, predicateScope, refuseLockedWrite],
   );
 
   // Re-serialize a normalized dependency list back onto a record field,
@@ -2183,6 +2210,13 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
       if (!depField) return;
       if (!effectiveDataSource || typeof effectiveDataSource.update !== 'function') return;
       const nextValue = serializeDependencies(raw, nextDeps);
+      // A link is an edit by hand of the TARGET's dependencies field: its
+      // hand lock over that record refuses it (`ganttPatchByHand`).
+      const target = data.find((r) => String(r.id ?? r._id) === String(targetId)) ?? {};
+      if (ganttPatchByHand({ [depField]: nextValue }, target, objectSchema?.fields as GanttLockDefs, predicateScope).kind === 'refused') {
+        refuseLockedWrite();
+        return;
+      }
       const prevSnapshot = data;
       setData((prev) =>
         prev.map((r) =>
@@ -2198,7 +2232,7 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
         notifyWriteError(err);
       }
     },
-    [ganttConfig, effectiveDataSource, resource, data, reload, notifyWriteError],
+    [ganttConfig, effectiveDataSource, resource, data, reload, notifyWriteError, objectSchema, predicateScope, refuseLockedWrite],
   );
 
   // Persist a created/updated dependency (create + link type): upsert the source
@@ -2586,7 +2620,14 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
           groupBy={groupByAccessor}
           defaultCollapsedDepth={ganttConfig?.defaultCollapsedDepth}
           summaryExtent={ganttConfig?.summaryExtent}
-          interactions={ganttConfig?.interactions}
+          // The static hand lock closes a gesture that can only write a field
+          // locked on every record (objectstack#37448); the rest is judged on
+          // the write, per record.
+          interactions={ganttHandLockedInteractions(
+            ganttConfig?.interactions,
+            objectSchema?.fields as GanttLockDefs,
+            ganttConfig,
+          )}
           dependencyTypes={ganttConfig?.dependencyTypes}
           timeZone={ganttConfig?.timeZone}
           onBeforeTaskUpdate={onBeforeTaskUpdate}

@@ -67,6 +67,17 @@ describe('ADMIN_FULL_ACCESS_CAPABILITIES — the one platform-admin list plugin-
     expect(PLATFORM_CAPABILITIES.find((c) => c.name === 'manage_connector_connections')?.scope).toBe('org');
   });
 
+  it('carries the knowledge source capability, declared platform-scoped (ADR-0161 K4, ruling Q2 = B)', () => {
+    // Asked beside `manage_metadata` at every door that saves a
+    // `knowledge_source`. Platform administrators hold it by default through
+    // this grant and no other shipped set does: the holder list is pinned by
+    // the `[ADR-0161 K4] the knowledge source capability ships with the
+    // platform administrator and no other set` case in plugin-security's
+    // `default-permission-sets.test.ts`.
+    expect(ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions).toContain('manage_knowledge_sources');
+    expect(PLATFORM_CAPABILITIES.find((c) => c.name === 'manage_knowledge_sources')?.scope).toBe('platform');
+  });
+
   it('every granted system permission is a declared built-in capability (ADR-0066 registry)', () => {
     const unknown = (ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions ?? []).filter(
       (name) => !PLATFORM_CAPABILITY_NAMES.has(name),

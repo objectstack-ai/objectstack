@@ -1025,6 +1025,15 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       //     them. A real read: the enumeration changes if the mask does.
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
+      //   src/validate-action-body-capabilities.test.ts (#35143) READS the
+      //     sandbox runner's source and pins the rule's write-method set to its
+      //     `WRITE` list, so a method the runner starts gating on `api.write`
+      //     turns this suite red instead of leaving the rule a method short.
+      'packages/runtime/src/sandbox/quickjs-runner.ts',
+      //   src/validate-seed-record-keys.test.ts (#35143) READS the engine's
+      //     `PLATFORM_PROVISIONED_COLUMNS` and pins the rule's mirror of it, so
+      //     a column the engine starts provisioning turns this suite red.
+      'packages/objectql/src/declared-read-columns.ts',
     ],
     heldBy: {
       // `const commandsDir = join(repoRoot, 'packages/cli/src/commands')`
@@ -1443,8 +1452,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     //
     // test/score/entry.test.ts reads ADR-0150 D1's bucket-1 and position rows,
     // the table the bare-name check restates, so an edit to that table does too.
+    //
+    // test/verified-builds.test.ts pins each verified build under
+    // docs/qa/scenarios/builds/ to its provenance and to its card's sha256
+    // (#34920), so a build, provenance or card edit moves its verdict.
     globs: [
       'docs/qa/scenarios/*.json',
+      'docs/qa/scenarios/builds/*.json',
       'docs/qa/platform-checklist/areas/*.json',
       'packages/cli/src/lint/corpus.ts',
       'docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md',
@@ -1456,6 +1470,8 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
         'packages/qa/scenarios/test/library.test.ts',
         'packages/qa/scenarios/test/refusals.test.ts',
       ],
+      // The builds directory is listed the same way, to pair each build with its card.
+      'docs/qa/scenarios/builds/*.json': ['packages/qa/scenarios/test/verified-builds.test.ts'],
     },
   },
   '@objectstack/formula': {

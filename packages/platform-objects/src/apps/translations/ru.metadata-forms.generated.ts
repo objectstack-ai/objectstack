@@ -1069,7 +1069,7 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonly: {
         label: "Только для чтения в интерфейсе",
-        helpText: "Никто не может изменить это поле вручную в консоли (диалоги, страница записи, таблицы, перетаскивание в канбане и календаре), а действия, импорт, API и потоки продолжают записывать его, и каждая запись проверяется правилами проверки объекта. Оставьте выключенным, если включено «Только для чтения»: оно уже запрещает любую запись клиентом."
+        helpText: "Никто не может изменить это поле вручную в консоли (диалоги, страница записи, таблицы, перетаскивание в канбане, календаре и на диаграмме Ганта, табель), а действия, импорт, API и потоки продолжают записывать его, и каждая запись проверяется правилами проверки объекта. Оставьте выключенным, если включено «Только для чтения»: оно уже запрещает любую запись клиентом. Встроенный ассистент, действующий от имени человека, пока его не учитывает."
       },
       hidden: {
         label: "Скрытое",
@@ -1097,7 +1097,7 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonlyWhen: {
         label: "Только для чтения в интерфейсе, когда",
-        helpText: "Предикат CEL над записью (например, record.status != 'draft') — пока он TRUE, никто не может изменить поле существующей записи в консоли (диалог редактирования, страница записи, таблицы, перетаскивание в канбане и календаре); диалог создания новой записи его не оценивает. Действия, импорт, API и потоки по-прежнему записывают его, и каждую запись оценивают проверки объекта. Читает собственные столбцы записи, как «Только чтение, если»."
+        helpText: "Предикат CEL над записью (например, record.status != 'draft') — пока он TRUE, никто не может изменить поле существующей записи в консоли (диалог редактирования, страница записи, таблицы, перетаскивание в канбане, календаре и на диаграмме Ганта, табель); диалог создания новой записи его не оценивает. Действия, импорт, API и потоки по-прежнему записывают его, и каждую запись оценивают проверки объекта. Читает собственные столбцы записи, как «Только чтение, если». Встроенный ассистент, действующий от имени человека, пока его не учитывает."
       },
       requiredWhen: {
         label: "Обязательно, когда",
@@ -1661,7 +1661,7 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       requiredPermissions: {
         label: "Required Permissions",
-        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this view either."
+        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you no longer see this view in the list either."
       },
       object: {
         label: "Объект"
@@ -3488,5 +3488,8 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "A long-text field of the root object (textarea, markdown, html, richtext). Any other field is reported when the pack is saved, and the pack then carries no body."
       }
     }
+  },
+  knowledge_source: {
+    label: "Источник знаний"
   }
 };

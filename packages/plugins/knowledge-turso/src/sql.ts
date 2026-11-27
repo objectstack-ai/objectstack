@@ -9,9 +9,10 @@
  */
 
 /**
- * A source id this module puts into a table name: the spec's snake_case
- * source id (`KnowledgeSource.id`), the spec's own pattern. Anything else is
- * refused before it reaches a string.
+ * A source's index key this module puts into a table name: the string the
+ * knowledge service hands over as `ctx.source.name` (a source's snake_case
+ * name, or the service's spelling of a package's source — the same
+ * alphabet). Anything else is refused before it reaches a string.
  */
 export const SAFE_SOURCE_ID = /^[a-z_][a-z0-9_]*$/;
 

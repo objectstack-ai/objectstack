@@ -298,9 +298,11 @@ const ctx = (activeOrganizationId?: string): any => ({
     // [#21124] `manage_platform_settings` too: the URL-contract case below drives
     // every registered type, and a `datasource` write is admitted only with it
     // (`metaTypeWriteRefusal`, the type-level write admission).
+    // [ADR-0161 K4] `manage_knowledge_sources` for the same reason: a
+    // `knowledge_source` write asks it.
     executionContext: {
         userId: 'usr_1',
-        systemPermissions: ['manage_metadata', 'manage_platform_settings'],
+        systemPermissions: ['manage_metadata', 'manage_platform_settings', 'manage_knowledge_sources'],
         ...(activeOrganizationId ? { tenantId: activeOrganizationId } : {}),
     },
 });

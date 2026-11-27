@@ -93,6 +93,7 @@ import {
 import { isNonCanonicalStoredType } from './protocol-stored-overlay-types.js';
 import type { RollbackMetaItemRequest } from './protocol-door-requests.js';
 import { historySlotOf, refusePackageSelectorOutsideSlottedTypes } from './protocol-history-slots.js';
+import { packagelessHolderRefusal } from './protocol-save.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { ImportUnmanagedPackageAnswer, InstallPackageStoredRowHook, StoredPackageRow } from './protocol-package-install.js';
@@ -2298,6 +2299,23 @@ export class ProtocolPackageCommitsFacet {
                 'rollback',
             );
             if (namedBase) throw namedBase;
+        }
+        // [ADR-0150 D3, the 2026-11-26 note] A rollback naming no package
+        // that restores the package-unbound row of a name only disabled
+        // packages hold rewrote their customization, hidden with them, so the
+        // next enable served the restored body. It asks the judgment the
+        // save and the delete ask ({@link packagelessHolderRefusal}, its
+        // disabled-holders judgment only), after the D11 close above, and is
+        // refused with the enable as the remedy, nothing written.
+        if (request.packageId === undefined && rollbackPackageId === null) {
+            const active = await host.packagelessAddress(singularType, request.name, member, 'active');
+            if (active.unbound) {
+                const holderRefusal = packagelessHolderRefusal(
+                    host, 'rollback', request.type, singularType, request.name, member,
+                    { candidates: active.candidates, unbound: true }, 'disabled-holders',
+                );
+                if (holderRefusal) throw holderRefusal;
+            }
         }
         // [ADR-0146 D2] A rollback of the base's paired `.custom` row is the
         // pair's declared override, as its save is: it edits no managed item,

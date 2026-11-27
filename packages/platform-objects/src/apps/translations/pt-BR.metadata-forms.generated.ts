@@ -1069,7 +1069,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       uiReadonly: {
         label: "Somente leitura na interface",
-        helpText: "Ninguém pode editar este campo manualmente no console (diálogos, página do registro, grades, arrastar no kanban e no calendário), enquanto ações, importações, a API e fluxos continuam gravando-o, cada gravação julgada pelas validações do objeto. Deixe desativado quando Somente leitura estiver ativado: ele já bloqueia toda gravação do cliente."
+        helpText: "Ninguém pode editar este campo manualmente no console (diálogos, página do registro, grades, arrastar no kanban, no calendário e no Gantt, a folha de horas), enquanto ações, importações, a API e fluxos continuam gravando-o, cada gravação julgada pelas validações do objeto. Deixe desativado quando Somente leitura estiver ativado: ele já bloqueia toda gravação do cliente. O assistente do aplicativo que age em nome de uma pessoa ainda não o respeita."
       },
       hidden: {
         label: "Oculto",
@@ -1097,7 +1097,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       uiReadonlyWhen: {
         label: "Somente leitura na interface quando",
-        helpText: "Predicado CEL sobre o registro (ex.: record.status != 'draft') — enquanto for TRUE, ninguém pode editar o campo de um registro existente no console (a caixa de edição, a página do registro, as grades e o arrastar no kanban e no calendário); a caixa de criação de um novo registro não o avalia. Ações, importações, a API e os fluxos continuam gravando-o, julgados pelas validações do objeto. Lê as colunas do próprio registro, como Somente leitura quando."
+        helpText: "Predicado CEL sobre o registro (ex.: record.status != 'draft') — enquanto for TRUE, ninguém pode editar o campo de um registro existente no console (a caixa de edição, a página do registro, as grades e o arrastar no kanban, no calendário e no Gantt, a folha de horas); a caixa de criação de um novo registro não o avalia. Ações, importações, a API e os fluxos continuam gravando-o, julgados pelas validações do objeto. Lê as colunas do próprio registro, como Somente leitura quando. O assistente do aplicativo que age em nome de uma pessoa ainda não o respeita."
       },
       requiredWhen: {
         label: "Obrigatório quando",
@@ -1661,7 +1661,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       requiredPermissions: {
         label: "Required Permissions",
-        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this view either."
+        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you no longer see this view in the list either."
       },
       object: {
         label: "Objeto"
@@ -3488,5 +3488,8 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "A long-text field of the root object (textarea, markdown, html, richtext). Any other field is reported when the pack is saved, and the pack then carries no body."
       }
     }
+  },
+  knowledge_source: {
+    label: "Fonte de conhecimento"
   }
 };

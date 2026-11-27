@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/knowledge-turso",
-  "version": "19.0.0-next.0",
+  "version": "19.0.0-next.1",
   "license": "Apache-2.0",
   "description": "libSQL (Turso) knowledge adapter for ObjectStack: an open vector store in a libSQL file of its own, for local development and deployments not on PostgreSQL.",
   "type": "commonjs",
@@ -33,6 +33,7 @@
   },
   "devDependencies": {
     "@objectstack/service-knowledge": "workspace:*",
+    "@objectstack/service-settings": "workspace:*",
     "@types/node": "^26.6.5",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",

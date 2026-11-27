@@ -131,6 +131,23 @@ describe('NavigationRenderer: a row with nothing new to draw is not redrawn (obj
     expect(screen.getByText('Opportunities')).toBeInTheDocument();
   });
 
+  it('a new capability checker that answers the same for every row redraws no leaf row, and one that hides a row removes it', () => {
+    const { drawn, view } = setup();
+    const items = [
+      ...ITEMS,
+      { id: 'nav_tenants', type: 'object', objectName: 'sys_tenant', requiresObject: 'sys_tenant' },
+    ] as NavigationItem[];
+    const r = resolvers({ ...LABELS, sys_tenant: 'Tenants' });
+    const { rerender } = render(view({ ...r, items, checkCapability: () => true }));
+    expect(screen.getByText('Tenants')).toBeInTheDocument();
+    drawn.length = 0;
+    rerender(view({ ...r, items, checkCapability: () => true }));
+    expect(drawn).toEqual([]);
+    rerender(view({ ...r, items, checkCapability: (kind, name) => !(kind === 'object' && name === 'sys_tenant') }));
+    expect(screen.queryByText('Tenants')).toBeNull();
+    expect(drawn).toEqual([]);
+  });
+
   it('a prop other than the resolvers is still compared by identity: a new evaluator redraws every row', () => {
     const { drawn, view } = setup();
     const r = resolvers(LABELS);

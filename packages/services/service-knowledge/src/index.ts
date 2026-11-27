@@ -6,7 +6,10 @@ export type {
   KnowledgeSearchRefusal,
   KnowledgeSearchReport,
   KnowledgeServiceOptions,
+  KnowledgeSourceDescription,
 } from './knowledge-service.js';
+export { KNOWLEDGE_SOURCE_TYPE, indexKeyOf } from './knowledge-source-registry.js';
+export type { KnowledgeSourceDoor, KnowledgeSourceEntry, KnowledgeSourceHolder } from './knowledge-source-registry.js';
 export {
   ASSEMBLY_RULE_VERSION,
   INDEX_FINGERPRINT_VERSION,
@@ -38,6 +41,10 @@ export {
   BUILD_LEASE_MS,
   BUILD_PROGRESS_LOG_INTERVAL_MS,
   buildLockKey,
+  RECONCILE_DEFAULT_CRON,
+  RECONCILE_JOB,
+  RECONCILE_MAX_WAIT_MS,
+  RECONCILE_QUIET_MS,
 } from './knowledge-build.js';
 export type {
   KnowledgeBuildLock,
@@ -47,6 +54,9 @@ export type {
   KnowledgeBuildTrigger,
   KnowledgeIndexReading,
   KnowledgeIndexState,
+  KnowledgeReconcileEntry,
+  KnowledgeReconcileReport,
+  KnowledgeReconcileRequest,
 } from './knowledge-build.js';
 export {
   KNOWLEDGE_INDEX_STATUS_ACTION,

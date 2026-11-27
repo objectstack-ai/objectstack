@@ -47,7 +47,7 @@ describe.skipIf(!PG_URL)('requires knowledge on PostgreSQL — the token mounts 
     kernel.use(
       new KnowledgeServicePlugin({
         enableEventSync: false,
-        sources: [{ id: 'kpg_notes', label: 'Notes', adapter: 'pgvector', source: { kind: 'object', object: 'kpg_note', contentFields: ['body'] } }],
+        sources: [{ name: 'kpg_notes', label: 'Notes', adapter: 'pgvector', source: { kind: 'object', object: 'kpg_note', content: ['body'] } }],
       }),
     );
     // The store as the rule builds it — its argument — in a schema of this file's own.

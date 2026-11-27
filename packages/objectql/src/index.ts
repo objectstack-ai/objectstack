@@ -801,11 +801,18 @@ export type {
   LifecycleSettingsLike,
   LifecycleGovernanceAlert,
   LifecycleReapGuard,
+  // [ADR-0154 D8] The sealed-object expiry seam beside the reap guard.
+  LifecycleExpiryPrefix,
+  LifecycleExpiryPrefixRequest,
+  LifecycleExpiryPrefixRun,
   // [#5195] Consumer-declared floors on settings-driven window overrides.
   LifecycleRetentionFloor,
   LifecycleFloorViolation,
 } from './lifecycle/lifecycle-service.js';
 export { parseLifecycleDuration } from './lifecycle/duration.js';
+// [ADR-0154 D8] Which sealed objects take the signed expiry: the lifecycle service, the audit floors and the sealer ask one predicate.
+export { takesSignedExpiry } from './lifecycle/signed-expiry-scope.js';
+export type { SignedExpiryRegistryLike } from './lifecycle/signed-expiry-scope.js';
 // [#30237, ADR-0148 D3] What a host hands `ObjectQLPlugin`'s `recycleBinRetention`.
 export type { RecycleBinRetentionSettings } from './recycle-bin/retention.js';
 export type { RecycleBinRemovalOptions } from './recycle-bin/purge.js';

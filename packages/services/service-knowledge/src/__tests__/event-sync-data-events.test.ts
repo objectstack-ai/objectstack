@@ -179,13 +179,13 @@ const DRAFT: Row = { ...PUBLISHED, body: 'Draft wording, not yet approved', stat
 
 function source(where?: Record<string, unknown>): KnowledgeSource {
   return {
-    id: 'kb',
+    name: 'kb',
     label: 'Knowledge base',
     adapter: 'memory',
     source: {
       kind: 'object',
       object: 'kb_article',
-      contentFields: ['title', 'body'],
+      content: ['title', 'body'],
       ...(where ? { where } : {}),
     },
   };
@@ -239,9 +239,13 @@ describe('the event bridge: which data.record.* events reach the service', () =>
     expect(upsert).not.toHaveBeenCalled();
   });
 
-  it('says out loud that a predicate write leaves the index stale', async () => {
-    const harness = makeCtx();
-    const { service, deliver } = await harness.boot(new KnowledgeServicePlugin());
+  it('says out loud that a predicate write leaves the index stale where no reconcile can repair it', async () => {
+    // The source's adapter does not list its documents, so the reconcile a
+    // predicate write asks for elsewhere cannot repair this index.
+    const db = makeEngine([]);
+    const harness = makeCtx(db.engine);
+    const { service, deliver } = await harness.boot(new KnowledgeServicePlugin({ sources: [source()] }));
+    service.registerAdapter('memory', makeAdapter().adapter);
     const upsert = vi.spyOn(service, 'handleRecordUpsert').mockResolvedValue(undefined);
     const del = vi.spyOn(service, 'handleRecordDelete').mockResolvedValue(undefined);
 
@@ -268,6 +272,7 @@ describe('the event bridge: which data.record.* events reach the service', () =>
     expect(message).toContain('cannot be repaired from the event stream');
     expect(message).toContain('the lifecycle reap guard de-indexes those rows before they are deleted');
     expect(message).toContain('application-level predicate writes are not');
+    expect(message).toContain("source(s) kb (no reconcile can repair it");
   });
 });
 

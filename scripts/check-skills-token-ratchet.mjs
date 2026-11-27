@@ -441,7 +441,16 @@ export const CEILINGS = new Map([
   // line left the count (A2′, see STAMP_LINE_REPIN) — its headroom did not move.
   // 6801 -> 6800: pitfall 2 no longer says Modify All grants a field edit (19: View All and
   // Modify All cast no field vote). 27230 -> 27225 bytes; the row follows the measurement down.
-  ['skills/objectstack-ai/SKILL.md', 6800], //          -18 (was 6824), then -5 A2′ (was 6806)
+  // 6800 -> 6799 (card #37304): the `supportKb` example's two renamed keys add
+  // two bytes and its comment gives back six; the row follows the measurement down.
+  // 6799 -> 6795 (#37797): LOWERED to the measurement on that PR's head merged
+  // with `main`. Two retired-key rows name their replacements; one sample
+  // instruction line left the skill example and over-paid by 4 tokens.
+  // 6795 -> 6791 (#37782): the `agent.tools` row no longer teaches an aged-out migration; LOWERED to the measurement.
+  // 6791 -> 6609: the section that taught an authored AI button on a record
+  // page is replaced by one sentence (ADR-0160 D6, "Entry point": the shell's
+  // entry is the only one); the row follows the measurement down.
+  ['skills/objectstack-ai/SKILL.md', 6609], //          -18 (was 6824), then -5 A2′ (was 6806)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying
@@ -919,7 +928,17 @@ export const CEILINGS = new Map([
   // priced text is 24612 bytes -> 6153 tokens: the ceiling moves 6151 -> 6153
   // (+2). Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 27) / 4) == ceil(24612 / 4)
-  ['skills/objectstack-platform/SKILL.md', 6153],
+  // 6153 -> 6158 (card #37304): the enumeration row for the new top-level
+  // collection `knowledgeSources` — the key joins the same list, under the
+  // same standing enumeration-row case (ruling A on #32584, record 6819475461;
+  // #32673 letter A, record 6840575378). Raised by the row's own measured
+  // delta and by no more; nothing else in the file is cut and nothing rides
+  // along. Arithmetic in priced bytes (stamp line excluded): after #37086's
+  // `forms` row above the text is 24612 bytes (6153 tokens, headroom 0); the
+  // row adds 20 bytes, so the LANDED priced text is 24632 bytes -> 6158
+  // tokens: the ceiling moves 6153 -> 6158 (+5). Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 27) / 4) == ceil(24632 / 4)
+  ['skills/objectstack-platform/SKILL.md', 6158],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
@@ -2215,7 +2234,13 @@ export const CEILINGS = new Map([
   //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(7507 / 4)
   // = 1877 (+4), the measured remainder only. Pinned AT the measurement, zero
   // headroom; no other row moves.
-  ['skills/objectstack-ask/SKILL.md', 1875], // -2 to the measurement (was 1877)
+  // 1875 -> 1873 (#34996): the step-1 rewrite (terms copied whole as the user
+  // wrote them, one worked example, the re-send sentence before a question)
+  // paid for itself inside the file and freed 9 bytes; lowered to the new
+  // measurement, shrink-only, no ruling needed. 7516 bytes less the 27-byte
+  // stamp line:
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 27) / 4) == ceil(7489 / 4)
+  ['skills/objectstack-ask/SKILL.md', 1873], // -2 to the measurement (was 1875)
 
   // ── the objectstack-mcp-build skill joins the catalog — ruling #34691 S3 = A ──
   // (decision record: comment 6943107981 on #34691, "one copy of the shape

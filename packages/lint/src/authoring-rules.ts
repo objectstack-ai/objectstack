@@ -122,6 +122,7 @@ import { validateJsxPages } from './validate-jsx-pages.js';
 import { validateReactPages } from './validate-react-pages.js';
 import { validatePageSourceStyling } from './validate-page-source-styling.js';
 import { validateCapabilityReferences } from './validate-capability-references.js';
+import { validateBookAudienceClaims } from './validate-book-audience-claims.js';
 import {
   validateFlowApiTriggerSecret,
   validateFlowSubflowTargets,
@@ -155,6 +156,8 @@ import {
 } from './validate-membership-key-declarations.js';
 import { validateRuleCompilability } from './validate-rule-compilability.js';
 import { validateActionBodyCompiles } from './validate-action-body-compiles.js';
+import { validateActionBodyCapabilities } from './validate-action-body-capabilities.js';
+import { validateSeedRecordKeys } from './validate-seed-record-keys.js';
 import { validateHookAndJobBodyCompiles } from './validate-hook-body-compiles.js';
 import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
@@ -1422,6 +1425,16 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // tier 1 («the parsers load NEVER») from a standing fact into a red. The
     // measurement that named their bridge named `validateStackExpressions`, a
     // CEL-only rule, for exactly this reason.
+    // [#35143] `action` joins anyway, and the reason above still holds: since
+    // #9313 a write dispatches only the MEMBERS that declare its type, and the
+    // four body-writes members keep the frozen `flow` default, so an `action`
+    // write reaches `validateObjectReferences` alone (an action's `objectName`,
+    // the Seeds and actions family's binding line) and no parser loads —
+    // `runtime-lazy-deps.test.ts` gates an action write carrying a body to prove
+    // it. `seed` stays out: the save door already refuses a seed over an object
+    // nothing resolves (#34864), with the draft and publish-promotion carve-outs
+    // a snapshot of served objects cannot see. `hook` stays out: no member
+    // judges a hook write.
     // [#30023] `page` joins, NARROW by the same mechanism: a page write reaches
     // exactly `validateSortableFields`, the one member that declares `page`,
     // so a stored page sort naming a field the list door refuses
@@ -1429,7 +1442,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // does not have, as `page-field-unknown`) is refused at publish rather
     // than at its first fetch. Every other member keeps its declaration.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'view', 'object', 'dataset', 'report', 'page'],
+    runtimeTypes: ['flow', 'view', 'object', 'dataset', 'report', 'page', 'action'],
     run: (stack, ctx) => validateReferenceIntegrity(stack, ctx),
   },
   // ADR-0078 / #5068 — the SDUI component-props gate. `PageComponent.properties`
@@ -1626,6 +1639,22 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       + 'graduates from advisory to gating there rather than merely being ported. That promotion is a '
       + 'severity change on a published rule id and belongs in its own PR, not riding a wiring change.',
     run: (stack) => validateCapabilityReferences(stack),
+  },
+  // ADR-0046 §6.7 — a gated book claims its pages by name. `include: '*'` on a
+  // book with a `{ permissionSet }` / `{ systemPermission }` audience also
+  // claims every doc bound to no package (in every package scope) and hides it
+  // from every reader outside the audience. Decidable from the book alone, so it
+  // gates, and it judges the written book at the runtime door too: a Studio,
+  // REST `/meta` or MCP author of a book is the same author.
+  {
+    name: 'validateBookAudienceClaims',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-book-audience-claims.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['book'],
+    run: (stack) => validateBookAudienceClaims(stack),
   },
   // A flow that LOOKS armed and never launches — silently. Reads the pre-parse
   // tier so an author sees what they wrote.
@@ -2072,6 +2101,27 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateSeedStateMachine(stack),
+  },
+  // [#35143] A seed record key, or a seed `columns` key, that names no column
+  // of the dataset's object (`seed-record-unknown-field`). The seed load writes
+  // each record through the engine's insert, whose declared-field door refuses
+  // the key, so the record is dropped at boot while the build read as passed.
+  // `defineSeed` refuses it when it runs; a plain `data[]` entry and a `seed`
+  // saved at the runtime door were judged by nothing before the load. GATING
+  // on all three commands and on the runtime `seed` door. The columns are the
+  // object's fields as served — the stack's own extensions folded in on the
+  // CLI; at the door the deployment's served objects (`context.objects`) — plus
+  // the system columns injected on that object. A dataset whose object the
+  // snapshot does not hold is not judged here.
+  {
+    name: 'validateSeedRecordKeys',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-seed-record-keys.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['seed'],
+    run: (stack, ctx) => validateSeedRecordKeys(stack, objectsAsServed(stack, ctx.storedObjectExtensions ?? []).objects),
   },
   // An active state machine with no (or an empty) `initialStates`: a record
   // can be born in any state. Gating: the declaration works against its author
@@ -3202,6 +3252,25 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['action', 'object'],
     run: (stack) => validateActionBodyCompiles(stack),
+  },
+  // [#35143] An L2 action body that calls a write leaf of `ctx.api` (`insert`,
+  // `update`, `delete`, `updateMany`, `deleteMany`, `upsert`) without granting
+  // itself `api.write` (`action-body-write-capability-undeclared`). The sandbox
+  // refuses the call at the call site, so the action answers 403 on every click
+  // that reaches it. Gating: the grant and the refusal are both facts. Read,
+  // never parsed (the source parsers load at no runtime door), so it crosses
+  // the runtime publish gate for `action` writes and for `object` writes, whose
+  // inline `actions[]` the same walk reads; the differential charges a write
+  // only with the bodies it adds.
+  {
+    name: 'validateActionBodyCapabilities',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-action-body-capabilities.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['action', 'object'],
+    run: (stack) => validateActionBodyCapabilities(stack),
   },
   // The same compile check over an L2 hook body and an L2 job body, in the
   // wrapper the runtime runs both in (`(async (ctx) => { SOURCE })`, built from

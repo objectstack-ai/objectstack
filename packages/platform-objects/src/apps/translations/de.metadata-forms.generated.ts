@@ -1069,7 +1069,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonly: {
         label: "In der Oberfläche schreibgeschützt",
-        helpText: "Niemand kann dieses Feld in der Konsole von Hand bearbeiten (Dialoge, Datensatzseite, Tabellen, Ziehen im Kanban und Kalender), während Aktionen, Importe, die API und Flows es weiterhin schreiben; jeder Schreibvorgang wird von den Validierungen des Objekts beurteilt. Ausgeschaltet lassen, wenn Schreibgeschützt eingeschaltet ist: Das hält bereits jeden Client-Schreibvorgang fern."
+        helpText: "Niemand kann dieses Feld in der Konsole von Hand bearbeiten (Dialoge, Datensatzseite, Tabellen, Ziehen im Kanban, Kalender und Gantt, Zeiterfassung), während Aktionen, Importe, die API und Flows es weiterhin schreiben; jeder Schreibvorgang wird von den Validierungen des Objekts beurteilt. Ausgeschaltet lassen, wenn Schreibgeschützt eingeschaltet ist: Das hält bereits jeden Client-Schreibvorgang fern. Der In-App-Assistent, der im Auftrag einer Person handelt, beachtet es noch nicht."
       },
       hidden: {
         label: "Ausgeblendet",
@@ -1097,7 +1097,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonlyWhen: {
         label: "In der Oberfläche schreibgeschützt wenn",
-        helpText: "CEL-Prädikat über den Datensatz (z. B. record.status != 'draft') – solange es TRUE ist, kann niemand das Feld eines bestehenden Datensatzes in der Konsole bearbeiten (Bearbeitungsdialog, Datensatzseite, Tabellen, Ziehen in Kanban und Kalender); der Erstellungsdialog eines neuen Datensatzes wertet es nicht aus. Aktionen, Importe, die API und Flows schreiben es weiterhin, beurteilt von den Validierungen des Objekts. Liest die eigenen Spalten des Datensatzes, wie Schreibgeschützt wenn."
+        helpText: "CEL-Prädikat über den Datensatz (z. B. record.status != 'draft') – solange es TRUE ist, kann niemand das Feld eines bestehenden Datensatzes in der Konsole bearbeiten (Bearbeitungsdialog, Datensatzseite, Tabellen, Ziehen in Kanban, Kalender und Gantt, Zeiterfassung); der Erstellungsdialog eines neuen Datensatzes wertet es nicht aus. Aktionen, Importe, die API und Flows schreiben es weiterhin, beurteilt von den Validierungen des Objekts. Liest die eigenen Spalten des Datensatzes, wie Schreibgeschützt wenn. Der In-App-Assistent, der im Auftrag einer Person handelt, beachtet es noch nicht."
       },
       requiredWhen: {
         label: "Erforderlich wenn",
@@ -1661,7 +1661,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       requiredPermissions: {
         label: "Required Permissions",
-        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this view either."
+        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you no longer see this view in the list either."
       },
       object: {
         label: "Objekt"
@@ -3488,5 +3488,8 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "A long-text field of the root object (textarea, markdown, html, richtext). Any other field is reported when the pack is saved, and the pack then carries no body."
       }
     }
+  },
+  knowledge_source: {
+    label: "Wissensquelle"
   }
 };

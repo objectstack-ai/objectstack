@@ -91,7 +91,7 @@ import { fetchPackages } from '../../views/studio-design/packages-io.js';
 import { resolveAiApiBase } from '../../hooks/useAiSurface.js';
 import { isAiStudioEnabled, isMarketplaceEnabled } from '../../runtime-config.js';
 import { useNewPackageDoorPath } from '../../hooks/useNewPackageDoorPath.js';
-import { useOpenAssistant } from '../../layout/chatDockControl.js';
+import { useAskAiEntry } from '../../layout/AssistantTopBarButton.js';
 import { isProductApp } from '../../utils/homePath.js';
 import { useAddAppEntries, useMayAddApp } from '../../hooks/useAddAppEntries.js';
 import { catalogServesBuild } from '../../hooks/surfaceAgent.js';
@@ -454,9 +454,11 @@ export { readRecentObjects, type RecentObjectReading };
 export function HomePage({ checklist }: HomePageProps = {}) {
   const navigate = useNavigate();
   // objectstack#34608 — the Home AI buttons open the same right-side drawer
-  // every console page has (in place, no navigation).
-  const openAssistant = useOpenAssistant();
-  const openHomeAssistant = (agent: 'ask') => openAssistant({ agent });
+  // every console page has (in place, no navigation). objectstack#37858 —
+  // through the Ask AI entry the top bar's button opens it with, so the two
+  // change together when opening comes to mean a new conversation.
+  const askAi = useAskAiEntry();
+  const openHomeAssistant = (agent: 'ask') => askAi({ agent });
   const { t, language } = useObjectTranslation();
   const metadata = useMetadata();
   const { apps, loading } = metadata;

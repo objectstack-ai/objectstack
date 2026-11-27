@@ -1,14 +1,18 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The first build of a source and the operator's rebuild (ADR-0161 K7, "What
- * starts a rebuild"; K8, item 8 b).
+ * The first build of a source, the operator's rebuild and the reconcile
+ * (ADR-0161 K7, "What starts a rebuild"; K8, item 8 b; K1, "Events keep an
+ * index fresh; a reconcile pass keeps it correct").
  *
  * The knowledge service reads what a source's adapter holds at boot and
- * builds the sources that need it, and an administrator can start a rebuild
- * of one source. This file holds the shapes both answer in and the lease the
- * build runs under; the reading and the build are
- * `KnowledgeService.readIndexState` and `KnowledgeService.rebuildSource`.
+ * builds the sources that need it, an administrator can start a rebuild of
+ * one source, and the reconcile walks every source whose store lists its
+ * documents, daily and soon after a predicate write. This file holds the
+ * shapes they answer in, the lease the build runs under and the reconcile's
+ * timings; the reading, the build and the reconcile are
+ * `KnowledgeService.readIndexState`, `KnowledgeService.rebuildSource` and
+ * `KnowledgeService.reconcileSources`.
  *
  * ## One node builds a source
  *
@@ -91,8 +95,8 @@ import type { AdapterIndexStatus, KnowledgeReindexResult } from '@objectstack/sp
  *   automatically; the operator's rebuild is the way.
  * - `unreadable` — reading the adapter failed. Nothing is built; `detail`
  *   says why.
- * - `not-built-here` — the service does not build this source: a `file` or
- *   `http` source (its adapter ingests it), or no data engine is bound.
+ * - `not-built-here` — the service cannot build this source here: no data
+ *   engine is bound.
  */
 export type KnowledgeIndexState =
   | 'nothing'
@@ -118,8 +122,13 @@ export interface KnowledgeIndexReading {
   held?: AdapterIndexStatus;
 }
 
-/** Who started a build: the boot's first-build pass, or an administrator. */
-export type KnowledgeBuildTrigger = 'boot' | 'operator';
+/**
+ * Who started a build: the boot's first-build pass, a `knowledge_source` item
+ * that was added or changed while the process runs (`reload`), an
+ * administrator, or the reconcile (`KnowledgeService.reconcileSources`: the
+ * daily job, or the quiet period after a predicate write).
+ */
+export type KnowledgeBuildTrigger = 'boot' | 'reload' | 'operator' | 'reconcile';
 
 /** How far a running build has walked; the totals of a finished one. */
 export interface KnowledgeBuildProgress {
@@ -174,6 +183,52 @@ export interface KnowledgeBuildRecord {
   message?: string;
 }
 
+/**
+ * What one reconcile did with one source (`KnowledgeService.reconcileSources`).
+ * A walked source carries its build's `record` (trigger `reconcile`); a source
+ * the reconcile does not walk carries `left`, one sentence saying why.
+ */
+export interface KnowledgeReconcileEntry {
+  sourceId: string;
+  /** The complete build the reconcile ran (or found running, or found held by another node). */
+  record?: KnowledgeBuildRecord;
+  /** Why the source was not walked: an external indexer owns it, no data engine, or a store that lists no documents. */
+  left?: string;
+}
+
+/** One reconcile pass over the registered sources (`KnowledgeService.reconcileSources`). */
+export interface KnowledgeReconcileReport {
+  /** ISO-8601 time the pass began. */
+  startedAt: string;
+  /** ISO-8601 time it ended. */
+  finishedAt: string;
+  /** Every source the pass considered, in the order it took them. */
+  sources: KnowledgeReconcileEntry[];
+  /**
+   * The walks that did not finish: a build `failed`, `lease-lost` or
+   * `timed-out`, each named with its record's message. Empty when every walk
+   * the pass ran finished, or another node held it.
+   */
+  unfinished: Array<{ sourceId: string; status: KnowledgeBuildRecord['status']; message?: string }>;
+}
+
+/**
+ * What a predicate write asked of the reconcile
+ * (`KnowledgeService.requestReconcile`): the sources over the object that
+ * will be reconciled once the quiet period passes, and those no reconcile can
+ * repair, each named by its face.
+ */
+export interface KnowledgeReconcileRequest {
+  /** Sources whose reconcile is pending: it starts once no predicate write on the object arrived for {@link RECONCILE_QUIET_MS}. */
+  scheduled: string[];
+  /**
+   * Sources over the object no reconcile can repair, so none is asked for:
+   * their store lists no documents (a walk could neither skip nor purge), or
+   * no data engine is bound (nothing can be walked).
+   */
+  unreconcilable: string[];
+}
+
 /** A lease on the cluster lock, as the build uses it (`LockHandle`, `@objectstack/spec/contracts`). */
 export interface KnowledgeBuildLockHandle {
   release(): Promise<void>;
@@ -203,6 +258,32 @@ export const BUILD_STALL_LIMIT_MS = 15 * 60_000;
 
 /** The least time between two progress lines of one running build. */
 export const BUILD_PROGRESS_LOG_INTERVAL_MS = 10_000;
+
+/**
+ * When the reconcile job runs unless the plugin's `reconcile` option moves it:
+ * once a day, at 03:00 (UTC unless a `timezone` is given), an hour most
+ * deployments are quiet in. A reconcile of a source whose index is current
+ * reads every row and embeds none, so the daily cost is the read.
+ */
+export const RECONCILE_DEFAULT_CRON = '0 3 * * *';
+
+/** The job the plugin schedules the daily reconcile under (`IJobService.schedule`). */
+export const RECONCILE_JOB = 'knowledge:reconcile';
+
+/**
+ * How long no further predicate write on an object must arrive before the
+ * reconcile it asked for starts: two minutes. Each predicate write on the
+ * object restarts the wait, so a run of bulk writes starts one reconcile of
+ * each source once it is over.
+ */
+export const RECONCILE_QUIET_MS = 2 * 60_000;
+
+/**
+ * The longest a reconcile a predicate write asked for waits, from the first
+ * request it gathers: ten minutes. Bulk writes that keep arriving inside the
+ * quiet period start it at this bound, so they cannot hold it off for good.
+ */
+export const RECONCILE_MAX_WAIT_MS = 10 * 60_000;
 
 /** The cluster lock key one source's build is held under. */
 export function buildLockKey(sourceId: string): string {
