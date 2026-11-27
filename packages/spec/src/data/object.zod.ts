@@ -1176,7 +1176,9 @@ export const LifecycleSchema = lazySchema(() => strictObject({
     "the platform shows. Only `class: 'audit'` may declare it, and not beside a `retention` or `ttl` " +
     "`onlyWhen`, a `ttl` on another field than `created_at`, or rotation `storage`. Sealed rows past their " +
     '`retention`, `ttl` or `archive.keep` window leave only by whole checkpoints, after a signed expiry ' +
-    'amendment names them, so the verifier reads them as expired rather than missing. A retention override ' +
+    'amendment names them, so the verifier reads them as expired rather than missing. Signed expiry covers ' +
+    'objects whose lifecycle is declared in packaged metadata; an object created at runtime keeps the ' +
+    'retention sweep. A retention override ' +
     'cannot shorten the declared window. A tenant-scoped window is set on `organization_id`, so it applies to ' +
     "that organization's chain only where `chainField` is `organization_id`; every other chain (the chain of " +
     'rows about no organization, and every chain of an object chained by another column) keeps its rows to ' +

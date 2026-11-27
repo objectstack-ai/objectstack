@@ -10,6 +10,7 @@ import type {
   ICryptoProvider,
   LockHandle,
 } from '@objectstack/spec/contracts';
+import { isTenantAuthored } from '@objectstack/metadata-core';
 import { isMissingTableError } from '@objectstack/types';
 import {
   AUDIT_SEAL_CANON_VERSION,
@@ -209,6 +210,11 @@ interface SealPlan {
   /** The column each row's chain is read from ({@link chainValueOf}): `lifecycle.seal.chainField`, or `tenant_id`. */
   readonly chainField: string;
   readonly archiveTo?: string;
+  /**
+   * ADR-0154 D8: whether the object's lifecycle is declared in packaged metadata, so it takes the signed
+   * expiry. An object created at runtime (a tenant-authored definition) is sealed but keeps the row-cutoff sweep.
+   */
+  readonly signedExpiry: boolean;
 }
 
 interface ChainHead {
@@ -424,7 +430,10 @@ export class AuditSealer {
           'columns of a type with a canonical rule (ADR-0154 D1, D5, D10), or remove lifecycle.seal.');
         continue;
       }
-      plans.push({ name: object.name, fields, columns, chainField, ...(lifecycle.archive?.to ? { archiveTo: lifecycle.archive.to } : {}) });
+      plans.push({
+        name: object.name, fields, columns, chainField, signedExpiry: !isTenantAuthored(object),
+        ...(lifecycle.archive?.to ? { archiveTo: lifecycle.archive.to } : {}),
+      });
     }
     return plans;
   }
@@ -562,7 +571,7 @@ export class AuditSealer {
    */
   async expire(request: AuditExpiryRequest): Promise<AuditExpiryRun[]> {
     const plan = this.plans().find((p) => p.name === request.object);
-    if (!plan) return [];
+    if (!plan || !plan.signedExpiry) return [];
     const memo = [
       `${auditExpiryCutoff(Date.parse(request.cutoff))}|${request.policy}|${request.policyValue}`,
       `on:${request.tenantColumn ?? ''}`,

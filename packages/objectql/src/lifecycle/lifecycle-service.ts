@@ -3,6 +3,7 @@
 import { resolveInjectedColumnProvenance, type Lifecycle } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import { isMissingTableError } from '@objectstack/metadata/errors';
+import { isTenantAuthored } from '@objectstack/metadata-core';
 import { redactPropagatedDriverFault } from '@objectstack/types';
 import { parseLifecycleDuration } from './duration.js';
 import { isFederatedUnprovisionedInjectedColumn } from '../federated-object.js';
@@ -925,7 +926,8 @@ export class LifecycleService {
 
   /**
    * [ADR-0154 D8] Register the expiry every object declaring `lifecycle.seal`
-   * expires through. One slot: the sealer's owner registers it, and a later
+   * in packaged metadata expires through (an object created at runtime keeps
+   * the row-cutoff sweep, {@link expiresSealed}). One slot: the sealer's owner registers it, and a later
    * registration replaces it (a re-initialised plugin). Answers the
    * unregistration, which clears the slot only while it still holds this one.
    *
@@ -1575,8 +1577,8 @@ export class LifecycleService {
     if (lc.archive) {
       return this.archiveObject(engine, obj, lc, report);
     }
-    // [ADR-0154 D8] A sealed object expires by whole checkpoints, never by a row cutoff.
-    if (lc.seal) return this.reapSealed(engine, obj, lc, report);
+    // [ADR-0154 D8] A sealed object expires by whole checkpoints, never by a row cutoff ({@link expiresSealed}).
+    if (expiresSealed(obj, lc)) return this.reapSealed(engine, obj, lc, report);
 
     const outcomes: Array<number | undefined> = [];
     // Governance overrides (P4): a configured window beats the declared one.
@@ -2219,7 +2221,7 @@ export class LifecycleService {
     // not moved yet is listed by the same checkpoint as its archived siblings.
     if (!this.abort.aborted && archive.keep) {
       const keepCutoffMs = this.now() - parseLifecycleDuration(archive.keep);
-      if (lc.seal) {
+      if (expiresSealed(obj, lc)) {
         await this.sweepSealed(
           engine,
           obj,
@@ -2485,6 +2487,20 @@ function idKey(id: unknown): string | undefined {
  * override when it is the one that stood, else the declaration. A sealed
  * object's expiry amendment signs it, and the verifier judges the expiry by it.
  */
+/**
+ * [ADR-0154 D8] Whether `obj` expires through the sealed-object expiry: it
+ * declares `lifecycle.seal`, and its definition is packaged or code metadata.
+ *
+ * Signed expiry covers objects whose lifecycle is declared in packaged
+ * metadata. An object created at runtime (a tenant-authored definition,
+ * ADR-0010 `_provenance: 'org'`) keeps today's retention sweep: its rows leave
+ * by their row cutoff and a settings override applies, as before this expiry
+ * existed. Extending signed expiry to runtime-created objects is separate work.
+ */
+function expiresSealed(obj: LifecycleObjectLike, lc: Lifecycle): boolean {
+  return Boolean(lc.seal) && !isTenantAuthored(obj);
+}
+
 function appliedLiteral(override: string | undefined, declared: string, appliedMs: number): string {
   if (typeof override !== 'string') return declared;
   try {

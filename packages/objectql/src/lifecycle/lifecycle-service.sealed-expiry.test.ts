@@ -290,6 +290,29 @@ describe('LifecycleService — a sealed object expires only through the sealed e
     expect(() => svc.registerExpiryPrefix({} as never)).toThrow(/requires an object with a plan\(request\) method/);
   });
 
+  it('a sealed object created at runtime keeps the row-cutoff sweep, retained or archiving, and never asks the sealed expiry', async () => {
+    // Signed expiry covers objects whose lifecycle is declared in packaged metadata; a tenant-authored
+    // definition (ADR-0010 `_provenance: 'org'`) keeps today's retention sweep.
+    const runtimeRetained = { ...RETAINED, _provenance: 'org' } as LifecycleObjectLike;
+    const runtimeArchiving = { ...ARCHIVING, name: 'app_journal', _provenance: 'org' } as LifecycleObjectLike;
+    const hot = store('default');
+    const cold = store('archive');
+    const { engine, finds } = engineOver([runtimeRetained, runtimeArchiving], { hot, cold, rows: [] });
+    const { warns, logger } = recordingLogger();
+    const svc = service(engine, logger);
+    const { expiry, requests } = expiryOf([]);
+    svc.registerExpiryPrefix(expiry);
+
+    const report = await svc.sweep();
+
+    expect(requests).toEqual([]);
+    expect(finds.map((f) => f.where)).toContainEqual({ created_at: { $lt: isoCutoff('30d') } });
+    expect(cold.deleteMany).toHaveBeenCalledWith('app_journal', { where: { created_at: { $lt: isoCutoff('7y') } } });
+    expect(report.swept.map((e) => [e.object, e.policy])).toEqual([['app_ledger', 'retention'], ['app_journal', 'archive']]);
+    expect(report.skipped).toEqual([]);
+    expect(warns.join('\n')).not.toMatch(/lifecycle\.seal/);
+  });
+
   it('an object without `seal` keeps the row-cutoff path, and never asks the sealed expiry', async () => {
     const plain: LifecycleObjectLike = { name: 'app_log', lifecycle: { class: 'telemetry', retention: { maxAge: '30d' } } as any };
     const { engine, finds } = engineOver([plain], { rows: [] });

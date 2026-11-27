@@ -139,6 +139,49 @@ describe('AuditPlugin — on a sealed object, a retention override cannot shorte
   });
 });
 
+describe('AuditPlugin — signed expiry covers objects whose lifecycle is declared in packaged metadata (ADR-0154 D8)', () => {
+  const FIELDS = { id: { type: 'text' }, created_at: { type: 'datetime' }, tenant_id: { type: 'lookup' }, new_value: { type: 'textarea' } };
+  const runtime = (): LifecycleObjectLike => ({ ...retained('30d'), fields: FIELDS, _provenance: 'org', _packageId: 'sys_metadata' } as never);
+  const packaged = (): LifecycleObjectLike => ({ ...retained('30d'), fields: FIELDS, _provenance: 'package', _packageId: 'app.ledger' } as never);
+
+  it('an object created at runtime takes no floor: an override below its declared window applies, and no expiry is asked', async () => {
+    const rig = sweepRig([runtime()], { app_ledger: { maxAge: '1d' } });
+    const { requests } = await rig.start();
+
+    const report = await rig.lifecycle.sweep();
+
+    expect(requests).toEqual([]);
+    expect(report.floorViolations).toEqual([]);
+    expect(report.swept).toEqual([expect.objectContaining({ object: 'app_ledger', policy: 'retention', cutoff: isoCutoff('1d') })]);
+  });
+
+  it('a packaged object still takes its floor and the signed expiry', async () => {
+    const rig = sweepRig([packaged()], { app_ledger: { maxAge: '1d' } });
+    const { requests } = await rig.start();
+
+    const report = await rig.lifecycle.sweep();
+
+    expect(requests).toEqual([expect.objectContaining({ object: 'app_ledger', policyValue: '30d' })]);
+    expect(report.floorViolations.map((v) => v.declaredBy)).toEqual([AUDIT_SEAL_FLOOR_REGISTRAR]);
+  });
+
+  it("the sealer's expiry answers no run for an object created at runtime, before it resolves a seam; a packaged one goes on", async () => {
+    const objects = [runtime()];
+    const rig = sweepRig(objects, undefined);
+    const { sealer } = await rig.start();
+    vi.mocked(sealer.expire).mockRestore();
+    const seams = vi.spyOn(sealer as unknown as { resolveSeams(): Promise<unknown> }, 'resolveSeams').mockResolvedValue(null);
+    const request = { object: 'app_ledger', policy: 'retention.maxAge', policyValue: '30d', cutoff: isoCutoff('30d') } as const;
+
+    await expect(sealer.expire(request)).resolves.toEqual([]);
+    expect(seams).not.toHaveBeenCalled();
+
+    objects[0] = packaged();
+    await expect(sealer.expire(request)).rejects.toThrow(/could not be resolved/);
+    expect(seams).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('sealedWindowFloors — the windows a sealed object is floored at', () => {
   it('a retained or ttl sealed object: one floor per window, at the declared value, by the audit seal', () => {
     expect(sealedWindowFloors(retained('30d'))).toEqual([
@@ -157,5 +200,6 @@ describe('sealedWindowFloors — the windows a sealed object is floored at', () 
       lifecycle: { class: 'audit', retention: { maxAge: '90d' }, archive: { after: '90d', to: 'archive', keep: '7y' }, seal: SEAL },
     })).toEqual([]);
     expect(sealedWindowFloors({ name: 'app_ledger', lifecycle: { class: 'audit', retention: { maxAge: 'soon' }, seal: SEAL } })).toEqual([]);
+    expect(sealedWindowFloors({ ...retained('30d'), _provenance: 'org' } as never)).toEqual([]);
   });
 });

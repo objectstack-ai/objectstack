@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { isTenantAuthored } from '@objectstack/metadata-core';
 import { parseLifecycleDuration, type LifecycleRetentionFloor } from '@objectstack/objectql';
 
 /**
@@ -20,6 +21,10 @@ import { parseLifecycleDuration, type LifecycleRetentionFloor } from '@objectsta
  * archiving sealed object expires only past `archive.keep`, which no settings
  * key reaches, and its other window decides when a row moves to the archive,
  * not when it leaves.
+ *
+ * Which objects: those whose lifecycle is declared in packaged metadata. An
+ * object created at runtime keeps today's retention sweep (no signed expiry),
+ * and an override applies to it as before, so it takes no floor.
  */
 
 /** Who the floors are registered by: named in every rejection the lifecycle service reports. */
@@ -66,7 +71,7 @@ function floorOf(object: string, policy: 'retention' | 'ttl', key: string, liter
 /** The floors one object definition takes: one per window its sealed expiry runs under, at the declared value. */
 export function sealedWindowFloors(object: { name: string; lifecycle?: unknown }): LifecycleRetentionFloor[] {
   const lc = object.lifecycle as SealedLifecycleLike | undefined;
-  if (!lc?.seal || lc.archive) return [];
+  if (!lc?.seal || lc.archive || isTenantAuthored(object)) return [];
   const floors: LifecycleRetentionFloor[] = [];
   const maxAge = lc.retention?.maxAge;
   const retentionMs = windowMs(maxAge);
