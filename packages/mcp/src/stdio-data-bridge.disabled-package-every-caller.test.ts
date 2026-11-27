@@ -18,7 +18,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL } from '@objectstack/objectql/core';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -129,7 +129,7 @@ for (const withProtocol of [true, false]) {
         expect(envelope(err)).toEqual({ code: 'OBJECT_PACKAGE_DISABLED', status: 404, object: 'dq_beta', param: undefined });
         // Nothing was written: the row is still there, unchanged, once re-enabled.
         h.engine.registry.enablePackage(PKG_B);
-        const row: any = await h.engine.findOne('dq_beta', { where: { id: h.betaId } } as any);
+        const row: any = await h.engine.findOne('dq_beta', { where: { id: h.betaId } });
         expect(row?.name).toBe('beta');
       });
 
