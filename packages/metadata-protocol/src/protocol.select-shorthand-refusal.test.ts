@@ -101,3 +101,32 @@ describe('#25013 the save door refuses a shorthand option that is no system iden
         expect(rows.size).toBe(1);
     });
 });
+
+describe('a one-character option value saves at the object door', () => {
+    it('`Field.select([\'A\', \'B\', \'C\'])` (values `a`, `b`, `c`) saves and is stored', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const result = await protocol.saveMetaItem({
+            type: 'object', name: 'ticket', item: objectWith(Field.select(['A', 'B', 'C'])),
+        });
+
+        expect(result.success).toBe(true);
+        expect(rows.size).toBe(1);
+    });
+
+    it.each([
+        ['an empty value', '', 'too_small'],
+        ['an uppercase value', 'A', 'invalid_format'],
+    ])('%s still answers 422 INVALID_METADATA at the option slot, and nothing is stored', async (_label, value, code) => {
+        const { protocol, rows } = makeProtocol();
+
+        const err = await rejection(protocol.saveMetaItem({
+            type: 'object', name: 'ticket',
+            item: objectWith({ type: 'select', options: [{ label: 'A', value: 'a' }, { label: 'X', value }] }),
+        }));
+
+        expect([err.code, err.status]).toEqual(['INVALID_METADATA', 422]);
+        expect(err.issues).toContainEqual(expect.objectContaining({ path: 'fields.status.options.1.value', code }));
+        expect(rows.size).toBe(0);
+    });
+});
