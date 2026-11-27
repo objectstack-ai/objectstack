@@ -347,7 +347,7 @@ export const SAMPLES: Record<string, Record<string, unknown>> = {
     label: 'Sales Copilot',
     role: 'Assistant for sales reps',
     active: true,
-    model: { provider: 'openai', model: 'gpt-4o', temperature: 0.4, maxTokens: 2048 },
+    model: { model: 'gpt-4o', temperature: 0.4, maxTokens: 2048 },
     instructions:
       'You are a helpful sales assistant. Answer questions about accounts and orders, and draft follow-up emails. Always cite the record you used.',
     // An agent reaches exactly the tools its surface-compatible skills declare

@@ -20,32 +20,17 @@ describe('AIModelConfigSchema', () => {
     };
 
     const result = AIModelConfigSchema.parse(config);
-    expect(result.provider).toBeUndefined();
+    expect('provider' in result).toBe(false);
     expect(result.temperature).toBe(0.7);
   });
 
   it('adds no provider to a block that names none — the host picks the model and its provider', () => {
     const result = AIModelConfigSchema.parse({ temperature: 0.2 });
     expect('provider' in result).toBe(false);
-    expect(AIModelConfigSchema.parse({ provider: 'anthropic' }).provider).toBe('anthropic');
-    expect(AIModelConfigSchema.safeParse({ provider: 'google' }).success).toBe(false);
-  });
-
-  it('should accept all providers', () => {
-    const providers = ['openai', 'azure_openai', 'anthropic', 'local'] as const;
-    
-    providers.forEach(provider => {
-      const config = {
-        provider,
-        model: 'test-model',
-      };
-      expect(() => AIModelConfigSchema.parse(config)).not.toThrow();
-    });
   });
 
   it('should accept full model config', () => {
     const config = {
-      provider: 'anthropic' as const,
       model: 'claude-3-opus-20240229',
       temperature: 0.5,
       maxTokens: 4096,
@@ -59,7 +44,7 @@ describe('AIModelConfigSchema', () => {
     const result = AIModelConfigSchema.parse({ temperature: 0.2 });
     expect(result.model).toBeUndefined();
     expect(result.temperature).toBe(0.2);
-    expect(result.provider).toBeUndefined();
+    expect('provider' in result).toBe(false);
     expect(AIModelConfigSchema.parse({}).model).toBeUndefined();
   });
 
@@ -204,7 +189,6 @@ describe('AgentSchema', () => {
         role: 'Business Intelligence Analyst',
         instructions: 'Analyze data and provide insights.',
         model: {
-          provider: 'anthropic',
           model: 'claude-3-opus-20240229',
           temperature: 0.3,
           maxTokens: 8192,
@@ -370,7 +354,6 @@ Your responsibilities:
 
 Always be polite, empathetic, and solution-oriented.`,
         model: {
-          provider: 'openai',
           model: 'gpt-4-turbo-preview',
           temperature: 0.7,
           maxTokens: 2048,
@@ -400,7 +383,6 @@ Core capabilities:
 
 Be persuasive but honest. Focus on value creation.`,
         model: {
-          provider: 'anthropic',
           model: 'claude-3-sonnet-20240229',
           temperature: 0.8,
         },
@@ -427,7 +409,6 @@ Skills:
 
 Be precise, data-driven, and clear in your explanations.`,
         model: {
-          provider: 'openai',
           model: 'gpt-4',
           temperature: 0.3,
           maxTokens: 4096,

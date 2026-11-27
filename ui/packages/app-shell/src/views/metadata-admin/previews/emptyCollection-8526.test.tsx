@@ -109,7 +109,7 @@ function expectPopulated(block: HTMLElement, sentence: string) {
 const AGENT = {
   name: 'sales_copilot',
   label: 'Sales Copilot',
-  model: { provider: 'openai', model: 'gpt-4o' },
+  model: { model: 'gpt-4o' },
   instructions: 'Be kind.',
   skills: ['summarize_account'],
   planning: { maxIterations: 8 },

@@ -3288,7 +3288,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       model: {
         label: "Modell",
-        helpText: "Konfiguration des KI-Modells (Anbieter, Modellname, Temperatur usw.)"
+        helpText: "Konfiguration des KI-Modells (Modellname, Temperatur usw.)"
       },
       planning: {
         label: "Planung",

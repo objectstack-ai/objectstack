@@ -3288,7 +3288,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       model: {
         label: "Modelo",
-        helpText: "Configuração do modelo de IA (provedor, nome do modelo, temperatura etc.)"
+        helpText: "Configuração do modelo de IA (nome do modelo, temperatura etc.)"
       },
       planning: {
         label: "Planejamento",
