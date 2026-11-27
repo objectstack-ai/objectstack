@@ -198,6 +198,7 @@ const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
     tools: 'tool',
     skills: 'skill',
     aiContexts: 'ai_context',
+    knowledgeSources: 'knowledge_source',
     // `ragPipelines: 'rag_pipeline'` removed (ADR-0049 enforce-or-remove), the
     // fourth retirement of the `policies` shape: the stack schema declares no
     // `ragPipelines` key, so the strict parse below refuses a definition that

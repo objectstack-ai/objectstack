@@ -129,6 +129,10 @@ function makeDoor(items: Record<string, unknown> = ITEMS) {
         return { item: items[`${type} ${name}`] };
     };
     p.getMetaItems = async () => ({ items: [] });
+    // [#37304] The door asks whether the package holds a knowledge source for a
+    // caller without `manage_knowledge_sources`. This double has no registry
+    // to list from, so it answers as a package that holds none.
+    p.getMetaItemsPerPackage = async () => ({ items: [] });
     const engineFinds: Array<{ object: string; context: unknown }> = [];
     p.engine = {
         find: async (object: string, query: any) => {

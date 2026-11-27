@@ -110,4 +110,5 @@ export const STUDIO_MENU_PLACEMENT: readonly StudioMenuPlacementRow[] = Object.f
   { type: 'capability', tier: 'advanced' },
   // 高级 — ai
   { type: 'ai_context', tier: 'advanced' },
+  { type: 'knowledge_source', tier: 'advanced' },
 ] as const satisfies readonly StudioMenuPlacementRow[]);

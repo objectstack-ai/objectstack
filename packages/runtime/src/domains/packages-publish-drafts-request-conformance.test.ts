@@ -215,6 +215,19 @@ describe('a backfill the schema refuses is refused at the door before anything i
         return new ObjectStackProtocolImplementation(untouchable as any, undefined, undefined, 'package-author');
     }
 
+    /**
+     * [#37304] The caller also holds `manage_knowledge_sources`. The door reads
+     * whether the package holds a knowledge source for a caller who does not
+     * (`packages-knowledge-source-gate.test.ts`), which is a read before the
+     * protocol runs; a holder is answered without one. What this case pins is
+     * the protocol's own order, the shape judgement before any read.
+     */
+    const SOURCE_ADMIN = () => {
+        const context = PKG_ADMIN();
+        context.executionContext.systemPermissions.push('manage_knowledge_sources');
+        return context;
+    };
+
     it('answers 400 VALIDATION_ERROR naming the entry, for each malformed shape', async () => {
         const bodies: Array<{ body: Record<string, unknown>; path: string }> = [
             { body: { backfill: { object: 'crm_account', field: 'is_key' } }, path: 'backfill' },
@@ -228,7 +241,7 @@ describe('a backfill the schema refuses is refused at the door before anything i
             const protocol = realProtocol();
             const publish = vi.spyOn(protocol, 'publishPackageDrafts');
             const { dispatcher } = makeDoor(protocol as unknown as Record<string, unknown>);
-            const result = await dispatcher.handlePackages(`/${PKG}/publish-drafts`, 'POST', body, {}, PKG_ADMIN());
+            const result = await dispatcher.handlePackages(`/${PKG}/publish-drafts`, 'POST', body, {}, SOURCE_ADMIN());
             const response = result.response as any;
             expect(response.status, JSON.stringify(body)).toBe(400);
             expect(response.body?.error?.code, JSON.stringify(body)).toBe('VALIDATION_ERROR');

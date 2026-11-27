@@ -3488,5 +3488,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "根对象的一个长文本字段（textarea、markdown、html、richtext）。选其他字段会在保存时报告，资料包也就不带正文。"
       }
     }
+  },
+  knowledge_source: {
+    label: "知识源"
   }
 };

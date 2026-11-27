@@ -25,6 +25,8 @@
  * underlying error on purpose, because the message could echo row contents.
  */
 
+// Paid at collection, not inside a clocked case (check-test-source-alias).
+import '@objectstack/metadata';
 import { describe, it, expect } from 'vitest';
 
 import { HttpDispatcher } from './../http-dispatcher.js';
@@ -83,8 +85,12 @@ async function dispatchWith(method: string, path: string, err: unknown, body: an
     // reaching the mapping under test. Only the caller's capabilities are stubbed;
     // every mechanism and expected status below is unchanged. (The /meta and /ui
     // routes in the loop need no capability, and holding extra ones never rejects.)
+    // [#37304] `manage_knowledge_sources` too: for a caller without it the PATCH
+    // door first reads whether the package holds a knowledge source, and this
+    // protocol double throws from every member, so the door would answer for
+    // that read instead of for the `updatePackage` error this pins.
     (dispatcher as any).timedResolveExecutionContext = async () => ({
-        userId: 'u1', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
+        userId: 'u1', systemPermissions: ['manage_metadata', 'manage_knowledge_sources', 'studio.access', 'setup.access'],
     });
     const result: any = await dispatcher.dispatch(method, path, body, {}, {} as any);
     return result.response;

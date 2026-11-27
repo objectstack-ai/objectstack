@@ -441,7 +441,9 @@ export const CEILINGS = new Map([
   // line left the count (A2′, see STAMP_LINE_REPIN) — its headroom did not move.
   // 6801 -> 6800: pitfall 2 no longer says Modify All grants a field edit (19: View All and
   // Modify All cast no field vote). 27230 -> 27225 bytes; the row follows the measurement down.
-  ['skills/objectstack-ai/SKILL.md', 6800], //          -18 (was 6824), then -5 A2′ (was 6806)
+  // 6800 -> 6799 (card #37304): the `supportKb` example's two renamed keys add
+  // two bytes and its comment gives back six; the row follows the measurement down.
+  ['skills/objectstack-ai/SKILL.md', 6799], //          -18 (was 6824), then -5 A2′ (was 6806)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying
@@ -919,7 +921,17 @@ export const CEILINGS = new Map([
   // priced text is 24612 bytes -> 6153 tokens: the ceiling moves 6151 -> 6153
   // (+2). Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 27) / 4) == ceil(24612 / 4)
-  ['skills/objectstack-platform/SKILL.md', 6153],
+  // 6153 -> 6158 (card #37304): the enumeration row for the new top-level
+  // collection `knowledgeSources` — the key joins the same list, under the
+  // same standing enumeration-row case (ruling A on #32584, record 6819475461;
+  // #32673 letter A, record 6840575378). Raised by the row's own measured
+  // delta and by no more; nothing else in the file is cut and nothing rides
+  // along. Arithmetic in priced bytes (stamp line excluded): after #37086's
+  // `forms` row above the text is 24612 bytes (6153 tokens, headroom 0); the
+  // row adds 20 bytes, so the LANDED priced text is 24632 bytes -> 6158
+  // tokens: the ceiling moves 6153 -> 6158 (+5). Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 27) / 4) == ceil(24632 / 4)
+  ['skills/objectstack-platform/SKILL.md', 6158],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:

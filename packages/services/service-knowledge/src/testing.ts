@@ -18,6 +18,8 @@
  *     builds: true,
  *     refusesOtherFingerprint: true,
  *     generations: true,
+ *     scope: true,
+ *     dropSource: true,
  *   },
  * });
  * ```
@@ -47,7 +49,11 @@
  * stores `docHash` returns it on each hit as stored, which the service's
  * record-level freshness check compares (pinned through a real
  * `KnowledgeService`), and an adapter that takes chunks returns each
- * passage's `headingPath`.
+ * passage's `headingPath`; and `dropSource` (ADR-0161 K8, item 4) — on the
+ * adapter alone, every document of every generation and what it recorded
+ * about the index are gone and another source's are untouched, and through a
+ * real `KnowledgeService`, removing a metadata item's source drops its index
+ * or, for an adapter without the member, says once that it was kept.
  *
  * Every optional member is DECLARED by the caller in `implements`, and the
  * suite asserts the declaration against the adapter: a member an adapter lacks
@@ -123,6 +129,12 @@ export interface KnowledgeAdapterContractOptions {
      * before it ranks, and returns each document's `metadata` on its hits.
      */
     scope: boolean;
+    /**
+     * `dropSource` (ADR-0161 K8, item 4): the adapter removes everything it
+     * holds for a source — every document of every generation, and what it
+     * recorded about the index.
+     */
+    dropSource: boolean;
   };
 }
 
@@ -138,10 +150,10 @@ const SOURCE_PREFIX = 'contract_';
 
 function objectSource(id: string, extra: Partial<ObjectKnowledgeSource> = {}): KnowledgeSource {
   return {
-    id: `${SOURCE_PREFIX}${id}`,
+    name: `${SOURCE_PREFIX}${id}`,
     label: id,
     adapter: 'under_test',
-    source: { kind: 'object', object: 'article', contentFields: ['body'], metadataFields: ['status'], ...extra },
+    source: { kind: 'object', object: 'article', content: ['body'], metadataFields: ['status'], ...extra },
   } as KnowledgeSource;
 }
 
@@ -170,10 +182,10 @@ function docFor(withChunks: boolean) {
     docHash?: string,
     organizationId?: string,
   ): KnowledgeDocument => {
-    const id = `${source.id}:${n}`;
+    const id = `${source.name}:${n}`;
     return {
       id,
-      sourceId: source.id,
+      sourceId: source.name,
       sourceRecordId: n,
       content,
       title: `Title ${n}`,
@@ -370,6 +382,9 @@ async function serviceOver(
         },
       }
       : {}),
+    ...(typeof adapter.dropSource === 'function'
+      ? { dropSource: (ctx: AdapterContext) => adapter.dropSource!(ctx) }
+      : {}),
   };
   const posture = setup.posture;
   const engine = rowsEngine(rows, setup.wall);
@@ -471,6 +486,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
       // The two ends of a build come together or not at all.
       expect(typeof adapter.beginBuild === 'function').toBe(opts.implements.builds);
       expect(typeof adapter.completeBuild === 'function').toBe(opts.implements.builds);
+      expect(typeof adapter.dropSource === 'function').toBe(opts.implements.dropSource);
       if (opts.implements.generations) {
         expect(opts.implements.builds && opts.implements.refusesOtherFingerprint).toBe(true);
       }
@@ -485,8 +501,8 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
         await adapter.upsert([doc(b, '1', 'alpine meadow flowers')], ctxOf(b));
         const hits = await adapter.search('alpine meadow', { source: a, topK: 5 });
         expect(hits.length).toBeGreaterThan(0);
-        expect(hits[0].documentId).toBe(`${a.id}:1`);
-        for (const hit of hits) expect(hit.sourceId).toBe(a.id);
+        expect(hits[0].documentId).toBe(`${a.name}:1`);
+        for (const hit of hits) expect(hit.sourceId).toBe(a.name);
         for (let i = 1; i < hits.length; i++) expect(hits[i - 1].score).toBeGreaterThanOrEqual(hits[i].score);
         expect((await adapter.search('alpine meadow', { source: a, topK: 1 })).length).toBeLessThanOrEqual(1);
       });
@@ -497,18 +513,18 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
         await adapter.upsert([doc(a, '1', 'volcanic basalt columns')], ctxOf(a));
         await adapter.upsert([doc(a, '1', 'glacier ice caves')], ctxOf(a));
         const stale = await adapter.search('volcanic basalt', { source: a, topK: 5 });
-        expect(stale.filter((h) => h.documentId === `${a.id}:1`)).toEqual([]);
+        expect(stale.filter((h) => h.documentId === `${a.name}:1`)).toEqual([]);
         const fresh = await adapter.search('glacier ice', { source: a, topK: 5 });
-        expect(fresh.map((h) => h.documentId)).toContain(`${a.id}:1`);
+        expect(fresh.map((h) => h.documentId)).toContain(`${a.name}:1`);
       });
 
       it('a deleted document is not found; deleting an absent id is a no-op', async () => {
         const adapter: IKnowledgeAdapter = await make();
         const a = objectSource('a');
         await adapter.upsert([doc(a, '1', 'copper kettle'), doc(a, '2', 'copper wire')], ctxOf(a));
-        await adapter.delete([`${a.id}:1`, `${a.id}:absent`], ctxOf(a));
+        await adapter.delete([`${a.name}:1`, `${a.name}:absent`], ctxOf(a));
         const hits = await adapter.search('copper', { source: a, topK: 5 });
-        expect(hits.map((h) => h.documentId)).toEqual([`${a.id}:2`]);
+        expect(hits.map((h) => h.documentId)).toEqual([`${a.name}:2`]);
       });
     });
 
@@ -533,15 +549,15 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           const { adapter, a } = await seeded();
           // topK 1: a filter applied after ranking would keep B's better hit and drop it, answering nothing.
           const top = await adapter.search(ORG_QUERY, { source: a, topK: 1, organizationIds: ['org_a'] });
-          expect(top.map((h) => h.documentId)).toEqual([`${a.id}:a1`]);
+          expect(top.map((h) => h.documentId)).toEqual([`${a.name}:a1`]);
           const all = await adapter.search(ORG_QUERY, { source: a, topK: 5, organizationIds: ['org_a'] });
-          expect(all.map((h) => h.documentId)).toEqual([`${a.id}:a1`]);
+          expect(all.map((h) => h.documentId)).toEqual([`${a.name}:a1`]);
         });
 
         it('ranks the documents of every organization in the set, and none stored without one', async () => {
           const { adapter, a } = await seeded();
           const hits = await adapter.search(ORG_QUERY, { source: a, topK: 5, organizationIds: ['org_a', 'org_b'] });
-          expect(hits.map((h) => h.documentId).sort()).toEqual([`${a.id}:a1`, `${a.id}:b1`]);
+          expect(hits.map((h) => h.documentId).sort()).toEqual([`${a.name}:a1`, `${a.name}:b1`]);
         });
 
         it('an empty set ranks nothing — it is never read as "no filter"', async () => {
@@ -552,7 +568,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
         it('without the option every document is ranked, as before', async () => {
           const { adapter, a } = await seeded();
           const hits = await adapter.search(ORG_QUERY, { source: a, topK: 5 });
-          expect(hits.map((h) => h.documentId).sort()).toEqual([`${a.id}:a1`, `${a.id}:b1`, `${a.id}:n1`]);
+          expect(hits.map((h) => h.documentId).sort()).toEqual([`${a.name}:a1`, `${a.name}:b1`, `${a.name}:n1`]);
         });
       });
     }
@@ -563,15 +579,15 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           const rows = orgRows();
           const source = objectSource(`org_${posture}`);
           const h = await serviceOver(make, rows, source, { posture: () => posture, wall: wallOf(posture) });
-          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 2 });
+          expect(await h.svc.reindexSource(source.name)).toMatchObject({ ok: true, indexed: 2 });
           const caller = posture === 'isolated' ? CALLER_A : CALLER_AC;
           const hits = await h.svc.search(ORG_QUERY, { topK: 1, executionContext: caller });
           // The service hands the adapter the caller's organizations, by the posture.
           expect(lastOf(h.searched)?.organizationIds).toEqual(posture === 'isolated' ? ['org_a'] : ['org_a', 'org_c']);
-          expect(hits.map((x) => x.documentId)).not.toContain(`${source.id}:rb`);
+          expect(hits.map((x) => x.documentId)).not.toContain(`${source.name}:rb`);
           if (opts.implements.organizationIds) {
             // Filtered before ranking: B's better document does not take A's place.
-            expect(hits.map((x) => x.documentId)).toEqual([`${source.id}:ra`]);
+            expect(hits.map((x) => x.documentId)).toEqual([`${source.name}:ra`]);
           }
         });
       }
@@ -579,7 +595,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
       it('isolated: a caller with no active organization is handed an empty set, and gets nothing', async () => {
         const source = objectSource('org_none');
         const h = await serviceOver(make, orgRows(), source, { posture: () => 'isolated', wall: wallOf('isolated') });
-        await h.svc.reindexSource(source.id);
+        await h.svc.reindexSource(source.name);
         const nobody = { ...CALLER_A, tenantId: undefined, accessible_org_ids: [] } as ExecutionContext;
         expect(await h.svc.search(ORG_QUERY, { topK: 5, executionContext: nobody })).toEqual([]);
         expect(lastOf(h.searched)?.organizationIds).toEqual([]);
@@ -588,16 +604,16 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
       it('single posture and the system identity: no filter is handed, and the results are as before', async () => {
         const source = objectSource('org_single');
         const single = await serviceOver(make, orgRows(), source, { posture: () => 'single' });
-        await single.svc.reindexSource(source.id);
+        await single.svc.reindexSource(source.name);
         const hits = await single.svc.search(ORG_QUERY, { topK: 1, executionContext: CALLER_A });
         expect(lastOf(single.searched)).not.toHaveProperty('organizationIds');
-        expect(hits.map((x) => x.documentId)).toEqual([`${source.id}:rb`]);
+        expect(hits.map((x) => x.documentId)).toEqual([`${source.name}:rb`]);
 
         const walled = await serviceOver(make, orgRows(), source, { posture: () => 'isolated', wall: wallOf('isolated') });
-        await walled.svc.reindexSource(source.id);
+        await walled.svc.reindexSource(source.name);
         const asSystem = await walled.svc.search(ORG_QUERY, { topK: 1, executionContext: SYSTEM });
         expect(lastOf(walled.searched)).not.toHaveProperty('organizationIds');
-        expect(asSystem.map((x) => x.documentId)).toEqual([`${source.id}:rb`]);
+        expect(asSystem.map((x) => x.documentId)).toEqual([`${source.name}:rb`]);
       });
 
       if (opts.implements.organizationIds) {
@@ -605,13 +621,13 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           let posture: TenancyPosture = 'single';
           const source = objectSource('org_upgrade');
           const h = await serviceOver(make, orgRows(), source, { posture: () => posture, wall: wallOf('isolated') });
-          await h.svc.reindexSource(source.id); // under `single`: no document carries an organization
+          await h.svc.reindexSource(source.name); // under `single`: no document carries an organization
           posture = 'isolated';
           expect(await h.svc.search(ORG_QUERY, { topK: 5, executionContext: CALLER_A })).toEqual([]);
           // The organization enters the hash, so the reindex writes both documents again rather than skipping them.
-          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 2, skipped: 0 });
+          expect(await h.svc.reindexSource(source.name)).toMatchObject({ ok: true, indexed: 2, skipped: 0 });
           const hits = await h.svc.search(ORG_QUERY, { topK: 5, executionContext: CALLER_A });
-          expect(hits.map((x) => x.documentId)).toEqual([`${source.id}:ra`]);
+          expect(hits.map((x) => x.documentId)).toEqual([`${source.name}:ra`]);
         });
       }
     });
@@ -724,7 +740,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
       it('an own-object scope: every hit is one of the scoped records, and topK is filled from their passages', async () => {
         const source = clauseSource('scope_record');
         const h = await serviceOver(make, clauseRows(), source, { schemas: { article: CLAUSE_SCHEMA } });
-        expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 20 });
+        expect(await h.svc.reindexSource(source.name)).toMatchObject({ ok: true, indexed: 20 });
         const scoped = new Set(['c03', 'c07']);
         const hits = await h.svc.search(SCOPE_QUERY, {
           topK: 5,
@@ -745,7 +761,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
       it('a parent scope: only the clauses whose listed lookup holds one of the policy ids', async () => {
         const source = clauseSource('scope_parent');
         const h = await serviceOver(make, clauseRows(), source, { schemas: { article: CLAUSE_SCHEMA } });
-        await h.svc.reindexSource(source.id);
+        await h.svc.reindexSource(source.name);
         const hits = await h.svc.search(SCOPE_QUERY, {
           topK: 5,
           scope: [{ object: 'policy', ids: ['p1'] }],
@@ -768,7 +784,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           stripScope: true,
           logger: { warn, debug: () => undefined, info: () => undefined, error: () => undefined },
         });
-        await h.svc.reindexSource(source.id);
+        await h.svc.reindexSource(source.name);
         for (const ids of [['c03', 'c07'], ['c07']]) {
           const hits = await h.svc.search(SCOPE_QUERY, { topK: 5, scope: [{ object: 'article', ids }], executionContext: READER });
           for (const hit of hits) expect(ids).toContain(hit.sourceRecordId);
@@ -797,7 +813,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           const { pages, entries } = await listAll(adapter, a, 3);
           const ids = entries.map((e) => e.documentId);
           expect(new Set(ids).size).toBe(ids.length);
-          expect([...ids].sort()).toEqual(Array.from({ length: n }, (_, i) => `${a.id}:d${i}`).sort());
+          expect([...ids].sort()).toEqual(Array.from({ length: n }, (_, i) => `${a.name}:d${i}`).sort());
           // 0 and 3 documents fit one page (plus, at most, an empty one after it); 4 need two.
           expect(pages).toBeLessThanOrEqual(n === 4 ? 3 : 2);
           if (n === 4) expect(pages).toBeGreaterThanOrEqual(2);
@@ -810,9 +826,9 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           await adapter.upsert([doc(a, '1', 'granite quarry, revised', 'v1:replaced')], ctxOf(a));
           const { entries } = await listAll(adapter, a, 10);
           const byId = new Map(entries.map((e) => [e.documentId, e.docHash]));
-          expect(byId.get(`${a.id}:1`)).toBe('v1:replaced');
-          expect(byId.has(`${a.id}:2`)).toBe(true);
-          expect(byId.get(`${a.id}:2`)).toBeUndefined();
+          expect(byId.get(`${a.name}:1`)).toBe('v1:replaced');
+          expect(byId.has(`${a.name}:2`)).toBe(true);
+          expect(byId.get(`${a.name}:2`)).toBeUndefined();
         });
 
         it("lists only the source's own documents, and none that were deleted", async () => {
@@ -821,9 +837,9 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           const b = objectSource('b');
           await adapter.upsert([doc(a, '1', 'tidal pool'), doc(a, '2', 'tidal flat')], ctxOf(a));
           await adapter.upsert([doc(b, '1', 'tidal pool')], ctxOf(b));
-          await adapter.delete([`${a.id}:2`], ctxOf(a));
+          await adapter.delete([`${a.name}:2`], ctxOf(a));
           const { entries } = await listAll(adapter, a, 10);
-          expect(entries.map((e) => e.documentId)).toEqual([`${a.id}:1`]);
+          expect(entries.map((e) => e.documentId)).toEqual([`${a.name}:1`]);
         });
       });
 
@@ -834,9 +850,9 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           await adapter.upsert([doc(a, '1', 'basalt quarry', 'v1:opaque-as-given'), doc(a, '2', 'basalt cliffs')], ctxOf(a));
           const hits = await adapter.search('basalt', { source: a, topK: 5 });
           const byDoc = new Map(hits.map((h) => [h.documentId, h]));
-          expect(byDoc.get(`${a.id}:1`)?.docHash).toBe('v1:opaque-as-given');
-          expect(byDoc.get(`${a.id}:2`)).toBeDefined();
-          expect(byDoc.get(`${a.id}:2`)?.docHash).toBeUndefined();
+          expect(byDoc.get(`${a.name}:1`)?.docHash).toBe('v1:opaque-as-given');
+          expect(byDoc.get(`${a.name}:2`)).toBeDefined();
+          expect(byDoc.get(`${a.name}:2`)?.docHash).toBeUndefined();
         });
 
         it('a record-level search answers one hit per record, and none for a record that changed or left since it was indexed', async () => {
@@ -847,7 +863,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           ];
           const source = objectSource('fresh', { where: { status: 'published' } });
           const h = await serviceOver(make, rows, source);
-          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 3 });
+          expect(await h.svc.reindexSource(source.name)).toMatchObject({ ok: true, indexed: 3 });
           const ask = () => h.svc.search('lagoon reef', { granularity: 'record', topK: 5, executionContext: SYSTEM });
           expect((await ask()).map((x) => x.sourceRecordId).sort()).toEqual(['r1', 'r2', 'r3']);
           rows[0].body = 'lagoon reef, rewritten after indexing';
@@ -856,7 +872,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           expect(out.map((x) => x.sourceRecordId)).toEqual(['r3']);
           // The stale documents are repaired in the background: r1 rewritten, r2 removed.
           await expect.poll(async () => (await ask()).map((x) => x.sourceRecordId).sort()).toEqual(['r1', 'r3']);
-          expect(h.upserted.flat().filter((id) => id === `${source.id}:r1`)).toHaveLength(2);
+          expect(h.upserted.flat().filter((id) => id === `${source.name}:r1`)).toHaveLength(2);
         });
       });
 
@@ -865,25 +881,25 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           const rows = rowsOf(3);
           const source = objectSource('skip');
           const h = await serviceOver(make, rows, source);
-          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 3, skipped: 0, purged: 0 });
+          expect(await h.svc.reindexSource(source.name)).toMatchObject({ ok: true, indexed: 3, skipped: 0, purged: 0 });
           h.upserted.length = 0;
-          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, discovered: 3, indexed: 0, skipped: 3, purged: 0 });
+          expect(await h.svc.reindexSource(source.name)).toMatchObject({ ok: true, discovered: 3, indexed: 0, skipped: 3, purged: 0 });
           expect(h.upserted).toEqual([]);
           rows[1].body = 'body number 1 rewritten';
-          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 1, skipped: 2, purged: 0 });
-          expect(h.upserted).toEqual([[`${source.id}:r1`]]);
+          expect(await h.svc.reindexSource(source.name)).toMatchObject({ ok: true, indexed: 1, skipped: 2, purged: 0 });
+          expect(h.upserted).toEqual([[`${source.name}:r1`]]);
         });
 
         it('a complete reindex purges the documents of a deleted row and of a row that left where', async () => {
           const rows = rowsOf(3);
           const source = objectSource('purge', { where: { status: 'published' } });
           const h = await serviceOver(make, rows, source);
-          await h.svc.reindexSource(source.id);
+          await h.svc.reindexSource(source.name);
           rows.splice(0, 1); // r0 deleted
           rows[1].status = 'draft'; // r2 stopped matching
-          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, discovered: 1, purged: 2 });
+          expect(await h.svc.reindexSource(source.name)).toMatchObject({ ok: true, discovered: 1, purged: 2 });
           const { entries } = await listAll(h.adapter, source, 10);
-          expect(entries.map((e) => e.documentId)).toEqual([`${source.id}:r1`]);
+          expect(entries.map((e) => e.documentId)).toEqual([`${source.name}:r1`]);
           expect((await h.adapter.search('zebra0 zebra2', { source, topK: 5 })).map((x) => x.documentId)).toEqual([]);
         });
 
@@ -891,10 +907,10 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           const rows = rowsOf(3);
           const source = objectSource('partial');
           const h = await serviceOver(make, rows, source);
-          await h.svc.reindexSource(source.id);
+          await h.svc.reindexSource(source.name);
           rows.splice(0, 1);
-          expect(await h.svc.reindexSource(source.id, { limit: 10 })).toMatchObject({ ok: true, purged: null });
-          expect(await h.svc.reindexSource(source.id, { dryRun: true })).toMatchObject({ ok: true, purged: null });
+          expect(await h.svc.reindexSource(source.name, { limit: 10 })).toMatchObject({ ok: true, purged: null });
+          expect(await h.svc.reindexSource(source.name, { dryRun: true })).toMatchObject({ ok: true, purged: null });
           expect((await listAll(h.adapter, source, 10)).entries).toHaveLength(3);
         });
       });
@@ -904,11 +920,11 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           const rows = rowsOf(3);
           const source = objectSource('nolist');
           const h = await serviceOver(make, rows, source);
-          await h.svc.reindexSource(source.id);
+          await h.svc.reindexSource(source.name);
           rows.splice(0, 1);
           h.upserted.length = 0;
-          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 2, skipped: 0, purged: null });
-          expect(h.upserted.flat()).toEqual([`${source.id}:r1`, `${source.id}:r2`]);
+          expect(await h.svc.reindexSource(source.name)).toMatchObject({ ok: true, indexed: 2, skipped: 0, purged: null });
+          expect(h.upserted.flat()).toEqual([`${source.name}:r1`, `${source.name}:r2`]);
         });
       });
     }
@@ -918,7 +934,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
         const rows = rowsOf(2);
         const source = objectSource('fp_carry');
         const h = await serviceOver(make, rows, source);
-        expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 2 });
+        expect(await h.svc.reindexSource(source.name)).toMatchObject({ ok: true, indexed: 2 });
         await h.svc.handleRecordDelete('article', 'r0');
         await h.svc.search('zebra1', { topK: 3, executionContext: SYSTEM });
         expect(h.contexts.length).toBeGreaterThan(0);
@@ -938,7 +954,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
         };
         const base = await seen({});
         expect(await seen({})).toEqual(base); // the same source, the same adapter: the same hashes
-        const content = await seen({ contentFields: ['body', 'status'] });
+        const content = await seen({ content: ['body', 'status'] });
         expect(content.fingerprint).not.toBe(base.fingerprint);
         const where = await seen({ where: { status: 'published' } });
         expect(where.fingerprint).toBe(base.fingerprint);
@@ -953,19 +969,19 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           const rows = rowsOf(3);
           const source = objectSource('fp_pair');
           const h = await serviceOver(make, rows, source);
-          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true });
+          expect(await h.svc.reindexSource(source.name)).toMatchObject({ ok: true });
           expect(h.builds).toEqual(['begin', 'complete']);
-          await h.svc.reindexSource(source.id, { limit: 10 });
-          await h.svc.reindexSource(source.id, { dryRun: true });
+          await h.svc.reindexSource(source.name, { limit: 10 });
+          await h.svc.reindexSource(source.name, { dryRun: true });
           expect(h.builds).toEqual(['begin', 'complete']);
-          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true });
+          expect(await h.svc.reindexSource(source.name)).toMatchObject({ ok: true });
           expect(h.builds).toEqual(['begin', 'complete', 'begin', 'complete']);
         });
       } else {
         it('without beginBuild / completeBuild a complete reindex walks as before', async () => {
           const source = objectSource('fp_nobuild');
           const h = await serviceOver(make, rowsOf(2), source);
-          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 2 });
+          expect(await h.svc.reindexSource(source.name)).toMatchObject({ ok: true, indexed: 2 });
           expect(h.builds).toEqual([]);
         });
       }
@@ -977,7 +993,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           const before = await h.adapter.indexStatus!(ctxOf(source));
           expect(before.recipeHash).toBeUndefined();
           expect(before.building ?? false).toBe(false);
-          await h.svc.reindexSource(source.id);
+          await h.svc.reindexSource(source.name);
           const carried = h.contexts[0].index!;
           const after = await h.adapter.indexStatus!(ctxOf(source));
           expect(after.fingerprint).toBe(carried.fingerprint);
@@ -1001,29 +1017,29 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           await adapter.upsert([doc(a, '1', 'basalt columns')], ctxOf(a, FP_OLD));
           await expectRebuildRefusal(adapter.upsert([doc(a, '2', 'basalt quarry')], ctxOf(a, FP_NEW)));
           const hits = await adapter.search('basalt', { source: a, topK: 5, index: { fingerprint: FP_OLD.fingerprint } });
-          expect(hits.map((x) => x.documentId)).toEqual([`${a.id}:1`]);
+          expect(hits.map((x) => x.documentId)).toEqual([`${a.name}:1`]);
         });
 
         it('through KnowledgeService: a changed recipe refuses the source by name, and the call whole only when none answers', async () => {
           const rows = rowsOf(2);
           const stale = objectSource('fp_stale');
           const h = await serviceOver(make, rows, stale);
-          await h.svc.reindexSource(stale.id);
+          await h.svc.reindexSource(stale.name);
           // The content list changes: a new fingerprint the stored index was not built under.
-          h.svc.registerSource(objectSource('fp_stale', { contentFields: ['body', 'status'] }));
+          h.svc.registerSource(objectSource('fp_stale', { content: ['body', 'status'] }));
           const whole = await h.svc.search('zebra1', { topK: 5, executionContext: SYSTEM }).then(
             () => undefined,
             (e: unknown) => e,
           );
-          expect(whole).toMatchObject({ code: REBUILD_REQUIRED, status: 409, refused: [{ sourceId: stale.id, code: REBUILD_REQUIRED }] });
+          expect(whole).toMatchObject({ code: REBUILD_REQUIRED, status: 409, refused: [{ sourceId: stale.name, code: REBUILD_REQUIRED }] });
           // A second source that can be searched answers; the stale one is named, never read as empty.
           const fresh = objectSource('fp_fresh');
           h.svc.registerSource(fresh);
-          await h.svc.reindexSource(fresh.id);
+          await h.svc.reindexSource(fresh.name);
           const report = await h.svc.searchWithRefusals('zebra1', { topK: 5, executionContext: SYSTEM });
-          expect(report.hits.map((x) => x.sourceId)).toEqual([fresh.id]);
-          expect(report.refused).toEqual([expect.objectContaining({ sourceId: stale.id, code: REBUILD_REQUIRED, status: 409 })]);
-          expect((await h.svc.search('zebra1', { topK: 5, executionContext: SYSTEM })).map((x) => x.sourceId)).toEqual([fresh.id]);
+          expect(report.hits.map((x) => x.sourceId)).toEqual([fresh.name]);
+          expect(report.refused).toEqual([expect.objectContaining({ sourceId: stale.name, code: REBUILD_REQUIRED, status: 409 })]);
+          expect((await h.svc.search('zebra1', { topK: 5, executionContext: SYSTEM })).map((x) => x.sourceId)).toEqual([fresh.name]);
         });
       }
 
@@ -1051,14 +1067,97 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           const rows = rowsOf(2);
           const source = objectSource('fp_rebuild');
           const h = await serviceOver(make, rows, source);
-          await h.svc.reindexSource(source.id);
-          h.svc.registerSource(objectSource('fp_rebuild', { contentFields: ['body', 'status'] }));
+          await h.svc.reindexSource(source.name);
+          h.svc.registerSource(objectSource('fp_rebuild', { content: ['body', 'status'] }));
           await expectRebuildRefusal(h.svc.search('zebra1', { topK: 5, executionContext: SYSTEM }));
-          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 2, skipped: 0 });
+          expect(await h.svc.reindexSource(source.name)).toMatchObject({ ok: true, indexed: 2, skipped: 0 });
           const hits = await h.svc.search('zebra1', { topK: 5, executionContext: SYSTEM });
-          expect(hits.map((x) => x.documentId)).toEqual([`${source.id}:r1`]);
+          expect(hits.map((x) => x.documentId)).toEqual([`${source.name}:r1`]);
         });
       }
+    });
+
+    describe('dropSource (ADR-0161 K8, item 4)', () => {
+      if (opts.implements.dropSource) {
+        it("removes every document of the source and none of another's; dropping a source it holds nothing for is no error", async () => {
+          const adapter: IKnowledgeAdapter = await make();
+          const a = objectSource('drop_a');
+          const b = objectSource('drop_b');
+          await adapter.upsert([doc(a, '1', 'granite quarry'), doc(a, '2', 'granite bridge')], ctxOf(a));
+          await adapter.upsert([doc(b, '1', 'granite cliffs')], ctxOf(b));
+          await adapter.dropSource!(ctxOf(a));
+          expect(await adapter.search('granite', { source: a, topK: 5 })).toEqual([]);
+          expect((await adapter.search('granite', { source: b, topK: 5 })).map((x) => x.documentId)).toEqual([`${b.name}:1`]);
+          if (opts.implements.listDocuments) {
+            expect((await listAll(adapter, a, 10)).entries).toEqual([]);
+            expect((await listAll(adapter, b, 10)).entries.map((e) => e.documentId)).toEqual([`${b.name}:1`]);
+          }
+          // Twice, and for a source it has never seen: neither is an error.
+          await expect(adapter.dropSource!(ctxOf(a))).resolves.toBeUndefined();
+          await expect(adapter.dropSource!(ctxOf(objectSource('drop_never')))).resolves.toBeUndefined();
+        });
+
+        if (opts.implements.indexStatus) {
+          it('after it indexStatus answers as for a source never built, and the source builds again from nothing', async () => {
+            const source = objectSource('drop_status');
+            const h = await serviceOver(make, rowsOf(2), source);
+            await h.svc.reindexSource(source.name);
+            expect((await h.adapter.indexStatus!(ctxOf(source))).fingerprint).toBeDefined();
+            await h.adapter.dropSource!(ctxOf(source));
+            const after = await h.adapter.indexStatus!(ctxOf(source));
+            expect(after.fingerprint).toBeUndefined();
+            expect(after.recipeHash).toBeUndefined();
+            expect(after.building ?? false).toBe(false);
+            expect(await h.svc.readIndexState(source.name)).toMatchObject({ state: 'nothing', due: true });
+            expect(await h.svc.reindexSource(source.name)).toMatchObject({ ok: true, indexed: 2 });
+            expect((await h.svc.search('zebra1', { topK: 5, executionContext: SYSTEM })).length).toBeGreaterThan(0);
+          });
+        }
+
+        if (opts.implements.generations) {
+          it('removes the generation under construction too: a build left open before the drop does not survive it', async () => {
+            const adapter: IKnowledgeAdapter = await make();
+            const a = objectSource('drop_building');
+            await adapter.beginBuild!(ctxOf(a, FP_OLD));
+            await adapter.upsert([doc(a, '1', 'obsidian shards')], ctxOf(a, FP_OLD));
+            await adapter.completeBuild!(ctxOf(a, FP_OLD));
+            await adapter.beginBuild!(ctxOf(a, FP_NEW));
+            await adapter.upsert([doc(a, '2', 'obsidian mirror')], ctxOf(a, FP_NEW));
+            await adapter.dropSource!(ctxOf(a));
+            const status = await adapter.indexStatus?.(ctxOf(a));
+            if (status !== undefined) {
+              expect(status.fingerprint).toBeUndefined();
+              expect(status.building ?? false).toBe(false);
+            }
+            // Nothing of either generation answers, under either fingerprint or none.
+            expect(await adapter.search('obsidian', { source: a, topK: 5 })).toEqual([]);
+          });
+        }
+      }
+
+      it('through KnowledgeService: removing a metadata item\'s source drops its index, or says once that the adapter kept it', async () => {
+        const source = objectSource('drop_item');
+        const warn = vi.fn();
+        const h = await serviceOver(make, rowsOf(2), source, { logger: { warn } });
+        // The suite registers through the code door; the removal under test is
+        // the metadata door's, so the source is registered there instead.
+        h.svc.unregisterSource(source.name);
+        const entry = h.svc.registerMetadataSource(source);
+        await h.svc.reindexSource(source.name);
+        expect((await h.adapter.search('zebra1', { source: entry.handed, topK: 5 })).length).toBeGreaterThan(0);
+        await h.svc.dropMetadataSource(entry.key);
+        expect(h.svc.getSource(source.name)).toBeUndefined();
+        const left = await h.adapter.search('zebra1', { source: entry.handed, topK: 5 });
+        const kept = warn.mock.calls.filter(([line]) => /its index was not dropped/.test(String(line)));
+        if (opts.implements.dropSource) {
+          expect(left).toEqual([]);
+          expect(kept).toEqual([]);
+        } else {
+          expect(left.length).toBeGreaterThan(0);
+          expect(kept).toHaveLength(1);
+          expect(String(kept[0][0])).toContain(`'${source.name}'`);
+        }
+      });
     });
 
     describe('the chunk channel (ADR-0161 K8, item 5)', () => {
@@ -1074,7 +1173,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           const source = splitSource('chunks');
           const rows: Row[] = [{ id: 'r1', body: longBody, status: 'published' }];
           const h = await serviceOver(make, rows, source);
-          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 1, failed: 0, failures: [] });
+          expect(await h.svc.reindexSource(source.name)).toMatchObject({ ok: true, indexed: 1, failed: 0, failures: [] });
           const [sent] = h.received;
           const expected = splitDocument(
             sent,
@@ -1095,10 +1194,10 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
         it('a hit carries the heading path of its passage, and none for a passage without one', async () => {
           const adapter: IKnowledgeAdapter = await make();
           const a = objectSource('headings');
-          const id = `${a.id}:1`;
+          const id = `${a.name}:1`;
           await adapter.upsert(
             [{
-              id, sourceId: a.id, sourceRecordId: '1', content: 'fjord ferry timetable. fjord glacier', metadata: {},
+              id, sourceId: a.name, sourceRecordId: '1', content: 'fjord ferry timetable. fjord glacier', metadata: {},
               chunks: [
                 { id: `${id}#0`, documentId: id, index: 0, content: 'fjord ferry timetable', headingPath: ['Travel', 'Ferries'] },
                 { id: `${id}#1`, documentId: id, index: 1, content: 'fjord glacier' },
@@ -1121,36 +1220,22 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           ];
           // 60 tokens: a 48-token budget, which the short row fits and the long one does not.
           const h = await serviceOver(make, rows, source, { maxInputTokens: 60 });
-          const first = await h.svc.reindexSource(source.id);
+          const first = await h.svc.reindexSource(source.name);
           expect(first).toMatchObject({ ok: true, discovered: 2, indexed: 1, failed: 1 });
-          expect(first.failures).toEqual([{ documentId: `${source.id}:r2`, reason: expect.stringContaining("split 'whole'") }]);
+          expect(first.failures).toEqual([{ documentId: `${source.name}:r2`, reason: expect.stringContaining("split 'whole'") }]);
           expect(await h.adapter.search('glaciers copper', { source, topK: 5 })).toEqual([]);
           // A document that fit and then grew past the budget leaves the index too.
           rows[0].body = `tundra ${longBody}`;
-          const second = await h.svc.reindexSource(source.id);
+          const second = await h.svc.reindexSource(source.name);
           expect(second).toMatchObject({ ok: true, failed: 2 });
           expect((await h.adapter.search('tundra', { source, topK: 5 })).map((x) => x.documentId)).toEqual([]);
-        });
-
-        it('indexDocument refuses caller-supplied chunks', async () => {
-          const source = splitSource('push');
-          const h = await serviceOver(make, [], source);
-          await expect(
-            h.svc.indexDocument(source.id, {
-              id: `${source.id}:x`,
-              sourceId: source.id,
-              content: 'pushed',
-              chunks: [{ id: `${source.id}:x#0`, documentId: `${source.id}:x`, index: 0, content: 'pushed' }],
-            }),
-          ).rejects.toThrow(/chunks are cut by the knowledge service/);
-          expect(h.upserted).toEqual([]);
         });
       } else {
         it('receives whole documents, never chunks, whatever the source splits by or the budget', async () => {
           const source = splitSource('nochunks');
           const rows: Row[] = [{ id: 'r1', body: longBody, status: 'published' }];
           const h = await serviceOver(make, rows, source, { maxInputTokens: 20 });
-          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 1, failed: 0 });
+          expect(await h.svc.reindexSource(source.name)).toMatchObject({ ok: true, indexed: 1, failed: 0 });
           expect(h.received).toHaveLength(1);
           expect(h.received[0].content).toBe(longBody);
           expect('chunks' in h.received[0]).toBe(false);

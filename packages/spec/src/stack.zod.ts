@@ -101,6 +101,7 @@ import { retiredKey } from './shared/retired-key';
 import { AgentSchema } from './ai/agent.zod';
 import { SkillSchema } from './ai/skill.zod';
 import { AiContextSchema } from './ai/ai-context.zod';
+import { KnowledgeSourceSchema } from './ai/knowledge-source.zod';
 import { ToolSchema } from './ai/tool.zod';
 
 // Data Protocol (additional)
@@ -1231,6 +1232,7 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * that does neither serves no such tool, whatever packs it holds.
    */
   aiContexts: z.array(AiContextSchema).optional().describe('AI context packs — the material of one record handed to a model, read as the caller by get_record_context (ADR-0160). A host serves that tool only when it mounts the record-context service: the CLI mounts it where `requires` includes `record-context`, and a host that composes its own kernel lists `RecordContextServicePlugin` in `plugins`'),
+  knowledgeSources: z.array(KnowledgeSourceSchema).optional().describe('Knowledge sources — which object\'s records the knowledge service indexes, which fields are sent to the embedder as content, and which adapter holds the index (ADR-0161 K4). A host indexes them only when it mounts the knowledge service: the CLI mounts it where `requires` includes `knowledge`, and a host that composes its own kernel lists `KnowledgeServicePlugin` in `plugins`'),
 
   /**
    * ObjectQL: Data Extensions
@@ -1704,6 +1706,7 @@ export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   tools: 'concat',
   skills: 'concat',
   aiContexts: 'concat',
+  knowledgeSources: 'concat',
   hooks: 'concat',
   mappings: 'concat',
   analyticsCubes: 'concat',
@@ -3467,6 +3470,7 @@ const SAME_STACK_ENTRY_IDENTITY = Object.freeze({
   tools: lastWinsByName('Tool', 'tools'),
   skills: lastWinsByName('Skill', 'skills'),
   aiContexts: lastWinsByName('AI context pack', 'aiContexts'),
+  knowledgeSources: lastWinsByName('Knowledge source', 'knowledge sources'),
   views: {
     identity: (entry) =>
       isAggregatedViewContainer(entry)
