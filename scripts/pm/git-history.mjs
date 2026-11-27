@@ -212,9 +212,11 @@
  *     skew margin. A real ancestor that the walk missed must sit below a
  *     boundary, and a boundary is its descendant, so it cannot predate it. The
  *     newest boundary is therefore the control leg: it is in the ref's history
- *     by construction (it is where the walk stopped) and it is deeper than the
- *     tested commit. `--control=<sha>` adds the operator's own leg on top: it
- *     must answer 0 and must not be newer than the tested commit;
+ *     (it is where the walk stopped; the leg is still run, and its exit code
+ *     is the one the receipt prints) and it is deeper than the tested commit.
+ *     `--control=<sha>` adds the operator's own leg on top: it must answer 0
+ *     and must not be newer than the tested commit. A walk that could not be
+ *     read is never "no graft": it is refused;
  *   - otherwise it deepens (`--deepen=N` doubling, then `--unshallow`, the same
  *     additive ladder `touch` climbs) and reads again, and REFUSES with exit 2
  *     and empty stdout when the negative still cannot be told from a cut.
@@ -271,7 +273,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'bare dates: the instant the proof reads is the instant git counts': 16,
   'touch: the provenance reading a shallow clone fabricates': 26,
   'piped stdout: the answer a pipe reads is the answer a file holds': 4,
-  'ancestor: the negative a shallow clone fabricates': 32,
+  'ancestor: the negative a shallow clone fabricates': 38,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -774,6 +776,32 @@ function commitShaOf(cwd, rev) {
   return /^[0-9a-f]{40,64}$/.test(sha) ? sha : null;
 }
 
+/**
+ * Why a hex string that resolves to no commit is NOT simply absent, or null
+ * when it is: git lists every object the prefix can mean, and two or more is
+ * an ambiguous prefix, one is an object that is not a commit. Either read as
+ * "not in this clone" would print a receipt that is untrue.
+ *
+ * @param {string} cwd
+ * @param {string} hex
+ * @param {(cwd: string, hex: string) => string[]} [candidatesOf] injected by the self-test
+ * @returns {string|null}
+ */
+export function hexPrefixProblem(cwd, hex, candidatesOf = disambiguate) {
+  const candidates = candidatesOf(cwd, hex);
+  if (candidates.length > 1) {
+    return `is ambiguous here: ${candidates.length} objects begin with it (give more digits)`;
+  }
+  if (candidates.length === 1) return `names an object that is not a commit (${candidates[0].slice(0, 9)})`;
+  return null;
+}
+
+/** Every object id in this clone that begins with `hex`. */
+function disambiguate(cwd, hex) {
+  const out = git(['rev-parse', `--disambiguate=${hex}`], { cwd, allowFail: true });
+  return (out || '').split('\n').map((l) => l.trim()).filter(Boolean);
+}
+
 /** Committer date of `sha` in ms, or null when it cannot be read. */
 function commitDateMs(cwd, sha) {
   const out = git(['log', '-1', '--format=%cI', sha], { cwd, allowFail: true });
@@ -804,9 +832,22 @@ export function rawIsAncestor(cwd, commit, ref) {
  * committer date. Empty means the history under `ref` is complete here,
  * whatever the repository's shallow flag says about some other ref.
  *
- * @returns {Array<{sha: string, ms: number|null}>|null} null when `ref` does not resolve.
+ * Empty is the one value that PROVES a negative, so nothing unread may turn
+ * into it. A walk that could not run at all answers `null` — for ANY failure
+ * of the `rev-list`, not only a ref that does not resolve — and the caller
+ * refuses. A parentless commit whose parents could not be read is neither a
+ * boundary nor a real root: it comes back marked `undecided`, which
+ * `negativeIsProven()` refuses on. (`isGraftBoundary()` answers false for
+ * that commit, which is right for `touch`, where unreadable is refused on its
+ * own leg, and would be a "real root" here.)
+ *
+ * `read` injects the two parent readers, for the self-test only.
+ *
+ * @returns {Array<{sha: string, ms: number|null, undecided?: true}>|null} null when the walk could not be read.
  */
-export function graftBoundaries(cwd, ref) {
+export function graftBoundaries(cwd, ref, read = {}) {
+  const parentsOf = read.parentsOf ?? objectParents;
+  const traversalOf = read.traversalOf ?? traversalParents;
   const out = git(['rev-list', '--max-parents=0', '--format=%cI', ref], { cwd, allowFail: true });
   if (out === null) return null;
   const found = [];
@@ -814,8 +855,15 @@ export function graftBoundaries(cwd, ref) {
   for (const line of out.split('\n')) {
     if (line.startsWith('commit ')) { sha = line.slice('commit '.length).trim(); continue; }
     if (line === '' || sha === null) continue;
-    const ms = Date.parse(line.trim());
-    if (isGraftBoundary(cwd, sha)) found.push({ sha, ms: Number.isFinite(ms) ? ms : null });
+    const parsed = Date.parse(line.trim());
+    const ms = Number.isFinite(parsed) ? parsed : null;
+    const named = parentsOf(cwd, sha);
+    const used = named === null ? null : traversalOf(cwd, sha);
+    if (named === null || used === null) {
+      found.push({ sha, ms, undecided: true });
+    } else if (named.map((p) => p.sha).sort().join(' ') !== [...used].sort().join(' ')) {
+      found.push({ sha, ms });
+    }
     sha = null;
   }
   return found;
@@ -834,15 +882,19 @@ export function graftBoundaries(cwd, ref) {
  *     none can hide it (`by: floor`), and that boundary is the control leg:
  *     in the ref's history by construction, and deeper than the tested commit;
  *   - a tested commit with no date here (its object is absent) can be placed
- *     against nothing, and a boundary with no readable date decides nothing.
+ *     against nothing, a boundary with no readable date decides nothing, and
+ *     a parentless commit that could not be read (`undecided`) is not known to
+ *     be a real root, so it proves nothing either.
  *
- * @param {{boundaries: Array<{sha: string, ms: number|null}>, testedMs: number|null, marginDays?: number}} input
+ * @param {{boundaries: Array<{sha: string, ms: number|null, undecided?: true}>, testedMs: number|null, marginDays?: number}} input
  * @returns {{proven: boolean, by: 'complete'|'floor'|null,
  *            control: {sha: string, ms: number|null}|null,
- *            why: 'tested-absent'|'boundary-undated'|'floor-intrudes'|null}}
+ *            why: 'boundary-unread'|'tested-absent'|'boundary-undated'|'floor-intrudes'|null}}
  */
 export function negativeIsProven({ boundaries, testedMs, marginDays = DEFAULT_MARGIN_DAYS }) {
   if (boundaries.length === 0) return { proven: true, by: 'complete', control: null, why: null };
+  const unread = boundaries.find((b) => b.undecided === true);
+  if (unread) return { proven: false, by: null, control: unread, why: 'boundary-unread' };
   const undated = boundaries.find((b) => b.ms === null);
   if (undated) return { proven: false, by: null, control: undated, why: 'boundary-undated' };
   const newest = boundaries.reduce((a, b) => (b.ms > a.ms ? b : a));
@@ -861,13 +913,17 @@ const short9 = (sha) => String(sha).slice(0, 9);
  *
  * @returns {{state: 'yes'|'no'|'unproven'|'unreadable', deepenCanHelp?: boolean, refSha: string|null, tested: string|null,
  *            testedStatus: number|null, testedMs: number|null, by: 'complete'|'floor'|null,
- *            boundaries: Array<{sha: string, ms: number|null}>, control: {sha: string, ms: number|null}|null,
+ *            boundaries: Array<{sha: string, ms: number|null, undecided?: true}>,
+ *            control: {sha: string, ms: number|null}|null, controlStatus: number|null,
  *            operator: {sha: string|null, status: number|null, ms: number|null, ok: boolean}|null,
  *            reason: string|null}}
  */
-export function ancestorReading({ cwd, commit, ref, control, marginDays = DEFAULT_MARGIN_DAYS }) {
+export function ancestorReading({
+  cwd, commit, ref, control, marginDays = DEFAULT_MARGIN_DAYS, readBoundaries = graftBoundaries,
+}) {
   const base = {
-    refSha: null, tested: null, testedStatus: null, testedMs: null, by: null, boundaries: [], control: null, operator: null,
+    refSha: null, tested: null, testedStatus: null, testedMs: null, by: null, boundaries: [], control: null,
+    controlStatus: null, operator: null,
   };
   const refSha = commitShaOf(cwd, ref);
   if (refSha === null) {
@@ -890,9 +946,22 @@ export function ancestorReading({ cwd, commit, ref, control, marginDays = DEFAUL
     }
     testedMs = commitDateMs(cwd, tested);
   }
-  const boundaries = graftBoundaries(cwd, refSha) ?? [];
+  // ⛔ Never `?? []`: an empty list is "the history is complete", the one
+  // value that proves a negative, and a walk that could not be read is not it.
+  const boundaries = readBoundaries(cwd, refSha);
+  if (boundaries === null) {
+    return {
+      ...base, state: 'unreadable', refSha, tested, testedStatus, testedMs,
+      reason:
+        `the graft boundaries under '${ref}' could not be read (git rev-list failed), so whether this clone's ` +
+        'history of it is cut is unknown — and an unread history is not a complete one',
+    };
+  }
   const neg = negativeIsProven({ boundaries, testedMs, marginDays });
-  const reading = { ...base, refSha, tested, testedStatus, testedMs, boundaries, control: neg.control };
+  // The floor's control leg is RUN, not assumed: the receipt prints the exit
+  // code git gave for it, and a boundary that does not answer 0 voids the no.
+  const controlStatus = neg.by === 'floor' ? rawIsAncestor(cwd, neg.control.sha, refSha).status : null;
+  const reading = { ...base, refSha, tested, testedStatus, testedMs, boundaries, control: neg.control, controlStatus };
 
   // The operator's own control leg, when one was named. It can only ADD a
   // requirement: it never stands in for the floor, because a commit the
@@ -922,11 +991,27 @@ export function ancestorReading({ cwd, commit, ref, control, marginDays = DEFAUL
     if (problem !== null) return { ...reading, state: 'unproven', deepenCanHelp: !nearRelative, operator, reason: problem };
   }
 
+  if (neg.proven && neg.by === 'floor' && controlStatus !== 0) {
+    return {
+      ...reading, state: 'unproven', deepenCanHelp: true, operator,
+      reason:
+        `the control leg answered exit ${controlStatus}: the graft boundary ${short9(neg.control.sha)} did not read as ` +
+        `in '${ref}', so the negative is void`,
+    };
+  }
   if (neg.proven) return { ...reading, state: 'no', by: neg.by, operator, reason: null };
 
   const cut = `this clone's history of '${ref}' is cut at ${boundaries.length} graft boundar${boundaries.length === 1 ? 'y' : 'ies'}`;
   let reason;
-  if (neg.why === 'tested-absent') {
+  if (neg.why === 'boundary-unread') {
+    reason =
+      `the parentless commit ${short9(neg.control.sha)} under '${ref}' could not be read, so whether the history is ` +
+      'cut there or really begins there is unknown — it is not counted as a real root';
+  } else if (neg.why === 'tested-absent' && tested !== null) {
+    reason =
+      `the commit date of ${short9(tested)} could not be read, and ${cut} (newest ${short9(neg.control.sha)}, ` +
+      `${isoDay(neg.control.ms)}) — the commit cannot be placed against the cut`;
+  } else if (neg.why === 'tested-absent') {
     reason =
       `${commit} is not an object in this clone, and ${cut} (newest ${short9(neg.control.sha)}, ${isoDay(neg.control.ms)}) — ` +
       'it may sit below one of them, or nowhere in this history at all, and nothing here tells those apart';
@@ -1230,6 +1315,10 @@ function ancestorMain(opts) {
   if (commitShaOf(cwd, opts.commit) === null && !/^[0-9a-f]{7,64}$/.test(opts.commit)) {
     usage(`--commit=${opts.commit} names no commit here (give a sha, or a ref this checkout has)`);
   }
+  // …and a hex prefix that resolves to nothing because it names TOO MUCH is not
+  // an absent sha either: "is not an object in this clone" would be untrue.
+  const prefixProblem = commitShaOf(cwd, opts.commit) === null ? hexPrefixProblem(cwd, opts.commit) : null;
+  if (prefixProblem !== null) usage(`--commit=${opts.commit} ${prefixProblem}`);
   const marginDays = opts.marginDays ?? DEFAULT_MARGIN_DAYS;
 
   const r = ensureAncestorProvable({
@@ -1252,7 +1341,9 @@ function ancestorMain(opts) {
     // Three refusals, three remedies: a ref that names nothing is fetched, a
     // control that is too shallow is re-chosen, and only a cut is deepened.
     let remedy;
-    if (r.state === 'unreadable') {
+    if (r.state === 'unreadable' && r.refSha !== null) {
+      remedy = `   Remedy: ask again; a read that keeps failing is about the repository (git -C ${cwd} fsck), not the commit.\n`;
+    } else if (r.state === 'unreadable') {
       remedy = `   Remedy: name a ref this checkout has (git -C ${cwd} fetch ${remote}), then ask again.\n`;
     } else if (r.deepenCanHelp === false) {
       remedy =
@@ -1295,7 +1386,7 @@ function ancestorMain(opts) {
   const controlLeg = r.by === 'complete'
     ? "control leg: none is owed — every root under the ref is a real root, so this clone's history of it is " +
       'complete and the walk that missed the commit missed nothing'
-    : `control leg ${short9(r.control.sha)} exit 0 — the newest of ${r.boundaries.length} graft boundar` +
+    : `control leg ${short9(r.control.sha)} exit ${r.controlStatus} — the newest of ${r.boundaries.length} graft boundar` +
       `${r.boundaries.length === 1 ? 'y' : 'ies'} under the ref (${isoDay(r.control.ms)}), in its history by ` +
       `construction and at least ${marginDays} day(s) older than the tested commit (${isoDay(r.testedMs)}): ` +
       'no cut sits where that commit could hide';
@@ -2098,6 +2189,47 @@ function selfTest() {
     t('an unresolvable ref is REFUSED (exit 2, empty stdout) with its own remedy, not read as "not in it"',
       noRef.code === 2 && noRef.stdout === '' && /does not resolve to a commit/.test(noRef.stderr)
         && !/--deepen=/.test(noRef.stderr), JSON.stringify(noRef));
+
+    // An UNREAD history is not a complete one. "No graft boundary" is the one
+    // value that proves a negative, so each way of not having looked is pinned
+    // to a refusal, with the reader injected: on `full`, where the honest
+    // reading of this very commit is the `no` asserted above.
+    const unreadWalk = ancestorReading({ cwd: full, commit: oldSide, ref: 'origin/main', readBoundaries: () => null });
+    t('⛔ a boundary walk that could not be read (null) is UNREADABLE, never "complete history ⇒ no" — on the '
+      + 'clone and the commit whose honest reading is `no`',
+      unreadWalk.state === 'unreadable' && /could not be read/.test(unreadWalk.reason ?? '')
+        && ancestorReading({ cwd: full, commit: oldSide, ref: 'origin/main' }).state === 'no', JSON.stringify(unreadWalk));
+    const rootOfFull = g(['rev-list', '--max-parents=0', 'origin/main'], full).trim();
+    const unreadParents = graftBoundaries(full, 'origin/main', { parentsOf: () => null });
+    const unreadTraversal = graftBoundaries(full, 'origin/main', { traversalOf: () => null });
+    t('a parentless commit whose parents cannot be read is an UNDECIDED boundary, not a real root: the complete '
+      + 'clone that lists none lists its root, marked, under either unreadable parent read',
+      unreadParents.length === 1 && unreadParents[0].sha === rootOfFull && unreadParents[0].undecided === true
+        && unreadTraversal.length === 1 && unreadTraversal[0].undecided === true
+        && graftBoundaries(full, 'origin/main').length === 0, JSON.stringify({ unreadParents, unreadTraversal }));
+    const vUnread = negativeIsProven({ boundaries: unreadParents, testedMs: tested0 });
+    const undecidedReading = ancestorReading({ cwd: full, commit: oldSide, ref: 'origin/main', readBoundaries: () => unreadParents });
+    t('and an undecided boundary proves nothing, whatever its date: the negative is refused, and the reason says '
+      + 'the commit could not be read rather than naming a floor',
+      vUnread.proven === false && vUnread.why === 'boundary-unread' && undecidedReading.state === 'unproven'
+        && /could not be read/.test(undecidedReading.reason ?? ''), JSON.stringify({ vUnread, undecidedReading }));
+    const floorReading = ancestorReading({ cwd: anc20, commit: newSide, ref: 'origin/main' });
+    t('the floor\'s control leg is RUN: the reading carries the exit code git gave for the boundary, and that is '
+      + 'the number the receipt prints',
+      floorReading.state === 'no' && floorReading.by === 'floor' && floorReading.controlStatus === 0
+        && rawAnc(anc20, floorReading.control.sha) === 0 && deepFloor.stderr.includes(`control leg ${short(floorReading.control.sha)} exit 0`),
+      JSON.stringify(floorReading));
+    t('a hex string that resolves to no commit because it names TOO MUCH is not an absent sha: two candidates is '
+      + 'ambiguous, one is an object that is not a commit, none is absent',
+      /ambiguous/.test(hexPrefixProblem(full, '0148abc', () => [c2, c38]) ?? '')
+        && /not a commit/.test(hexPrefixProblem(full, '0148abc', () => [c2]) ?? '')
+        && hexPrefixProblem(full, 'deadbeefdeadbeef') === null);
+    const blobSha = g(['rev-parse', 'origin/main:f.txt'], full).trim();
+    const blobAsCommit = anc([`--commit=${blobSha}`], full);
+    t('and the CLI refuses such a string as usage, exit 1 with empty stdout — on a complete clone, where it '
+      + 'would otherwise be answered `no` with "is not an object in this clone" (a real blob\'s sha, no injection)',
+      blobAsCommit.code === 1 && blobAsCommit.stdout === '' && /names an object that is not a commit/.test(blobAsCommit.stderr),
+      JSON.stringify(blobAsCommit));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

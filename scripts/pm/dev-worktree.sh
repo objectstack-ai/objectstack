@@ -6,8 +6,8 @@
 # task lands in; it builds the task's own worktree BESIDE that checkout and
 # never edits the checkout itself.
 #
-#   bash scripts/pm/dev-worktree.sh --branch=claude/issue-<n>-<slug>
-#        [--worktree=<name>] [--resume-from=BRANCH@SHA] [--probe | --no-probe]
+#   bash scripts/pm/dev-worktree.sh --branch=claude/issue-<n>-<slug> [--probe]
+#        [--worktree=<name>] [--resume-from=BRANCH@SHA] [--no-probe]
 #        [--scratchpad=<dir>] [--no-install] [--backoff=<s,s,…>]
 #   bash scripts/pm/dev-worktree.sh --base        # inside a worktree: print the pinned base
 #   bash scripts/pm/dev-worktree.sh --pin-base    # inside a worktree: pin HEAD as the base, once
@@ -29,21 +29,26 @@
 #      worktree's own git dir, where it survives every shell and leaves with
 #      `git worktree remove`. `--base` prints it. A resumed branch is pinned
 #      after its merge, with `--pin-base`; a pin is never moved.
-#   4. the empty-branch probe, `git push -u origin <branch>`, before any edit.
-#      A 403 stops at once (exit 3: report `blocked`, no retry). Only a network
-#      error is retried, on the `--backoff` schedule, and then given up (exit
-#      4). Any other refusal stops without a retry (exit 5).
+#   4. with `--probe`, and ONLY with it: the empty-branch probe,
+#      `git push -u origin <branch>`, before any edit. A 403 stops at once
+#      (exit 3: report `blocked`, no retry). Only a network error is retried,
+#      on the `--backoff` schedule, and then given up (exit 4). Any other
+#      refusal stops without a retry (exit 5).
 #   5. `--scratchpad=<dir>` (the session's scratchpad directory): `issue-<n>/`
 #      is made under it.
 #   6. `pnpm install` inside the new tree (`--no-install` leaves it to you).
 #
-# ## A branch the platform assigned is never pushed
+# ## Nothing is pushed unless you say `--probe`
 #
 # The probe is for a branch you build yourself. A card thread's branch is
-# assigned by the platform and pushed by the harness, so it takes `--no-probe`.
-# `claude/issue-<n>-<slug>` is the spelling rule 1 gives a self-built branch,
-# and only that spelling is probed by default; for any other name this script
-# will not guess — say `--probe` or `--no-probe`.
+# assigned by the platform and pushed by the harness, and rule 1 forbids the
+# empty-branch push there. A branch NAME cannot tell the two apart: a card
+# thread that builds its tree under the `claude/issue-<n>-<slug>` spelling
+# would have that alias pushed under a name the platform never assigned. So
+# no spelling is ever probed by default. The dev who owns a self-built branch
+# says `--probe`; without it the tree is built, the base is pinned, and
+# `PROBE=skipped` is printed with the line that says what is still owed.
+# `--no-probe` says the default out loud.
 #
 # ## What it will not do
 #
@@ -54,9 +59,10 @@
 # work in flight (rule 2: stop and report `blocked`).
 #
 # Running it again for a tree it already built is safe: nothing is re-created,
-# the pin is read back, and the probe is sent only if the branch is still
-# empty and still absent from `origin` — so a network give-up (exit 4) is
-# retried by the same command.
+# the pin is read back, and with `--probe` the probe is sent only if the
+# branch is still empty and still absent from `origin` — so a network give-up
+# (exit 4), or a first run that did not say `--probe`, is completed by the
+# same command.
 #
 # ## Output
 #
@@ -67,7 +73,7 @@
 #   BASE=<sha> | unpinned         PROBE=pushed | on-origin | skipped | owed | 403 | network | refused
 #   SCRATCH=<dir>                 INSTALL=done | skipped | failed
 #
-# Exit codes: 0 ready · 1 refused, nothing was created · 2 usage ·
+# Exit codes: 0 ready · 1 refused, no tree was built · 2 usage ·
 #   3 the probe answered 403 · 4 the probe was not delivered (network, retries
 #   spent) · 5 the probe was refused for another reason · 6 `pnpm install`
 #   failed. From 3 up the worktree exists; the VERDICT line says what is owed.
@@ -94,18 +100,20 @@ log() { printf 'dev-worktree: %s\n' "$*" >&2; }
 usage() {
   cat >&2 << 'USAGE'
 usage:
-  bash scripts/pm/dev-worktree.sh --branch=claude/issue-<n>-<slug> [--worktree=<name>]
-       [--resume-from=BRANCH@SHA] [--probe | --no-probe] [--scratchpad=<dir>] [--no-install]
+  bash scripts/pm/dev-worktree.sh --branch=claude/issue-<n>-<slug> [--probe] [--worktree=<name>]
+       [--resume-from=BRANCH@SHA] [--no-probe] [--scratchpad=<dir>] [--no-install]
        [--backoff=<s,s,…>]
   bash scripts/pm/dev-worktree.sh --base        (inside a worktree) print the pinned base
   bash scripts/pm/dev-worktree.sh --pin-base    (inside a worktree) pin HEAD as the base, once
   bash scripts/pm/dev-worktree.sh --self-test
 
   Builds the task's worktree beside the current checkout from a freshly fetched origin/main
-  (or, with --resume-from, from origin/BRANCH at the claimed sha), pins the base, sends the
-  empty-branch probe, makes the issue's scratchpad directory and runs pnpm install.
-  --no-probe: the branch is platform-assigned (a card thread) — it is never pushed here.
-  Exits: 0 ready · 1 refused, nothing created · 2 usage · 3 probe 403 (report blocked, no retry)
+  (or, with --resume-from, from origin/BRANCH at the claimed sha), pins the base, makes the
+  issue's scratchpad directory and runs pnpm install.
+  --probe: also send the empty-branch push, before any edit — for a branch you build yourself.
+  Without it NOTHING is pushed, whatever the branch is called: a platform-assigned branch
+  (a card thread) is never pushed from here. --no-probe says that default out loud.
+  Exits: 0 ready · 1 refused, no tree built · 2 usage · 3 probe 403 (report blocked, no retry)
          · 4 probe not delivered (network) · 5 probe refused otherwise · 6 pnpm install failed
 USAGE
 }
@@ -248,7 +256,7 @@ probe_push() {
 # can fail is checked where it stands.
 mode_build() {
   local top main_checkout parent repo issue='' path start resume_branch='' resume_sha='' built=0
-  local existing remote_line tip base='' scratch='' install='skipped' rc=0 verdict head
+  local existing remote_line tip base='' scratch='' install='skipped' rc=0 verdict head probe_declared
 
   top="$(git rev-parse --show-toplevel 2> /dev/null)" || refuse 'not inside a git checkout: run this from the repository the task lands in'
   main_checkout="$(git -C "$top" worktree list --porcelain | sed -n '1s/^worktree //p')"
@@ -287,13 +295,10 @@ mode_build() {
   if ! printf '%s' "$WORKTREE" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$'; then
     die_usage "--worktree takes a directory NAME (letters, digits, dot, dash, underscore), built beside the checkout — not a path: $WORKTREE"
   fi
-  if [ -z "$PROBE_MODE" ]; then
-    if [ -n "$issue" ]; then
-      PROBE_MODE='probe'
-    else
-      die_usage "'$BRANCH' is not the claude/issue-<n>-<slug> spelling of a self-built branch, and this script will not guess: a platform-assigned branch (a card thread; the harness pushes it) takes --no-probe, a branch you were ordered to build takes --probe"
-    fi
-  fi
+  # No spelling is probed by default: a name cannot tell a self-built branch
+  # from a card thread's alias, and pushing the second is what rule 1 forbids.
+  probe_declared="$PROBE_MODE"
+  [ -n "$PROBE_MODE" ] || PROBE_MODE='no-probe'
   if ! printf '%s\n' "$BACKOFF" | grep -Eq '^([0-9]+(,[0-9]+)*)?$'; then
     die_usage "--backoff takes seconds separated by commas (got: $BACKOFF)"
   fi
@@ -305,7 +310,7 @@ mode_build() {
 
   if [ -e "$path" ]; then
     existing="$(worktree_branch_at "$path")"
-    [ "$existing" = "$BRANCH" ] || refuse "$path exists and is not the worktree of $BRANCH${existing:+ (it holds $existing)} — nothing is ever forced; read what is there (git -C $path status)"
+    [ "$existing" = "$BRANCH" ] || refuse "$path exists and is not the worktree of $BRANCH${existing:+ (it holds $existing)} — nothing is ever forced; read what is there (git -C $path status). A second branch of the same card takes its own tree: --worktree=<name>"
     built=1
     log "$path is already the worktree of $BRANCH — nothing is re-created"
   else
@@ -331,8 +336,16 @@ mode_build() {
       fi
       start='origin/main'
     fi
-    git -C "$top" worktree add --no-track "$path" -b "$BRANCH" "$start" >&2 \
-      || refuse "git worktree add failed for $path"
+    if ! git -C "$top" worktree add --no-track "$path" -b "$BRANCH" "$start" >&2; then
+      # git can fail after it has made the branch. Say what is really there
+      # instead of "nothing was created".
+      if git -C "$top" show-ref --verify --quiet "refs/heads/$BRANCH"; then
+        log "REFUSED — git worktree add failed for $path, and it left the local branch $BRANCH behind: no tree was built; read \`git worktree list\` and remove that branch before the next run"
+        printf 'VERDICT refused — no tree was built; the local branch %s was left behind\n' "$BRANCH"
+        exit "$EXIT_REFUSED"
+      fi
+      refuse "git worktree add failed for $path"
+    fi
     if [ -z "$resume_branch" ]; then
       head="$(git -C "$path" rev-parse HEAD)"
       printf '%s\n' "$head" > "$(base_file_of "$path")" \
@@ -345,7 +358,11 @@ mode_build() {
   # ── the empty-branch probe ───────────────────────────────────────────────
   if [ "$PROBE_MODE" = 'no-probe' ]; then
     PROBE='skipped'
-    log "no probe: $BRANCH was declared platform-assigned (--no-probe), and such a branch is never pushed from here"
+    if [ -n "$probe_declared" ]; then
+      log "no probe: --no-probe was given, and nothing is pushed from here"
+    else
+      log "no probe: --probe was not given, so NOTHING was pushed. A branch you build yourself owes the empty-branch push before any edit — run this command again with --probe. A platform-assigned branch (a card thread) is never pushed."
+    fi
   elif [ "$built" -eq 1 ]; then
     remote_line="$(git -C "$path" ls-remote --heads origin "refs/heads/$BRANCH")" \
       || refuse "cannot read origin's heads, so whether the probe landed is unknown"
@@ -353,6 +370,9 @@ mode_build() {
       PROBE='on-origin'
     elif [ -n "$base" ] && [ "$(git -C "$path" rev-parse HEAD)" = "$base" ]; then
       probe_push "$path" "$BRANCH" || rc=$?
+    elif [ -z "$base" ]; then
+      PROBE='owed'
+      log "$BRANCH is not on origin, and this tree has no pinned base, so an empty branch cannot be told from one that carries work — your own first push is the probe"
     else
       PROBE='owed'
       log "$BRANCH is not on origin and is no longer an empty branch — your own first push is the probe now"
@@ -411,8 +431,8 @@ ST_BATTERIES='the probe failure classifier=12
 a fresh worktree=13
 refusals before anything is created=12
 resume from a claimed sha=11
-the probe=15
-re-run, scratchpad and install=13
+the probe=19
+re-run, scratchpad and install=14
 what the script never spells=4'
 ST_BATTERY_FLOOR=7
 ST_OPEN=''
@@ -456,6 +476,23 @@ self_test() {
 # Answers `push` from the plan (line N = attempt N: 403 | network | other |
 # anything else = the real push) and counts the attempts; every other call is
 # the real git.
+if [ -f "$OS_TEST_DEV_WORKTREE_SHIM/worktree.fail" ]; then
+  case " $* " in
+    *" worktree add "*)
+      prev=''
+      top=''
+      br=''
+      for a in "$@"; do
+        [ "$prev" = -C ] && top="$a"
+        [ "$prev" = -b ] && br="$a"
+        prev="$a"
+      done
+      "$OS_TEST_DEV_WORKTREE_REAL_GIT" -C "$top" branch "$br" origin/main
+      echo 'fatal: could not create the worktree directory' >&2
+      exit 128
+      ;;
+  esac
+fi
 for a in "$@"; do
   if [ "$a" = push ]; then
     n=$(cat "$OS_TEST_DEV_WORKTREE_SHIM/push.count" 2> /dev/null || echo 0)
@@ -529,7 +566,7 @@ SHIM
     )
   }
   reset_shim() {
-    rm -f "$shim/push.count" "$shim/push.plan" "$shim/pnpm.log" "$shim/pnpm.exit"
+    rm -f "$shim/push.count" "$shim/push.plan" "$shim/pnpm.log" "$shim/pnpm.exit" "$shim/worktree.fail"
     [ -z "${1:-}" ] || printf '%s\n' "$1" | tr ',' '\n' > "$shim/push.plan"
   }
   pushes() { cat "$shim/push.count" 2> /dev/null || echo 0; }
@@ -567,7 +604,7 @@ SHIM
   st_battery 'a fresh worktree'
   reset_shim
   mkdir -p "$dir/pad"
-  out="$(run "$dir/objectstack" --branch=claude/issue-7-demo --no-install --scratchpad="$dir/pad")"
+  out="$(run "$dir/objectstack" --branch=claude/issue-7-demo --probe --no-install --scratchpad="$dir/pad")"
   rc=$?
   wt="$dir/objectstack-issue-7"
   st_case 'it exits 0 and the last line is the ready verdict' "$rc|$(printf '%s\n' "$out" | tail -n 1)" "0|VERDICT ready — cd $wt"
@@ -579,7 +616,7 @@ SHIM
   st_case '--base inside the tree reads the pin back' "$(run "$wt" --base)" "$main_sha"
   st_case 'the pin is a file in the worktree'\''s own git dir, not in the tree' \
     "$(cat "$("$real_git" -C "$wt" rev-parse --absolute-git-dir)/$BASE_FILE_NAME")|$("$real_git" -C "$wt" status --porcelain | wc -l | tr -d ' ')" "$main_sha|0"
-  st_case 'the probe was pushed once, and origin now holds the empty branch at that commit' \
+  st_case 'with --probe the probe was pushed once, and origin now holds the empty branch at that commit' \
     "$(field "$out" PROBE)|$(pushes)|$(on_origin claude/issue-7-demo)" "pushed|1|$main_sha"
   st_case 'the push set the upstream the branch was created without' \
     "$("$real_git" -C "$wt" rev-parse --abbrev-ref '@{upstream}' 2> /dev/null)" 'origin/claude/issue-7-demo'
@@ -610,9 +647,14 @@ SHIM
     "$?|$([ -e "$dir/objectstack-issue-8" ] && echo built || echo none)|$("$real_git" -C "$dir/objectstack" show-ref --verify --quiet refs/heads/claude/issue-8-x && echo branch || echo none)|$(pushes)" '1|none|none|0'
   st_case '…and the refusal names both readings: the resume flag, and another session'\''s work in flight' \
     "$(grep -c -- '--resume-from=BRANCH@SHA' "$err")|$(grep -c 'in flight' "$err")" '1|1'
-  out="$(run "$dir/objectstack" --branch=claude/project-thread-abc123 --worktree=objectstack-thread --no-install)"
-  st_case '⛔ a branch that is not claude/issue-<n>-… is not probed by guess: usage (2), nothing built, nothing pushed' \
-    "$?|$([ -e "$dir/objectstack-thread" ] && echo built || echo none)|$(pushes)|$(grep -c 'this script will not guess' "$err")" '2|none|0|1'
+  : > "$shim/worktree.fail"
+  out="$(run "$dir/objectstack" --branch=claude/issue-8-z --no-install)"
+  rc=$?
+  st_case 'a `git worktree add` that fails after making the branch is refused (1) WITHOUT the words "nothing was created": the verdict names the branch it left' \
+    "$rc|$(printf '%s\n' "$out" | tail -n 1)|$([ -e "$dir/objectstack-issue-8" ] && echo built || echo none)" \
+    '1|VERDICT refused — no tree was built; the local branch claude/issue-8-z was left behind|none'
+  rm -f "$shim/worktree.fail"
+  "$real_git" -C "$dir/objectstack" branch -D claude/issue-8-z > /dev/null
   out="$(run "$dir/objectstack" --branch=claude/project-thread-abc123 --no-probe --no-install)"
   st_case 'a branch with no issue number has no default tree name: usage (2)' "$?" 2
   out="$(run "$dir/objectstack" --no-install)"
@@ -647,7 +689,7 @@ SHIM
   st_case 'a --branch that differs from the resumed one is usage (2): a resume continues the SAME branch' "$?" 2
   out="$(run "$dir/objectstack" --resume-from=claude/issue-9-resume --no-install)"
   st_case '--resume-from without @SHA is usage (2)' "$?" 2
-  out="$(run "$dir/objectstack" --resume-from="claude/issue-9-resume@$(printf '%s' "$tip" | cut -c1-12 | tr 'a-f' 'A-F')" --no-install)"
+  out="$(run "$dir/objectstack" --resume-from="claude/issue-9-resume@$(printf '%s' "$tip" | cut -c1-12 | tr 'a-f' 'A-F')" --probe --no-install)"
   rc=$?
   wt="$dir/objectstack-issue-9"
   st_case 'with the claimed sha (abbreviated, any case) the same-name branch is built from origin/BRANCH, at that commit' \
@@ -668,8 +710,23 @@ SHIM
 
   # ── the probe ─────────────────────────────────────────────────────────────
   st_battery 'the probe'
+  reset_shim
+  out="$(run "$dir/objectstack" --branch=claude/issue-30-noflag --no-install)"
+  rc=$?
+  st_case '⛔ NO FLAG, the very spelling rule 1 prints (claude/issue-<n>-<slug>): the tree is built and NOTHING is pushed — zero pushes, origin has no such branch' \
+    "$rc|$(pushes)|$(field "$out" PROBE)|$(on_origin claude/issue-30-noflag)|$([ -d "$dir/objectstack-issue-30" ] && echo dir)" '0|0|skipped|absent|dir'
+  st_case '…the base is pinned all the same, and the line printed says what a self-built branch still owes' \
+    "$(field "$out" BASE)|$(grep -c 'run this command again with --probe' "$err")" "$main_sha|1"
+  reset_shim
+  out="$(run "$dir/objectstack" --branch=claude/issue-30-noflag --probe --no-install)"
+  st_case '…and the same command WITH --probe completes it: one push, the empty branch on origin, nothing re-created' \
+    "$?|$(pushes)|$(field "$out" PROBE)|$(on_origin claude/issue-30-noflag)|$(grep -c 'nothing is re-created' "$err")" "0|1|pushed|$main_sha|1"
+  reset_shim
+  out="$(run "$dir/objectstack" --branch=claude/project-thread-noflag --worktree=objectstack-thread-noflag --no-install)"
+  st_case 'a branch under any other spelling needs no flag to be built, and is not pushed either' \
+    "$?|$(pushes)|$(field "$out" PROBE)|$(on_origin claude/project-thread-noflag)" '0|0|skipped|absent'
   reset_shim 403
-  out="$(run "$dir/objectstack" --branch=claude/issue-10-denied --backoff=0,0)"
+  out="$(run "$dir/objectstack" --branch=claude/issue-10-denied --probe --backoff=0,0)"
   rc=$?
   st_case '⛔ a 403 exits 3 after exactly ONE push — it is never retried' "$rc|$(pushes)|$(field "$out" PROBE)" '3|1|403'
   st_case '…the verdict is the blocked one' "$(printf '%s\n' "$out" | tail -n 1 | cut -c1-19)" 'VERDICT blocked-403'
@@ -677,26 +734,26 @@ SHIM
     "$([ -d "$dir/objectstack-issue-10" ] && echo dir)|$(field "$out" BASE)" "dir|$main_sha"
   st_case '…and it STOPPED there: no pnpm install ran after a refused probe' "$(field "$out" INSTALL)|$([ -f "$shim/pnpm.log" ] && echo ran || echo none)" 'skipped|none'
   reset_shim network,network
-  out="$(run "$dir/objectstack" --branch=claude/issue-11-flaky --no-install --backoff=0,0)"
+  out="$(run "$dir/objectstack" --branch=claude/issue-11-flaky --probe --no-install --backoff=0,0)"
   st_case 'two network errors, then the real push: retried on the backoff schedule, exit 0 after 3 attempts' \
     "$?|$(pushes)|$(field "$out" PROBE)|$(on_origin claude/issue-11-flaky)" "0|3|pushed|$main_sha"
   reset_shim network,network,network
-  out="$(run "$dir/objectstack" --branch=claude/issue-12-down --no-install --backoff=0,0)"
+  out="$(run "$dir/objectstack" --branch=claude/issue-12-down --probe --no-install --backoff=0,0)"
   rc=$?
   st_case 'a network error on every attempt is given up at 1 + the schedule'\''s length: exit 4, three pushes, never a loop' \
     "$rc|$(pushes)|$(field "$out" PROBE)|$(on_origin claude/issue-12-down)" '4|3|network|absent'
   st_case '…and the verdict says the same command retries it' "$(printf '%s\n' "$out" | tail -n 1 | grep -c 'the same command retries it')" 1
   reset_shim network
-  out="$(run "$dir/objectstack" --branch=claude/issue-13-once --no-install --backoff=)"
+  out="$(run "$dir/objectstack" --branch=claude/issue-13-once --probe --no-install --backoff=)"
   st_case 'an empty --backoff spends no retry: one push, exit 4' "$?|$(pushes)" '4|1'
   reset_shim other
-  out="$(run "$dir/objectstack" --branch=claude/issue-14-hook --no-install --backoff=0,0)"
+  out="$(run "$dir/objectstack" --branch=claude/issue-14-hook --probe --no-install --backoff=0,0)"
   st_case 'a refusal that is neither is exit 5 after ONE push — only a network error is retried' "$?|$(pushes)|$(field "$out" PROBE)" '5|1|refused'
   reset_shim
   out="$(run "$dir/objectstack" --branch=claude/project-thread-abc123 --worktree=objectstack-thread --no-probe --no-install)"
   rc=$?
-  st_case '⛔ --no-probe (a platform-assigned branch) builds the tree and pushes NOTHING: zero pushes, origin has no such branch' \
-    "$rc|$(pushes)|$(field "$out" PROBE)|$(on_origin claude/project-thread-abc123)|$([ -d "$dir/objectstack-thread" ] && echo dir)" '0|0|skipped|absent|dir'
+  st_case '--no-probe is still accepted and says the default out loud: the tree is built, zero pushes, origin has no such branch' \
+    "$rc|$(pushes)|$(field "$out" PROBE)|$(on_origin claude/project-thread-abc123)|$([ -d "$dir/objectstack-thread" ] && echo dir)|$(grep -c -- '--no-probe was given' "$err")" '0|0|skipped|absent|dir|1'
   st_case '…and it still pins the base' "$(field "$out" BASE)" "$main_sha"
   reset_shim
   out="$(run "$dir/objectstack" --branch=release-notes-fix --worktree=objectstack-notes --probe --no-install)"
@@ -713,22 +770,27 @@ SHIM
   st_battery 're-run, scratchpad and install'
   reset_shim
   wt="$dir/objectstack-issue-7"
-  out="$(run "$dir/objectstack" --branch=claude/issue-7-demo --no-install)"
-  st_case 'a re-run for a tree already built exits 0, re-creates nothing and pushes nothing' \
+  out="$(run "$dir/objectstack" --branch=claude/issue-7-demo --probe --no-install)"
+  st_case 'a re-run with --probe for a tree already built and already on origin exits 0, re-creates nothing and pushes nothing' \
     "$?|$(pushes)|$(field "$out" PROBE)|$(grep -c 'nothing is re-created' "$err")" '0|0|on-origin|1'
   st_case '…and reads the SAME base back' "$(field "$out" BASE)" "$main_sha"
   reset_shim
-  out="$(run "$dir/objectstack" --branch=claude/issue-12-down --no-install)"
+  out="$(run "$dir/objectstack" --branch=claude/issue-12-down --probe --no-install)"
   st_case 'the re-run after a network give-up sends the probe that was owed: one push, exit 0, the branch on origin' \
     "$?|$(pushes)|$(field "$out" PROBE)|$(on_origin claude/issue-12-down)" "0|1|pushed|$main_sha"
   reset_shim
   "$real_git" -C "$dir/objectstack-issue-13" -c user.email=selftest@objectstack.ai -c user.name=selftest commit --quiet --allow-empty -m 'work'
-  out="$(run "$dir/objectstack" --branch=claude/issue-13-once --no-install)"
+  out="$(run "$dir/objectstack" --branch=claude/issue-13-once --probe --no-install)"
   st_case '⛔ a re-run never pushes WORK as a probe: a branch with commits and absent from origin reads `owed`, zero pushes' \
     "$?|$(pushes)|$(field "$out" PROBE)|$(on_origin claude/issue-13-once)" '0|0|owed|absent'
   out="$(run "$dir/objectstack" --branch=claude/issue-99-other --worktree=objectstack-issue-7 --no-install)"
-  st_case 'a path that is another branch'\''s worktree is refused (1), and the refusal names the branch it holds' \
-    "$?|$(grep -c 'it holds claude/issue-7-demo' "$err")" '1|1'
+  st_case 'a path that is another branch'\''s worktree is refused (1); the refusal names the branch it holds and the flag a second branch of one card takes' \
+    "$?|$(grep -c 'it holds claude/issue-7-demo' "$err")|$(grep -c -- '--worktree=<name>' "$err")" '1|1|1'
+  reset_shim
+  "$real_git" -C "$dir/objectstack" worktree add --quiet --no-track "$dir/objectstack-issue-21" -b claude/issue-21-hand origin/main 2> /dev/null
+  out="$(run "$dir/objectstack" --branch=claude/issue-21-hand --probe --no-install)"
+  st_case 'a hand-built tree with no pin is never probed on a guess that it is empty: `owed`, zero pushes, and the line says the base is unpinned rather than "no longer empty"' \
+    "$?|$(pushes)|$(field "$out" PROBE)|$(field "$out" BASE)|$(grep -c 'has no pinned base' "$err")|$(grep -c 'no longer an empty branch' "$err")" '0|0|owed|unpinned|1|0'
   reset_shim
   out="$(run "$dir/objectstack" --branch=claude/issue-16-install)"
   rc=$?
@@ -736,7 +798,7 @@ SHIM
     "$rc|$(field "$out" INSTALL)|$(cat "$shim/pnpm.log")" "0|done|$dir/objectstack-issue-16|install"
   reset_shim
   echo 1 > "$shim/pnpm.exit"
-  out="$(run "$dir/objectstack" --branch=claude/issue-17-broken)"
+  out="$(run "$dir/objectstack" --branch=claude/issue-17-broken --probe)"
   rc=$?
   st_case 'a failing pnpm install is exit 6, with the tree, the pin and the probe standing' \
     "$rc|$(field "$out" INSTALL)|$(field "$out" PROBE)|$(field "$out" BASE)" "6|failed|pushed|$main_sha"

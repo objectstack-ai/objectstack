@@ -24,11 +24,11 @@ model: opus
 ## 六条基本规则
 
 1. **Worktree-first。** 任何编辑之前建专用 worktree,`cd` 进去 `pnpm install`。
-   - `bash scripts/pm/dev-worktree.sh --branch=claude/issue-<n>-<slug>`:自 `origin/main` 建 `<repo>-issue-<n>`。
+   - `bash scripts/pm/dev-worktree.sh --branch=claude/issue-<n>-<slug>`:自 `origin/main` 建 `../<repo>-issue-<n>`。
    - 认领带 `Resume-from: BRANCH@SHA` ⇒ 从 `origin/BRANCH` 建同名分支续写,先合 `origin/main`。
    - ⛔ 永不编辑共享检出;修复横跨姊妹仓时一仓一 worktree。
    - 动笔前记下基点 `BASE=$(git rev-parse HEAD)`,它是标准条款节里家族规则的锚。
-   - 建好分支后先推空分支(任何编辑前):落地标记兼写路由探针。
+   - 建好分支后先推空分支(任何编辑前 `dev-worktree.sh --probe`):落地标记兼写路由探针。
    - 卡线程分支由平台指定、harness 推送,⛔ 不推空分支;探针规则只对自建分支。
    - 探针遇 403 ⇒ 停下报 `blocked`,⛔ 不进重试循环;只有网络错误才退避重试。
    - Scratchpad 按 issue 隔离:在 scratchpad 目录下建 `issue-<n>/` 子目录,临时文件全写进去。
@@ -191,7 +191,7 @@ model: opus
 - `git reset --soft origin/main` 会把你分支点之后他人已合并的文件整批 stage 成你的。
 - 起点在哪的 reset/diff/log/rebase 一律锚基本规则 1 记录的 `"$BASE"`。
 - `log -S/--follow/blame` 判日期或先后前,先 `git rev-parse --is-shallow-repository`,true 就加深申报。
-- `merge-base --is-ancestor` 判祖先前读 pm-dispatch `references/dev-traps.md`〈浅检出上的祖先读数〉;现读`git-history.mjs ancestor`。
+- `merge-base --is-ancestor` 判祖先前读 pm-dispatch `references/dev-traps.md`〈浅检出上的祖先读数〉。
 - 拒收类用例断言信封,不断言 throw 本身;最小断言集是错误的 `code` 与 `status`(ADR-0112 信封)。
 - 单独的 `expect(...).toThrow()` 不是拒收测试:抛裸 `Error` 的未修复 driver 照样绿。
 - 从不抛错的传输层转红时,它指向缺陷之外。
