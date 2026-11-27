@@ -3106,6 +3106,8 @@ const fr = {
         twoFactorTooManyAttempts: "Trop de codes incorrects. Reconnectez-vous avec votre mot de passe.",
         twoFactorExpired: "Cette connexion a expiré. Reconnectez-vous avec votre mot de passe.",
         twoFactorLocked: "Trop de tentatives échouées. Votre compte est temporairement verrouillé. Réessayez plus tard.",
+        managedPasswordSignIn: "Ce déploiement vous connecte via son fournisseur d'identité, aucun mot de passe ne peut donc être utilisé ici. Utilisez le bouton du fournisseur d'identité ci-dessus pour vous connecter.",
+        managedPasswordReset: "Ce déploiement vous connecte via son fournisseur d'identité, aucun mot de passe n'est donc défini ni réinitialisé ici. Connectez-vous avec le bouton du fournisseur d'identité sur la page de connexion.",
         invalidCredentials: "E-mail ou mot de passe invalide. Après plusieurs échecs, la connexion est suspendue pendant un moment. Mot de passe oublié ? Réinitialisez-le pour vous connecter immédiatement.",
         invalidCredentialsNoMail: 'E-mail ou mot de passe invalide. Après plusieurs échecs, la connexion est suspendue pendant un moment. Mot de passe oublié ? Demandez à votre administrateur de le réinitialiser.',
         emailNotVerified: "Veuillez vérifier votre adresse e-mail avant de vous connecter.",

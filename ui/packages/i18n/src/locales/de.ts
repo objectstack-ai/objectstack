@@ -3032,6 +3032,8 @@ const de = {
         twoFactorTooManyAttempts: "Zu viele falsche Codes. Melden Sie sich erneut mit Ihrem Passwort an.",
         twoFactorExpired: "Diese Anmeldung ist abgelaufen. Melden Sie sich erneut mit Ihrem Passwort an.",
         twoFactorLocked: "Zu viele fehlgeschlagene Versuche. Ihr Konto ist vorübergehend gesperrt. Versuchen Sie es später erneut.",
+        managedPasswordSignIn: "Diese Bereitstellung meldet Sie über ihren Identitätsanbieter an, daher kann hier kein Passwort verwendet werden. Melden Sie sich über die Schaltfläche des Identitätsanbieters oben an.",
+        managedPasswordReset: "Diese Bereitstellung meldet Sie über ihren Identitätsanbieter an, daher wird hier kein Passwort festgelegt oder zurückgesetzt. Melden Sie sich auf der Anmeldeseite über die Schaltfläche des Identitätsanbieters an.",
         invalidCredentials: "Ungültige E-Mail oder Passwort. Nach mehreren fehlgeschlagenen Versuchen wird die Anmeldung für eine Weile pausiert. Passwort vergessen? Setzen Sie es zurück, um sich sofort anzumelden.",
         invalidCredentialsNoMail: 'Ungültige E-Mail oder Passwort. Nach mehreren fehlgeschlagenen Versuchen wird die Anmeldung für eine Weile pausiert. Passwort vergessen? Bitten Sie Ihre Administration, es zurückzusetzen.',
         emailNotVerified: "Bitte bestätigen Sie Ihre E-Mail-Adresse, bevor Sie sich anmelden.",

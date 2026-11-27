@@ -3156,6 +3156,8 @@ const zh = {
         twoFactorTooManyAttempts: '错误次数过多，请重新使用密码登录。',
         twoFactorExpired: '本次登录已过期，请重新使用密码登录。',
         twoFactorLocked: '失败次数过多，您的账户已被暂时锁定，请稍后再试。',
+        managedPasswordSignIn: "此部署通过其身份提供方登录，这里不能使用密码。请点击上方的身份提供方按钮登录。",
+        managedPasswordReset: "此部署通过其身份提供方登录，这里不设置也不重置密码。请在登录页点击身份提供方按钮登录。",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
