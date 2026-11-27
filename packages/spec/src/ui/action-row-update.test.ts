@@ -286,8 +286,9 @@ describe('mixing rule: one refusal per contradiction, at the contradicting key',
     expect(del?.code).toBe('invalid_value');
     expect(del?.message).toMatch(/^`operation: 'delete'` is a bulk-def operation with no row-level form: a row delete is the object's own delete affordance/);
     // the refusal names the working route, so an author is not left guessing
-    expect(del?.message).toContain("declare a `type: 'script'` action whose `body` runs `await ctx.api.object('<object>').delete({ where: { id: ctx.recordId } })`");
-    expect(del?.message).toContain("or a `type: 'flow'` action naming an autolaunched flow that deletes the record (the flow runs as the caller)");
+    expect(del?.message).toContain("declare a `type: 'flow'` action naming an autolaunched flow that deletes the record: the flow runs as the caller, so the caller's delete permission applies.");
+    // never the script route: a script body runs elevated and would skip the caller's delete permission
+    expect(del?.message).not.toContain("type: 'script'");
     const custom = issueAt(ActionSchema.safeParse({ ...duly, operation: 'custom' }), 'operation');
     expect(custom?.code).toBe('invalid_value');
     expect(custom?.message).toMatch(/^`operation: 'custom'` is a bulk-def operation with no row-level form: on a bulk def `'custom'` dispatches the action the def NAMES/);

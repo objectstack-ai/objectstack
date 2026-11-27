@@ -1696,9 +1696,8 @@ const actionObject = () => strictObject({
       ? `\`operation: '${issue.input}'\` is a bulk-def operation with no row-level form: `
         + (issue.input === 'delete'
           ? 'a row delete is the object\'s own delete affordance, not a declarative action (and was not ruled for the row form). '
-            + "To delete the current record from an action, declare a `type: 'script'` action whose `body` runs "
-            + "`await ctx.api.object('<object>').delete({ where: { id: ctx.recordId } })`, or a `type: 'flow'` action "
-            + 'naming an autolaunched flow that deletes the record (the flow runs as the caller). '
+            + "To delete the current record from an action, declare a `type: 'flow'` action naming an autolaunched flow "
+            + "that deletes the record: the flow runs as the caller, so the caller's delete permission applies. "
           : "on a bulk def `'custom'` dispatches the action the def NAMES; on a row the action IS the action, so there is nothing to name. ")
         + "The one row-level operation is `'update'` (a static `patch` written to the current record)."
       : undefined),
