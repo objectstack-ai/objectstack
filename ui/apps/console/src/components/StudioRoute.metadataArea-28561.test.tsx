@@ -99,10 +99,16 @@ import { studioRoutes } from './StudioRoute';
 /** Every location the router showed, in order: one redirect is two entries. */
 let seen: string[] = [];
 
+/**
+ * Records in a LAYOUT effect, which runs in the same commit that writes the
+ * DOM: once a routed target is visible, its location is already in `seen`.
+ * A passive `useEffect` is flushed later, so on a slow runner a case that
+ * waited for the DOM read `seen` one entry short.
+ */
 function LocationProbe() {
   const { pathname, search } = useLocation();
   const here = `${pathname}${search}`;
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     seen.push(here);
   }, [here]);
   return <div data-testid="pathname">{here}</div>;
