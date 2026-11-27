@@ -443,7 +443,9 @@ export const CEILINGS = new Map([
   // Modify All cast no field vote). 27230 -> 27225 bytes; the row follows the measurement down.
   // 6800 -> 6799 (card #37304): the `supportKb` example's two renamed keys add
   // two bytes and its comment gives back six; the row follows the measurement down.
-  ['skills/objectstack-ai/SKILL.md', 6799], //          -18 (was 6824), then -5 A2′ (was 6806)
+  // 6799 -> 6791: the Ask AI example drops its `locations` line (32 bytes), so it compiles
+  // under both action location vocabularies; the row follows the measurement down.
+  ['skills/objectstack-ai/SKILL.md', 6791], //          -18 (was 6824), then -5 A2′ (was 6806)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying
@@ -1083,7 +1085,9 @@ export const CEILINGS = new Map([
   // (-41 bytes). Net shrink, so no raise: the ceiling follows the file down to the
   // measurement, 9133 bytes (9113 priced) -> 9107 (9087 priced) -> 2272 tokens.
   //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(9087 / 4)
-  ['skills/objectstack-ui/SKILL.md', 2264], // -8 to the measurement (was 2272)
+  // 2264 -> 2256: the Actions JSON fence drops its `locations` key (32 bytes), so it parses
+  // under both action location vocabularies; the row follows the measurement down.
+  ['skills/objectstack-ui/SKILL.md', 2256], // -8 to the measurement (was 2264)
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into
@@ -1652,7 +1656,10 @@ export const CEILINGS = new Map([
   // measured remainder only. Same ruling (2026-10-27, tap A): 「A:先削重复,余额按实测提高」
   // (ruling record 6513306068, letter B).
   //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(15559 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 3890],
+  // 3890 -> 3844: five checked examples drop their `locations` line (186 bytes), so each
+  // compiles under both action location vocabularies; the row follows the measurement down.
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(15373 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 3844],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling
