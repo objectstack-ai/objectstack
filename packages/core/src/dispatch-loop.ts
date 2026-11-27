@@ -42,7 +42,18 @@
  *    already complete", and so did the audit writes the tick's updates fired;
  *    the timer a tick sets inherited the same context, so every later tick did
  *    too. The same holds for any other ambient store (a request's identity, a
- *    grants memo): a tick is the loop's work, not the waker's.
+ *    grants memo): a tick is the loop's work, not the waker's. ⛔ So construct
+ *    a loop at boot (a plugin's `start()` or `kernel:ready`, a service
+ *    constructor), never lazily inside a request or a unit: the context it is
+ *    constructed in is the one every tick runs in for good. `DbQueueAdapter`
+ *    builds its loop in `start()`, which `subscribe()` also reaches under
+ *    `autoStart`, so a first `subscribe()` belongs at boot too.
+ *  - **A wake for a row a unit of work just wrote goes at that unit's
+ *    commit** (#37705, {@link wakeAfterOpenUnitsCommit}). The tick runs outside
+ *    the unit, so on a pooled driver it cannot see the uncommitted row: woken
+ *    inside the unit, it finds nothing and the row waits for a backed-off
+ *    tick (up to `maxIdleIntervalMs` under `soleWriter`). A unit that rolls
+ *    back sends no wake, and has no row to wake for.
  *
  * The price of the backoff is paid in latency by work nobody wakes the loop
  * for — a deferred row coming due, a row another process wrote, a crashed
@@ -329,6 +340,19 @@ export class DispatchLoop {
         clearTimeout(this.timer);
         this.timer = undefined;
     }
+}
+
+/**
+ * [#37705] Send `wake` (a {@link DispatchLoop.wake} after an outbox or queue
+ * insert) once the unit of work open at the call commits, through the
+ * engine's `runAfterOpenUnitsCommit` (`@objectstack/objectql`): at once when no
+ * unit is open, never when it rolls back. An engine without that member (a
+ * double, a driver-level store) sends it at once, as before.
+ */
+export function wakeAfterOpenUnitsCommit(engine: unknown, wake: () => void): void {
+    const defer = (engine as { runAfterOpenUnitsCommit?: (body: () => void) => void } | null | undefined)?.runAfterOpenUnitsCommit;
+    if (typeof defer === 'function') defer.call(engine, wake);
+    else wake();
 }
 
 /** The earlier of two optional instants. */

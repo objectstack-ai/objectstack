@@ -237,6 +237,35 @@ export function runOutsideOpenUnitsOnCommit<T>(
 }
 
 /**
+ * [#37705] Run `body` once the unit of work open at the call commits, outside
+ * every unit ({@link runOutsideOpenUnits}), in the async context of the call;
+ * never when that unit rolls back; at once, outside the units, when no
+ * unsettled unit is open. The body of the public
+ * `ObjectQL.runAfterOpenUnitsCommit(body)`, for a signal about a row the
+ * caller's unit just wrote: a dispatcher's wake after an outbox or queue
+ * insert. A wake started inside the unit runs its read outside it (a tick must
+ * not take the unit's handle), and on a pooled driver that read cannot see the
+ * row until the unit commits, so the wake is sent at the commit instead. The
+ * unit is the ambient one: a unit the `beginTransaction` trio opened is not
+ * published there and does not hold the body back. Fire-and-forget: a throw
+ * from `body` after the commit is the body's own, as with every queued run.
+ */
+export function runAfterOpenUnitsCommit(
+  txStore: Pick<AsyncLocalStorage<QueuedUnitEntry | undefined>, 'getStore' | 'exit'> | undefined,
+  body: () => void,
+): void {
+  const queue = unsettledUnitQueue(txStore, undefined, undefined);
+  if (!queue) {
+    runOutsideOpenUnits(txStore, undefined, body);
+    return;
+  }
+  queue.pending!.push({
+    commit: AsyncResource.bind(() => runOutsideOpenUnits(txStore, undefined, body)),
+    drop: () => undefined,
+  });
+}
+
+/**
  * The key of `ScopedContext#[DETACHED_HOOK_RUN]`, which runs a body outside
  * the units open for that api, at once or once the unit it was dispatched in
  * commits ({@link runOutsideOpenUnitsOnCommit}). A symbol, and ⛔

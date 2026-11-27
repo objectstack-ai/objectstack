@@ -17,7 +17,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { DispatchLoop, type DispatchLoopOptions } from './dispatch-loop.js';
+import { DispatchLoop, wakeAfterOpenUnitsCommit, type DispatchLoopOptions } from './dispatch-loop.js';
 
 const BASE = 500;
 const MINUTE = 60_000;
@@ -345,5 +345,25 @@ describe('#37705 DispatchLoop — a tick runs in the loop\'s own context, not th
 
     it('CONTROL: the store the waker is in is real — a body run inside it sees it', () => {
         expect(ambient.run('unit-of-the-waker', () => ambient.getStore())).toBe('unit-of-the-waker');
+    });
+});
+
+describe('#37705 wakeAfterOpenUnitsCommit — a wake for a row a unit just wrote goes at its commit', () => {
+    it('hands the wake to the engine\'s runAfterOpenUnitsCommit, which decides when it runs', () => {
+        const held: Array<() => void> = [];
+        const engine = { runAfterOpenUnitsCommit(body: () => void) { held.push(body); } };
+        const woke: string[] = [];
+        wakeAfterOpenUnitsCommit(engine, () => woke.push('wake'));
+        expect(woke, 'not sent while the engine holds it').toEqual([]);
+        expect(held).toHaveLength(1);
+        held[0]!();
+        expect(woke).toEqual(['wake']);
+    });
+
+    it('an engine without it, or none, wakes at once', () => {
+        const woke: string[] = [];
+        wakeAfterOpenUnitsCommit({ find: async () => [] }, () => woke.push('plain'));
+        wakeAfterOpenUnitsCommit(undefined, () => woke.push('none'));
+        expect(woke).toEqual(['plain', 'none']);
     });
 });

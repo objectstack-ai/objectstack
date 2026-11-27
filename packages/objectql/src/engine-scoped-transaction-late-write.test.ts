@@ -747,3 +747,63 @@ describe('#37705 — work started inside a unit and not awaited runs outside it 
     expect(driver.creates.map((c: { object: string; transaction: unknown }) => [c.object, c.transaction])).toEqual([['rec', outer], ['note', own]]);
   });
 });
+
+/**
+ * [#37705] A signal about a row the open unit just wrote (a dispatcher's wake
+ * after an outbox insert) waits for that unit's commit: the work it starts
+ * runs outside the unit, and on a pooled driver that work cannot see the row
+ * until the commit. A rolled-back unit sends none; with no unit open it goes
+ * at once.
+ */
+describe('#37705 — runAfterOpenUnitsCommit sends its signal at the commit of the open unit, outside it', () => {
+  it('inside a unit: not while it is open, then once, right after its commit', async () => {
+    const { engine, driver } = await makeEngine();
+    const events: string[] = [];
+    const realCommit = driver.commit.bind(driver);
+    driver.commit = async (h: object) => { await realCommit(h); events.push('commit'); };
+    await engine.transaction(async (trx) => {
+      await engine.insert('rec', { name: 'r1' }, { context: trx });
+      engine.runAfterOpenUnitsCommit(() => events.push('signal'));
+      await new Promise((r) => setImmediate(r));
+      events.push('body done');
+    });
+    expect(events).toEqual(['body done', 'commit', 'signal']);
+  });
+
+  it('the work the signal starts takes no handle of the committed unit', async () => {
+    const { engine, driver } = await makeEngine();
+    const seen: unknown[] = [];
+    const realFind = driver.find.bind(driver);
+    driver.find = async (o: string, ast: unknown, options: { transaction?: unknown } | undefined) => {
+      if (o === 'note') seen.push(options?.transaction);
+      return realFind(o, ast, options);
+    };
+    let read!: Promise<unknown>;
+    await engine.transaction(async () => {
+      engine.runAfterOpenUnitsCommit(() => { read = engine.find('note', { context: { isSystem: true } }); });
+    });
+    await expect(read).resolves.toEqual([]);
+    expect(driver.begun, 'a unit really opened').toHaveLength(1);
+    expect(seen).toEqual([undefined]);
+  });
+
+  it('a unit that rolls back sends no signal', async () => {
+    const { engine, driver } = await makeEngine();
+    const fired: string[] = [];
+    await expect(engine.transaction(async (trx) => {
+      await engine.insert('rec', { name: 'r1' }, { context: trx });
+      engine.runAfterOpenUnitsCommit(() => fired.push('signal'));
+      throw new Error('the unit fails');
+    })).rejects.toThrow('the unit fails');
+    expect(driver.rolledBack, 'the unit really rolled back').toHaveLength(1);
+    await new Promise((r) => setImmediate(r));
+    expect(fired).toEqual([]);
+  });
+
+  it('with no unit open the signal goes at once, before the call returns', async () => {
+    const { engine } = await makeEngine();
+    const fired: string[] = [];
+    engine.runAfterOpenUnitsCommit(() => fired.push('signal'));
+    expect(fired).toEqual(['signal']);
+  });
+});
