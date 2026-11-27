@@ -641,10 +641,14 @@ an exact scan.
   needed after. A database it cannot reach is reported as unreachable, with
   no SQL. A caller reads one sentence; the driver's text and the SQL go only
   to the operator — the health check, the boot warning and the log.
-- **Search.** An exact scan by cosine distance, so any width works —
-  including a 3072-wide model. The organization filter, the
+- **Search.** Two legs in one statement, merged by reciprocal rank fusion
+  (`k` = 60, each leg at most `topK`) before the service's re-check: an exact
+  scan by cosine distance, so any width works — including a 3072-wide model —
+  and a keyword leg on `to_tsvector('simple', content)` (a GIN expression
+  index), a word of three characters or more as a phrase, a shorter term or
+  one in Han, kana or Hangul script by `ILIKE`. The organization filter, the
   [record scope](#record-scope) and the metadata `filter` (equality per key)
-  run in the same `WHERE`, before ranking.
+  are one `WHERE`, run in both legs before either ranks.
   `queryPrefix` is put before every query before it is embedded, for a model
   that embeds questions and passages differently.
 - **Re-embedding.** A passage whose text is unchanged (its `chunk_hash`) is
@@ -702,9 +706,13 @@ the `embedder` it is given), and answers a search by an exact scan.
   `knowledge_<source>_g<n>`, its vector column sized for that generation
   (`<source>` is the source's index key). A key that is not snake_case is
   refused before any SQL.
-- **Search.** An exact scan by cosine distance; the organization filter, the
-  [record scope](#record-scope) and the metadata `filter` (JSON equality per
-  key) run in the same `WHERE`, before ranking. The store creates no DiskANN index: `vector_top_k` ranks
+- **Search.** Two legs merged by reciprocal rank fusion (`k` = 60, each leg
+  at most `topK`) before the service's re-check: an exact scan by cosine
+  distance, and a keyword leg in a contentless FTS5 trigram index beside each
+  passage table (kept in step by triggers), a term of three characters or
+  more as a quoted phrase, a shorter one by `LIKE`. The organization filter,
+  the [record scope](#record-scope) and the metadata `filter` (JSON equality
+  per key) are one `WHERE`, run in both legs before either ranks. The store creates no DiskANN index: `vector_top_k` ranks
   before it filters, and with one, 1,000 vectors of 1,536 dimensions grew a
   file from 8.2 MB to 329 MB and took 21.8 s to index. Without it the same
   1,000 passages take 8.3 MB and a search about 5 ms; 10,000 take 82 MB and
@@ -1184,8 +1192,8 @@ followed (§4.1, §4.2) are the adapters to run in production.
 | Audit + metrics | ⏳ Phase 2 |  |
 | `knowledge-llamaindex` | ⏳ Phase 2 |  |
 | `knowledge-dify` | ⏳ Phase 3 / community |  |
-| `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan, organization, record scope and metadata filter in SQL, index fingerprint (§4.1) |
-| `knowledge-turso` | ✅ | A libSQL file of its own; exact scan, organization, record scope and metadata filter in SQL, a generation built beside the active one (§4.2) |
+| `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan and a `tsvector` keyword leg merged by RRF, organization, record scope and metadata filter in SQL, index fingerprint (§4.1) |
+| `knowledge-turso` | ✅ | A libSQL file of its own; exact scan and an FTS5 trigram keyword leg merged by RRF, organization, record scope and metadata filter in SQL, a generation built beside the active one (§4.2) |
 
 ### 7.1 Non-goals for Phase 1
 

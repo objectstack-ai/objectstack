@@ -148,7 +148,146 @@ export function passageTableDdl(table: string, dimensions: number): string[] {
   embedding F32_BLOB(${dimensions}) NOT NULL
 )`,
     `CREATE INDEX ${quoted(`${table}_document`)} ON ${quoted(table)} (document_id)`,
+    ...keywordIndexDdl(table),
   ];
+}
+
+/**
+ * The names of a passage table's keyword index: a map table (`<table>-kw`, a
+ * stable integer key per passage), an FTS5 table (`<table>-fts`, contentless,
+ * trigram-tokenized, keyed by the map's integer) and the three triggers that
+ * keep both in step with every write to the passage table. Each name holds a
+ * hyphen, which no source id, no generation table and no object name can
+ * hold, so none can collide with a table the store did not make.
+ */
+export function keywordNames(table: string): { map: string; fts: string; triggers: [string, string, string] } {
+  return {
+    map: `${table}-kw`,
+    fts: `${table}-fts`,
+    triggers: [`${table}-kw-insert`, `${table}-kw-delete`, `${table}-kw-update`],
+  };
+}
+
+/**
+ * The statements that make a passage table's keyword index ({@link
+ * keywordNames}) and fill it from the rows the table already holds. The FTS5
+ * table is contentless: the text stays in the passage table alone, and a
+ * passage's entry is removed with the FTS5 `delete` command and the text as
+ * it was indexed, which the triggers hold as `old.content`. The map's integer
+ * key is an `INTEGER PRIMARY KEY`, so it survives a `VACUUM` (a passage row's
+ * implicit rowid may not). The triggers fire inside the statement that writes
+ * the passage, so the index never lags a committed write.
+ */
+export function keywordIndexDdl(table: string): string[] {
+  const { map, fts, triggers } = keywordNames(table);
+  const t = quoted(table);
+  const m = quoted(map);
+  const f = quoted(fts);
+  const remove = (row: 'old') =>
+    `INSERT INTO ${f} (${f}, rowid, content) SELECT 'delete', id, ${row}.content FROM ${m} WHERE chunk_id = ${row}.chunk_id;`;
+  return [
+    ...dropKeywordIndexDdl(table),
+    `CREATE TABLE ${m} (id INTEGER PRIMARY KEY, chunk_id TEXT NOT NULL UNIQUE)`,
+    `CREATE VIRTUAL TABLE ${f} USING fts5(content, content='', tokenize='trigram')`,
+    `INSERT INTO ${m} (chunk_id) SELECT chunk_id FROM ${t} ORDER BY chunk_id`,
+    `INSERT INTO ${f} (rowid, content) SELECT k.id, p.content FROM ${m} k JOIN ${t} p ON p.chunk_id = k.chunk_id`,
+    `CREATE TRIGGER ${quoted(triggers[0])} AFTER INSERT ON ${t} BEGIN
+  INSERT INTO ${m} (chunk_id) VALUES (new.chunk_id);
+  INSERT INTO ${f} (rowid, content) SELECT id, new.content FROM ${m} WHERE chunk_id = new.chunk_id;
+END`,
+    `CREATE TRIGGER ${quoted(triggers[1])} AFTER DELETE ON ${t} BEGIN
+  ${remove('old')}
+  DELETE FROM ${m} WHERE chunk_id = old.chunk_id;
+END`,
+    `CREATE TRIGGER ${quoted(triggers[2])} AFTER UPDATE OF chunk_id, content ON ${t}
+  WHEN old.chunk_id IS NOT new.chunk_id OR old.content IS NOT new.content BEGIN
+  ${remove('old')}
+  UPDATE ${m} SET chunk_id = new.chunk_id WHERE chunk_id = old.chunk_id;
+  INSERT INTO ${f} (rowid, content) SELECT id, new.content FROM ${m} WHERE chunk_id = new.chunk_id;
+END`,
+  ];
+}
+
+/** The statements that drop a passage table's keyword index; its triggers go with the passage table or here. */
+export function dropKeywordIndexDdl(table: string): string[] {
+  const { map, fts, triggers } = keywordNames(table);
+  return [
+    ...triggers.map((name) => `DROP TRIGGER IF EXISTS ${quoted(name)}`),
+    `DROP TABLE IF EXISTS ${quoted(fts)}`,
+    `DROP TABLE IF EXISTS ${quoted(map)}`,
+  ];
+}
+
+/** What is found under a passage table's keyword-index names, read from `sqlite_master` rows (`type`, `name`, `sql`). */
+export type KeywordIndexShape = 'none' | 'complete' | 'partial' | 'other';
+
+/**
+ * Reads the shape of a passage table's keyword index: `complete` when the
+ * map, the FTS5 table and the three triggers are all there and are this
+ * module's; `none` when nothing is; `partial` when only some of this module's
+ * are (never left by this module, whose statements run in one transaction,
+ * but rebuilt rather than trusted); `other` when an object under one of those
+ * names is not this module's — never dropped or used.
+ */
+export function keywordIndexShape(
+  table: string,
+  rows: ReadonlyArray<Record<string, unknown>>,
+  mapColumns: ReadonlyArray<Record<string, unknown>>,
+): KeywordIndexShape {
+  const { map, fts, triggers } = keywordNames(table);
+  const byName = new Map(
+    rows.map((r) => [String(r.name), { type: String(r.type), on: String(r.tbl_name), sql: String(r.sql ?? '') }]),
+  );
+  const found = [map, fts, ...triggers].filter((n) => byName.has(n));
+  if (found.length === 0) return 'none';
+  const mapOk =
+    !byName.has(map) ||
+    (byName.get(map)!.type === 'table' &&
+      mapColumns.map((c) => String(c.name)).sort().join(',') === 'chunk_id,id');
+  const ftsOk = !byName.has(fts) || (byName.get(fts)!.type === 'table' && /USING\s+fts5\s*\(/i.test(byName.get(fts)!.sql));
+  const triggersOk = triggers.every(
+    (n) => !byName.has(n) || (byName.get(n)!.type === 'trigger' && byName.get(n)!.on === table),
+  );
+  if (!mapOk || !ftsOk || !triggersOk) return 'other';
+  return found.length === 2 + triggers.length ? 'complete' : 'partial';
+}
+
+/** The most terms of one query the keyword leg matches; the rest are left to the vector leg. */
+export const MAX_KEYWORD_TERMS = 16;
+
+/** The shortest term (in characters) the trigram index can match; a shorter one is matched by `LIKE`. */
+export const TRIGRAM_MIN_CHARS = 3;
+
+/**
+ * The terms of a query for the keyword leg: split at white space and at
+ * punctuation that never sits inside a code (a hyphen, a dot, a slash, an
+ * underscore, `#`, `@` and `+` stay inside one, so `X-200`, `v1.2` and
+ * `a/b` are each one term), stripped of what is not a letter or a digit at
+ * either end, compared case-insensitively, at most {@link MAX_KEYWORD_TERMS}.
+ */
+export function keywordTerms(query: string): string[] {
+  const seen = new Set<string>();
+  const terms: string[] = [];
+  for (const raw of query.split(/[\s,;:!?()[\]{}<>"'`|\\=*~^$%&\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65\u2018-\u201f\u2026]+/u)) {
+    const term = raw.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+    if (term === '') continue;
+    const key = term.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    terms.push(term);
+    if (terms.length === MAX_KEYWORD_TERMS) break;
+  }
+  return terms;
+}
+
+/** A term as one FTS5 phrase: double-quoted, an inner double quote doubled, so no character of it is FTS5 syntax. */
+export function ftsPhrase(term: string): string {
+  return `"${term.replace(/"/g, '""')}"`;
+}
+
+/** A `LIKE … ESCAPE '\\'` pattern that holds `term` anywhere, its `%`, `_` and `\\` matched literally. */
+export function containsPattern(term: string): string {
+  return `%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 }
 
 /** The text a vector is bound as, for `vector32(?)`: `[x,y,…]`. */

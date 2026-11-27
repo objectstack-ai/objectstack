@@ -90,7 +90,79 @@ export function vectorTableDdl(schema: string, dimensions: number, vectorType: s
   PRIMARY KEY (source_id, generation, chunk_id)
 )`,
     `CREATE INDEX IF NOT EXISTS "${table}_document" ON ${qualified(schema, table)} (source_id, generation, document_id)`,
+    keywordIndexDdl(schema, dimensions),
   ];
+}
+
+/**
+ * The text-search configuration of the keyword leg: `simple` — lower-cased
+ * words, no stemming and no stop words, so a code or a name is matched as it
+ * is written, in any language the parser splits into words.
+ */
+export const TS_CONFIG = `'simple'::regconfig`;
+
+/** The `tsvector` of a passage the keyword leg matches, the expression its GIN index is built on. */
+export const PASSAGE_TSVECTOR = `to_tsvector(${TS_CONFIG}, content)`;
+
+/** The name of the keyword index of the passage table of one width. */
+export function keywordIndexName(dimensions: number): string {
+  return `${vectorTable(dimensions)}_content_tsv`;
+}
+
+/**
+ * The statement that makes the keyword index of the passage table of one
+ * width: a GIN index on {@link PASSAGE_TSVECTOR}. An expression index, so no
+ * column is added and no row is rewritten; PostgreSQL keeps it in step with
+ * every write, delete and drop of the table's rows.
+ */
+export function keywordIndexDdl(schema: string, dimensions: number): string {
+  return `CREATE INDEX IF NOT EXISTS "${keywordIndexName(dimensions)}" ON ${qualified(schema, vectorTable(dimensions))} USING gin (${PASSAGE_TSVECTOR})`;
+}
+
+/** The most terms of one query the keyword leg matches; the rest are left to the vector leg. */
+export const MAX_KEYWORD_TERMS = 16;
+
+/** The shortest term (in characters) matched on the `tsvector`; a shorter one is matched by `ILIKE`. */
+export const WORD_MIN_CHARS = 3;
+
+/**
+ * A character the `simple` parser does not split a run of text at: Han,
+ * Hiragana, Katakana and Hangul. A run of them is one `tsvector` word, so a
+ * term holding one is matched by `ILIKE`, as a substring, never as a word.
+ */
+export const UNSEGMENTED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+/**
+ * The terms of a query for the keyword leg: split at white space and at
+ * punctuation that never sits inside a code (a hyphen, a dot, a slash, an
+ * underscore, `#`, `@` and `+` stay inside one, so `X-200`, `v1.2` and
+ * `a/b` are each one term), stripped of what is not a letter or a digit at
+ * either end, compared case-insensitively, at most {@link MAX_KEYWORD_TERMS}.
+ * The same rule as the libSQL store's.
+ */
+export function keywordTerms(query: string): string[] {
+  const seen = new Set<string>();
+  const terms: string[] = [];
+  for (const raw of query.split(/[\s,;:!?()[\]{}<>"'`|\\=*~^$%&\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65\u2018-\u201f\u2026]+/u)) {
+    const term = raw.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+    if (term === '') continue;
+    const key = term.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    terms.push(term);
+    if (terms.length === MAX_KEYWORD_TERMS) break;
+  }
+  return terms;
+}
+
+/** Whether a term is matched on the `tsvector` (a word of three characters or more the parser splits), not by `ILIKE`. */
+export function isWordTerm(term: string): boolean {
+  return [...term].length >= WORD_MIN_CHARS && !UNSEGMENTED.test(term);
+}
+
+/** An `ILIKE` pattern that holds `term` anywhere, its `%`, `_` and `\\` matched literally (the default escape). */
+export function containsPattern(term: string): string {
+  return `%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 }
 
 /** The text a vector is bound as: pgvector's `[x,y,…]` literal. */
