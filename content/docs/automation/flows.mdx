@@ -1476,6 +1476,12 @@ key. A reserved name answers **400**, nothing is applied (not even legitimate
 keys sent alongside it), and the run stays parked. Ordinary author variables are
 unaffected, `$` mid-name (`price$`) included.
 
+A third: **no signal key, nor any dot-separated part of one, may be `__proto__`,
+`constructor` or `prototype`** — the rule a flow's own variable keys follow (see
+[Variables](#variables)). It covers both signal fields too, and is judged before
+anything else reads the submitted values: such a key answers **400**
+`INVALID_SIGNAL`, nothing is applied, and the run stays parked.
+
 ### A `screen` resume is checked against the declared fields
 
 A screen node's `config.fields` is a **contract**, not just a rendering hint:
@@ -2241,6 +2247,18 @@ variables: [
 | `isOutput` | `boolean` | Available as output parameter |
 | `defaultValue` | `unknown` | Bound at run start when no parameter supplies one — this is what makes the declaration a guarantee. Optional |
 | `objectName` | `string` | **Planned.** On an input only (refused at parse on any other variable): the input is the id of a record of this object. No start door reads it yet. See [a start input that is a record id](#a-start-input-that-is-a-record-id). Optional |
+
+A variable key — a declared `name`, an `assignment` target, a node's
+`outputVariable` / `iteratorVariable` / `indexVariable` / `errorVariable`, a
+`screen` field's `name` — may not be `__proto__`, `constructor` or `prototype`,
+nor have one as any dot-separated part (`cfg.prototype`). Registration refuses
+such a flow and names each key; a name that only contains one of the words
+(`constructor_name`) is fine.
+
+Each run starts from its own copy of a declared object or list `defaultValue`,
+and a dotted write under a value the run holds (`cfg.mode`, `record.x`) is read
+back by that run without changing the value itself: one run never changes the
+flow's default, the next run's values, or the trigger's record and `$record`.
 
 ### `defaultValue` — declaring a variable is not the same as binding it
 
