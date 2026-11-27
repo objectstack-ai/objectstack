@@ -16,6 +16,7 @@
     "ui/ActionText",
     "ui/ActionType",
     "ui/AddRecordConfig",
+    "ui/AiChatNavParams",
     "ui/App",
     "ui/AppBranding",
     "ui/AppContextSelector",
