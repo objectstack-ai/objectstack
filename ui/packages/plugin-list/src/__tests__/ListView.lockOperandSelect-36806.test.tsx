@@ -75,18 +75,18 @@ const objectDef = {
   },
 };
 
-const makeDataSource = () =>
+const makeDataSource = (def: Record<string, unknown> = objectDef) =>
   ({
     find: vi.fn(async () => ({ data: [], total: 0 })),
     findOne: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
-    getObjectSchema: vi.fn(async (name: string) => (name === OBJECT ? objectDef : null)),
+    getObjectSchema: vi.fn(async (name: string) => (name === OBJECT ? def : null)),
   }) as any;
 
-async function selectFor(extra: Record<string, unknown>): Promise<string[]> {
-  const dataSource = makeDataSource();
+async function selectFor(extra: Record<string, unknown>, def?: Record<string, unknown>): Promise<string[]> {
+  const dataSource = makeDataSource(def);
   const schema: any = { type: 'list-view', objectName: OBJECT, viewType: 'grid', userActions: { editInline: false }, ...extra };
   render(
     <SchemaRendererProvider dataSource={dataSource}>
@@ -128,6 +128,17 @@ describe('ListView — the field locks\' operands are projected (objectstack#368
     const select = await selectFor({ viewType: 'kanban', columns: ['title'], kanban: { groupByField: 'stage' } });
     expect(select).toContain('status');
     expect(select).toContain('stage');
+  });
+
+  it('objectstack#37448 — the lane field the board detects when the block names none', async () => {
+    // No `groupByField`: the board takes the object's declared lifecycle
+    // (`stageField`, ADR-0085), so a card drag writes `stage` and its
+    // predicate's operand rides the projection as the named lane field's does.
+    const select = await selectFor(
+      { viewType: 'kanban', columns: ['title'], kanban: {} },
+      { ...objectDef, stageField: 'stage' },
+    );
+    expect(select).toContain('status');
   });
 
   it('the calendar start and end fields\' operands', async () => {

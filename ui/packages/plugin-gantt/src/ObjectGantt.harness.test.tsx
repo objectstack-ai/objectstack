@@ -50,6 +50,7 @@ import { SchemaRendererProvider, SchemaRenderer, notifyDataChanged } from '@obje
 import { I18nProvider } from '@object-ui/i18n';
 import type { DataSource, DeclaredNode, ObjectGanttBlockNode } from '@object-ui/types';
 import { safeValidateSchema } from '@object-ui/types/zod';
+import { toast } from 'sonner';
 import { ObjectGantt } from './ObjectGantt';
 import { GANTT_FETCH_STEP } from './ganttRowWalk';
 // Module scope, not a hook: this import IS the registration (AGENTS.md
@@ -2399,5 +2400,141 @@ describe('ObjectGantt.refusedRead-35317', () => {
     const view = await screen.findByTestId('gantt-view');
     expect(view.getAttribute('data-task-count')).toBe('1');
     expect(screen.queryByTestId('gantt-no-access')).toBeNull();
+  });
+});
+
+// ── ObjectGantt.handLock-37448 ──────────────────────────────────────────────────
+
+/**
+ * objectstack#37448 — every in-chart write is an edit by hand, so the field
+ * hand lock (`@object-ui/core`'s one verdict: `readonly`, `uiReadonly`, and the
+ * conditional `readonlyWhen` / `uiReadonlyWhen`) holds on the Gantt.
+ *
+ * What is pinned: the STATIC half narrows the interaction switches the chart
+ * is handed (a move needs both dates, a resize either, the progress handle its
+ * field, the link UI the dependencies field); the CONDITIONAL half refuses, on
+ * the write, a drag, an in-place edit and a drawn link that change a field
+ * locked over THAT record, with the read-only reason toasted — and an in-place
+ * edit that only echoes a locked value is sent without it.
+ */
+describe('ObjectGantt.handLock-37448', () => {
+  const captured: { props: Record<string, any> } = { props: {} };
+  beforeEach(() => {
+    captured.props = {};
+    standIns.ganttView = (props: any) => {
+      captured.props = props;
+      return <div data-testid="gantt-view" data-task-count={String(props.tasks.length)} />;
+    };
+    vi.mocked(toast.error).mockClear();
+  });
+
+  const DONE = "record.status == 'done'";
+  const fieldsWith = (locks: Record<string, Record<string, unknown>>) => ({
+    fields: {
+      name: { type: 'text' },
+      status: { type: 'text' },
+      start_date: { type: 'date', ...locks.start_date },
+      end_date: { type: 'date', ...locks.end_date },
+      progress: { type: 'number', ...locks.progress },
+      deps: { type: 'text', ...locks.deps },
+    },
+  });
+
+  const ROWS = [
+    { id: 't1', name: 'Open task', status: 'open', start_date: '2026-01-05', end_date: '2026-01-09', progress: 40, deps: '' },
+    { id: 't2', name: 'Done task', status: 'done', start_date: '2026-01-12', end_date: '2026-01-16', progress: 100, deps: '' },
+  ];
+
+  const SCHEMA: any = {
+    type: 'object-gantt',
+    objectName: 'project_task',
+    gantt: {
+      titleField: 'name',
+      startDateField: 'start_date',
+      endDateField: 'end_date',
+      progressField: 'progress',
+      dependenciesField: 'deps',
+    },
+  };
+
+  function adapter(locks: Record<string, Record<string, unknown>>) {
+    return {
+      find: vi.fn(async () => ({ data: ROWS.map((r) => ({ ...r })), total: ROWS.length })),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => fieldsWith(locks)),
+    } as unknown as DataSource & { update: ReturnType<typeof vi.fn> };
+  }
+
+  async function mount(locks: Record<string, Record<string, unknown>>) {
+    const ds = adapter(locks);
+    render(<ObjectGantt schema={SCHEMA} dataSource={ds} />);
+    await waitFor(() => expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe('2'));
+    const task = (id: string) => (captured.props.tasks as any[]).find((t) => t.id === id);
+    return { ds, task };
+  }
+
+  it('the static half narrows the interaction switches the chart is handed', async () => {
+    await mount({ progress: { uiReadonly: true } });
+    expect(captured.props.interactions).toEqual({ progress: false });
+    cleanup();
+    await mount({ start_date: { uiReadonly: true }, deps: { readonly: true } });
+    expect(captured.props.interactions).toEqual({ move: false, link: false });
+    cleanup();
+    await mount({ start_date: { uiReadonly: true }, end_date: { uiReadonly: true } });
+    expect(captured.props.interactions).toEqual({ move: false, resize: false });
+  });
+
+  it('CONTROL: no lock hands the authored switches through untouched', async () => {
+    await mount({});
+    expect(captured.props.interactions).toBeUndefined();
+  });
+
+  it('a bar drag over a record whose date is locked by hand writes nothing and says why', async () => {
+    const { ds, task } = await mount({ start_date: { uiReadonlyWhen: DONE } });
+    await act(async () => {
+      await captured.props.onTaskUpdate(task('t2'), { start: new Date(2026, 0, 13), end: new Date(2026, 0, 17) });
+    });
+    expect(ds.update).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith('Save failed — the change was rolled back', { description: 'This field is read-only.' });
+    // CONTROL: the open record takes the same drag.
+    await act(async () => {
+      await captured.props.onTaskUpdate(task('t1'), { start: new Date(2026, 0, 6), end: new Date(2026, 0, 10) });
+    });
+    expect(ds.update).toHaveBeenCalledTimes(1);
+    expect(ds.update.mock.calls[0][1]).toBe('t1');
+    expect(Object.keys(ds.update.mock.calls[0][2]).sort()).toEqual(['end_date', 'start_date']);
+  });
+
+  it('an in-place edit that only echoes a locked value is sent without it; one that changes it is refused', async () => {
+    const { ds, task } = await mount({ progress: { uiReadonly: true } });
+    await act(async () => {
+      await captured.props.onTaskUpdate(task('t1'), { title: 'Renamed', progress: 40 });
+    });
+    expect(ds.update).toHaveBeenCalledTimes(1);
+    expect(ds.update.mock.calls[0][2]).toEqual({ name: 'Renamed' });
+    await act(async () => {
+      await captured.props.onTaskUpdate(task('t1'), { title: 'Renamed again', progress: 55 });
+    });
+    expect(ds.update).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledTimes(1);
+  });
+
+  it('a drawn link into a record whose dependencies field is locked by hand writes nothing', async () => {
+    const { ds, task } = await mount({ deps: { uiReadonlyWhen: DONE } });
+    await act(async () => {
+      await captured.props.onDependencyCreate(task('t1'), task('t2'), 'fs');
+    });
+    expect(ds.update).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    // CONTROL: the open record takes the link.
+    await act(async () => {
+      await captured.props.onDependencyCreate(task('t2'), task('t1'), 'fs');
+    });
+    expect(ds.update).toHaveBeenCalledTimes(1);
+    expect(ds.update.mock.calls[0][1]).toBe('t1');
+    expect(ds.update.mock.calls[0][2]).toHaveProperty('deps');
   });
 });

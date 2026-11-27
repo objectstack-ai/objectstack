@@ -4565,8 +4565,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // [objectstack#36806] The field locks' operands (`readonlyWhen`,
           // `uiReadonlyWhen`) of every field a person edits in place from
           // this list: the shown grid columns, the kanban's lane field (a card
-          // drag writes it) and the calendar's start / end fields (an event
-          // drag writes them). Each surface judges the lock over the ROW
+          // drag writes it — the block's `groupByField`, else the lane field
+          // the board detects off the object's lifecycle, `kanbanLaneFieldOf`)
+          // and the calendar's start / end fields (an event drag writes them). Each surface judges the lock over the ROW
           // (`fieldReadOnlyByHand`), so a row projected without the operand
           // faulted `No such key`: open for `readonlyWhen` (the server drops
           // the write), locked for the hand lock (nothing behind it judges
@@ -4578,7 +4579,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           const lockDefs = objectDef?.fields as Record<string, { readonlyWhen?: unknown; uiReadonlyWhen?: unknown } | undefined> | undefined;
           const editedInPlace = [
             ...cols,
-            (schema.kanban as { groupByField?: unknown } | undefined)?.groupByField,
+            kanbanLaneFieldOf(schema, objectDef),
             (schema.calendar as { startDateField?: unknown } | undefined)?.startDateField,
             (schema.calendar as { endDateField?: unknown } | undefined)?.endDateField,
           ].filter((name): name is string => typeof name === 'string' && name.length > 0);
