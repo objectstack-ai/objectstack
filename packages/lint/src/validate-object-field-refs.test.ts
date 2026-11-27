@@ -1128,6 +1128,69 @@ describe('validateObjectFieldRefs — dependsOn (the gate on the OWNER, the filt
     expect(findings[0]!.message).toContain('Did you mean "country"?');
   });
 
+  // [#37717] The filter half names a field the referenced object computes on
+  // read: the engine refuses every filter on it, so the picker's candidate
+  // query and the importer's scoped lookup both get no answer.
+  const withFormula = (fields: Record<string, unknown>) => ({
+    objects: [
+      invoice(fields),
+      account({ fields: {
+        ...account().fields,
+        region_label: { type: 'formula', expression: 'UPPER(region)' },
+      } }),
+    ],
+  });
+
+  it('REFUSES a `param` naming a formula field of the referenced object, naming that field and why', () => {
+    const findings = validateObjectFieldRefs(withFormula({
+      region_label: { type: 'text' },
+      contact: lookup({ dependsOn: [{ field: 'region', param: 'region_label' }] }),
+    }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: OBJECT_FIELD_REF_UNKNOWN,
+      path: 'objects[0].fields.contact.dependsOn[0].param',
+    });
+    expect(findings[0]!.message).toContain('"region_label" is a formula field of "crm_account", computed on read');
+    expect(findings[0]!.hint).toContain('stored field of the referenced object');
+    expect(explained()).toContain('computed on read, such as a `formula`');
+  });
+
+  it('REFUSES a bare name that is a formula on the referenced object — it is the filter key too', () => {
+    const findings = validateObjectFieldRefs(withFormula({
+      region_label: { type: 'text' },
+      contact: lookup({ dependsOn: ['region_label'] }),
+    }));
+    expect(findings.map((f) => f.path)).toEqual(['objects[0].fields.contact.dependsOn[0]']);
+    expect(findings[0]!.message).toContain('computed on read');
+  });
+
+  it('passes a `param` naming a stored field, and a formula only on the OWNING side (the gate reads the record)', () => {
+    expect(validateObjectFieldRefs(withFormula({
+      contact: lookup({ dependsOn: [{ field: 'region', param: 'region' }] }),
+    }))).toEqual([]);
+    expect(validateObjectFieldRefs(withFormula({
+      region_calc: { type: 'formula', expression: 'region' },
+      contact: lookup({ dependsOn: [{ field: 'region_calc', param: 'region' }] }),
+    }))).toEqual([]);
+  });
+
+  it('is refused at the runtime publish gate too', () => {
+    const stack = withFormula({
+      region_label: { type: 'text' },
+      contact: lookup({ dependsOn: [{ field: 'region', param: 'region_label' }] }),
+    });
+    const result = runRuntimeAuthoringRules({
+      type: 'object',
+      item: stack.objects[0],
+      context: { objects: [stack.objects[1]] },
+    });
+    const refusal = result.errors.find((f) => f.rule === OBJECT_FIELD_REF_UNKNOWN);
+    expect(refusal, JSON.stringify(result.errors)).toBeDefined();
+    expect(refusal!.path).toBe('objects.crm_invoice.fields.contact.dependsOn[0].param');
+  });
+
   it('a registry-injected column on the owner is a live gate (skip 3)', () => {
     expect(validateObjectFieldRefs({ objects: [invoice({
       note: { type: 'text', dependsOn: ['owner_id'] },
