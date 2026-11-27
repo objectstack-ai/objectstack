@@ -108,7 +108,7 @@ an omitted `required` as `true`.
 master (one reference column to it) or the lookup's `dependsOn` sibling: a tie
 there is `reference_ambiguous`, another master's detail `reference_out_of_scope`
 (`scope: [{ field, value }]` names the scoping columns). A name no record
-carries, or a scoping field the caller cannot read, is `reference_not_found`.
+has, or a scoping field the caller cannot read, is `reference_not_found`.
 
 ### Many-to-Many: Junction Object
 
