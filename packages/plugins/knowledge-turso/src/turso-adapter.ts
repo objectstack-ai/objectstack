@@ -614,15 +614,18 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       const idf = matches
         .map((_, i) => `h${i} * ln(1.0 + (stats.n - stats.d${i} + 0.5) / (stats.d${i} + 0.5))`)
         .join(' + ');
+      // Passages of equal keyword score are ranked by cosine distance, so the
+      // keyword leg never reorders by chunk id what the vector leg ranks.
+      const distance = vectorLeg ? 'vector_distance_cos(embedding, vector32(?1))' : '0';
       ctes.push(
-        `cand AS (SELECT chunk_id, ${matches.map((m, i) => `${m} AS h${i}`).join(', ')} FROM ${table}
-           WHERE ${inScope} AND (${matches.join(' OR ')}))`,
+        `cand AS (SELECT chunk_id, ${distance} AS distance, ${matches.map((m, i) => `${m} AS h${i}`).join(', ')}
+           FROM ${table} WHERE ${inScope} AND (${matches.join(' OR ')}))`,
         `stats AS (SELECT (SELECT count(*) FROM ${table} WHERE ${inScope}) AS n,
            ${matches.map((_, i) => `coalesce(sum(h${i}), 0) AS d${i}`).join(', ')} FROM cand)`,
         `kw AS (
-          SELECT chunk_id, row_number() OVER (ORDER BY score DESC, chunk_id) AS pos FROM (
-            SELECT cand.chunk_id, ${idf} AS score FROM cand, stats
-          ) ORDER BY score DESC, chunk_id LIMIT ${limit})`,
+          SELECT chunk_id, row_number() OVER (ORDER BY score DESC, distance, chunk_id) AS pos FROM (
+            SELECT cand.chunk_id, cand.distance, ${idf} AS score FROM cand, stats
+          ) ORDER BY score DESC, distance, chunk_id LIMIT ${limit})`,
       );
       legs.push('SELECT chunk_id, NULL AS vpos, pos AS kpos FROM kw');
     }
@@ -1093,8 +1096,9 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
 
 /**
  * Reciprocal rank fusion of the two legs' rows (`vpos`, `kpos`: a row's rank
- * in each leg, or null): best first, ties by chunk id, at most `topK`. The
- * score is the fused sum divided by that of a row first in both legs.
+ * in each leg, or null): best first, at most `topK`; a tie goes to the better
+ * vector rank, then to the chunk id. The score is the fused sum divided by
+ * that of a row first in both legs.
  */
 function fuse<R extends Record<string, unknown>>(
   rows: readonly R[],
@@ -1102,9 +1106,15 @@ function fuse<R extends Record<string, unknown>>(
 ): Array<{ row: R; score: number }> {
   const best = 2 / (RRF_K + 1);
   const leg = (pos: unknown) => (pos === null || pos === undefined ? 0 : 1 / (RRF_K + Number(pos)));
+  const vectorRank = (row: R) => (row.vpos === null || row.vpos === undefined ? Infinity : Number(row.vpos));
   return rows
     .map((row) => ({ row, score: (leg(row.vpos) + leg(row.kpos)) / best }))
-    .sort((a, b) => b.score - a.score || (String(a.row.chunk_id) < String(b.row.chunk_id) ? -1 : 1))
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        vectorRank(a.row) - vectorRank(b.row) ||
+        (String(a.row.chunk_id) < String(b.row.chunk_id) ? -1 : 1),
+    )
     .slice(0, topK);
 }
 

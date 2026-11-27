@@ -366,7 +366,7 @@ describe.skipIf(!PG_URL)('knowledge-pgvector hybrid search on a LIVE PostgreSQL'
     expect(await ids({ organizationIds: ['org_a'] }, 'moisture')).toEqual([`${s.name}:in2`]);
   });
 
-  it('a passage table made before the keyword index gets it at its first search, and answers by keyword before and after', async () => {
+  it('a passage table made before the keyword index gets it at its first search, which answers from it', async () => {
     const first = hybrid.adapter();
     const s = source('kw_legacy');
     await first.upsert([...fillers(s), doc(s, 'code', CODE)], ctx(s));

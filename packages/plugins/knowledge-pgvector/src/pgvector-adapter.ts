@@ -644,8 +644,10 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
 
     const ctes: string[] = [];
     const legs: string[] = [];
+    let vectorParam = 0;
     if (vectorLeg) {
       params.push(vectorLiteral(vector));
+      vectorParam = params.length;
       ctes.push(`vec AS (
         SELECT chunk_id, row_number() OVER (ORDER BY distance, chunk_id) AS pos FROM (
           SELECT chunk_id, embedding OPERATOR(${ext}.<=>) $${params.length}::${ext}.vector AS distance
@@ -674,15 +676,18 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
         .map((_, i) => `h.h${i} * ln(1.0 + (s.n - s.d${i} + 0.5) / (s.d${i} + 0.5))`)
         .join(' + ');
       ctes.push(
-        `cand AS (SELECT chunk_id, content FROM ${table} WHERE ${inScope} AND (${onRow.join(' OR ')}))`,
-        `hits AS (SELECT c.chunk_id, ${onCandidate.map((m, i) => `(${m})::int AS h${i}`).join(', ')}
+        // Passages of equal keyword score are ranked by cosine distance, so the
+        // keyword leg never reorders by chunk id what the vector leg ranks.
+        `cand AS (SELECT chunk_id, content, ${vectorLeg ? `embedding OPERATOR(${ext}.<=>) $${vectorParam}::${ext}.vector` : '0'} AS distance
+                    FROM ${table} WHERE ${inScope} AND (${onRow.join(' OR ')}))`,
+        `hits AS (SELECT c.chunk_id, c.distance, ${onCandidate.map((m, i) => `(${m})::int AS h${i}`).join(', ')}
                     FROM cand c CROSS JOIN LATERAL (SELECT ${PASSAGE_TSVECTOR.replace('content', 'c.content')} AS tsv) v)`,
         `stats AS (SELECT (SELECT count(*) FROM ${table} WHERE ${inScope}) AS n,
                     ${onCandidate.map((_, i) => `coalesce(sum(h${i}), 0) AS d${i}`).join(', ')} FROM hits)`,
         `kw AS (
-          SELECT chunk_id, row_number() OVER (ORDER BY score DESC, chunk_id) AS pos FROM (
-            SELECT h.chunk_id, ${idf} AS score FROM hits h CROSS JOIN stats s
-          ) scored ORDER BY score DESC, chunk_id LIMIT ${limit})`,
+          SELECT chunk_id, row_number() OVER (ORDER BY score DESC, distance, chunk_id) AS pos FROM (
+            SELECT h.chunk_id, h.distance, ${idf} AS score FROM hits h CROSS JOIN stats s
+          ) scored ORDER BY score DESC, distance, chunk_id LIMIT ${limit})`,
       );
       legs.push('SELECT chunk_id, NULL::bigint AS vpos, pos AS kpos FROM kw');
     }
@@ -1365,8 +1370,9 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
 
 /**
  * Reciprocal rank fusion of the two legs' rows (`vpos`, `kpos`: a row's rank
- * in each leg, or null): best first, ties by chunk id, at most `topK`. The
- * score is the fused sum divided by that of a row first in both legs.
+ * in each leg, or null): best first, at most `topK`; a tie goes to the better
+ * vector rank, then to the chunk id. The score is the fused sum divided by
+ * that of a row first in both legs.
  */
 function fuse<R extends { chunk_id: string; vpos: string | number | null; kpos: string | number | null }>(
   rows: readonly R[],
@@ -1374,9 +1380,15 @@ function fuse<R extends { chunk_id: string; vpos: string | number | null; kpos: 
 ): Array<{ row: R; score: number }> {
   const best = 2 / (RRF_K + 1);
   const leg = (pos: string | number | null) => (pos === null ? 0 : 1 / (RRF_K + Number(pos)));
+  const vectorRank = (row: R) => (row.vpos === null ? Infinity : Number(row.vpos));
   return rows
     .map((row) => ({ row, score: (leg(row.vpos) + leg(row.kpos)) / best }))
-    .sort((a, b) => b.score - a.score || (a.row.chunk_id < b.row.chunk_id ? -1 : 1))
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        vectorRank(a.row) - vectorRank(b.row) ||
+        (a.row.chunk_id < b.row.chunk_id ? -1 : 1),
+    )
     .slice(0, topK);
 }
 
