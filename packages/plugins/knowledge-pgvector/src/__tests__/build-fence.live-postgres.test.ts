@@ -98,7 +98,7 @@ afterAll(async () => {
 
 /** A pool of its own, as another process has: its own connections to the same database. */
 function processPool(): pg.Pool {
-  const pool = new pg.Pool({ connectionString: PG_URL, max: 4 });
+  const pool = new pg.Pool({ connectionString: PG_URL, max: 2 });
   otherPools.push(pool);
   return pool;
 }
