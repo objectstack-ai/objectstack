@@ -14,7 +14,9 @@
  *     stored;
  *   - a by-name read previewing drafts treats a pending draft row of it as no
  *     draft, and serves the active item;
- *   - the layered read reports no overlay for it and no pending draft;
+ *   - the layered read reports no overlay for it and no pending draft, and
+ *     its version token still names the stored row, so a publish pinned to
+ *     it replaces the row;
  *   - the metadata API's delete (`deleteMetaItem`, through
  *     `SysMetadataRepository`) still reaches the row and takes it out.
  */
@@ -195,9 +197,26 @@ describe('a stored ask_ai action row (ADR-0160 D7)', () => {
         const { engine } = makeStubEngine([askAiRow, { ...askAiRow, state: 'draft' }]);
         const protocol = new ObjectStackProtocolImplementation(engine);
 
-        const layered = await protocol.getMetaItemLayered({ type: 'action', name: 'ask_about_ticket' }, { withDraft: true });
+        const layered = await protocol.getMetaItemLayered({ type: 'action', name: 'ask_about_ticket' }, { withDraft: true, withVersion: true });
 
         expect(layered).toMatchObject({ overlay: null, overlayScope: null, draft: null });
+        expect(layered.overlayVersion).toEqual(expect.any(String));
+    });
+
+    it('the layered version token still names the stored row, so a publish pinned to it replaces the row', async () => {
+        // Studio pins a publish to the layered read's `overlayVersion`. A
+        // `null` token would pin `If-None-Match: *`, which the row still
+        // stored at the address refuses `409`; the stored row's token lets a
+        // new action of the name be published over it.
+        const { engine, tables } = makeStubEngine([askAiRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const { overlayVersion } = await protocol.getMetaItemLayered({ type: 'action', name: 'ask_about_ticket' }, { withVersion: true });
+        const live = { name: 'ask_about_ticket', label: 'Close', objectName: 'ticket', type: 'script', target: 'close_ticket' };
+
+        await protocol.saveMetaItem({ type: 'action', name: 'ask_about_ticket', item: live, mode: 'draft' });
+        await protocol.publishMetaItem({ type: 'action', name: 'ask_about_ticket', parentVersion: overlayVersion });
+
+        expect(metaRows(tables).map((r) => [r.state, JSON.parse(r.metadata).type])).toEqual([['active', 'script']]);
     });
 
     it('the metadata API delete reaches the row and takes it out', async () => {
