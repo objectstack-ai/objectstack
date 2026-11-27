@@ -35,6 +35,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid during collection, not inside a case's clock: the dispatcher reaches
+// `standalone-stack.ts`, whose dynamic `@objectstack/metadata` import would
+// otherwise load inside the first case that gets that far (check:test-source-alias).
+import '@objectstack/metadata';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext, KernelResolver } from '../http-dispatcher.js';
 
@@ -325,4 +329,51 @@ describe('[#22576] the token is the only credential — the membership gate skip
             expect(member.handleActionPage).not.toHaveBeenCalled();
         }
     });
+});
+
+// [#37662] The action-page door's two `501` sentences are the operation-message
+// catalog's, in the request's top `Accept-Language` tag, as the own-door
+// bridge answers its doors' own. The English is byte for byte the sentence the
+// door answered before, the code and status are unchanged, and no
+// `userMessage` is added.
+describe('[#37662] the action-page door\'s 501 follows the request\'s language', () => {
+    const SENTENCES = {
+        unregistered: {
+            en: 'Approval action pages are not available: no approvals service is registered. Register @objectstack/plugin-approvals to serve them.',
+            'zh-CN': '审批操作页不可用：未注册 approvals 服务。请注册 @objectstack/plugin-approvals 来提供这些页面。',
+            'ja-JP': '承認アクションページは利用できません。approvals サービスが登録されていません。これらのページを提供するには @objectstack/plugin-approvals を登録してください。',
+            'es-ES': 'Las páginas de acción de aprobación no están disponibles: no hay ningún servicio approvals registrado. Registre @objectstack/plugin-approvals para servirlas.',
+        },
+        memberMissing: {
+            en: 'Approval action pages are not available: the registered approvals service does not implement handleActionPage.',
+            'zh-CN': '审批操作页不可用：已注册的 approvals 服务未实现 handleActionPage。',
+            'ja-JP': '承認アクションページは利用できません。登録されている approvals サービスは handleActionPage を実装していません。',
+            'es-ES': 'Las páginas de acción de aprobación no están disponibles: el servicio approvals registrado no implementa handleActionPage.',
+        },
+    };
+    const HEADERS: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', Array<Record<string, string>>> = {
+        en: [{ 'accept-language': 'en-US,en;q=0.9' }, {}],
+        'zh-CN': [{ 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8' }],
+        'ja-JP': [{ 'accept-language': 'ja-JP,ja;q=0.9' }],
+        'es-ES': [{ 'accept-language': 'es-ES,es;q=0.9' }],
+    };
+
+    for (const site of [
+        { name: 'no approvals slot on the kernel', services: {} as Record<string, unknown>, sentences: SENTENCES.unregistered },
+        { name: 'an approvals service without handleActionPage', services: { approvals: { getRequest: vi.fn() } }, sentences: SENTENCES.memberMissing },
+    ]) {
+        it(`${site.name}: 501 NOT_IMPLEMENTED in en (and with no header), zh-CN, ja-JP and es-ES`, async () => {
+            for (const [locale, list] of Object.entries(HEADERS) as Array<[keyof typeof HEADERS, Array<Record<string, string>>]>) {
+                for (const headers of list) {
+                    const { dispatcher } = makeDispatcher(site.services);
+                    const request = new Request(`${ORIGIN}/api/v1${ACT}?token=t`, { headers });
+                    const label = JSON.stringify(headers);
+                    const result = await dispatcher.dispatch('GET', ACT, undefined, {}, ctx(request));
+                    expect(envelope(result), label).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
+                    expect(result.response?.body?.error?.message, label).toBe(site.sentences[locale]);
+                    expect(result.response?.body?.error?.userMessage, label).toBeUndefined();
+                }
+            }
+        });
+    }
 });
