@@ -7,6 +7,7 @@
  *
  *   node scripts/pm/check-handover.mjs --session=session_01… --account=LOGIN [--since=ISO] [--repo=OWNER/NAME]
  *                                      [--stay-behind=#N[,#N…] --body-file=PATH]
+ *   node scripts/pm/check-handover.mjs --inflight --paths=PATH[,PATH…] [--card=N] [--repo=OWNER/NAME]
  *   node scripts/pm/check-handover.mjs --probe        # can the live read run HERE? (no board read)
  *   node scripts/pm/check-handover.mjs --self-test    # offline, no network, no token
  *
@@ -120,8 +121,23 @@
  *     vacant bodies (#21118, #6024). Its cards are the `#N` (or `owner/name#N` naming the swept board) outside code
  *     on that line.
  *
- * Exit: 0 handover clear · 1 usage · 2 REFUSED (a finding) · 3 PREREQUISITE NOT MET (no route; nothing read) ·
- * 4 the read failed or was truncated (no verdict).
+ * ## `--inflight` — the dispatch-time in-flight check (`SKILL.md` 〈车道与域〉)
+ *
+ * The rule: before a dispatch, read the file surface each `pm:dispatched` card's claim declares and intersect it with
+ * the surface about to be dispatched, locally — the seat used to retype that reading claim by claim. This mode is the
+ * reading; the rule and what a hit means (queue behind it or yield, `area-lease.md` 重叠检查) stay in the rule text.
+ * It shares (a)'s population and its paging (`readDispatched`): every open `pm:dispatched` card, every thread. Per card,
+ * the NEWEST `Claim:` (`CLAIM_COMMENT_MARKER`) not followed by any `Release:`, its `File surface:` line (one line, or
+ * an empty value and the list under it) and every later `Claim amendment`'s, unioned; the code spans that are paths,
+ * braces expanded, minus every path a `Not …` / `No …` / `⛔ …` clause fences (`surfaceTokens`). Then each pair of a
+ * dispatch entry and a claimed entry that could hold one file (`surfacesMeet`: literal paths, directories, globs; a
+ * claimed bare file name reads anywhere, a dispatched one is the root file). `--card=N` leaves the card being
+ * dispatched out. ⛔ It does not read open PRs' diffs — `overlap-check.mjs` is that reading — nor a surface written in
+ * prose with no path in it: such a claim is named, and the run exits 5, never 0.
+ *
+ * Exit: 0 handover clear (`--inflight`: no claimed surface meets) · 1 usage · 2 REFUSED (a finding; `--inflight`: an
+ * OVERLAP, each pair named) · 3 PREREQUISITE NOT MET (no route; nothing read) · 4 the read failed or was truncated
+ * (no verdict) · 5 `--inflight` only: no readable surface meets, but a held claim's surface names no path.
  */
 
 import process from 'node:process';
@@ -151,8 +167,10 @@ import {
   markerMatches,
   pmLabelListingPath,
   proxyRearmPlan,
+  readSignatureLine,
   resolveSweepRepo,
   stripMarkdownCode,
+  stripSignatureLine,
 } from './check-half-states.mjs';
 import { enqueuerFromTimeline } from './check-governed-queue-guard.mjs';
 import { classifyRulingComment } from './check-prior-rulings.mjs';
@@ -412,19 +430,260 @@ export function stayBehindText(reported) {
     .join('\n');
 }
 
+// ---------------------------------------------------------------------------
+// --inflight — the dispatch-time in-flight check: the file surfaces the open `pm:dispatched` claims declare,
+// intersected locally with the surface about to be dispatched. Pure below; the reads are the live layer's.
+// ---------------------------------------------------------------------------
+
+/** `--inflight`'s own exit: no finding meets, but some held claim's surface names no path (read those by hand). */
+export const EXIT_SURFACE_UNREAD = 5;
+
+/** How many `inflight: ` self-test cases must register — the mode's battery floor (AGENTS.md, writing a `--self-test`). */
+const INFLIGHT_CASE_FLOOR = 17;
+
+/** The claim template's `File surface:` key line (SKILL.md 〈模板与表〉), read one line at a time. */
+export const FILE_SURFACE_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*+][ \t]+)?(?:\*\*)?`?File surface`?(?:\*\*)?[ \t]*[:：](?:\*\*)?(.*)$/u;
+
+/** A key line that ends a multi-line value — `Container & model:`, `Clause-②:` and the template's other keys. */
+const NEXT_KEY_LINE = /^[ \t]*(?:>[ \t]*)?(?:\*\*)?`?[A-Z][^\s:：`*]*(?:[ \t][^\s:：`*]+){0,3}`?(?:\*\*)?[ \t]*[:：]/u;
+
+/** A list item or an indented line under an EMPTY key value — the measured multi-line spelling of the surface. */
+const CONTINUATION_LINE = /^(?:[ \t]*(?:[-*+]|\d{1,3}[.)])[ \t]+\S|[ \t]+\S)/u;
+
+/** The headline of an amendment to a claim (`Claim amendment: slice 2 · …`), which re-declares the surface. */
+export const CLAIM_AMENDMENT_HEAD = /^[ \t>]*(?:\*\*)?Claim amendment\b/iu;
+
+/**
+ * The `File surface:` value of one comment, or `null` when it carries no such line. The value is the line's own text
+ * and, when that is empty or ends the line in a list, every continuation line under it up to the next key or a blank
+ * line — the measured multi-line spelling (`File surface:` then `- PATH: …` items).
+ */
+export function fileSurfaceValue(body) {
+  const lines = String(body ?? '').split(/\r?\n/);
+  const at = lines.findIndex((l) => FILE_SURFACE_LINE.test(l));
+  if (at < 0) return null;
+  const parts = [FILE_SURFACE_LINE.exec(lines[at])[1]];
+  for (let i = at + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === '' || NEXT_KEY_LINE.test(line) || !CONTINUATION_LINE.test(line)) break;
+    parts.push(line);
+  }
+  return parts.join('\n').trim();
+}
+
+/** `{a,b}` groups expanded, left to right, every combination. */
+export function expandBraces(token) {
+  const m = /\{([^{}]*,[^{}]*)\}/u.exec(token);
+  if (!m) return [token];
+  return m[1].split(',').flatMap((alt) => expandBraces(token.slice(0, m.index) + alt + token.slice(m.index + m[0].length)));
+}
+
+const hasExtension = (p) => /\.[A-Za-z][A-Za-z0-9]{0,7}$/u.test(p.split('/').pop() ?? '');
+
+/**
+ * Is a code-span token a PATH? No whitespace, no `:`/`#`/`=`/quotes/angle brackets (a seat, a `file:line`, a flag
+ * value, a URL, a placeholder), not a flag, and either a slash in it or a file extension on its last segment.
+ */
+export function isPathToken(token) {
+  const t = String(token ?? '');
+  if (t === '' || /[\s:#=<>"'()`]/u.test(t) || t.startsWith('-')) return false;
+  return t.includes('/') || hasExtension(t);
+}
+
+/** An EXCLUSION clause of the surface — it opens with `Not`, `No`, `none`, `never`, `except` or `⛔`. */
+const EXCLUSION_CLAUSE = /^[\s([*>-]*(?:⛔|(?:not|no|none|never|nor|except|excluding)\b)/iu;
+
+/**
+ * The paths a surface value names, split into what it INCLUDES and what an exclusion clause names (`Not
+ * \`area-lease.md\`, not \`os-dev.md\`` — the measured spelling of a claim's fence). Clauses split at a sentence end
+ * (`. ` or `; `) and at a line break; only code spans are read, braces expanded, a leading `./` dropped.
+ * @returns {{ paths: string[], excluded: string[] }}
+ */
+export function surfaceTokens(value) {
+  const paths = new Set();
+  const excluded = new Set();
+  for (const clause of String(value ?? '').split(/(?<=[.;])[ \t]+|\n/u)) {
+    const into = EXCLUSION_CLAUSE.test(clause) ? excluded : paths;
+    for (const m of clause.matchAll(/`([^`\n]+)`/gu)) {
+      for (const raw of expandBraces(m[1].trim())) {
+        const t = raw.replace(/^\.\//u, '').replace(/[,.;]+$/u, '');
+        if (isPathToken(t)) into.add(t);
+      }
+    }
+  }
+  for (const t of excluded) paths.delete(t);
+  return { paths: [...paths], excluded: [...excluded] };
+}
+
+const GLOB_CHAR = /[*?[]/u;
+const staticPrefix = (p) => {
+  const i = p.search(GLOB_CHAR);
+  if (i < 0) return p;
+  const cut = p.lastIndexOf('/', i);
+  return cut < 0 ? '' : p.slice(0, cut + 1);
+};
+const globRegex = (p) =>
+  new RegExp(
+    `^${p
+      .replace(/[.+^${}()|\\]/gu, '\\$&')
+      .replace(/\*\*\/?|\*|\?/gu, (g) => (g.startsWith('**') ? (g.endsWith('/') ? '(?:.*/)?' : '.*') : g === '*' ? '[^/]*' : '[^/]'))}$`,
+    'u',
+  );
+
+/**
+ * Does a dispatch entry MEET a claimed entry — could one file be inside both? Conservative where it cannot tell, in
+ * the direction of reporting: a literal path meets itself, its directories and everything under it; a glob meets a
+ * path it matches, a directory its static part lies under, and another glob whose static part shares a prefix with
+ * its own. The two sides are read differently in ONE place: a dispatch entry is a repo-relative path, so a bare
+ * `package.json` there is the root file; a CLAIMED bare file name (`own-door-bridge.ts`, no slash) is prose shorthand
+ * for that name anywhere, so it meets a path or glob whose last segment is or matches it — ⛔ never a `DIR/**` or a
+ * bare directory, whose contents this reader cannot list (it would meet every claim that names a `package.json`).
+ */
+export function surfacesMeet(dispatch, claimed) {
+  const norm = (p) => String(p ?? '').replace(/^\.\//u, '').replace(/\/+$/u, '');
+  const a = norm(dispatch);
+  const b = norm(claimed);
+  if (a === '' || b === '') return false;
+  if (!String(claimed).replace(/^\.\//u, '').includes('/') && a.includes('/')) {
+    const last = a.split('/').pop();
+    if (!GLOB_CHAR.test(a)) return last === b || (GLOB_CHAR.test(b) && globRegex(b).test(last));
+    return !/^\*\*$/u.test(last) && globRegex(last).test(b);
+  }
+  const ga = GLOB_CHAR.test(a);
+  const gb = GLOB_CHAR.test(b);
+  if (!ga && !gb) return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+  if (ga && gb) {
+    const sa = staticPrefix(a);
+    const sb = staticPrefix(b);
+    return sa.startsWith(sb) || sb.startsWith(sa);
+  }
+  const [glob, path] = ga ? [a, b] : [b, a];
+  if (globRegex(glob).test(path)) return true;
+  if (hasExtension(path)) return false;
+  const head = staticPrefix(glob);
+  return head.startsWith(`${path}/`) || `${path}/`.startsWith(head);
+}
+
+/** The session a claim names: its `Session:` line, else its signature's, else the first session id in it. */
+export function claimSession(body) {
+  const text = String(body ?? '');
+  const keyed = new RegExp(`^[ \\t>*-]*\`?Session\`?(?:\\*\\*)?[ \\t]*[:：][ \\t]*\`?(${SEAT_SESSION_ID.source})`, 'mu').exec(text);
+  if (keyed) return keyed[1];
+  return readSignatureLine(text)?.session ?? SEAT_SESSION_ID.exec(text)?.[0] ?? null;
+}
+
+/**
+ * One open card's in-flight surface: its NEWEST `Claim:` and every later `Claim amendment` that re-declares the
+ * surface — UNIONED, the reporting direction (an amendment may only add to the surface, 就地修's 同轮增补), every
+ * fence applied to the union. `held` is the population; `released` (a `Release:` newer than the claim, whoever wrote it), `unclaimed`
+ * and `out` (not an open `pm:dispatched` issue) are not in flight.
+ * @returns {{ verdict: 'out'|'unclaimed'|'released'|'held', claim?: object, session?: string|null, seat?: string|null,
+ *             declared?: boolean, paths?: string[], excluded?: string[] }}
+ */
+export function inflightSurface(issue, comments) {
+  if (issue?.pull_request || issue?.state !== 'open' || !labelNames(issue).includes('pm:dispatched')) return { verdict: 'out' };
+  const rows = Array.isArray(comments) ? comments : [];
+  const newest = latestMarkedComment(rows, CLAIM_COMMENT_MARKER);
+  if (newest === null) return { verdict: 'unclaimed' };
+  const claim = rows[newest.index];
+  const release = rows.find((c) => c !== claim && isNewer(c, claim) && markerMatches(RELEASE_COMMENT_MARKER, String(c?.body ?? '')));
+  if (release) return { verdict: 'released', claim, release };
+  const values = [fileSurfaceValue(claim?.body)];
+  for (const c of rows) {
+    if (c === claim || !isNewer(c, claim) || !CLAIM_AMENDMENT_HEAD.test(stripSignatureLine(String(c?.body ?? '')).trimStart())) continue;
+    values.push(fileSurfaceValue(c.body));
+  }
+  const declared = values.some((v) => v !== null);
+  const tokens = values.filter((v) => v !== null).map(surfaceTokens);
+  const excluded = [...new Set(tokens.flatMap((t) => t.excluded))];
+  // A fence names a path or a bare file name; a bare name fences that name wherever the surface put it.
+  const fenced = (p) => excluded.some((e) => e === p || (!e.includes('/') && p.split('/').pop() === e));
+  const paths = [...new Set(tokens.flatMap((t) => t.paths))].filter((p) => !fenced(p));
+  const sig = readSignatureLine(String(claim?.body ?? ''));
+  return { verdict: 'held', claim, session: claimSession(claim?.body), seat: sig ? `${sig.lane}#${sig.seat}` : null, declared, paths, excluded };
+}
+
+/** `--paths=a,b` → the dispatch's surface entries (code-span backticks tolerated), or the usage error. */
+export function parseInflightPaths(value) {
+  // Commas inside a `{a,b}` group belong to the entry; the rest separate entries.
+  const parts = (String(value ?? '').match(/(?:\{[^{}]*\}|[^,])+/gu) ?? [])
+    .map((p) => p.trim().replace(/^`|`$/gu, ''))
+    .filter((p) => p !== '')
+    .flatMap(expandBraces);
+  const bad = parts.find((p) => !isPathToken(p) && !GLOB_CHAR.test(p));
+  if (parts.length === 0) return { ok: false, error: '--inflight needs --paths=PATH[,PATH…]: the surface about to be dispatched' };
+  if (bad !== undefined) return { ok: false, error: `--paths entry ${JSON.stringify(bad)} is not a path, a directory or a glob (spell a root directory \`NAME/\`)` };
+  return { ok: true, paths: parts };
+}
+
+/**
+ * The verdict over every held surface: each (dispatch entry, claimed entry) pair that meets, per card; the held cards
+ * whose surface names no path (no `File surface:` line, or prose only); and the exit — OVERLAP (2) over UNREAD (5).
+ */
+export function inflightVerdict({ paths = [], held = [], exclude = new Set() } = {}) {
+  const overlaps = [];
+  const unread = [];
+  for (const h of held) {
+    if (exclude.has(h.issue.number)) continue;
+    if (h.paths.length === 0) {
+      unread.push(h);
+      continue;
+    }
+    const pairs = [];
+    for (const d of paths) for (const c of h.paths) if (surfacesMeet(d, c)) pairs.push([d, c]);
+    if (pairs.length > 0) overlaps.push({ ...h, pairs });
+  }
+  const exit = overlaps.length > 0 ? EXIT_REFUSED : unread.length > 0 ? EXIT_SURFACE_UNREAD : EXIT_OK;
+  return { exit, overlaps, unread };
+}
+
+/** What `--inflight` prints — the verdict line first, then every overlap with its meeting pairs, then the unread. */
+export function inflightText(verdict, { repo, paths, read }) {
+  const who = (h) => `#${h.issue.number} (claim ${h.claim?.id ?? '?'} · ${h.session ?? 'no session read'}${h.seat ? ` · ${h.seat}` : ''})`;
+  const head =
+    verdict.exit === EXIT_REFUSED
+      ? `check-handover --inflight: OVERLAP — ${verdict.overlaps.length} in-flight claim(s) on ${repo} meet the surface about to be dispatched.`
+      : verdict.exit === EXIT_SURFACE_UNREAD
+        ? `check-handover --inflight: NO OVERLAP READ, ${verdict.unread.length} SURFACE(S) UNREAD — no readable in-flight surface on ${repo} meets this one; the cards below name no path, so read their claims by hand.`
+        : `check-handover --inflight: clear — no in-flight claim on ${repo} declares a surface that meets this one.`;
+  const lines = [head, `  Dispatch surface: ${paths.map((p) => `\`${p}\``).join(', ')}.`];
+  verdict.overlaps.forEach((h, i) => {
+    lines.push(`  ${i + 1}. ${who(h)}: ${h.pairs.map(([d, c]) => `\`${d}\` meets \`${c}\`${c.includes('/') ? '' : ' (a bare file name on the claim, read anywhere)'}`).join('; ')}`);
+  });
+  if (verdict.overlaps.length > 0) lines.push('     Queue behind each, or yield, as the overlap check rules (`area-lease.md`); ⛔ never dispatch over it.');
+  if (verdict.unread.length > 0) lines.push(`  Surface unread (no \`File surface:\` line, or no path in it): ${verdict.unread.map((h) => `${who(h)}${h.declared ? '' : ' — no line'}`).join(', ')}.`);
+  lines.push(`  Read: ${read}.`);
+  return lines.join('\n');
+}
+
 export function parseArgs(argv) {
-  const options = { session: null, account: null, since: null, repo: null, stayBehind: null, bodyFile: null, selfTest: false, probe: false };
+  const options = { session: null, account: null, since: null, repo: null, stayBehind: null, bodyFile: null, selfTest: false, probe: false, inflight: false, paths: null, card: null };
   for (const arg of argv) {
     if (arg === '--self-test') options.selfTest = true;
     else if (arg === '--probe') options.probe = true;
+    else if (arg === '--inflight') options.inflight = true;
     else if (arg === '--help' || arg === '-h') return { ok: false, help: true };
     else {
-      const m = /^--(session|account|since|repo|stay-behind|body-file)=(.*)$/u.exec(arg);
+      const m = /^--(session|account|since|repo|stay-behind|body-file|paths|card)=(.*)$/u.exec(arg);
       if (!m) return { ok: false, error: `unknown argument ${JSON.stringify(arg)} (spell options as --key=value)` };
       options[{ 'stay-behind': 'stayBehind', 'body-file': 'bodyFile' }[m[1]] ?? m[1]] = m[2].trim();
     }
   }
   if (options.selfTest || options.probe) return { ok: true, options };
+  if (options.repo !== null && !/^[^/\s]+\/[^/\s]+$/u.test(options.repo)) {
+    return { ok: false, error: `--repo=${JSON.stringify(options.repo)} is not \`owner/name\`` };
+  }
+  if (options.inflight) {
+    const handover = ['session', 'account', 'since', 'stayBehind', 'bodyFile'].filter((k) => options[k] !== null);
+    if (handover.length > 0) return { ok: false, error: `--inflight reads the board's in-flight claims, not a handover: it takes --paths, --card and --repo, never ${handover.map((k) => `--${k.replace(/[A-Z]/gu, (c) => `-${c.toLowerCase()}`)}`).join(', ')}` };
+    const read = parseInflightPaths(options.paths);
+    if (!read.ok) return { ok: false, error: read.error };
+    options.inflightPaths = read.paths;
+    if (options.card !== null && !/^#?[1-9][0-9]*$/u.test(options.card)) return { ok: false, error: `--card=${JSON.stringify(options.card)} is not a card number (the card being dispatched, left out of its own check)` };
+    options.cardNumber = options.card === null ? null : Number(options.card.replace('#', ''));
+    return { ok: true, options };
+  }
+  if (options.paths !== null || options.card !== null) return { ok: false, error: '--paths and --card belong to --inflight' };
   if (!options.session || !new RegExp(`^${SEAT_SESSION_ID.source}$`, 'u').test(options.session)) {
     return { ok: false, error: '--session must be ONE session id, `session_01` plus 22 characters — the id the claims and releases carry' };
   }
@@ -433,9 +692,6 @@ export function parseArgs(argv) {
   }
   if (options.since !== null && !Number.isFinite(Date.parse(options.since))) {
     return { ok: false, error: `--since=${JSON.stringify(options.since)} is not an instant (write e.g. 2026-10-12T13:57Z)` };
-  }
-  if (options.repo !== null && !/^[^/\s]+\/[^/\s]+$/u.test(options.repo)) {
-    return { ok: false, error: `--repo=${JSON.stringify(options.repo)} is not \`owner/name\`` };
   }
   if (options.stayBehind !== null) {
     const sb = parseStayBehind(options.stayBehind);
@@ -551,6 +807,53 @@ function prerequisiteText(v) {
   );
 }
 
+/** Every open `pm:dispatched` issue, paged to exhaustion under the patrol's ceiling; a bound that binds throws truncated. */
+async function readDispatched(repo) {
+  const dispatched = [];
+  for (let page = 1; page <= OPEN_LISTING_PAGE_CEILING; page++) {
+    const batch = await rest(pmLabelListingPath(repo, 'pm:dispatched', page));
+    dispatched.push(...batch.filter((i) => !i.pull_request));
+    if (batch.length < 100) return dispatched;
+  }
+  throw Object.assign(new Error(`the \`pm:dispatched\` listing filled its ${OPEN_LISTING_PAGE_CEILING}-page ceiling`), { truncated: true });
+}
+
+/** `--inflight`: every open `pm:dispatched` card's thread, its claim's surface, the local intersection. */
+async function runInflight(options, repo) {
+  const reach = await probeTransport(repo);
+  if (reach?.kind !== 'reachable') {
+    console.error(prerequisiteText(reach));
+    return EXIT_PREREQUISITE_NOT_MET;
+  }
+  let dispatched = [];
+  try {
+    dispatched = await readDispatched(repo);
+    const held = [];
+    const notHeld = [];
+    for (const issue of dispatched) {
+      const s = inflightSurface(issue, await readThread(repo, issue.number));
+      if (s.verdict === 'held') held.push({ issue, ...s });
+      else notHeld.push(`#${issue.number} (${s.verdict})`);
+    }
+    const exclude = new Set(options.cardNumber === null ? [] : [options.cardNumber]);
+    const verdict = inflightVerdict({ paths: options.inflightPaths, held, exclude });
+    const read =
+      `${dispatched.length} open \`pm:dispatched\` card(s), every thread read; ${held.length} held claim(s)` +
+      (exclude.size > 0 ? `, #${options.cardNumber} left out as the card being dispatched` : '') +
+      (notHeld.length > 0 ? `; not in flight: ${notHeld.join(', ')}` : '');
+    const text = inflightText(verdict, { repo, paths: options.inflightPaths, read });
+    if (verdict.exit === EXIT_OK) console.log(text);
+    else console.error(text);
+    return verdict.exit;
+  } catch (err) {
+    console.error(
+      `check-handover --inflight: NO VERDICT — ${err.message}. ${dispatched.length > 0 ? `${dispatched.length} open \`pm:dispatched\` card(s) were listed before it stopped. ` : ''}` +
+        'A read that failed or was truncated is not a clear board, and it is not an overlap either.',
+    );
+    return EXIT_UNREAD;
+  }
+}
+
 async function run(options) {
   const repoRes = options.repo ? { repo: options.repo, valid: true } : resolveSweepRepo(process.env);
   if (!repoRes.valid) {
@@ -558,6 +861,7 @@ async function run(options) {
     return EXIT_USAGE;
   }
   const repo = repoRes.repo;
+  if (options.inflight) return runInflight(options, repo);
   let declared = { vacant: false, cards: new Set(), lines: [] };
   if (options.bodyFile) {
     let body;
@@ -587,18 +891,7 @@ async function run(options) {
   const listed = [];
   try {
     // (a) every open pm:dispatched card, then the departing account's threads.
-    let page = 1;
-    let exhausted = false;
-    const dispatched = [];
-    for (; page <= OPEN_LISTING_PAGE_CEILING; page++) {
-      const batch = await rest(pmLabelListingPath(repo, 'pm:dispatched', page));
-      dispatched.push(...batch.filter((i) => !i.pull_request));
-      if (batch.length < 100) {
-        exhausted = true;
-        break;
-      }
-    }
-    if (!exhausted) throw Object.assign(new Error(`the \`pm:dispatched\` listing filled its ${OPEN_LISTING_PAGE_CEILING}-page ceiling`), { truncated: true });
+    const dispatched = await readDispatched(repo);
     const login = options.account.toLowerCase();
     const mine = dispatched.filter((i) => (i.assignees ?? []).some((a) => String(a?.login ?? '').toLowerCase() === login));
     const held = [];
@@ -709,9 +1002,12 @@ const USAGE = [
   '  node scripts/pm/check-handover.mjs --session=session_01… --account=LOGIN [--since=ISO] [--repo=OWNER/NAME]',
   '    [--stay-behind=#N[,#N…] --body-file=PATH]   a tail this seat stays behind on — an ACCEPTed pull waiting on the queue or a',
   '                                                human approval — declared on the vacant body\'s Stay-behind: line',
+  '  node scripts/pm/check-handover.mjs --inflight --paths=PATH[,PATH…] [--card=N] [--repo=OWNER/NAME]',
+  '    the dispatch-time in-flight check: the surface about to be dispatched against every open pm:dispatched',
+  '    claim\'s File surface: line, intersected locally; --card leaves the card being dispatched out',
   '  node scripts/pm/check-handover.mjs --probe | --self-test',
   '',
-  `  Exit: ${EXIT_OK} clear · ${EXIT_USAGE} usage · ${EXIT_REFUSED} REFUSED · ${EXIT_PREREQUISITE_NOT_MET} prerequisite not met (nothing read) · ${EXIT_UNREAD} no verdict (a read failed or was truncated).`,
+  `  Exit: ${EXIT_OK} clear · ${EXIT_USAGE} usage · ${EXIT_REFUSED} REFUSED (--inflight: OVERLAP) · ${EXIT_PREREQUISITE_NOT_MET} prerequisite not met (nothing read) · ${EXIT_UNREAD} no verdict (a read failed or was truncated) · ${EXIT_SURFACE_UNREAD} --inflight: no overlap read, a held surface names no path.`,
 ].join('\n');
 
 // ---------------------------------------------------------------------------
@@ -848,6 +1144,44 @@ export function selfTest() {
   t('structural: the readers are IMPORTED from the patrol and the ruling search, ⛔ none restated here', ['latestMarkedComment', 'markerMatches', 'hasDecisionFacetMarker', 'labelNames', 'classifyRulingComment', 'pmLabelListingPath', 'proxyRearmPlan', 'classifyTransportProbe'].every((name) => new RegExp(`\\b${name}\\b`, 'u').test(imports) && !new RegExp(`function\\s+${name}\\b`, 'u').test(own)) && imports.includes("from './check-half-states.mjs';") && imports.includes("from './check-prior-rulings.mjs';"));
   t('structural: this tool writes nothing — no request below names a write verb', !/method:\s*'(?:POST|PATCH|PUT|DELETE)'/u.test(own));
   t('structural: the re-exec guard is this tool\'s own name, never the patrol\'s', PROXY_REARM_GUARD === 'OS_CHECK_HANDOVER_PROXY_REARMED');
+
+  // --inflight — the dispatch-time in-flight check
+  const IF_SIG = 'repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU';
+  const IF_CLAIM = (surface, id = 40, m = 0, extra = '') => comment(id, m, `${IF_SIG}\n\nClaim: PM loop round 1 · 2026-11-27T07:39Z\nSession: \`session_01L9qibyUSf2nKJWW6qBemSU\`\nBranch: \`claude/issue-37064-x\`\n${surface}\nContainer & model: \`M\`, \`mode:subagent\`, \`effort: high\`${extra}`);
+  const OWN_SURFACE = 'File surface: slice 4 of this card plus carrier items 1 and 2, one PR (`Part of #35237`): `scripts/pm/check-handover.mjs` (`--inflight`), `scripts/pm/round-open.mjs` (new); one-line pointers in `.claude/skills/pm-dispatch/references/{area-lease,seat-lifecycle,execution-duties}.md`; carrier item 1 in `scripts/pm/record-recognisers.mjs` (`readContractReviewHandoff` target grammar takes `repo:<name>#N` and `epic:#N#k`, self-test rows). Not `dispatch-gates.mjs` (carrier item 3 waits), not slice 7, not `os-dev.md`, `SKILL.md` or any ratchet ceiling. (stop on breach; explain in the report)';
+  const ownTokens = surfaceTokens(fileSurfaceValue(OWN_SURFACE));
+  t('inflight: ⭐ THE MEASURED CLAIM LINE reads its paths — braces expanded, code spans that are no path (a flag, a symbol, a seat, a card) dropped', ownTokens.paths.join() === 'scripts/pm/check-handover.mjs,scripts/pm/round-open.mjs,.claude/skills/pm-dispatch/references/area-lease.md,.claude/skills/pm-dispatch/references/seat-lifecycle.md,.claude/skills/pm-dispatch/references/execution-duties.md,scripts/pm/record-recognisers.mjs');
+  t('inflight: ⭐ …and its fence — the `Not …` sentence — is EXCLUDED, never read as surface', ownTokens.excluded.sort().join() === 'SKILL.md,dispatch-gates.mjs,os-dev.md' && !ownTokens.paths.includes('os-dev.md'));
+  const MULTI = 'Scope: N1–N4.\nFile surface:\n- `.changeset/37326-swimlane-lane-statistic.md`: the last sentence\n- `ui/packages/plugin-kanban/src/KanbanImpl.tsx`: jsdoc only\nContainer & model: `XS`, `mode:thread`';
+  t('inflight: the measured MULTI-LINE surface (an empty value, then list items) reads every item and stops at the next key', surfaceTokens(fileSurfaceValue(MULTI)).paths.join() === '.changeset/37326-swimlane-lane-statistic.md,ui/packages/plugin-kanban/src/KanbanImpl.tsx' && fileSurfaceValue('no surface here') === null);
+  t('inflight: a bulleted or bolded key reads, and a mid-sentence mention is no line', fileSurfaceValue('- **File surface:** `a/b.mjs`') === '`a/b.mjs`' && fileSurfaceValue('the File surface: `a/b.mjs` line') === null);
+  t('inflight: path tokens — a slash or an extension; ⛔ a flag, `file:line`, a seat, a placeholder, a version or a word is none', ['scripts/pm/**', 'docs/adr', 'package.json', 'ui/'].every(isPathToken) && !['--inflight', 'actions.ts:281', 'repo:objectstack#2', 'PATH<x>', '0.5.0', 'readContractReviewHandoff', 'a b.md'].some(isPathToken));
+  t('inflight: ⭐ meeting — a path meets itself, its directory and what is under it; a sibling never', surfacesMeet('scripts/pm/card-pick.mjs', 'scripts/pm/card-pick.mjs') && surfacesMeet('packages/lint', 'packages/lint/src/x.ts') && surfacesMeet('docs/adr/0162-x.md', 'docs/adr') && !surfacesMeet('packages/lint', 'packages/lint-extra') && !surfacesMeet('scripts/pm/card-pick.mjs', 'scripts/pm/card-pick.mjs.bak'));
+  t('inflight: ⭐ meeting — a glob meets what it matches and a directory under its static part; two globs meet on a shared prefix', surfacesMeet('scripts/pm/x.mjs', 'scripts/pm/**') && surfacesMeet('docs/adr/0162-a.md', 'docs/adr/0162-*.md') && !surfacesMeet('docs/adr/0163-a.md', 'docs/adr/0162-*.md') && surfacesMeet('scripts', 'scripts/pm/*.mjs') && surfacesMeet('scripts/pm/**', 'scripts/**') && !surfacesMeet('ui/**', 'packages/**') && !surfacesMeet('scripts/pm/x.md', 'scripts/pm/*.mjs'));
+  t('inflight: ⭐ a CLAIMED bare name reads anywhere (its last segment), ⛔ never against a `DIR/**`; a DISPATCHED bare name is the root file', surfacesMeet('.claude/agents/os-dev.md', 'os-dev.md') && surfacesMeet('.claude/**/*.md', 'os-dev.md') && !surfacesMeet('scripts/pm/**', 'package.json') && surfacesMeet('package.json', 'package.json') && !surfacesMeet('package.json', 'packages/lint/**') && !surfacesMeet('package.json', 'docs/adr/**'));
+  const IF_CARD = (labels = ['pm:dispatched'], extra = {}) => ({ number: 37064, title: 'dispatch-gates', state: 'open', labels: labels.map((name) => ({ name })), assignees: [{ login: 'os-tesla' }], ...extra });
+  const heldIf = inflightSurface(IF_CARD(), [IF_CLAIM('File surface: `scripts/pm/dispatch-gates.mjs`, `scripts/pm/dispatch-gates.data.mjs`. (stop on breach)')]);
+  t('inflight: ⭐ a held claim names its session (the `Session:` line), its seat (the signature) and its paths', heldIf.verdict === 'held' && heldIf.session === 'session_01L9qibyUSf2nKJWW6qBemSU' && heldIf.seat === 'repo:objectstack#3' && heldIf.paths.join() === 'scripts/pm/dispatch-gates.mjs,scripts/pm/dispatch-gates.data.mjs');
+  const amended = inflightSurface(IF_CARD(), [IF_CLAIM('File surface: `scripts/pm/card-pick.mjs`'), comment(41, 60, `${IF_SIG}\n\nClaim amendment: slice 2 · 2026-11-19T15:06Z\nFile surface: slice 2 only: \`scripts/pm/landing-k.mjs\` (new). Not \`card-pick.mjs\`.`)]);
+  t('inflight: a later `Claim amendment` re-declares the surface — its paths join the claim\'s, its fence (a bare name too) removes from the union', amended.paths.join() === 'scripts/pm/landing-k.mjs' && amended.excluded.join() === 'card-pick.mjs' && inflightSurface(IF_CARD(), [IF_CLAIM('File surface: `scripts/pm/card-pick.mjs`'), comment(41, 60, `${IF_SIG}\n\nClaim amendment: rider\nFile surface: \`package.json\` added.`)]).paths.join() === 'scripts/pm/card-pick.mjs,package.json');
+  t('inflight: ⛔ not in flight — a `Release:` newer than the claim (whoever wrote it), no claim, another state, a closed card', inflightSurface(IF_CARD(), [IF_CLAIM('File surface: `a/b.mjs`'), comment(42, 90, 'Release: back to the queue')]).verdict === 'released' && inflightSurface(IF_CARD(), [comment(43, 0, 'a note')]).verdict === 'unclaimed' && inflightSurface(IF_CARD(['pm:queue']), [IF_CLAIM('File surface: `a/b.mjs`')]).verdict === 'out' && inflightSurface(IF_CARD(undefined, { state: 'closed' }), [IF_CLAIM('File surface: `a/b.mjs`')]).verdict === 'out');
+  const prose = inflightSurface(IF_CARD(), [IF_CLAIM("File surface: none in the repository this round; the thread writes a design note.")]);
+  const none = inflightSurface(IF_CARD(), [comment(44, 0, 'Claim: round 1\nSession: `session_01L9qibyUSf2nKJWW6qBemSU`')]);
+  const v1 = inflightVerdict({ paths: ['scripts/pm/dispatch-gates.mjs', 'scripts/pm/round-open.mjs'], held: [{ issue: IF_CARD(), ...heldIf }, { issue: { number: 37767 }, ...prose }] });
+  t('inflight: ⭐ an OVERLAP is exit 2, naming the card, its claim and each meeting pair — over any unread surface', v1.exit === EXIT_REFUSED && v1.overlaps.length === 1 && v1.overlaps[0].pairs.join() === 'scripts/pm/dispatch-gates.mjs,scripts/pm/dispatch-gates.mjs' && inflightText(v1, { repo: 'o/r', paths: ['scripts/pm/dispatch-gates.mjs'], read: 'x' }).includes('OVERLAP — 1 in-flight claim(s)') && inflightText(v1, { repo: 'o/r', paths: ['x'], read: 'x' }).includes('#37064 (claim 40'));
+  const v2 = inflightVerdict({ paths: ['scripts/pm/round-open.mjs'], held: [{ issue: IF_CARD(), ...heldIf }, { issue: { number: 37767 }, ...prose }, { issue: { number: 37766 }, ...none }] });
+  t('inflight: ⭐ no readable surface meets, but a prose-only surface or a claim with no line is NOT clear — exit 5, each named', v2.exit === EXIT_SURFACE_UNREAD && v2.unread.map((h) => h.issue.number).join() === '37767,37766' && none.declared === false && prose.declared === true && inflightText(v2, { repo: 'o/r', paths: ['x'], read: 'x' }).includes('#37766 (claim 44'));
+  const v3 = inflightVerdict({ paths: ['scripts/pm/round-open.mjs'], held: [{ issue: IF_CARD(), ...heldIf }, { issue: { number: 37767 }, ...prose }], exclude: new Set([37767]) });
+  t('inflight: clear is exit 0; --card leaves the card being dispatched out of its own check', v3.exit === EXIT_OK && v3.overlaps.length === 0 && v3.unread.length === 0 && inflightText(v3, { repo: 'o/r', paths: ['x'], read: 'x' }).startsWith('check-handover --inflight: clear'));
+  t('inflight: arguments — --paths required, brace groups kept whole and expanded, a handover flag refused, --card a number', parseArgs(['--inflight']).ok === false && parseArgs(['--inflight', '--paths=a/{b,c}.md,d/']).options?.inflightPaths.join() === 'a/b.md,a/c.md,d/' && parseArgs(['--inflight', '--paths=a/b.md', `--session=${S}`]).ok === false && parseArgs(['--inflight', '--paths=a/b.md', '--card=#35237']).options?.cardNumber === 35237 && parseArgs(['--inflight', '--paths=a/b.md', '--card=x']).ok === false && parseArgs([`--session=${S}`, '--account=x', '--paths=a/b.md']).ok === false);
+  t('inflight: the exit register keeps its own code apart from the five', EXIT_SURFACE_UNREAD === 5 && ![EXIT_OK, EXIT_USAGE, EXIT_REFUSED, EXIT_PREREQUISITE_NOT_MET, EXIT_UNREAD].includes(EXIT_SURFACE_UNREAD));
+  {
+    const ownSource = readFileSync(SELF_PATH, 'utf8');
+    t('inflight: structural — the listing is ONE helper, shared by (a) and --inflight, and --inflight buys no request before its probe', (ownSource.match(/^[ \t]+(?:const )?dispatched = await readDispatched\(repo\);$/gmu) ?? []).length === 2 && ownSource.indexOf('const reach = await probeTransport(repo);') < ownSource.indexOf('dispatched = await readDispatched(repo);'));
+  }
+  // The floor for this mode's cases: a deleted block must not pass as a shorter green run.
+  const inflightCases = cases.filter((c) => c.name.startsWith('inflight: ')).length;
+  t(`inflight: the mode's floor — ${INFLIGHT_CASE_FLOOR} cases pinned, ${inflightCases} registered`, inflightCases >= INFLIGHT_CASE_FLOOR);
 
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name}`);
