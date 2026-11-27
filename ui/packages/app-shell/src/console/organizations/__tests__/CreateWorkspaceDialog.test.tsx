@@ -451,7 +451,7 @@ describe('the unpaid-organization limit refusal shows its sentence and next step
     expect(shown).toHaveTextContent(ZH_SENTENCE);
     const link = screen.getByTestId('workspace-create-upgrade');
     expect(link).toHaveAttribute('href', UPGRADE_URL);
-    expect(link).toHaveTextContent((builtInLocales['zh-Hans'] as { organization: Record<string, string> }).organization.viewPlans);
+    expect(link).toHaveTextContent((builtInLocales['zh-Hans'] as { organization: { viewPlans: string } }).organization.viewPlans);
     expect(createOrganization).toHaveBeenCalledTimes(1);
     expect(provisionMock).not.toHaveBeenCalled();
   });
