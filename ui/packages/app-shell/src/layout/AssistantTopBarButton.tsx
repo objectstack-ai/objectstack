@@ -26,7 +26,8 @@
  * advertised there and `aria-keyshortcuts` is not set.
  *
  * Under a layout with no drawer it is a link to the pre-drawer address, which
- * the console routes back into the drawer.
+ * the console routes back into the drawer. On an app's AI inquiry page it is
+ * not drawn (ui ADR-0057 Amendment A4).
  */
 import * as React from 'react';
 import { Link } from 'react-router-dom';
@@ -94,6 +95,10 @@ export function AssistantTopBarButton({ className, iconOnly = false }: Assistant
   const phone = usePhoneViewport();
   const mac = React.useMemo(() => isMacPlatform(), []);
   const markerId = React.useId();
+  // ui ADR-0057 Amendment A4 — hidden on the app's AI inquiry page, which is
+  // that page's one ask conversation. After every hook, so the hook order
+  // holds whichever way the page turns.
+  if (control?.askPageActive) return null;
   const label = t('home.askAI', { defaultValue: 'Ask AI' });
   const iconAlone = iconOnly || phone;
   // `aria-hidden` keeps the marker's words out of the name a text face takes

@@ -61,6 +61,7 @@ import {
   AppWindow,
   BarChart3,
   BookOpen,
+  LibraryBig,
   Bot,
   Boxes,
   Brain,
@@ -197,6 +198,7 @@ const STUDIO_MENU_TYPE_ICONS: Readonly<Record<string, LucideIcon>> = {
   queue: Inbox,
   capability: ListTree,
   ai_context: Brain,
+  knowledge_source: LibraryBig,
 };
 
 /** The icon of each entry that is not a type: the page it opens. */

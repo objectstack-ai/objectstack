@@ -126,10 +126,10 @@ function makeAdapter(opts: { embedding?: AdapterEmbeddingDescriptor; omit?: Arra
 
 function source(overrides: Partial<KnowledgeSource> = {}, where?: Record<string, unknown>): KnowledgeSource {
   return {
-    id: 'kb',
+    name: 'kb',
     label: 'Knowledge base',
     adapter: 'memory',
-    source: { kind: 'object', object: 'kb_article', contentFields: ['title', 'body'], ...(where ? { where } : {}) },
+    source: { kind: 'object', object: 'kb_article', content: ['title', 'body'], ...(where ? { where } : {}) },
     ...overrides,
   };
 }
@@ -251,18 +251,16 @@ describe('readIndexState — the states of ADR-0161 K7 "What starts a rebuild"',
     expect(reading.detail).toContain('os knowledge rebuild');
   });
 
-  it('a failed read is unreadable and not due; a file source is not built here', async () => {
+  it('a failed read is unreadable and not due', async () => {
     const db = makeEngine(ROWS);
     const { adapter } = makeAdapter();
     adapter.indexStatus = async () => { throw new Error('store offline'); };
     const { service } = makeService(db.engine, adapter);
     service.registerSource(source());
-    service.registerSource({ id: 'files', label: 'Files', adapter: 'memory', source: { kind: 'file', paths: ['docs/*.md'] } } as unknown as KnowledgeSource);
 
     const reading = await service.readIndexState('kb');
     expect(reading).toMatchObject({ state: 'unreadable', due: false });
     expect(reading.detail).toContain('store offline');
-    expect(await service.readIndexState('files')).toMatchObject({ state: 'not-built-here', due: false });
   });
 
   it('a first build that opened a generation and never completed it reads as nothing built, not another fingerprint', async () => {
@@ -284,7 +282,7 @@ describe('buildSourcesAtBoot — the first build', () => {
     const { adapter, calls } = makeAdapter();
     const { service, logger } = makeService(db.engine, adapter);
     service.registerSource(source());
-    vi.spyOn(service, 'listSources').mockImplementation(() => { throw new Error('registry torn down'); });
+    vi.spyOn((service as unknown as { registry: { entries(): unknown[] } }).registry, 'entries').mockImplementation(() => { throw new Error('registry torn down'); });
 
     await expect(service.buildSourcesAtBoot()).resolves.toBeUndefined();
     expect(calls.upserted).toBe(0);
@@ -461,12 +459,11 @@ describe('the rebuild and index_status settings actions', () => {
     await vi.waitFor(() => expect(service.buildRecord('kb')?.status).toBe('done'));
   });
 
-  it('refuses a payload key other than source, a missing source, an unknown one and a file source', async () => {
+  it('refuses a payload key other than source, a missing source and an unknown one', async () => {
     const db = makeEngine(ROWS);
     const { adapter, calls } = makeAdapter();
     const { service } = makeService(db.engine, adapter);
     service.registerSource(source());
-    service.registerSource({ id: 'files', label: 'Files', adapter: 'memory', source: { kind: 'file', paths: ['docs/*.md'] } } as unknown as KnowledgeSource);
     const rebuild = knowledgeRebuildActionHandler(service);
     const status = knowledgeIndexStatusActionHandler(service);
 
@@ -477,7 +474,6 @@ describe('the rebuild and index_status settings actions', () => {
     expect(await run(rebuild, {})).toMatchObject({ ok: false });
     expect(await run(rebuild, { source: 'nope' })).toMatchObject({ ok: false });
     expect(await run(status, { source: 'nope' })).toMatchObject({ ok: false });
-    expect(await run(rebuild, { source: 'files' })).toMatchObject({ ok: false });
     expect(calls.upserted).toBe(0);
   });
 });

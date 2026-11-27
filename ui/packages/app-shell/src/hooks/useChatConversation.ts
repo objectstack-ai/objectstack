@@ -113,6 +113,15 @@ export interface UseChatConversationOptions {
    * fetch failing) falls through to creating a fresh conversation.
    */
   adoptLegacy?: (messages: HydratedUIMessage[]) => boolean;
+  /**
+   * The `metadata` the create on the first send carries
+   * (`CreateAiConversationRequestSchema.metadata`, `@objectstack/spec/api`).
+   * Absent = the create sends an empty body, as every caller did before. The
+   * app's AI inquiry page passes `{ activePackageId }`, so the row records the
+   * app it belongs to (ui ADR-0057 Amendment A4). Read at the moment of the
+   * create, so its identity does not matter.
+   */
+  createMetadata?: Readonly<Record<string, unknown>>;
 }
 
 export interface UseChatConversationReturn {
@@ -469,6 +478,8 @@ interface ServerMessage {
 interface ServerConversation {
   id: string;
   messages?: ServerMessage[];
+  /** `AiConversationSchema.metadata` (`@objectstack/spec/api`), as the conversation routes return it. */
+  metadata?: Record<string, unknown>;
 }
 
 function contentToParts(content: unknown): HydratedUIMessagePart[] {
@@ -692,12 +703,15 @@ export async function fetchConversation(apiBase: string, id: string): Promise<Se
   return (await res.json()) as ServerConversation;
 }
 
-async function createConversation(apiBase: string): Promise<ServerConversation> {
+async function createConversation(
+  apiBase: string,
+  metadata?: Readonly<Record<string, unknown>>,
+): Promise<ServerConversation> {
   const res = await authFetch(`${apiBase}/conversations`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: '{}',
+    body: metadata ? JSON.stringify({ metadata }) : '{}',
   });
   if (!res.ok) throw notSentCreateError(`POST conversation failed: ${res.status}`, res.status);
   return (await res.json()) as ServerConversation;
@@ -729,6 +743,7 @@ export function useChatConversation(
     resumeMode = 'resume',
     legacyScope,
     adoptLegacy,
+    createMetadata,
   } = options;
   // Ref'd so the resolve effect reads the LATEST predicate without depending on
   // its identity (hosts pass inline closures; re-resolving on every render of
@@ -754,14 +769,14 @@ export function useChatConversation(
   // event handler, after commit) acts for the surface the user is looking at.
   // Synced in a LAYOUT effect: those run before every passive effect of the
   // commit, the host's replay effect included.
-  const latestRef = useRef({ userId, scope, apiBase });
+  const latestRef = useRef({ userId, scope, apiBase, createMetadata });
   // Mirror of `conversationId`, written eagerly beside every create/settle so
   // a call landing before the re-render still sees the held id.
   const conversationIdRef = useRef<string | undefined>(conversationId);
   useLayoutEffect(() => {
-    latestRef.current = { userId, scope, apiBase };
+    latestRef.current = { userId, scope, apiBase, createMetadata };
     conversationIdRef.current = conversationId;
-  }, [userId, scope, apiBase, conversationId]);
+  }, [userId, scope, apiBase, createMetadata, conversationId]);
   // The cache key the hook has SETTLED on with no conversation: nothing to
   // resume, so the first send mints the row. `undefined` while a resolve runs
   // or once a conversation is held.
@@ -785,7 +800,7 @@ export function useChatConversation(
       if (mountedRef.current) setCreateError(undefined);
       entry.promise = (async (): Promise<string | undefined> => {
         try {
-          const fresh = await createConversation(base);
+          const fresh = await createConversation(base, latestRef.current.createMetadata);
           // The row exists and is the (user, scope)'s, whatever happens next.
           writeCache(key, fresh.id);
           // Adopt only while the hook is still waiting on THIS key. A resolve

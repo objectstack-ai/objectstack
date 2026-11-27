@@ -36,6 +36,7 @@ const zh = {
       manage_metadata: '管理元数据',
       manage_mailboxes: '管理邮箱',
       manage_connector_connections: '管理连接器连接',
+      manage_knowledge_sources: '管理知识源',
       manage_platform_settings: '管理平台设置',
       setup_access: '访问 Setup',
       setup_write: '保存设置',
@@ -2594,6 +2595,10 @@ const zh = {
       noChatsDescription: '开始新的对话后会显示在这里。',
       noMatchingChats: '没有匹配的对话。',
       newConversation: '新对话',
+      // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
+      askPage: {
+        scopeBadge: '本应用优先',
+      },
       renameConversation: '重命名对话',
       deleteConversation: '删除对话',
       saveRename: '保存重命名',
@@ -4134,6 +4139,9 @@ const zh = {
         form: '表单 {{count}}',
         form_one: '表单 {{count}}',
         form_other: '表单 {{count}}',
+        knowledge_source: '知识源 {{count}}',
+        knowledge_source_one: '知识源 {{count}}',
+        knowledge_source_other: '知识源 {{count}}',
         datasource: '数据源 {{count}}',
         datasource_one: '数据源 {{count}}',
         datasource_other: '数据源 {{count}}',

@@ -11,7 +11,7 @@
 // re-exports, by name, every declaration here it exported before, so every
 // importer of `./engine.js` reads what it read.
 
-import { AUDIT_PROVENANCE_FIELDS, ENGINE_UPDATE_UPSERT_REMOVED, FILE_REFERENCE_TYPES, FullTextSearchSchema, QUERY_CURSOR_REMOVED, QUERY_DISTINCT_REMOVED, REFERENCE_VALUE_TYPES, RPC_QUERY_ALIAS_SLOTS, VALID_AST_OPERATORS, foldQueryAliasSlots, isFilterAST, isMultiValueField, lowerFilterCondition, normalizeFilterComparandTypes, parseFilterAST, percentScaleOf, readAutonumberCounter, referenceCarrierOf, referenceTargetOf, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
+import { AUDIT_PROVENANCE_FIELDS, ENGINE_UPDATE_UPSERT_REMOVED, FILE_REFERENCE_TYPES, FullTextSearchSchema, QUERY_CURSOR_REMOVED, QUERY_DISTINCT_REMOVED, REFERENCE_VALUE_TYPES, RPC_QUERY_ALIAS_SLOTS, VALID_AST_OPERATORS, foldQueryAliasSlots, isFilterAST, isMultiValueField, isVirtualSearchField, lowerFilterCondition, normalizeFilterComparandTypes, parseFilterAST, percentScaleOf, readAutonumberCounter, referenceCarrierOf, referenceTargetOf, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
 import type { DroppedFieldsEvent, FilterCondition, FilterLoweringOptions, HookContext, QueryAST, QueryAliasSlot, RecycleBinClearedReference, ServiceObject } from '@objectstack/spec/data';
 import type { EngineFilterJudgement, ISecurityService } from '@objectstack/spec/contracts';
 import { assertFilterIsMaterializable, assertListComparandShapes, collectComposableReadableIds, invalidFilterError } from './filter-comparand-shape.js';
@@ -1861,6 +1861,32 @@ function withFileOwnerKey(
  * a dotted PROJECTION entry is refused since #7589 —
  * {@link assertProjectionHasNoDottedPaths}, directly below.
  *
+ * ONE SOURCE — "computed on read" is judged by `isVirtualSearchField`
+ * (`@objectstack/spec/data`, set `SEARCH_VIRTUAL_TYPES`), the predicate the
+ * Data API's sort door (`assertSortFieldsExist`, metadata-protocol) and the
+ * served sortability projection (`resolveObjectSortability`, `virtual-type`)
+ * read too, never a type literal of this door's own. A type added to the
+ * spec's set is then refused here and at the Data API together; a literal
+ * here would let an in-process `find` drop the sort the Data API refuses.
+ * `engine-sort-door-agreement.test.ts` holds the two doors together for
+ * every `FieldType`. It is the STORAGE fact, deliberately not the spec's
+ * `COMPUTED_VALUE_TYPES` (the write contract): `summary` and `autonumber`
+ * have stored columns and sort.
+ *
+ * THE OTHER SITES that spell the same fact with a `formula` literal of their
+ * own, read from the predicate by none of them yet. This list is their
+ * ledger (it moved here when the Data API door's local set was retired);
+ * changing one of them is its own card, and a type added to the spec's set
+ * needs each of them reworked first:
+ * - `driver-sql`: `fieldHasColumn` (`schema-drift.ts`) and
+ *   `SqlDriver.createColumn` (`sql-driver.ts`), the DDL that gives a
+ *   `formula` no column;
+ * - `driver-turso`: `remote-transport.ts`, which skips it with the same
+ *   "Virtual — no column" note;
+ * - this package: {@link planFormulaProjection} above and
+ *   `search-companion.ts`'s title-eligibility check;
+ * - `plugin-audit`: `VIRTUAL_FIELD_TYPES` (`audit-writers.ts`).
+ *
  * A registry-less host (`schema` undefined) returns early, exactly as the
  * ingress gate returns early when `resolveQueryFields` cannot answer: a door
  * that cannot see the field map must not invent a verdict about it.
@@ -1876,7 +1902,7 @@ function assertOrderByIsMaterializable(
   const names = orderBy.map((node) =>
     typeof node === 'string' ? node : String((node as any)?.field ?? ''));
   const unmaterialized = names.filter((f) =>
-    f !== '' && !f.includes('.') && (schema.fields as any)[f]?.type === 'formula');
+    f !== '' && !f.includes('.') && isVirtualSearchField((schema.fields as any)[f]));
   if (unmaterialized.length === 0) return;
   const first = unmaterialized[0];
   const type = String((schema.fields as any)[first]?.type);
@@ -4568,6 +4594,10 @@ const METADATA_ARRAY_KEYS = [
   // [ADR-0160 D1] Context packs — read by the record-context service from
   // the registry, so a declaration lands here with its package stamped.
   'aiContexts',
+  // [ADR-0161 K4] Knowledge sources — the knowledge service's loader reads
+  // them back with the package that ships each one stamped, which is the
+  // coordinate its registry and index keys carry (ADR-0150 D4).
+  'knowledgeSources',
   // API Protocol
   'apis',
   // Data Extensions

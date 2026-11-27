@@ -124,6 +124,9 @@ export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   // [ADR-0150 addendum 2026-11-25, reader 3] `/meta/ai_context/NAME` and its
   // `?package=` qualifier: a bare pack name two packages hold is refused.
   'ai_context',
+  // [ADR-0150 addendum 2026-11-25, reader 5] `/meta/knowledge_source/NAME` and
+  // its `?package=` qualifier: a bare source name two packages hold is refused.
+  'knowledge_source',
 ] as const);
 
 /** A type whose by-name readers consult `(package, name)` ({@link PACKAGE_SCOPED_READ_TYPES}). */

@@ -77,6 +77,9 @@ import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
  * - `completeBuild` makes the generation it built the active one (the old one
  *   is dropped) and records the recipe hash; `indexStatus` answers both.
  *
+ * - `dropSource` (K8, item 4) discards both generations and what was recorded
+ *   about the index; the source then answers as one never seen.
+ *
  * It reports no `embedding` descriptor: its vectors are token counts, and its
  * index does not outlive the process (K7, rule 8).
  *
@@ -87,7 +90,7 @@ import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
 export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
   readonly id: string;
   readonly capabilities = { chunks: true } as const;
-  /** source id → its generations. */
+  /** A source's index key (`ctx.source.name`) → its generations. */
   private readonly store = new Map<string, SourceIndex>();
 
   constructor(id = 'memory') {
@@ -100,7 +103,7 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
   }
 
   async delete(documentIds: string[], ctx: AdapterContext): Promise<void> {
-    const index = this.store.get(ctx.source.id);
+    const index = this.store.get(ctx.source.name);
     for (const generation of [index?.active, index?.building]) {
       if (!generation) continue;
       const docs: Map<string, StoredDocument> = generation.docs;
@@ -109,7 +112,7 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
   }
 
   async indexStatus(ctx: AdapterContext): Promise<AdapterIndexStatus> {
-    const index = this.store.get(ctx.source.id);
+    const index = this.store.get(ctx.source.name);
     const status: AdapterIndexStatus = {};
     if (index?.active?.fingerprint !== undefined) status.fingerprint = index.active.fingerprint;
     if (index?.active?.recipeHash !== undefined) status.recipeHash = index.active.recipeHash;
@@ -119,7 +122,7 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
 
   async beginBuild(ctx: AdapterContext): Promise<void> {
     const fingerprint = requireIndex(ctx, 'beginBuild').fingerprint;
-    const index = this.sourceIndex(ctx.source.id);
+    const index = this.sourceIndex(ctx.source.name);
     if (index.active === undefined) {
       index.active = { fingerprint, docs: new Map() };
       return;
@@ -131,7 +134,7 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
 
   async completeBuild(ctx: AdapterContext): Promise<void> {
     const { fingerprint, recipeHash } = requireIndex(ctx, 'completeBuild');
-    const index = this.sourceIndex(ctx.source.id);
+    const index = this.sourceIndex(ctx.source.name);
     if (index.building?.fingerprint === fingerprint) {
       index.active = { ...index.building, recipeHash };
       index.building = undefined;
@@ -142,8 +145,17 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
       return;
     }
     throw new Error(
-      `completeBuild: source '${ctx.source.id}' holds no generation for this fingerprint; call beginBuild first.`,
+      `completeBuild: source '${ctx.source.name}' holds no generation for this fingerprint; call beginBuild first.`,
     );
+  }
+
+  /**
+   * Everything held for the source is gone (ADR-0161 K8, item 4): both
+   * generations and what was recorded about the index. A source it holds
+   * nothing for is no error.
+   */
+  async dropSource(ctx: AdapterContext): Promise<void> {
+    this.store.delete(ctx.source.name);
   }
 
   private sourceIndex(sourceId: string): SourceIndex {
@@ -163,7 +175,7 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
    */
   private writeTarget(ctx: AdapterContext, create: boolean): Generation | undefined {
     const fingerprint = ctx.index?.fingerprint;
-    const index = this.sourceIndex(ctx.source.id);
+    const index = this.sourceIndex(ctx.source.name);
     if (index.active === undefined) {
       if (!create) return undefined;
       index.active = { fingerprint, docs: new Map() };
@@ -171,7 +183,7 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
     }
     if (fingerprint === undefined || index.active.fingerprint === fingerprint) return index.active;
     if (index.building?.fingerprint === fingerprint) return index.building;
-    throw rebuildRequired(ctx.source.id, false);
+    throw rebuildRequired(ctx.source.name, false);
   }
 
   async listDocuments(ctx: AdapterContext, opts: AdapterListDocumentsOptions): Promise<AdapterListDocumentsPage> {
@@ -195,12 +207,12 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
   }
 
   async search(query: string, opts: AdapterSearchOptions): Promise<KnowledgeHit[]> {
-    const index = this.store.get(opts.source.id);
+    const index = this.store.get(opts.source.name);
     const active = index?.active;
     // Vectors of two fingerprints are never ranked against each other
     // (ADR-0161 K7, rule 5): refused, never answered from the other generation.
     if (active !== undefined && opts.index !== undefined && active.fingerprint !== opts.index.fingerprint) {
-      throw rebuildRequired(opts.source.id, index?.building?.fingerprint === opts.index.fingerprint);
+      throw rebuildRequired(opts.source.name, index?.building?.fingerprint === opts.index.fingerprint);
     }
     const chunks = [...(active?.docs.values() ?? [])].flatMap((d) => d.chunks);
     if (chunks.length === 0) return [];
@@ -232,7 +244,7 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
     return top.map<KnowledgeHit>(({ chunk, score }) => ({
       chunkId: chunk.chunkId,
       documentId: chunk.documentId,
-      sourceId: opts.source.id,
+      sourceId: opts.source.name,
       sourceRecordId: chunk.sourceRecordId,
       score,
       snippet: chunk.content,

@@ -44,6 +44,7 @@ import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatch
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 // [#23214] The repo's one sentence for a repeated single-valued parameter.
 import { repeatedQueryParamMessage } from '@objectstack/rest';
+import { catalogNotImplemented } from './own-door-bridge.js';
 
 /**
  * [#23214] `?locale=` on the two arms whose PATH names no locale
@@ -222,7 +223,7 @@ export async function handleI18nRequest(
     // `degraded` (#4058 step 1 — `createMemoryI18n`, which plugin-dev also
     // wraps) and `handlerReady` defaults to `true` for them: they keep serving.
     // This gate is for an occupant that would answer with invented strings.
-    if (!isServiceServeable(i18nService)) return { handled: true, response: deps.error('i18n service not available', 501) };
+    if (!isServiceServeable(i18nService)) return catalogNotImplemented(deps, context, 'i18n_service_unavailable');
 
     const m = method.toUpperCase();
     const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);

@@ -646,6 +646,13 @@ describe('select-affected-tests — the live tree', () => {
     expect(heavy.tests.filter((t) => !tracked.has(t))).toEqual([]);
   });
 
+  // The walker case's own budget, from its measured time rather than the 15 s
+  // project default: 2.3 s on an idle box; the slowest PR-CI factor read is
+  // about 5x (15.8 s against 3.6 s here before objectstack#37830, 11.2 s
+  // against 2.3 s after), so 2.3 s x 5 x 2 headroom = 23 s, rounded up to the
+  // next 10 s. Work that grows past it is still a red, not a re-run.
+  const WALKER_CASE_BUDGET_MS = 30_000;
+
   it('a change to the imported path walker selects what a change to the selector itself does (objectstack#31520)', () => {
     // The walker lives outside ui/, so a change there arrives as `outside`. It
     // must keep reaching this file's own tests, or an edit to it could narrow
@@ -655,6 +662,12 @@ describe('select-affected-tests — the live tree', () => {
     // One scan memo for the three (objectstack#31941): each call re-read every
     // placed test's import closure, 8.9 s here and 12.1 s on PR CI of the 15 s
     // testTimeout, and timed out in the merge queue; shared, 4.2 s here.
+    // Still 15.8 s on a starved PR runner (objectstack#37830), so each verdict
+    // was made cheaper with its output unchanged: filters lowered once, not
+    // once per pair; a file's specifiers read once; package owners memoised.
+    // 3.6 s -> 2.3 s here. On PR CI the case still read 11.2 s after that,
+    // and 10.6 s before it on a passing run: contention, not this work, sets
+    // its CI time, so it also carries the budget WALKER_CASE_BUDGET_MS states.
     const self = 'scripts/__tests__/select-affected-tests.test.ts';
     const scans = scanMemo();
     const walker = selectAffectedTests({ changed: [], outside: [PATH_WALKER_FILE], scans });
@@ -669,7 +682,7 @@ describe('select-affected-tests — the live tree', () => {
     expect(walker.filters).toContain('scripts/');
     expect(walker.filters.some((f) => self.includes(f))).toBe(true);
     expect(empty.filters).not.toContain('scripts/');
-  });
+  }, WALKER_CASE_BUDGET_MS);
 
   it('a file the root config reaches inside an owner directory still forces a full run (objectstack#31520)', () => {
     // The owner directories are not workspace packages: computing the root

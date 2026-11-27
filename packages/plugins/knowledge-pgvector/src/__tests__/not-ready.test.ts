@@ -22,7 +22,7 @@ import {
 } from '../index.js';
 import { FakeEmbedder } from './live-pg.testkit.js';
 
-const source = { id: 's1', label: 's1', adapter: 'pgvector', source: { kind: 'object', object: 'a', contentFields: ['body'] } } as KnowledgeSource;
+const source = { name: 's1', label: 's1', adapter: 'pgvector', source: { kind: 'object', object: 'a', content: ['body'] } } as KnowledgeSource;
 
 /** A database without pgvector, where this connection may not create it; `installed` flips that. */
 function databaseWithoutVector() {

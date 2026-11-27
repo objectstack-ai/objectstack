@@ -1659,6 +1659,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "鎖定者",
         helpText: "鎖定該檢視設定的使用者"
       },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this view either."
+      },
       object: {
         label: "物件"
       }
@@ -1874,6 +1878,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "篩選",
         description: "套用到所有元件的預設篩選與全域篩選"
       },
+      access: {
+        label: "Access",
+        description: "Who can see this dashboard."
+      },
       advanced: {
         label: "進階設定",
         description: "效能與無障礙"
@@ -2054,6 +2062,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "globalFilters.targetWidgets": {
         label: "目標元件"
+      },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Who sees this dashboard: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone sees this dashboard. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the dashboard in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this dashboard either."
       }
     }
   },
@@ -3476,5 +3488,8 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         helpText: "A long-text field of the root object (textarea, markdown, html, richtext). Any other field is reported when the pack is saved, and the pack then carries no body."
       }
     }
+  },
+  knowledge_source: {
+    label: "知識來源"
   }
 };

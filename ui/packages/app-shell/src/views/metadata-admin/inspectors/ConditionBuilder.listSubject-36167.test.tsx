@@ -23,7 +23,7 @@ import * as React from 'react';
 import { describe, it, expect, afterEach, beforeAll, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { celEngine } from '@objectstack/formula';
+import { celEngine, listMembershipSource, validateExpression, type ExprSchemaHint } from '@objectstack/formula';
 import { jsonColumnFilterOperators } from '@object-ui/components';
 
 // ConditionBuilder calls useObjectFields(objectName) even when `fields` is
@@ -39,8 +39,8 @@ vi.mock('../useMetadata', () => ({
   useMetadataClient: () => state.metadataClient,
 }));
 
-import { ConditionBuilder } from './ConditionBuilder';
-import { listSubjectOperators } from './cel-list-membership';
+import { ConditionBuilder, type ConditionSubjectVocabulary } from './ConditionBuilder';
+import { listMembershipCel, listSubjectOperators, readListMembership } from './cel-list-membership';
 import { rowsToCel } from './flow-edge-condition-rows';
 
 afterEach(() => cleanup());
@@ -151,7 +151,7 @@ describe('membership is written null-safe, in the flow edge’s spelling, and th
     await addRowOn(container, FIELDS[0]);
     expect(lastOpTrigger(container).textContent).toBe('contains');
     typeValue(container, 'frontend');
-    expect(committed()).toBe("record.labels != null && 'frontend' in record.labels");
+    expect(committed()).toBe("has(record.labels) && record.labels != null && 'frontend' in record.labels");
   });
 
   it.each(LIST_FIELDS)('$label: contains / does not contain', async (field) => {
@@ -163,8 +163,8 @@ describe('membership is written null-safe, in the flow edge’s spelling, and th
     await pickOp(container, 'does not contain');
     const notContains = committed();
 
-    expect(contains).toBe(`${s} != null && 'u1' in ${s}`);
-    expect(notContains).toBe(`${s} == null || !('u1' in ${s})`);
+    expect(contains).toBe(`has(${s}) && ${s} != null && 'u1' in ${s}`);
+    expect(notContains).toBe(`!has(${s}) || ${s} == null || !('u1' in ${s})`);
     // The same row through the flow edge's writer: one spelling.
     const edgeField = { value: s, label: field.label!, type: field.type, multiple: field.multiple };
     expect(rowsToCel({ logic: 'and', conditions: [{ field: s, operator: 'contains', value: 'u1' }] }, [edgeField]))
@@ -203,9 +203,9 @@ describe('membership is written null-safe, in the flow edge’s spelling, and th
 
 describe('a stored condition on a list reads back exactly, or opens in the raw editor unchanged', () => {
   it.each([
-    ['contains, alone', "record.labels != null && 'frontend' in record.labels"],
-    ['does not contain, alone', "record.labels == null || !('frontend' in record.labels)"],
-    ['contains, joined', "record.status == 'done' && (record.watchers != null && 'u1' in record.watchers)"],
+    ['contains, alone', "has(record.labels) && record.labels != null && 'frontend' in record.labels"],
+    ['does not contain, alone', "!has(record.labels) || record.labels == null || !('frontend' in record.labels)"],
+    ['contains, joined', "record.status == 'done' && (has(record.watchers) && record.watchers != null && 'u1' in record.watchers)"],
   ])('%s: reopens as rows, and an edit re-emits it unchanged', (_name, cel) => {
     const { container } = render(<Harness initial={cel} />);
     expect(rawEditor(container), 'opened in the raw editor — it did not round-trip').toBeNull();
@@ -218,7 +218,8 @@ describe('a stored condition on a list reads back exactly, or opens in the raw e
   it.each([
     ['== on a list', "record.labels == 'frontend'"],
     ['!= on a list, joined', "record.status == 'done' && record.regions != 'emea'"],
-    ['membership on a single-value field', "record.owner != null && 'u1' in record.owner"],
+    ['membership on a single-value field', "has(record.owner) && record.owner != null && 'u1' in record.owner"],
+    ['an unguarded `record.` read (it faults on a sparse row)', "record.labels != null && 'frontend' in record.labels"],
   ])('%s: opens in the raw editor verbatim, and nothing is emitted', (_name, stored) => {
     const { container } = render(<Harness initial={stored} />);
     expect(rawEditor(container), 'expected the raw CEL editor').not.toBeNull();
@@ -235,7 +236,7 @@ describe('a stored condition on a list reads back exactly, or opens in the raw e
 
 describe('moving a row between a list and a single-value field keeps an offered operator', () => {
   it('list → single value: membership becomes equals, the value kept', async () => {
-    const { container } = render(<Harness initial="record.labels != null && 'frontend' in record.labels" />);
+    const { container } = render(<Harness initial="has(record.labels) && record.labels != null && 'frontend' in record.labels" />);
     await userEvent.click(comboboxes(container)[0]);
     await userEvent.click(await screen.findByRole('option', { name: 'Status record.status' }));
     expect(lastOpTrigger(container).textContent).toBe('equals');
@@ -248,5 +249,130 @@ describe('moving a row between a list and a single-value field keeps an offered 
     await userEvent.click(await screen.findByRole('option', { name: 'Owner record.owner' }));
     expect(lastOpTrigger(container).textContent).toBe('is empty');
     expect(committed()).toBe('record.owner == null');
+  });
+});
+
+describe('the builder writes the validator’s own per-site prescription, and the engine answers it without faulting', () => {
+  /** A list field and a scalar beside it, as each site's catalog declares them. */
+  const SITE_FIELDS: CatalogRow[] = [
+    { name: 'labels', label: 'Labels', type: 'multiselect' },
+    { name: 'status', label: 'Status', type: 'select' },
+  ];
+  const hint = (scope: 'record' | 'flattened'): ExprSchemaHint => ({
+    objectName: 'probe',
+    fields: ['labels', 'status'],
+    fieldTypes: { labels: 'multiselect', status: 'select' },
+    scope,
+    // A record-triggered flow is the run proven to bind a row of the object.
+    ...(scope === 'flattened' ? { faultOutcome: 'run-fails' as const } : {}),
+  });
+
+  function SiteHarness({ subjects, scope, initial = '' }: { subjects?: ConditionSubjectVocabulary; scope: 'record' | 'flattened'; initial?: string }) {
+    const [v, setV] = React.useState(initial);
+    return (
+      <div>
+        <ConditionBuilder label="Condition" value={v} onCommit={setV} fields={SITE_FIELDS} subjects={subjects} scope={scope} />
+        <pre data-testid="committed">{v}</pre>
+      </div>
+    );
+  }
+
+  /** Build `subject contains 'frontend'` (and its complement) in the builder at a site. */
+  async function build(subjects: ConditionSubjectVocabulary | undefined, scope: 'record' | 'flattened', subject: string) {
+    const { container } = render(<SiteHarness subjects={subjects} scope={scope} />);
+    fireEvent.click(screen.getByText('Add condition'));
+    const boxes = comboboxes(container);
+    await userEvent.click(boxes[boxes.length - 2]);
+    const options = await screen.findAllByRole('option');
+    const option = options.find((o) => (o.textContent ?? '').endsWith(subject) && !(o.textContent ?? '').endsWith(`.${subject}`));
+    if (!option) throw new Error(`no subject option ${subject}: ${options.map((o) => o.textContent).join(' | ')}`);
+    await userEvent.click(option);
+    expect(lastOpTrigger(container).textContent).toBe('contains');
+    typeValue(container, 'frontend');
+    const contains = committed();
+    await pickOp(container, 'does not contain');
+    const notContains = committed();
+    return { container, contains, notContains };
+  }
+
+  /** The validator's rewrite for `subject OP 'frontend'` at the site — the prescription. */
+  const prescription = (subject: string, op: '==' | '!=', scope: 'record' | 'flattened'): string => {
+    const errors = validateExpression('predicate', `${subject} ${op} 'frontend'`, hint(scope)).errors;
+    expect(errors.map((e) => e.code)).toEqual(['list-equality']);
+    const [e] = errors;
+    if (e.code !== 'list-equality') throw new Error('unreachable');
+    return e.params.rewrite;
+  };
+
+  /** The builder's text and the prescription differ only in the literal's quotes and the outer parentheses. */
+  const asPrescribed = (built: string) => `(${built.replaceAll("'frontend'", '"frontend"')})`;
+
+  const run = (source: string, vars: Record<string, unknown>) => celEngine.evaluate({ dialect: 'cel', source }, vars);
+
+  const SITES = [
+    {
+      site: 'an action row (`record.` on a sparse row)',
+      subjects: undefined,
+      scope: 'record' as const,
+      subject: 'record.labels',
+      // An action's row binds only the keys the list fetched: `labels` absent.
+      fault: { record: { status: 'open' } },
+      member: { record: { labels: ['frontend', 'qa'] } },
+      nonMember: { record: { labels: ['qa'] } },
+    },
+    {
+      site: '`previous.` (null on a create)',
+      subjects: { includePrevious: true },
+      scope: 'record' as const,
+      subject: 'previous.labels',
+      fault: { record: { labels: ['frontend'] }, previous: null },
+      member: { record: {}, previous: { labels: ['frontend'] } },
+      nonMember: { record: {}, previous: { labels: [] } },
+    },
+    {
+      site: 'a record-triggered flow’s start condition (bare name)',
+      subjects: { fieldPrefix: '', includePrevious: true },
+      scope: 'flattened' as const,
+      subject: 'labels',
+      // The run binds every declared field, `null` when empty.
+      fault: { extra: { labels: null, status: 'open' } },
+      member: { extra: { labels: ['frontend'], status: 'open' } },
+      nonMember: { extra: { labels: ['qa'], status: 'open' } },
+    },
+  ];
+
+  it.each(SITES)('$site: built text = the prescription, accepted unchanged, reads back as a row', async (s) => {
+    const { contains, notContains } = await build(s.subjects, s.scope, s.subject);
+    expect(contains).toBe(listMembershipSource({ reference: s.subject, bare: !s.subject.includes('.') }, "'frontend'", true));
+    expect(asPrescribed(contains)).toBe(prescription(s.subject, '==', s.scope));
+    expect(asPrescribed(notContains)).toBe(prescription(s.subject, '!=', s.scope));
+    for (const cel of [contains, notContains]) {
+      expect(validateExpression('predicate', cel, hint(s.scope)).errors).toEqual([]);
+      expect(readListMembership(cel)?.subject).toBe(s.subject);
+    }
+  });
+
+  it.each(SITES)('$site: the engine answers it — no fault where the list is absent or null', async (s) => {
+    const { contains, notContains } = await build(s.subjects, s.scope, s.subject);
+    expect(run(contains, s.fault)).toEqual({ ok: true, value: false });
+    expect(run(notContains, s.fault)).toEqual({ ok: true, value: true });
+    expect(run(contains, s.member)).toEqual({ ok: true, value: true });
+    expect(run(notContains, s.member)).toEqual({ ok: true, value: false });
+    expect(run(contains, s.nonMember)).toEqual({ ok: true, value: false });
+    expect(run(notContains, s.nonMember)).toEqual({ ok: true, value: true });
+  });
+
+  it.each(SITES)('$site: a stored built condition reopens as a row, joined too', (s) => {
+    const built = listMembershipCel(s.subject, "'frontend'", true);
+    for (const stored of [built, `${s.subject.replace('labels', 'status')} == 'open' && (${built})`]) {
+      const { container } = render(<SiteHarness subjects={s.subjects} scope={s.scope} initial={stored} />);
+      expect(rawEditor(container), `${stored} opened in the raw editor`).toBeNull();
+      cleanup();
+    }
+  });
+
+  it('INSTRUMENT CONTROL — the unguarded spelling faults where the has() one does not', () => {
+    expect(run("record.labels != null && 'frontend' in record.labels", { record: {} }).ok).toBe(false);
+    expect(run("previous.labels != null && 'frontend' in previous.labels", { record: {}, previous: null }).ok).toBe(false);
   });
 });

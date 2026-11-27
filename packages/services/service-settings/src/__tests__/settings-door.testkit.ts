@@ -156,9 +156,28 @@ export async function bootSettingsDoor(
     await put(req, res);
     return state;
   };
+  /**
+   * One request at any settings route this door registered, as an HTTP
+   * caller makes it: `route` is the registered key (`'GET /api/settings/:namespace'`).
+   */
+  const request = async (route: string, params: Record<string, string>, body?: unknown) => {
+    const handler = http.routes.get(route);
+    if (!handler) throw new Error(`route not registered: ${route}`);
+    const [method] = route.split(' ');
+    const req: IHttpRequest = { params, query: {}, body: body ?? {}, headers: {}, method, path: '/' } as IHttpRequest;
+    const state: { status: number; body?: any } = { status: 200 };
+    const res: IHttpResponse = {
+      json: vi.fn((d) => { state.body = d; }) as any,
+      send: vi.fn() as any,
+      status: vi.fn((c: number) => { state.status = c; return res; }) as any,
+      header: vi.fn(() => res) as any,
+    };
+    await handler(req, res);
+    return state;
+  };
   const stored = (key: string) =>
     [...rowsOf('sys_platform_setting').values()].find((r) => r.namespace === namespace && r.key === key);
   const seed = (row: Record<string, unknown>) =>
     rowsOf('sys_platform_setting').set(String(row.id), { encrypted: false, locked: false, value_enc: null, ...row });
-  return { svc, save, stored, seed };
+  return { svc, save, request, stored, seed };
 }

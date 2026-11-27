@@ -33,6 +33,7 @@ const en = {
       manage_metadata: 'Manage Metadata',
       manage_mailboxes: 'Manage Mailboxes',
       manage_connector_connections: 'Manage Connector Connections',
+      manage_knowledge_sources: 'Manage Knowledge Sources',
       manage_platform_settings: 'Manage Platform Settings',
       setup_access: 'Setup Access',
       setup_write: 'Write Settings',
@@ -3065,6 +3066,10 @@ const en = {
       noChatsDescription: 'Start a new conversation to see it here.',
       noMatchingChats: 'No matching chats.',
       newConversation: 'New conversation',
+      // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
+      askPage: {
+        scopeBadge: 'Answers prefer this app',
+      },
       renameConversation: 'Rename conversation',
       deleteConversation: 'Delete conversation',
       saveRename: 'Save rename',
@@ -4745,6 +4750,9 @@ const en = {
         form: '{{count}} forms',
         form_one: '{{count}} form',
         form_other: '{{count}} forms',
+        knowledge_source: '{{count}} knowledge sources',
+        knowledge_source_one: '{{count}} knowledge source',
+        knowledge_source_other: '{{count}} knowledge sources',
         datasource: '{{count}} datasources',
         datasource_one: '{{count}} datasource',
         datasource_other: '{{count}} datasources',

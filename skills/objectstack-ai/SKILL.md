@@ -291,13 +291,13 @@ dev/test), `@objectstack/knowledge-pgvector` (`'pgvector'`) or `@objectstack/kno
 import { KnowledgeSourceSchema, type KnowledgeSource } from '@objectstack/spec/ai';
 
 export const supportKb: KnowledgeSource = KnowledgeSourceSchema.parse({
-  id: 'support_kb',
+  name: 'support_kb',
   label: 'Support Knowledge Base',
   adapter: 'pgvector',
   source: {
     kind: 'object',
     object: 'kb_article',
-    contentFields: ['title', 'body'],       // concatenated into document content
+    content: ['title', 'body'],             // joined into document content
     metadataFields: ['category', 'owner_id'], // projected for search-time filtering
     where: { published: true },             // index published articles only
   },
@@ -362,11 +362,13 @@ live, but listing-only: carried onto the tool, never sent to the model).
 ## Model Configuration
 
 Sampling lives under an agent's `model` (`AIModelConfigSchema`), **never a
-top-level `temperature` / `maxTokens`** (`packages/spec/src/ai/agent.zod.ts:37-45`):
+top-level `temperature` / `maxTokens`** (`packages/spec/src/ai/agent.zod.ts:87-95`).
+The block names a model, never a provider: the deployment's AI settings choose
+the provider and resolve the model name among the providers turned on.
+`provider` is retired (protocol 19): writing it is a parse error. Delete it.
 
 | Key | Contract |
 |:--|:--|
-| `provider` | Optional, no default (the deployment's choice): inline enum `openai` \| `azure_openai` \| `anthropic` \| `local`. Model-registry entries (`ModelProviderSchema`) add `google`, `cohere`, `huggingface`, `custom` |
 | `model` | Optional free-string model name; absent = the host's default model for the environment |
 | `temperature` | `min(0).max(2)`, default `0.7`. **Outside 0–2 is a parse error** |
 | `maxTokens` / `topP` | Optional, schema-unbounded numbers |
@@ -393,8 +395,8 @@ top-level `temperature` / `maxTokens`** (`packages/spec/src/ai/agent.zod.ts:37-4
    action, whose body writes elevated (`isSystem`), over a field a non-system
    write cannot set. `readonly: true` binds every non-system caller (the value
    is stripped, **objectstack-data** → `readonly`); a field permission without
-   `editable` (refused `403`) binds only a caller no held set grants it, and
-   Modify All grants it, so an admin's agent still writes the field. The body
+   `editable` (refused `403`) binds only a caller none of whose sets grants it
+   with an `editable: true` row; Modify All is no such grant. The body
    skips the caller's edit right: declare who may run the action in its
    `requiredPermissions` (ADR-0066). A declarative
    `operation: 'update'` action, and a `flow` action under `runAs: 'user'`,

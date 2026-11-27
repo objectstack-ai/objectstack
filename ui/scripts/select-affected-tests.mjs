@@ -447,12 +447,14 @@ const libraryOf = (spec) => (spec.startsWith('@') ? spec.split('/').slice(0, 2).
  * spelled here.
  *
  * @param {string} rawSource
+ * @param {string[]} [rawSpecifiers]  `moduleSpecifiers(rawSource).specifiers`, when
+ *   the caller already read them: the closure scan does, for every file
  */
-export function libraryReadsDisk(rawSource) {
+export function libraryReadsDisk(rawSource, rawSpecifiers = moduleSpecifiers(rawSource).specifiers) {
   // Comments only add specifiers, so a source naming no library anywhere is
   // answered before it is tokenised. A comment names a library nothing runs:
   // a JSDoc `{import('eslint').Rule}`, a CSS `@import 'tailwindcss'` in prose.
-  if (!moduleSpecifiers(rawSource).specifiers.some((sp) => LIBRARY_DISK_READERS.has(libraryOf(sp)))) return false;
+  if (!rawSpecifiers.some((sp) => LIBRARY_DISK_READERS.has(libraryOf(sp)))) return false;
   const source = stripComments(rawSource);
   const libs = moduleSpecifiers(source).specifiers.filter((sp) => LIBRARY_DISK_READERS.has(libraryOf(sp)));
   if (libs.length === 0) return false;
@@ -658,7 +660,7 @@ export function closureSummaries(root, seeds, names, dirOf, radiusOf = () => nul
       if (name) node.packageNames.add(name);
     }
     // Item 2d: a library program reads the disk with or without `fs`.
-    if (!touchesDisk && /\.(?:[cm]?[jt]sx?)$/.test(rel) && libraryReadsDisk(source)) touchesDisk = true;
+    if (!touchesDisk && /\.(?:[cm]?[jt]sx?)$/.test(rel) && libraryReadsDisk(source, info.specifiers)) touchesDisk = true;
     // Item 2c: a module whose disk use is pinned as no test input.
     if (touchesDisk && !node.readsDisk && isBenignDiskModule(rel, source)) touchesDisk = false;
     if (touchesDisk && !node.readsDisk) {
@@ -937,7 +939,13 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
   ];
   const names = new Set(packages.map((p) => p.name));
   const { dependencyClosure, dependentClosure } = packageClosures(packages);
-  const dirOf = (rel) => owningPackage(rel, packages)?.dir ?? '';
+  // Asked of every file a verdict meets, several times each: answered once.
+  const owners = new Map();
+  const ownerOf = (rel) => {
+    if (!owners.has(rel)) owners.set(rel, owningPackage(rel, packages));
+    return owners.get(rel);
+  };
+  const dirOf = (rel) => ownerOf(rel)?.dir ?? '';
 
   // What the root config and its setup files reach. Walked file by file
   // because the answer needed is the FILES, not a summary.
@@ -1009,7 +1017,7 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
       reasons.push(`${rel}: the root vitest config or a setup file imports it, so every test runs through it`);
       continue;
     }
-    const owner = owningPackage(rel, packages);
+    const owner = ownerOf(rel);
     if (owner) {
       changedPackages.add(owner.name);
       continue;
@@ -1038,7 +1046,7 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
 
   const testFiles = tracked.filter((f) => TEST_FILE.test(f) && !f.split('/').includes('node_modules'));
   const placed = testFiles.filter((f) => {
-    const owner = owningPackage(f, packages);
+    const owner = ownerOf(f);
     return owner && !affected.has(owner.name);
   });
   const prefix = nestedPrefix(root);
@@ -1055,7 +1063,7 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
   /** @type {Array<{ file: string, via: string[] }>} */
   const attributed = [];
   for (const file of testFiles) {
-    const owner = owningPackage(file, packages);
+    const owner = ownerOf(file);
     if (!owner) {
       alwaysOn.push({ file, why: 'outside every workspace package' });
       continue;
@@ -1090,7 +1098,13 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
     ...alwaysOn.map((a) => a.file),
     ...attributed.map((a) => a.file),
   ]);
-  const selected = testFiles.filter((f) => filters.some((flt) => f.toLowerCase().includes(flt.toLowerCase())));
+  // Each side lowered once, not once per pair: per pair this line alone was
+  // about 0.3 s of every verdict on the live tree (objectstack#37830).
+  const lowFilters = filters.map((flt) => flt.toLowerCase());
+  const selected = testFiles.filter((f) => {
+    const low = f.toLowerCase();
+    return lowFilters.some((flt) => low.includes(flt));
+  });
 
   return {
     mode: 'affected',
@@ -1117,8 +1131,12 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
 export function dedupeFilters(filters) {
   const unique = [...new Set(filters)].sort((a, b) => a.length - b.length || a.localeCompare(b));
   const kept = [];
+  const lowKept = [];
   for (const f of unique) {
-    if (!kept.some((k) => f.toLowerCase().includes(k.toLowerCase()))) kept.push(f);
+    const low = f.toLowerCase();
+    if (lowKept.some((k) => low.includes(k))) continue;
+    kept.push(f);
+    lowKept.push(low);
   }
   return kept.sort();
 }

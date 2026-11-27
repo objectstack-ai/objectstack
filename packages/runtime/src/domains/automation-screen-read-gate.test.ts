@@ -52,6 +52,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// [#37811] Paid at collection: the dispatcher's reach loads `@objectstack/metadata` (check:test-source-alias).
+import '@objectstack/metadata';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
@@ -525,5 +528,28 @@ describe('#7968 — the paused-run screen is gated to its trigger identity, or t
             expect(h.resume).toHaveBeenCalledTimes(1);
             expect(h.explainCalls).toHaveLength(0);
         });
+    });
+});
+
+// [#37811] This door's 501 sentence is the operation-message catalog's, in the
+// request's top `Accept-Language` tag: byte-identical English with no header,
+// the catalog's Japanese under `ja-JP`, and `Vary: Accept-Language` either way.
+const JA_37811 = { request: { headers: { 'accept-language': 'ja-JP,ja;q=0.9' } } };
+const LANGS_37811 = [['en', {}], ['ja-JP', JA_37811]] as const;
+const sentence37811 = (locale: 'en' | 'ja-JP', key: string, params: Record<string, string> = {}): string =>
+    BUILTIN_OPERATION_MESSAGES[locale][key].replace(/\{\{(\w+)\}\}/g, (_m, name: string) => params[name] ?? '');
+const vary37811 = (response: unknown): unknown => (response as any)?.headers?.Vary;
+
+describe('[#37811] the screen-lookup 501 follows the request\'s language', () => {
+    it('automation_screen_lookup_unsupported', async () => {
+        for (const [locale, extra] of LANGS_37811) {
+            const h = makeDispatcher('refusing', { withoutScreenLookup: true });
+            const { response } = await h.dispatcher.handleAutomation(
+                SCREEN_PATH, 'GET', undefined, { ...STRANGER(), ...extra } as HttpProtocolContext, undefined,
+            );
+            expect((response as any).status).toBe(501);
+            expect((response as any).body?.error?.message).toBe(sentence37811(locale, 'automation_screen_lookup_unsupported'));
+            expect(vary37811(response)).toBe('Accept-Language');
+        }
     });
 });

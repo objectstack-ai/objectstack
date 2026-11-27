@@ -63,6 +63,18 @@ import { isExitSignal } from '../../utils/format.js';
 // MODULE LOAD: the fixture's served boot reaches it through a dynamic
 // `import()` inside a clocked hook (`scripts/check-test-source-alias.mjs`).
 import '@objectstack/runtime';
+import '@objectstack/cloud-connection';
+import '@objectstack/driver-turso';
+import '@objectstack/metadata';
+import '@objectstack/metadata-protocol';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-hono-server';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/service-automation';
+import '@objectstack/service-datasource';
+import '@objectstack/service-settings';
+import '@objectstack/service-storage';
 import { withDefaultOrganization } from '../../utils/default-organization-plugin.testkit.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -457,7 +469,8 @@ for (const cell of DIALECT_CELLS) {
     }, cell.timeout);
 
     it('audit-metadata-bodies --apply still redacts the cleartext copy (the control)', async () => {
-      const { payload } = await runJson(auditBodies, ['--apply', '--yes', '--database-url', fixture!.databaseUrl]);
+      // [#31908] sys_audit_log is sealed by default, and SQLite offers no session lock: --sealer-stopped (ADR-0154 D3 amended, B).
+      const { payload } = await runJson(auditBodies, ['--apply', '--yes', '--sealer-stopped', '--database-url', fixture!.databaseUrl]);
 
       expect(payload.apply).toBe(true);
       expect(payload.report.byObject.sys_audit_log.rewritten).toBe(1);

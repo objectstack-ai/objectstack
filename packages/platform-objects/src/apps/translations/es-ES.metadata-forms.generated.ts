@@ -1659,6 +1659,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Bloqueado por",
         helpText: "Usuario que bloqueó la configuración de la vista"
       },
+      requiredPermissions: {
+        label: "Permisos requeridos",
+        helpText: "Quién ve esta vista: las capacidades que una persona debe tener, todas las indicadas. Los conjuntos de permisos otorgan capacidades, y un puesto transmite las que otorgan sus conjuntos de permisos. Si se deja vacío, todos los que pueden ver la lista ven esta vista. Para mostrarla a varios grupos, elija una capacidad y otórguela al conjunto de permisos de cada grupo. El servidor lo aplica: los demás no encuentran la vista en la lista y se les deniega si la abren directamente. Esto también se aplica a usted: si indica una capacidad que no tiene, o la escribe mal, usted tampoco podrá volver a abrir esta vista."
+      },
       object: {
         label: "Objeto"
       }
@@ -1874,6 +1878,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Filtros",
         description: "Filtros predeterminados y globales aplicados a todos los widgets."
       },
+      access: {
+        label: "Acceso",
+        description: "Quién puede ver este panel."
+      },
       advanced: {
         label: "Avanzado",
         description: "Ajustes de accesibilidad y rendimiento."
@@ -2054,6 +2062,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "globalFilters.targetWidgets": {
         label: "Widgets de destino"
+      },
+      requiredPermissions: {
+        label: "Permisos requeridos",
+        helpText: "Quién ve este panel: las capacidades que una persona debe tener, todas las indicadas. Los conjuntos de permisos otorgan capacidades, y un puesto transmite las que otorgan sus conjuntos de permisos. Si se deja vacío, todos ven este panel. Para mostrarlo a varios grupos, elija una capacidad y otórguela al conjunto de permisos de cada grupo. El servidor lo aplica: los demás no encuentran el panel en la lista y se les deniega si lo abren directamente. Esto también se aplica a usted: si indica una capacidad que no tiene, o la escribe mal, usted tampoco podrá volver a abrir este panel."
       }
     }
   },
@@ -3476,5 +3488,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Un campo de texto largo del objeto raíz (textarea, markdown, html, richtext). Cualquier otro campo se informa al guardar el paquete, y entonces el paquete no lleva cuerpo."
       }
     }
+  },
+  knowledge_source: {
+    label: "Fuente de conocimiento"
   }
 };

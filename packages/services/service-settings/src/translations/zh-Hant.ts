@@ -500,31 +500,19 @@ export const zhHant: PlatformTranslationData = {
       title: '知識庫',
       description: 'RAG／知識來源使用的向量儲存後端。',
       groups: {
-        adapter: { title: '後端', description: '選擇文件分塊及其向量的存放位置。' },
-        turso: { title: 'Turso / libSQL', description: '可搭配託管 Turso、本機檔案或記憶體使用。' },
+        turso: { title: 'Turso / libSQL', description: '僅在平台資料庫不是 PostgreSQL 時使用；平台資料庫為 PostgreSQL 時，知識儲存位於平台資料庫中，不會讀取這些欄位。可搭配託管 Turso、本機檔案或記憶體使用。' },
         indexing: { title: '索引預設值', description: '在知識來源本身設定的值優先於這些預設值。' },
-        permissions: { title: '權限' },
       },
       keys: {
-        adapter: {
-          label: '轉接器',
-          options: { memory: '記憶體（僅限開發／測試）', turso: 'Turso / libSQL（雲端或本機）' },
-        },
         turso_url: {
           label: '連線 URL',
           help: '範例：libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
         },
         turso_auth_token: { label: '驗證權杖', help: '僅託管 Turso URL 需要。' },
         chunk_target: { label: '目標區塊大小（字元）', help: '知識服務切分文件時每個片段的最大字元數。知識來源自身設定的大小優先；嵌入模型的輸入上限可能將其調低。' },
-        over_fetch: { label: '超量擷取倍數', help: '搜尋時取回所要求結果數的這個倍數，以便依文件資訊篩選後仍有足夠結果可傳回。' },
-        enforce_rls: { label: '搜尋時強制套用 RLS', help: '依呼叫者的記錄層級權限重新檢查每一筆命中結果。' },
       },
       actions: {
         test: { label: '測試連線' },
-      },
-      banners: {
-        adapter_switch_warning: { title: '既有索引不會遷移', text: '切換轉接器「不會」遷移既有索引——以前一個轉接器建立索引的文件，在重新建立索引前都無法存取。' },
-        enforce_rls_warning: { title: '正式環境請保持 RLS 開啟', text: '關閉會略過平台防止向量儲存資料外洩的獨有防護——正式環境請保持開啟。' },
       },
     },
     lifecycle: {

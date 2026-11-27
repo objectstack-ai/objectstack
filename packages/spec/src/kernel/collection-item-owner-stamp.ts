@@ -104,7 +104,7 @@ export const OWNER_STAMP_JUDGED_COLLECTIONS = Object.freeze([
   'flows', 'webhooks', 'jobs',
   'positions', 'permissions', 'capabilities', 'sharingRules',
   'queues', 'assignmentRules',
-  'agents', 'tools', 'skills', 'aiContexts',
+  'agents', 'tools', 'skills', 'aiContexts', 'knowledgeSources',
   'apis',
   'hooks', 'mappings', 'analyticsCubes',
   'connectors',

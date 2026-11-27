@@ -26,6 +26,7 @@ for (const kind of ['memory', 'file'] as const) {
         refusesOtherFingerprint: true,
         generations: true,
         scope: true,
+        dropSource: true,
       },
     });
   });

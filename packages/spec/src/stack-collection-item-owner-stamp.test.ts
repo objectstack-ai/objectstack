@@ -244,6 +244,9 @@ const JUDGED_FIXTURES: Record<OwnerStampJudgedCollection, { item: Record<string,
   tools: { item: { name: 'probe_tool', label: 'Tool', description: 'tool', parameters: { type: 'object', properties: {} } } },
   skills: { item: { name: 'probe_skill', label: 'Skill', description: 'skill', instructions: 'x', tools: [] } },
   aiContexts: { item: { name: 'probe_pack', label: 'Pack', object: 'probe_thing', fields: ['title'] } },
+  knowledgeSources: {
+    item: { name: 'probe_source', label: 'Source', adapter: 'memory', source: { kind: 'object', object: 'probe_thing', content: ['title'] } },
+  },
   apis: {
     item: { name: 'probe_api', description: 'api', path: '/api/v1/apps/crm/p1', method: 'GET', type: 'flow', target: 'probe_flow' },
     context: { flows: [probeFlow] },

@@ -15,6 +15,7 @@
 import * as React from 'react';
 import { NavigationType, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { useIsMobile } from '@object-ui/components';
+import { isBuildAgent } from '@object-ui/plugin-chatbot/core';
 import { useAssistant } from '../assistant/assistantBus.js';
 import { useChatDockState, ChatDockPanel, ChatDockMobileSheet } from './ChatDock.js';
 import { matchChatDockShortcut, DOCK_EXPANDED_STORAGE_KEY } from './chatDockState.js';
@@ -45,6 +46,23 @@ export interface ConsoleChatDockOptions {
   /** objectstack#30043 — the page in view, as `context.surface`. */
   surfaceContext?: ChatSurfaceContext;
   surfaceArtifactLabel?: string;
+  /**
+   * ui ADR-0057 Amendment A4 — the app's AI inquiry page (`ai:chat`) is the
+   * active route. While it is, the drawer is closed and its triggers are
+   * inert: the keyboard toggle and the assistant bus open nothing, and
+   * `open()` opens only a build hand-off ({@link opensBesideAskPage}). Leaving
+   * the page shows the drawer as it was.
+   */
+  askPageActive?: boolean;
+}
+
+/**
+ * ui ADR-0057 Amendment A4 — what the drawer may open on the AI inquiry page:
+ * a build hand-off (a build target, or a Builder handoff), never a second
+ * `ask` conversation beside the page's own.
+ */
+export function opensBesideAskPage(target: ChatDockTarget | null | undefined, handoff?: BuilderHandoffState): boolean {
+  return hasHandoff(handoff) || Boolean(target?.agent && isBuildAgent(target.agent));
 }
 
 export interface ConsoleChatDock {
@@ -97,6 +115,7 @@ export function useConsoleChatDock({
   appPackageId,
   surfaceContext,
   surfaceArtifactLabel,
+  askPageActive = false,
 }: ConsoleChatDockOptions): ConsoleChatDock {
   const dock = useChatDockState({ persistExpandedKey: DOCK_EXPANDED_STORAGE_KEY, persistFullWindow: true });
   // Under `md` there is no horizontal room for the rail — the drawer presents
@@ -149,9 +168,23 @@ export function useConsoleChatDock({
     }
   }, []);
 
-  const { expand, collapse, toggle, fullWindow, setFullWindow, expanded } = dock;
+  const { expand, collapse, toggle, fullWindow, setFullWindow, expanded: storedExpanded } = dock;
+  // ui ADR-0057 Amendment A4 — on the AI inquiry page the drawer is shown only
+  // after a build hand-off opened it there; the stored open state is left as
+  // it is, so the next page shows the drawer as the user left it.
+  const [handoffOnAskPage, setHandoffOnAskPage] = React.useState(false);
+  if (handoffOnAskPage && (!askPageActive || !storedExpanded)) setHandoffOnAskPage(false);
+  const expanded = storedExpanded && (!askPageActive || handoffOnAskPage);
+  const askPageActiveRef = React.useRef(askPageActive);
+  React.useLayoutEffect(() => {
+    askPageActiveRef.current = askPageActive;
+  }, [askPageActive]);
   const open = React.useCallback(
     (next?: ChatDockTarget | null, nextHandoff?: BuilderHandoffState) => {
+      if (askPageActiveRef.current) {
+        if (!opensBesideAskPage(next, nextHandoff)) return;
+        setHandoffOnAskPage(true);
+      }
       if (next === null) setTarget(undefined);
       else if (next !== undefined) setTarget(next);
       holdHandoff(nextHandoff);
@@ -221,6 +254,16 @@ export function useConsoleChatDock({
     }
     // A phone host's first render: `isMobile` is not measured yet.
     if (!isMobile) return;
+    // ui ADR-0057 Amendment A4 — arriving on the AI inquiry page with the
+    // sheet stored open closes it: the page hides it, and a phone sheet
+    // closes on any move away anyway (above), so the next page must not
+    // bring it back over itself. The desktop rail keeps its stored state.
+    if (askPageActive && storedExpanded && !expanded) {
+      movedAwayRef.current = false;
+      writeSheetShownAt(null);
+      collapse();
+      return;
+    }
     if (!expanded) {
       movedAwayRef.current = false;
       writeSheetShownAt(null);
@@ -233,7 +276,7 @@ export function useConsoleChatDock({
       return;
     }
     writeSheetShownAt(location.key);
-  }, [enabled, isMobile, expanded, location.key, navigationType, collapse]);
+  }, [enabled, isMobile, expanded, storedExpanded, askPageActive, location.key, navigationType, collapse]);
 
   // A designer surface can ask the assistant to open through the assistant bus
   // (e.g. an "Ask AI" button).
@@ -242,12 +285,13 @@ export function useConsoleChatDock({
   React.useEffect(() => {
     if (openSeq === seenOpenSeq.current) return;
     seenOpenSeq.current = openSeq;
-    if (enabled) expand();
+    if (enabled && !askPageActiveRef.current) expand();
   }, [openSeq, enabled, expand]);
 
   // ⌘/Ctrl+Shift+I toggles the drawer (composer-safe; see matchChatDockShortcut).
+  // ui ADR-0057 Amendment A4 — inert on the AI inquiry page.
   React.useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || askPageActive) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (matchChatDockShortcut(e) !== 'toggle') return;
       e.preventDefault();
@@ -255,11 +299,11 @@ export function useConsoleChatDock({
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [enabled, toggle]);
+  }, [enabled, askPageActive, toggle]);
 
   const control = React.useMemo<ChatDockControl | null>(
-    () => (enabled ? { expanded, fullWindow, toggle, open } : null),
-    [enabled, expanded, fullWindow, toggle, open],
+    () => (enabled ? { expanded, fullWindow, toggle, open, askPageActive } : null),
+    [enabled, expanded, fullWindow, toggle, open, askPageActive],
   );
 
   const thread = { target: shownTarget, onTargetChange: setTarget, handoff };

@@ -195,6 +195,17 @@ declare const handleAddComment: (text: string) => void;
 - **Positioning**: Panel can be placed at `bottom`, `right`, or `left` of the record view
 - **Collapsible**: Optional collapse/expand with configurable default state
 
+## How a field is drawn on the record page
+
+The default record page's field list draws one field a row: the label left,
+the value beside it. A wide field (`textarea`, `markdown`, `html`, `richtext`,
+`grid`, or `file` / `image` declared `multiple: true`) draws its label above
+the value instead, and the value takes the column's whole width; a click on it
+still edits it. In a `markdown`, `html` or `richtext` body, `h1`–`h3` read one
+step smaller than the typography scale (18 / 16 / 14 px) and stay heading
+elements, so a link to a cited section still finds them. A grid cell flattens
+headings to a bold line at its own size.
+
 ## Editing a field on the record page
 
 A record page offers two ways to edit, and both save through

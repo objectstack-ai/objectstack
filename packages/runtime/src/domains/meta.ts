@@ -33,6 +33,8 @@ import {
     // `manage_metadata` (or `isSystem`), the one predicate the REST doors run
     // too. No `/meta` branch here carries an organization into a metadata
     // write or read: the per-organization overlay axis is retired.
+    KNOWLEDGE_SOURCE_ADMISSION_SERVICE,
+    authoredKnowledgeSourceRefusal,
     metaWriteCapabilityVerdict,
     // [ADR-0131 D3 · D12 items 7–8] …and, under a wall, the platform operator
     // alone: the walled refusal every environment-metadata write door asks.
@@ -121,6 +123,7 @@ import { buildApiError } from '../error-envelope.js';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { catalogNotImplemented } from './own-door-bridge.js';
 
 /**
  * [#15238] The `protocol` service slot **as this domain reaches it** — one
@@ -1547,10 +1550,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // A dedicated path cannot fall through to the plain read the way the
             // `?layers=` flag does — `RestServer`'s `501 NOT_IMPLEMENTED`, in this
             // transport's envelope.
-            return {
-                handled: true,
-                response: deps.error('Layered metadata view not supported by protocol implementation', 501),
-            };
+            return catalogNotImplemented(deps, _context, 'meta_layered_view_unsupported');
         }
         // [#22188] `RestServer`'s reading: `all` names no package.
         const packageId = metaItemPackageBinding(query?.package);
@@ -1979,6 +1979,31 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // means was the actual defect; one answer, from one authority.
             const item = body ?? {};
 
+            // [ADR-0161 K4, guard two] Source admission at save: a
+            // `knowledge_source` is saved only when its author may themselves
+            // search what it would index — the knowledge service's search-time
+            // gates, asked for the author before anything is written
+            // (`authoredKnowledgeSourceRefusal`, the predicate `RestServer`'s
+            // `PUT` and the MCP draft save ask). Every other type passes
+            // untouched.
+            {
+                const refused = await authoredKnowledgeSourceRefusal({
+                    type,
+                    item,
+                    executionContext: _context.executionContext,
+                    // The classified lookup, not the `resolveService` probe:
+                    // a name nothing registered answers `undefined` (no
+                    // knowledge service, nothing to ask), and a service that
+                    // is registered and cannot be resolved rejects, which the
+                    // predicate answers `503`.
+                    resolveKnowledgeService: () =>
+                        deps.resolveServiceOrLoud(_context, KNOWLEDGE_SOURCE_ADMISSION_SERVICE, _context.environmentId),
+                });
+                if (refused) {
+                    return { handled: true, response: deps.error(refused.message, refused.status) };
+                }
+            }
+
             // Try to get the protocol service directly
             const protocol = await resolveProtocol(deps, _context);
 
@@ -2064,15 +2089,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // `RestServer` gives any save its protocol cannot take — rather than
             // written unguarded or ACTIVE, the very drop just closed above.
             if (saveOptions.request.parentVersion !== undefined || saveOptions.request.mode !== undefined) {
-                return {
-                    handled: true,
-                    response: deps.error(
-                        'This host has no protocol saveMetaItem, so it cannot honour If-Match, If-None-Match '
-                            + 'or ?mode=draft on a save. Send the save without them, or save through a host whose '
-                            + 'protocol implements saveMetaItem.',
-                        501,
-                    ),
-                };
+                return catalogNotImplemented(deps, _context, 'meta_save_conditions_unsupported');
             }
 
             // Fallback: try MetadataService directly
@@ -2089,7 +2106,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.errorFromThrown(e, 501) };
                 }
             }
-            return { handled: true, response: deps.error('Save not supported', 501) };
+            return catalogNotImplemented(deps, _context, 'meta_save_unsupported');
         }
 
         // [commit 4fc4a3c0b] The read `try` below is this block's default answer, and it
@@ -2602,7 +2619,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 return { handled: true, response: deps.errorFromThrown(e, 500) };
             }
         }
-        return { handled: true, response: deps.error('Draft listing not supported', 501) };
+        return catalogNotImplemented(deps, _context, 'meta_draft_listing_unsupported');
     }
 
     // POST /metadata/_migrate-stored  (#4327 / #4454 / #4498)
@@ -2664,7 +2681,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
         const protocol = await resolveProtocol(deps, _context);
         if (!protocol || typeof protocol.migrateStoredMetadata !== 'function') {
-            return { handled: true, response: deps.error('Stored-metadata migration not supported', 501) };
+            return catalogNotImplemented(deps, _context, 'meta_stored_migration_unsupported');
         }
         const types = Array.isArray(body?.types)
             ? body.types.filter((t: unknown): t is string => typeof t === 'string' && t.length > 0)

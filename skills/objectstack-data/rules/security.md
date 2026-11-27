@@ -268,7 +268,7 @@ filter: [{ field: 'api_key', operator: 'is_not_null' }]  // list view
 **High-sensitivity fields — `requiredPermissions` (ADR-0066 D3).** The field
 is **stripped on read and denied on write** unless the caller holds ALL listed
 capabilities (a set's `systemPermissions`): strictest-wins over every field
-row, `viewAllFields`, View All and Modify All. With `maskingRule`, a caller
+row and `viewAllFields`. With `maskingRule`, a caller
 without them reads the partial value.
 
 ```typescript

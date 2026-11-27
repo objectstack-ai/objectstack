@@ -72,6 +72,7 @@ import { automationAddressRegistryOf, bareNameRefusal } from './automation-addre
 import { maskObjectSchema, resolveObjectMasker } from './meta.js';
 // [ADR-0106 D1] The run doors' visibility question, asked where an action is listed or run.
 import { actionRunFieldVisibilityRefusal, actionRunMasker, projectActionForCaller } from '../action-run-visibility.js';
+import { catalogNotImplemented } from './own-door-bridge.js';
 
 /** Typed as the registered vocabulary, so a misspelling fails to compile. */
 const FIELD_VISIBILITY_UNRESOLVED: ErrorCode = 'FIELD_VISIBILITY_UNRESOLVED';
@@ -206,7 +207,7 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
     }
     const mcp: any = await deps.resolveService(context, 'mcp', context.environmentId);
     if (!mcp || typeof mcp.handleHttpRequest !== 'function') {
-        return { handled: true, response: deps.error('MCP server is not available', 501) };
+        return catalogNotImplemented(deps, context, 'mcp_server_unavailable');
     }
 
     // [#24151] The body is read once the anonymous decision above has admitted
@@ -361,7 +362,7 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
     }
     const mcp: any = await deps.resolveService(context, 'mcp', context.environmentId);
     if (!mcp || typeof mcp.renderSkill !== 'function') {
-        return { handled: true, response: deps.error('MCP server is not available', 501) };
+        return catalogNotImplemented(deps, context, 'mcp_server_unavailable');
     }
 
     // Resolve this environment's MCP URL for the skill's Connect section:

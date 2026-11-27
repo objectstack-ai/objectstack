@@ -61,7 +61,7 @@ export default class KnowledgeRebuild extends Command {
   ];
 
   static override args = {
-    source: Args.string({ description: 'The knowledge source id', required: true }),
+    source: Args.string({ description: 'The knowledge source, by the name `os knowledge status` lists it under (NAMESPACE-NAME for a package\'s source)', required: true }),
   };
 
   static override flags = {

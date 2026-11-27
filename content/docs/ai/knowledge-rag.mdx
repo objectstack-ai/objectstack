@@ -30,44 +30,86 @@ Which store is mounted depends on the platform database:
 | PostgreSQL | `@objectstack/knowledge-pgvector` | `pgvector` | the platform database, schema `os_knowledge` ([below](#self-hosted-vector-store-postgresql--pgvector)) |
 | anything else (SQLite under `os dev`, libSQL, MySQL, MongoDB) | `@objectstack/knowledge-turso` | `turso` | `knowledge.db` in the directory of the default database and never its file: `.objectstack/data/`, or `<OS_HOME>/data/` when `OS_HOME` is set ([below](#local-vector-store-a-libsql-file)) |
 
-- **Sources are still written in code**: register them on the `knowledge` service from your own plugin, and name the adapter of the store your database gets (`adapter: 'turso'` or `adapter: 'pgvector'`).
+- **Sources are metadata**: list them under `knowledgeSources` ([below](#writing-a-source)), and name the adapter of the store your database gets (`adapter: 'turso'` or `adapter: 'pgvector'`).
 - **A source naming a store that is not mounted** does not stop the boot: the server logs one error naming the source and the stores that are mounted, and indexing or searching that source answers `SERVICE_UNAVAILABLE` (503) with the same choices; `search_knowledge` lists it in `refused`.
 - **The embedder** comes from Settings → AI & Embedder ([below](#configuring-the-embedder-from-settings)).
 - **Another libSQL store** for the `turso` case: save its URL as `turso_url` (and `turso_auth_token` for a managed `libsql://` database) in Settings → Knowledge, then restart. A `file:` URL saved there must name a file inside that same data directory, and a URL carrying a NUL byte or another control character, written out or percent-encoded (`%00`), is refused, as is a token carrying one (a pasted line break counts); either way the store answers `SERVICE_UNAVAILABLE` saying why, and the boot goes on.
 - **Where the file is**: `os start --home` and `OS_HOME` move it with the default database, so on a container put `OS_HOME` on a volume and the index survives a redeploy. A database named by URL (`OS_DATABASE_URL`) does not move it.
+- **Settings → Knowledge** holds only what the service and its store read: `turso_url` and `turso_auth_token` (read where the store is `turso`; on PostgreSQL nothing reads them) and `chunk_target`, the longest passage the splitter cuts. The page names no adapter: a source's store is the one its own `adapter` names, and `os knowledge status` reports it per source. Every search re-checks each hit as the asking user, and no setting turns that off.
 - **More than one replica** on MySQL, MongoDB or a remote libSQL database: each replica keeps its own local `knowledge.db` and indexes only the record writes that replica itself handles, so replicas answer from indexes that differ. Give them one store: save a shared `libsql://` URL in `turso_url`, or run on PostgreSQL, where the vectors live in the one database.
 - **An install without the libSQL client**: `@objectstack/knowledge-turso` is an optional dependency of the CLI, because its client is a native module. Where it could not be installed the server warns at boot that the store was not mounted, and sources naming `turso` answer `SERVICE_UNAVAILABLE`.
 - **Without the token** nothing is mounted: no knowledge service, no store and no Knowledge settings page. `knowledge-memory` is never mounted for you.
 - **Mounting it yourself** still works: an app whose `plugins` already hold `KnowledgeServicePlugin` keeps its own, and the runtime adds neither a second service nor a store.
 
-## Wiring by hand
+## Writing a source
+
+A knowledge source is a metadata item: a `*.knowledge-source.ts` file in your
+app, listed under `knowledgeSources`. It says which object's records to
+index, which fields become searchable text, and which adapter holds the index.
 
 ```ts
-import { ObjectKernel } from '@objectstack/core';
+// src/ai/task-notes.knowledge-source.ts
+import type { KnowledgeSource } from '@objectstack/spec/ai';
+
+export const TaskNotes: KnowledgeSource = {
+  name: 'task_notes',
+  label: 'Task notes',
+  adapter: 'turso', // 'pgvector' when the platform database is PostgreSQL
+  source: { kind: 'object', object: 'task', content: ['title', 'notes'] },
+};
+```
+
+```ts
+// objectstack.config.ts
+import { defineStack } from '@objectstack/spec';
+import { TaskNotes } from './src/ai/task-notes.knowledge-source.js';
+
+export default defineStack({
+  requires: ['knowledge'],
+  knowledgeSources: [TaskNotes],
+  // …
+});
+```
+
+The knowledge service loads the source when it starts, runs its first build,
+and keeps the index in step with the records. There is no registration call
+to write.
+
+- **`content` lists its fields by name.** What is listed is what leaves the row store: the text of those fields is sent to the embedder and kept in the index. `'*'` is refused, and a field added to the object later is not indexed until you add it here.
+- **A source can also be created or changed at run time**, in Studio or through MCP, with no restart: a new source is loaded and built, a changed one is reloaded (and rebuilt when what it indexes changed), and a removed one has its index dropped.
+- **Authoring one needs `manage_knowledge_sources`** beside `manage_metadata` — platform administrators hold it by default — and the author must themselves be allowed to search the object and query every listed field and every field `where` reads, or the save is refused naming what they may not read. A write to a package that holds a source (publish its drafts, roll it back, duplicate, disable or delete it) needs the same capability.
+- **Two packages may each ship a source of the same name.** `search_knowledge` lists a package's source as `NAMESPACE-NAME` and takes that spelling in `sourceIds`.
+- **Registering in code still works**: `new KnowledgeServicePlugin({ sources: [TaskNotes] })` or `knowledge.registerSource(TaskNotes)` takes the same shape. A source registered in code and an item saved under the same name are one name: the second to arrive is refused.
+
+<Callout type="warn">
+**Upgrading from 18.** `id` is now `name` and `source.contentFields` is `source.content` (run `os migrate meta --from 18`); a `'*'` member must be replaced with the field names; `embedding`, `vectorStore`, `adapterConfig` and `refresh.cron` are removed, as are the `file` and `http` source kinds and `indexDocument` / `deleteDocument` on the service. Each retired key is refused with what to write instead.
+</Callout>
+
+## Wiring by hand
+
+An app that mounts the service and a store itself, instead of declaring
+`requires: ['knowledge']`, keeps its own: the runtime adds neither a second
+service nor a store. This is also how the in-memory store is mounted for a demo
+or a test.
+
+```ts
+// objectstack.config.ts
+import { defineStack } from '@objectstack/spec';
 import { KnowledgeServicePlugin } from '@objectstack/service-knowledge';
 import { KnowledgeMemoryPlugin } from '@objectstack/knowledge-memory';
 // or, for prod (PostgreSQL + pgvector; a libSQL file is `@objectstack/knowledge-turso`):
 // import { KnowledgePgvectorPlugin } from '@objectstack/knowledge-pgvector';
+import { TaskNotes } from './src/ai/task-notes.knowledge-source.js';
 
-const kernel = new ObjectKernel();
-kernel.use(new KnowledgeServicePlugin({
-  sources: [
-    {
-      id: 'task_notes',
-      label: 'Task notes',
-      adapter: 'memory',
-      source: { kind: 'object', object: 'task', contentFields: ['title', 'notes'] },
-    },
-    {
-      id: 'product_docs',
-      label: 'Product docs',
-      adapter: 'memory', // 'pgvector' once KnowledgePgvectorPlugin is registered below
-      source: { kind: 'object', object: 'product_doc', contentFields: ['title', 'body'] },
-    },
+export default defineStack({
+  plugins: [
+    new KnowledgeServicePlugin(),
+    new KnowledgeMemoryPlugin(),
+    // new KnowledgePgvectorPlugin(),
   ],
-}));
-kernel.use(new KnowledgeMemoryPlugin());
-// kernel.use(new KnowledgePgvectorPlugin());
+  knowledgeSources: [TaskNotes], // with `adapter: 'memory'`
+  // …
+});
 ```
 
 ## Retrieving knowledge
@@ -76,7 +118,7 @@ Retrieval is a plain service call — no AI runtime required. Resolve the `knowl
 service and call `search`. Hits are re-checked against the caller's
 `ExecutionContext` (RLS), sorted by score, and capped at `topK` before they come
 back. Because the re-check runs after ranking, for a caller other than the
-system identity the service asks each object source for more hits than `topK`,
+system identity the service asks each source for more hits than `topK`,
 and asks once more when too few records survive, so a caller who may read few of
 the matching records still gets up to `topK` hits
 ([the protocol](/docs/protocol/knowledge) gives the factors and the cap). A
@@ -127,7 +169,7 @@ installed ([Connect an MCP Client](/docs/ai/connect-mcp)).
 
 ## Searching inside chosen records
 
-Pass `scope` to search only inside some records: the records an object source indexes, or a parent record that source reaches through a lookup it lists in `metadataFields`.
+Pass `scope` to search only inside some records: the records a source indexes, or a parent record that source reaches through a lookup it lists in `metadataFields`.
 
 ```ts
 // Only the clauses of one policy: the clause source lists its `policy` lookup in metadataFields.
@@ -190,13 +232,13 @@ const vectors = await embedder.embed(chunks.map((c) => c.content));
 
 ## Splitting documents into passages
 
-The knowledge service cuts each document into passages once, and every adapter that takes passages (`knowledge-memory` does) indexes the same ones. An object source chooses how with `split`:
+The knowledge service cuts each document into passages once, and every adapter that takes passages (`knowledge-memory` does) indexes the same ones. A source chooses how with `split`:
 
 ```ts
 source: {
   kind: 'object',
   object: 'policy',
-  contentFields: ['title', 'body'],
+  content: ['title', 'body'],
   split: { strategy: 'markdown', maxChars: 600 },
 }
 ```

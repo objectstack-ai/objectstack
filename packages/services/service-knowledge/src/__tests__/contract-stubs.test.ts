@@ -51,7 +51,7 @@ function rank(passages: Passage[], query: string, opts: AdapterSearchOptions): K
     .map(({ p, score }) => ({
       chunkId: p.chunkId,
       documentId: p.documentId,
-      sourceId: opts.source.id,
+      sourceId: opts.source.name,
       sourceRecordId: p.sourceRecordId,
       score,
       snippet: p.text,
@@ -69,7 +69,7 @@ class StubAdapter implements IKnowledgeAdapter {
   }
 
   async upsert(docs: KnowledgeDocument[], ctx: AdapterContext): Promise<void> {
-    const byDoc = this.store.get(ctx.source.id) ?? new Map<string, Passage[]>();
+    const byDoc = this.store.get(ctx.source.name) ?? new Map<string, Passage[]>();
     for (const doc of docs) {
       if (this.capabilities?.chunks) {
         if (doc.chunks === undefined) throw new Error(`chunk-stub: document '${doc.id}' arrived without chunks`);
@@ -85,15 +85,15 @@ class StubAdapter implements IKnowledgeAdapter {
         byDoc.set(doc.id, [{ chunkId: `${doc.id}#0`, documentId: doc.id, sourceRecordId: doc.sourceRecordId, text: doc.content }]);
       }
     }
-    this.store.set(ctx.source.id, byDoc);
+    this.store.set(ctx.source.name, byDoc);
   }
 
   async search(query: string, opts: AdapterSearchOptions): Promise<KnowledgeHit[]> {
-    return rank([...(this.store.get(opts.source.id)?.values() ?? [])].flat(), query, opts);
+    return rank([...(this.store.get(opts.source.name)?.values() ?? [])].flat(), query, opts);
   }
 
   async delete(documentIds: string[], ctx: AdapterContext): Promise<void> {
-    const byDoc = this.store.get(ctx.source.id);
+    const byDoc = this.store.get(ctx.source.name);
     for (const id of documentIds) byDoc?.delete(id);
   }
 }
@@ -110,6 +110,7 @@ runKnowledgeAdapterContract({
     refusesOtherFingerprint: false,
     generations: false,
     scope: false,
+    dropSource: false,
   },
 });
 
@@ -125,5 +126,6 @@ runKnowledgeAdapterContract({
     refusesOtherFingerprint: false,
     generations: false,
     scope: false,
+    dropSource: false,
   },
 });

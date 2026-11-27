@@ -1,0 +1,150 @@
+{
+  "type": "knowledge_source",
+  "_note": "KnowledgeSourceSchema (packages/spec/src/ai/knowledge-source.zod.ts) — a knowledge source, the stack's `knowledgeSources` (ADR-0161 K4). Seeded 2026-11-26 with the type itself (#37304): every key that parses is read by the knowledge service (`@objectstack/service-knowledge`), which loads the published items; the keys ADR-0161 K6 retired are tombstones, classified dead. The protection fields (`_lock*`, `_provenance`, `_packageId`) are the framework overlay fields every kind carries and are judged where every kind's are.",
+  "props": {
+    "name": {
+      "status": "live",
+      "verifiedAt": "2026-11-26",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/services/service-knowledge/src/knowledge-source-registry.ts#indexKeyOf — the name, with the holding package, is the source's slot and the key its index is held under; packages/services/service-knowledge/src/knowledge-source-registry.ts#resolveSourceRef — how `search_knowledge`'s `sourceIds` and the service's by-name members find it.",
+      "producer": "packages/metadata/src/plugin.ts — the stack's `knowledgeSources` collection reaches the metadata service as `knowledge_source` items; packages/services/service-knowledge/src/knowledge-service-plugin.ts#readPublishedSources reads the published items back and packages/services/service-knowledge/src/knowledge-source-loader.ts#KnowledgeSourceLoader registers each as a source (boot, a published change, a metadata reload).",
+      "note": "Identity: with the package that holds the item, the source's slot (ADR-0150 bucket 3)."
+    },
+    "id": {
+      "status": "dead",
+      "verifiedAt": "2026-11-26",
+      "note": "REMOVED 2026-11-26 (#37304; ADR-0161 K6) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and handled for stored rows and existing sources by the protocol-19 conversion `knowledge-source-id-to-name` (a rename; the value is unchanged, so document ids do not move). The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). It was the source's identity before a source was a metadata item; `name` carries the same value."
+    },
+    "label": {
+      "status": "live",
+      "verifiedAt": "2026-11-26",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/services/service-knowledge/src/knowledge-tools.ts#summarize — carried as `sources[].label`, what the model reads to choose a source; packages/services/service-knowledge/src/knowledge-build-actions.ts#knowledgeIndexStatusActionHandler — the operator's status listing.",
+      "producer": "packages/metadata/src/plugin.ts — the stack's `knowledgeSources` collection reaches the metadata service as `knowledge_source` items; packages/services/service-knowledge/src/knowledge-service-plugin.ts#readPublishedSources reads the published items back and packages/services/service-knowledge/src/knowledge-source-loader.ts#KnowledgeSourceLoader registers each as a source (boot, a published change, a metadata reload)."
+    },
+    "description": {
+      "status": "live",
+      "verifiedAt": "2026-11-26",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/services/service-knowledge/src/knowledge-tools.ts#summarize — carried as `sources[].description` when the source states one.",
+      "producer": "packages/metadata/src/plugin.ts — the stack's `knowledgeSources` collection reaches the metadata service as `knowledge_source` items; packages/services/service-knowledge/src/knowledge-service-plugin.ts#readPublishedSources reads the published items back and packages/services/service-knowledge/src/knowledge-source-loader.ts#KnowledgeSourceLoader registers each as a source (boot, a published change, a metadata reload)."
+    },
+    "adapter": {
+      "status": "live",
+      "verifiedAt": "2026-11-26",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/services/service-knowledge/src/knowledge-service.ts#reindexWith — the adapter the source's documents are written to and searched in is resolved by this id; packages/services/service-knowledge/src/knowledge-service.ts#dropMetadataSource — the adapter asked to drop the index of a removed item.",
+      "producer": "packages/metadata/src/plugin.ts — the stack's `knowledgeSources` collection reaches the metadata service as `knowledge_source` items; packages/services/service-knowledge/src/knowledge-service-plugin.ts#readPublishedSources reads the published items back and packages/services/service-knowledge/src/knowledge-source-loader.ts#KnowledgeSourceLoader registers each as a source (boot, a published change, a metadata reload).",
+      "note": "Required until row 3b of topic #37000 makes it optional."
+    },
+    "adapterConfig": {
+      "status": "dead",
+      "verifiedAt": "2026-11-26",
+      "note": "REMOVED 2026-11-26 (#37304; ADR-0161 K6) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and handled for stored rows and existing sources by the protocol-19 conversion `knowledge-source-inert-keys-removed` (a strip). The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). Its one reader was the RAGFlow adapter, retired by #37004; no adapter in this repository read it after that (ADR-0161 K4: a key no adapter reads does not enter v1)."
+    },
+    "source": {
+      "children": {
+        "kind": {
+          "status": "live",
+          "verifiedAt": "2026-11-26",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/services/service-knowledge/src/knowledge-index-fingerprint.ts#contentRecipe — the kind is part of the source's content recipe; one value, `object` (the `file` and `http` arms retired, ADR-0161 K4 point 1).",
+          "producer": "packages/metadata/src/plugin.ts — the stack's `knowledgeSources` collection reaches the metadata service as `knowledge_source` items; packages/services/service-knowledge/src/knowledge-service-plugin.ts#readPublishedSources reads the published items back and packages/services/service-knowledge/src/knowledge-source-loader.ts#KnowledgeSourceLoader registers each as a source (boot, a published change, a metadata reload).",
+          "note": "A discriminator with one arm: kept so a designed arm can return without a rename."
+        },
+        "object": {
+          "status": "live",
+          "verifiedAt": "2026-11-26",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/services/service-knowledge/src/knowledge-service.ts#objectSourcesFor — a written or deleted record is matched to its sources by this object; packages/services/service-knowledge/src/knowledge-service.ts#walkObjectSource — the object a build walks; packages/services/service-knowledge/src/knowledge-reap-guard.ts#guardedObjectsFor — the object the lifecycle reap guard is registered for.",
+          "producer": "packages/metadata/src/plugin.ts — the stack's `knowledgeSources` collection reaches the metadata service as `knowledge_source` items; packages/services/service-knowledge/src/knowledge-service-plugin.ts#readPublishedSources reads the published items back and packages/services/service-knowledge/src/knowledge-source-loader.ts#KnowledgeSourceLoader registers each as a source (boot, a published change, a metadata reload)."
+        },
+        "content": {
+          "status": "live",
+          "verifiedAt": "2026-11-26",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/services/service-knowledge/src/knowledge-service.ts#recordToDocument — the listed fields, in order, are the document's text; packages/services/service-knowledge/src/knowledge-source-admission.ts#servedFieldsOf — each is a field the caller must be allowed to query before the source is searched for them.",
+          "producer": "packages/metadata/src/plugin.ts — the stack's `knowledgeSources` collection reaches the metadata service as `knowledge_source` items; packages/services/service-knowledge/src/knowledge-service-plugin.ts#readPublishedSources reads the published items back and packages/services/service-knowledge/src/knowledge-source-loader.ts#KnowledgeSourceLoader registers each as a source (boot, a published change, a metadata reload).",
+          "note": "A list of field names; the `'*'` member is refused at parse (ADR-0161 K5: embedding is egress)."
+        },
+        "contentFields": {
+          "status": "dead",
+          "verifiedAt": "2026-11-26",
+          "note": "REMOVED 2026-11-26 (#37304; ADR-0161 K6) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and handled for stored rows and existing sources by the protocol-19 conversion `knowledge-source-content-fields-to-content` (a rename; a `'*'` member is reported for a hand edit). The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). The key is spelled `content`; the readers above read that."
+        },
+        "metadataFields": {
+          "status": "live",
+          "verifiedAt": "2026-11-26",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/services/service-knowledge/src/knowledge-service.ts#recordToDocument — each listed field's value is carried in the document's metadata; packages/services/service-knowledge/src/knowledge-index-fingerprint.ts#computeRecipeHash — a change to the list changes the recipe hash and starts one rebuild; packages/services/service-knowledge/src/knowledge-search-scope.ts — a parent scope and `groupBy` resolve against the listed fields.",
+          "producer": "packages/metadata/src/plugin.ts — the stack's `knowledgeSources` collection reaches the metadata service as `knowledge_source` items; packages/services/service-knowledge/src/knowledge-service-plugin.ts#readPublishedSources reads the published items back and packages/services/service-knowledge/src/knowledge-source-loader.ts#KnowledgeSourceLoader registers each as a source (boot, a published change, a metadata reload)."
+        },
+        "where": {
+          "status": "live",
+          "verifiedAt": "2026-11-26",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/services/service-knowledge/src/knowledge-service.ts#walkObjectSource — a build indexes only the records the filter selects; packages/services/service-knowledge/src/knowledge-service.ts#syncRecord — a written record is re-read under it, and one that no longer matches is de-indexed; packages/services/service-knowledge/src/knowledge-index-fingerprint.ts#computeRecipeHash — a changed filter starts one rebuild.",
+          "producer": "packages/metadata/src/plugin.ts — the stack's `knowledgeSources` collection reaches the metadata service as `knowledge_source` items; packages/services/service-knowledge/src/knowledge-service-plugin.ts#readPublishedSources reads the published items back and packages/services/service-knowledge/src/knowledge-source-loader.ts#KnowledgeSourceLoader registers each as a source (boot, a published change, a metadata reload)."
+        },
+        "split": {
+          "children": {
+            "strategy": {
+              "status": "live",
+              "verifiedAt": "2026-11-26",
+              "evidenceScope": "in-repo",
+              "evidence": "packages/services/service-knowledge/src/split/splitter.ts#resolveSplit — the strategy the service cuts the source's documents by (`recursive` when omitted); packages/services/service-knowledge/src/split/splitter.ts#splitDocument — the cut; packages/services/service-knowledge/src/knowledge-index-fingerprint.ts#computeIndexFingerprint — part of the index fingerprint.",
+              "producer": "packages/metadata/src/plugin.ts — the stack's `knowledgeSources` collection reaches the metadata service as `knowledge_source` items; packages/services/service-knowledge/src/knowledge-service-plugin.ts#readPublishedSources reads the published items back and packages/services/service-knowledge/src/knowledge-source-loader.ts#KnowledgeSourceLoader registers each as a source (boot, a published change, a metadata reload)."
+            },
+            "maxChars": {
+              "status": "live",
+              "verifiedAt": "2026-11-26",
+              "evidenceScope": "in-repo",
+              "evidence": "packages/services/service-knowledge/src/split/splitter.ts#resolveSplit — the longest passage; wins over the settings page's `knowledge.chunk_target`, and the embedder's limit can lower it.",
+              "producer": "packages/metadata/src/plugin.ts — the stack's `knowledgeSources` collection reaches the metadata service as `knowledge_source` items; packages/services/service-knowledge/src/knowledge-service-plugin.ts#readPublishedSources reads the published items back and packages/services/service-knowledge/src/knowledge-source-loader.ts#KnowledgeSourceLoader registers each as a source (boot, a published change, a metadata reload)."
+            },
+            "minChars": {
+              "status": "live",
+              "verifiedAt": "2026-11-26",
+              "evidenceScope": "in-repo",
+              "evidence": "packages/services/service-knowledge/src/split/splitter.ts#resolveSplit — adjacent pieces shorter than this are merged; never above the effective maxChars.",
+              "producer": "packages/metadata/src/plugin.ts — the stack's `knowledgeSources` collection reaches the metadata service as `knowledge_source` items; packages/services/service-knowledge/src/knowledge-service-plugin.ts#readPublishedSources reads the published items back and packages/services/service-knowledge/src/knowledge-source-loader.ts#KnowledgeSourceLoader registers each as a source (boot, a published change, a metadata reload)."
+            }
+          }
+        }
+      }
+    },
+    "embedding": {
+      "status": "dead",
+      "verifiedAt": "2026-11-26",
+      "note": "REMOVED 2026-11-26 (#37304; ADR-0161 K6) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and handled for stored rows and existing sources by the protocol-19 conversion `knowledge-source-inert-keys-removed` (a strip). The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). It was never read: no service and no adapter chose a model from it. The embedder is configured once for the deployment."
+    },
+    "vectorStore": {
+      "status": "dead",
+      "verifiedAt": "2026-11-26",
+      "note": "REMOVED 2026-11-26 (#37304; ADR-0161 K6) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and handled for stored rows and existing sources by the protocol-19 conversion `knowledge-source-inert-keys-removed` (a strip). The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). It was never read: no service and no adapter chose a store from it. The store is the adapter the deployment installs."
+    },
+    "refresh": {
+      "children": {
+        "onRecordChange": {
+          "status": "live",
+          "verifiedAt": "2026-11-26",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/services/service-knowledge/src/knowledge-service.ts#objectSourcesFor — `false` leaves the source out of the event sync and of the reap guard; packages/services/service-knowledge/src/knowledge-service.ts#buildIfDue — and out of the boot and reload builds: an external indexer owns its index.",
+          "producer": "packages/metadata/src/plugin.ts — the stack's `knowledgeSources` collection reaches the metadata service as `knowledge_source` items; packages/services/service-knowledge/src/knowledge-service-plugin.ts#readPublishedSources reads the published items back and packages/services/service-knowledge/src/knowledge-source-loader.ts#KnowledgeSourceLoader registers each as a source (boot, a published change, a metadata reload)."
+        },
+        "cron": {
+          "status": "dead",
+          "verifiedAt": "2026-11-26",
+          "note": "REMOVED 2026-11-26 (#37304; ADR-0161 K6) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and handled for stored rows and existing sources by the protocol-19 conversion `knowledge-source-inert-keys-removed` (a strip). The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). It was parsed and reached no engine: nothing ever scheduled a reindex from it."
+        }
+      }
+    },
+    "aiExposed": {
+      "status": "live",
+      "verifiedAt": "2026-11-26",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/services/service-knowledge/src/knowledge-tools.ts#searchableSources — `false` withholds the source from `search_knowledge`: it is not listed, not searched and cannot be named.",
+      "producer": "packages/metadata/src/plugin.ts — the stack's `knowledgeSources` collection reaches the metadata service as `knowledge_source` items; packages/services/service-knowledge/src/knowledge-service-plugin.ts#readPublishedSources reads the published items back and packages/services/service-knowledge/src/knowledge-source-loader.ts#KnowledgeSourceLoader registers each as a source (boot, a published change, a metadata reload)."
+    }
+  }
+}

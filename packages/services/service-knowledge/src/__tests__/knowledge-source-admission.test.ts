@@ -49,16 +49,16 @@ function hitFor(sourceId: string, recordId = 'rec_1'): KnowledgeHit {
 }
 
 function makeAdapter(): IKnowledgeAdapter & { searchSpy: ReturnType<typeof vi.fn> } {
-  const searchSpy = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) => [hitFor(opts.source.id)]);
+  const searchSpy = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) => [hitFor(opts.source.name)]);
   return { id: 'memory', upsert: vi.fn(async () => undefined), delete: vi.fn(async () => undefined), search: searchSpy, searchSpy };
 }
 
-function objectSource(id: string, object: string, contentFields: string[], metadataFields?: string[]): KnowledgeSource {
+function objectSource(id: string, object: string, content: string[], metadataFields?: string[]): KnowledgeSource {
   return {
-    id,
+    name: id,
     label: id,
     adapter: 'memory',
-    source: { kind: 'object', object, contentFields, ...(metadataFields ? { metadataFields } : {}) } as ObjectKnowledgeSource,
+    source: { kind: 'object', object, content, ...(metadataFields ? { metadataFields } : {}) } as ObjectKnowledgeSource,
   };
 }
 
@@ -109,7 +109,7 @@ function setup(options: {
   });
   svc.registerAdapter('memory', adapter);
   for (const s of options.sources) svc.registerSource(s);
-  const searched = () => adapter.searchSpy.mock.calls.map((c) => (c[1] as { source: KnowledgeSource }).source.id);
+  const searched = () => adapter.searchSpy.mock.calls.map((c) => (c[1] as { source: KnowledgeSource }).source.name);
   return { svc, adapter, engine, searched };
 }
 
@@ -124,6 +124,29 @@ describe('field gate — a source serving a field the caller may not query is no
     const out = await svc.search('raise', { executionContext: MEMBER });
     expect(ids(out)).toEqual(['bodies']);
     expect(searched()).toEqual(['bodies']); // never searched, not searched-then-dropped
+  });
+
+  it('the fields a source\'s `where` reads are judged too: one the caller may not query refuses the source', async () => {
+    const selecting = (id: string, where: Record<string, unknown>): KnowledgeSource => {
+      const source = objectSource(id, 'ticket', ['body']);
+      return { ...source, source: { ...source.source, where } as ObjectKnowledgeSource };
+    };
+    const { svc, searched } = setup({
+      sources: [
+        selecting('by_key', { salary_note: { $ne: null } }),
+        selecting('nested', { $and: [{ status: 'open' }, { $or: [{ $not: { salary_note: 'x' } }] }] }),
+        selecting('dotted', { 'salary_note.grade': 3 }),
+        selecting('comparand', { body: { $eq: { $field: 'salary_note' } } }),
+        selecting('open_only', { status: 'open' }),
+      ],
+      security: salaryHiddenFromMembers,
+    });
+    expect(ids(await svc.search('raise', { executionContext: MEMBER }))).toEqual(['open_only']);
+    expect(searched()).toEqual(['open_only']); // never searched, not searched-then-dropped
+    // Preservation: a caller who may query the field is served every one of them.
+    expect(ids(await svc.search('raise', { executionContext: MANAGER }))).toEqual(
+      ['by_key', 'comparand', 'dotted', 'nested', 'open_only'],
+    );
   });
 
   it('preservation: a manager who may query every field, and the system context, get the hit', async () => {
@@ -148,16 +171,17 @@ describe('field gate — a source serving a field the caller may not query is no
     expect(ids(await plain.svc.search('q', { executionContext: MEMBER }))).toEqual(['s']);
   });
 
-  it("`'*'` serves every declared field: one hidden field refuses it, while the fields the index never carries are not asked", async () => {
+  it('a source that lists every field: one hidden field refuses it, while the fields the index never carries are not asked', async () => {
     const withSecret: ObjectDef = {
       name: 'ticket',
       fields: { ...TICKET.fields, api_token: { type: 'password' }, internal_score: { type: 'number', internal: true } },
     };
     const allButSecrets = makeSecurity(() => Object.keys(TICKET.fields));
-    const admitted = setup({ objects: [withSecret], sources: [objectSource('all', 'ticket', ['*'])], security: allButSecrets });
+    const every = Object.keys(withSecret.fields).filter((f) => f !== 'id');
+    const admitted = setup({ objects: [withSecret], sources: [objectSource('all', 'ticket', every)], security: allButSecrets });
     expect(ids(await admitted.svc.search('q', { executionContext: MEMBER }))).toEqual(['all']);
 
-    const refused = setup({ objects: [withSecret], sources: [objectSource('all', 'ticket', ['*'])], security: salaryHiddenFromMembers });
+    const refused = setup({ objects: [withSecret], sources: [objectSource('all', 'ticket', every)], security: salaryHiddenFromMembers });
     expect(await refused.svc.search('q', { executionContext: MEMBER })).toEqual([]);
   });
 
@@ -245,36 +269,27 @@ describe('exposure gate — an object the caller\'s exposure decision refuses is
     expect(await svc.search('q', { executionContext: MANAGER })).toEqual([]);
     expect(searched()).toEqual([]);
   });
-
-  it('a file / http source is untouched by either gate', async () => {
-    const { svc } = setup({
-      objects: [sealed],
-      sources: [objectSource('sealed', 'sealed', ['body']), { id: 'web', label: 'web', adapter: 'memory', source: { kind: 'http', urls: ['https://x.test'] } as KnowledgeSource['source'] }],
-    });
-    expect(ids(await svc.search('q', { executionContext: MEMBER }))).toEqual(['web']);
-  });
 });
 
 describe('no context, no engine, foreign hits — an object source no gate can judge is never served', () => {
   it('no context: an object source is not searched, even when its hits carry no `sourceRecordId`', async () => {
     const adapter = makeAdapter();
     adapter.search = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) => [
-      { chunkId: 'c', documentId: 'd', sourceId: opts.source.id, score: 0.9, snippet: 'passage' },
+      { chunkId: 'c', documentId: 'd', sourceId: opts.source.name, score: 0.9, snippet: 'passage' },
     ]);
     const svc = new KnowledgeService({ dataEngine: makeEngine([TICKET]) });
     svc.registerAdapter('memory', adapter);
     svc.registerSource(objectSource('notes', 'ticket', ['body']));
-    svc.registerSource({ id: 'web', label: 'web', adapter: 'memory', source: { kind: 'http', urls: ['https://x.test'] } as KnowledgeSource['source'] });
-    expect(ids(await svc.search('q'))).toEqual(['web']);
-    expect((adapter.search as ReturnType<typeof vi.fn>).mock.calls.map((c) => (c[1] as { source: KnowledgeSource }).source.id)).toEqual(['web']);
-    // Preservation: the system context still reaches the object source.
-    expect(ids(await svc.search('q', { executionContext: SYSTEM }))).toEqual(['notes', 'web']);
+    expect(ids(await svc.search('q'))).toEqual([]);
+    expect(adapter.search).not.toHaveBeenCalled();
+    // Preservation: the system context still reaches the source.
+    expect(ids(await svc.search('q', { executionContext: SYSTEM }))).toEqual(['notes']);
   });
 
   it('no data engine: an object source is not searched for an end-user context', async () => {
     const adapter = makeAdapter();
     adapter.search = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) => [
-      { chunkId: 'c', documentId: 'd', sourceId: opts.source.id, score: 0.9, snippet: 'passage' },
+      { chunkId: 'c', documentId: 'd', sourceId: opts.source.name, score: 0.9, snippet: 'passage' },
     ]);
     const svc = new KnowledgeService();
     svc.registerAdapter('memory', adapter);
@@ -286,8 +301,8 @@ describe('no context, no engine, foreign hits — an object source no gate can j
   it('an admitted object source\'s hit with no `sourceRecordId` cannot be re-checked and is dropped', async () => {
     const adapter = makeAdapter();
     adapter.search = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) => [
-      { chunkId: 'a', documentId: 'a', sourceId: opts.source.id, sourceRecordId: 'rec_1', score: 0.9, snippet: 'row' },
-      { chunkId: 'b', documentId: 'b', sourceId: opts.source.id, score: 0.8, snippet: 'unplaced' },
+      { chunkId: 'a', documentId: 'a', sourceId: opts.source.name, sourceRecordId: 'rec_1', score: 0.9, snippet: 'row' },
+      { chunkId: 'b', documentId: 'b', sourceId: opts.source.name, score: 0.8, snippet: 'unplaced' },
     ]);
     const svc = new KnowledgeService({ dataEngine: makeEngine([TICKET]) });
     svc.registerAdapter('memory', adapter);
@@ -299,7 +314,7 @@ describe('no context, no engine, foreign hits — an object source no gate can j
     const adapter = makeAdapter();
     // Every search answers the refused source's passage as well as its own.
     adapter.search = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) =>
-      opts.source.id === 'notes' ? [hitFor('notes')] : [hitFor(opts.source.id), hitFor('notes')]);
+      opts.source.name === 'notes' ? [hitFor('notes')] : [hitFor(opts.source.name), hitFor('notes')]);
     const warn = vi.fn();
     const svc = new KnowledgeService({ dataEngine: makeEngine([TICKET]), resolveSecurity: () => salaryHiddenFromMembers, logger: { warn } });
     svc.registerAdapter('memory', adapter);
@@ -408,5 +423,130 @@ describe('field gate — the title field is the object\'s display field', () => 
     const all = makeSecurity(() => ['id', 'name', 'title', 'body']);
     const { svc } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: all });
     expect(ids(await svc.search('q', { executionContext: MEMBER }))).toEqual(['s']);
+  });
+});
+
+// [ADR-0161 K4, guard two] The same gates, asked once for the AUTHOR when a
+// `knowledge_source` item is saved: nobody builds an index over an object or
+// a field they could not themselves search.
+describe('admitAuthoredSource — source admission at save, as the authoring principal', () => {
+  const item = (object: string, content: string[], extra: Record<string, unknown> = {}) => ({
+    name: 'authored', label: 'Authored', adapter: 'memory', source: { kind: 'object', object, content, ...extra },
+  });
+  const sealed: ObjectDef = { ...TICKET, name: 'sealed', enable: { apiEnabled: false } };
+  const getOnly: ObjectDef = { ...TICKET, name: 'get_only', enable: { apiMethods: ['get'] } };
+  const sysClosed: ObjectDef = { ...TICKET, name: 'sys_closed_note' };
+  const sysOpen: ObjectDef = { ...TICKET, name: 'sys_open_note', enable: { aiReadable: true } };
+
+  it('a field the author may not query is refused PERMISSION_DENIED / 403, naming the object and the field', async () => {
+    const { svc } = setup({ sources: [], security: salaryHiddenFromMembers });
+    const verdict = await svc.admitAuthoredSource(item('ticket', ['body', 'salary_note']), MEMBER);
+    expect(verdict).toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, object: 'ticket', field: 'salary_note' });
+    const message = (verdict as { message: string }).message;
+    expect(message).toContain('knowledge source "authored" was not saved');
+    expect(message).toContain("field 'salary_note' of object 'ticket'");
+    expect(message).toContain('Remove the field from `content` and `metadataFields`');
+    // The same source, by an author who may query the field, and by the engine itself.
+    expect(await svc.admitAuthoredSource(item('ticket', ['body', 'salary_note']), MANAGER)).toEqual({ admitted: true });
+    expect(await svc.admitAuthoredSource(item('ticket', ['body', 'salary_note']), SYSTEM)).toEqual({ admitted: true });
+  });
+
+  it('a `metadataFields` member, and the retired `contentFields` spelling, are judged as the fields they index', async () => {
+    const { svc } = setup({ sources: [], security: salaryHiddenFromMembers });
+    expect(await svc.admitAuthoredSource(item('ticket', ['body'], { metadataFields: ['salary_note'] }), MEMBER))
+      .toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, field: 'salary_note' });
+    const retired = { name: 'authored', label: 'A', adapter: 'memory', source: { kind: 'object', object: 'ticket', contentFields: ['salary_note'] } };
+    expect(await svc.admitAuthoredSource(retired, MEMBER))
+      .toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, field: 'salary_note' });
+  });
+
+  it.each([
+    ['a condition key', { salary_note: { $ne: null } }],
+    ['a key under $and / $or / $not', { $and: [{ status: 'open' }, { $or: [{ $not: { salary_note: 'x' } }] }] }],
+    ['a dotted path, by its first segment', { 'salary_note.grade': 3 }],
+    ['a cross-field comparand', { body: { $eq: { $field: 'salary_note' } } }],
+  ])('a field the `where` reads is judged like a served one: %s', async (_label, where) => {
+    const { svc } = setup({ sources: [], security: salaryHiddenFromMembers });
+    const verdict = await svc.admitAuthoredSource(item('ticket', ['body'], { where }), MEMBER);
+    expect(verdict).toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, object: 'ticket', field: 'salary_note' });
+    const message = (verdict as { message: string }).message;
+    expect(message).toContain("its `where` reads field 'salary_note' of object 'ticket'");
+    expect(message).toContain('Remove the field from `where`');
+    // The same source, by an author who may query the field, and by the engine itself.
+    expect(await svc.admitAuthoredSource(item('ticket', ['body'], { where }), MANAGER)).toEqual({ admitted: true });
+    expect(await svc.admitAuthoredSource(item('ticket', ['body'], { where }), SYSTEM)).toEqual({ admitted: true });
+  });
+
+  it('CONTROL: a `where` over fields the author may query is admitted, and a `where` that is no condition names no field', async () => {
+    const { svc } = setup({ sources: [], security: salaryHiddenFromMembers });
+    expect(await svc.admitAuthoredSource(item('ticket', ['body'], { where: { status: { $in: ['open', 'new'] } } }), MEMBER))
+      .toEqual({ admitted: true });
+    expect(await svc.admitAuthoredSource(item('ticket', ['body'], { where: 'status = open' }), MEMBER)).toEqual({ admitted: true });
+  });
+
+  it('a `where` key that is neither a logical key nor a field the author may query is refused: an unknown operator is not a pass', async () => {
+    const { svc } = setup({ sources: [], security: salaryHiddenFromMembers });
+    expect(await svc.admitAuthoredSource(item('ticket', ['body'], { where: { $nor: [{ status: 'open' }] } }), MEMBER))
+      .toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, field: '$nor' });
+  });
+
+  it("the object's display field is indexed as the title: an author who may not query it is refused though the source does not list it", async () => {
+    const hideTitle = makeSecurity(() => ['id', 'body', 'salary_note', 'status']);
+    const { svc } = setup({ sources: [], security: hideTitle });
+    const verdict = await svc.admitAuthoredSource(item('ticket', ['body']), MEMBER);
+    expect(verdict).toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, field: 'title' });
+    expect((verdict as { message: string }).message).toContain("display field");
+  });
+
+  it.each([
+    ['an object of a disabled package', { objects: [TICKET], disabled: ['ticket'] }, 'ticket', 'disabled package'],
+    ['an object the API does not serve at all', { objects: [sealed] }, 'sealed', 'does not serve object'],
+    ['an object whose `apiMethods` do not grant `search`', { objects: [getOnly] }, 'get_only', 'does not serve object'],
+    ['a system object without `enable.aiReadable`', { objects: [sysClosed] }, 'sys_closed_note', 'does not opt into AI reads'],
+  ])('%s is refused PERMISSION_DENIED / 403, naming the object', async (_label, opts, object, said) => {
+    const { svc } = setup({ sources: [], ...opts });
+    const verdict = await svc.admitAuthoredSource(item(object, ['body']), MANAGER);
+    expect(verdict).toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, object });
+    expect((verdict as { message: string }).message).toContain(`'${object}'`);
+    expect((verdict as { message: string }).message).toContain(said);
+    // The engine's own write is admitted: a package install is judged at validate and publish.
+    expect(await svc.admitAuthoredSource(item(object, ['body']), SYSTEM)).toEqual({ admitted: true });
+  });
+
+  it('CONTROL: a served object, and a system object that opts into AI reads, are admitted', async () => {
+    const { svc } = setup({ sources: [], objects: [TICKET, sysOpen] });
+    expect(await svc.admitAuthoredSource(item('ticket', ['body']), MANAGER)).toEqual({ admitted: true });
+    expect(await svc.admitAuthoredSource(item('sys_open_note', ['body']), MANAGER)).toEqual({ admitted: true });
+  });
+
+  it('fails closed, SERVICE_UNAVAILABLE / 503: a gate that throws, a security service that answers neither question, no data engine', async () => {
+    const thrown = setup({ sources: [], schemaThrows: true, logger: { warn: vi.fn(), error: vi.fn() } });
+    expect(await thrown.svc.admitAuthoredSource(item('ticket', ['body']), MANAGER))
+      .toMatchObject({ admitted: false, code: 'SERVICE_UNAVAILABLE', status: 503, object: 'ticket' });
+
+    const mute: KnowledgeFieldSecurity = { getQueryableFields: async () => undefined, getReadableFields: async () => undefined };
+    const unanswered = setup({ sources: [], security: mute });
+    expect(await unanswered.svc.admitAuthoredSource(item('ticket', ['body']), MANAGER))
+      .toMatchObject({ admitted: false, code: 'SERVICE_UNAVAILABLE', status: 503 });
+
+    const noEngine = new KnowledgeService({});
+    expect(await noEngine.admitAuthoredSource(item('ticket', ['body']), MANAGER))
+      .toMatchObject({ admitted: false, code: 'SERVICE_UNAVAILABLE', status: 503 });
+  });
+
+  it('a save that carries no identity is refused; an item naming no object is left to the parse', async () => {
+    const { svc } = setup({ sources: [] });
+    expect(await svc.admitAuthoredSource(item('ticket', ['body']), undefined))
+      .toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403 });
+    for (const shapeless of [null, {}, { name: 'x' }, { name: 'x', source: { kind: 'object' } }, { name: 'x', source: 'ticket' }]) {
+      expect(await svc.admitAuthoredSource(shapeless, MANAGER), JSON.stringify(shapeless)).toEqual({ admitted: true });
+    }
+  });
+
+  it('registers nothing and searches nothing: the verdict is a read', async () => {
+    const { svc, adapter } = setup({ sources: [], security: salaryHiddenFromMembers });
+    await svc.admitAuthoredSource(item('ticket', ['body']), MANAGER);
+    expect(svc.listSources()).toEqual([]);
+    expect(adapter.searchSpy).not.toHaveBeenCalled();
   });
 });

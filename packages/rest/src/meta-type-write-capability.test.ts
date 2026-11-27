@@ -164,8 +164,12 @@ const envelope = (res: any) => ({ status: res.statusCode, code: res.body?.code ?
 // ── 1. The predicate ──────────────────────────────────────────────────────────
 
 describe('[#21124] metaTypeWriteRefusal — the type-level write admission', () => {
-    it('the one row names a declared platform capability (matched, never minted)', () => {
-        expect(META_TYPE_WRITE_CAPABILITIES).toEqual({ datasource: 'manage_platform_settings' });
+    it('each row names a declared platform capability (matched, or a maintainer\'s ruling; never minted here)', () => {
+        expect(META_TYPE_WRITE_CAPABILITIES).toEqual({
+            datasource: 'manage_platform_settings',
+            // [ADR-0161 K4, guard one] ruled on #37304 (Q2 = B).
+            knowledge_source: 'manage_knowledge_sources',
+        });
         for (const capability of Object.values(META_TYPE_WRITE_CAPABILITIES)) {
             expect(PLATFORM_CAPABILITY_NAMES.has(capability)).toBe(true);
         }
@@ -410,5 +414,84 @@ describe('[#21124] no principal writes a datasource through /meta that the datas
         expect(byBoth).toEqual(['Bearer operator-author']);
         const author = await door('Bearer author');
         expect({ status: author.statusCode, code: author.body?.error?.code }).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+    });
+});
+
+// ── 4. `knowledge_source` → `manage_knowledge_sources` ────────────────────────────────
+
+/**
+ * [ADR-0161 K4, guard one; ruled on #37304, Q2 = B] A knowledge source is
+ * written on the `/meta` surface only by a holder of `manage_knowledge_sources`
+ * BESIDE `manage_metadata`: saving one sends record content to an embedding
+ * provider, so the right to author metadata does not include it, and neither
+ * does a grant on the indexed object's records. Same predicate, same doors and
+ * same harness as the datasource batteries above.
+ */
+describe('[ADR-0161 K4] a knowledge_source is written through /meta only beside `manage_knowledge_sources`', () => {
+    const FAQ = { name: 'faq', label: 'FAQ', adapter: 'memory', source: { kind: 'object', object: 'article', content: ['body'] } };
+    const SPELLINGS = ['knowledge_source', 'knowledge_sources', 'knowledgeSources'];
+    const BELOW = {
+        // Every authoring capability `/meta` knows: the doors' own admission admits it.
+        author: REFUSED.author,
+        // Another type's row is not this one's.
+        'platform-settings': { userId: 'u_settings', systemPermissions: ['manage_metadata', 'manage_platform_settings'] },
+        // Full read and write on the indexed object's records, and no capability.
+        'record-grant': { userId: 'u_editor', systemPermissions: [] as string[], permissions: ['article_editor'], positions: ['editor'] },
+    } as const;
+    const BOTH = { userId: 'u_admin', systemPermissions: ['manage_knowledge_sources', 'manage_metadata'] };
+
+    it('the predicate: every write verb on every spelling is refused 403 PERMISSION_DENIED naming the capability; a read verb is not judged', () => {
+        for (const type of SPELLINGS) {
+            for (const verb of ['PUT', 'POST', 'PATCH', 'DELETE']) {
+                const refusal = metaTypeWriteRefusal(verb, type, BELOW.author);
+                expect(refusal, `${verb} ${type}`).toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
+                expect(refusal?.message).toContain('`manage_knowledge_sources`');
+            }
+            expect(metaTypeWriteRefusal('GET', type, BELOW.author)).toBeUndefined();
+            expect(metaTypeWriteRefusal('PUT', type, BOTH)).toBeUndefined();
+        }
+        // Reading a knowledge source asks nothing of its own.
+        expect(Object.prototype.hasOwnProperty.call(META_TYPE_READ_CAPABILITIES, 'knowledge_source')).toBe(false);
+    });
+
+    for (const spelling of SPELLINGS) {
+        for (const [who, ctx] of Object.entries(BELOW)) {
+            it(`${spelling} × ${who}: every write shape refuses 403 PERMISSION_DENIED with the store unchanged and no protocol call`, async () => {
+                const { rest, store, calls } = boot(ctx);
+                const before = clone(store);
+                for (const shape of writeShapes(rest)) {
+                    const res = await drive(rest, shape.method, shape.path, spelling, 'faq', shape.query, FAQ);
+                    expect({ shape: shape.label, ...envelope(res) }).toEqual({ shape: shape.label, status: 403, code: 'PERMISSION_DENIED' });
+                    expect(res.body?.error?.message ?? res.body?.message).toContain('`manage_knowledge_sources`');
+                }
+                expect(store).toEqual(before);
+                expect(calls()).toBe(0);
+            });
+        }
+    }
+
+    it('a holder of both saves, publishes, rolls back and resets — each reaching the store', async () => {
+        const { rest, store, protocol } = boot(BOTH);
+        const saved = await drive(rest, 'PUT', `${META}/:type/:name`, 'knowledge_source', 'faq', {}, FAQ);
+        expect(saved.statusCode).toBe(200);
+        expect(store.knowledge_source.faq).toEqual(FAQ);
+        await drive(rest, 'POST', `${META}/:type/:name/publish`, 'knowledge_source', 'faq', {}, {});
+        expect(protocol.publishMetaItem).toHaveBeenCalledTimes(1);
+        await drive(rest, 'POST', `${META}/:type/:name/rollback`, 'knowledge_source', 'faq', {}, { version: 1 });
+        expect(protocol.rollbackMetaItem).toHaveBeenCalledTimes(1);
+        const reset = await drive(rest, 'DELETE', `${META}/:type/:name`, 'knowledge_source', 'faq', {}, {});
+        expect(reset.statusCode).toBe(200);
+        expect(store.knowledge_source.faq).toBeUndefined();
+    });
+
+    it('beside, never instead — the capability without `manage_metadata` is refused by the door\'s own admission', async () => {
+        const { rest, store, calls } = boot({ userId: 'u_half', systemPermissions: ['manage_knowledge_sources'] });
+        const before = clone(store);
+        const res = await drive(rest, 'PUT', `${META}/:type/:name`, 'knowledge_source', 'faq', {}, FAQ);
+        expect(res.statusCode).toBe(403);
+        expect(res.body?.error?.code).toBe('FORBIDDEN');
+        expect(res.body?.error?.message).toContain('manage_metadata');
+        expect(store).toEqual(before);
+        expect(calls()).toBe(0);
     });
 });

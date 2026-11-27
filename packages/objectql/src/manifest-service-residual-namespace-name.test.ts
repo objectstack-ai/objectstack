@@ -71,6 +71,8 @@ const item = (type: NamespaceUniqueType, name: string, tag: string): Record<stri
       return { name, label, description: 'A tool', parameters: {} };
     case 'ai_context':
       return { name, label, object: 'crm_account' };
+    case 'knowledge_source':
+      return { name, label, adapter: 'memory', source: { kind: 'object', object: 'crm_account', content: ['name'] } };
     default:
       return { name, label };
   }

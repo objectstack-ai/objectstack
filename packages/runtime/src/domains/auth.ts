@@ -12,6 +12,7 @@ import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { CoreServiceName } from '@objectstack/spec/system';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { catalogNotImplemented } from './own-door-bridge.js';
 
 /**
  * The route this domain claims — `/auth` and its slash-separated sub-paths,
@@ -188,7 +189,7 @@ export async function handleAuthRequest(deps: DomainHandlerDeps, _path: string, 
     // faith with the one true observation the mock was built on — that a bare
     // 404 on sign-in sends the operator hunting for a routing bug — without
     // the lie it used to answer that concern.
-    return { handled: true, response: deps.error('Auth service not available — register @objectstack/plugin-auth to enable authentication', 501) };
+    return catalogNotImplemented(deps, context, 'auth_service_unavailable');
 }
 
 /** The transport's peer address (`IHttpRequest.remoteAddress`), when the request carries one. */

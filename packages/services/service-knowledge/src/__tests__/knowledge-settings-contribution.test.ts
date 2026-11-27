@@ -220,10 +220,10 @@ describe('[#24769] the two buttons the knowledge service contributes, at the HTT
 describe('the rebuild and index_status actions are administrator-only, at the HTTP door', async () => {
   // A distinctive source: its id and label must appear in no refusal.
   const SECRET_SOURCE: KnowledgeSource = {
-    id: 'board_minutes_private',
+    name: 'board_minutes_private',
     label: 'Board minutes (private)',
     adapter: 'memory',
-    source: { kind: 'object', object: 'board_minute', contentFields: ['body'] },
+    source: { kind: 'object', object: 'board_minute', content: ['body'] },
   } as KnowledgeSource;
   const kernel = new LiteKernel();
   kernel.use(new FakeManifestPlugin([]));
@@ -249,17 +249,17 @@ describe('the rebuild and index_status actions are administrator-only, at the HT
   };
   /** Every method the two handlers can call on the service, watched. */
   const watchService = () =>
-    (['listSources', 'getSource', 'readIndexState', 'rebuildSource', 'buildRecord'] as const).map((m) => vi.spyOn(knowledge, m));
+    (['describeSources', 'describeSource', 'readIndexState', 'rebuildSource', 'buildRecord'] as const).map((m) => vi.spyOn(knowledge, m));
   afterEach(() => { vi.restoreAllMocks(); });
 
   it.each([
-    ['member', 'rebuild', { source: SECRET_SOURCE.id }],
+    ['member', 'rebuild', { source: SECRET_SOURCE.name }],
     ['member', 'rebuild', {}],
     ['member', 'index_status', {}],
-    ['member', 'index_status', { source: SECRET_SOURCE.id }],
-    ['bare', 'rebuild', { source: SECRET_SOURCE.id }],
+    ['member', 'index_status', { source: SECRET_SOURCE.name }],
+    ['bare', 'rebuild', { source: SECRET_SOURCE.name }],
     ['bare', 'index_status', {}],
-    ['anonymous', 'rebuild', { source: SECRET_SOURCE.id }],
+    ['anonymous', 'rebuild', { source: SECRET_SOURCE.name }],
     ['anonymous', 'index_status', {}],
   ] as const)('a %s caller of %s %j is refused, names no source, and reaches no handler', async (who, action, body) => {
     const watched = watchService();
@@ -274,7 +274,7 @@ describe('the rebuild and index_status actions are administrator-only, at the HT
     }
     // The refusal names the namespace, never a source the caller may not see.
     const text = JSON.stringify(answer.body);
-    expect(text).not.toContain(SECRET_SOURCE.id);
+    expect(text).not.toContain(SECRET_SOURCE.name);
     expect(text).not.toContain(SECRET_SOURCE.label);
     for (const spy of watched) expect(spy, spy.getMockName()).not.toHaveBeenCalled();
   });
@@ -284,19 +284,19 @@ describe('the rebuild and index_status actions are administrator-only, at the HT
     const watched = watchService();
     const status = await post(door('admin'), 'knowledge', 'index_status', {});
     expect(status.status).toBe(200);
-    expect(JSON.stringify(status.body)).toContain(SECRET_SOURCE.id);
+    expect(JSON.stringify(status.body)).toContain(SECRET_SOURCE.name);
 
     // `rebuild` without a source is answered by the handler itself, which lists the ids.
     const unnamed = await post(door('admin'), 'knowledge', 'rebuild', {});
     expect(unnamed.status).toBe(400);
     expect(unnamed.body?.error?.code).toBe('SETTINGS_ACTION_FAILED');
-    expect(JSON.stringify(unnamed.body)).toContain(SECRET_SOURCE.id);
+    expect(JSON.stringify(unnamed.body)).toContain(SECRET_SOURCE.name);
     expect(watched.some((spy) => spy.mock.calls.length > 0)).toBe(true);
   });
 
   it('in process, an enforced caller without the capability is refused by runAction itself', async () => {
     for (const action of ['rebuild', 'index_status']) {
-      await expect(settings.runAction('knowledge', action, { source: SECRET_SOURCE.id }, callers.member()))
+      await expect(settings.runAction('knowledge', action, { source: SECRET_SOURCE.name }, callers.member()))
         .rejects.toMatchObject({ code: 'SETTINGS_FORBIDDEN', namespace: 'knowledge', required: 'manage_platform_settings' });
     }
   });
@@ -444,7 +444,7 @@ async function bootEmbedder(opts: {
   if (opts.host) kernel.use(new HostEmbedderPlugin(opts.host.embedder, opts.host.phase));
   kernel.use(new KnowledgeServicePlugin({
     enableEventSync: false,
-    sources: [{ id: 'docs', label: 'Docs', adapter: 'vec', source: { kind: 'http', urls: ['https://docs.example.com/'] } }],
+    sources: [{ name: 'docs', label: 'Docs', adapter: 'vec', source: { kind: 'object', object: 'doc', content: ['body'] } }],
   }));
   kernel.use(new SettingsServicePlugin({ env: opts.env ?? {}, registerRoutes: false, crypto: new ConfidentialTestAdapter() }));
   kernel.use(new EmbeddingAdapterPlugin());
@@ -454,6 +454,20 @@ async function bootEmbedder(opts: {
   const embedder = kernel.getService<IEmbedder>(EMBEDDER_SERVICE);
   return { kernel, lines, knowledge, embedder };
 }
+
+/**
+ * One index write for the `docs` source, handed to its adapter as the
+ * service's sync hands it: the adapter embeds the content, so what the
+ * embedder answers — or refuses with — is what this call answers.
+ */
+const indexOne = (knowledge: KnowledgeService, content: string): Promise<void> =>
+  knowledge.getAdapter('vec').upsert(
+    [{ id: 'docs:d1', sourceId: 'docs', sourceRecordId: 'd1', content }],
+    { source: knowledge.getSource('docs')!, reason: 'manual' },
+  );
+
+/** The system identity: the service searches a source for it without a data engine to re-check with. */
+const SYSTEM = { positions: [], permissions: [], systemPermissions: [], isSystem: true };
 
 const texts = (n: number) => Array.from({ length: n }, (_, i) => `chunk ${i}`);
 
@@ -470,7 +484,7 @@ describe('#37094 — the open edition registers EMBEDDER_SERVICE from the ai.emb
     expect(embedder.id).toBe('openai');
     expect(requests).toHaveLength(0); // nothing is sent at boot
 
-    await knowledge.indexDocument('docs', { id: 'd1', sourceId: 'docs', content: 'hello embedder' });
+    await indexOne(knowledge, 'hello embedder');
     expect(requests).toEqual([{
       url: 'https://api.openai.com/v1/embeddings',
       authorization: `Bearer ${API_KEY}`,
@@ -506,7 +520,7 @@ describe('#37094 — the open edition registers EMBEDDER_SERVICE from the ai.emb
         saved: { embedder_provider: 'openai', embedder_api_key: API_KEY },
       });
       expect(embedder).toBe(own);
-      await knowledge.indexDocument('docs', { id: 'd1', sourceId: 'docs', content: 'hello' });
+      await indexOne(knowledge, 'hello');
       expect(requests).toHaveLength(0);
       const kept = lines.filter((l) => l.line.includes('already registered') && l.line.includes('host-own'));
       expect(kept).toHaveLength(1);
@@ -544,12 +558,12 @@ describe('#37094 — the open edition registers EMBEDDER_SERVICE from the ai.emb
     const { knowledge, embedder, lines } = await bootEmbedder();
     const named = /No embedder is configured[\s\S]*ai\.embedder_provider[\s\S]*restart/;
 
-    await expect(knowledge.indexDocument('docs', { id: 'd1', sourceId: 'docs', content: 'hello' })).rejects.toThrow(named);
+    await expect(indexOne(knowledge, 'hello')).rejects.toThrow(named);
     // The adapter's search answers the error; the service's search reports it
     // per source and answers no hits.
     await expect(knowledge.getAdapter('vec').search('hello', { source: knowledge.getSource('docs')!, topK: 5 }))
       .rejects.toThrow(named);
-    await expect(knowledge.search('hello', { sourceIds: ['docs'] })).resolves.toEqual([]);
+    await expect(knowledge.search('hello', { sourceIds: ['docs'], executionContext: SYSTEM })).resolves.toEqual([]);
     expect(lines.some((l) => l.level === 'error' && named.test(l.line))).toBe(true);
     // A vector column cannot be sized from it either.
     expect(() => embedder.dimensions).toThrow(named);
@@ -662,14 +676,14 @@ describe('#37094 — the open edition registers EMBEDDER_SERVICE from the ai.emb
     const rejected = await bootEmbedder({
       saved: { embedder_provider: 'openai', embedder_api_key: API_KEY, embedder_model: 'text-embedding-3-small' },
     });
-    await expect(rejected.knowledge.indexDocument('docs', { id: 'd1', sourceId: 'docs', content: 'hello' }))
+    await expect(indexOne(rejected.knowledge, 'hello'))
       .rejects.toThrow(/401/);
     const failure = await rejected.embedder.embed(['x']).then(
       () => { throw new Error('expected a provider error'); },
       (err: unknown) => err as Error,
     );
     expect(failure.message).not.toContain(API_KEY);
-    await rejected.knowledge.search('hello', { sourceIds: ['docs'] });
+    await rejected.knowledge.search('hello', { sourceIds: ['docs'], executionContext: SYSTEM });
     expect(requests.length).toBeGreaterThan(0);
     expect(rejected.lines.filter((l) => l.line.includes(API_KEY))).toEqual([]);
   });
