@@ -2251,6 +2251,10 @@ const ja = {
       noChatsDescription: "新しい会話を開始するとここに表示されます。",
       noMatchingChats: "一致するチャットはありません。",
       newConversation: "新しい会話",
+      // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
+      askPage: {
+        scopeBadge: "このアプリを優先",
+      },
       renameConversation: "会話の名前を変更",
       deleteConversation: "会話を削除",
       saveRename: "名前を保存",

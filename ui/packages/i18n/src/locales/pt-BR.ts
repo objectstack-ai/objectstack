@@ -2308,6 +2308,10 @@ const pt = {
       noChatsDescription: "Inicie uma nova conversa para vê-la aqui.",
       noMatchingChats: "Nenhuma conversa correspondente.",
       newConversation: "Nova conversa",
+      // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
+      askPage: {
+        scopeBadge: "Prioriza este app",
+      },
       renameConversation: "Renomear conversa",
       deleteConversation: "Excluir conversa",
       saveRename: "Salvar novo nome",

@@ -2379,6 +2379,10 @@ const ru = {
       noChatsDescription: "Начните новый диалог, и он появится здесь.",
       noMatchingChats: "Подходящих чатов нет.",
       newConversation: "Новый диалог",
+      // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
+      askPage: {
+        scopeBadge: "Сначала это приложение",
+      },
       renameConversation: "Переименовать диалог",
       deleteConversation: "Удалить диалог",
       saveRename: "Сохранить название",

@@ -12,7 +12,8 @@
  *    of the plan's state clears it, never opening the chat.
  *
  * Under a layout with no drawer it is a link to the pre-drawer address, which
- * the console routes back into the drawer.
+ * the console routes back into the drawer. On an app's AI inquiry page it is
+ * not drawn (ui ADR-0057 Amendment A4).
  */
 import * as React from 'react';
 import { Link } from 'react-router-dom';
@@ -37,6 +38,9 @@ export function AssistantTopBarButton({ className }: { className?: string }) {
     </span>
   ) : null;
   const classes = cn('relative h-8 w-8 max-md:size-11 shrink-0', className);
+  // ui ADR-0057 Amendment A4 — hidden on the app's AI inquiry page, which is
+  // that page's one ask conversation.
+  if (control?.askPageActive) return null;
   if (!control) {
     return (
       <Button variant="ghost" size="icon" className={classes} asChild aria-label={label}>
