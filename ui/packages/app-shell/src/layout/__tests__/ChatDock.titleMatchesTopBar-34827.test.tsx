@@ -40,6 +40,9 @@ import React from 'react';
 import { render, screen, cleanup, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { I18nProvider, BUILT_IN_LANGUAGE_CODES, loadBuiltInLocale } from '@object-ui/i18n';
+// The drawer's chat body reaches `import('@object-ui/plugin-grid')`; pay its
+// first load at collection, never inside a clocked case (`check:test-source-alias`).
+import '@object-ui/plugin-grid';
 import { AssistantTopBarButton } from '../AssistantTopBarButton';
 import { ChatDockPanel, ChatDockMobileSheet, type ChatDockState } from '../ChatDock';
 

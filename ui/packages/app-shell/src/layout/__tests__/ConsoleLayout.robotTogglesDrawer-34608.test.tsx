@@ -56,6 +56,9 @@ vi.mock('../ConsoleNotificationBanners', () => ({ ConsoleNotificationBanners: ()
 vi.mock('../../preview/DraftPreviewBar', () => ({ DraftPreviewBar: () => null }));
 vi.mock('../../preview/UnpublishedAppBar', () => ({ UnpublishedAppBar: () => null }));
 
+// The drawer's chat body reaches `import('@object-ui/plugin-grid')`; pay its
+// first load at collection, never inside a clocked case (`check:test-source-alias`).
+import '@object-ui/plugin-grid';
 import { ConsoleLayout } from '../ConsoleLayout';
 import { NavigationProvider } from '../../context/NavigationContext';
 

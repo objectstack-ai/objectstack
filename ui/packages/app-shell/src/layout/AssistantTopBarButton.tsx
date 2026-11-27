@@ -44,7 +44,7 @@ export const ASK_AI_MAC_KEY_SHORTCUTS = 'Meta+Shift+I';
 const ASK_AI_MAC_KEYCAPS = ['⌘', '⇧', 'I'] as const;
 
 /** Whether this browser runs on a Mac, where ⌘⇧I is free for the drawer. */
-export function isMacPlatform(): boolean {
+function isMacPlatform(): boolean {
   if (typeof navigator === 'undefined') return false;
   const platform =
     (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ??
@@ -92,7 +92,7 @@ export function AssistantTopBarButton({ className, iconOnly = false }: Assistant
   const control = useChatDockControl();
   const planPending = usePlanApprovalPending();
   const phone = usePhoneViewport();
-  const mac = React.useMemo(isMacPlatform, []);
+  const mac = React.useMemo(() => isMacPlatform(), []);
   const markerId = React.useId();
   const label = t('home.askAI', { defaultValue: 'Ask AI' });
   const iconAlone = iconOnly || phone;
