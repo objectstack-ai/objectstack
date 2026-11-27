@@ -105,7 +105,7 @@ export default defineSkill({
 
 Each condition is `{ field, operator, value }`, ANDed with its siblings. The
 shape of `value` is **coupled to `operator`** — a mismatch is a parse error, not
-a coercion (`packages/spec/src/ai/skill.zod.ts:37-51, 139-202`):
+a coercion (`packages/spec/src/ai/skill.zod.ts:38-52, 140-203`):
 
 | Operator | Meaning | `value` must be |
 |:---------|:--------|:----------------|
