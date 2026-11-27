@@ -92,6 +92,7 @@ import {
   type ActionResult,
   type FilterNode,
   withHeaderSortPick,
+  bulkDeleteRefusalLines,
 } from '@object-ui/core';
 import { useSafeFieldLabel, useRecordContext, useRecordPagePreferences, type RelatedListPreference } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
@@ -2715,9 +2716,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // counts them, then the data source's batch delete in one call where it
   // has one, else every row through the row delete this list was handed,
   // settled together as the list page settles them. One re-read, and the
-  // outcome stays on screen: how many went, and how many did not.
+  // outcome stays on screen: how many went, and how many did not, and why
+  // (objectstack#37816): each distinct reason on its own line, led by the
+  // names of the rows it refused, by the list page's rule (`bulkDeleteRefusalLines`).
   const [bulkDeleteTargets, setBulkDeleteTargets] = React.useState<any[] | null>(null);
-  const [bulkDeleteOutcome, setBulkDeleteOutcome] = React.useState<{ succeeded: number; failed: number } | null>(null);
+  const [bulkDeleteOutcome, setBulkDeleteOutcome] = React.useState<{ succeeded: number; failed: number; reasons: string[] } | null>(null);
   const handleBulkDeleteRows = React.useCallback((rows: any[]) => {
     if (rows.length > 0) setBulkDeleteTargets(rows);
   }, []);
@@ -2727,20 +2730,40 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     if (rows.length === 0) return;
     const ids = rows.map((row) => String(row.id ?? row._id));
     let succeeded = 0;
+    // Each refused row and what refused it: the ids the batch call names (a
+    // plain count names none), every row under a batch call that threw, each
+    // rejected row delete.
+    let refused: Array<{ record: any; err: unknown }> = [];
     if (api && typeof dataSource?.bulkDelete === 'function') {
       try {
         const answer = await dataSource.bulkDelete(api, ids);
         succeeded = Math.min(ids.length, typeof answer === 'number' ? answer : answer.succeeded);
+        if (typeof answer !== 'number') {
+          const byId = new Map(rows.map((row, i) => [ids[i], row]));
+          refused = (answer.errors ?? []).flatMap((rowError) => {
+            const record = byId.get(String(rowError.id));
+            return record ? [{ record, err: rowError.error }] : [];
+          });
+        }
       } catch (err) {
         console.error('[RelatedList] bulk delete failed', err);
+        refused = rows.map((record) => ({ record, err }));
       }
     } else if (onRowDelete) {
       const settled = await Promise.allSettled(rows.map((row) => Promise.resolve(onRowDelete(row))));
       succeeded = settled.filter((result) => result.status === 'fulfilled').length;
+      refused = settled.flatMap((result, i) =>
+        result.status === 'rejected' ? [{ record: rows[i], err: result.reason as unknown }] : [],
+      );
     }
-    setBulkDeleteOutcome({ succeeded, failed: ids.length - succeeded });
+    const failed = ids.length - succeeded;
+    setBulkDeleteOutcome({
+      succeeded,
+      failed,
+      reasons: failed > 0 ? bulkDeleteRefusalLines({ t, objectDef: objectSchema }, refused) : [],
+    });
     setRefreshNonce((n) => n + 1);
-  }, [bulkDeleteTargets, onRowDelete, dataSource, api]);
+  }, [bulkDeleteTargets, onRowDelete, dataSource, api, t, objectSchema]);
 
   /**
    * May the caller Add existing here? The write's row of the affordance-to-grant
@@ -4575,15 +4598,22 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         </div>
         {conditionRow && <div className="min-w-0" data-related-enlarged-conditions="">{conditionRow}</div>}
         {bulkDeleteOutcome && (
-          <p
+          <div
             role="status"
             data-related-bulk-delete-outcome=""
-            className={cn('text-xs', bulkDeleteOutcome.failed > 0 ? 'text-destructive' : 'text-muted-foreground')}
+            className={cn('min-w-0 text-xs', bulkDeleteOutcome.failed > 0 ? 'text-destructive' : 'text-muted-foreground')}
           >
-            {bulkDeleteOutcome.failed > 0
-              ? t('objectActions.bulkDeletePartial', { succeeded: bulkDeleteOutcome.succeeded, failed: bulkDeleteOutcome.failed })
-              : t('objectActions.bulkDeleteSuccess', { count: bulkDeleteOutcome.succeeded, label: objectLabel({ name: api ?? '', label: objectSchema?.label ?? api ?? '' }) })}
-          </p>
+            <p>
+              {bulkDeleteOutcome.failed > 0
+                ? t('objectActions.bulkDeletePartial', { succeeded: bulkDeleteOutcome.succeeded, failed: bulkDeleteOutcome.failed })
+                : t('objectActions.bulkDeleteSuccess', { count: bulkDeleteOutcome.succeeded, label: objectLabel({ name: api ?? '', label: objectSchema?.label ?? api ?? '' }) })}
+            </p>
+            {bulkDeleteOutcome.reasons.length > 0 && (
+              <ul data-related-bulk-delete-reasons="" className="mt-0.5 [overflow-wrap:anywhere]">
+                {bulkDeleteOutcome.reasons.map((line) => <li key={line}>{line}</li>)}
+              </ul>
+            )}
+          </div>
         )}
         {loadFailure ? (
           <RelatedListLoadFailed error={loadFailure.error} onRetry={handleRetryRead} />
