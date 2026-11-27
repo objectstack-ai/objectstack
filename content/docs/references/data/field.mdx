@@ -203,7 +203,7 @@ const result = CurrencyConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | ✅ | Display label (human-readable, any case allowed) |
-| **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
+| **value** | `string` | ✅ | Stored value (lowercase machine identifier, one character or more) |
 | **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
 | **color** | `string` | optional | Color code for badges/charts |
 | **default** | `boolean` | optional | Is default option |
@@ -485,7 +485,7 @@ A lookupFilters comparand read from the record being edited: `{ $record: "field"
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | ✅ | Display label (human-readable, any case allowed) |
-| **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
+| **value** | `string` | ✅ | Stored value (lowercase machine identifier, one character or more) |
 | **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
 | **color** | `string` | optional | Color code for badges/charts |
 | **default** | `boolean` | optional | Is default option |

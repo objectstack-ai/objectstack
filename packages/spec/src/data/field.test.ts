@@ -3107,10 +3107,10 @@ describe('select option value: one character is enough', () => {
   });
 
   it.each([
-    ['empty', '', 'too_small'],
-    ['uppercase', 'A', 'invalid_format'],
-    ['a leading digit', '1', 'invalid_format'],
-  ])('still refuses a %s value', (_label, value, code) => {
+    ['an empty value', '', 'too_small'],
+    ['an uppercase value', 'A', 'invalid_format'],
+    ['a value with a leading digit', '1', 'invalid_format'],
+  ])('still refuses %s', (_label, value, code) => {
     expect(issueAt(SelectOptionSchema.safeParse({ label: 'X', value }), 'value')).toBe(code);
     expect(issueAt(FormSelectOptionSchema.safeParse({ label: 'X', value }), 'value')).toBe(code);
     expect(
