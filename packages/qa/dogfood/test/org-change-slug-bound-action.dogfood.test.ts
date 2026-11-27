@@ -143,7 +143,8 @@ describe('a cloud-shaped composition binds change_slug to sys_organization, and 
 
   it('sorts after the rename and before leave in the record header, so it sits in the overflow', () => {
     const header = actions
-      .filter((a) => (a.locations ?? []).includes('record_page'))
+      // `record` covers the record page too (objectstack#36495).
+      .filter((a) => (a.locations ?? []).some((l: string) => l === 'record_page' || l === 'record'))
       .map((a, i) => ({ a, i }))
       .sort((x, y) => (x.a.order ?? 0) - (y.a.order ?? 0) || x.i - y.i)
       .map(({ a }) => a.name);
