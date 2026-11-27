@@ -126,10 +126,13 @@ refuse() {
 # The probe's failure, classified from what git printed. 403 is checked FIRST:
 # git reports a refused push as `RPC failed; HTTP 403`, which also carries the
 # words of a transport failure, and a 403 read as "network" would be retried.
+# The two misreadings are not equal: a failure wrongly read as 403 stops one
+# run early, and one wrongly read as network costs a bounded handful of pushes
+# — neither is a loop, and anything this cannot place is `other`: stop.
 # ---------------------------------------------------------------------------
 classify_push_failure() {
   local out="$1"
-  if printf '%s\n' "$out" | grep -Eq '(error:|HTTP|status|code)[ :]+403([^0-9]|$)|Permission to .+ denied'; then
+  if printf '%s\n' "$out" | grep -Eq '(error:|HTTP(/[0-9.]+)?|status|code|response)[ :]+403([^0-9]|$)|Permission to .+ denied'; then
     printf '403\n'
     return 0
   fi
@@ -241,6 +244,8 @@ probe_push() {
   done
 }
 
+# Called as `mode_build || rc=$?`, so errexit is OFF inside it: every step that
+# can fail is checked where it stands.
 mode_build() {
   local top main_checkout parent repo issue='' path start resume_branch='' resume_sha='' built=0
   local existing remote_line tip base='' scratch='' install='skipped' rc=0 verdict head
@@ -330,7 +335,8 @@ mode_build() {
       || refuse "git worktree add failed for $path"
     if [ -z "$resume_branch" ]; then
       head="$(git -C "$path" rev-parse HEAD)"
-      printf '%s\n' "$head" > "$(base_file_of "$path")"
+      printf '%s\n' "$head" > "$(base_file_of "$path")" \
+        || log "could not write the pin file for $path — BASE reads unpinned below; pin it before the first edit (--pin-base)"
     fi
   fi
 
@@ -379,7 +385,7 @@ mode_build() {
   if [ -z "$base" ] && [ -n "$resume_branch" ]; then
     log "BASE is unpinned: a resumed branch merges origin/main first (cd $path && bash scripts/pm/os-regen-merge.sh), then pins the base before its first edit (bash scripts/pm/dev-worktree.sh --pin-base)"
   elif [ -z "$base" ]; then
-    log "BASE is unpinned: this tree was not built fresh by this script — pin the commit its work starts from, inside it, before the next edit (bash scripts/pm/dev-worktree.sh --pin-base)"
+    log "BASE is unpinned: this tree was not built fresh by this script. --pin-base pins HEAD, so it is the base only while the tree's first edit is still ahead"
   fi
   case "$rc" in
     0) verdict="ready — cd $path" ;;
@@ -401,7 +407,7 @@ mode_build() {
 # name=minimum, one per line. A battery below its minimum means cases stopped
 # running; the roster's own length is pinned too, so a deleted row cannot take
 # its floor with it.
-ST_BATTERIES='the probe failure classifier=10
+ST_BATTERIES='the probe failure classifier=12
 a fresh worktree=13
 refusals before anything is created=12
 resume from a claimed sha=11
@@ -538,6 +544,10 @@ SHIM
     "$(classify_push_failure 'remote: Permission to o/r.git denied to someone.')" 403
   st_case '⛔ `RPC failed; HTTP 403` is a 403, although it carries the words of a transport failure — checked first, or it would be retried' \
     "$(classify_push_failure 'error: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403')" 403
+  st_case 'an HTTP/2 status line carrying 403 is a 403' \
+    "$(classify_push_failure 'error: RPC failed; HTTP/2 403')" 403
+  st_case 'a proxy that refuses the CONNECT with 403 is a 403: the host is not allowed, and that is not retried either' \
+    "$(classify_push_failure "fatal: unable to access 'https://github.com/o/r/': Received HTTP code 403 from proxy after CONNECT")" 403
   st_case 'a name that does not resolve is a network error' \
     "$(classify_push_failure "fatal: unable to access 'https://github.com/o/r/': Could not resolve host: github.com")" network
   st_case 'a reset connection is a network error' \
