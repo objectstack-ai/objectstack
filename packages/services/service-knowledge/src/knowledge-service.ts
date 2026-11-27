@@ -2633,9 +2633,11 @@ export class KnowledgeService implements IKnowledgeService {
         return refuse(
           403,
           'PERMISSION_DENIED',
-          `${named}: the API does not serve object '${object}' for \`search\` (\`enable.apiEnabled\` is false, or ` +
-            "its `enable.apiMethods` list does not include `search`), and a knowledge search is a search over the " +
-            "object's records. Serve the object for `search`, or index another object.",
+          `${named}: the API does not serve object '${object}' for \`search\` (\`enable.apiEnabled\` is false, its ` +
+            '`enable.apiMethods` list does not grant `list`, from which search derives, or it grants `list` beside ' +
+            "`enable.searchable: false`), and a knowledge search is a search over the object's records. " +
+            `Serve '${object}' for search: keep \`enable.apiEnabled\` true and, where it declares ` +
+            '`enable.apiMethods`, include `list` with `enable.searchable` not false; or index another object.',
         );
       case 'system-object-not-ai-readable':
         return refuse(

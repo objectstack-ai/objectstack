@@ -63,6 +63,7 @@ const EXPECTED_RELEVANCE: Readonly<Record<string, readonly string[]>> = {
   '18:mapping-lookup-params-retired': ['mappings'],
   '18:permission-restore-purge-bits-retired': ['permissions'],
   '19:agent-model-provider-retired': ['agents'],
+  '19:knowledge-source-publish-refuses-missing-references-and-gated-objects': ['knowledgeSources'],
 };
 
 /** The keys the evaluation reads as carriers of other definitions, never as a family. */
@@ -85,12 +86,12 @@ describe('which entries carry a relevance question (ENUMERATION)', () => {
     expect(actual).toEqual(EXPECTED_RELEVANCE);
   });
 
-  it('is 28 entries: 5 of protocol 17, 22 of protocol 18 and 1 of protocol 19', () => {
+  it('is 29 entries: 5 of protocol 17, 22 of protocol 18 and 2 of protocol 19', () => {
     const keys = Object.keys(EXPECTED_RELEVANCE);
-    expect(keys).toHaveLength(28);
+    expect(keys).toHaveLength(29);
     expect(keys.filter((k) => k.startsWith('17:'))).toHaveLength(5);
     expect(keys.filter((k) => k.startsWith('18:'))).toHaveLength(22);
-    expect(keys.filter((k) => k.startsWith('19:'))).toHaveLength(1);
+    expect(keys.filter((k) => k.startsWith('19:'))).toHaveLength(2);
   });
 
   it('the table names only registered entries (anti-vacuity for the comparison above)', () => {

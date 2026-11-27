@@ -6204,9 +6204,11 @@ const KNOWLEDGE_SOURCE_OBJECT_UNKNOWN_EXPLANATION: RuleExplanation = {
       'An object nothing defines has no records, so the source is built empty and every search over it ' +
       'answers nothing, with no error anywhere.',
     'Defined means an object of this stack, of a package in the same artifact (`packages[]`), or, at the ' +
-      'publish gate, an object the host serves. A platform object a known package registers (`sys_user`) is ' +
-      'not judged when the stack does not carry its definition. A name with a platform prefix that no known ' +
-      'package registers is a warning, because a third-party package may still provide it. When the publish ' +
+      'publish gate, an object the host serves. On the command line a platform object a known package ' +
+      'registers (`sys_user`) is not judged when the stack does not carry its definition, and a name with a ' +
+      'platform prefix that no known package registers is a warning, because a third-party package may still ' +
+      'provide it. At the publish gate with no package stated, the source is judged against every object the ' +
+      'host serves, so either one is an error there when the host does not serve it. When the publish ' +
       'gate states the package\'s closure (the package, the packages its manifest declares in ' +
       '`dependencies`, and platform objects), an object outside it is reported with the remedy to declare the ' +
       'dependency.',
