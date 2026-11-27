@@ -248,7 +248,7 @@ describe('ObjectFormDesigner — object translations (objectui#3134)', () => {
 describe('ObjectFormDesigner — emits the one legal `FormField.type` spelling (objectui#4838)', () => {
   // Maintainer ruling 2026-08-19: a bare spec-type name is NOT a legal
   // `FormField.type`. The canvas is a PRODUCER of that vocabulary (it hands a
-  // type to `isWideFieldType`), so it is the producer that was fixed — the
+  // type to `resolveColSpan`, once `isWideFieldType`), so it is the producer that was fixed — the
   // tolerant `field:`-prefix fallback in `renderFieldComponent` and the
   // dual-spelling `WIDE_FIELD_TYPES` set are deliberately untouched.
 
