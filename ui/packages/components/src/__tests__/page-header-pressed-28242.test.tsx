@@ -19,6 +19,8 @@ import { ComponentRegistry } from '@object-ui/core';
 import { ActionProvider, RecordContextProvider } from '@object-ui/react';
 // Registers `page:header` at module scope (object-ui/no-dynamic-import-in-test-hook).
 import '../renderers';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@object-ui/react-runtime';
 
 const HELPFUL = {
   name: 'mark_article_helpful',

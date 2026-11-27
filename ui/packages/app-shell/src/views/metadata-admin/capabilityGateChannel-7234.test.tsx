@@ -90,6 +90,8 @@ vi.mock('./useMetadata', () => ({
 
 import { ActionDefaultInspector } from './inspectors/ActionDefaultInspector';
 import { ActionPreview } from './previews/ActionPreview';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 /** The reporting app's action, reduced to the members these cases read. */
 const GATED = {

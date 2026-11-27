@@ -111,6 +111,8 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { ConsoleToaster } from '../chrome/ConsoleToaster';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 const ACTION_URL = '/api/v1/actions/crm_lead/create_campaign';
 

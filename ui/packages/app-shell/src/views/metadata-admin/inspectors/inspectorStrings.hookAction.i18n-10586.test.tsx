@@ -95,6 +95,8 @@ import { InspectorComboField } from './InspectorComboField';
 // namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
 // Resident before any case, so the zh rows below read synchronously.
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 await loadStudioCatalogue('zh');
 
 /** Each fixture starts from the same catalog, fields and held set. */

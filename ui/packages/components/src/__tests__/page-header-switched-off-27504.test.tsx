@@ -22,6 +22,8 @@ import { ComponentRegistry, markSwitchedOffActions } from '@object-ui/core';
 import { ActionProvider } from '@object-ui/react';
 // The renderers register on import; this file is not in the dom-heavy set.
 import '../renderers';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@object-ui/react-runtime';
 
 function Node({ schema }: { schema: any }) {
   const Component = ComponentRegistry.get(schema.type);

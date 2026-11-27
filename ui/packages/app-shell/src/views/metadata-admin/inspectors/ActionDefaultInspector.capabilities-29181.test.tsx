@@ -36,6 +36,8 @@ import { t } from '../i18n';
 import { ActionDefaultInspector } from './ActionDefaultInspector';
 // `engine.inspector.*` rows live in the lazy `studio` namespace (objectstack#25922).
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 await loadStudioCatalogue('zh');
 
 afterEach(cleanup);

@@ -33,6 +33,8 @@ import { ActionProvider, RecordContextProvider } from '@object-ui/react';
 // (object-ui/no-dynamic-import-in-test-hook, objectui#3010). This keeps the
 // file in the light `dom` project instead of adding it to `heavyDomTests`.
 import '../renderers';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@object-ui/react-runtime';
 
 function PageHeader({ schema }: { schema: any }) {
   const Component = ComponentRegistry.get('page:header');

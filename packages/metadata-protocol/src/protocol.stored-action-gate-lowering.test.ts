@@ -18,6 +18,8 @@ import { ObjectSchema } from '@objectstack/spec/data';
 import { ActionSchema } from '@objectstack/spec/ui';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 /** The engine surface the repository write path touches (as the external-binding harness). */
 function makeProtocol() {

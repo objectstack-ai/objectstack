@@ -37,6 +37,8 @@ import {
     summarizeActionParams,
     summarizeFlowInputParams,
 } from './action-execution.js';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/metadata';
 
 const NO_DEPS: any = {};
 

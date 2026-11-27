@@ -37,6 +37,8 @@ const state = vi.hoisted(() => ({
 vi.mock('../useMetadata', () => ({ useMetadataClient: () => state.metadataClient }));
 
 import { ActionDefaultInspector, AI_DESCRIPTION_MIN } from './ActionDefaultInspector';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 afterEach(cleanup);
 

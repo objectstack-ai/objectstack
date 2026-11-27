@@ -15,6 +15,8 @@
 import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 /** The engine surface the repository write path touches (as the container-issue-descent harness). */
 function makeProtocol() {

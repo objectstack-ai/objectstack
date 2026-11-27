@@ -32,6 +32,8 @@ import { I18nProvider } from '@object-ui/i18n';
 // of depending on the full DOM setup to have run one
 // (object-ui/no-dynamic-import-in-test-hook, objectui#3010/#3021).
 import '../renderers';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@object-ui/react-runtime';
 
 function PageHeader({ schema }: { schema: any }) {
   const Component = ComponentRegistry.get('page:header');

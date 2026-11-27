@@ -89,6 +89,8 @@ vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 const OBJECT_NAME = 'task';
 

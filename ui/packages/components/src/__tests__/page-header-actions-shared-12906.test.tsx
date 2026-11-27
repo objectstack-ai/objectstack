@@ -20,6 +20,8 @@ import { render, cleanup } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { ActionProvider, RecordContextProvider } from '@object-ui/react';
 import { PageHeaderActions } from '../index';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@object-ui/react-runtime';
 
 const RECORD = { id: 'lead-1', name: 'Ada', status: 'open' };
 const OBJECT_SCHEMA = { name: 'lead', label: 'Lead' };
