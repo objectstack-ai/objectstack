@@ -610,7 +610,9 @@ the page. A ⌘/Ctrl or middle click on the name opens the page in a new tab.
 one that declares nothing. `none` keeps its meaning, the rows open nothing; prefer
 `navigation: { preventNavigation: true }` for that. Omit the key. `modal`, `split` and `popover`
 were removed in @objectstack/spec 18.3.0 (ADR-0087 D2): a stored value is refused with its fix,
-and `os migrate meta --from 17` drops it.
+and `os migrate meta --from 17` drops it. `none` and `preventNavigation` hold on a phone too,
+where a list draws each row as a card showing only some of its columns, so the columns a card
+does not show are unreachable there: declare either only where the rows need no detail view.
 
 The page a list opens remembers that list: its top bar counts the record among the list's
 rows (**N of M**, M being the records the list matched), steps to the previous and next of

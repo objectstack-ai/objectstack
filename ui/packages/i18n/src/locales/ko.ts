@@ -1349,7 +1349,21 @@ const ko = {
       typeLabel: '보기 유형',
       includeCurrent: '현재 필터와 정렬 포함',
       scopeShared: '공유',
-      scopeHint: '공유 보기는 이 목록을 볼 수 있는 모든 사람에게 표시됩니다',
+      scopeHint: '공유 보기는 이 목록을 볼 수 있는 모든 사람에게 표시됩니다. 단, 특정 권한 보유자로 제한한 경우는 예외입니다',
+      // objectstack#34908 — who a shared view reaches: the capability picker and its position preview.
+      audienceLabel: '이 보기를 볼 수 있는 사람',
+      audienceEveryone: '이 목록을 볼 수 있는 모든 사람',
+      audienceAdd: '권한 보유자로 제한…',
+      audienceAllAdded: '모든 권한이 추가됨',
+      audienceLoading: '권한을 불러오는 중…',
+      audienceLoadFailed: '권한을 불러올 수 없어 추가할 수 없습니다: {{message}}',
+      audienceNone: '아직 정의된 권한이 없습니다. 권한은 설정에서 권한 집합에 부여합니다.',
+      audienceGrantedBy: '{{sets}}에서 부여',
+      audienceRemove: '{{name}} 제거',
+      audiencePositions: '{{positions}}이(가) 이 보기를 봅니다',
+      audienceNoPosition: '선택한 모든 권한을 단독으로 가진 직위가 없습니다. 직접 또는 여러 직위를 통해 모두 가진 사람만 이 보기를 봅니다',
+      audienceSelf: '이는 본인에게도 적용됩니다. 선택한 모든 권한을 갖고 있지 않으면 생성 후 이 보기는 본인 목록에서도 사라집니다',
+      audiencePositionsUnread: '직위를 읽을 수 없어 이 보기를 볼 사람이 표시되지 않습니다',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: '게시되지 않은 초안이 이미 이 보기의 이름을 사용하고 있어 공유하지 않았습니다. 보기 이름을 바꾸고 다시 시도하세요.',
       viewGone: '연 보기가 더 이상 없으므로 목록에 기본 보기가 표시됩니다.',
@@ -2253,6 +2267,8 @@ const ko = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: "이 앱 우선",
+        recentTitle: "최근 대화",
+        recentEmpty: "여기서 한 질문이 여기에 표시됩니다.",
       },
       renameConversation: "대화 이름 변경",
       deleteConversation: "대화 삭제",
@@ -4549,6 +4565,18 @@ const ko = {
     },
     recordCitations: {
       title: '레코드에서 인용',
+    },
+    questionCard: {
+      aiAsks: 'AI 질문:',
+      progress: '질문 {{current}}/{{total}}',
+      typeYourOwn: '직접 입력…',
+      recommended: '추천',
+      skip: '건너뛰기',
+      back: '이전',
+      next: '다음',
+      send: '보내기',
+      pending: '답변을 기다리는 질문이 있습니다',
+      answerLine: '{{header}}: {{answer}}',
     },
     tool: {
       aggregate_data: "관련 데이터 집계하기",

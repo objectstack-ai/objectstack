@@ -1419,7 +1419,21 @@ const ru = {
       typeLabel: 'Тип представления',
       includeCurrent: 'Включить текущие фильтры и сортировку',
       scopeShared: 'Общее',
-      scopeHint: 'Общие представления видны всем, кто видит этот список',
+      scopeHint: 'Общие представления видны всем, кто видит этот список, если представление не ограничено владельцами разрешения',
+      // objectstack#34908 — who a shared view reaches: the capability picker and its position preview.
+      audienceLabel: 'Кто видит это представление',
+      audienceEveryone: 'Все, кто видит этот список',
+      audienceAdd: 'Ограничить разрешением…',
+      audienceAllAdded: 'Все разрешения добавлены',
+      audienceLoading: 'Загрузка разрешений…',
+      audienceLoadFailed: 'Не удалось загрузить разрешения, поэтому добавить их нельзя: {{message}}',
+      audienceNone: 'Разрешения ещё не определены. Разрешения выдаются в настройках через наборы разрешений.',
+      audienceGrantedBy: 'Выдаётся набором {{sets}}',
+      audienceRemove: 'Удалить {{name}}',
+      audiencePositions: 'Это представление увидят: {{positions}}',
+      audienceNoPosition: 'Ни одна должность сама по себе не имеет всех выбранных разрешений: представление увидят только те, у кого есть все они — напрямую или через несколько должностей',
+      audienceSelf: 'Это касается и вас: если у вас нет всех выбранных разрешений, после создания представление исчезнет и из вашего списка',
+      audiencePositionsUnread: 'Не удалось прочитать должности, поэтому не показано, кто увидит это представление',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: 'Неопубликованный черновик уже использует имя этого представления, поэтому ничего не открыто для всех. Переименуйте представление и попробуйте снова.',
       viewGone: 'Открытое представление больше недоступно, поэтому список показывает представление по умолчанию.',
@@ -2383,6 +2397,8 @@ const ru = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: "Сначала это приложение",
+        recentTitle: "Недавние разговоры",
+        recentEmpty: "Вопросы, заданные здесь, появятся здесь.",
       },
       renameConversation: "Переименовать диалог",
       deleteConversation: "Удалить диалог",
@@ -4747,6 +4763,18 @@ const ru = {
     },
     recordCitations: {
       title: 'Цитаты из записей',
+    },
+    questionCard: {
+      aiAsks: 'ИИ спрашивает:',
+      progress: 'Вопрос {{current}} из {{total}}',
+      typeYourOwn: 'Ввести свой вариант…',
+      recommended: 'Рекомендуется',
+      skip: 'Пропустить',
+      back: 'Назад',
+      next: 'Далее',
+      send: 'Отправить',
+      pending: 'Вопрос ждёт вашего ответа',
+      answerLine: '{{header}}: {{answer}}',
     },
     tool: {
       aggregate_data: "Агрегировать данные",

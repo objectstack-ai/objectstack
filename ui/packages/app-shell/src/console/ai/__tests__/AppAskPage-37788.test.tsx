@@ -226,3 +226,68 @@ describe('AppAskPage (objectstack#37788)', () => {
     expect(screen.queryByTestId('app-ask-home')).not.toBeInTheDocument();
   });
 });
+
+describe('AppAskPage recent conversations (objectstack#37790)', () => {
+  const lists = () => fetchMock.mock.calls.filter((c) => String(c[0]).includes('/conversations?limit=50'));
+  function serveList(rows: unknown[]) {
+    fetchMock.mockImplementation(async (input: unknown) => {
+      const url = String(input);
+      if (url.includes('/conversations?limit=')) return jsonResponse({ conversations: rows, hasMore: false });
+      const id = decodeURIComponent(url.split('/conversations/')[1] ?? '');
+      const row = (rows as Array<{ id: string }>).find((r) => r.id === id);
+      return row ? jsonResponse({ messages: [], ...row }) : jsonResponse({ error: 'not found' }, 404);
+    });
+  }
+  const row = (id: string, title: string, updatedAt: string, metadata?: unknown) => ({
+    id,
+    title,
+    createdAt: updatedAt,
+    updatedAt,
+    ...(metadata === undefined ? {} : { metadata }),
+  });
+
+  it('lists only this app\'s page conversations, newest first, at most five', async () => {
+    serveList([
+      row('p1', 'Leave policy', '2026-11-20T10:00:00Z', { activePackageId: PKG }),
+      row('o1', 'Other app thread', '2026-11-26T10:00:00Z', { activePackageId: 'com.other' }),
+      row('d1', 'Drawer thread', '2026-11-26T09:00:00Z'),
+      row('s1', 'String metadata', '2026-11-26T08:00:00Z', JSON.stringify({ activePackageId: PKG })),
+      ...[2, 3, 4, 5, 6].map((n) => row(`p${n}`, `Question ${n}`, `2026-11-2${n}T10:00:00Z`, { activePackageId: PKG })),
+    ]);
+    mount();
+    const items = await screen.findAllByTestId('app-ask-recent-item');
+    expect(items.map((i) => i.getAttribute('data-conversation'))).toEqual(['p6', 'p5', 'p4', 'p3', 'p2']);
+    expect(screen.queryByText('Other app thread')).not.toBeInTheDocument();
+    expect(screen.queryByText('Drawer thread')).not.toBeInTheDocument();
+    expect(screen.queryByText('String metadata')).not.toBeInTheDocument();
+    expect(items[0]).toHaveTextContent('Question 6');
+    expect(lists()).toHaveLength(1);
+  });
+
+  it('shows the empty state when this app has none', async () => {
+    serveList([
+      row('o1', 'Other app thread', '2026-11-26T10:00:00Z', { activePackageId: 'com.other' }),
+      row('d1', 'Drawer thread', '2026-11-26T09:00:00Z'),
+    ]);
+    mount();
+    expect(await screen.findByTestId('app-ask-recent-empty')).toHaveTextContent('Questions you ask here will appear here.');
+    expect(screen.queryByTestId('app-ask-recent-item')).not.toBeInTheDocument();
+  });
+
+  it('draws nothing while the list fails, never an empty state', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ error: 'boom' }, 500));
+    mount();
+    await waitFor(() => expect(lists()).toHaveLength(1));
+    await act(async () => {});
+    expect(screen.queryByTestId('app-ask-recent')).not.toBeInTheDocument();
+  });
+
+  it('a click opens the conversation in the page through ?c=', async () => {
+    serveList([row('p1', 'Leave policy', '2026-11-20T10:00:00Z', { activePackageId: PKG })]);
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: /Leave policy/ }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('?c=p1'));
+    await waitFor(() => expect(screen.getByTestId('chat-pane')).toHaveAttribute('data-conversation', 'p1'));
+    expect(screen.queryByTestId('app-ask-home')).not.toBeInTheDocument();
+  });
+});

@@ -61,7 +61,7 @@ export const zhHantGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.report.fields.exportOptions.formats.label": "193cd91818d64ef7",
   "metadataForms.report.fields.exportOptions.includeHeaders.helpText": "44cbc80015ff051d",
   "metadataForms.report.fields.exportOptions.includeHeaders.label": "f114a4778c9727ae",
-  "metadataForms.view.fields.requiredPermissions.helpText": "c4599be2ffa06c02",
+  "metadataForms.view.fields.requiredPermissions.helpText": "824ea3479e2e607a",
   "metadataForms.view.fields.requiredPermissions.label": "a47b2168b71f5e68",
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",
   "objects.sys_email_template.fields.id.label": "00b0385c9c152888",

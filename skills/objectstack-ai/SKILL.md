@@ -429,13 +429,13 @@ absent or `true` = the binding rule above.
 part), auto-registered **only** when an analytics service (`IAnalyticsService`)
 is wired — `query_data` / `aggregate_data` return numbers, not charts.
 
-Two `AgentSchema` keys are **tombstones**, not legacy options — authoring either
-is a parse error carrying its migration
-(`packages/spec/src/ai/agent.zod.ts:234, :251`):
+Two `AgentSchema` keys are retired, not legacy options: the strict schema
+refuses each as an unknown key, naming
+https://objectstack.ai/docs/protocol-upgrade:
 
-| Retired key | REMOVED in protocol 17 — why, and what replaces it |
+| Retired key | Removed in 17, tombstone gone in 18 — why, and what replaces it |
 |:--|:--|
-| `agent.tools` | The inline slot resolved names against the *full* registry with no surface check. Not a rename: the migration deletes the key and names each tool that was listed; re-declare each in a `defineSkill` under the stack's `skills` (ADR-0064) |
+| `agent.tools` | The inline slot resolved names against the *full* registry with no surface check. Not a rename: the strict schema refuses the key as unknown; re-declare each tool in a `defineSkill` under the stack's `skills` (ADR-0064) |
 | `agent.knowledge` | Declaring sources/indexes on an agent never scoped retrieval — `search_knowledge` takes `sourceIds` from the model's tool-call arguments. Restrict on the knowledge source (`aiExposed`, `source.where`); describe intended grounding in `instructions` |
 
 ---

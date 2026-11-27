@@ -1486,7 +1486,21 @@ const ar = {
       typeLabel: 'نوع العرض',
       includeCurrent: 'تضمين عوامل التصفية والفرز الحالية',
       scopeShared: 'مشترك',
-      scopeHint: 'العروض المشتركة يراها كل من يمكنه رؤية هذه القائمة',
+      scopeHint: 'العروض المشتركة يراها كل من يمكنه رؤية هذه القائمة، ما لم يُقصر العرض على حاملي صلاحية',
+      // objectstack#34908 — who a shared view reaches: the capability picker and its position preview.
+      audienceLabel: 'من يرى هذا العرض',
+      audienceEveryone: 'كل من يمكنه رؤية هذه القائمة',
+      audienceAdd: 'قصر العرض على صلاحية…',
+      audienceAllAdded: 'تمت إضافة كل الصلاحيات',
+      audienceLoading: 'جارٍ تحميل الصلاحيات…',
+      audienceLoadFailed: 'تعذر تحميل الصلاحيات، لذا لا يمكن إضافة أي منها: {{message}}',
+      audienceNone: 'لم تُعرَّف أي صلاحية بعد. تُمنح الصلاحيات في الإعداد عبر مجموعات الأذونات.',
+      audienceGrantedBy: 'تمنحها {{sets}}',
+      audienceRemove: 'إزالة {{name}}',
+      audiencePositions: 'سيرى هذا العرض: {{positions}}',
+      audienceNoPosition: 'لا يوجد منصب واحد يحمل كل الصلاحيات المختارة: لن يرى هذا العرض إلا من يحملها كلها، مباشرة أو عبر عدة مناصب',
+      audienceSelf: 'ينطبق هذا عليك أيضًا: إذا لم تكن تحمل كل الصلاحيات المختارة، فسيختفي العرض من قائمتك أنت أيضًا بعد إنشائه',
+      audiencePositionsUnread: 'تعذرت قراءة المناصب، لذا لا يظهر من سيرى هذا العرض',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: 'توجد مسودة غير منشورة تستخدم اسم هذا العرض بالفعل، لذلك لم تتم المشاركة. غيّر اسم العرض وحاول مرة أخرى.',
       viewGone: 'العرض الذي فتحته لم يعد متاحًا، لذا تعرض القائمة العرض الافتراضي.',
@@ -2501,6 +2515,8 @@ const ar = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: "هذا التطبيق أولاً",
+        recentTitle: "المحادثات الأخيرة",
+        recentEmpty: "ستظهر هنا الأسئلة التي تطرحها في هذه الصفحة.",
       },
       renameConversation: "إعادة تسمية المحادثة",
       deleteConversation: "حذف المحادثة",
@@ -4924,6 +4940,18 @@ const ar = {
     },
     recordCitations: {
       title: 'مقتبس من السجلات',
+    },
+    questionCard: {
+      aiAsks: 'يسأل الذكاء الاصطناعي:',
+      progress: 'السؤال {{current}} من {{total}}',
+      typeYourOwn: 'اكتب شيئًا آخر…',
+      recommended: 'موصى به',
+      skip: 'تخطٍّ',
+      back: 'السابق',
+      next: 'التالي',
+      send: 'إرسال',
+      pending: 'هناك سؤال بانتظار إجابتك',
+      answerLine: '{{header}}: {{answer}}',
     },
     tool: {
       aggregate_data: "تجميع البيانات ذات الصلة",

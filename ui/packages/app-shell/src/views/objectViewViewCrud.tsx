@@ -606,7 +606,7 @@ export function useCreateViewInPlace({
     clearSourceListState?: (viewId: string) => void;
     t: ReturnType<typeof useObjectTranslation>['t'];
 }) {
-    return useCallback(async ({ config, scope, includeCurrent }: InPlaceViewRequest): Promise<boolean> => {
+    return useCallback(async ({ config, scope, includeCurrent, requiredPermissions }: InPlaceViewRequest): Promise<boolean> => {
         const { type, label, name } = config;
         const block = config[type];
         const listState = readListState();
@@ -625,6 +625,14 @@ export function useCreateViewInPlace({
             // the name and key the card gave it.
             const body: Record<string, unknown> = { ...built.config, type, label, name };
             delete body.id;
+            // objectstack#34908 — the card's 「Who sees this view」, when it
+            // offered one, decides the gate: the open view's own gate (copied
+            // over with its other keys) is replaced, and an empty pick is no
+            // gate, so no key is written.
+            if (requiredPermissions) {
+                delete body.requiredPermissions;
+                if (requiredPermissions.length > 0) body.requiredPermissions = [...requiredPermissions];
+            }
             return createShared(body);
         }
         try {
