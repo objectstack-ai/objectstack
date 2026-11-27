@@ -297,7 +297,7 @@ describe('createStandaloneStack — surfaces the collections whose items mount a
     }
   });
 
-  it('an artifact shipping a knowledge_source and no `knowledge` token: the result carries the source, and serve mounts KnowledgeServicePlugin', async () => {
+  it('an artifact shipping a knowledge_source and no `knowledge` token: the result carries the source collection', async () => {
     const result = await createStandaloneStack({
       artifactPath: writeArtifact('with-source.objectstack.json', { knowledgeSources: [SOURCE] }),
       databaseUrl: ':memory:',
@@ -308,6 +308,13 @@ describe('createStandaloneStack — surfaces the collections whose items mount a
     for (const [token, row] of MOUNT_ROWS) {
       expect(Object.keys(result), token).toContain(row.mountedBy!.collection);
     }
+  }, BOOT_TIMEOUT);
+
+  it('the same artifact: `os serve` mounts KnowledgeServicePlugin off the config it builds from the result', async () => {
+    const result = await createStandaloneStack({
+      artifactPath: writeArtifact('with-source-mount.objectstack.json', { knowledgeSources: [SOURCE] }),
+      databaseUrl: ':memory:',
+    });
     expect(servedTokens(result)).toContain('knowledge');
     expect(CAPABILITY_PROVIDERS.knowledge?.export).toBe('KnowledgeServicePlugin');
   }, BOOT_TIMEOUT);
@@ -340,8 +347,8 @@ describe('createStandaloneStack — surfaces the collections whose items mount a
       artifactPath: writeArtifact('fallback.objectstack.json', { knowledgeSources: [SOURCE] }),
       databaseUrl: ':memory:',
     });
-    expect(r.knowledgeSources?.map((s: any) => s.name)).toEqual(['notes']);
     expect(servedTokens(r)).toContain('knowledge');
+    expect(r.knowledgeSources?.map((s: any) => s.name)).toEqual(['notes']);
   }, BOOT_TIMEOUT);
 });
 
