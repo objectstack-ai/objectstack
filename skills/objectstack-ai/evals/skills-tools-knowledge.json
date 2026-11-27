@@ -14,11 +14,11 @@
     {
       "id": 2,
       "prompt": "Our copilot should use Anthropic with a low temperature (0.3) and cap responses at 2000 tokens. Where do these settings go in the metadata?",
-      "expected_output": "Places sampling under the agent's `model` block (`AIModelConfigSchema`): `provider: 'anthropic'`, `temperature: 0.3` (0–2, outside is a parse error) and `maxTokens: 2000`; a free-string `model` is optional (absent runs on the host's default model), so omitting it is correct. States that there is no top-level `temperature` / `maxTokens` on an agent and that the inline `provider` enum is `openai | azure_openai | anthropic | local`, with no default.",
+      "expected_output": "Places sampling under the agent's `model` block (`AIModelConfigSchema`): `temperature: 0.3` (0–2, outside is a parse error) and `maxTokens: 2000`, and states that there is no top-level `temperature` / `maxTokens` on an agent. Writes no provider key: `provider` is retired in protocol 19 and a parse error, because the deployment's AI settings choose the provider, not the agent. To run on an Anthropic model, names that model in the free-string `model` (the deployment resolves the name among the providers turned on) or omits it to run on the host's default model; turning Anthropic on is done in the deployment's AI settings, not in metadata.",
       "files": [],
       "assertions": {
-        "must_contain": ["provider", "anthropic", "temperature", "maxTokens"],
-        "must_not_contain": []
+        "must_contain": ["temperature", "maxTokens", "deployment"],
+        "must_not_contain": ["provider:"]
       }
     },
     {

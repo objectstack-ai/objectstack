@@ -362,11 +362,13 @@ live, but listing-only: carried onto the tool, never sent to the model).
 ## Model Configuration
 
 Sampling lives under an agent's `model` (`AIModelConfigSchema`), **never a
-top-level `temperature` / `maxTokens`** (`packages/spec/src/ai/agent.zod.ts:37-45`):
+top-level `temperature` / `maxTokens`** (`packages/spec/src/ai/agent.zod.ts:87-95`).
+The block names a model, never a provider: the deployment's AI settings choose
+the provider and resolve the model name among the providers turned on.
+`provider` is retired (protocol 19): writing it is a parse error. Delete it.
 
 | Key | Contract |
 |:--|:--|
-| `provider` | Optional, no default (the deployment's choice): inline enum `openai` \| `azure_openai` \| `anthropic` \| `local`. Model-registry entries (`ModelProviderSchema`) add `google`, `cohere`, `huggingface`, `custom` |
 | `model` | Optional free-string model name; absent = the host's default model for the environment |
 | `temperature` | `min(0).max(2)`, default `0.7`. **Outside 0–2 is a parse error** |
 | `maxTokens` / `topP` | Optional, schema-unbounded numbers |
