@@ -2516,7 +2516,29 @@ const ru = {
           availableObjects: "Перечисли доступные объекты данных.",
           recentActivity: "Сделай сводку моей недавней активности.",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'Кратко изложить эту запись',
+            related: 'Что связано с этой записью?',
+          },
+          list: {
+            summarize: 'Кратко изложить записи в этом списке',
+            recent: 'Какие записи добавлены на этой неделе?',
+          },
+          dashboard: {
+            explain: 'Что показывает эта панель?',
+            standOut: 'Что выделяется на этой панели?',
+          },
+          report: {
+            summarize: 'Кратко изложить этот отчёт',
+            takeaways: 'Каковы главные выводы из этого отчёта?',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'Предлагаемые вопросы',
       discussing: "Просмотр: {{target}}",
       focus: {
         pin: "Продолжать спрашивать об этой записи",
