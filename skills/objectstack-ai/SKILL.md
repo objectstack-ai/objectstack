@@ -395,8 +395,8 @@ the provider and resolve the model name among the providers turned on.
    action, whose body writes elevated (`isSystem`), over a field a non-system
    write cannot set. `readonly: true` binds every non-system caller (the value
    is stripped, **objectstack-data** → `readonly`); a field permission without
-   `editable` (refused `403`) binds only a caller no held set grants it, and
-   Modify All grants it, so an admin's agent still writes the field. The body
+   `editable` (refused `403`) binds only a caller none of whose sets grants it
+   with an `editable: true` row; Modify All is no such grant. The body
    skips the caller's edit right: declare who may run the action in its
    `requiredPermissions` (ADR-0066). A declarative
    `operation: 'update'` action, and a `flow` action under `runAs: 'user'`,
