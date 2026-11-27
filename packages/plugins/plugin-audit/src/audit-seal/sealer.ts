@@ -10,7 +10,7 @@ import type {
   ICryptoProvider,
   LockHandle,
 } from '@objectstack/spec/contracts';
-import { isTenantAuthored } from '@objectstack/metadata-core';
+import { takesSignedExpiry, type SignedExpiryRegistryLike } from '@objectstack/objectql';
 import { isMissingTableError } from '@objectstack/types';
 import {
   AUDIT_SEAL_CANON_VERSION,
@@ -158,7 +158,8 @@ export interface AuditSealerLogger {
 
 /** The engine surface the sealer uses: the signer's, plus the registry and the archive datasource. */
 export interface AuditSealerEngine extends SealStorageEngine {
-  registry: { getAllObjects(): ReadonlyArray<{ name: string; fields?: unknown; lifecycle?: unknown }> };
+  /** The object reads, and the owner reads that place an object in packaged metadata ({@link takesSignedExpiry}). */
+  registry: SignedExpiryRegistryLike & { getAllObjects(): ReadonlyArray<{ name: string; fields?: unknown; lifecycle?: unknown }> };
   datasource?(name: string): SealStorageDriver | undefined;
 }
 
@@ -211,8 +212,9 @@ interface SealPlan {
   readonly chainField: string;
   readonly archiveTo?: string;
   /**
-   * ADR-0154 D8: whether the object's lifecycle is declared in packaged metadata, so it takes the signed
-   * expiry. An object created at runtime (a tenant-authored definition) is sealed but keeps the row-cutoff sweep.
+   * ADR-0154 D8: whether the registry places the object's lifecycle in packaged metadata, so it takes the signed
+   * expiry (`takesSignedExpiry`, the lifecycle service's own routing). Any other sealed object is sealed but keeps
+   * the row-cutoff sweep.
    */
   readonly signedExpiry: boolean;
 }
@@ -431,7 +433,7 @@ export class AuditSealer {
         continue;
       }
       plans.push({
-        name: object.name, fields, columns, chainField, signedExpiry: !isTenantAuthored(object),
+        name: object.name, fields, columns, chainField, signedExpiry: takesSignedExpiry(this.options.engine.registry, object),
         ...(lifecycle.archive?.to ? { archiveTo: lifecycle.archive.to } : {}),
       });
     }

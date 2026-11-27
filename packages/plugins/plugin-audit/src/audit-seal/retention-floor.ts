@@ -1,7 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { isTenantAuthored } from '@objectstack/metadata-core';
-import { parseLifecycleDuration, type LifecycleRetentionFloor } from '@objectstack/objectql';
+import {
+  parseLifecycleDuration,
+  takesSignedExpiry,
+  type LifecycleRetentionFloor,
+  type SignedExpiryRegistryLike,
+} from '@objectstack/objectql';
 
 /**
  * [ADR-0154 D8] On a sealed object, a retention override cannot shorten the
@@ -22,8 +26,9 @@ import { parseLifecycleDuration, type LifecycleRetentionFloor } from '@objectsta
  * key reaches, and its other window decides when a row moves to the archive,
  * not when it leaves.
  *
- * Which objects: those whose lifecycle is declared in packaged metadata. An
- * object created at runtime keeps today's retention sweep (no signed expiry),
+ * Which objects: those the registry places in packaged metadata
+ * (`takesSignedExpiry`, the predicate the lifecycle service routes by). Any
+ * other sealed object keeps the row-cutoff retention sweep (no signed expiry),
  * and an override applies to it as before, so it takes no floor.
  */
 
@@ -69,9 +74,12 @@ function floorOf(object: string, policy: 'retention' | 'ttl', key: string, liter
 }
 
 /** The floors one object definition takes: one per window its sealed expiry runs under, at the declared value. */
-export function sealedWindowFloors(object: { name: string; lifecycle?: unknown }): LifecycleRetentionFloor[] {
+export function sealedWindowFloors(
+  object: { name: string; lifecycle?: unknown },
+  registry: SignedExpiryRegistryLike,
+): LifecycleRetentionFloor[] {
   const lc = object.lifecycle as SealedLifecycleLike | undefined;
-  if (!lc?.seal || lc.archive || isTenantAuthored(object)) return [];
+  if (!lc?.seal || lc.archive || !takesSignedExpiry(registry, object)) return [];
   const floors: LifecycleRetentionFloor[] = [];
   const maxAge = lc.retention?.maxAge;
   const retentionMs = windowMs(maxAge);
@@ -83,17 +91,17 @@ export function sealedWindowFloors(object: { name: string; lifecycle?: unknown }
 }
 
 /**
- * Register {@link sealedWindowFloors} for every object `objects` holds. A floor
+ * Register {@link sealedWindowFloors} for every object `registry` holds. A floor
  * is keyed by object, policy and registrar, so registering again replaces it:
  * called again after a declaration changed, the floor follows the declaration.
  */
 export function registerSealedWindowFloors(
   lifecycle: Required<SealedFloorRegistrar>,
-  objects: ReadonlyArray<{ name: string; lifecycle?: unknown }>,
+  registry: SignedExpiryRegistryLike & { getAllObjects(): ReadonlyArray<{ name: string; lifecycle?: unknown }> },
 ): number {
   let registered = 0;
-  for (const object of objects) {
-    for (const floor of sealedWindowFloors(object)) {
+  for (const object of registry.getAllObjects()) {
+    for (const floor of sealedWindowFloors(object, registry)) {
       lifecycle.registerRetentionFloor(object.name, floor);
       registered += 1;
     }

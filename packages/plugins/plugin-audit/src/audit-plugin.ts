@@ -972,7 +972,7 @@ export class AuditPlugin implements Plugin {
     let failed: string | null = null;
     this.refreshSealedFloors = () => {
       try {
-        registerSealedWindowFloors(floors, engine.registry.getAllObjects());
+        registerSealedWindowFloors(floors, engine.registry);
         failed = null;
       } catch (err) {
         const fault = String((err as Error)?.message ?? err);

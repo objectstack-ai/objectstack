@@ -31,8 +31,19 @@ function sweepRig(
   global: Record<string, unknown> | undefined,
   tenants: Record<string, Record<string, unknown>> = {},
 ) {
+  // The registry's owner reads, as `SchemaRegistry` answers them: an object with a `_packageId` is owned by that
+  // package (installed from code when it is `app.ledger`), one with none is a plain registration from code.
+  const ownerOf = (name: string) => objects.find((o) => o.name === name) as { _packageId?: string } | undefined;
   const engine = {
-    registry: { getAllObjects: () => objects },
+    registry: {
+      getAllObjects: () => objects,
+      getPackagedObjectOwner: (name: string) => {
+        const o = ownerOf(name) as { _packageId?: string; _provenance?: string } | undefined;
+        return o?._packageId && o._packageId !== 'sys_metadata' && o._provenance !== 'org' ? { packageId: o._packageId } : undefined;
+      },
+      getObjectOwner: (name: string) => (ownerOf(name) ? { packageId: ownerOf(name)!._packageId, definition: ownerOf(name) } : undefined),
+      getPackage: (id: string) => (id === 'app.ledger' ? { source: 'code' } : undefined),
+    },
     getDriverForObject: () => undefined,
     find: async (object: string) => (object === 'sys_organization' ? Object.keys(tenants).map((id) => ({ id })) : []),
     delete: async (_object: string, options: unknown) => {
@@ -155,6 +166,19 @@ describe('AuditPlugin — signed expiry covers objects whose lifecycle is declar
     expect(report.swept).toEqual([expect.objectContaining({ object: 'app_ledger', policy: 'retention', cutoff: isoCutoff('1d') })]);
   });
 
+  it('an object owned under a package id no installed code or marketplace package answers takes no floor and no expiry', async () => {
+    // The reload door's shape: a loader-chain body stamped with a package and package provenance.
+    const unplaced = { ...retained('30d'), fields: FIELDS, _provenance: 'package', _packageId: 'app.unknown' } as never;
+    const rig = sweepRig([unplaced], { app_ledger: { maxAge: '1d' } });
+    const { requests } = await rig.start();
+
+    const report = await rig.lifecycle.sweep();
+
+    expect(requests).toEqual([]);
+    expect(report.floorViolations).toEqual([]);
+    expect(report.swept).toEqual([expect.objectContaining({ object: 'app_ledger', policy: 'retention', cutoff: isoCutoff('1d') })]);
+  });
+
   it('a packaged object still takes its floor and the signed expiry', async () => {
     const rig = sweepRig([packaged()], { app_ledger: { maxAge: '1d' } });
     const { requests } = await rig.start();
@@ -183,23 +207,26 @@ describe('AuditPlugin — signed expiry covers objects whose lifecycle is declar
 });
 
 describe('sealedWindowFloors — the windows a sealed object is floored at', () => {
+  /** A registry that places every object as a plain registration from code. */
+  const CODE = { getObjectOwner: () => ({}) };
   it('a retained or ttl sealed object: one floor per window, at the declared value, by the audit seal', () => {
-    expect(sealedWindowFloors(retained('30d'))).toEqual([
+    expect(sealedWindowFloors(retained('30d'), CODE)).toEqual([
       expect.objectContaining({ policy: 'retention', minWindowMs: 30 * DAY, declaredBy: AUDIT_SEAL_FLOOR_REGISTRAR }),
     ]);
     expect(sealedWindowFloors({
       name: 'app_receipt',
       lifecycle: { class: 'audit', ttl: { field: 'created_at', expireAfter: '7d' }, seal: SEAL },
-    })).toEqual([expect.objectContaining({ policy: 'ttl', minWindowMs: 7 * DAY })]);
+    }, CODE)).toEqual([expect.objectContaining({ policy: 'ttl', minWindowMs: 7 * DAY })]);
   });
 
-  it('none for an unsealed object, an archiving one (it expires past `archive.keep`, which no override reaches), or an unparsable window', () => {
-    expect(sealedWindowFloors({ name: 'app_note', lifecycle: { class: 'audit', retention: { maxAge: '30d' } } })).toEqual([]);
+  it('none for an unsealed object, an archiving one (it expires past `archive.keep`, which no override reaches), an unparsable window, or one the registry does not place in packaged metadata', () => {
+    expect(sealedWindowFloors({ name: 'app_note', lifecycle: { class: 'audit', retention: { maxAge: '30d' } } }, CODE)).toEqual([]);
     expect(sealedWindowFloors({
       name: 'sys_audit_log',
       lifecycle: { class: 'audit', retention: { maxAge: '90d' }, archive: { after: '90d', to: 'archive', keep: '7y' }, seal: SEAL },
-    })).toEqual([]);
-    expect(sealedWindowFloors({ name: 'app_ledger', lifecycle: { class: 'audit', retention: { maxAge: 'soon' }, seal: SEAL } })).toEqual([]);
-    expect(sealedWindowFloors({ ...retained('30d'), _provenance: 'org' } as never)).toEqual([]);
+    }, CODE)).toEqual([]);
+    expect(sealedWindowFloors({ name: 'app_ledger', lifecycle: { class: 'audit', retention: { maxAge: 'soon' }, seal: SEAL } }, CODE)).toEqual([]);
+    expect(sealedWindowFloors({ ...retained('30d'), _provenance: 'org' } as never, CODE)).toEqual([]);
+    expect(sealedWindowFloors(retained('30d'), {})).toEqual([]);
   });
 });

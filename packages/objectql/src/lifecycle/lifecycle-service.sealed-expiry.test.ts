@@ -10,6 +10,7 @@ import {
 } from './lifecycle-service.js';
 import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 import { parseLifecycleDuration } from './duration.js';
+import { SchemaRegistry } from '../registry.js';
 
 /**
  * [ADR-0154 D8] A sealed object (`lifecycle.seal`) never loses rows to a row
@@ -70,7 +71,8 @@ function engineOver(objects: LifecycleObjectLike[], opts: { hot?: ReturnType<typ
   const finds: any[] = [];
   let rows = [...(opts.rows ?? [])];
   const engine: any = {
-    registry: { getAllObjects: () => objects },
+    // Each object a plain registration from code, unless it is tenant-authored: the registry places it in packaged metadata.
+    registry: { getAllObjects: () => objects, getObjectOwner: (name: string) => (objects.some((o) => o.name === name) ? {} : undefined) },
     getDriverForObject: () => opts.hot?.driver,
     datasource(name: string) {
       if (name === 'archive' && opts.cold) return opts.cold.driver;
@@ -292,7 +294,7 @@ describe('LifecycleService — a sealed object expires only through the sealed e
 
   it('a sealed object created at runtime keeps the row-cutoff sweep, retained or archiving, and never asks the sealed expiry', async () => {
     // Signed expiry covers objects whose lifecycle is declared in packaged metadata; a tenant-authored
-    // definition (ADR-0010 `_provenance: 'org'`) keeps today's retention sweep.
+    // definition (ADR-0010 `_provenance: 'org'`) keeps the row-cutoff retention sweep.
     const runtimeRetained = { ...RETAINED, _provenance: 'org' } as LifecycleObjectLike;
     const runtimeArchiving = { ...ARCHIVING, name: 'app_journal', _provenance: 'org' } as LifecycleObjectLike;
     const hot = store('default');
@@ -311,6 +313,32 @@ describe('LifecycleService — a sealed object expires only through the sealed e
     expect(report.swept.map((e) => [e.object, e.policy])).toEqual([['app_ledger', 'retention'], ['app_journal', 'archive']]);
     expect(report.skipped).toEqual([]);
     expect(warns.join('\n')).not.toMatch(/lifecycle\.seal/);
+  });
+
+  it('a sealed object the registry cannot place in an installed code or marketplace package keeps the row-cutoff sweep', async () => {
+    // The reload door's shape (`ObjectQLPlugin`): a loader-chain body registered under its own `_packageId`, or
+    // `metadata-service`, with whatever provenance it carries. Only a positive answer takes the signed expiry.
+    const FIELDS = { created_at: { type: 'datetime' }, tenant_id: { type: 'lookup' }, new_value: { type: 'textarea' } };
+    const sweepOver = async (install?: 'code' | 'marketplace' | 'authored', body: Record<string, unknown> = { _packageId: 'app.ledger', _provenance: 'package' }) => {
+      const registry = new SchemaRegistry() as any;
+      if (install) registry.installPackage({ id: 'app.ledger', name: 'app.ledger', version: '1.0.0', type: 'app', namespace: 'ledger' }, install);
+      registry.registerObject({ ...RETAINED, fields: FIELDS, ...body }, (body._packageId as string | undefined) ?? 'metadata-service', undefined, 'own');
+      const { engine } = engineOver([], { rows: [] });
+      engine.registry = registry;
+      const svc = service(engine);
+      const { expiry, requests } = expiryOf([]);
+      svc.registerExpiryPrefix(expiry);
+      const report = await svc.sweep();
+      return { requests, policies: report.swept.filter((e) => e.object === 'app_ledger').map((e) => e.policy) };
+    };
+
+    for (const outcome of [await sweepOver(), await sweepOver(undefined, {}), await sweepOver('authored')]) {
+      expect(outcome).toEqual({ requests: [], policies: ['retention'] });
+    }
+    for (const source of ['code', 'marketplace'] as const) {
+      const outcome = await sweepOver(source);
+      expect(outcome.requests.map((r) => r.policy)).toEqual(['retention.maxAge']);
+    }
   });
 
   it('an object without `seal` keeps the row-cutoff path, and never asks the sealed expiry', async () => {

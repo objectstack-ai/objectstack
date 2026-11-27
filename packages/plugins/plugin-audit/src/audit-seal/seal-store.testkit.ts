@@ -91,7 +91,8 @@ export function memoryEngine(objects: ReadonlyArray<{ name: string; fields?: unk
   const archive = new MemoryStore();
   const inserts: Array<{ object: string; row: Row }> = [];
   const engine: AuditSealerEngine = {
-    registry: { getAllObjects: () => objects },
+    // Each object is a plain registration from code: the registry places it in packaged metadata (`takesSignedExpiry`).
+    registry: { getAllObjects: () => objects, getObjectOwner: (name: string) => (objects.some((o) => o.name === name) ? {} : undefined) },
     getDriverForObject: () => hot,
     datasource: (name: string) => (name === 'archive' ? archive : undefined),
     async insert(object, row) {

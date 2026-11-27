@@ -277,13 +277,14 @@ it is sealed on every deployment whose `AuditPlugin` has a crypto provider.
 - Refused at parse time beside `seal`: a `class` other than `audit`,
   `retention.onlyWhen`, `ttl.onlyWhen`, a `ttl` on a field other than
   `created_at`, and rotation `storage`. Each deletes part of a sealed hour.
-  Sealed rows past their `retention`, `ttl` or `archive.keep` window leave
-  only by whole checkpoints: the sealer first writes a signed expiry
+  Signed expiry covers objects whose lifecycle is declared in packaged
+  metadata. Their sealed rows past their `retention`, `ttl` or `archive.keep`
+  window leave only by whole checkpoints: the sealer first writes a signed expiry
   amendment naming them, so the verifier reads them as `expired` rather than
   missing. The window is counted to the start of a UTC day, so a row can stay
   up to a day past it, and at most 10,000 such rows leave per object per sweep,
   so a backlog drains over several sweeps; once it has, a chain gains at most
-  one expiry amendment a day. On a sealed object with no `archive`, a
+  one expiry amendment a day. On such a packaged object with no `archive`, a
   retention override cannot shorten the declared window: an override of
   `retention.maxAge` or `ttl.expireAfter` in the `lifecycle` settings, global
   or for one organization, may lengthen it, and one below the declared window
@@ -297,10 +298,9 @@ it is sealed on every deployment whose `AuditPlugin` has a crypto provider.
   every chain of an object chained by another column (the default
   `tenant_id`), which may hold rows of several organizations. No row leaves
   before the window set for it. While no sealer is running (no crypto
-  provider), the sweeper keeps them and says so once. Signed expiry covers
-  objects whose lifecycle is declared in packaged metadata; an object created
-  at runtime keeps today's retention sweep: its rows leave at their row
-  cutoff, and a retention override applies to it.
+  provider), the sweeper keeps them and says so once. On an object created at
+  runtime the retention sweeper still deletes sealed rows at their row cutoff,
+  which then read as missing, and a retention override applies to it.
 - Sealing needs a crypto provider, which the host passes to `AuditPlugin` as
   `cryptoProvider`. `os serve` passes the one it seals every secret with; an
   app that puts its own `AuditPlugin` in `plugins` passes one itself. Without

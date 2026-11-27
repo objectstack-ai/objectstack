@@ -1174,12 +1174,12 @@ export const LifecycleSchema = lazySchema(() => strictObject({
   }).optional().describe(
     'Seals the rows into signed, chained checkpoints (ADR-0154), so a change, insert or delete made outside ' +
     "the platform shows. Only `class: 'audit'` may declare it, and not beside a `retention` or `ttl` " +
-    "`onlyWhen`, a `ttl` on another field than `created_at`, or rotation `storage`. Sealed rows past their " +
-    '`retention`, `ttl` or `archive.keep` window leave only by whole checkpoints, after a signed expiry ' +
-    'amendment names them, so the verifier reads them as expired rather than missing. Signed expiry covers ' +
-    'objects whose lifecycle is declared in packaged metadata; an object created at runtime keeps the ' +
-    'retention sweep. A retention override ' +
-    'cannot shorten the declared window. A tenant-scoped window is set on `organization_id`, so it applies to ' +
+    "`onlyWhen`, a `ttl` on another field than `created_at`, or rotation `storage`. Signed expiry covers " +
+    'objects whose lifecycle is declared in packaged metadata: their sealed rows past their `retention`, `ttl` ' +
+    'or `archive.keep` window leave only by whole checkpoints, after a signed expiry amendment names them, so ' +
+    'the verifier reads them as expired rather than missing, and on such an object with no `archive` a ' +
+    'retention override cannot shorten the declared window. On an object created at runtime the retention ' +
+    'sweeper still deletes sealed rows at their row cutoff, which then read as missing. A tenant-scoped window is set on `organization_id`, so it applies to ' +
     "that organization's chain only where `chainField` is `organization_id`; every other chain (the chain of " +
     'rows about no organization, and every chain of an object chained by another column) keeps its rows to ' +
     'the longest window set. The window is counted to the start of a ' +
