@@ -525,20 +525,40 @@ describe('an approval whose steps span runs tells its submitter only when the ap
     expect(outcomesAbout(step2.id)).toEqual([['approval.approved', ['u_sub']]]);
   });
 
-  it('a map item that is a record is told its own outcome while another item is still pending', async () => {
+  it('a request opened before requests recorded their record run falls back to its own run', async () => {
+    const step1 = await submit('deal_single_run', 'legacy');
+    expect(step1.record_run_id, 'the scene: the request recorded its record run').toBe(step1.flow_run_id);
+    // The shape a request opened before ADR-0162 item 7 has.
+    await engine.update('sys_approval_request', { id: step1.id, root_run_id: null, root_run_started_at: null, record_run_id: null }, { context: SYSTEM } as any);
+    await approve(step1, 'u_mgr');
+    const step2 = await pendingOn('D_legacy');
+    expect([step2?.flow_node_id, step2?.flow_run_id]).toEqual(['exec', step1.flow_run_id]);
+    // Its own run still shows the further step, so the first decision tells no one.
+    expect(outcomesAbout(step1.id)).toEqual([]);
+    await approve(step2, 'u_exec');
+    expect(outcomesAbout(step2.id)).toEqual([['approval.approved', ['u_sub']]]);
+  });
+
+  it('a map item that is a record is told its own outcome while the next item of the same approval is pending', async () => {
     const items = [await newDeal('item1'), await newDeal('item2')];
-    const run = await automation.execute('deal_batch_outcome', { userId: 'u_sub', items } as any);
-    expect(run.status, 'the batch parked on its items').toBe('paused');
+    const run = await automation.execute('deal_batch_outcome', { params: { items }, userId: 'u_sub' } as any);
+    expect(run.status, 'the batch parked on its first item').toBe('paused');
     const first = await pendingOn('D_item1');
-    const second = await pendingOn('D_item2');
-    // The scene: one approval (one root run), two records, each carried by its own item run.
-    expect(first.root_run_id).toBe(second.root_run_id);
-    expect(first.record_run_id).not.toBe(second.record_run_id);
+    expect(first).toBeDefined();
 
     await approve(first, 'u_mgr');
-    // The item's record has no further step, so its approval is over even with the other item pending.
-    expect(await pendingOn('D_item2')).toBeDefined();
+    // The scene: the batch moved on to the second item, under the same root run
+    // (one approval) and its own item run (another record).
+    const second = await pendingOn('D_item2');
+    expect(second?.flow_node_id).toBe('mgr');
+    expect(second.root_run_id).toBe(first.root_run_id);
+    expect(second.record_run_id).not.toBe(first.record_run_id);
+
+    // The first deal has no further step, so its approval is over although the batch's is not.
     expect(outcomesAbout(first.id)).toEqual([['approval.approved', ['u_sub']]]);
     expect(outcomesAbout(second.id)).toEqual([]);
+
+    await approve(second, 'u_mgr');
+    expect(outcomesAbout(second.id)).toEqual([['approval.approved', ['u_sub']]]);
   });
 });
