@@ -339,7 +339,7 @@ describe('ADR-0162 item 7 — every run of a tree is handed its root run', () =>
       } as never);
       const [item] = parkedOf(engine, 'leaf');
       expect(recordOfLast(item!.runId)).toEqual({ runId: item!.runId, object: 'crm_task', recordId: 't1' });
-      expect(seen.at(-1)!.root).toMatchObject({ runId: batch.runId, object: 'crm_project' });
+      expect(seen[seen.length - 1]!.root).toMatchObject({ runId: batch.runId, object: 'crm_project' });
       expect((await store.load(item!.runId))!.context, 'and parks with it').toMatchObject({
         [RECORD_RUN_CONTEXT_KEY]: { runId: item!.runId, recordId: 't1' },
       });
@@ -418,7 +418,7 @@ describe('ADR-0162 item 7 — every run of a tree is handed its root run', () =>
       };
       const resumed = await engine.resume(started.runId!, {});
       expect(resumed.code).not.toBe('STORE_UNAVAILABLE');
-      expect(seen.at(-1), 'the segment after the pause ran').toEqual({ runId: started.runId, nodeId: 'see_after', root: undefined });
+      expect(seen[seen.length - 1], 'the segment after the pause ran').toEqual({ runId: started.runId, nodeId: 'see_after', root: undefined });
       expect(logger.lines.filter((l: any) => l.msg.includes('could not be derived') || l.msg.includes('derive its root run'))).toEqual([]);
     });
   });
