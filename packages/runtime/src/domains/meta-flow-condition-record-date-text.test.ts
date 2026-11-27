@@ -233,7 +233,9 @@ describe('[#36377] the flow publish door refuses a bare date ordering before dat
             const issues = dateArithmeticIssues(err);
             expect(issues, `${root}: ${JSON.stringify(err.issues)}`).toHaveLength(1);
             expect(issues[0].message).toContain(`— \`${root}.due_date\` is a date field, and the runtime holds`);
-            expect(issues.map((i: any) => i.message), root).toEqual(dateArithmeticIssues(allRoot).map((i: any) => i.message));
+            // The door's message ends by quoting the source; the finding before it is the all-root spelling's.
+            const finding = (i: any) => String(i.message).split(' — source: ')[0];
+            expect(issues.map(finding), root).toEqual(dateArithmeticIssues(allRoot).map(finding));
             expect(await rig.state(name), root).toEqual(['draft']);
         }
     }, 60_000);
