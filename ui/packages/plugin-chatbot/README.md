@@ -482,6 +482,12 @@ does not detect the question or send anything itself.
 ```tsx
 import { QuestionCard } from '@object-ui/plugin-chatbot';
 
+export function PendingQuestion({ messageId, onSend, onDismiss }: {
+  messageId: string;
+  onSend: (text: string) => void;
+  onDismiss: () => void;
+}) {
+  return (
 <QuestionCard
   key={messageId}            // a new question is a new card
   questions={[
@@ -495,9 +501,11 @@ import { QuestionCard } from '@object-ui/plugin-chatbot';
     },
   ]}
   announce                   // "A question is waiting for your answer" in a polite live region
-  onAnswer={(text) => sendMessage(text)}
-  onSkip={() => dismiss()}
+  onAnswer={onSend}
+  onSkip={onDismiss}
 />
+  );
+}
 ```
 
 - One question: a click on an option calls `onAnswer` with its label at once.
