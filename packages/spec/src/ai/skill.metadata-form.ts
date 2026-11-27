@@ -1,13 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { defineForm } from '../ui/view.zod';
+import { defineMetadataForm } from '../ui/view.zod';
 
 /**
  * Skill Metadata Form
  * 
  * Form layout for creating/editing AI skill metadata definitions.
  */
-export const skillForm = defineForm({
+export const skillForm = defineMetadataForm({
   schemaId: 'skill',
   type: 'simple',
   sections: [

@@ -3,7 +3,7 @@
 /**
  * Built-in widget renderers for SchemaForm.
  *
- * These cover the common widget hints declared in spec `*.form.ts`
+ * These cover the common widget hints declared in spec `*.metadata-form.ts`
  * files (e.g. `widget: 'ref:object'`, `widget: 'master-detail'`).
  *
  * Each widget receives `WidgetProps`:

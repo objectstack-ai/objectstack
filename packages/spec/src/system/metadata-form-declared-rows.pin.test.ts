@@ -152,7 +152,7 @@ describe('declared keys that now have a form row', () => {
     // gate, not a parse gate. The related-list derivation only ever reads it
     // on the child-side FK, so offering it elsewhere would advertise a knob
     // the runtime does not deliver.
-    // `defineForm` normalises a predicate into a `{ dialect, source }`
+    // `defineMetadataForm` normalises a predicate into a `{ dialect, source }`
     // envelope, so the assertion reads the envelope rather than the string it
     // was authored as.
     expect(row.visibleWhen).toEqual({ dialect: 'cel', source: "data.type in ['lookup','master_detail']" });
@@ -225,10 +225,10 @@ describe('object.imageField is offered as a plain text row beside nameField, wit
  * **A `type: 'code'` row's `language` must name the slot it actually edits**
  * (#20439).
  *
- * `hook.form.ts`'s `condition` row declared `language: 'javascript'` over
+ * `hook.metadata-form.ts`'s `condition` row declared `language: 'javascript'` over
  * `HookSchema.condition`, which is `EvaluatedExpressionInputSchema` — a CEL
- * predicate, not a script. Every sibling predicate row (`field.form.ts` /
- * `object.form.ts`'s `visibleWhen` / `readonlyWhen` / `requiredWhen`, and the
+ * predicate, not a script. Every sibling predicate row (`field.metadata-form.ts` /
+ * `object.metadata-form.ts`'s `visibleWhen` / `readonlyWhen` / `requiredWhen`, and the
  * formula `expression` row) already declares `language: 'expression'`; a
  * consumer keyed on the declared language (objectui#10963's `CodeWidget`
  * fix) cannot otherwise tell this row apart from a real script row

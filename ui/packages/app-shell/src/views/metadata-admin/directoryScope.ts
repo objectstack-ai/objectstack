@@ -10,9 +10,13 @@ import { ENVIRONMENT_AREA_TYPES } from './metadataAreaHost.js';
 
 /**
  * Types never listed. `field` is edited inside its object; `package` is the
- * scope container itself, with its own management surface.
+ * scope container itself, with its own management surface. `form` (ADR-0159
+ * card ②, objectstack#37086) has no designer, menu placement or ADR-0084 row
+ * yet: card ③ (objectstack#37087) brings all three and takes it off this set.
+ * Its forms are still served and judged; only Studio's directory and menu
+ * leave the type out.
  */
-export const HIDDEN_DIRECTORY_TYPES: ReadonlySet<string> = new Set(['field', 'package']);
+export const HIDDEN_DIRECTORY_TYPES: ReadonlySet<string> = new Set(['field', 'package', 'form']);
 
 /**
  * The served type entries a directory lists, in served order:

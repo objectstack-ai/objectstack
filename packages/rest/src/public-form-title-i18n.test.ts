@@ -24,7 +24,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from '@objectstack/objectql';
-import { expandViewContainer } from '@objectstack/spec/ui';
+import { expandViewContainer, projectedFormsOf } from '@objectstack/spec/ui';
 import { RestServer } from './rest-server';
 
 // [#10126] Pay the first transform of the dist-resolved workspace dep the
@@ -160,6 +160,7 @@ function overDouble(view: Record<string, any>) {
         getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
         getMetaTypes: vi.fn().mockResolvedValue([]),
         getMetaItems: vi.fn(async ({ type }: { type: string }) => {
+            if (type === 'form') return projectedFormsOf([view]);
             if (type === 'view') return [view];
             if (type === 'object') return [ticketObject];
             return [];

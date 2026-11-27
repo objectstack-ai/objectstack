@@ -13,10 +13,10 @@
  * form no longer declares those fields.
  */
 
-import { defineForm } from './view.zod';
+import { defineMetadataForm } from './view.zod';
 import { defaultPeriodOptions } from './default-period-options';
 
-export const reportForm = defineForm({
+export const reportForm = defineMetadataForm({
   schemaId: 'report',
   type: 'simple',
   sections: [

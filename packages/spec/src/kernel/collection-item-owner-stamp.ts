@@ -100,7 +100,7 @@ export interface CollectionItemOwnerStampRefusal {
 export const OWNER_STAMP_JUDGED_COLLECTIONS = Object.freeze([
   'objects', 'apps',
   'picklists',
-  'actions', 'views', 'pages', 'dashboards', 'reports', 'datasets',
+  'actions', 'views', 'forms', 'pages', 'dashboards', 'reports', 'datasets',
   'flows', 'webhooks', 'jobs',
   'positions', 'permissions', 'capabilities', 'sharingRules',
   'queues', 'assignmentRules',

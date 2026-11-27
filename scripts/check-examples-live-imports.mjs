@@ -412,6 +412,12 @@ function owningPackage(fileAbs) {
  * Packages whose `#test` task declares an `examples/...` input glob in
  * turbo.json, mapped to those globs in repo-relative form (the `$TURBO_ROOT$/`
  * prefix stripped) so they can be matched against a coupling target.
+ *
+ * A package that splits its suite into two vitest projects (#16466) runs the
+ * files its `vitest.repo-tests.json` lists under `#test:repo` instead: those
+ * globs are keyed `<package>#test:repo`, and {@link declaredGlobsFor} asks the
+ * task that actually runs the file. A `#test` glob never covers a repo-project
+ * file, nor the reverse: each task hashes its own inputs.
  */
 function packagesWithExampleInputs() {
   const declared = new Map();
@@ -423,13 +429,32 @@ function packagesWithExampleInputs() {
   }
   const tasks = turbo.tasks ?? turbo.pipeline ?? {};
   for (const [taskId, cfg] of Object.entries(tasks)) {
-    if (!taskId.endsWith('#test')) continue;
+    const repoTask = taskId.endsWith('#test:repo');
+    if (!taskId.endsWith('#test') && !repoTask) continue;
     const globs = (cfg?.inputs ?? [])
       .filter((g) => typeof g === 'string' && g.includes('examples/'))
       .map((g) => g.replace(/^\$TURBO_ROOT\$\//, ''));
-    if (globs.length) declared.set(taskId.slice(0, -'#test'.length), globs);
+    if (globs.length) declared.set(repoTask ? taskId : taskId.slice(0, -'#test'.length), globs);
   }
   return declared;
+}
+
+/** Whether `fileAbs` is listed in its package's `vitest.repo-tests.json`, so `#test:repo` runs it. */
+function inRepoProject(pkgDir, fileAbs) {
+  try {
+    const listed = JSON.parse(readFileSync(join(REPO_ROOT, pkgDir, 'vitest.repo-tests.json'), 'utf8'));
+    const own = posix.normalize(relative(join(REPO_ROOT, pkgDir), fileAbs).split(sep).join('/'));
+    return Array.isArray(listed) && listed.some((entry) => typeof entry === 'string' && posix.normalize(entry) === own);
+  } catch {
+    return false;
+  }
+}
+
+/** The `examples/` input globs of the turbo task that runs this test file. */
+function declaredGlobsFor(exampleInputs, pkg, fileAbs) {
+  const name = pkg?.manifest?.name ?? '(unknown)';
+  if (pkg?.dir !== undefined && inRepoProject(pkg.dir, fileAbs)) return exampleInputs.get(`${name}#test:repo`) ?? [];
+  return exampleInputs.get(name) ?? [];
 }
 
 /**
@@ -533,7 +558,7 @@ function collect() {
 
     // Only the by-path couplings need an input glob: a by-package-name coupling
     // on a declared edge is already reachable through the dependency graph.
-    const declaredGlobs = exampleInputs.get(pkgName) ?? [];
+    const declaredGlobs = declaredGlobsFor(exampleInputs, pkg, abs);
     const uncoveredTargets = uncoveredTargetsOf(byPath, abs, declaredGlobs);
 
     let visibility;
@@ -868,6 +893,30 @@ function selfTest() {
       'every declared entry carries a substantive note',
       Object.values(INVISIBLE_COUPLINGS).every((e) => (e.note ?? '').trim().length >= 40),
     ],
+
+    // ── the task that runs the file: a repo-project file is hashed on `#test:repo` ──
+    //
+    // Read off rest's own split (#16466): the first file its
+    // `vitest.repo-tests.json` lists is asked of the `#test:repo` globs, and a
+    // file it does not list of the `#test` globs, never the other task's.
+    ...(() => {
+      const restDir = 'packages/rest';
+      let listed = [];
+      try {
+        listed = JSON.parse(readFileSync(join(REPO_ROOT, restDir, 'vitest.repo-tests.json'), 'utf8'));
+      } catch {
+        listed = [];
+      }
+      const pkg = { dir: restDir, manifest: { name: '@objectstack/rest' } };
+      const inputs = new Map([['@objectstack/rest', ['examples/a/**']], ['@objectstack/rest#test:repo', ['examples/b/**']]]);
+      const repoFile = join(REPO_ROOT, restDir, String(listed[0] ?? ''));
+      const localFile = join(REPO_ROOT, restDir, 'src/__not-listed__.test.ts');
+      return [
+        ['rest lists at least one repo-project file', listed.length > 0 && inRepoProject(restDir, repoFile)],
+        ['a listed file is asked of the #test:repo globs', declaredGlobsFor(inputs, pkg, repoFile).join() === 'examples/b/**'],
+        ['an unlisted file is asked of the #test globs', declaredGlobsFor(inputs, pkg, localFile).join() === 'examples/a/**'],
+      ];
+    })(),
 
     // ── input-glob coverage: the check that lets a radius be NARROW safely ──
     //

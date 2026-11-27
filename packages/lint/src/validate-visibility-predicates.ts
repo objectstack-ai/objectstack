@@ -87,11 +87,11 @@
  *     predicate here is a wrong-layer paste that silently never matches; and
  *   - **metadata-editing** forms — the row under edit — bind `data`, so a
  *     `record.`-rooted predicate there is the same bug in the other direction.
- *   That surface is reached two ways: a `*.form.ts` module, and a form view
+ *   That surface is reached two ways: a `*.metadata-form.ts` module, and a form view
  *   declaring `data: { provider: 'schema', schemaId }`, which is judged here on
  *   its own say-so whatever the caller passes (#7815). Only the first has a
  *   file, which is why the EMITTED prose names the surface and never a filename
- *   (#8042) — the `*.form.ts` mentions that remain below are the ones addressed
+ *   (#8042) — the `*.metadata-form.ts` mentions that remain below are the ones addressed
  *   to a file-aware CALLER of this function, where the filename is the point.
  *   The layer is read off the METADATA where the metadata declares it, and taken
  *   from the caller (`opts.layer`, default `'runtime'`) only where it does not —
@@ -606,7 +606,7 @@ export type VisibilitySeverity = 'error' | 'warning';
 /**
  * Which binding environment the linted surface belongs to (ADR-0089 §Context):
  * - `runtime`  — `*.view.ts` / `*.page.ts`; binds `record` + `current_user` (+ `page`).
- * - `metadata` — metadata-editing forms (a `*.form.ts` module, or a form view
+ * - `metadata` — metadata-editing forms (a `*.metadata-form.ts` module, or a form view
  *   declaring `data: { provider: 'schema', schemaId }`); binds `data` (the row
  *   under edit).
  */
@@ -623,7 +623,7 @@ export interface VisibilityOptions {
    * row under edit as `data` — so such a site is judged at `'metadata'`
    * regardless of this option (#7815; see the module note §Which layer a site is
    * on). Pass `'metadata'` to cover the forms that do not carry that data source
-   * either, which is what a file-aware caller linting a `*.form.ts` does.
+   * either, which is what a file-aware caller linting a `*.metadata-form.ts` does.
    */
   layer?: VisibilityLayer;
 }
@@ -1331,7 +1331,7 @@ function rhsChainRoots(node: unknown, out: Set<string> = new Set()): Set<string>
  * The root an author on this layer should have written. Runtime view/page
  * surfaces bind the live record as `record`; a metadata-editing form binds the
  * row under edit as `data` (ADR-0089 D3, §Context) — whether that form was
- * authored as a `*.form.ts` module or published as a schema-bound form view.
+ * authored as a `*.metadata-form.ts` module or published as a schema-bound form view.
  */
 const CANONICAL_ROOT_BY_LAYER: Record<VisibilityLayer, string> = {
   runtime: 'record',
@@ -1667,7 +1667,7 @@ function isFieldObject(entry: unknown): entry is AnyRec {
  * The binding-root check is layer-directional (ADR-0089 D3). A form view that
  * declares `data: { provider: 'schema', schemaId }` is judged at `metadata` on
  * its own say-so (#7815); for every other site pass `opts.layer = 'metadata'`
- * when linting a `*.form.ts` metadata-editing form (so a `record.`-rooted
+ * when linting a `*.metadata-form.ts` metadata-editing form (so a `record.`-rooted
  * predicate is flagged), or leave it at the `'runtime'` default for `*.view.ts` /
  * `*.page.ts` surfaces (so a `data.`-rooted predicate is flagged). The syntax and
  * bare-identifier checks are layer-agnostic — but the ROOT their hints prescribe

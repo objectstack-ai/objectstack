@@ -118,6 +118,10 @@ const SPEC_TRANSLATION_GROUPS = [
   // objectstack #34939 serves `mappings` (a named import mapping's label, the
   // name the import wizard offers it by), copied through onto `app` the same way.
   'mappings',
+  // objectstack #37086 serves `forms` (a `form` item's label, title and
+  // thank-you panel, ADR-0159 card ②). Nothing on this side reads it yet, but
+  // a payload carrying it is namespaced like any other group.
+  'forms',
 ] as const;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

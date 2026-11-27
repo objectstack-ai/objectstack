@@ -5751,13 +5751,14 @@ export function selfTest({ tier = 'full' } = {}) {
   // the metadataForms surface is registry-driven, its source lives in
   // packages/spec, and packages/spec owns no extract config. Pure judgments
   // first, then the live tree, then both rendering directions.
-  t('a form module is one', isMetadataFormModulePath('packages/spec/src/data/object.form.ts'));
+  t('a form module is one', isMetadataFormModulePath('packages/spec/src/data/object.metadata-form.ts'));
   t('its sibling schema is not', !isMetadataFormModulePath('packages/spec/src/data/object.zod.ts'));
-  t('a bare .form.ts with no name is not one', !isMetadataFormModulePath('packages/spec/src/data/.form.ts'));
-  t('a form module test file is not one', !isMetadataFormModulePath('packages/spec/src/data/object.form.test.ts'));
+  t('a `form` metadata item source (the ADR-0159 type) is not one', !isMetadataFormModulePath('examples/app-crm/src/forms/lead.form.ts'));
+  t('a bare .metadata-form.ts with no name is not one', !isMetadataFormModulePath('packages/spec/src/data/.metadata-form.ts'));
+  t('a form module test file is not one', !isMetadataFormModulePath('packages/spec/src/data/object.metadata-form.test.ts'));
 
-  const formMods = ['packages/spec/src/data/object.form.ts', 'packages/spec/src/ui/view.form.ts'];
-  t('the module itself reaches', reachesMetadataFormModule('packages/spec/src/data/object.form.ts', formMods));
+  const formMods = ['packages/spec/src/data/object.metadata-form.ts', 'packages/spec/src/ui/view.metadata-form.ts'];
+  t('the module itself reaches', reachesMetadataFormModule('packages/spec/src/data/object.metadata-form.ts', formMods));
   t('a directory CONTAINING one reaches (a card surface is named before its files exist)', reachesMetadataFormModule('packages/spec/src/ui', formMods));
   t('a sibling sharing a name prefix does not', !reachesMetadataFormModule('packages/spec/src/dat', formMods));
   t('an unrelated package does not', !reachesMetadataFormModule('packages/objectql/src/engine.ts', formMods));
@@ -5772,7 +5773,7 @@ export function selfTest({ tier = 'full' } = {}) {
 
   // The live tree — the half no fixture can prove.
   const liveForms = metadataFormModulePaths();
-  t('the live walk discovers form modules', liveForms.length > 0 && liveForms.every((f) => f.endsWith('.form.ts')));
+  t('the live walk discovers form modules', liveForms.length > 0 && liveForms.every((f) => f.endsWith('.metadata-form.ts')));
   t('the live walk finds no duplicates', new Set(liveForms).size === liveForms.length);
   // If this flips, the entry stops firing BY DESIGN (every package opted out of
   // the shared baseline) — read the entry's deletion criterion before "fixing" it.
@@ -5784,7 +5785,7 @@ export function selfTest({ tier = 'full' } = {}) {
   // rendered delimiters for the reason the entry above states: a bare substring
   // stays green through a prefix-preserving rename, the one rot the STALE branch
   // exists to catch.
-  const formHit = changeKindLines(['packages/spec/src/data/object.form.ts', 'packages/spec/src/data/field.form.ts'], resolved, i18nRows);
+  const formHit = changeKindLines(['packages/spec/src/data/object.metadata-form.ts', 'packages/spec/src/data/field.metadata-form.ts'], resolved, i18nRows);
   // The `?? ''` is not defensive noise: reverse-verifying this block by making
   // every config opt out emptied `formHit`, and the bare index CRASHED the whole
   // self-test on a TypeError — one stack in place of 180-odd named verdicts. A
@@ -5794,14 +5795,14 @@ export function selfTest({ tier = 'full' } = {}) {
   const formKindLine = formHit[0] ?? '';
   t('the measured incident paths now emit the metadata-form section', formHit.length === 2 && formKindLine.includes('metadata form module'));
   t('that section names check:i18n exactly, runnably', formHit.some((l) => l.includes('- pnpm check:i18n   —')));
-  t('and it names both incident paths, not just the first', formKindLine.includes('object.form.ts') && formKindLine.includes('field.form.ts'));
+  t('and it names both incident paths, not just the first', formKindLine.includes('object.metadata-form.ts') && formKindLine.includes('field.metadata-form.ts'));
   // The over-trigger direction, which the card demanded in its own right: a spec
   // change that touches no form must NOT be pushed into this gate. Both a schema
   // beside a real form module and an unrelated package are pinned, because the
   // first is the one a filename convention could plausibly over-reach into.
   t('a spec schema next door to a form emits no i18n section', !changeKindLines(['packages/spec/src/data/filter.zod.ts'], resolved).some((l) => l.includes('check:i18n')));
   t('an unrelated package still emits no i18n section', !changeKindLines(['packages/rest/src/rest-server.ts'], resolved).some((l) => l.includes('check:i18n')));
-  const formStale = changeKindLines(['packages/spec/src/data/object.form.ts'], () => null);
+  const formStale = changeKindLines(['packages/spec/src/data/object.metadata-form.ts'], () => null);
   t('an undiscoverable check:i18n renders STALE for this entry too', formStale.filter((l) => l.includes('⚠ check:i18n: STALE')).length === 1);
 
   // The measured incident (#8410 / PR #8399), pinned against the REAL workflow
@@ -5991,7 +5992,7 @@ export function selfTest({ tier = 'full' } = {}) {
   const FORM_REGISTRY = 'packages/spec/src/system/metadata-form-registry.ts';
   const i18nGateHints = readHints('scripts/check-i18n-bundles.mjs');
   t('the i18n gate declares the type-level metadata registry module', covers(i18nGateHints, TYPE_REGISTRY));
-  t('the i18n gate declares the form registry module too (not just its *.form.ts leaves)', covers(i18nGateHints, FORM_REGISTRY));
+  t('the i18n gate declares the form registry module too (not just its *.metadata-form.ts leaves)', covers(i18nGateHints, FORM_REGISTRY));
   const typeRegistryVerdict = classifyEntry({ files: ['scripts/check-i18n-bundles.mjs'], hints: i18nGateHints }, [TYPE_REGISTRY]);
   const formRegistryVerdict = classifyEntry({ files: ['scripts/check-i18n-bundles.mjs'], hints: i18nGateHints }, [FORM_REGISTRY]);
   t(

@@ -46,6 +46,7 @@
 import { FILE_REFERENCE_TYPES } from '@objectstack/spec/data';
 import {
   anonymousFormIntakeCandidates,
+  anonymousFormIntakeSlug,
   anonymousFormObjectName,
   type AnonymousFormIntakeCandidate,
 } from '@objectstack/spec/ui';
@@ -165,6 +166,41 @@ export function validatePublicFormFileFields(stack: AnyRec): PublicFormFileField
                 `and declares "${fieldName}".`,
             });
           }
+        }
+      }
+    }
+  }
+
+  // [ADR-0159] …and every authored `form` item open to anonymous intake, the
+  // same judgement at the form's own root.
+  for (const { rec: form, path: formPath } of collectionEntries(stack.forms, 'forms')) {
+    const formName = strName(form.name) ?? formPath;
+    const slug = anonymousFormIntakeSlug(form.sharing);
+    const objectName = strName(form.object);
+    const types = slug !== null && objectName ? fieldTypes.get(objectName) : undefined;
+    if (!types) continue;
+    for (const bucket of ['sections', 'groups'] as const) {
+      const sections = Array.isArray(form[bucket]) ? (form[bucket] as unknown[]) : [];
+      for (let s = 0; s < sections.length; s++) {
+        const section = sections[s];
+        const entries = isRec(section) && Array.isArray(section.fields) ? (section.fields as unknown[]) : [];
+        for (let f = 0; f < entries.length; f++) {
+          const fieldName = fieldNameOf(entries[f]);
+          const type = fieldName ? types.get(fieldName) : undefined;
+          if (!fieldName || !type || !FILE_REFERENCE_TYPES.has(type)) continue;
+          findings.push({
+            severity: 'error',
+            rule: PUBLIC_FORM_FILE_FIELD,
+            where: `form "${formName}"`,
+            path: `${formPath}.${bucket}[${s}].fields[${f}]`,
+            message:
+              `${formName}: the form is open to anonymous intake (its sharing publishes /forms/${slug} with ` +
+              `allowAnonymous: true) and declares "${fieldName}", a ${type} field on object "${objectName}". A ` +
+              `public form takes no attachment: an anonymous visitor has no upload door, so this field can never be filled.`,
+            hint:
+              `Take "${fieldName}" off this public form. To collect a file from a visitor, have them register and ` +
+              `sign in, then fill a form that is not open to anonymous intake and declares "${fieldName}".`,
+          });
         }
       }
     }

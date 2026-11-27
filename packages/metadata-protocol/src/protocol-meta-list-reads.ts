@@ -34,6 +34,7 @@ import {
 } from './protocol-authoring-refusals.js';
 import { shippingPackageIds } from './protocol-environment-rows.js';
 import type { ProtocolHost } from './protocol-host.js';
+import { readEffectiveFormList, type FormReadHost } from './protocol-form-reads.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { mergePackageAwareOverlay, servedViewExpansion, withoutServedRowName } from './protocol-overlay-merge.js';
 import {
@@ -59,8 +60,24 @@ import {
     pairMemberWithheldAt,
 } from './protocol-exact-qualifier.js';
 
+/**
+ * [ADR-0159 D5] The `form` list face: the items {@link readEffectiveFormList}
+ * resolves, in the envelope of the generic list of the same request. Unscoped,
+ * that is the envelope the resolution itself read; a list scoped to a package
+ * takes the scoped generic list's envelope, as before.
+ */
+async function effectiveFormList(
+    host: FormReadHost,
+    request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean },
+    audience: 'served' | 'execution',
+) {
+    const resolved = await readEffectiveFormList(host, request, audience);
+    if (request.packageId === undefined) return resolved;
+    return { ...(await host.readFlattenedMetaItems(request, audience)), items: resolved.items };
+}
+
 /** The body of `ObjectStackProtocolImplementation#getMetaItems`; the method's docblock there is its contract. */
-export async function getMetaItems(host: Pick<ProtocolHost, 'readFlattenedMetaItems'>, request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean }) {
+export async function getMetaItems(host: FormReadHost, request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean }) {
     // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. This one
     // is load-bearing twice over: the SchemaRegistry indexes code-authored
     // items under the SINGULAR type, and the overlay-hydration branch below
@@ -71,13 +88,19 @@ export async function getMetaItems(host: Pick<ProtocolHost, 'readFlattenedMetaIt
     // overlay row shadowed the entire code-authored listing. Folded HERE, at
     // each face's boundary, so the shared body only ever sees the canonical
     // key.
-    return host.readFlattenedMetaItems(canonicalizeMetaRequestType(request), 'served');
+    const canonical = canonicalizeMetaRequestType(request);
+    // [ADR-0159 D5] The `form` list is resolved over both types, in one
+    // generic read where the list names no package (`readEffectiveFormList`).
+    if (canonical.type === 'form') return effectiveFormList(host, canonical, 'served');
+    return host.readFlattenedMetaItems(canonical, 'served');
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItemsForExecution`; the method's docblock there is its contract. */
-export async function getMetaItemsForExecution(host: Pick<ProtocolHost, 'readFlattenedMetaItems'>, request: { type: string; packageId?: string; previewDrafts?: boolean }) {
+export async function getMetaItemsForExecution(host: FormReadHost, request: { type: string; packageId?: string; previewDrafts?: boolean }) {
     // The same #4432 fold {@link getMetaItems} applies, for the same reason.
-    return host.readFlattenedMetaItems(canonicalizeMetaRequestType(request), 'execution');
+    const canonical = canonicalizeMetaRequestType(request);
+    if (canonical.type === 'form') return effectiveFormList(host, canonical, 'execution');
+    return host.readFlattenedMetaItems(canonical, 'execution');
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItemsPerPackage`; the method's docblock there is its contract. */

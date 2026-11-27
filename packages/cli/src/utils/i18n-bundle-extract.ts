@@ -217,6 +217,13 @@ export function extractTranslations(config: any, opts: ExtractOptions = {}): Ext
         const existingValue = lookupDeep(existing[locale], entry.path);
         if (existingValue !== undefined && existingValue !== '') {
           value = String(existingValue);
+        } else if (entry.fallbackPath !== undefined) {
+          // [ADR-0159 D8] A translation at the address the translator falls
+          // back to already translates the string: no value is scaffolded at
+          // the first address, where an empty or `[TODO]` one would be read
+          // ahead of it.
+          const fallbackValue = lookupDeep(existing[locale], entry.fallbackPath);
+          if (fallbackValue !== undefined && fallbackValue !== '') continue;
         }
       }
       if (value === undefined) {
@@ -561,7 +568,7 @@ export function renderSourceHashModule(
  * digests of the Studio metadata-form baseline `@objectstack/platform-objects`
  * owns — unreadable in that package (no `metadataForms` bundle exists there for
  * them to be about) and re-written in all three of its companions every time an
- * unrelated `*.form.ts` in `packages/spec` moved. That is the cross-package
+ * unrelated `*.metadata-form.ts` in `packages/spec` moved. That is the cross-package
  * coupling ADR-0029 D8 and each package's `bundle-ownership.test.ts` keep out of
  * the committed bundles; the companion is not exempt from it.
  *

@@ -189,6 +189,42 @@ describe('validateTranslationReferences — orphan keys', () => {
     expect(findings).toEqual([]);
   });
 
+  it('[ADR-0159 card ②] a `form` item\'s named section is a `_sections` anchor of the object it binds to', () => {
+    // `translateForm` reads a form item's section headings at
+    // `objects.<object>._sections.<name>`, as it reads a form view's.
+    const stackWithForm = (sectionKey: string) => ({
+      ...leadStack([{ 'zh-CN': { objects: { crm_lead: { label: '线索', _sections: { [sectionKey]: { label: '反馈', fields: { name: { label: '称呼' } } } } } } } }]),
+      forms: [{ name: 'crm_lead.feedback', object: 'crm_lead', type: 'simple', sections: [{ name: 'feedback', fields: [{ field: 'name' }] }] }],
+    });
+    expect(validateTranslationReferences(stackWithForm('feedback'))).toEqual([]);
+    // CONTROL: the same stack keyed to a section nothing declares is still reported.
+    expect(validateTranslationReferences(stackWithForm('feedbacks')).map((f) => f.path)).toEqual([
+      'translations[0]["zh-CN"].objects.crm_lead._sections.feedbacks',
+    ]);
+  });
+
+  it('[ADR-0159 D8] a `form` item\'s own `forms.<name>.sections` node is judged against the sections it names and their entries', () => {
+    const FORM = 'crm_lead.feedback';
+    const stackWithFormNode = (formKey: string, sectionKey: string, fieldKey: string) => ({
+      ...leadStack([{ 'zh-CN': {
+        objects: { crm_lead: { label: '线索' } },
+        forms: { [formKey]: { label: '反馈', sections: { [sectionKey]: { label: '反馈', fields: { [fieldKey]: { label: '称呼' } } } } } },
+      } }]),
+      forms: [{ name: FORM, object: 'crm_lead', type: 'simple', sections: [{ name: 'feedback', fields: [{ field: 'name' }, 'status'] }] }],
+    });
+    const paths = (stack: unknown) => validateTranslationReferences(stack as any).map((f) => [f.rule, f.path]);
+    expect(paths(stackWithFormNode(FORM, 'feedback', 'name'))).toEqual([]);
+    expect(paths(stackWithFormNode(FORM, 'feedbacks', 'name'))).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, `translations[0]["zh-CN"].forms["${FORM}"].sections.feedbacks`],
+    ]);
+    // An entry the section does not declare as an entry object: a bare field name authors no copy.
+    expect(paths(stackWithFormNode(FORM, 'feedback', 'status'))).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, `translations[0]["zh-CN"].forms["${FORM}"].sections.feedback.fields.status`],
+    ]);
+    // CONTROL: the node of a form the stack does not author is not judged here.
+    expect(paths(stackWithFormNode('crm_lead.elsewhere', 'feedbacks', 'status'))).toEqual([]);
+  });
+
   it('flags an unresolved view / action / section by name', () => {
     const findings = validateTranslationReferences(
       leadStack([

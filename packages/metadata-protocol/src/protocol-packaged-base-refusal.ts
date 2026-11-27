@@ -35,6 +35,7 @@
  * re-exports this module, so the published surface does not move.
  */
 
+import { projectViewForms } from '@objectstack/spec/ui';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import {
     isOriginGatedType,
@@ -1420,8 +1421,8 @@ export function overrideWriteVerdict(
         || overrideWriteActionObjectOf(a) === overrideWriteActionObjectOf(request.item);
     const shippers = dependencies === undefined || dependencies.length === 0
         ? []
-        : Array.from(new Set(
-            this.shippedArtifactsOf(request.type, request.name, undefined, member)
+        : Array.from(new Set([
+            ...this.shippedArtifactsOf(request.type, request.name, undefined, member)
                 .filter((a) => overrideWriteMemberOf(request.type, a) === member && onItsObject(a))
                 .map((a) => (a as { _packageId?: unknown } | null | undefined)?._packageId)
                 // An override replaces an item of an INSTALLED, read-only base
@@ -1431,7 +1432,19 @@ export function overrideWriteVerdict(
                 // (`registerApp` → `manifests`), so this keeps no real base out.
                 .filter((id): id is string => typeof id === 'string' && dependencies.includes(id)
                     && !this.isWritablePackage(id)),
-        ));
+            // [ADR-0159 D4, D7-b] …and, for a `form`, a base that ships the form
+            // as an OLD SHAPE: the `view` artifacts of the name read through the
+            // projection (the expanded `viewKind: 'form'` items a container
+            // registers, a form `view` item). Until card ④ every first-party form
+            // is an old shape, and its `form` override switches it off.
+            ...((PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'form'
+                ? this.shippedArtifactsOf('view', request.name)
+                    .filter((a) => projectViewForms(a).forms.some((form) => form.name === request.name))
+                    .map((a) => (a as { _packageId?: unknown } | null | undefined)?._packageId)
+                    .filter((id): id is string => typeof id === 'string' && dependencies.includes(id)
+                        && !this.isWritablePackage(id))
+                : []),
+        ]));
     // [#30065] The base's own item, the one a declared action override is
     // judged against: the shipping artifact under that base's envelope.
     const baseItemOf = (basePackageId: string): unknown => this.shippedArtifactsOf(request.type, request.name, undefined, member)

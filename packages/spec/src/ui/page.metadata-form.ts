@@ -1,13 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { defineForm } from './view.zod';
+import { defineMetadataForm } from './view.zod';
 
 /**
  * Page Metadata Form
  * 
  * Form layout for creating/editing page metadata definitions.
  */
-export const pageForm = defineForm({
+export const pageForm = defineMetadataForm({
   schemaId: 'page',
   type: 'simple',
   sections: [

@@ -5,7 +5,7 @@
  * schema REFUSES.
  *
  * `FieldSchema.returnType` has always been `z.enum(['number','text','boolean',
- * 'date'])`. The object designer's quick-add grid (`object.form.ts`, the
+ * 'date'])`. The object designer's quick-add grid (`object.metadata-form.ts`, the
  * `fields` repeater) declared an inline `options` list of SIX — the four plus
  * `datetime` and `currency` — so an author who added a formula field there and
  * picked either of the extra two wrote a value the parse refuses. The failure
@@ -15,7 +15,7 @@
  *
  * The exit is a pull-back, not a decision about what a formula may return. Two
  * carriers in this package already spelled the accept set correctly — the enum
- * itself, and the field designer's own control in `field.form.ts` (four
+ * itself, and the field designer's own control in `field.metadata-form.ts` (four
  * members, explicit list). Narrowing the grid makes it three.
  *
  * ## Why the four, and not the six
@@ -58,8 +58,8 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 
-import { objectForm } from './object.form';
-import { fieldForm } from './field.form';
+import { objectForm } from './object.metadata-form';
+import { fieldForm } from './field.metadata-form';
 import { FieldSchema } from './field.zod';
 import { FormViewSchema } from '../ui/view.zod';
 
@@ -212,7 +212,7 @@ describe('`returnType` is never offered a value the schema refuses', () => {
       });
 
       it('is expressible in the form DSL as it stands — no schema extension', () => {
-        // `defineForm` parses at module load; re-parsing makes the claim an
+        // `defineMetadataForm` parses at module load; re-parsing makes the claim an
         // assertion rather than an import side effect.
         const parsed = (FormViewSchema as unknown as z.ZodType).safeParse(form);
         expect(parsed.success, JSON.stringify((parsed as { error?: unknown }).error)).toBe(true);

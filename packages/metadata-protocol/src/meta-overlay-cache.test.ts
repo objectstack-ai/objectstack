@@ -82,13 +82,17 @@
  */
 
 import { describe, expect, it } from 'vitest';
+// check:test-source-alias — the protocol's lazy `@objectstack/lint` load is paid at collection, not in a case's window.
+import '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import {
     bumpWriteEpoch,
     META_OVERLAY_CACHE_DEFAULT_TTL_MS,
     metaOverlayCacheEntryCount,
     metaOverlayCacheTtlMs,
+    readOverlayCacheGeneration,
     readWriteEpoch,
+    retireOverlayCacheOnRollback,
 } from './meta-overlay-cache.js';
 
 interface StoredRow {
@@ -788,6 +792,64 @@ describe('[#10757 leg 6] §10 a write to any OTHER object does not retire the ov
         await h.protocol.getMetaItems({ type: 'object' });
         const perCall = h.finds.length;
         (h.engine.writeEpoch as { bump(reason: string): number }).bump('write');
+        await h.protocol.getMetaItems({ type: 'object' });
+        expect(h.finds.length).toBe(perCall);
+    });
+});
+
+describe('[ADR-0067 D2] §11 after a transaction that does not commit, the reads answer only committed rows', () => {
+    /**
+     * One transaction over the harness: a `sys_metadata` insert of `gamma`
+     * through the seam, a read inside it, then the callback's outcome; a failure undoes the insert BELOW the seam,
+     * as a driver rollback does, and rethrows.
+     */
+    const transaction = (h: ReturnType<typeof makeHarness>, rows: StoredRow[], fail: Error | null, write = true) =>
+        retireOverlayCacheOnRollback(h.engine, async () => {
+            if (write) await h.writeTo('sys_metadata', () => rows.push(storedRow('object', 'gamma')), 'insert');
+            const inside = await h.protocol.getMetaItems({ type: 'object' });
+            if (fail) {
+                if (write) rows.pop();
+                throw fail;
+            }
+            return inside;
+        });
+    const names = (answer: { items: unknown[] }) => (answer.items as Array<{ name?: string }>).map((i) => i.name);
+
+    it('rolled back: the next read answers the committed rows, and the error is rethrown as it came', async () => {
+        const rows = clone(OVERLAY_ROWS);
+        const h = makeHarness(rows);
+        await h.protocol.getMetaItems({ type: 'object' });
+        const refused = new Error('refused part-way');
+        let generationInside: number | undefined;
+        await expect(retireOverlayCacheOnRollback(h.engine, async () => {
+            await h.writeTo('sys_metadata', () => rows.push(storedRow('object', 'gamma')), 'insert');
+            expect(names(await h.protocol.getMetaItems({ type: 'object' }))).toContain('gamma');
+            generationInside = readOverlayCacheGeneration(h.engine);
+            rows.pop();
+            throw refused;
+        })).rejects.toBe(refused);
+        expect(readOverlayCacheGeneration(h.engine)).toBe(generationInside! + 1);
+        const perCall = h.finds.length;
+        expect(names(await h.protocol.getMetaItems({ type: 'object' }))).not.toContain('gamma');
+        expect(h.finds.length).toBeGreaterThan(perCall);
+    });
+
+    it('CONTROL: committed, the committed row is answered with zero reads', async () => {
+        const rows = clone(OVERLAY_ROWS);
+        const h = makeHarness(rows);
+        await transaction(h, rows, null);
+        const perCall = h.finds.length;
+        expect(names(await h.protocol.getMetaItems({ type: 'object' }))).toContain('gamma');
+        expect(h.finds.length).toBe(perCall);
+    });
+
+    it('CONTROL: a failed transaction that wrote no `sys_metadata` row retires nothing', async () => {
+        const rows = clone(OVERLAY_ROWS);
+        const h = makeHarness(rows);
+        await h.protocol.getMetaItems({ type: 'object' }); // first sight: wires the seam before the transaction opens
+        const refused = new Error('refused');
+        await expect(transaction(h, rows, refused, false)).rejects.toBe(refused);
+        const perCall = h.finds.length;
         await h.protocol.getMetaItems({ type: 'object' });
         expect(h.finds.length).toBe(perCall);
     });

@@ -17,8 +17,8 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { reportForm } from './report.form';
-import { dashboardForm } from './dashboard.form';
+import { reportForm } from './report.metadata-form';
+import { dashboardForm } from './dashboard.metadata-form';
 import { DATE_RANGE_DEFAULT_RANGES } from './dashboard.zod';
 
 type Option = { label?: unknown; value?: unknown };

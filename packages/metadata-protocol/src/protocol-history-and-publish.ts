@@ -23,6 +23,7 @@
  * not move.
  */
 
+import { applyOldShapeFormRowRemovals, formTypeWriteRefusal, healOldShapeFormRowRemovals, restoreOldShapeFormRowRemovals, type AppliedOldShapeFormRowRemoval } from './protocol-form-writes.js';
 import { stampHtmlPageRequires } from './runtime-authoring-gate.js';
 import type { RuntimeAuthoringIssue, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
 import { DraftConflictError, packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
@@ -68,6 +69,7 @@ import { historySlotOf, refusePackageSelectorOutsideSlottedTypes } from './proto
 import { captureStoredExpressionChange, fillStoredExpressionChange, type StoredExpressionFillCapture } from './protocol-stored-expression-fill.js';
 import { OBJECT_REGISTRY_REFUSED, reportObjectRegistryRefusal } from './protocol-registry-hydration.js';
 import { OBJECT_EXTENSION_TYPE, registrableObjectExtension } from './protocol-object-extension-item.js';
+import { retireOverlayCacheOnRollback } from './meta-overlay-cache.js';
 
 /**
  * [#32396] A promotion a package publish wrote: what {@link undoLandedPromotions}
@@ -84,6 +86,12 @@ type LandedPromotion = {
     version: string;
     /** The draft row the promotion consumed. */
     promotedDraft?: { body: unknown; hash: string };
+    /**
+     * [ADR-0159 D5] The old-shape `view` rows a `form` promotion removed or
+     * re-saved at its address, each with the version it replaced: the undo
+     * puts them back before it undoes the promotion itself.
+     */
+    removedOldShapeRows?: readonly AppliedOldShapeFormRowRemoval[];
 };
 
 /**
@@ -107,7 +115,10 @@ function unwrittenPromotionError(type: string, name: string): Error {
  * moves an ADR-0067 D3 revert makes, read off the same pre-publish capture) —
  * and the draft row the promotion consumed is put back as the pending draft,
  * byte for byte, so its hash and its version token are the ones the author
- * holds.
+ * holds. [ADR-0159 D5] A `form` promotion also removed (or re-saved) the
+ * old-shape `view` row of its address; that row is put back first, at the
+ * version it stood at ({@link restoreOldShapeFormRowRemovals}), so an undo
+ * that stops part-way never leaves the address without it.
  *
  * Each undo step appends its own history event, as a revert does: history is
  * append-only (D3), so the log records that the publish happened and was
@@ -151,6 +162,9 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'engine' | 'isArtif
                 ? 'override-artifact' : 'runtime-only';
         const intent = intentFor(item.packageId);
         try {
+            if (item.removedOldShapeRows && item.removedOldShapeRows.length > 0) {
+                await restoreOldShapeFormRowRemovals(host, args.repo, item.removedOldShapeRows, { actor, source, message });
+            }
             if (!item.promotedDraft) {
                 throw new Error(`the draft ${item.d.type}/${item.d.name} consumed was not captured, so it cannot be put back`);
             }
@@ -674,7 +688,7 @@ export class ProtocolHistoryAndPublishFacet {
      * `recordPendingDenialAudit`, rethrow. Skip it and the refusal is silent
      * again — the pre-#7748 state, not merely a worse one.
      */
-    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'engine' | 'ensureOverlayIndex' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'resolveSduiManifest' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'storedParentForToken' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
+    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'applyRegistryWriteThrough' | 'expandStoredViewContainers' | 'readFlattenedMetaItems' | 'readActiveOverlayRows' | 'restoreArtifactRegistryView' | 'storedOverlayEntries' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'engine' | 'ensureOverlayIndex' | 'expandRuntimeViewContainer' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'isWritablePackage' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'resolveSduiManifest' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'storedParentForToken' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
             type: string; name: string; actor?: string; message?: string;
             /**
              * [#8907] ADR-0048 — the package binding of the draft being promoted,
@@ -776,8 +790,13 @@ export class ProtocolHistoryAndPublishFacet {
              * discipline — per the maintainer's ruling, no parallel top-level map.
              */
             advisories: RuntimeAuthoringIssue[];
-            /** What `repo.promoteDraft` wrote. Absent exactly when `judgeOnly` was stated. */
-            result?: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+            /**
+             * What `repo.promoteDraft` wrote. Absent exactly when `judgeOnly`
+             * was stated. [ADR-0159 D5] For a `form`, also the old-shape rows
+             * the same transaction removed or re-saved, each with the version
+             * it replaced (absent when it changed none).
+             */
+            result?: { version: string; seq: number; item: MetadataItem; packageId: string | null; removedOldShapeRows?: readonly AppliedOldShapeFormRowRemoval[] };
             /**
              * [#32369] What a judge-only call judged: the draft body the
              * promotion would make active and the package it would write it
@@ -1195,6 +1214,20 @@ export class ProtocolHistoryAndPublishFacet {
             );
             if (nameCollision) throw nameCollision;
         }
+        // [ADR-0159 card ② items 5 and 7] …and the save door's two `form`-type
+        // refusals, judged again on the draft's body and the package it is
+        // promoted into before `repo.promoteDraft` writes: a package-less view
+        // draft that would store a list at the name a read-only package
+        // authors as a `form` (`VALIDATION_ERROR`, 400), and a `form` draft
+        // left open on a public address another form has taken since the
+        // draft was saved (`FORM_ADDRESS_TAKEN`, 409). See
+        // {@link formTypeWriteRefusal}.
+        if (draftForGate) {
+            const formRefusal = await formTypeWriteRefusal(
+                host, singularType, draftForGate.body, request.name, promoteInto,
+            );
+            if (formRefusal) throw formRefusal;
+        }
         // [#28905, ADR-0146 D1, D11] …and the promotion INTO the read-only
         // base itself, of an item of one of the five overlay types it ships:
         // the active row it writes is bound to the base, outside the pair D1
@@ -1436,7 +1469,27 @@ export class ProtocolHistoryAndPublishFacet {
                 });
                 expectedActiveHash = await host.storedParentForToken(ref, request.parentVersion, activeHead.head?.hash ?? null);
             }
-            const result = await repo.promoteDraft(ref, {
+            // [ADR-0159 D5, card ② item 5] A `form` made active here removes
+            // the promoted-into package's old-shape row of the name in the
+            // same transaction, as the published save does
+            // ({@link applyOldShapeFormRowRemovals}); the registry is healed
+            // after the commit. ⛔ Form content only.
+            let removedOldShapeRows: AppliedOldShapeFormRowRemoval[] = [];
+            const promoteFormAware = async (promote: () => Promise<any>): Promise<any> => {
+                if (singularType !== 'form' || request.judgeOnly) return promote();
+                const run = async () => {
+                    const promoted = await promote();
+                    removedOldShapeRows = await applyOldShapeFormRowRemovals(host, {
+                        name: request.name,
+                        packageId: promoteInto,
+                        actor: request.actor ?? null,
+                        source: 'protocol.publishMetaItem',
+                    });
+                    return promoted;
+                };
+                return typeof host.engine?.transaction === 'function' ? retireOverlayCacheOnRollback(host.engine, () => host.engine.transaction!(run)) : run();
+            };
+            const result = await promoteFormAware(() => repo.promoteDraft(ref, {
                 deriveActiveBody: (draftBody) => stampHtmlPageRequires(singularType, draftBody, sduiManifest),
                 // #4556 — NULL, not 'system', for an actor-less publish.
                 actor: request.actor ?? null,
@@ -1468,11 +1521,12 @@ export class ProtocolHistoryAndPublishFacet {
                 ...(expectedActiveHash !== undefined ? { expectedActiveHash } : {}),
                 // [#22877] …of the member that was judged.
                 ...memberOption(request.member),
-            });
+            }));
+            await healOldShapeFormRowRemovals(host, removedOldShapeRows);
             return {
                 singularType,
                 advisories: runtimeAdvisories,
-                result,
+                result: removedOldShapeRows.length > 0 ? { ...result, removedOldShapeRows } : result,
                 ...(draftForGate ? { promotedDraft: { body: draftForGate.body, hash: draftForGate.hash } } : {}),
             };
         } catch (err: any) {
@@ -2213,7 +2267,7 @@ export class ProtocolHistoryAndPublishFacet {
             ? this.engine.transaction.bind(this.engine)
             : undefined;
         const inTxn: <T>(cb: () => Promise<T>) => Promise<T> =
-            engineTx ? (cb) => engineTx(() => cb()) : (cb) => cb();
+            engineTx ? (cb) => retireOverlayCacheOnRollback(this.engine, () => engineTx(() => cb())) : (cb) => cb();
         /** The promotion request for one draft: Phase 0 judges it, Phase 1 writes it. */
         const promotionRequest = (d: (typeof ordered)[number]) => ({
             registryQuestion: PROMOTION_REGISTRY_QUESTION['package-publish'],
@@ -2336,6 +2390,7 @@ export class ProtocolHistoryAndPublishFacet {
                             seq: result.seq,
                             advisories,
                             ...(promotedDraft ? { promotedDraft } : {}),
+                            ...(result.removedOldShapeRows?.length ? { removedOldShapeRows: result.removedOldShapeRows } : {}),
                         });
                         if (typeof result.seq === 'number') publishedSeqs.push(result.seq);
                     } catch (e: unknown) {
@@ -2375,13 +2430,28 @@ export class ProtocolHistoryAndPublishFacet {
                     // [#22877] Keyed by member too: two members of one name
                     // are two plan items.
                     const promotedKeys = new Set(promoted.map((p) => commitPlanKey(p.d)));
+                    const committedItems = commitItems.filter((it) => promotedKeys.has(commitPlanKey(it)));
+                    // [ADR-0159 D5, ADR-0067 D3] …and every old-shape `view` row a
+                    // `form` promotion removed or re-saved: a row this publish
+                    // edited, recorded at the version it stood at before the
+                    // publish (the first removal of it; a row the batch also
+                    // promotes keeps its own pre-publish capture), so the
+                    // commit's revert restores it as it restores any edited row.
+                    for (const p of promoted) {
+                        for (const removal of p.removedOldShapeRows ?? []) {
+                            const item: CommitPlanItem = {
+                                type: 'view', name: removal.row.name, existedBefore: true, prevVersion: removal.replacedVersion,
+                            };
+                            if (!committedItems.some((it) => commitPlanKey(it) === commitPlanKey(item))) committedItems.push(item);
+                        }
+                    }
                     commit = await this.recordPackageCommit({
                         packageId: request.packageId,
                         operation: 'apply',
                         ...(request.message ? { message: request.message } : {}),
                         ...(request.actor ? { actor: request.actor } : {}),
                         ...(request.aiModel ? { aiModel: request.aiModel } : {}),
-                        items: commitItems.filter((it) => promotedKeys.has(commitPlanKey(it))),
+                        items: committedItems,
                         ...(publishedSeqs.length
                             ? { eventSeqStart: Math.min(...publishedSeqs), eventSeqEnd: Math.max(...publishedSeqs) }
                             : {}),

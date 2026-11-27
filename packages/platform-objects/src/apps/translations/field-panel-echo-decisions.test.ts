@@ -50,7 +50,7 @@
 // otherwise beside it.
 //
 // The remaining four keys have no twin at all — `relatedListFilter` (#19085
-// added it to `field.form.ts` only) and three of the five `summaryOperations`
+// added it to `field.metadata-form.ts` only) and three of the five `summaryOperations`
 // row properties — and are decided from their own helpText and their schema.
 //
 // ## The #19430 trap, met and checked AT THE SCHEMA before a word was rendered
@@ -220,7 +220,7 @@ const DECISIONS: readonly Decision[] = [
     en: 'Related List Filter',
     verdict: ALL_TRANSLATE,
     reason:
-      'THE ONE LABEL IN THIS FAMILY WITH NO SAME-STRING PRECEDENT: `Related List` returns zero hits across BOTH catalogs, and there is no twin (#19085 added this row to field.form.ts alone). Decided instead by composing this catalog\'s own authored renderings of its two parts — `Related` is 关联 / 関連 / relacionad- (sys_email.fields.related_object.label is 关联对象 / 関連オブジェクト / Objeto relacionado) and `Filter` is 筛选 / フィルター / Filtro (four authored precedents). ⚠️ Recorded as a LITERAL rendering, not an expansion: unlike round 3\'s `include`, the English compound already names its content, so nothing had to be added to make the label answer "filter what?".',
+      'THE ONE LABEL IN THIS FAMILY WITH NO SAME-STRING PRECEDENT: `Related List` returns zero hits across BOTH catalogs, and there is no twin (#19085 added this row to field.metadata-form.ts alone). Decided instead by composing this catalog\'s own authored renderings of its two parts — `Related` is 关联 / 関連 / relacionad- (sys_email.fields.related_object.label is 关联对象 / 関連オブジェクト / Objeto relacionado) and `Filter` is 筛选 / フィルター / Filtro (four authored precedents). ⚠️ Recorded as a LITERAL rendering, not an expansion: unlike round 3\'s `include`, the English compound already names its content, so nothing had to be added to make the label answer "filter what?".',
   },
   {
     scope: 'fields',

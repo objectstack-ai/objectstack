@@ -40,6 +40,7 @@
     "ui/ElementTextInputProps:required = false",
     "ui/ElementTextProps:align = \"left\"",
     "ui/ElementTextProps:variant = \"body\"",
+    "ui/Form:type = \"simple\"",
     "ui/FormField:span = \"auto\"",
     "ui/FormSection:collapsed = false",
     "ui/FormSection:collapsible = false",

@@ -59,9 +59,11 @@
  * envelope `TransportScopedMetaRequest` is imported from
  * `meta-collection-routes.ts`, where slice 13a moved it on from `ui-routes.ts`
  * (slice 10's home for it), and the data doors' `ServerScopedDataRequest` from
- * `data-action-routes.ts`, where slice 1 moved it. `anonymousFormIntakeWithdrawnIn`,
+ * `data-action-routes.ts`, where slice 1 moved it.
  * `PUBLIC_FORM_SERVER_MANAGED_FIELDS` and `isExpectedRouteError`, which only
- * this body read, are imported here instead of there. No export was added
+ * this body read, are imported here instead of there (and so was
+ * `anonymousFormIntakeWithdrawnIn`, until ADR-0159 card ② judged withdrawal
+ * through `formIntakeLayer`). No export was added
  * anywhere, and the published surface does not move.
  */
 
@@ -69,14 +71,21 @@ import {
     anonymousFormIntakeCandidates,
     anonymousFormIntakePosture,
     anonymousFormIntakeUnavailability,
-    anonymousFormIntakeWithdrawnIn,
     anonymousFormObjectName,
 } from '@objectstack/metadata-core';
 import { isEmptyForRequired, isMissing } from '@objectstack/core';
 import type { CreateDataRequest, GetMetaItemsRequest, PublicFormSubmitResponse } from '@objectstack/spec/api';
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { renderValidationMessage } from '@objectstack/spec/system';
-import { thankYouRecordFieldNames } from '@objectstack/spec/ui';
+import {
+    PROJECTED_FORM_SOURCE_KEY,
+    formIntakeLayer,
+    openFormAt,
+    projectViewForms,
+    thankYouRecordFieldNames,
+    type FormIntakeLayer,
+    type UnreadableFormBody,
+} from '@objectstack/spec/ui';
 import { validationFailure } from '@objectstack/types';
 import { FILE_REFERENCE_TYPES, RUNTIME_OWNED_FIELD_TYPES } from '@objectstack/spec/data';
 import type { ServerScopedDataRequest } from './data-action-routes.js';
@@ -153,6 +162,23 @@ function thankYouAnswerFields(
 }
 
 /**
+ * [ADR-0159 D2] The body of a `form` item the doors serve as the form: the
+ * item without its envelope (its identity, its label — served beside the form
+ * — its override declaration and protection, and every `_` envelope key), so
+ * an authored `form` is answered in the shape an old-shape form is.
+ */
+function formBodyOf(item: unknown): any {
+    if (!item || typeof item !== 'object') return item;
+    const body: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(item as Record<string, unknown>)) {
+        if (key.startsWith('_') || key === 'name' || key === 'object' || key === 'label'
+            || key === 'overrides' || key === 'protection') continue;
+        body[key] = value;
+    }
+    return body;
+}
+
+/**
  * Register the public (anonymous) form endpoints —
  * `RestServer#registerFormEndpoints`' body, called by that method with the
  * server as `this`. The method's own docblock, which the published declaration
@@ -179,7 +205,7 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
     // document under its override (the hard requirement ruled on #28238,
     // option 3). A candidate is served only when no body of its view name
     // in that layer explicitly withdraws the same form
-    // (`anonymousFormIntakeWithdrawnIn`: matched by slot or by slug, the
+    // (then `anonymousFormIntakeWithdrawnIn`: matched by slot or by slug, the
     // link kept with a switch set to `false`), so a withdrawal in one
     // package closes the name's form in every package (a known limit that
     // fails closed). Another view publishing the same slug is a different
@@ -189,22 +215,52 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
     // dependent package's same-named row, the base's form the override
     // removed — is not offered: that narrows intake, the direction a layer
     // may take.
-    const findPublicFormView = (
+    // [ADR-0159 D6] Since card ②, over BOTH types. The candidates are the
+    // open forms of the effective `form` read — authored `form` items and the
+    // projection of the old shapes (a container's `form`, a `formViews`
+    // entry, a `viewKind: 'form'` item), resolved over both types, so a
+    // stored row that closes an address by replacing its base's body keeps
+    // closing it. The withdrawal layer is the effective lists AND the
+    // per-package layers of both `form` and `view`, the old shapes passed
+    // through the projection first (`formIntakeLayer`): narrowing only, in
+    // both directions. Identity is the served name and, inside one name, the
+    // whole item (rule 6), so a same-name withdrawal closes the form whatever
+    // slug either side declares; a definition under another name is a
+    // different form. A stored body the projection cannot read closes the
+    // links it names (rule 7, `getUnreadableFormBodies`).
+    //
+    // A projected form whose served `view` item the effective `view` list
+    // still serves is answered through that item exactly as before (the same
+    // `form` object, the same label and translation), so an old-shape form
+    // answers byte-equal on the resolve door.
+    const findPublicForm = (
+        forms: any[],
         views: any[],
-        withdrawalLayer: any[],
+        layer: FormIntakeLayer,
         slug: string,
-    ): { view: any; form: any; object: string } | null => {
-        for (const view of views ?? []) {
-            if (!view || typeof view !== 'object') continue;
-            for (const c of anonymousFormIntakeCandidates(view)) {
-                if (c.slug !== slug) continue;
-                if (anonymousFormIntakeWithdrawnIn(withdrawalLayer, view, c)) continue;
+    ): { view: any; form: any; object: string; formItem: any } | null => {
+        const open = openFormAt(forms ?? [], layer, slug);
+        if (!open) return null;
+        const item = open.form;
+        if (item?.[PROJECTED_FORM_SOURCE_KEY] === 'view') {
+            const pkg = item?._packageId ?? undefined;
+            for (const view of views ?? []) {
+                if (!view || typeof view !== 'object') continue;
+                // The served item of that name, or (from a protocol that hands
+                // the doors a container) the container whose projection it is.
+                if (view.name !== item.name && !projectViewForms(view).forms.some((f) => f.name === item.name)) continue;
+                if ((view._packageId ?? undefined) !== pkg) continue;
+                const c = anonymousFormIntakeCandidates(view).find((candidate) => candidate.slug === slug);
+                if (!c) continue;
                 const objectName = anonymousFormObjectName(view, c.form);
-                if (!objectName) continue;
-                return { view, form: c.form, object: objectName };
+                if (objectName !== open.object) continue;
+                return { view, form: c.form, object: objectName, formItem: item };
             }
         }
-        return null;
+        // An authored `form` item, or a projected one the `view` list does
+        // not serve at its address (a stored `view` row over a base that left
+        // the type): served as the form body, without its item envelope.
+        return { view: undefined, form: formBodyOf(item), object: open.object, formItem: item };
     };
 
     // [ADR-0131 D6, C7] WHICH metadata an anonymous form request reads:
@@ -236,7 +292,7 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
         environmentId: string | undefined,
         req: any,
         slug: string,
-    ): Promise<{ view: any; form: any; object: string } | null> => {
+    ): Promise<{ view: any; form: any; object: string; formItem: any } | null> => {
         const p = await this.resolveProtocol(environmentId, req);
         if (typeof (p as any).getMetaItems !== 'function') return null;
         const tenancy = await this.resolveAnonymousFormTenancy(environmentId, req);
@@ -249,15 +305,31 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
             : Array.isArray(result)
                 ? result
                 : []);
-        const items = listOf(await p.getMetaItems(viewsRequest));
-        // [#28409] The per-package layer, where the protocol serves one: a
+        const formsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = { ...viewsRequest, type: 'form' };
+        const views = listOf(await p.getMetaItems(viewsRequest));
+        // [ADR-0159 D5, D6 rules 1 and 3] The candidates are the effective
+        // `form` read, which projects the old shapes itself: ONE read, and no
+        // second candidate source inside the door. A protocol that serves no
+        // `form` item serves no candidate.
+        const forms = listOf(await p.getMetaItems(formsRequest));
+        // [#28409] The per-package layers, where the protocol serves them: a
         // server-only extension, feature-detected like the other extensions
         // the doors read. A protocol without it serves no narrower list than
         // the one it lists, which is then the whole layer.
-        const perPackage = typeof (p as any).getMetaItemsPerPackage === 'function'
-            ? listOf(await (p as any).getMetaItemsPerPackage(viewsRequest))
+        const perPackage = async (request: TransportScopedMetaRequest<GetMetaItemsRequest>): Promise<any[]> =>
+            (typeof (p as any).getMetaItemsPerPackage === 'function'
+                ? listOf(await (p as any).getMetaItemsPerPackage(request))
+                : []);
+        // [ADR-0159 D6 rule 7] …and the stored bodies the projection cannot read.
+        const unreadable: UnreadableFormBody[] = typeof (p as any).getUnreadableFormBodies === 'function'
+            ? await (p as any).getUnreadableFormBodies()
             : [];
-        const match = findPublicFormView(items, [...items, ...perPackage], slug);
+        const layer = formIntakeLayer({
+            forms: [...forms, ...(await perPackage(formsRequest))],
+            views: [...views, ...(await perPackage(viewsRequest))],
+            unreadable,
+        });
+        const match = findPublicForm(forms, views, layer, slug);
         if (!match) return null;
         // [#21476] A form that cannot take intake on this posture is not
         // offered: `null` here IS the withdrawn form's answer on both
@@ -329,7 +401,7 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 // view that authors none keeps the route's own reading, so
                 // the console's `label ?? form.title ?? objectSchema.label`
                 // still reaches the form's (translated) title.
-                let servedLabel: any = match.view?.label ?? match.form?.label;
+                let servedLabel: any = match.view !== undefined ? (match.view?.label ?? match.form?.label) : match.formItem?.label;
                 try {
                     const p = await this.resolveProtocol(environmentId, req);
                     if (typeof (p as any).getMetaItems === 'function') {
@@ -435,15 +507,30 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                                     // reads ask, of the view as the protocol served it
                                     // (its envelope names the base). `undefined` keeps
                                     // the override's own text, as before.
-                                    const pairBundle = await pairTranslationBundleOf(p, 'view', match.view);
-                                    const view = translateMetadataDocument('view', match.view, bundle, {
-                                        ...this.translateOptionsFor(i18n, locale),
-                                        packagedBase: this.packagedObjectBase(p, 'view', match.view?.name),
-                                        ...(pairBundle !== undefined ? { pairBundle: pairBundle as any } : {}),
-                                    });
-                                    if (match.form === match.view?.config) servedForm = view?.config;
-                                    if (match.view?.label !== undefined && view?.label !== undefined) {
-                                        servedLabel = view.label;
+                                    if (match.view !== undefined) {
+                                        const pairBundle = await pairTranslationBundleOf(p, 'view', match.view);
+                                        const view = translateMetadataDocument('view', match.view, bundle, {
+                                            ...this.translateOptionsFor(i18n, locale),
+                                            packagedBase: this.packagedObjectBase(p, 'view', match.view?.name),
+                                            ...(pairBundle !== undefined ? { pairBundle: pairBundle as any } : {}),
+                                        });
+                                        if (match.form === match.view?.config) servedForm = view?.config;
+                                        if (match.view?.label !== undefined && view?.label !== undefined) {
+                                            servedLabel = view.label;
+                                        }
+                                    } else {
+                                        // [ADR-0159 D8] A `form` item: `forms.NAME` first,
+                                        // its old-shape `_views` tails as the fallback.
+                                        const pairBundle = await pairTranslationBundleOf(p, 'form', match.formItem);
+                                        const form = translateMetadataDocument('form', match.formItem, bundle, {
+                                            ...this.translateOptionsFor(i18n, locale),
+                                            packagedBase: this.packagedObjectBase(p, 'form', match.formItem?.name),
+                                            ...(pairBundle !== undefined ? { pairBundle: pairBundle as any } : {}),
+                                        });
+                                        servedForm = formBodyOf(form);
+                                        if (match.formItem?.label !== undefined && form?.label !== undefined) {
+                                            servedLabel = form.label;
+                                        }
                                     }
                                 }
                             } catch (e: any) {

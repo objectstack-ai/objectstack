@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { defineForm } from '../ui/view.zod';
+import { defineMetadataForm } from '../ui/view.zod';
 
 /**
  * PermissionSet — canonical FormView layout.
@@ -20,7 +20,7 @@ import { defineForm } from '../ui/view.zod';
  * now — they're typically managed via the dedicated permission matrix
  * UI on a record-by-record basis, not free-form editing.
  */
-export const permissionForm = defineForm({
+export const permissionForm = defineMetadataForm({
   schemaId: 'permission',
   type: 'simple',
   sections: [

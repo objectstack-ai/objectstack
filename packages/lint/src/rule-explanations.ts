@@ -1164,7 +1164,7 @@ const VISIBILITY_ROOT_MISLAYERED_EXPLANATION: RuleExplanation = {
   paragraphs: [
     'ADR-0089 D3 binds a different root on each layer. A runtime view or page surface binds the live ' +
       'record as `record`, plus `current_user` (and page state as `page.VAR` on a page component); a ' +
-      'metadata-editing form — a `*.form.ts` module or a schema-bound form view — binds the row under ' +
+      'metadata-editing form — a `*.metadata-form.ts` module or a schema-bound form view — binds the row under ' +
       'edit as `data`.',
     'A predicate rooted at the other layer\'s namespace never matches, and the element renders ' +
       'unconditionally. The rule is a warning rather than an error because the root is at least a ' +
@@ -5144,6 +5144,67 @@ const FORM_VIEW_INTERNAL_NOT_LOADED_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Form items (`validate-form-items.ts`, ADR-0159) ───────────────────────────
+
+const FORM_PUBLIC_ADDRESS_TAKEN_EXPLANATION: RuleExplanation = {
+  rule: 'form-public-address-taken',
+  covers: 'why two forms cannot share one public address',
+  paragraphs: [
+    'A public form answers at `/forms/<slug>`, the slug its `sharing.publicLink` names. Two forms on one ' +
+      'address answer one of them, and nothing says which: the anonymous doors take the first form that ' +
+      'is open there, so a second form can take over an address an administrator thinks is closed.',
+    'A form HOLDS an address while its `sharing.publicLink` names it, switched on or off: a form that ' +
+      'keeps its link with `enabled: false` or `allowAnonymous: false` still holds it, so a successor on ' +
+      'the same address is refused until the retired form\'s link is cleared. The forms read are every ' +
+      'authored `form` item and every form an old `view` shape carries (a container\'s `form`, a ' +
+      '`formViews` entry, a `viewKind: \'form\'` item), under the names they are served as.',
+    'Only an authored `form` left OPEN on a held address is refused; a closed form is never refused, and ' +
+      'two old-shape forms on one address keep today\'s behaviour. The runtime `form` write door refuses ' +
+      'the same save with `409 FORM_ADDRESS_TAKEN`. To clear it, give the form another public link, or ' +
+      'clear the link of the form that holds the address.',
+  ],
+};
+
+const FORM_CONSUMER_LESS_EXPLANATION: RuleExplanation = {
+  rule: 'form-consumer-less',
+  covers: 'what counts as a consumer of a form',
+  paragraphs: [
+    'A `form` item is a named form with a consumer (ADR-0159 D1): a public link (`sharing.publicLink`), ' +
+      'or an action of `type: \'form\'` whose `target` is the form\'s name. A form with neither is reached ' +
+      'by nothing: it installs and steers nothing. A record create or edit form is not a `form` item; it ' +
+      'is the object\'s `fieldGroups`.',
+    'Not raised for an item that declares `overrides`: an override with no link over a base form that has ' +
+      'a consumer is what keeps that address closed, and removing it would re-open the base\'s form. The ' +
+      'rule is a warning. To clear it, give the form a public link, open it from an action of type `form`, ' +
+      'or remove it.',
+  ],
+};
+
+const FORM_OBJECT_OUTSIDE_CLOSURE_EXPLANATION: RuleExplanation = {
+  rule: 'form-object-outside-closure',
+  covers: 'which objects a form may bind',
+  paragraphs: [
+    'A `form` item submits into the one object its `object` names (ADR-0159 D2). Under a stated package ' +
+      'scope that object must be inside the package\'s closure: its own objects, the objects of the ' +
+      'packages its manifest declares in `dependencies`, and platform objects — the closure a list view\'s ' +
+      'object is judged against. A form bound outside it installs into a deployment where the object may ' +
+      'not exist, and its public submit has nowhere to write.',
+    'To clear it, bind the form to an object inside the closure, or declare a dependency on the package ' +
+      'that ships the object.',
+  ],
+};
+
+const FORM_OBJECT_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'form-object-unknown',
+  covers: 'why a form must bind an object that exists',
+  paragraphs: [
+    'A `form` item submits into the one object its `object` names (ADR-0159 D2). Judged against the whole ' +
+      'collection a runtime write is judged against, the object exists nowhere in the deployment, so the ' +
+      'form has nothing to render and its submit nothing to write into.',
+    'To clear it, bind the form to an object that exists, or save the object before you publish the form.',
+  ],
+};
+
 // ── Flow template paths (`validate-flow-template-paths.ts`) ───────────────────
 
 const FLOW_TEMPLATE_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
@@ -7093,6 +7154,10 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [PAGE_SECTION_GROUP_UNKNOWN_EXPLANATION.rule]: PAGE_SECTION_GROUP_UNKNOWN_EXPLANATION,
   [FORM_SECTION_GROUP_UNKNOWN_EXPLANATION.rule]: FORM_SECTION_GROUP_UNKNOWN_EXPLANATION,
   [FORM_VIEW_INTERNAL_NOT_LOADED_EXPLANATION.rule]: FORM_VIEW_INTERNAL_NOT_LOADED_EXPLANATION,
+  [FORM_PUBLIC_ADDRESS_TAKEN_EXPLANATION.rule]: FORM_PUBLIC_ADDRESS_TAKEN_EXPLANATION,
+  [FORM_CONSUMER_LESS_EXPLANATION.rule]: FORM_CONSUMER_LESS_EXPLANATION,
+  [FORM_OBJECT_OUTSIDE_CLOSURE_EXPLANATION.rule]: FORM_OBJECT_OUTSIDE_CLOSURE_EXPLANATION,
+  [FORM_OBJECT_UNKNOWN_EXPLANATION.rule]: FORM_OBJECT_UNKNOWN_EXPLANATION,
   [FLOW_TEMPLATE_FIELD_UNPROVISIONED_EXPLANATION.rule]: FLOW_TEMPLATE_FIELD_UNPROVISIONED_EXPLANATION,
   [FLOW_TEMPLATE_LOOKUP_TRAVERSAL_EXPLANATION.rule]: FLOW_TEMPLATE_LOOKUP_TRAVERSAL_EXPLANATION,
   [FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION.rule]: FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION,

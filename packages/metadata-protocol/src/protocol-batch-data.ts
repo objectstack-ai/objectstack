@@ -52,6 +52,7 @@ import type { DroppedFieldsEvent, EngineQueryOptionsParsed } from '@objectstack/
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import { engineCanRollBack, recordNotFoundError } from '@objectstack/core';
 import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
+import { retireOverlayCacheOnRollback } from './meta-overlay-cache.js';
 import { staleSummaryAnswerLines, staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 
 /**
@@ -281,14 +282,14 @@ export async function runAtomicBatch(
     const ABORT = new Error('atomic batch aborted — rolled back');
     let aborted: BatchDataLoopOutcome | undefined;
     try {
-        return await engineTx(async (trxCtx: any) => {
+        return await retireOverlayCacheOnRollback(this.engine, () => engineTx(async (trxCtx: any) => {
             const outcome = await runLoop(trxCtx);
             if (outcome.failed > 0) {
                 aborted = outcome;
                 throw ABORT;
             }
             return onCommit(outcome);
-        }, context);
+        }, context));
     } catch (err) {
         if (err === ABORT && aborted) {
             return onRollback(aborted);

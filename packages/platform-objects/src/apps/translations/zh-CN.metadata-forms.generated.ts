@@ -1664,6 +1664,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     }
   },
+  form: {
+    label: "表单"
+  },
   page: {
     label: "页面",
     sections: {
