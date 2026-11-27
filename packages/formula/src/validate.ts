@@ -1497,9 +1497,11 @@ function scalarLiteralOf(node: unknown): string | undefined {
  * 'frontend'` is `false`, and so is `null == 'frontend'`, so the expression
  * answers `false` (for `!=`, `true`) on every row whatever the list holds — a
  * condition that never fires, or always does, with no fault and no log line.
- * The prescription is membership, in the null-guarded spelling the Studio
- * condition builder writes: `'a' in null` faults, so `S != null && V in S`
- * for `==` and `S == null || !(V in S)` for `!=`.
+ * The prescription is membership, null-guarded because `'a' in null` faults,
+ * and spelled for the site by {@link listMembershipSource} — the one spelling
+ * the Studio condition builder writes too: `has()`-guarded for a
+ * `<root>.<field>` read, `!= null`-guarded for a bare name at a flattened
+ * site, `.contains(…)` where the source compiles to a query filter.
  *
  * Accepted, deliberately: `S == null` / `S != null` (either side), which test
  * whether the list is set; a list compared with a list literal or with
@@ -1509,7 +1511,7 @@ function scalarLiteralOf(node: unknown): string | undefined {
  * At a `'flattened'` site nothing is judged unless the caller declares the run
  * proven to bind a row of the typed object ({@link ExprSchemaHint.faultOutcome}
  * `'run-fails'`); elsewhere the names hold what the entrance handed the run.
- * The prescription is spelled for the site ({@link listMembershipRewrite}).
+ * The prescription is spelled for the site ({@link listMembershipSource}).
  *
  * The subject is read through `rootMemberOf`, the field-existence pass's own
  * member reader, so `record.f` and `record['f']` (and `previous.…`) are
@@ -1657,16 +1659,23 @@ function forEachListEquality(
   walk(tree, new Set());
 }
 
-/** A read {@link checkListEquality} judges: `<root>.<field>`, or a bare field name at a flattened site. */
-interface ListSubjectRead {
+/**
+ * A read {@link checkListEquality} judges, and the site a membership test is
+ * spelled for: `<root>.<field>`, or a bare field name at a flattened site.
+ */
+export interface ListSubjectRead {
   readonly reference: string;
   readonly bare: boolean;
 }
 
 /**
- * The membership test that replaces `<reference> <operator> <operand>`, in
- * the spelling that works where the source is read, parenthesised whole so it
- * can stand where the comparison stood (`A && (…)`):
+ * Membership of `member` (a CEL literal) in the list `read.reference` —
+ * `contains` ⇒ the member is in the list, else its complement — in the
+ * spelling that works where the source is read. Two or three clauses, NOT
+ * parenthesised: a caller that joins it with other terms parenthesises it.
+ * This is the one prescription: the `list-equality` refusal's rewrite is this
+ * text parenthesised, and the Studio condition builder writes this text, so
+ * the two cannot prescribe different spellings for one site.
  *
  * - a `<root>.<field>` read evaluated as CEL: `has()`-guarded, because an
  *   action's `visible` / `disabled` / `pressed` binds a sparse row (a key
@@ -1681,27 +1690,37 @@ interface ListSubjectRead {
  *   on a list column; its comparand is text, so a number or boolean literal
  *   is passed as its text (`$contains` names a stored `3` by `"3"`).
  */
+export function listMembershipSource(
+  read: ListSubjectRead,
+  member: string,
+  contains: boolean,
+  filterCompiled = false,
+): string {
+  const r = read.reference;
+  if (filterCompiled && !read.bare) {
+    const text = member.startsWith('"') || member.startsWith("'") ? member : JSON.stringify(member);
+    return contains ? `${r} != null && ${r}.contains(${text})` : `${r} == null || !${r}.contains(${text})`;
+  }
+  if (read.bare) {
+    return contains ? `${r} != null && ${member} in ${r}` : `${r} == null || !(${member} in ${r})`;
+  }
+  return contains
+    ? `has(${r}) && ${r} != null && ${member} in ${r}`
+    : `!has(${r}) || ${r} == null || !(${member} in ${r})`;
+}
+
+/**
+ * The membership test that replaces `<reference> <operator> <operand>`:
+ * {@link listMembershipSource}, parenthesised whole so it can stand where the
+ * comparison stood (`A && (…)`).
+ */
 function listMembershipRewrite(
   read: ListSubjectRead,
   operator: '==' | '!=',
   operand: string,
   filterCompiled: boolean,
 ): string {
-  const r = read.reference;
-  if (filterCompiled && !read.bare) {
-    const text = operand.startsWith('"') || operand.startsWith("'") ? operand : JSON.stringify(operand);
-    return operator === '=='
-      ? `(${r} != null && ${r}.contains(${text}))`
-      : `(${r} == null || !${r}.contains(${text}))`;
-  }
-  if (read.bare) {
-    return operator === '=='
-      ? `(${r} != null && ${operand} in ${r})`
-      : `(${r} == null || !(${operand} in ${r}))`;
-  }
-  return operator === '=='
-    ? `(has(${r}) && ${r} != null && ${operand} in ${r})`
-    : `(!has(${r}) || ${r} == null || !(${operand} in ${r}))`;
+  return `(${listMembershipSource(read, operand, operator === '==', filterCompiled)})`;
 }
 
 /** The `list-equality` refusal for `<reference> <operator> <operand>`. */
