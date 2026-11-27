@@ -126,7 +126,6 @@ describe('validateActionBodyCapabilities at the runtime publish door (#35143)', 
   it('refuses an action write whose body writes with no api.write grant, and passes it granted', () => {
     const refused = runRuntimeAuthoringRules({
       type: 'action',
-      name: 'pr_close',
       item: action("await ctx.api.object('pr_task').update({ id: ctx.recordId, done: true });", []),
       context: { objects: [TASK] },
     });
@@ -136,7 +135,6 @@ describe('validateActionBodyCapabilities at the runtime publish door (#35143)', 
 
     const granted = runRuntimeAuthoringRules({
       type: 'action',
-      name: 'pr_close',
       item: action("await ctx.api.object('pr_task').update({ id: ctx.recordId, done: true });", ['api.write']),
       context: { objects: [TASK] },
     });
@@ -147,7 +145,6 @@ describe('validateActionBodyCapabilities at the runtime publish door (#35143)', 
   it('refuses an object write that adds an inline action with the same body', () => {
     const result = runRuntimeAuthoringRules({
       type: 'object',
-      name: 'pr_task',
       item: { ...TASK, actions: [action("await ctx.api.object('pr_task').insert({ name: 'x' });", [])] },
       context: { objects: [] },
     });

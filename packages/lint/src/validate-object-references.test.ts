@@ -537,14 +537,12 @@ describe('[#35143] validateObjectReferences — the object a seed, a flow node o
     it('a `seed` write over an object the deployment does not serve is refused; over a served one it passes', () => {
       const refused = runRuntimeAuthoringRules({
         type: 'seed',
-        name: 's',
         item: { object: 'crm_led', externalId: 'name', records: [{ name: 'a' }] },
         context: { objects },
       });
       expect(objectRefErrors(refused)).toEqual(['data[0].object']);
       const passed = runRuntimeAuthoringRules({
         type: 'seed',
-        name: 's',
         item: { object: 'crm_lead', externalId: 'name', records: [{ name: 'a' }] },
         context: { objects },
       });
@@ -556,7 +554,6 @@ describe('[#35143] validateObjectReferences — the object a seed, a flow node o
       const write = (objectName: string) =>
         runRuntimeAuthoringRules({
           type: 'action',
-          name: 'go',
           item: { name: 'go', label: 'Go', objectName, type: 'script', locations: ['record_header'], body: { language: 'js', source: 'return 1;' } },
           context: { objects },
         });
@@ -568,7 +565,6 @@ describe('[#35143] validateObjectReferences — the object a seed, a flow node o
       const write = (objectName: string) =>
         runRuntimeAuthoringRules({
           type: 'flow',
-          name: 'crm_flow',
           item: flow([{ id: 'c', type: 'create_record', label: 'Make', config: { objectName, fields: { name: 'x' } } }]),
           context: { objects },
         });

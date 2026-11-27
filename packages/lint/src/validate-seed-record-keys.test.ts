@@ -103,7 +103,6 @@ describe('validateSeedRecordKeys at the runtime `seed` publish door (#35143)', (
   it('refuses a seed write whose record carries a key the served object does not have', () => {
     const result = runRuntimeAuthoringRules({
       type: 'seed',
-      name: 'pr_task_seed',
       item: seed([{ name: 'a', bogus_key: 1 }]),
       context: { objects: [TASK] },
     });
@@ -115,7 +114,6 @@ describe('validateSeedRecordKeys at the runtime `seed` publish door (#35143)', (
   it('passes the same write once the key is a field', () => {
     const result = runRuntimeAuthoringRules({
       type: 'seed',
-      name: 'pr_task_seed',
       item: seed([{ name: 'a', done: true }]),
       context: { objects: [TASK] },
     });
