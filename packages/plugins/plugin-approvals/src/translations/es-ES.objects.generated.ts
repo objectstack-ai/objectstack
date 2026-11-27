@@ -113,6 +113,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Inicio de la ejecución raíz",
         help: "Cuándo comenzó la ejecución en la que se inició la aprobación a la que pertenece esta solicitud."
       },
+      record_run_id: {
+        label: "Ejecución del registro",
+        help: "Ejecución de automatización que lleva el registro de esta solicitud."
+      },
       node_config_json: {
         label: "Node Config",
         help: "Snapshot of the Approval node config (approvers/behavior) for node-driven requests."

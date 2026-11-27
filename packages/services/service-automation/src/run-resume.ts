@@ -16,7 +16,7 @@
  */
 
 import { withFlowRunSlot } from './flow-slots.js';
-import { deriveRootRun, readRootRun, ROOT_RUN_CONTEXT_KEY, type RootRunDerivation } from './root-run.js';
+import { deriveRunLinks, isRunLinkStamped, RECORD_RUN_CONTEXT_KEY, ROOT_RUN_CONTEXT_KEY, type RunLinkDerivation } from './root-run.js';
 import type { FlowParsed, FlowRunSummary } from '@objectstack/spec/automation';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { AutomationContext, AutomationResult, ResumeSignal } from '@objectstack/spec/contracts';
@@ -1798,19 +1798,20 @@ export async function resumeInternal(
         let segmentContext = await this.resolveDecisionSegmentContext(run, signal);
 
         // [ADR-0162 Execution item 7] A run parked before the engine stamped
-        // root runs carries none: it gets its root run here, derived from its
-        // links to its parents, so every node of this segment and every child
-        // it starts reads one (an approval step that opens here records it).
-        // BEFORE the claim, for the reason the segment context above is: a
-        // parent the store cannot read refuses this resume without consuming
-        // anything, and the identical resume can be retried. A chain that
-        // cannot be read whole (a parent that is no longer parked) is not a
-        // reason to stop the run: it continues with no root run, said once
-        // here, and a reader that needs one refuses on its own terms.
-        if (!readRootRun(segmentContext)) {
-            let derivation: RootRunDerivation;
+        // root runs carries no stamp: it gets its root run and its record run
+        // here, derived in one walk of its links to its parents, so every node
+        // of this segment and every child it starts reads them (an approval
+        // step that opens here records them). BEFORE the claim, for the reason
+        // the segment context above is: a parent the store cannot read refuses
+        // this resume without consuming anything, and the identical resume can
+        // be retried. A chain that cannot be read whole (a parent that is no
+        // longer parked) is not a reason to stop the run: it continues stamped
+        // `null` (so it is not walked again), said once here, and a reader that
+        // needs the runs refuses on its own terms.
+        if (!isRunLinkStamped(segmentContext)) {
+            let derivation: RunLinkDerivation;
             try {
-                derivation = await deriveRootRun(run, (parentId) => this.loadSuspendedRunStrict(parentId));
+                derivation = await deriveRunLinks(run, (parentId) => this.loadSuspendedRunStrict(parentId));
             } catch (err) {
                 const message = (err as Error).message;
                 // The same durability reading, the same envelope, as the
@@ -1830,8 +1831,13 @@ export async function resumeInternal(
                 };
             }
             if (derivation.kind === 'derived') {
-                segmentContext = { ...segmentContext, [ROOT_RUN_CONTEXT_KEY]: derivation.rootRun } as AutomationContext;
+                segmentContext = {
+                    ...segmentContext,
+                    [ROOT_RUN_CONTEXT_KEY]: derivation.rootRun,
+                    [RECORD_RUN_CONTEXT_KEY]: derivation.recordRun,
+                } as AutomationContext;
             } else {
+                segmentContext = { ...segmentContext, [ROOT_RUN_CONTEXT_KEY]: null, [RECORD_RUN_CONTEXT_KEY]: null } as AutomationContext;
                 // FUNCTIONAL, so `warn`: nothing the run claims to persist is
                 // lost, and the reader that needs a root run says so itself.
                 this.logger.warn(

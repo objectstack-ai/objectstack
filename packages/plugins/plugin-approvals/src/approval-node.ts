@@ -28,7 +28,7 @@ import {
 // `IApprovalService.openNodeRequest` declares for its context parameter since
 // commit aa4b90d9a (the full-envelope ruling: no per-site subset contracts).
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { ApprovalRootRun, ApprovalService } from './approval-service.js';
+import type { ApprovalRecordRun, ApprovalRootRun, ApprovalService } from './approval-service.js';
 import { registerApprovalReviseNode } from './approval-revise-node.js';
 
 /** Minimal surface of the automation engine this provider depends on. */
@@ -61,6 +61,13 @@ export interface ApprovalAutomationSurface {
    * run at all.
    */
   rootRunOf?(context: unknown): ApprovalRootRun | undefined;
+  /**
+   * [ADR-0162 Execution item 7] The run that carries the record of the run
+   * `context` belongs to (`AutomationEngine.recordRunOf`): the root run, or a
+   * `map` item run whose item is a record. `undefined` exactly where
+   * {@link rootRunOf} is.
+   */
+  recordRunOf?(context: unknown): ApprovalRecordRun | undefined;
 }
 
 interface MinimalLogger {
@@ -187,16 +194,21 @@ export function registerApprovalNode(
       if (!object) return { success: false, error: `Approval node '${node.id}': no target object in context` };
       if (!recordId) return { success: false, error: `Approval node '${node.id}': no record id in $record` };
 
-      // [ADR-0162 Execution item 7] The run's root run, recorded on the
-      // request it opens. An engine that hands root runs and has none for this
-      // run could not read the run's tree whole (a run parked before runs
-      // recorded their root run, whose parent is no longer parked): the step
-      // is refused rather than opened unplaced, because a request that records
-      // no root run cannot be told apart from one opened before the release,
-      // and every request opened after it records one. An engine that hands
-      // none (`rootRunOf` absent) leaves the column empty, as before.
-      const rootRun = typeof automation.rootRunOf === 'function' ? automation.rootRunOf(context) : null;
-      if (rootRun === undefined) {
+      // [ADR-0162 Execution item 7] The run's root run and record run,
+      // recorded on the request it opens. An engine that hands them and has
+      // none for this run could not read the run's tree whole (a run parked
+      // before runs recorded their root run, whose parent is no longer parked,
+      // or a child of one): the step is refused rather than opened unplaced,
+      // because a request that records no root run cannot be told apart from
+      // one opened before the release, and every request opened after it
+      // records one. An engine that hands none (`rootRunOf` absent) leaves the
+      // columns empty, as before.
+      const handsRunLinks = typeof automation.rootRunOf === 'function';
+      const rootRun = handsRunLinks ? automation.rootRunOf!(context) : null;
+      const recordRun = handsRunLinks && typeof automation.recordRunOf === 'function'
+        ? automation.recordRunOf(context)
+        : null;
+      if (rootRun === undefined || recordRun === undefined) {
         return {
           success: false,
           error: `Approval node '${node.id}': the approval this step belongs to cannot be placed — the run it `
@@ -241,6 +253,7 @@ export function registerApprovalNode(
           // "ended" only for a root run's request.
           runRoot: !hasParentRun(context),
           rootRun,
+          recordRun,
         }, {
           ...SYSTEM_CTX,
           userId: context?.userId,

@@ -113,6 +113,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Início da execução raiz",
         help: "Quando começou a execução em que a aprovação desta solicitação foi iniciada."
       },
+      record_run_id: {
+        label: "Execução do registro",
+        help: "Execução de automação que carrega o registro desta solicitação."
+      },
       node_config_json: {
         label: "Configuração do nó",
         help: "Instantâneo da configuração do nó de aprovação (aprovadores/comportamento) para solicitações conduzidas por nó."

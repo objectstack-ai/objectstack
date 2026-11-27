@@ -113,6 +113,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Root Run Started At",
         help: "When the run the approval this request belongs to was started on began."
       },
+      record_run_id: {
+        label: "Record Run",
+        help: "Automation run that carries the record this request is on."
+      },
       node_config_json: {
         label: "Node Config",
         help: "Snapshot of the Approval node config (approvers/behavior) for node-driven requests."

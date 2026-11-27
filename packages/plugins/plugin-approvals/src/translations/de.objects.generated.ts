@@ -113,6 +113,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Beginn der Stammausführung",
         help: "Wann die Ausführung begann, mit der die Genehmigung dieser Anfrage gestartet wurde."
       },
+      record_run_id: {
+        label: "Datensatzausführung",
+        help: "Automatisierungsausführung, die den Datensatz dieser Anfrage trägt."
+      },
       node_config_json: {
         label: "Knotenkonfiguration",
         help: "Momentaufnahme der Konfiguration des Genehmigungsknotens (Genehmiger/Verhalten) bei knotengesteuerten Anfragen."

@@ -241,7 +241,7 @@ import { FlowActivationProjection } from './flow-activation-projection.js';
 import { packageScopedRefusalMessage, PackageScopedNameRefusedError } from '@objectstack/core';
 import { ENVIRONMENT_ADDRESS_SEGMENT } from '@objectstack/spec/kernel';
 import { FlowSlotTable, flowRunKey, flowRunPackage, isSlotKeySpelling, qualifiedFlowKey, unfiledFlowKey, stampFlowRunSlot, type FlowKeyMove, type FlowSlot } from './flow-slots.js';
-import { readRootRun, stampRootRun, type RootRun } from './root-run.js';
+import { readRecordRun, readRootRun, stampRootRun, type RecordRun, type RootRun } from './root-run.js';
 import { flowSlotRunStore } from './flow-slot-run-store.js';
 import { ConnectorInstances } from './connector-instances.js';
 import type { ConnectorInstanceOptions } from './plugin-extension-api.js';
@@ -6132,12 +6132,24 @@ export class AutomationEngine implements IAutomationService {
      * [ADR-0162 Execution item 7] The root run of the run `context` belongs
      * to: the run its tree was started on, at any depth, as the engine
      * stamped it (`root-run.ts`). `undefined` where the run carries none: a
-     * child run parked before root runs were stamped whose chain of parents
-     * the resume could not read whole, or a context that is no run's. A node
+     * run parked before root runs were stamped whose chain of parents the
+     * resume could not read whole, a child of such a run, or a context that is
+     * no run's. A node
      * executor reads it here, as it reads {@link flowKeyOfRun}. Engine-local.
      */
     rootRunOf(context: AutomationContext | undefined): RootRun | undefined {
         return readRootRun(context);
+    }
+
+    /**
+     * [ADR-0162 Execution item 7] The record run of the run `context` belongs
+     * to: the highest run, from that run up, over which the record does not
+     * change (the root run, or a `map` item run whose item is a record), as
+     * the engine stamped it (`root-run.ts`). `undefined` exactly where
+     * {@link rootRunOf} is. Engine-local.
+     */
+    recordRunOf(context: AutomationContext | undefined): RecordRun | undefined {
+        return readRecordRun(context);
     }
 
     /**

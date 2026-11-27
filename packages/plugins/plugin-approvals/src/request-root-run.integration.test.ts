@@ -4,14 +4,18 @@
  * [ADR-0162 Execution item 7, "The root run"] Each request records its root
  * run as it opens, in columns of its own the store can be asked for: the run
  * its approval's tree of runs was started on, as the automation service hands
- * it to the approval node (`AutomationEngine.rootRunOf`).
+ * it to the approval node (`AutomationEngine.rootRunOf`), and the run that
+ * carries its record (`recordRunOf`): the root, or a `map` item run whose item
+ * is the record.
  *
  * Driven on the real data engine (SQLite through `SqlDriver`, the plugin's own
  * object definitions synced), so the columns exist and the store filters on
  * them, and on the real automation engine. The pins:
  *  - a root run's request records its own run;
  *  - a `subflow` child's requests, both steps, record the parent, which the
- *    request's own `flow_run_id` does not name;
+ *    request's own `flow_run_id` does not name, as root run and record run;
+ *  - a `map` item that is a record: the batch is the root, and the item run
+ *    is the record run, so the store tells one item's requests from another's;
  *  - the card's test: a child run started before the release, which opens a
  *    request after it, records its root run. The release is played as a
  *    restart: the parked runs lose their root run (the shape a run parked
@@ -96,6 +100,21 @@ const TWO_STEP = {
 };
 
 /** Hosts the two steps in a `subflow` child: every request names the CHILD run. */
+/** A batch with no record of its own: each item is a deal, approved in its own `deal_two_step` run. */
+const BATCH = {
+  name: 'deal_batch', label: 'Deal Batch', type: 'autolaunched',
+  variables: [{ name: 'items', type: 'list', isInput: true }],
+  nodes: [
+    { id: 'bstart', type: 'start', label: 'Start' },
+    { id: 'each', type: 'map', label: 'Each deal', config: { collection: { dialect: 'cel', source: 'items' }, flowName: 'deal_two_step', itemObject: 'crm_deal' } },
+    { id: 'bend', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'b1', source: 'bstart', target: 'each' },
+    { id: 'b2', source: 'each', target: 'bend' },
+  ],
+};
+
 const PARENT = {
   name: 'deal_parent', label: 'Deal Parent', type: 'autolaunched',
   nodes: [
@@ -123,6 +142,7 @@ describe('ADR-0162 item 7 — each request records its root run, in columns the 
     registerApprovalNode(surfaceOf(a), svc, silent);
     a.registerFlow('deal_two_step', TWO_STEP as any);
     a.registerFlow('deal_parent', PARENT as any);
+    a.registerFlow('deal_batch', BATCH as any);
     svc.attachAutomation(a as any);
     return a;
   }
@@ -153,6 +173,7 @@ describe('ADR-0162 item 7 — each request records its root run, in columns the 
       const row = await store.load(id);
       expect((row!.context as any).$rootRun, `run '${id}' parked with a root run, before it is forgotten`).toBeDefined();
       delete (row!.context as any).$rootRun;
+      delete (row!.context as any).$recordRun;
       await store.save(row!);
     }
   }
@@ -185,6 +206,7 @@ describe('ADR-0162 item 7 — each request records its root run, in columns the 
     expect(request.flow_run_id).toBe(runId);
     expect(request.root_run_id).toBe(runId);
     expect(isoOf(request.root_run_started_at)).toBe(parked!.startedAt);
+    expect(request.record_run_id, 'the root run carries its own record').toBe(runId);
     expect((await byRootRun(runId)).map(r => r.id)).toEqual([request.id]);
   });
 
@@ -195,11 +217,13 @@ describe('ADR-0162 item 7 — each request records its root run, in columns the 
     expect(first.flow_run_id).not.toBe(parentRunId);
     expect(first.root_run_id).toBe(parentRunId);
     expect(isoOf(first.root_run_started_at)).toBe(parentRow!.startedAt);
+    expect(first.record_run_id, 'the child inherits the parent\'s record, so the parent carries it').toBe(parentRunId);
 
     await approve(first, 'u_mgr');
     const second = await pendingOn('D_child');
     expect([second.flow_node_id, second.flow_run_id]).toEqual(['exec', first.flow_run_id]);
     expect(second.root_run_id).toBe(parentRunId);
+    expect(second.record_run_id).toBe(parentRunId);
     expect((await byRootRun(parentRunId)).map(r => r.id).sort()).toEqual([first.id, second.id].sort());
   });
 
@@ -210,7 +234,7 @@ describe('ADR-0162 item 7 — each request records its root run, in columns the 
     // Before the release: neither run carries a root run, and the request it
     // opened records none.
     await forgetRootRuns([parentRunId, childRunId]);
-    await engine.update('sys_approval_request', { id: first.id, root_run_id: null, root_run_started_at: null }, { context: SYSTEM } as any);
+    await engine.update('sys_approval_request', { id: first.id, root_run_id: null, root_run_started_at: null, record_run_id: null }, { context: SYSTEM } as any);
 
     // The release: a fresh process over the same store resumes the child.
     automation = boot();
@@ -221,6 +245,32 @@ describe('ADR-0162 item 7 — each request records its root run, in columns the 
     expect([second.flow_node_id, second.flow_run_id]).toEqual(['exec', childRunId]);
     expect(second.root_run_id).toBe(parentRunId);
     expect(isoOf(second.root_run_started_at)).toBe(parentRow!.startedAt);
+    expect(second.record_run_id).toBe(parentRunId);
+  });
+
+  it('a map item that is a record: the batch is the root, the item run carries the record, and the store tells the items apart', async () => {
+    const items = [{ id: 'D_m1', title: 'm1', organization_id: ORG }, { id: 'D_m2', title: 'm2', organization_id: ORG }];
+    for (const item of items) await engine.insert('crm_deal', item, { context: SYSTEM } as any);
+    const batch = await automation.execute('deal_batch', { params: { items }, userId: SUBMITTER } as any);
+    expect(batch.status).toBe('paused');
+
+    const first = await pendingOn('D_m1');
+    expect(first.root_run_id).toBe(batch.runId);
+    expect(first.record_run_id, 'the item run that opened it carries D_m1').toBe(first.flow_run_id);
+    expect(first.flow_run_id).not.toBe(batch.runId);
+
+    await approve(first, 'u_mgr');
+    await approve(await pendingOn('D_m1'), 'u_exec');
+    const second = await pendingOn('D_m2');
+    expect(second.root_run_id).toBe(batch.runId);
+    expect(second.record_run_id).toBe(second.flow_run_id);
+    expect(second.record_run_id).not.toBe(first.record_run_id);
+
+    const ofFirstItem: any[] = await engine.find('sys_approval_request', {
+      where: { record_run_id: first.record_run_id }, context: SYSTEM,
+    } satisfies EngineQueryOptions);
+    expect(ofFirstItem.map(r => r.flow_node_id).sort(), 'both steps of item 1, none of item 2').toEqual(['exec', 'mgr']);
+    expect(ofFirstItem.every(r => r.record_id === 'D_m1')).toBe(true);
   });
 
   it('a child whose tree cannot be read whole opens no request: the step is refused and the run fails, saying why', async () => {
@@ -251,5 +301,6 @@ describe('ADR-0162 item 7 — each request records its root run, in columns the 
     expect(request.flow_run_id).toBe(runId);
     expect(request.root_run_id ?? null).toBeNull();
     expect(request.root_run_started_at ?? null).toBeNull();
+    expect(request.record_run_id ?? null).toBeNull();
   });
 });

@@ -1732,6 +1732,21 @@ export interface ApprovalRootRun {
   startedAt: string;
 }
 
+/**
+ * [ADR-0162 Execution item 7] The run that carries a run's record, as the
+ * automation service hands it (`AutomationEngine.recordRunOf`, its
+ * `RecordRun`): the root run, or a `map` item run whose item is a record.
+ * Mirrored for the reason {@link ApprovalRootRun} is.
+ */
+export interface ApprovalRecordRun {
+  /** The record run's id. */
+  runId: string;
+  /** The object of the record it carries; `null` for a run on no record. */
+  object: string | null;
+  /** The id of the record it carries; `null` for a run on no record. */
+  recordId: string | null;
+}
+
 export interface ApprovalNodeAutoOutcome {
   autoApproved: true;
   reason: 'empty_approvers';
@@ -5189,6 +5204,13 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
        * absent records none (an engine that hands no root run).
        */
       rootRun?: ApprovalRootRun | null;
+      /**
+       * [ADR-0162 Execution item 7] The run that carries this request's
+       * record (`recordRunOf`): the root run, or the `map` item run whose
+       * item is the record. Its id is recorded in `record_run_id`, which the
+       * store can be asked for. `null` or absent records none.
+       */
+      recordRun?: ApprovalRecordRun | null;
     },
     context: ExecutionContext,
   ): Promise<ApprovalRequestRow | ApprovalNodeAutoOutcome> {
@@ -5598,6 +5620,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       // [ADR-0162 Execution item 7] The request's approval: its root run.
       root_run_id: input.rootRun?.runId ?? null,
       root_run_started_at: input.rootRun?.startedAt ?? null,
+      record_run_id: input.recordRun?.runId ?? null,
       node_config_json: JSON.stringify(configSnapshot),
       organization_id: requestOrg,
       created_at: now,

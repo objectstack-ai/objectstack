@@ -113,6 +113,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "ルート実行開始日時",
         help: "この申請が属する承認が開始された実行の開始日時。"
       },
+      record_run_id: {
+        label: "レコード実行",
+        help: "この申請の対象レコードを担う自動化実行。"
+      },
       node_config_json: {
         label: "Node Config",
         help: "Snapshot of the Approval node config (approvers/behavior) for node-driven requests."

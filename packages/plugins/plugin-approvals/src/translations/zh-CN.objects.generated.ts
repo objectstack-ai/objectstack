@@ -113,6 +113,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "根运行开始时间",
         help: "此请求所属审批发起时所在的运行的开始时间。"
       },
+      record_run_id: {
+        label: "记录运行",
+        help: "承载此请求所在记录的自动化运行。"
+      },
       node_config_json: {
         label: "Node Config",
         help: "Snapshot of the Approval node config (approvers/behavior) for node-driven requests."

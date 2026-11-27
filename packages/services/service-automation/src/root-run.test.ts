@@ -27,7 +27,7 @@ import { AutomationEngine } from './engine.js';
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
 import { registerMapNode } from './builtin/map-node.js';
 import { registerSubflowNode } from './builtin/subflow-node.js';
-import { ROOT_RUN_CONTEXT_KEY, type RootRun } from './root-run.js';
+import { RECORD_RUN_CONTEXT_KEY, ROOT_RUN_CONTEXT_KEY, type RecordRun, type RootRun } from './root-run.js';
 
 function recordingLogger(): any {
   const lines: Array<{ level: string; msg: string }> = [];
@@ -70,6 +70,12 @@ const BATCH = flow('batch', [
   { id: 'each', type: 'map', config: { collection: { dialect: 'cel', source: 'items' }, flowName: 'leaf', itemObject: 'crm_task' } },
   { id: 'be', type: 'end' },
 ], { variables: [{ name: 'items', type: 'list', isInput: true }] });
+/** A `map` whose body is a `subflow` chain: each item run is `middle`, which calls `leaf`. */
+const BATCH_WRAPPED = flow('batch_wrapped', [
+  { id: 'ws', type: 'start' },
+  { id: 'each', type: 'map', config: { collection: { dialect: 'cel', source: 'items' }, flowName: 'middle', itemObject: 'crm_task' } },
+  { id: 'we', type: 'end' },
+], { variables: [{ name: 'items', type: 'list', isInput: true }] });
 /** Fails its first attempt, so `retry` runs a second one. */
 const FLAKY = flow('flaky', [
   { id: 'fs', type: 'start' }, { id: 'flake', type: 'flake' }, { id: 'see', type: 'see' }, { id: 'fe', type: 'end' },
@@ -81,12 +87,14 @@ describe('ADR-0162 item 7 — every run of a tree is handed its root run', () =>
   let store: InMemorySuspendedRunStore;
   let logger: ReturnType<typeof recordingLogger>;
   let seen: Sight[];
+  let records: Array<{ runId: string; nodeId: string; record: RecordRun | undefined }>;
   let flakes: number;
 
   beforeEach(() => {
     store = new InMemorySuspendedRunStore();
     logger = recordingLogger();
     seen = [];
+    records = [];
     flakes = 0;
   });
 
@@ -103,6 +111,7 @@ describe('ADR-0162 item 7 — every run of a tree is handed its root run', () =>
       type: 'see',
       async execute(node: any, variables: Map<string, unknown>, context: any) {
         seen.push({ runId: String(variables.get('$runId')), nodeId: node.id, root: engine.rootRunOf(context) });
+        records.push({ runId: String(variables.get('$runId')), nodeId: node.id, record: engine.recordRunOf(context) });
         return { success: true };
       },
     } as never);
@@ -116,7 +125,7 @@ describe('ADR-0162 item 7 — every run of a tree is handed its root run', () =>
     } as never);
     registerMapNode(engine, pluginCtx(logger));
     registerSubflowNode(engine, pluginCtx(logger));
-    for (const f of [LEAF, MIDDLE, OUTER, TOP, LATE_PARENT, BATCH, FLAKY]) engine.registerFlow(f.name, f as never);
+    for (const f of [LEAF, MIDDLE, OUTER, TOP, LATE_PARENT, BATCH, BATCH_WRAPPED, FLAKY]) engine.registerFlow(f.name, f as never);
     return engine;
   }
 
@@ -129,7 +138,9 @@ describe('ADR-0162 item 7 — every run of a tree is handed its root run', () =>
       const row = await store.load(id);
       expect(row, `run '${id}' is parked`).toBeTruthy();
       expect((row!.context as any)[ROOT_RUN_CONTEXT_KEY], 'parked with a root run, before it is forgotten').toBeDefined();
+      expect((row!.context as any)[RECORD_RUN_CONTEXT_KEY], 'and with a record run').toBeDefined();
       delete (row!.context as any)[ROOT_RUN_CONTEXT_KEY];
+      delete (row!.context as any)[RECORD_RUN_CONTEXT_KEY];
       await store.save(row!);
     }
   }
@@ -265,11 +276,13 @@ describe('ADR-0162 item 7 — every run of a tree is handed its root run', () =>
     await forgetRootRuns([outer.runId!, middle!.runId, leaf!.runId]);
     await store.delete(middle!.runId);
 
-    seen = [];
+    seen = []; records = [];
     const resumed = await makeEngine().resume(leaf!.runId, {});
 
     expect(resumed.success, 'the leaf itself continues').toBe(true);
     expect(seen).toEqual([{ runId: leaf!.runId, nodeId: 'see_after', root: undefined }]);
+    expect(records.map(r => r.record), 'nor a record run').toEqual([undefined]);
+    expect((await store.load(leaf!.runId)), 'the leaf completed').toBeNull();
     const warns = logger.lines.filter((l: any) => l.level === 'warn' && l.msg.includes('could not be derived'));
     expect(warns).toHaveLength(1);
     expect(warns[0].msg).toContain(middle!.runId);
@@ -301,5 +314,112 @@ describe('ADR-0162 item 7 — every run of a tree is handed its root run', () =>
     const retried = await resumer.resume(leaf!.runId, {});
     expect(retried.success).toBe(true);
     expect(seen).toEqual([{ runId: leaf!.runId, nodeId: 'see_after', root: expect.objectContaining({ runId: outer.runId }) }]);
+  });
+
+  describe('the record run: the highest run, from this one up, over which the record does not change', () => {
+    const recordOfLast = (runId: string) => [...records].reverse().find(r => r.runId === runId)?.record;
+
+    it('a root run is its own record run', async () => {
+      const engine = makeEngine();
+      const started = await engine.execute('top', { object: 'crm_deal', record: { id: 'd1' } } as never);
+      expect(recordOfLast(started.runId!)).toEqual({ runId: started.runId, object: 'crm_deal', recordId: 'd1' });
+    });
+
+    it('a subflow child two levels down inherits the record, so the root carries it', async () => {
+      const engine = makeEngine();
+      const outer = await engine.execute('outer', { object: 'crm_deal', record: { id: 'd1' } } as never);
+      const [leaf] = parkedOf(engine, 'leaf');
+      expect(recordOfLast(leaf!.runId)).toEqual({ runId: outer.runId, object: 'crm_deal', recordId: 'd1' });
+    });
+
+    it('a map item that is a record is its own record run, under the parent\'s root', async () => {
+      const engine = makeEngine();
+      const batch = await engine.execute('batch', {
+        object: 'crm_project', record: { id: 'p1' }, params: { items: [{ id: 't1' }] },
+      } as never);
+      const [item] = parkedOf(engine, 'leaf');
+      expect(recordOfLast(item!.runId)).toEqual({ runId: item!.runId, object: 'crm_task', recordId: 't1' });
+      expect(seen.at(-1)!.root).toMatchObject({ runId: batch.runId, object: 'crm_project' });
+      expect((await store.load(item!.runId))!.context, 'and parks with it').toMatchObject({
+        [RECORD_RUN_CONTEXT_KEY]: { runId: item!.runId, recordId: 't1' },
+      });
+    });
+
+    it('a map item that is not a record carries the parent\'s record, so the parent\'s record run', async () => {
+      const engine = makeEngine();
+      const batch = await engine.execute('batch', {
+        object: 'crm_project', record: { id: 'p1' }, params: { items: [{ name: 'not a record' }] },
+      } as never);
+      const [item] = parkedOf(engine, 'leaf');
+      expect(item!.runId).not.toBe(batch.runId);
+      expect(recordOfLast(item!.runId)).toEqual({ runId: batch.runId, object: 'crm_project', recordId: 'p1' });
+    });
+
+    it('a subflow under a map item that is a record inherits the item run', async () => {
+      const engine = makeEngine();
+      await engine.execute('batch_wrapped', { params: { items: [{ id: 't1' }] } } as never);
+      const [item] = parkedOf(engine, 'middle');
+      const [leaf] = parkedOf(engine, 'leaf');
+      expect(recordOfLast(leaf!.runId)).toEqual({ runId: item!.runId, object: 'crm_task', recordId: 't1' });
+    });
+
+    it('a pre-change map item is derived its own record run, in the same walk as its root run', async () => {
+      const parker = makeEngine();
+      const batch = await parker.execute('batch', {
+        object: 'crm_project', record: { id: 'p1' }, params: { items: [{ id: 't1' }] },
+      } as never);
+      const [item] = parkedOf(parker, 'leaf');
+      await forgetRootRuns([batch.runId!, item!.runId]);
+
+      records = []; seen = [];
+      await makeEngine().resume(item!.runId, {});
+      expect(records).toEqual([{ runId: item!.runId, nodeId: 'see_after', record: { runId: item!.runId, object: 'crm_task', recordId: 't1' } }]);
+      expect(seen[0]!.root).toMatchObject({ runId: batch.runId, flowName: 'batch', object: 'crm_project' });
+    });
+
+    it('a pre-change subflow under a map item is derived the item run, the root above it', async () => {
+      const parker = makeEngine();
+      const batch = await parker.execute('batch_wrapped', { params: { items: [{ id: 't1' }] } } as never);
+      const [item] = parkedOf(parker, 'middle');
+      const [leaf] = parkedOf(parker, 'leaf');
+      await forgetRootRuns([batch.runId!, item!.runId, leaf!.runId]);
+
+      records = []; seen = [];
+      await makeEngine().resume(leaf!.runId, {});
+      expect(records).toEqual([{ runId: leaf!.runId, nodeId: 'see_after', record: { runId: item!.runId, object: 'crm_task', recordId: 't1' } }]);
+      expect(seen[0]!.root).toMatchObject({ runId: batch.runId, flowName: 'batch_wrapped', object: null });
+    });
+
+    it('a pre-change subflow child is derived the root as its record run', async () => {
+      const parker = makeEngine();
+      const outer = await parker.execute('outer', { object: 'crm_deal', record: { id: 'd1' } } as never);
+      const [leaf] = parkedOf(parker, 'leaf');
+      const [middle] = parkedOf(parker, 'middle');
+      await forgetRootRuns([outer.runId!, middle!.runId, leaf!.runId]);
+
+      records = [];
+      await makeEngine().resume(leaf!.runId, {});
+      expect(records).toEqual([{ runId: leaf!.runId, nodeId: 'see_after', record: { runId: outer.runId, object: 'crm_deal', recordId: 'd1' } }]);
+    });
+
+    it('a child started under a run that carries no root run is stamped null on both, and never walked', async () => {
+      const engine = makeEngine();
+      const started = await engine.execute('leaf', { object: 'crm_deal', record: { id: 'd1' }, $parentRunId: 'run_gone' } as never);
+      const row = await store.load(started.runId!);
+      expect([(row!.context as any)[ROOT_RUN_CONTEXT_KEY], (row!.context as any)[RECORD_RUN_CONTEXT_KEY]]).toEqual([null, null]);
+      expect(seen[0]).toEqual({ runId: started.runId, nodeId: 'see', root: undefined });
+
+      // Were the resume to walk the chain, this parent's unreadable row would
+      // refuse it with STORE_UNAVAILABLE before the claim.
+      const realLoad = store.load.bind(store);
+      store.load = async (id: string) => {
+        if (id === 'run_gone') throw new Error('connection refused');
+        return realLoad(id);
+      };
+      const resumed = await engine.resume(started.runId!, {});
+      expect(resumed.code).not.toBe('STORE_UNAVAILABLE');
+      expect(seen.at(-1), 'the segment after the pause ran').toEqual({ runId: started.runId, nodeId: 'see_after', root: undefined });
+      expect(logger.lines.filter((l: any) => l.msg.includes('could not be derived') || l.msg.includes('derive its root run'))).toEqual([]);
+    });
   });
 });

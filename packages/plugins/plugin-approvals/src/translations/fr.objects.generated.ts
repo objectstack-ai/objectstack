@@ -113,6 +113,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Début de l’exécution racine",
         help: "Date de début de l’exécution sur laquelle l’approbation de cette demande a été lancée."
       },
+      record_run_id: {
+        label: "Exécution de l’enregistrement",
+        help: "Exécution d’automatisation qui porte l’enregistrement de cette demande."
+      },
       node_config_json: {
         label: "Configuration du nœud",
         help: "Instantané de la configuration du nœud d’approbation (approbateurs/comportement) pour les demandes pilotées par un nœud."
