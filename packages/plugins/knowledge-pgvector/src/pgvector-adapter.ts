@@ -16,7 +16,14 @@ import {
   DEFAULT_KNOWLEDGE_SCHEMA,
   GENERATION_TABLE,
   type GenerationState,
+  PASSAGE_TSVECTOR,
   SAFE_IDENTIFIER,
+  TS_CONFIG,
+  containsPattern,
+  isWordTerm,
+  keywordIndexDdl,
+  keywordIndexName,
+  keywordTerms,
   qualified,
   schemaDdl,
   vectorLiteral,
@@ -113,6 +120,9 @@ const SEARCH_ATTEMPTS = 3;
 /** The standard ADR-0112 code of a search whose source's index was switched under it on every attempt. */
 const CONCURRENT_MODIFICATION = 'CONCURRENT_MODIFICATION';
 
+/** The `k` of reciprocal rank fusion: a passage at rank `r` of a leg adds `1 / (k + r)` to its score. */
+export const RRF_K = 60;
+
 /** A generation row: one complete index of one source under one fingerprint. */
 interface GenerationRow {
   generation: number;
@@ -163,12 +173,30 @@ interface Readiness {
  *
  * ## Search
  *
- * An exact scan by cosine distance — no approximate index, so a 3072-wide
- * model works (pgvector's HNSW index stops at 2000 dimensions; adding one is an
- * operator's step, documented with the package). The organization filter
- * (ADR-0161 K8, item 9) and the metadata-equality `filter` run in the same
- * `WHERE`, before ranking. A passage whose cosine similarity is not positive is
- * not a hit.
+ * Two legs, merged by reciprocal rank fusion (`k` = {@link RRF_K}) before the
+ * knowledge service re-checks each hit as the caller. Each leg ranks at most
+ * `topK` passages; a passage's score is the sum of `1 / (k + rank)` over the
+ * legs that rank it, divided by the score of a passage first in both, so it
+ * lies in `(0, 1]`. Both legs run in one statement, so in one snapshot.
+ *
+ * - The vector leg: an exact scan by cosine distance — no approximate index,
+ *   so a 3072-wide model works (pgvector's HNSW index stops at 2000
+ *   dimensions; adding one is an operator's step, documented with the
+ *   package). A passage whose cosine similarity is not positive is not ranked
+ *   by it.
+ * - The keyword leg: the query's terms (`keywordTerms`). A word of three
+ *   characters or more is matched as a phrase (`phraseto_tsquery`) on the
+ *   passage's `simple` `tsvector`, which a GIN expression index serves; a
+ *   shorter term (「出差」), or one holding a Han, kana or Hangul character —
+ *   which the parser never splits, so a `tsvector` holds the whole run as one
+ *   word — by `ILIKE` over the rows in scope. A passage's keyword score sums,
+ *   over the terms it holds, the term's BM25 inverse document frequency among
+ *   the rows in scope, so a term most passages hold weighs little.
+ *
+ * The organization filter (ADR-0161 K8, item 9), the record scope (item 17)
+ * and the metadata-equality `filter` are one `WHERE`, run in both legs before
+ * either ranks. The keyword index of a passage table made before it existed
+ * is made by the first call that writes or searches that table.
  *
  * ## Generations (ADR-0161 K7; K8, item 8)
  *
@@ -259,6 +287,8 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
   private readiness?: Readiness;
   /** Widths whose passage table this adapter has created or found. */
   private readonly tables = new Set<number>();
+  /** Widths whose passage table's keyword index this adapter has created or found. */
+  private readonly keyed = new Set<number>();
   /** The builder locks this adapter holds, by source id. */
   private readonly builders = new Map<string, BuilderLock>();
   /**
@@ -555,10 +585,17 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
           `vector, and this source's index holds ${generation.dim}-wide vectors.`,
       );
     }
-    if (vector.every((x) => x === 0)) return [];
+    const vectorLeg = !vector.every((x) => x === 0);
+    const terms = keywordTerms(query);
+    if (!vectorLeg && terms.length === 0) return [];
+    if (terms.length > 0) await this.ensureKeywordIndex(generation.dim);
 
     const ext = readiness.extensionSchema;
-    const params: unknown[] = [opts.source.name, generation.generation, vectorLiteral(vector), topK];
+    const table = qualified(this.schema, vectorTable(generation.dim));
+    // One WHERE for both legs: the source's active generation, the
+    // organization filter, the record scope and the metadata filter, each
+    // bound as values.
+    const params: unknown[] = [opts.source.name, generation.generation];
     const where = [
       'source_id = $1',
       'generation = $2',
@@ -578,28 +615,76 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       // and field names go as bound parameters. A `metadata` term holds for a
       // stored string or number equal to an id as text, or a list with such an
       // element; a missing value or any other kind holds for nothing.
-      const terms: string[] = [];
+      const scopeTerms: string[] = [];
       for (const term of opts.scope) {
         if (term.ids.length === 0) continue;
         params.push(term.ids);
         const ids = `$${params.length}::text[]`;
         if (term.kind === 'record') {
-          terms.push(`source_record_id = ANY(${ids})`);
+          scopeTerms.push(`source_record_id = ANY(${ids})`);
           continue;
         }
         params.push(term.field);
         const value = `(metadata -> $${params.length}::text)`;
-        terms.push(
+        scopeTerms.push(
           `EXISTS (SELECT 1 FROM jsonb_array_elements(CASE jsonb_typeof(${value}) WHEN 'array' THEN ${value} ` +
             `ELSE jsonb_build_array(${value}) END) AS e(v) ` +
             `WHERE jsonb_typeof(e.v) IN ('string', 'number') AND e.v #>> '{}' = ANY(${ids}))`,
         );
       }
-      where.push(`(${terms.join(' OR ')})`);
+      where.push(`(${scopeTerms.join(' OR ')})`);
     }
     for (const [key, value] of Object.entries(opts.filter ?? {})) {
       params.push(key, JSON.stringify(value === undefined ? null : value));
       where.push(`(metadata -> $${params.length - 1}) = $${params.length}::jsonb`);
+    }
+    const inScope = where.join(' AND ');
+    params.push(topK);
+    const limit = `$${params.length}`;
+
+    const ctes: string[] = [];
+    const legs: string[] = [];
+    if (vectorLeg) {
+      params.push(vectorLiteral(vector));
+      ctes.push(`vec AS (
+        SELECT chunk_id, row_number() OVER (ORDER BY distance, chunk_id) AS pos FROM (
+          SELECT chunk_id, embedding OPERATOR(${ext}.<=>) $${params.length}::${ext}.vector AS distance
+            FROM ${table} WHERE ${inScope}
+        ) ranked WHERE distance < 1 ORDER BY distance, chunk_id LIMIT ${limit})`);
+      legs.push('SELECT chunk_id, pos AS vpos, NULL::bigint AS kpos FROM vec');
+    }
+    if (terms.length > 0) {
+      // A term's match, written twice: on the row's columns where the index
+      // can serve it, and on the candidate's tsvector, computed once per row.
+      const onRow: string[] = [];
+      const onCandidate: string[] = [];
+      for (const term of terms) {
+        if (isWordTerm(term)) {
+          params.push(term);
+          const query = `phraseto_tsquery(${TS_CONFIG}, $${params.length}::text)`;
+          onRow.push(`${PASSAGE_TSVECTOR} @@ ${query}`);
+          onCandidate.push(`v.tsv @@ ${query}`);
+        } else {
+          params.push(containsPattern(term));
+          onRow.push(`content ILIKE $${params.length}::text`);
+          onCandidate.push(`c.content ILIKE $${params.length}::text`);
+        }
+      }
+      const idf = onCandidate
+        .map((_, i) => `h.h${i} * ln(1.0 + (s.n - s.d${i} + 0.5) / (s.d${i} + 0.5))`)
+        .join(' + ');
+      ctes.push(
+        `cand AS (SELECT chunk_id, content FROM ${table} WHERE ${inScope} AND (${onRow.join(' OR ')}))`,
+        `hits AS (SELECT c.chunk_id, ${onCandidate.map((m, i) => `(${m})::int AS h${i}`).join(', ')}
+                    FROM cand c CROSS JOIN LATERAL (SELECT ${PASSAGE_TSVECTOR.replace('content', 'c.content')} AS tsv) v)`,
+        `stats AS (SELECT (SELECT count(*) FROM ${table} WHERE ${inScope}) AS n,
+                    ${onCandidate.map((_, i) => `coalesce(sum(h${i}), 0) AS d${i}`).join(', ')} FROM hits)`,
+        `kw AS (
+          SELECT chunk_id, row_number() OVER (ORDER BY score DESC, chunk_id) AS pos FROM (
+            SELECT h.chunk_id, ${idf} AS score FROM hits h CROSS JOIN stats s
+          ) scored ORDER BY score DESC, chunk_id LIMIT ${limit})`,
+      );
+      legs.push('SELECT chunk_id, NULL::bigint AS vpos, pos AS kpos FROM kw');
     }
     const result = await pool.query<{
       chunk_id: string;
@@ -610,17 +695,15 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       metadata: Record<string, unknown> | null;
       doc_hash: string | null;
       heading_path: string[] | null;
-      distance: number;
+      vpos: string | number | null;
+      kpos: string | number | null;
     }>(
-      `SELECT * FROM (
-         SELECT chunk_id, document_id, source_record_id, content, title, metadata, doc_hash, heading_path,
-                embedding OPERATOR(${ext}.<=>) $3::${ext}.vector AS distance
-           FROM ${qualified(this.schema, vectorTable(generation.dim))}
-          WHERE ${where.join(' AND ')}
-       ) ranked
-       WHERE distance < 1
-       ORDER BY distance, chunk_id
-       LIMIT $4`,
+      `WITH ${ctes.join(',\n')}
+       SELECT p.chunk_id, p.document_id, p.source_record_id, p.content, p.title, p.metadata, p.doc_hash,
+              p.heading_path, u.vpos, u.kpos
+         FROM (SELECT chunk_id, min(vpos) AS vpos, min(kpos) AS kpos FROM (${legs.join(' UNION ALL ')}) l
+                GROUP BY chunk_id) u
+         JOIN ${table} p ON p.source_id = $1 AND p.generation = $2 AND p.chunk_id = u.chunk_id`,
       params,
     );
     if (result.rows.length === 0) {
@@ -628,12 +711,12 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       const now = await this.generations(opts.source.name);
       if (now.active?.generation !== generation.generation) return undefined;
     }
-    return result.rows.map((r) => ({
+    return fuse(result.rows, topK).map(({ row: r, score }) => ({
       chunkId: r.chunk_id,
       documentId: r.document_id,
       sourceId: opts.source.name,
       ...(r.source_record_id === null ? {} : { sourceRecordId: r.source_record_id }),
-      score: 1 - Number(r.distance),
+      score,
       snippet: r.content,
       ...(r.title === null ? {} : { title: r.title }),
       metadata: r.metadata ?? {},
@@ -927,6 +1010,33 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       );
     }
     this.tables.add(dimensions);
+    this.keyed.add(dimensions);
+  }
+
+  /**
+   * Makes the keyword index of a passage table made before the store kept one
+   * (`keywordIndexDdl`); a table this adapter made or already checked is
+   * skipped. Two processes making it at once: the one that loses finds it made.
+   */
+  private async ensureKeywordIndex(dimensions: number): Promise<void> {
+    if (this.keyed.has(dimensions)) return;
+    const pool = this.requirePool();
+    const statement = keywordIndexDdl(this.schema, dimensions);
+    try {
+      await pool.query(statement);
+    } catch (err) {
+      const found = await pool
+        .query<{ present: string | null }>('SELECT to_regclass($1) AS present', [qualified(this.schema, keywordIndexName(dimensions))])
+        .catch(() => undefined);
+      if (found?.rows[0]?.present == null) {
+        throw notReady(
+          `the keyword index of its ${dimensions}-wide passage table could not be created`,
+          `Creating ${keywordIndexName(dimensions)} failed (${errorText(err)}).`,
+          [`${statement};`],
+        );
+      }
+    }
+    this.keyed.add(dimensions);
   }
 
   private async tableExists(dimensions: number): Promise<boolean> {
@@ -1251,6 +1361,23 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       throw err;
     }
   }
+}
+
+/**
+ * Reciprocal rank fusion of the two legs' rows (`vpos`, `kpos`: a row's rank
+ * in each leg, or null): best first, ties by chunk id, at most `topK`. The
+ * score is the fused sum divided by that of a row first in both legs.
+ */
+function fuse<R extends { chunk_id: string; vpos: string | number | null; kpos: string | number | null }>(
+  rows: readonly R[],
+  topK: number,
+): Array<{ row: R; score: number }> {
+  const best = 2 / (RRF_K + 1);
+  const leg = (pos: string | number | null) => (pos === null ? 0 : 1 / (RRF_K + Number(pos)));
+  return rows
+    .map((row) => ({ row, score: (leg(row.vpos) + leg(row.kpos)) / best }))
+    .sort((a, b) => b.score - a.score || (a.row.chunk_id < b.row.chunk_id ? -1 : 1))
+    .slice(0, topK);
 }
 
 /** The passages of a document: the service's `chunks`, or the whole text as one. Empty passages are not stored. */
