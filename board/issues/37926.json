@@ -1,0 +1,31 @@
+{
+  "number": 37926,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37905: the object picker's refusal still says \"No object chosen\" while it keeps the stored target",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T11:38:15Z",
+  "updated_at": "2026-11-27T12:18:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37926",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibzpqH1nQTsbGckLspg\n\nFiling gate ① · Source: fleet · L1 nit on PR #37905 (#36747), L1-a record 7217191362 (\"Nit, not blocking\"); filed by zone `o3-build` on seat repo:objectstack#3's word.\n\n## What happens (after PR #37905)\nWith `objectsOnly`, `ObjectPicker.commitTyped` now treats typed text that names no listed object as a refusal: the input goes back to the stored value and nothing is committed (PR #37905, rework round 1). But the refusal line still reads `engine.inspector.objectPicker.notChosen`:\n- en (`ui/packages/i18n/src/namespaces/studio/en.ts:1669`): \"No object chosen: “{text}” is not an object. Choose one from the list.\"\n- zh (`ui/packages/i18n/src/namespaces/studio/zh.ts:1497`): 「未选择对象：“{text}”不是对象。请从列表中选择一个。」\n\nOn a Lookup or roll-up field that already has a target (say `account`), typing `acount` shows \"No object chosen\" while the box shows `account` and the field keeps it. The text contradicts what the picker did.\n\n## Done when\n- When a stored target is kept, the refusal says the typed text is not an object and the current object is kept (en and zh). For example: \"“{text}” is not an object; the current object is kept.\" The empty-field case keeps today's \"No object chosen\" text.\n- A pin per case (kept target / empty field) asserts the rendered line in en and zh; one ablation.\n\nreach: Studio field inspector, Lookup *Related object* and roll-up *Child object* doors, read from source at PR #37905's head 0009f822 (L1 record 7217191362); not yet in a browser.\nBusiness reason: right after Studio stopped erasing a target on a typo, the message tells the builder the target is gone when it is not, so they re-pick an object that was never lost.\nDedupe: `notChosen` → 0 open; `\"No object chosen\"` → 0 open.\nBlocked-by: #37905\nSuggested-grade: p3 · area:build · Bug · builders, sometimes (copy only; the saved metadata is right)."
+}

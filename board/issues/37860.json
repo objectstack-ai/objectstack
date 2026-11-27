@@ -14,20 +14,22 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:blocked",
+    "pm:dispatched",
     "pm:epic",
     "priority:p1",
     "size/l"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T07:22:35Z",
-  "updated_at": "2026-11-27T07:22:35Z",
+  "updated_at": "2026-11-27T14:02:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37860",
   "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ④ topic child. Source: topic #37853 (Jack: 「\"页面里加按钮\"的需求 作废」 06:28Z; card 「撤掉 ask_ai」 06:30Z; 「问 AI」 06:33Z; 「同意，立专题卡，非 cloud 的任务，让 objectstack #3 座位接手」 07:12Z, all 2026-11-27). Business reason: carried by the parent.\nParent: objectstack-ai/objectstack#37853 (rulings, target experience, card table, topic acceptance). Evidence: an independent Fable review of objectstack and cloud `main` (2026-11-27) checked every file:line below.\nOwner: **repo:objectstack#3** (Jack 07:12Z 「非 cloud 的任务，让 objectstack #3 座位接手」). Reserved under topic #37853 (`pm:epic`), not `pm:queue`: other seats leave it.\n\nGrading: area:ux · Task · p1 · size M–L.\nBlocked-by: C0b (#37855) (A5 table); #37803 (split of `AiChatPage`, >3000 lines, waits for the maintainer's merge). Ships in the same release as C5.\nDedupe: searched `forceNew`, `drawer new conversation`: none open.\n\n## 维护者速读\n- 是什么：用户主动关掉抽屉再点「问 AI」就开新会话（手机自动收起、待确认计划等例外）；抽屉顶部改成会话标题 + ☆ + ＋ + 历史图标 + ⋯ + ×。\n- 要你做什么：先合 #37803。\n\n## Background (verified)\n- The drawer reopens the last conversation; only `target.fresh` passes `forceNew` (no row until the first send) (`layout/ChatDockConversation.tsx:172-187`; `hooks/useChatConversation.ts:918-926,984-1042`).\n- `resumeMode:'fresh'` reuses a conversation with zero server messages; a turn persists only when it ends, so **a generating conversation looks empty**. Do not use it.\n- Mobile auto-collapses on answer-link taps and keeps the conversation (#37556, `layout/useConsoleChatDock.tsx:187-236`).\n- Pending-approval marks are keyed by conversation id on the bus (`assistant/assistantBus.ts:171-249`).\n- Header today: 「AI 助手」, a text 「历史」 button, ⋯, × (`layout/ChatDock.tsx:465-512,602-638`); the mobile sheet has its own header.\n- Titles are auto-generated server-side from the first turn (cloud `service-ai/src/ai-service.ts:1263-1455`, can be off).\n\n## What to do\n1. In `useConsoleChatDock`, remember how the drawer last closed: user paths (toggle, collapse, ×) set a flag; the auto-collapse (`:229-233`) does not. On the next open with the flag set, target `{agent, fresh: true}` → `forceNew`. Implement every row of C0b (#37855)'s table (pending approval → that conversation; named targets, refresh, Studio `requestOpen()`, build/`packageId`, narrow↔full unchanged).\n2. Header: title (「新会话」 before the first send; first-message summary when title generation is off, as the history list does); right side ＋ new conversation (current page record per C5), history as a clock icon button (keep `aria-pressed` and both names), ⋯ unchanged, ×. ☆ is added by C8. Same row on the mobile sheet, leaving room for its built-in ✕.\n3. No new-chat shortcut in this phase (⌘⇧O is the browser's bookmark manager).\n4. Update the #34827 title test to the new rule.\n\n## Acceptance\n- × then reopen → new; closed mid-generation then reopen → new, the old answer complete in history, no blank conversation; mobile auto-collapse then reopen → same; pending plan → that conversation.\n- Refresh, `/ai/ask/<id>`, history → the named conversation; Home 「Ask AI」 → new; Studio copilot unchanged; `app.defaultAgent:'build'` apps follow A5's exception."

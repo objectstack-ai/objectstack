@@ -2,8 +2,8 @@
   "number": 37608,
   "kind": "issue",
   "title": "metadata-protocol: while a package is disabled, the per-item publish and rollback doors still write a package-less row at a name only disabled packages hold",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:package",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,9 +22,13 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T15:02:59Z",
-  "updated_at": "2026-11-27T07:00:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T09:54:08Z",
+  "closed_at": "2026-11-27T09:51:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 6,
   "locked": false,

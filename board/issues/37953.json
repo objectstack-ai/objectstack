@@ -1,0 +1,31 @@
+{
+  "number": 37953,
+  "kind": "issue",
+  "title": "Review follow-ups of PR #37942: knowledge-turso — a build that continues after dropSource reopens the dropped source",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-27T12:50:08Z",
+  "updated_at": "2026-11-27T13:18:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37953",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ① follow-up of PR #37942 (L1-a ACCEPT 7218681035: \"The turso counterpart of gap 2 … is real by reading … File it as a card\"; one card per PR, review-follow-ups exception) · Source: topic #37000\nGrading: area:ai · domain:server · Bug · p2 (suggested; same defect class as #37732, which was p2) · reach: turso deployments that remove a knowledge source while a build of it runs elsewhere · evidence: read, not run (dev report 7218123759 on #37732).\nDedupe: `repo:objectstack-ai/objectstack is:issue \"PR #37942\"` → 1 hit (#37732, the card the PR fixes); `is:issue is:open turso dropSource` → #37732 (pgvector only), #37000 (epic). Reader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n\n- 问题：在 Turso 存储上删除一个知识源时，如果别处还有一次对它的构建在跑，那次构建的下一次写入会把知识源\"复活\"（重新开一个可用的索引版本）。pgvector 上同样的问题已由 PR #37942 修好。\n- 做什么：让 Turso 上的构建只写自己开的那个版本；版本被删后构建停止并返回冲突错误，和 pgvector 一致。\n- 谁受益：用 Turso（非 PostgreSQL 部署）删除知识源的管理员：删掉的就真的没了。\n- 需要你做的：无。\n\n## What\n\nPR #37942 measured, on PostgreSQL, that a build continuing in another process after `dropSource` opened a fresh ACTIVE generation and brought the dropped source back, and fixed it in knowledge-pgvector: a build's writes, listing and completion go only to the generation that build began; when that generation is gone the build ends and is refused `LOCK_CONFLICT` 409.\n\nknowledge-turso has the same shape by reading: `writeTarget` (`packages/plugins/knowledge-turso/src/turso-adapter.ts:867`, called at :289 and :447) opens a generation for a source that holds nothing, so a build or write arriving after `dropSource` (:684) reopens the source. turso has no builder lock and its drop is one SQLite-serialized transaction, so pgvector's gap 1 (a drop missing a generation opened concurrently) has no turso counterpart.\n\n## Acceptance\n\n- A build that began before `dropSource` and writes, lists or completes after it is refused `LOCK_CONFLICT` 409, and the source holds no generation afterwards; pinned, with an ablation.\n- A build that begins after the drop works as today (drop-then-build).\n- The contract sentence in `packages/spec/src/contracts/knowledge-adapter.ts:394` is unchanged."
+}

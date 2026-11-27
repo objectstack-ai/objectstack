@@ -13,18 +13,20 @@
   "labels": [
     "area:ai",
     "domain:ui",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-27T06:02:26Z",
-  "updated_at": "2026-11-27T06:18:57Z",
+  "updated_at": "2026-11-27T14:00:37Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37832",
   "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwGVgec21LwQTtRY85\n\nFiling gate: ③ maintainer-directed task. Source: maintainer — the AI 问询首页 plan ordered 「立卡派发」 (2026-11-27 02:37Z, quoted in #37788's body), handed to seat repo:objectstack#1 by epic:#5027#1 (mailbox comment 7209013967: \"file them when you take the line\") and taken on Elon's tap 「全接,开新专区」 (accepted 7210179549). Scope rows: #37788 comment 7210202110 (Fable review §4, copied verbatim by hotlong).\nGrading: area:ai · Feature · priority:p2 (follow-on of #37788, p1; T3 #37790 is p2) · size M · reach: every app whose maker uses 「设计布局」 to add the AI inquiry page.\nDedupe: open-issue search `\"DesignModeMenu\" ai:chat`: 1 hit (#37788); `\"设计布局\" \"AI 问询\"`: 1 hit (#37788). Neither files a designer entry.\nBlocked-by: #37788\n\n## 维护者速读\n- 是什么：「设计布局」里加一种菜单项「AI 问询」，一个应用只能有一个；小表单填欢迎标题、副标题、输入框提示和推荐问题；「设为首页」就是把它移到菜单第一位。\n- 为什么等 #37788：页面本身在 #37788，页面没合并前就能在设计器里加这个菜单项，用户会点到一个不存在的页面。\n- 要你做什么：无。\n\n## Scope (from #37788 comment 7210202110; `AS` = `ui/packages/app-shell/src`)\n- Files: `AS/layout/DesignModeMenu.tsx`, `AS/layout/designModeMenuModel.ts`, i18n `designMode.menu.kind`.\n- The picker gains 「AI 问询」 as a **singleton** (like \"链接\", it lists no existing items; once the app has one `ai:chat` entry it is no longer offered).\n- A small form edits title, subtitle, placeholder and suggestions, validated by `AiChatNavParamsSchema` (exported from `@objectstack/spec/ui` since #37787 merged; component ref `AI_CHAT_COMPONENT_REF`; at most one such entry per app).\n- \"设为首页\" = move the item to the first navigation position; do **not** write `landing` (`landing` entries require `visible`, and \"same home for everyone\" is the first nav item: `packages/spec/src/ui/app.zod.ts:1603-1611`, :1645-1650 at objectstack `da31daff`; re-read on main at claim).\n\n## Evidence (read at objectstack `da31daff`; re-measure at claim)\n- Picker kinds today: object / view / dashboard / report / page / url (`DesignModeMenu.tsx:990-995`); entries can only be renamed and re-iconed, \"who can see it\" stays in Studio (`DesignModeMenu.tsx:13-16`, :66-68).\n- `entryFor` has no `component` branch (`designModeMenuModel.ts:330-349`).\n- The save writes the whole app document: the own package when writable, else `.custom` (`AS/layout/designModeMenuSave.ts:5-15`).\n\n## Acceptance\n- On an installed app the entry saves into `.custom` and is visible to everyone after publish.\n- The kind is not offered once the app has an `ai:chat` entry; the form rejects what `AiChatNavParamsSchema` rejects.\n- \"设为首页\" reorders only; no `landing` key is written."

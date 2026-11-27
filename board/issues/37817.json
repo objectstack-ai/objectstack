@@ -2,8 +2,8 @@
   "number": 37817,
   "kind": "issue",
   "title": "ADR-0162 revision: write a closing outcome only when the approval is over, and hold the document for the whole approval (item 8 rulings)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:data",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-27T04:52:11Z",
-  "updated_at": "2026-11-27T08:08:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T08:42:40Z",
+  "closed_at": "2026-11-27T08:35:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37817",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ③ maintainer-directed · Source: the two maintainer rulings on the #37767 design note (2026-11-27)\n\n## 维护者速读\n\n- 做什么：把维护者对第 8 项设计说明的两条裁定写进 ADR-0162：多步审批全部走完才把关闭值写到单据上；声明了关闭状态的对象，审批期间从提交到结束一直锁住。约十处表述要改。\n- 用户会看到什么：这张卡本身只改设计文档；改完之后的建设卡会让单据不再出现「没走完的已批准」。\n- 不做会怎样：第 8 项的建设卡和「声明与执行」那张卡都按旧表述写测试，开不了工，新能力发布不了。\n- 顺序：先于 #37767 的建设；是一次独立的 Tier H 修订。\n\n## What happens\n\nADR-0162 D5, as merged in 972114df, has the approval status mirror write each request's outcome as it is decided. On a field the object closes on, that closes the record in the middle of a multi-step approval, and the three cases of #37767 can each leave it closed on an unfinished approval.\n\nThe design note for #37767 (revision 2, posted on that card) recommends shape P and a hold through the passage. The maintainer ruled both on 2026-11-27:\n\n- 「全部走完才显示已批准」: on a field the object closes on, a closing outcome is written only when the approval is over for that record (shape P).\n- 「随新能力一起全程锁」: on an object that declares `closedStates`, the document is held from submission to the end of the approval, and the hold ships with the key.\n\n## Expected\n\nOne revision of `docs/adr/0162-*.md`, of its own, before the build. Section 5 of the design note lists the statements it touches:\n\n- **D5.** \"The mirror writes each request's outcome as it is decided\"; the second of the \"four situations only\"; \"Two passes of the pending lock do not carry over\", for a node after the last step; the reasons for conditions 5 and 6; the premise of the first three bullets of \"What the conditions do not reach\"; \"Approved again ... the field holds `pending` once more\".\n- **Consequences.** The steps after an approval decision as refused writers; the record open again while the next step is pending; two bullets under the cost.\n- **Alternatives.** \"Hold a step's outcome back until the approval is over\" moves to chosen for closing fields; the narrow form of \"Set the object's validation rules aside\" is decided against; the narrower timing of P stays \"considered, not taken\", with the note's paragraph on why.\n- **Execution.** Item 7's \"Between two steps is after one step's closed outcome\", and item 8 restated for shape P, the hold, the reconciler and the host refusal.\n- **Conditions.** Condition 5 is dropped or restated, and condition 6 kept with its reason restated; the revision gives its choice and why.\n- **The seat's rulings on the note**, which the revision records where the ADR speaks to them: a host with no `job` service refuses an approval on a closing field at its first request; a request records the run that carries its record (item 7 slice A); the set of between-two-steps stops is stamped when the approval opens (item 7 slice B); a failure the flow routes to an end without asking the next step counts as unfinished (N46, option c′).\n\nNo statement in the words of an earlier maintainer ruling changes.\n\n## Done when\n\n- [ ] One PR revises ADR-0162 as above, Tier H, and lands through os-zhuang.\n- [ ] Every statement the design note's section 5 names is revised or kept with a reason in the PR body.\n- [ ] The status line stays `Proposed` (README \"Status hygiene\").\n- [ ] The two rulings above are quoted with their dates.\n\nCategory ③: maintainer-directed. A child of #36253.\nGrade: area:data · Feature · n/a · reach: the design record of a feature that has not shipped · evidence: the maintainer's two rulings and the #37767 design note\nSuggested-grade: p2 · it gates #37767, which gates the release of #36253's key\nSize: M (about ten statements; a contract review at the ADR tier)\nBusiness reason: the maintainer's rulings of 2026-11-27: a document never shows an approval that is not finished, and it is held for the whole approval.\nReader: seat 2 (repo:objectstack#2). A card thread at the ADR tier.\nClause-②: no (a design record only).\nMetadata-protocol: none.\nDedupe: the only ADR-0162 cards are #36253's children.\nRelated: #36253, #37767, #37766, PR #37606."

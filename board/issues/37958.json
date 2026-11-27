@@ -1,0 +1,31 @@
+{
+  "number": 37958,
+  "kind": "issue",
+  "title": "App Studio 改版（2-2）：完整版软件包概览页——「导出」成按钮、发布历史页签带还原、配对包按裁决、打开软件包统一落在概览（并入 #37687）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-27T12:59:41Z",
+  "updated_at": "2026-11-27T13:18:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37958",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibzywxH36FPH6ayWMUe\n\nFiling gate: ③ · Source: topic #37424 (the maintainer's decision 9, \"Package overview page\", in its body) and the maintainer's ruling 「全部按建议」 (2026-11-27T12:56Z) recorded on #37424 as comment 7218879913, which closes ADR-0084's open sentence at line 434 and the home of ADR-0146 D3's per-package line. Sub-issue of #37424 (phase 2). It folds #37687 (the read-only reason for keyboard and screen-reader users).\nGrade: area:ux · Feature · p2 · evidence: read on origin/main c3da7536 — the thin overview `ui/packages/app-shell/src/views/studio-design/StudioPackageOverviewPage.tsx` has Info and Pending only; Export and revert sit in the ⋯ menu (`StudioPackageMenu.tsx`), revert is passed the base's id and read-only status (`StudioDesignSurface.tsx:262-266`, greyed at `StudioPackageMenu.tsx:122-125`), and bare `/studio/PKG` and the Studio entry (`StudioEntryRedirect.tsx`) land on the object list.\nReader: seat repo:objectstack#3, a card thread (the PR edits `docs/adr/**`, Tier H, the maintainer merges); routed by zone `o3-studio`.\nDedupe: open and closed cards searched for \"概览\" / \"overview\" under #37424: #37454 (closed, the thin phase), #37687 (folded here); no other open.\nSerial: after #37918 (PR #37949), which also edits `DirectoryPage.allTypes-37360.test.tsx`; merge origin/main once it lands.\n\n## 维护者速读\n\n- 用户能看到什么变化：\n  - 概览页头：「导出」单独成按钮，「⋯」里是编辑信息、复制、「到设置里管理」，不放停用、启用、删除。\n  - 新增「发布历史」页签：列出发布记录，「还原到上次发布」挪到这里。\n  - 系统自带包（比如 HotCRM）有了定制之后：还原和发布历史作用在定制上；「导出」写成「导出 HotCRM 的定制」，下载的是定制。没定制过的包照旧导出原包。\n  - 打开一个软件包只有一个落点：直接打开软件包地址、进 Studio 自动回到上次的软件包，都先到概览（现在是对象列表）。\n  - 左侧菜单「全部类型」页标题下，在「已定制 n 项」后补上「已停用 m 项」。概览上不放这一行。\n  - 用键盘和读屏的人，在只读软件包上也能知道为什么不能改、不能发布（并入 #37687）。\n- 为什么：你的决定 9，以及你 12:56 对三个待定问题回的「全部按建议」。\n- 需要你做的：这个 PR 会在 ADR-0084 里补几句把这些定下来（受管文档），审核通过后要你或 os-zhuang 批准合并。\n\n## Ruled (not reopened)\n\n- Decision 9 (#37424 body), verbatim: \"Header: name, a 系统自带 or 可写 chip, a 使用中 or 已停用 chip, the description, then \\\"Export\\\" and ⋯ (edit info, duplicate, disable / enable, delete). All of these reuse the existing dialogs and confirmations.\" and the tabs \"**Info**: business fields, with the technical fields (id, namespace, type) folded away.\" · \"**Pending**: reuses the existing changes / publish panel\" · \"**Publish history**: a list plus \\\"revert to last publish\\\".\"\n- Question 1 (#37451 comment 7187264388; ADR-0084 line 430): disable, enable and delete stay in Setup → Packages; 概览 carries \"a link, \\\"Manage in Setup\\\"\". So ⋯ holds edit info, duplicate and Manage in Setup, not those three. ADR-0084 line 432: \"Export as its own button, the ⋯ rows decision 9 lists less those three, and revert on the Publish history tab.\"\n- Ruling 7218879913, items 1–4 (quoted in full on #37424): revert and publish history act on the pair (`pairId ?? packageId`); Export option A; the address stays `/studio/PKG/overview` and bare `/studio/PKG` plus the Studio entry's return to the last package land on 概览; the D3 line \"BASE 已定制 n 项 · 已停用 m 项\" goes under the 「全部类型」 page title (option B), not on 概览. The Setup → Packages detail panel is NOT removed here: it goes with #37401.\n- What each package kind may do (kernel, code, marketplace, authored) follows the existing rules; every action reuses its existing dialog and confirmation.\n\n## What\n\n1. 概览 header: Export as its own button (label per ruling item 2); ⋯ with edit info, duplicate, Manage in Setup; the \"adopt loose items\" row stays until the phase-4 move-into-package door retires it.\n2. Publish history tab: the package's publish list and \"revert to last publish\", acting on the pair where one exists (ruling item 1). Revert leaves ⋯.\n3. Landing: bare `/studio/PKG` and the Studio entry's last-package return open 概览 (ruling item 3); old links keep working.\n4. 「全部类型」 page: add \"已停用 m 项\" beside the existing customized count, from the read it already makes (ruling item 4).\n5. #37687: the switcher's lock and the read-only Pending / publish door get an accessible reason (`aria-label` / `aria-describedby`, reusing the existing read-only copy).\n6. ADR-0084: sentences that close line 434 (the pair target for Export, revert and history; the address and the landing) and record ruling item 4, citing 7218879913. No other ADR text.\n\n## Acceptance\n\n- Each of What 1–5 tested in the overview, directory and entry tests; revert on a paired base is enabled when the pair has pending publishes and calls the pair (tested, with an ablation that goes red).\n- #37687: the reason is announced (role and name queries), with an ablation.\n- Light and dark screenshots of 概览 (writable package; paired system package) and the 「全部类型」 header, saved to the project folder and named in the PR body."
+}

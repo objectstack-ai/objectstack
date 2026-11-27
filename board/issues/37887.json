@@ -1,0 +1,31 @@
+{
+  "number": 37887,
+  "kind": "issue",
+  "title": "AGENTS.md: a rule that a volatile number nobody acts on is deleted, not kept in sync (no rule counts in user-facing output, docs or baselines; a gate that exists only to sync such a number goes with it)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:docs",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T08:54:34Z",
+  "updated_at": "2026-11-27T09:16:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37887",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed. The maintainer, verbatim, 2026-11-27: 「是不是应该立skills卡，让开发遇到类似的没有意义统计数据直接删除」, then 「同意」 to triage's proposal to put the rule in AGENTS.md (the instruction set every seat reads before its first edit) rather than in the customer-published `skills/`. This is card 2, the rule. Card 1 is the removal of the first instance; it is linked below.\n\n## 维护者速读\n\n- 是什么：在开发规范里加一条规矩：一个会随开发变化、但没人依据它做事的数字（比如规则条数、文件数），不要写进用户看到的输出、文档或测试基线；遇到为了让这种数字保持同步而存在的检查或测试，删掉数字，不要去改数字。\n- 为什么写在开发规范而不是技能文档：`skills/` 是发给客户、教 AI 搭应用的；这条约束的是我们自己的开发座位，AGENTS.md 是它们开工前必读的。\n- 要你做什么：AGENTS.md 是受保护文件，PR 需要你批准合并。\n\n## The rule (draft wording; the drafting seat may tighten it)\n\n> **Volatile counts are deleted, not synced.** Do not write into user-facing output, `content/docs`, skills text or test baselines a number that changes whenever ordinary development adds an entry (rule counts, file counts, registry sizes) unless a reader acts on it. When you meet such a number, and above all when a gate or test exists only to keep it equal to a registry, delete the number (and the gate) instead of updating it. A count that a reader does act on (a limit, a quota, a price) is not volatile in this sense.\n\n## Work\n\n1. Add the rule to `AGENTS.md`, in the section on writing docs and user-facing text, or wherever the drafting seat finds the closest existing rule. One rule, no restatement elsewhere (CLAUDE.md is a pointer by its own rule).\n2. If an internal skill under `.claude/skills/**` teaches the opposite, for example \"update the count in the docs when you add a rule\", point it at the new rule.\n3. `AGENTS.md` is governed (Tier H): the PR waits for the maintainer's merge or an authorized approval.\n\n## Acceptance\n\n`AGENTS.md` carries the rule. No internal skill teaches syncing a volatile count.\n\nGrade: p2 (maintainer-directed rule; it prevents repeated queue ejections and false alarms of the #37875 kind). area:fleet (agent fleet instruction set). Seat repo:objectstack#8 holds area:fleet.\nRelated: card 1 (the removal), filed with this card. #37875 (the false p0 this class caused)."
+}

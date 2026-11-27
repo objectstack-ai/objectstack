@@ -2,8 +2,8 @@
   "number": 37504,
   "kind": "issue",
   "title": "flow-condition-option-label now reads filters and edge conditions: the automation skill's trap sentence and the os explain text still describe the start condition only",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T09:22:13Z",
-  "updated_at": "2026-11-27T06:38:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T09:37:43Z",
+  "closed_at": "2026-11-27T09:36:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37504",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CY2uhJ1AYNPw5TUSVS\n\nFiling gate: ① owed follow-up of PR #37491 (#36964): shipped text that the PR makes false, fenced off that card. Source: fleet (os-dev report 7187822605 on #36964, open questions 1 and 2; zone o5-P chose a follow-up for both).\nBlocked-by: #37491\n\nOnce #37491 merges, `flow-condition-option-label` (error) also reads get_record / update_record / delete_record filter operands, a time-relative filter, edge conditions and decision `conditions[].expression`. Two texts still say otherwise:\n\n- [ ] `skills/objectstack-automation/SKILL.md` §4: \"A label in a filter or an edge condition is never checked: it silently matches nothing\". After #37491 it is refused by `os validate` and the publish gate; the escape hatch for a deliberate label filter is a CEL value envelope. ⚠ `skills/**` is governed: its own PR, governed handoff.\n- [ ] `packages/lint/src/rule-explanations.ts` `FLOW_CONDITION_OPTION_LABEL_EXPLANATION` (\"why a start condition compares option values\") describes the start condition only. Held by open PR #37422 today: edit after it lands, or let its holder fold it in.\n\n## Business reason\nAn author or AI reading the skill is told a label filter silently matches nothing, while `os validate` now refuses it; `os explain` describes a narrower rule than the one that fired.\n\nSuggested-grade: p2 · area:build · Bug · docs/skill text wrong after a lint change.\nDedupe: `automation skill option label filter`, `flow-condition-option-label explanation` → no open card.\n\nParent: objectstack-ai/objectstack#36964."

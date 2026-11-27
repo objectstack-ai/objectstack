@@ -1,0 +1,37 @@
+{
+  "number": 37881,
+  "kind": "issue",
+  "title": "skills: objectstack-data lifecycle rule teaches the sealed-expiry scope and floor PR #37605 ships",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "documentation",
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T08:38:24Z",
+  "updated_at": "2026-11-27T12:19:21Z",
+  "closed_at": "2026-11-27T12:17:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37881",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (the `Skills-docs: follow-up owed` line of PR #37605, Part of #31908; claim amendment 7193137455) · Source: fleet (contract review records on PR #37605, the skills follow-up paragraphs of rounds 1, 5 and 6)\n\n## What happens\n\n`skills/objectstack-data/rules/lifecycle.md` teaches `retention` beside `seal`, tenant-scoped `retention_overrides`, and that the sweeper deletes sealed rows. After PR #37605 merges that is true only of some sealed objects. An agent that writes a sealed object from this page will expect an override to shorten the window, and will not know that a packaged sealed object's rows expire by whole signed checkpoints.\n\n`skills/**` is governed (Tier H), and PR #37605 declares a `(narrowing)` arm, so this text does not ride the code PR. It is the second PR of #31908's claim.\n\n## Expected\n\nThe page gains, in the wording PR #37605's texts use:\n\n- [ ] **The floor rule:** on a sealed object with no `archive` whose lifecycle is declared in packaged metadata, a retention override below the declared window is rejected, and the declared window applies. To keep rows for less time, shorten the declared window.\n- [ ] **The scope:** signed expiry covers objects whose lifecycle is declared in packaged metadata; any other sealed object keeps the row-cutoff retention sweep (seat reading 7212989029 on #31908).\n- [ ] **For those other objects, the sentence the page carries today**, kept for that case only: the sweeper deletes sealed rows, which then read as missing.\n- [ ] Paid for in the same file or bundle under the token ratchet; no ceiling moves.\n\nWritten against the merged #37605 tree.\n\nBlocked-by: #37605 (merge)\n\nGrade: area:data · documentation · reach: a shipped skill teaching sealed-object retention · evidence: the review records above\nSuggested-grade: p2\nSize: XS\nRelated: #31908, PR #37605, #37879, #37880."
+}

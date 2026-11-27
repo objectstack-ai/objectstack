@@ -1,0 +1,30 @@
+{
+  "number": 37961,
+  "kind": "issue",
+  "title": "Review follow-ups of PR #37951: refuse a knowledge_source save that names an adapter the running deployment does not mount",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T13:08:49Z",
+  "updated_at": "2026-11-27T13:18:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37961",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ① follow-up of PR #37951 (L1-a ACCEPT 7219082772: \"Please file A as a follow-up card so it is not lost\"; one card per PR, review-follow-ups exception) · Source: topic #37000\nGrading: area:ai · Task · p3 (suggested: boot already names such a source at `error` and search/index answer a coded 503, so this moves the refusal earlier rather than fixing a silent path) · reach: an author or agent saving `adapter: 'ragflow'` (retired by #37004) or a mistyped adapter over `PUT /meta/knowledge_source` or the MCP draft save · evidence: read (dev report 7218591835 on #37479, option A).\nDedupe: `repo:objectstack-ai/objectstack is:issue \"PR #37951\"` → #37479 only; `is:issue is:open knowledge unmounted adapter save` → none open besides #37000.\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n\n- 问题：保存知识源时如果写了本部署没装的存储（例如已退役的 ragflow，或拼错），保存照样成功，要到启动日志或检索报错时才发现。\n- 做什么：在保存时就拒绝，错误里写明知识源、存储名和本部署可用的存储。\n- 谁受益：在 Studio 或用 AI（MCP）写知识源的作者，当场就知道写错了。\n- 需要你做的：无（这是收窄：以前能存的写法会被拒，按惯例走契约审核）。\n\n## What\n\nPR #37951 closed #37479 with the refusal point at boot (area decision D): `reportUnmountedAdapters` names the source at `error`, `searchWithRefusals` lists it, index and search answer `SERVICE_UNAVAILABLE` 503. A save is still accepted.\n\nOption A from the dev report: extend `admitAuthoredSource` (service-knowledge, reached through metadata-core `knowledge-source-save-admission.ts` on `PUT /meta/knowledge_source` and the MCP draft save) to refuse `400` with a code naming the source, the adapter and the mounted adapters when the running deployment mounts no adapter by that id. An omitted `adapter` (allowed once #37306 lands) is not refused. Package installs (`isSystem`), code-registered sources and `os validate` are not covered by this door; say so.\n\n## Acceptance\n\n- Saving a source whose `adapter` names no mounted adapter is refused `400` with the code, the source, the adapter and the mounted list; pinned at the HTTP door and the MCP draft save.\n- A source naming a mounted adapter, or omitting `adapter`, saves as today.\n- Declared `Clause-②: no (narrowing)` with its contract-tier review.\n\nBlocked-by: #37306"
+}

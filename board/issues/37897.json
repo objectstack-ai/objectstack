@@ -1,0 +1,33 @@
+{
+  "number": 37897,
+  "kind": "pull_request",
+  "title": "fix(runtime): a dispatcher door is served only by the request's own kernel",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-mickey"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T09:33:27Z",
+  "updated_at": "2026-11-27T09:35:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37897",
+  "body": "Clause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:托管多环境主机上,评论、审批链接页、Webhook 重投、入站自动化钩子等入口只由本次请求所在环境自己的服务来处理;该环境没装对应插件时,入口如实回答\"尚未提供\"。单环境部署用户无感。\n- 为什么做:加固多环境部署下这几个入口的服务归属规则。\n- 出错会怎样:最坏是某环境里本应可用的入口回答\"尚未提供\",不会写错数据;改动小,可直接撤回。\n- 要你做什么:无\n\n## What changes\n\nA dispatcher door is served only by the request's own kernel.\n\n- `packages/runtime/src/domains/own-door-bridge.ts` gains `readDoorSlot`, the one reader every dispatcher door bridge reads the member it forwards to through. It reads the slot off the request's own kernel (`getRequestKernelService`, the reader the personal-view, attachment and print bridges already used) and treats a lookup that throws as an empty slot.\n- The comment doors (`comments.ts`), the approval action page (`approvals.ts`), the webhook redeliver door (`webhooks.ts`) and the inbound automation hook (`automation-hooks.ts`) now read their member through it. A request kernel without the slot answers the door's existing typed not-available answer, `501 NOT_IMPLEMENTED`, in the request's language, exactly as an empty slot already did.\n- On a host with one kernel the request's kernel is that kernel, so nothing changes there.\n\nFirst files to read, by risk:\n\n1. `packages/runtime/src/domains/own-door-bridge.ts` — the `readDoorSlot` function, the only new code path.\n2. `packages/runtime/src/domains/automation-hooks.ts` — the one-line reader swap at the top of `handleInboundHookRequest`.\n3. `packages/runtime/src/domains/own-door-bridge.test.ts` — the new last top-level `describe`.\n\n## Tests\n\nA new top-level `describe` in `own-door-bridge.test.ts` (the door bridges' shared harness), \"a dispatcher door is served only by the request's own kernel\", driven through the real `HttpDispatcher.dispatch()` with a `kernel-resolver` that places each request on its own kernel:\n\n- for each of the seven door bridges (comments, approvals, webhooks, automation-hooks, personal-views, attachments, print), twice (a request kernel whose lookup throws, and one that answers nothing): the door answers `501 NOT_IMPLEMENTED` and a member registered elsewhere is never called (14 cases);\n- for each of the seven: with the slot on the request kernel, the request kernel's member serves the call (7 preservation cases);\n- a completeness pin: every module under `src/domains/` that answers a door's not-available `501` reads the slot that answer guards through `readDoorSlot`, found by scanning the directory rather than listed, so a new bridge reading its member any other way fails it; and the reader itself reads the request kernel's slot and nothing else.\n\nReverse verification (each run on the committed fix, then restored and proved byte-identical to `HEAD`):\n\n- the four bridge reads reverted to their previous reader: 9 red (the 8 not-available cases of those four doors, and the completeness pin), the 7 preservation cases and the 3 untouched bridges green;\n- `readDoorSlot` itself reading through the other reader: 15 red (all 14 not-available cases and the completeness pin).\n\n<details><summary>Readings</summary>\n\nAll at head `da21c49d9db` (the branch merged with `origin/main`), after rebuilding `@objectstack/runtime`'s dependency closure:\n\n- `pnpm --filter @objectstack/runtime typecheck` — exit 0 (`tsc --noEmit` plus `check:test-typecheck`).\n- `pnpm --filter @objectstack/runtime exec vitest run --maxWorkers=2` over `own-door-bridge`, `comments`, `approvals-act`, `webhooks-redeliver`, `automation-hooks`, `scoped-service-miss-attribution`, `domain-501-language-37811` and `http-dispatcher` tests — `Test Files 8 passed (8)`, `Tests 461 passed (461)`.\n- Reverse verification, on the committed fix: four bridge reads reverted — `Tests 9 failed | 63 passed (72)`; the shared reader reverted — `Tests 15 failed | 57 passed (72)`; each restored and proved equal to the `HEAD` blob by `git hash-object`, `git diff HEAD` empty.\n- Derived gate families (`dispatch-gates.mjs --commands`, 64): 61 exit 0; three NOT MEASURED locally and left to CI — `check:dual-build-cjs-loads` (exit 3, it needs a full `pnpm build`), `check:query-options-erasure` and `check:type-check-debt` (stopped at a 300 s local cap on a shared box). The ratchet families and the source-text gates were re-run on the merged head, all exit 0.\n- The full `@objectstack/runtime` suite was not run locally (the shared verify lock was held by another run for over 18 minutes); `Test Core` runs it on this PR.\n\n</details>\n\n## Acceptance notes\n\n- The preservation cases are green before and after the fix by design: they pin that the request kernel's own member keeps serving.\n- No shared-kernel (scoped-registration) mode is affected: every slot these doors read is registered as a plain singleton by its plugin.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/runtime exec vitest run --maxWorkers=2 src/domains/own-door-bridge.test.ts` — expect every case under \"a dispatcher door is served only by the request's own kernel\" to pass.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ASNY8XNef4ywkQio6S9ju4)_\n"
+}

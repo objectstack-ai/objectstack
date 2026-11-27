@@ -14,20 +14,22 @@
     "area:ai",
     "domain:spec",
     "enhancement",
-    "pm:blocked",
+    "pm:dispatched",
     "pm:epic",
     "priority:p1",
     "size/l"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T07:19:44Z",
-  "updated_at": "2026-11-27T07:19:44Z",
+  "updated_at": "2026-11-27T12:39:44Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37856",
   "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ④ topic child. Source: topic #37853 (Jack: 「\"页面里加按钮\"的需求 作废」 06:28Z; card 「撤掉 ask_ai」 06:30Z; 「问 AI」 06:33Z; 「同意，立专题卡，非 cloud 的任务，让 objectstack #3 座位接手」 07:12Z, all 2026-11-27). Business reason: carried by the parent.\nParent: objectstack-ai/objectstack#37853 (rulings, target experience, card table, topic acceptance). Evidence: an independent Fable review of objectstack and cloud `main` (2026-11-27) checked every file:line below.\nOwner: **repo:objectstack#3** (Jack 07:12Z 「非 cloud 的任务，让 objectstack #3 座位接手」). Reserved under topic #37853 (`pm:epic`), not `pm:queue`: other seats leave it.\n\nGrading: area:ai · Task · p1 · size L · window: before 19.0.0 GA (the action type shipped in 18.x; removal is a breaking change).\nBlocked-by: C0a (#37854) (the amendment fixes the legacy-metadata behaviour).\nDedupe: searched `ask_ai`: #37142 (closed, introduced it), #37827 (open bug: record page hides `ask_ai`) is closed by this card; #37834 is the decision.\n\n## 维护者速读\n- 是什么：删掉 `ask_ai` 动作类型，以及只为它存在的代码和导出；旧元数据按 C0a (#37854) 的处方报错或跳过。\n- 影响：列表每行直接问 AI 没了（Jack 06:30 已接受）；brightrule 已装的那个动作要先处理。\n- 要你做什么：无（发版前要发布负责人一句话，见下文 changeset 那条）。\n\n## Background (verified)\n- `ask_ai` is a value of `ActionType` (`packages/spec/src/ui/action.zod.ts:706`). The real reference surface is 60 files; a regex finds 63, of which **3 must stay**: Studio canvas 「问 AI 生成字段」 (`ObjectFormCanvas.tsx`, `studio/{en,zh}.ts`).\n- Exports that exist only for it: `setChatFocus`, `ActionRunner.setAssistantFocusHandler`, `onAskAi`, `surfaceAgent.ts` `catalogServesFocus` / `focusAgentName`, `dashboard.zod.ts` `refuseRecordlessAskAi`. cloud mentions it only in comments; hotcrm has none.\n- `content/docs/references/**` is generated: run `gen:docs`, do not hand-edit.\n- `setChatFocus`, the pin control, 「改为问」 and `console.ai.focus.*` strings have only shipped in prereleases (`.changeset/pre/36999-conversation-focus.md`, app-shell `18.6.0-next.0`).\n\n## What to do\n1. `ActionType` → `enumWithRetiredValues()` with the prescription (precedent `packages/spec/src/ai/agent.zod.ts:161,173`). ADR-0087's three duties: conversion in `conversions/entries/19/`, a D3 semantic entry, the disposition marker in the changeset. The four generated baselines do not change for \"one enum value fewer\": expected, not missed.\n2. Implement the legacy behaviour exactly as C0a (#37854) writes it (source refusal with prescription; conversion auto-deletes only without references; installed metadata per C0a (#37854)).\n3. Remove the runtime and ui paths and the exports above; regenerate the API surface (`gen:api-surface`). spec and `ui/` changes go in **one PR** (release checklist item 4 in `AGENTS.md`).\n4. Examples: remove `ask_ai` actions and the page references to them (e.g. showcase `task-detail.page.ts`).\n5. Not in this card: `skills/**` (C1s) and ADRs (C0a (#37854)).\n6. `.changeset/pre/` holds two consumed changesets that describe the pin / `ask_ai`; ask the release owner whether their text may change. If not, put the correction in this card's changeset.\n7. Close #37827 with this PR.\n\n## brightrule (outside the fleet board; the C1 owner coordinates it before C1 releases)\n- brightrule's installed metadata has one action `brightrule_policy_ask`, `locations: ['record_header','list_item']`; no declaration was found in its `src/` (it depends on spec 18.6.0); `docs/policy-admin.md:76` mentions it.\n- Before C1 releases: find where it is declared, delete it, fix `docs/policy-admin.md:76`, and handle the copy installed in deployed environments. Ask the maintainer who owns brightrule if unsure.\n\n## Acceptance\n- Parsing a source file with `type:'ask_ai'` fails with the prescription text; `os migrate meta --from 18` lists it; installed metadata behaves as C0a (#37854) says.\n- Zero change in the four generated baselines; `git grep -n ask_ai` leaves only the prescription line, the conversion entry, the changeset, and the 3 Studio canvas hits.\n- Studio's 「问 AI 生成字段」 still works; brightrule boots on the new version."

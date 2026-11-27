@@ -1,0 +1,35 @@
+{
+  "number": 37929,
+  "kind": "pull_request",
+  "title": "feat(spec)!: action locations say what an action acts on",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "protocol:ui",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T11:47:54Z",
+  "updated_at": "2026-11-27T13:03:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37929",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoM3531xPi2L3EUw2ayzmaM3)_\n\nPart of #36495\n\n## What changes\n\nAn action's `locations` now say what the action acts on, not the part of the page it sits in. `ACTION_LOCATIONS` is `list`, `record`, `record_page`, `record_row`, `record_related`, `record_section`. The page-part words `list_toolbar`, `list_item`, `record_header` and `record_more` are retired.\n\n- `record` is new: the action acts on one record, so it is drawn on the record page's header and in each list row's menu.\n- The record header's ⋯ fold, which `record_more` used to say, is the action's `component: 'action:menu'`.\n- Which actions are buttons and in what order stays the object's `actionLayout`.\n\nClause-②: no (narrowing)\nMetadata-protocol: narrowed\nSkills-docs: follow-up #37895\n\n## ADR-0087 conversion `action-locations-acted-on` (lossless)\n\nFROM → TO. Each action is drawn in exactly the places it was drawn before:\n\n- `list_toolbar` → `list`\n- `list_item` → `record_row`\n- `record_header` / `record_more` → `record_page`\n- `record_header` or `record_more` beside `list_item` → `record`\n- `record_more` without `record_header` → `record_page` + `component: 'action:menu'`\n- A component's single `location` (`record:quick_actions`, `action:group`, `action:bar`) is mapped the same way.\n\nThe conversion is retired from the load path from day one, as every protocol-19 entry is. An old word is refused at authoring, and the refusal names the word to write instead. Stored items, built artifacts and `os migrate meta --from 18` replay the conversion. It leaves a TODO and changes nothing in three cases that have no lossless rewrite:\n\n- a `record_more`-only action that is also on `list_toolbar`; there are 0 in this repo\n- a component whose `location` is `record_more`\n- an `action:group` at `record_header` with a `record_more`-only member\n\nThe semantic entry `action-locations-page-parts-retired` carries the step into the protocol-19 upgrade guide.\n\n## Readers\n\n- `@object-ui/types`:\n  - `actionRendersAt` reads `record` as covering `record_page` and `record_row`.\n  - The new `actionFoldedIntoMenu` tells whether an action is folded into the ⋯.\n  - `arrangedHeaderActions` pins and unpins through `component`.\n- `page:header` sends every folded action to its ⋯. Every other `record_page` action takes the inline budget.\n- `record:quick_actions` at `record_page` leaves folded actions out.\n- The related list reads `record` as a row action.\n- The record-scoped checks in core and runtime (`isRecordScopedAction`, `requiresRecord`) accept `record`.\n- Studio:\n  - The action inspector and the `record:quick_actions` location dropdown offer `record`.\n  - The action preview draws the fold as \"record_page · ⋯\".\n- Lint: the record-page header, related-list and action-layout rules read the new words. The related-list hint now groups locations that draw the same thing, which keeps the one-line fix under 200 characters.\n- Declarations under `packages/**`, `examples/**` and `ui/**`, plus `content/docs/**`, use the new words. The generated references, `sdui.manifest.json` and the component reference pages are regenerated.\n\n## Not moved\n\n- #37895: the `skills/**` teaching. It is Blocked-by this card.\n  - ⚠ Two derived gates are red on this PR until #37895 PR 1 lands. That PR is skills-only and lands before this one; it makes 9 skills sites compile on both vocabularies.\n  - `check:skill-examples` fails on 8 `os:check` examples: `skills/objectstack-ai/SKILL.md:189` and `skills/objectstack-ui/rules/actions.md:69,96,180,205,239`.\n  - `check:skill-served-sections` fails on the JSON fence in `skills/objectstack-ui/SKILL.md` § Actions.\n  - After PR 1 merges, main is merged here and both gates are re-run.\n- HotCRM's declarations ride the HotCRM pin bump.\n- `docs/qa/**` checklist prose and the recorded build `docs/qa/scenarios/builds/travel_expense.json` keep the old words. Both are outside the card's file surface, and the recorded build is replayed through the conversion.\n\n## Size\n\n417 files, +2308/−1624 (3932 changed lines). This is over 3000, so it is a class (c) landing.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qic11optJUat6U8X67jY\n"
+}

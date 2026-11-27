@@ -2,7 +2,7 @@
   "number": 37803,
   "kind": "pull_request",
   "title": "refactor(app-shell): split AiChatPage into ChatPane and helper modules, move-only",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T04:12:33Z",
-  "updated_at": "2026-11-27T04:41:07Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-27T11:53:18Z",
+  "closed_at": "2026-11-27T11:53:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-27T11:53:15Z",
   "comments": 0,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37803",

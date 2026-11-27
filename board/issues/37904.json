@@ -1,0 +1,31 @@
+{
+  "number": 37904,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37900 (stdio bridge, disabled package)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T10:01:09Z",
+  "updated_at": "2026-11-27T10:16:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37904",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① L1/L2 follow-ups of one PR (`review follow-ups of PR #N`, one card per PR, later rounds append here). Source: fleet (L1 of PR #37900, comment 7215104549, item N1).\nGrading: area:package · Task · p3 · domain:server. The ruled cell of #36689 (data) is closed by PR #37900; this is schema on a narrower host, outside that ruling.\nReader: seat repo:objectstack#3, zone o3-package, after PR #37900 merges (the files are the ones that PR changes).\nDedupe: `\"PR #37900\"` 0 hits; `list_objects disabled package` 23 hits, all closed and on other mechanisms (#25120, #25138, #25245 made the listing read the protocol's merged view; none covers a host with no protocol).\n\nBusiness reason: when an admin disables a package, an AI client connected over a local MCP (stdio) session should stop seeing that package's objects, as it already does on a host with the protocol service. On a host with no protocol service the client still lists and describes them, so the model plans a query against an object whose data is then refused (after PR #37900). The cost is a wasted call and a confusing answer, not leaked data.\n\n## Items\n- [ ] N1: on a host with no protocol service, `list_objects` and `describe_object` (and the `objectstack://objects` resources, the same view) list and describe a disabled package's objects. The view falls back to `IMetadataService.listObjects()` / `getObject()` (`packages/mcp/src/stdio-data-bridge.ts#stdioObjectView`, `#readMergedObjects` returns `undefined` there), which does not ask `isObjectPackageDisabled`. Expected: filter the fallback through the same predicate PR #37900 threads into `StdioObjectReads` (`isObjectPackageDisabled`), so a disabled package's object is absent from both tools and the resources on every host. Pin with a no-protocol-host test plus a re-enable control.\n\n## Acceptance\n- On a no-protocol host, a disabled package's object is absent from `list_objects`, `describe_object` answers not found for it, and the resources agree; re-enabling restores all three.\n- The protocol-host behaviour is unchanged."
+}

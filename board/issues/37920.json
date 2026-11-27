@@ -1,0 +1,38 @@
+{
+  "number": 37920,
+  "kind": "issue",
+  "title": "App Studio 改版（3-4）：Studio 菜单去掉「数据源」一行——数据源只在「设置 › 集成」里管",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-27T11:30:27Z",
+  "updated_at": "2026-11-27T13:56:40Z",
+  "closed_at": "2026-11-27T13:56:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37920",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibzywxH36FPH6ayWMUe\n\nFiling gate: ③ · Source: topic #37424 (the maintainer's decision 12, \"Datasources are managed only in Setup → Integrations … the Studio menu drops the `datasource` entry (task 6)\", approved 「同意」), written into ADR-0084 on main (`#amendment-2026-11-26-moves`: \"**The menu draws no `datasource` row** (decision 12)\"). Phase 3 left it undone: PR #37602 deferred it to #37564, whose card did not carry it. Sub-issue of #37424 (phase 3).\nGrade: area:ux · Feature · p2 · evidence: read on origin/main c3da7536 — `ui/packages/app-shell/src/views/studio-design/studioMenuPlacement.ts:104` still holds `{ type: 'datasource', tier: 'advanced' }`, and `studioMenuModel.ts:178` still routes the row to Setup's Datasources page.\nReader: seat repo:objectstack#3, a card thread (Tier H: the PR edits `docs/adr/**`); routed by zone `o3-studio`.\nDedupe: open and closed cards searched for \"datasource\" under #37424: #37564 and #37565 (closed, neither carried the row), none open.\n\n## 维护者速读\n\n- 用户能看到什么变化：App Studio 左侧菜单「平台」组里不再有「数据源」这一行。数据源只在「设置 › 集成」里管。\n- 为什么：你的决定 12：连接是绑在环境上的配置，归设置管，Studio 只开发一个软件包。\n- 为什么一起改文档：有个测试要求菜单表和 ADR-0084 的类型表逐行一致，只改一边就红，所以代码和 ADR 那一行在同一个 PR 里改（和 #37564 一样）。\n- 需要你做的：这个 PR 改了受管文档（ADR），审核通过后要你或 os-zhuang 批准合并。\n\n## What\n\n- Remove the `datasource` row from the Studio menu placement (`studioMenuPlacement.ts`), so the menu draws no `datasource` entry in any scope. The type stays registered `system` (ADR-0084: \"like `field`, it is a type that draws no row\").\n- Retire what only served that row (the `datasource` branch in `studioMenuModel.ts` that routes it to Setup), unless another caller still reads it; the PR names what stays and why.\n- Answer #37424 comment 7188504633 (a) on the PR, from the code: does the 全部类型 (all types) directory still list `datasource` once the menu draws no row? PR #37602's body says it does; confirm on the then-current main, and if it does, say whether that matches ADR-0084 (one type, one group; a connection is managed in Setup alone). A change to the directory is out of scope; a mismatch is reported, not fixed here.\n- In the same PR, rewrite ADR-0084's type-table row for `datasource` (today `| **平台 Platform** | `system` | 6 | `datasource` | 高级 |`) into a no-row entry like `field`'s (`| — |` for Order and Tier), and renumber `external_catalog`; `studioMenuPlacement.test.ts` ties each table row to `STUDIO_MENU_PLACEMENT` and is red if only one side changes (as #37564 did). Update the table's count note if one names the 平台 Platform rows. No other ADR text. This makes the PR Tier H (`docs/adr/**`), landed by the seat after the maintainer's approval.\n\n## Acceptance\n\n- The Studio menu draws no `datasource` row (tested); `studioMenuPlacement.test.ts` passes against the ADR table as this PR leaves it.\n- Existing menu tests are re-pointed, not weakened. A screenshot of the 平台 group on the PR.\n"
+}

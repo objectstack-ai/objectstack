@@ -2,7 +2,7 @@
   "number": 37812,
   "kind": "pull_request",
   "title": "docs(adr): regenerate the ADR index for ADR-0160's amended status line",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "size/xs",
     "skip-changeset"
   ],
@@ -22,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T04:27:50Z",
-  "updated_at": "2026-11-27T07:23:05Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-27T08:36:13Z",
+  "closed_at": "2026-11-27T08:35:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-27T08:35:12Z",
   "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37812",

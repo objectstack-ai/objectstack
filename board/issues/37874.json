@@ -14,20 +14,22 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:blocked",
+    "pm:dispatched",
     "pm:epic",
     "priority:p1",
     "size/m"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T08:11:11Z",
-  "updated_at": "2026-11-27T08:11:11Z",
+  "updated_at": "2026-11-27T14:13:15Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37874",
   "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ④ topic child. Source: topic #37871 (Jack 2026-11-27: 「用户体验相关的非常关键，要启动」 06:56Z; card 「按 v2 立卡，顶替输入框」 08:05Z; 「交给 objectstack #3」 08:06Z). Business reason: carried by the parent.\nParent: objectstack-ai/objectstack#37871 (decisions D1–D6, relations, topic acceptance). Evidence: an independent Fable review of objectstack `main` adb65d16 and cloud `main` 9729319 (2026-11-27) checked every file:line below.\nOwner: **repo:objectstack#3** (Jack 08:06Z 「交给 objectstack #3」; 07:51Z 「你只处理 cloud 的任务，其他任务都交给 objectstack 座位哦」). Reserved under topic #37871 (`pm:epic`), not `pm:queue`: other seats leave it.\n\nGrading: area:ux · Task · p1 · size M.\nBlocked-by: Q1 (#37872), Q2a (#37873) (numbers in the parent's audit comment); #37799 (split A adds `chat/types.ts`; main-file line numbers all change). Soft order with #37729 (split B) and #37861 (entry C5): whoever lands later rebases.\nDedupe: searched `findPendingQuestion`, `composer gate`: none.\n\n## 维护者速读\n- 是什么：把问题卡接进对话：识别信封、判断何时出卡、卡片顶替输入框（输入框不卸载，草稿不丢）、对话里显示收起的「AI 问：…」、待答问题不显示\"重新生成\"、跳过记号。发版后在 brightrule 上真机冒烟。\n\n## Background (verified)\n- Tool parts reach the console in the stream (`tool-input-available` / `tool-output-available`, cloud `vercel-stream-encoder.ts:89-102`) and on reload (`objectql-conversation-service.ts:770-801`); the approval card is detected the same way (`mapMessages.ts:490,513-520`).\n- Two shapes: streamed, a tool-ended turn is ONE assistant message (tool parts + text); reloaded it is TWO (one with tool parts, one text) (`app-shell/src/hooks/useChatConversation.ts:544-612`).\n- Retry replays only the text, without tool frames (cloud `ai-service.ts:3674-3679`).\n- `PromptInput` in `ChatbotEnhanced` is uncontrolled; code reads and writes the textarea (`ChatbotEnhanced.tsx:1443-1452,1492-1499`); Enter during a turn queues, sent when the turn ends (`:1359-1361,1420-1440`); `readOnly` share pages render no input (`:396-404,2328`); `onSendMessage` exists (`:383`); `handleSuggestionClick` is the card-driven-send precedent (`:1456-1464`). A send through `onSendMessage` does not trigger the input's restore logic (`:1470-1499`).\n\n## What to do\n1. `findPendingQuestion(messages, status)` (pure, `plugin-chatbot`). Show the card only when ALL hold:\n   1. the stream has ended;\n   2. an assistant message after the last user message carries an envelope (both shapes);\n   3. the envelope's `reply` equals the last assistant text in that segment (excludes two questions in one batch, another tool ending the turn first, the tool-execution endpoint);\n   4. no user message after it (a HITL continuation `[HITL id]` also counts as \"moved on\": the card collapses, but the summary does not treat it as the answer);\n   5. no queued message (if one is queued it is sent and the question collapses: \"sending something else = skip\");\n   6. no pending write approval in the same segment (approval card first; the question shows collapsed);\n   7. no local skip mark for this question;\n   8. not a `readOnly` share page.\n   Fixtures: streamed shape, reloaded shape, plus one each for queued, HITL, two questions in a batch.\n2. Two states only: pending and past (answered or skipped are not distinguished; skip is device-local).\n3. **Composer gate**: a generic container around `PromptInput`; whoever holds it renders (the question card now, the approval card later, #37690 seg 3 item 4). While open, `PromptInput` stays MOUNTED, visually hidden plus `inert`: draft, attachments and focus state survive and come back after skip or answer.\n4. Answer: `onSendMessage(text)` from Q2a (#37873)'s `onAnswer`. On send failure the bubble rolls back, the conditions hold again and the card returns with its selection.\n5. In-thread message: when the envelope matches, draw from the envelope (pending: question and preface only; past: question plus expandable options); do not parse the bullets out of `reply`; copy still copies the full reply. Draw in the message layer, NOT in `renderToolDetail` (avoids split B).\n6. The pending-question message hides \"regenerate\".\n7. Skip marks: localStorage key `objectstack:ai-chat-question-skip:<conversation id>`, value = list of skipped question tool-call ids; reads and writes in try/catch; add the prefix to the sign-out cleanup (`useChatConversation.ts:283-296`).\n8. Add one item to the platform test checklist.\n9. After the release that carries this: smoke on brightrule (an ambiguous question shows the card; one click gets the number). brightrule is outside the fleet board; ask the maintainer who runs it there.\n\n## Acceptance\n- Topic acceptance 1–6 and 9 on #37871; with entry C5 (#37861) landed: the answer still sends `context.focus`, and the chip stays after the card closes."

@@ -1,0 +1,35 @@
+{
+  "number": 37984,
+  "kind": "issue",
+  "title": "i18n(console): the 问 AI launcher's amber marker still reads \"a proposed plan is waiting\" when what waits is a single write, in all eleven packs",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T14:05:27Z",
+  "updated_at": "2026-11-27T14:07:54Z",
+  "closed_at": "2026-11-27T14:07:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37984",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nBlocked-by: #37970\n\n## Why this matters\n\nC4 (#37860, PR #37970) lights the 问 AI launcher's amber marker in two cases: a proposed plan waiting for approval, as before, and now also a single write waiting for approval. Its accessible description and tooltip, `console.ai.dock.planAwaitingApproval`, still say only \"A proposed plan is waiting for your approval\" in all eleven locale packs. A user with a pending write who hovers the marker, or hears it read by a screen reader, is told about a plan that does not exist. They then look for a plan card and miss the write card that is actually waiting. The C4 thread found this and left it out of that PR's scope.\n\n## Where\n\n- `ui/packages/i18n/src/locales/en.ts:3225` (on PR #37970's head `f738217a`), `planAwaitingApproval: 'A proposed plan is waiting for your approval'`, and the same key in the other ten packs.\n- Used by `ui/packages/app-shell/src/layout/AssistantTopBarButton.tsx:115` and `ui/packages/app-shell/src/layout/ChatDock.tsx:787`.\n- Pinned by `ui/packages/app-shell/src/layout/__tests__/launcherPlanApprovalMarker-11666.test.tsx`.\n\n## Acceptance\n\n- The marker's text is true in both cases. Either one wording covers both (for example \"Something is waiting for your approval\"), or the marker picks a plan text or a write text by what is actually pending. The implementer picks which and says why in the PR.\n- All eleven packs are updated. A pack whose translation is not settled follows the repo's i18n fallback rule instead of keeping the stale English meaning.\n- The marker pin test checks the text for a pending write as well as for a pending plan.\n\n## Out of scope\n\nWhen the marker lights, and the open-type rules (ADR-0057 A5), are C4's and are not changed here."
+}

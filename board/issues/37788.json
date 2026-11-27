@@ -2,8 +2,8 @@
   "number": 37788,
   "kind": "issue",
   "title": "AI 问询首页 T2：平台通用的应用内 AI 问询页面（首页态、提问、恢复对话，本页隐藏机器人）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ai",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-27T03:19:08Z",
-  "updated_at": "2026-11-27T08:07:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T10:56:40Z",
+  "closed_at": "2026-11-27T10:55:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37788",
   "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ① maintainer-asked. Jack in the seat thread, 2026-11-27: 「立卡派发」 (02:37Z); route ruling 「先内置页面，再做页面积木」 (02:41Z card); 「我们是一个开发平台，你搭的入口页面必须是通用的」 (02:51Z); 「用fable评审一下完整的首页方案，我现在只要考虑这一个页面」 (03:07Z); ADR-0057 conflict ruling 「做首页，本页隐藏机器人」 (03:16Z card).\nPlan: `/mnt/project-files/ai-home/plan-v1.md`, Fable review with file:line evidence `/mnt/project-files/ai-home/fable-review-v1.md` (objectstack `da31daff`, cloud `917f57c`). Mockup: https://claude.ai/artifact/SS7UdUYXethLuvV8f5D7JY.\nParent: objectstack-ai/cloud#5027 (ask experience). Trigger app: brightrule (a policy-inquiry app whose only AI entry today is the top-right robot).\nGrading: area:ai · Task · p1 · size M · reach: every app with an `ai:chat` entry; brightrule first.\nDedupe: searched `AppAskPage`, `ai:chat`, `registerAppComponent ai`: none.\nBlocked-by: #37787\nBlocked-by: #37819\n\n## 维护者速读\n- 是什么：新做平台通用的「AI 问询」页面。应用把它挂在菜单上（第一位即首页），进来先看到应用配置的欢迎语、大输入框和推荐问题；提问后同一页变成对话。用通用 ask，在这一页隐藏右上角机器人。\n- 已定：做首页、本页隐藏机器人（03:16Z）；要补 ADR-0057 修订 A4。\n- 要你做什么：无。\n\n## Background (verified, see the review)\n- ADR-0057 Amendment A3 (2026-11-17) made the right drawer the only chat container and retired the full page (`ui/docs/adr/0057-console-ai-chat-one-conversation-docked.md:435-474`); `/ai` only opens the drawer (`ui/apps/console/src/App.tsx:525-557`). The maintainer has now ruled an app-level page back in, with the robot hidden on it.\n- ask sends `context.activeApp` (`ui/packages/app-shell/src/console/ai/AiChatPage.tsx:2078,2113`); the server reads it (cloud `packages/service-ai/src/turn-grounding.ts:118-126`), so passing `activeAppPackageId` to `ChatPane` is enough.\n- Makers' drawer defaults to build (`ui/packages/app-shell/src/layout/ChatDockConversation.tsx:158-190`): this page must pin `ask`.\n- The client creates conversations with body `'{}'` (`ui/packages/app-shell/src/hooks/useChatConversation.ts:884`); nothing writes `metadata.activePackageId` for ask.\n- Split cards objectstack#37728/#37730 (epic #37690) are rewriting `AiChatPage.tsx` / `ChatbotEnhanced.tsx`; this card must not edit those two files (split C keeps the `ChatPane` import path stable, `/mnt/project-files/ai-chat/split-plan-r2.md:108`).\n\n## What to do\n1. New `ui/packages/app-shell/src/console/ai/AppAskPage.tsx`, registered as `ai:chat` in `ui/packages/app-shell/src/services/builtinComponents.tsx` (lazy, like the other pages).\n2. The page reads its own nav item from the loaded app's navigation (by `componentRef: 'ai:chat'`) and parses `params` with #37787's schema; missing keys fall back to neutral platform copy (no business wording). It never reads params from the URL.\n3. Home state, drawn by the host: welcome title and subtitle, a large composer with the configured placeholder, an \"本应用优先\" scope badge (static text in v1), up to 4 suggestion buttons (click = send). Layout works at phone width.\n4. On first submit, mount the existing `ChatPane` via the existing `pendingFirstMessageRef` path: `hideHeader`, agent pinned to `ask`, `activeAppPackageId` = this app's package, conversation key `app:<pkg>:ask`. A maker also gets ask here; a build hand-off from ask keeps today's behaviour (opens the drawer).\n5. Conversation create from this page sends `metadata: { activePackageId: <pkg> }` (extend `useChatConversation`'s create body; drawer and other callers unchanged).\n6. URL: `?c=<conversationId>` once the conversation exists; reload restores it. A `?c=` that is not the caller's, or belongs to another app, opens the home state (no error page, no leak of its title). \"新对话\" returns to the home state.\n7. Hide the top-right robot / drawer trigger while this page is the active route, so one screen never holds two ask conversations; it comes back on any other page.\n8. AI unavailable for this user (deployment has no AI, or no seat, `useAiSurface`): render the existing `AiUnavailable` state.\n9. ~~ADR-0057: add Amendment A4 …~~ Moved to #37819 (seat repo:objectstack#1 split, 2026-11-27T04:57Z): the ADR text lands first; this card's PR lands only after #37819's PR merges and does not touch `ui/docs/adr/**`.\n10. If a cheap hook exists, tag turns from this page (`context.surface` or equivalent) so evals can split them; otherwise note it in the PR.\n\n## Acceptance\n- `AiChatPage.tsx` and `ChatbotEnhanced.tsx` untouched.\n- Tests: registration and route; home state renders configured copy and falls back cleanly; suggestion click sends; first submit mounts `ChatPane` with ask + package; create body carries `activePackageId`; `?c=` restore, foreign `?c=` falls back; robot hidden on this route only; unavailable state.\n- Browser check in the showcase or brightrule app with a hand-written nav item (screenshot in the PR).\n"

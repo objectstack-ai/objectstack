@@ -2,8 +2,8 @@
   "number": 37830,
   "kind": "issue",
   "title": "ci(test-ui): the live-tree \"imported path walker\" case in select-affected-tests timed out again (15.8 s of 15 s) on a slow PR runner, after the #31941 shared-memo fix",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:fleet",
     "domain:devx",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-27T06:00:19Z",
-  "updated_at": "2026-11-27T08:02:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T09:12:57Z",
+  "closed_at": "2026-11-27T09:12:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37830",
   "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwGVgec21LwQTtRY85\n\nFiling gate: ① reproducible defect in a gate (a deterministic-tree test that times out on a slow runner). Source: fleet.\nGrading: area:devpath · Bug · priority:p2 · reach: CI red on a PR run, measured once (below); suggested p2 because the failed-job rerun went green and no merge-queue kick is recorded yet; #31941 (closed) was p1 when it kicked the queue. Triage, please confirm.\nDedupe: issue search `\"select-affected-tests\" timeout` open: 0; `\"select-affected-tests\" flake` all states: 5, all closed (#31518 #26460 #25924 #31519 #27055); closest is closed #31941 (same test, same symptom), cited here rather than reopened because its fix landed and this is a fresh reading.\n\n## Reading\n\n- PR #37825 (docs-only: one ADR prose file under `ui/docs/adr/**`), head 8735dfe10fef4a124c1226588462b1761798b32e, CI run 45945413506, job \"Test UI (1/16)\" (check run 140329796350): `ui/scripts/__tests__/select-affected-tests.test.ts`, case \"select-affected-tests — the live tree > a change to the imported path walker selects what a change to the selector itself does (objectstack#31520)\", `Error: Test timed out in 15000ms`, the case reporting 15789 ms. 1 failed of 71 in the file; 12437 other tests in the shard passed. The shard log shows a starved runner (transform 135 s, import 1067 s, shard 802 s).\n- The failed-job rerun (attempt 2, job 140335443034) passed on the same head.\n- The test's own comment (around line 655) says the #31941 shared scan memo brought the three live-tree cases to 4.2 s; this run took 15.8 s for one, so the margin does not hold on a slow runner.\n- The diff of that PR cannot reach the test: it changes no code and the test reads no `docs/adr` path.\n\n## Ask\n\nMake the case fit its budget with margin on a slow runner (for example a smaller live-tree fixture, or a per-case timeout that the deterministic work justifies, measured), without weakening what it asserts. Acceptance: the case's own time on PR CI is read from three runs and recorded in the PR."

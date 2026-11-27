@@ -1,0 +1,36 @@
+{
+  "number": 37939,
+  "kind": "pull_request",
+  "title": "docs(skills): objectstack-ai teaches the unknown-key refusal for the two retired agent keys",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T12:11:07Z",
+  "updated_at": "2026-11-27T13:58:21Z",
+  "closed_at": "2026-11-27T13:56:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-27T13:56:40Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37939",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DLCo5F2y7fgbM8tstGoyyUn)_\n\nFixes #37782\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：照着 AI 技能文档写智能体的人，读到「两个已下线旧字段」那段说明时，看到的是现在真实的行为：系统把它们当未知字段拒绝，并指向升级指南网页。原文说的「带迁移提示的专用报错」和「迁移会自动删除该字段」都已不存在，这次一并改正。\n- 为什么做：技能文档与平台实际行为对齐的收尾，去掉一段过期描述、表格里一句过期说法和两处指向空处的引用。\n- 出错会怎样：只改了说明文字，实际报错不受影响；写错的话读者只会对报错形式有错误预期，撤回这次改动即可恢复。\n- 要你做什么：这是对外发布的技能文档，席位审核通过后请你批准合并。\n\n## What changes\n\n`skills/objectstack-ai/SKILL.md`, the paragraph above the retired-key table, the table's header cell, and one clause of the `agent.tools` row. Nothing else in the file moves.\n\n- Paragraph, before: \"Two `AgentSchema` keys are **tombstones**, not legacy options — authoring either is a parse error carrying its migration (`packages/spec/src/ai/agent.zod.ts:234, :251`)\". On `main`, lines 234 and 251 of that file hold a type export and a memory-store constant, and the file declares no `tools` or `knowledge` key and no `retiredKey()` for either.\n- Paragraph, after: \"Two `AgentSchema` keys are retired, not legacy options: the strict schema refuses each as an unknown key, naming https://objectstack.ai/docs/protocol-upgrade:\". The citation is the strict-object refusal itself, stated in words. No line number is left to drift.\n- Header cell: \"REMOVED in protocol 17\" becomes \"Removed in 17, tombstone gone in 18\".\n- `agent.tools` row, one clause, before: \"Not a rename: the migration deletes the key and names each tool that was listed; re-declare each in a `defineSkill` under the stack's `skills` (ADR-0064)\". After: \"Not a rename: the strict schema refuses the key as unknown; re-declare each tool in a `defineSkill` under the stack's `skills` (ADR-0064)\". The `agent-tools-to-skills` conversion left the load path in `@objectstack/spec` 17.0.0 (`packages/spec/src/conversions/retired-after.census.json`), so no migration converts the key any more. The row's why-sentence and its replacement stay as PR #37797 landed them. The L1 (7218142210) and contract review (7218120173) of #37797 both carried this clause here.\n- The `agent.knowledge` row is untouched.\n- `scripts/check-skills-token-ratchet.mjs`: the `skills/objectstack-ai/SKILL.md` row is lowered 6795 to 6791, the file's measurement on this head, with a one-line note. A lowering, not a raise; no other row moves.\n- A patch changeset for `@objectstack/skills` carries the two declaration lines and names the clause.\n\nHead `873d3a6d` merges `main` after PR #37797 (`3247e87d`) with no conflict, then rewrites the clause and lowers the row.\n\nSkill length (tokens as the ratchet counts them):\n\n| | before (`main`) | after (`873d3a6d`) |\n|:--|:--|:--|\n| `skills/objectstack-ai/SKILL.md` | 486 lines, 6795 tokens (27207 bytes) | 486 lines, 6791 tokens (27191 bytes) |\n\nRead first, by risk:\n\n1. `skills/objectstack-ai/SKILL.md`, the \"Two `AgentSchema` keys\" paragraph and the `agent.tools` row: check each claim against the tests named under Tests.\n2. `scripts/check-skills-token-ratchet.mjs`, the one row: 6795 to 6791 and its note.\n3. `.changeset/37782-ai-skill-retired-agent-keys-refusal.md`.\n\n## Tests\n\nNo test changes: the diff is prose in a published skill, a ratchet row and a changeset. The behaviour the text describes is already pinned on `main` in `packages/spec/src/ai/agent.test.ts`:\n\n- describe `agent.tools retirement (ADR-0064) — aged out; tools move into skills`, test \"REFUSES a legacy inline tools array as an unknown key naming the upgrade guide\".\n- describe `AgentSchema`, group `Tools and Capabilities`, test \"the refusal is the strict unknown-key one, naming the guide where the scoping prescription lives\" (asserts `unrecognized_keys`, the key name `knowledge` and the guide URL).\n\n`AgentSchema` is built with `strictObject` in `packages/spec/src/ai/agent.zod.ts`; the URL is `PROTOCOL_UPGRADE_GUIDE_URL` in `packages/spec/src/shared/protocol-upgrade-guide.ts`.\n\n## Acceptance notes\n\n- The card and the dispatch name an `agent.knowledge` describe in `agent.test.ts`. There is none on `main`: the `knowledge` refusal is pinned by the two tests in `AgentSchema` / `Tools and Capabilities`. The paragraph cites no describe name, so nothing depends on it.\n- \"Removed in 17\" is kept as a fact: `content/docs/ai/tools.mdx` on `main` says `agent.tools` was removed in protocol 17, and the comments in `agent.test.ts` say both tombstones left the shape at 18.\n- The same file cites `packages/spec/src/ai/agent.zod.ts:87-95` in its Model Configuration section. Those lines still hold the keys it names (the range has drifted by a few lines). Outside this card's paragraph, not touched.\n- Overlap at `873d3a6d`: `main` merges cleanly; PR 37919 and PR 37661 merge cleanly. PR 37947, PR 37937 and PR 36158 each conflict with this branch only in `scripts/check-skills-token-ratchet.mjs`, at the lowered row (`SKILL.md` merges by text with all of them). Whichever lands second merges `main` and re-measures the row.\n\n## Verification\n\nTwo-minute check: `node scripts/check-skills-token-ratchet.mjs` prints `skills/objectstack-ai/SKILL.md is 6791 tokens (ceiling 6791; headroom 0)` and exits 0.\n\n<details>\n<summary>Local gates at 873d3a6d (exit codes captured before any pipe, under os-verify-lock)</summary>\n\n- `node scripts/check-skills-token-ratchet.mjs`: exit 0, \"skills/objectstack-ai/SKILL.md is 6791 tokens (ceiling 6791; headroom 0)\". `--self-test`: exit 0.\n- `check:skill-examples`, `check:skill-docs`, `skill-evals --dry-run`, `check:skill-identifier-liveness`, `check:skill-links`, `check:nul-bytes`, `check:doc-authoring`: exit 0 each.\n- NOT MEASURED this round: the rest of the derived list (it ran in full at `46fb6638`, 45 of 49 exit 0 and 4 left to CI for want of a whole-repository build); `packages/spec/scripts/platform-catalog.test.ts`, reason: the script edit is one comment line and one number. CI runs both.\n- Dev reports on the card: 7217962987 (round 1), 7218957386 (this round; it supersedes 7218940982, whose overlap line was wrong).\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cxBECSPtHxQMZDHSie)_\n\n<!-- signed: repo:objectstack#1 · os-elon-musk · session_016WV4cxBECSPtHxQMZDHSie -->\n"
+}

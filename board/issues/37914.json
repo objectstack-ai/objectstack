@@ -1,0 +1,32 @@
+{
+  "number": 37914,
+  "kind": "issue",
+  "title": "Arabic (right-to-left) desktop: the sidebar panel covers the end of every page header, so page actions sit under it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-27T10:58:52Z",
+  "updated_at": "2026-11-27T11:20:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37914",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibwhwiMRQSuaJ1wVVcU\n\nFiling gate: ① user-visible defect, reproduced in a browser. Source: fleet (found by the o3-askai zone's dev during the browser pass for PR #37885, card #37858; L1 comment 7216505411 asked for this card).\nBusiness reason: Arabic is one of the eleven console languages we ship. An Arabic-speaking user on a desktop screen cannot reach the buttons at the end of each page header (the page's own actions, help, comments and the 「问 AI」 entry), because the fixed sidebar panel is drawn over them. Every page in every app is affected in that language. Not fixing it leaves the console partly unusable in a shipped locale.\nWho acts: seat repo:objectstack#3 (area:ux p2 is not in its intake; triage routes it), or whichever seat takes area:ux.\nDedupe: searched `rtl sidebar`, `sidebar rtl overlap`, `arabic sidebar`, `dir rtl sidebar`, `RTL layout sidebar` (issues, open and closed): 0 duplicates (hits #37858 and #36041 are unrelated: #36041 is a phone avatar-menu width bug in German).\n\nGrading: area:ux · Bug · p2 · size S · reach: browser, any `/apps/...` route at 1280 px with the console locale set to Arabic (`objectui-locale=ar`). Suggested p2 rather than p1: it hits one shipped locale on desktop only; phones use the off-canvas sheet.\n\n## 维护者速读\n- 是什么：界面语言设为阿拉伯语（从右到左）时，桌面上左侧固定的侧边栏面板盖住了页面内容的左边缘，而从右到左时页头的按钮组正好排在左边，于是页面自己的按钮、帮助、评论和「问 AI」都在侧边栏底下，点不到。\n- 影响：所有用阿拉伯语界面的桌面用户，每个应用的每个页面。\n- 要你做什么：无。\n\n## Reproduction (measured)\n- Measured on the console built from PR #37885's branch (a showcase runtime, Chromium 1280×800), Arabic locale. Element rects: the sidebar panel (`[data-sidebar=sidebar]`) is drawn at x 0..255; `#console-main-content` and `main` are laid out at x 0..1024 with `dir=rtl`; the strip x 1024..1280 is empty. So the content is not shifted away from the panel: its end edge (the left, in right-to-left) sits under the panel.\n- Seen: the reports index page-header group at x 24..364 and the record page's navigation-row group at x 8..224, both under the panel. Screenshots were taken in the dev container (`pagehdr-ar-record.png`, `after-ar-component-recycle-bin.png`); they are not attached here.\n- PR #37885 does not touch the sidebar; the same layout holds on `main` by reading (not re-measured on `main`).\n\n## Suspected cause (not verified; for the dev to confirm or disprove)\n- `ui/packages/components/src/ui/sidebar.tsx:262-266`: the fixed panel is positioned with the physical `left-0` (for `side=\"left\"`), while the in-flow spacer that reserves its width follows the flex direction, which `dir=rtl` reverses. The spacer therefore lands on the right and the panel stays on the left. Likely fixes: use logical positioning (`start-0`/`end-0`) or flip `side` with the document direction; the dev decides.\n- Related, same direction issue: `ShellSidebarExpandFallback` pins at `left-2`, the start edge only in left-to-right languages (not measured with a collapsed sidebar in Arabic).\n\n## Acceptance\n- At 1280 px in Arabic, the sidebar panel and the main content do not overlap on a list page, a record page and a dashboard; the page-header group is fully visible and clickable. A pin test or a browser reading names the rects.\n- Left-to-right languages unchanged."
+}

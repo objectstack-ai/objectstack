@@ -1,0 +1,31 @@
+{
+  "number": 37967,
+  "kind": "issue",
+  "title": "skills/docs: retired agent keys still called tombstones in eval case 5's expected_output, ai/agents.mdx and an agent.zod.ts comment",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:docs",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T13:17:29Z",
+  "updated_at": "2026-11-27T14:13:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37967",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cxBECSPtHxQMZDHSie\n\nFiling gate: ② follow-up out of #37782. The source is the contract record 7219261608 on PR #37939 (nits N2 and N3) and L1-a's ACCEPT 7219274731 on the same head, which asks the area for one follow-up card covering the three. The owning area files it under the source card.\nGrading: area:ai · Task · p3 · reach: readers of the shipped `ai/agents` docs page, readers of the objectstack-ai eval case 5, and the spec docblock reader · evidence: read on `main` `bc173343`.\n\n## 维护者速读\n- 做什么：两个已下线的智能体字段（`agent.tools`、`agent.knowledge`）早在协议 18 已不再是「墓碑」，系统直接把它们当未知字段拒绝。技能文档已改对（#37782），但还有三处文字仍说旧行为：一条评测题的期望答案说明、对外文档 ai/agents 页的两行、规格源码里的一句注释。这张卡把这三处说法改对。\n- 谁受益：照文档写智能体的作者和 AI，看到的报错形式说明与真实一致。\n- 不做会怎样：只是说明文字过期，不影响任何判定；读者会以为写这两个字段会在 TypeScript 编译时报错，实际是运行时按未知字段拒绝。\n- 需要你做的：无（评测文件在 `skills/**` 下，合并需 os-zhuang 批准）。\n\n## What\n1. **N2, eval prose.** `skills/objectstack-ai/evals/skills-tools-knowledge.json`, case 5, `expected_output` says \"`agent.tools` / `agent.knowledge` are protocol-17 tombstones\". Since 18 the strict `AgentSchema` refuses each as an unknown key naming https://objectstack.ai/docs/protocol-upgrade (`packages/spec/src/ai/agent.test.ts` ~:101-114 and ~:232-242). Rewrite that clause to match. Only `expected_output` changes: the prompt and the `assertions` stay byte-identical, so `hashCase` (prompt, assertions, `should_trigger`, files) does not move and case 5's recorded rounds stay keyed.\n2. **N3a, docs page.** `content/docs/ai/agents.mdx` ~:311-312, the `tools` and `knowledge` rows say \"typed `never`, so writing it fails `tsc`, and a value that reaches the runtime is rejected at parse\". That is the tombstone behaviour that left at 18. Say what happens today: the key is not on the type, and the strict schema refuses it as an unknown key naming the upgrade guide. Keep \"Removed in protocol 17\" and each row's why and replacement.\n3. **N3b, spec comment.** `packages/spec/src/ai/agent.zod.ts` ~:100, the docblock says `agent.knowledge` is \"tombstoned below\". Nothing below declares it; correct the comment. Comment only, no schema change.\n\n## Acceptance\n- The three places no longer describe either key as a tombstone or as typed `never`; each statement matches the tests named above.\n- Case 5's prompt and `assertions` are byte-identical to `main`; no eval round is owed.\n- `node scripts/check-skills-token-ratchet.mjs` exits 0 with no ceiling raised. `Clause-②: no`, `Metadata-protocol: none`.\n\nSerial: card #37928 (claimed, area o1-B) edits case 6 of the same eval file; the hunks are disjoint, and whichever lands second merges `main`.\nModel: `skills/**` is MANDATORY at the contract review tier (the eval file changes).\nParent: #37782\nSize: XS\nDedupe (objectstack, is:issue): `\"protocol-17 tombstones\"` 6 (open: only #37782, the source, which does not cover these three) · `\"tombstoned below\"` 5 (none open) · `\"typed never\" agents.mdx` 6 (none open; #10730 closed, an older retirement) · `agent.knowledge tombstone docs` 18 (open: only #37782). No duplicate."
+}

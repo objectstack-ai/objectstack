@@ -1,0 +1,37 @@
+{
+  "number": 37951,
+  "kind": "pull_request",
+  "title": "fix(service-knowledge): a source naming an unmounted adapter is logged once at boot",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T12:41:54Z",
+  "updated_at": "2026-11-27T13:56:40Z",
+  "closed_at": "2026-11-27T13:56:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T13:56:38Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37951",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFixes #37479\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 运维人员看启动日志时,一个指向未挂载存储的知识源从两行告警变为一行错误,错误里写明知识源、存储名和可选的已挂载存储;用户无感。\n- 属于知识检索平台(AI 检索)史诗,替看启动日志的运维人员去掉重复噪音。\n- 出错只会让这条错误多一行或少一行,检索与建索引的行为不变,可直接撤回。\n- 无。\n\n## What changes\n\n- `packages/services/service-knowledge/src/knowledge-service.ts` `buildIfDue`: at boot, a source whose adapter is not mounted is skipped by the first-build pass without a line. Before, the pass read its index state, `getAdapter` threw the unmounted-adapter refusal, and the pass logged it at `warn` as \"is not built at boot: what the adapter holds could not be read (...)\", beside the `error` that `reportUnmountedAdapters` already prints at `kernel:bootstrapped`. Now the boot says it once, at `error`, naming the source, the adapter and the mounted adapters.\n- On reload (a `knowledge_source` item added while the process runs) nothing changes: no boot reading runs then, so the reload build's `warn` is still the one line that names the source.\n- Indexing and searching such a source still answer the coded `SERVICE_UNAVAILABLE` 503 (PR #37442); not touched.\n\nThis is item 1 of the re-scope (card comment 7187970703). Item 2, a publish or `os validate` refusal of an adapter name no deployment can serve, is NOT in this PR: it would narrow what is accepted, and the area decides. Options are in the dev report on the card. That is why this PR says `Part of` and leaves the card open.\n\n## Tests\n\n- New pin in `src/__tests__/knowledge-build.test.ts`: with a data engine bound, one mounted source and one naming `pgvector` (not mounted), the boot pass plus the boot reading produce exactly one log line naming `'docs'` across debug/info/warn/error. That line is at `error` and names the adapter as not mounted. The mounted source is still built (`status: 'done'`).\n- Ablation: with the new guard line replaced by a comment, the pin goes red: `expected [ [ 'warn', …(1) ], [ 'error', …(1) ] ] to have a length of 1 but got 2` (1 failed, 22 passed). With the line restored, the file is green (23 passed).\n\n<details><summary>Package test and typecheck (head 13f32fc828)</summary>\n\n`pnpm --filter @objectstack/service-knowledge test && pnpm --filter @objectstack/service-knowledge typecheck` under the verify lock: `VERDICT command-exit 0`, Test Files 17 passed (17), Tests 529 passed (529). `typecheck` is `tsc --noEmit && pnpm check:test-typecheck`, so the test files are type-checked too.\n\n</details>\n\n## Acceptance notes\n\n- Item 2 of re-scope 7187970703 (a publish or `os validate` refusal) is closed by area decision D, with no publish-time refusal added. The refusal point is boot: `reportUnmountedAdapters` prints a coded error naming the source and the adapter. `searchWithRefusals` lists such a source as refused (`knowledge-service.ts` near :1882), and index and search answer the coded 503 (PR #37442 and this PR). Options A (save-time admission) and B (a `ragflow` tombstone) stay in the dev report on the card, for a future card.\n- The claim's file surface pointed at `:372` as \"the boot build pass's kept(...) line\". On origin/main 73d5e347f7, `:372` is `dropMetadataSource`'s `kept(...)`, which runs when a source is removed, not at boot. The second boot line comes from `buildIfDue` (the `warn` of an `unreadable` index reading). The fix sits there, and `dropMetadataSource` is not touched.\n- Public surface: no exported type, export or wire shape changes. No dependent package owes a test.\n\n## Verification\n\nRead first: `knowledge-service.ts` `buildIfDue` (the one added guard line), then the new pin.\n\nTwo-minute check: `pnpm --filter @objectstack/service-knowledge exec vitest run --maxWorkers=2 src/__tests__/knowledge-build.test.ts` should show 23 passed. Delete the guard line `if (trigger === 'boot' && !this.adapters.has(entry.handed.adapter)) return;` and the pin fails with 2 lines (warn, error) where it expects 1.\n\n<details><summary>Derived gates (local, head 13f32fc828): 68 exit 0, 2 NOT MEASURED</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 70 families from the 3 changed paths. All 70 ran; `--ran` with recorded exit codes: \"70 derived famil(ies) accounted for — 68 run, 2 NOT-MEASURED (2 DERIVED from a recorded exit 3)\".\n\n- NOT MEASURED: `check:dual-build-cjs-loads`, reason: PREREQUISITE NOT MET, it needs every package's `dist/` (a whole-tree build). CI runs it.\n- NOT MEASURED: `check:type-check-debt`, reason: its re-measure build did not get a turn on the shared verify lock (queue-timeout 99). CI runs it.\n\nThe package-wide scans (`pnpm lint` and the rest of the farm) are CI's.\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cwPhGV4g9p1BGQaZbP)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cwPhGV4g9p1BGQaZbP\n"
+}

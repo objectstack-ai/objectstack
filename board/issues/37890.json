@@ -1,0 +1,31 @@
+{
+  "number": 37890,
+  "kind": "issue",
+  "title": "Phone grid card: the amount slot ignores a formula column returning currency, so an order line's card shows its unit price instead of its total",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-27T09:02:08Z",
+  "updated_at": "2026-11-27T09:12:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37890",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAk8tegvAi1ECkgCFfc\n\nFiling gate ① (product defect with reach) · Source: maintainer — Irene chose to file this platform card on the hotcrm project thread's decision card (2026-11-27T09:00Z), after hotcrm#2828 was measured. · Type: Bug · Grade: left to objectstack triage.\n\nreach: HotCRM main 08a7451e on `@objectstack/*` 18.6.0, headless Chrome at 390 px. Open order SO-0002, then the **Order Lines** tab. The line \"Admin Training Workshop\" (quantity 2 × unit price 6,000.00, 10% discount) is drawn as a card whose bottom-right amount reads **6,000.00**, which is the unit price. The line total is **10,800.00**. At 1280 px the table shows both values correctly. The card only looked right before because the lines measured had quantity 1.\n\n## Why (read on objectstack main b620c4b2c6)\n\n`ui/packages/plugin-grid/src/ObjectGrid.tsx:4430`:\n```ts\nconst amountCol = bodyColumns.find(\n  (c) => c !== statusCol && c.type === 'currency' && !isMaskedCardColumn(c.accessorKey),\n);\n```\nThe slot takes the first column whose type is literally `currency`. A formula (or summary) column declared `returnType: 'currency'` has a different column type, so it is never eligible. The first plain currency column wins instead, here `unit_price`. Reordering the columns does not help: with `total_price` placed before `unit_price`, the amount still reads 6,000.00 and the total moves into the subtitle (measured).\n\n## Expected\n\nA column whose value renders as currency, whether a plain `currency` field, a formula with `returnType: 'currency'`, or a currency summary, is eligible for the amount slot. On a line-item card the amount is then its total.\n\nWho benefits: any app with line items (orders, quotes, invoices). A phone user reads a unit price as the line amount, which is a wrong figure on a money surface.\n\nDedupe: searched `amountCol currency formula`, `mobile card amount formula`, `grid card amount returnType` (open and closed), 0 open hits on this mechanism. Related but different, both closed: #37008 (gallery card drew a currency formula as a bare unlabelled number; label and format) and #27494 (list grid currency formula format). #28484 defines the card layout. The companion Feature card asks for a configurable related-list card layout."
+}

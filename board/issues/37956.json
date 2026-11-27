@@ -1,0 +1,31 @@
+{
+  "number": 37956,
+  "kind": "issue",
+  "title": "knowledge-turso: shape-check before every DROP and check knowledge_generation's shape at ready()",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-27T12:54:22Z",
+  "updated_at": "2026-11-27T13:18:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37956",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ③ maintainer-directed (topic child of #37000) · Source: maintainer (hotlong, cloud project): 「云上需要知识库，用turso」 / 「云端不应该让客户配置向量模型」, recorded on cloud#4993 comment 7218621399 · Spec: objectstack#37000 comment 7218695999\nGrading: area:ai · Feature · p2 (topic) · reach: a Turso store that shares its database with object tables (hosted cloud: one environment database per tenant) · evidence: read on main bc173343ea57.\nDedupe: `knowledge-turso DROP shape generation table` → 4 (open: #37000 parent only) · `knowledge_generation shape foreign table` → 1 (open: #37000 parent only) · `knowledge hosted turso` → 27 (open: #37680 settings group fallback, #37306 optional adapter, #37734 reconcile; none touches DDL safety).\n\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：云上 Turso 知识库和业务对象表放在同一个库里。重建/清理索引时，有 3 处按「代数表」名字直接 DROP，没先确认这张表是不是知识库自己建的；而且如果业务里恰好有个对象叫 `knowledge_generation`，知识库就静默不可用。\n- 做什么：这 3 处 DROP 前先做和新建代数表时相同的形状检查（不是自己建的表就拒绝，绝不删）；`ready()` 检查 `knowledge_generation` 的形状，不对就报告「不可用」并写明原因。不加表名前缀。\n- 谁受益：云上租户的业务数据（不会被误删）。\n- 需要你做的：无。\n\n## What\nPremise re-read on main bc173343ea57: every cited fact holds; line numbers for the DROPs are unchanged, the others moved slightly. Two more DROPs now exist and are already guarded.\n- Object table name = object name: `packages/spec/src/system/constants/system-names.ts:299-302` (`resolveTableName`, the name itself unless the legacy `ns__name` form).\n- Already shape-checked: `packages/plugins/knowledge-turso/src/turso-adapter.ts:836-850` (`openGeneration` refuses to recreate a table whose shape is `legacy` or `other`, via `shapeOf` :818 and `tableShape` in `sql.ts:83`).\n- Unchecked DROPs by generation-row name (all hold): `turso-adapter.ts:625` (`beginBuild`, replacing an unfinished `building` generation), `:652` (`completeBuild`, dropping the replaced `active` generation), `:694` (`dropSource`, for the active and building generations). `:670` and `:697` also DROP, but `legacyTable(...)` only when `hasLegacy` (:808-815) found shape `legacy`, so they are guarded already and stay as they are.\n- `knowledge_generation` itself: `GENERATION_TABLE` (`sql.ts:20`) is created by `generationDdl` with `CREATE TABLE IF NOT EXISTS` (`sql.ts:103`), run from `ready()` (`turso-adapter.ts:743-782`, the DDL loop at :774). A pre-existing object table of that name makes it a no-op and the store is unusable. `ready()` does not look at its shape.\n- Not re-verifiable from this repo: cloud's v18 verdict tool (`tenant-verdicts.mjs:290-303`) lives in the cloud repo.\n\nWhat: the same shape check before the three DROPs at :625, :652, :694: refuse, never drop, a table the store did not make. `ready()` checks `knowledge_generation`'s shape (its columns, as `tableShape` does for passage tables) and reports unavailable with the reason, naming the table. No table prefix: a prefix with characters an object name cannot carry trips cloud's v18 verdict tool and would force a rebuild on rename.\n\n## Acceptance\n- An object table that has a generation table's name (`knowledge_<source>_g<n>`) survives a rebuild and a source drop; the store refuses with a message naming the table.\n- A foreign table named `knowledge_generation` makes the store report unavailable, naming that table; the foreign table is untouched.\n- A normal store (own tables only) behaves as before; the existing `legacy` drop paths are unchanged.\n- Cloud reserves these names at publish (cloud#4993 part 2 item 8; cloud side, not this card).\n\nParent: #37000."
+}

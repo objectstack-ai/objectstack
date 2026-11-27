@@ -1,0 +1,37 @@
+{
+  "number": 37950,
+  "kind": "pull_request",
+  "title": "fix(scenarios): the seed leaves out the card values of the build's roll-ups, so a payment capped at its invoice's open balance loads",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T12:39:52Z",
+  "updated_at": "2026-11-27T13:56:40Z",
+  "closed_at": "2026-11-27T13:56:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T13:56:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37950",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuWUUzJ4EEzDD7fb56jyq1TP)_\n\nFixes #35654\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 是什么：评测跑器往应用里灌示例数据时，不再写入「自动汇总」类字段的值（比如发票的已付金额，它本该由付款记录加出来），改由平台按付款自己算。\n- 为什么：订单回款这张评测卡把每张发票的已付金额终态直接写进去。一个做得很对的应用（已付金额 = 付款合计，并且付款不得超过未付余额）在灌数据时就会把已付清发票的 66 笔付款当成超付拒掉，评测因此冤枉正确的应用。\n- 评测卡本身和上一个 PR 入库的验证构建都没改；只有把这类字段做成自动汇总的应用才受影响，做成普通数字字段的照旧收到卡上的值。发票号、订单号这类自动编号照样写入，因为问题里会引用它们。\n- 出错会怎样：只影响评测跑器灌数据这一步，最坏是某张卡的汇总字段起始值不对，可直接撤回。\n- 要你做的：无。\n\n## What changes\n\n`packages/qa/scenarios/src/runner/seed.ts` gains `rollupFields(artifact)`: the fields a built artifact declares `type: 'summary'`, per object, read through the scorer's artifact reader (the same shape as `derivedFields`).\n\n`packages/qa/scenarios/src/runner/orchestrate.ts`:\n\n- `seedRowBody` takes the object's roll-ups and leaves their card values out of the row, returning them as `leftOut` (`object.field`).\n- `seedApp` takes `rollups` (per object) after `required`, and records the left-out columns in the run record's `seed.leftOut` (new optional field on `RunHalf['seed']`, absent when nothing was left out, so a card with no roll-up keeps its record's bytes).\n- Both seed calls in the run half (first seed and the fresh-copy reseed) pass `rollupFields(built)`; `restoreSeededRows` re-inserts a seeded row with the same body.\n\n`packages/qa/scenarios/src/export/screenshots.ts`: the gallery screenshot boot passes the artifact's roll-ups too, so it seeds the same rows the run does.\n\nWhy only roll-ups, not every computed type (`derivedFields`: formula, summary, autonumber):\n\n- A roll-up is the case the card's end state breaks. The seed path is a system write, which stores a roll-up value it is sent as written (measured on #34986, report 7022810829), so a child rule that reads the parent's open balance sees the end state before the child that makes it.\n- A left-out `count` / `sum` roll-up starts at 0 on insert (`packages/objectql/src/engine-insert.ts`, #5749 / #34672) and each admitted child adds to it, also inside one batch (`summary-batch-accumulation.ts`), so the parent ends at the card's value.\n- An autonumber must stay: order_to_cash's committed build declares `name` an autonumber (`INV-{YYYY}-{0000}`), and the card's questions cite `INV-1058`. A first cut that left out every `derivedFields` column also dropped `name` on invoices, payments and orders; the test caught it.\n- A stored field with an `expression` (the committed build's `balance`, `status`, `amount`) is recomputed by the engine from the row anyway, so it needs nothing here.\n\nThe card is unchanged: every one of its 95 invoices states `amount_paid` equal to the sum of its payments (asserted in the new test), and every sales order's `total_amount` equals the sum of its lines. So its `cardSha256` and the committed build from #37911 are untouched, and a build that stores `amount_paid` as a plain number is still sent the card's value.\n\n## Tests\n\n`packages/qa/scenarios/test/runner/orchestrate.test.ts` gains a `[#35654]` block against the real card and the committed build (`docs/qa/scenarios/builds/order_to_cash.json`), with a double that runs the build shape the card names: `amount_paid` a roll-up of payments, a payment capped at the invoice's open balance, a roll-up value sent stored as written.\n\n- the committed build's invoice roll-up is `amount_paid` (and `derivedFields` also lists the autonumber `name`, which stays sent); the card states each invoice's `amount_paid` as the sum of its payments;\n- with the build's roll-ups, all 72 payments load, `seed.leftOut` is `demoorder_invoice.amount_paid` and `demoorder_sales_order.total_amount`, every invoice ends at the card's `amount_paid`, and `INV-1058` keeps its name;\n- control: sent the end state, the cap refuses 66 payments, all on `demoorder_payment`, with the rule's message;\n- `restoreSeededRows` re-inserts a removed invoice without its roll-up value.\n\nAblation: with the `src/` change stashed, the three new behaviour tests fail and the control passes.\n\n<details><summary>runs</summary>\n\n- `npx vitest run test/runner/orchestrate.test.ts` (in `packages/qa/scenarios`): 180 passed.\n- Whole package: 1384 passed, 14 skipped, 1 failed: `test/runner/packages.test.ts` \"every install ran the workspace's pinned pnpm\" — fails identically on `main` f926dfab in this container (the stash run), so not this change. `test/build/*` passed after `pnpm --filter @objectstack/scenarios build`.\n- `npx tsc --noEmit -p .` in `packages/qa/scenarios`: clean.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 64 derived, 62 exit 0, 2 exit 3 NOT MEASURED (`check-plugin-teardown-shape.mjs --self-test` did not reach its verdict here; `check:dual-build-cjs-loads` needs every package built). Left to CI.\n\n</details>\n\n## Verification\n\nTwo-minute check: `cd packages/qa/scenarios && npx vitest run test/runner/orchestrate.test.ts -t 35654` prints 4 passed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgTDPAaiTGidYohtQcg\n\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgTDPAaiTGidYohtQcg -->\n"
+}

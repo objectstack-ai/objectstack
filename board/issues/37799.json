@@ -2,7 +2,7 @@
   "number": 37799,
   "kind": "pull_request",
   "title": "refactor(plugin-chatbot): move ChatbotEnhanced types, subcomponents and helpers into chat/",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T03:58:15Z",
-  "updated_at": "2026-11-27T04:21:20Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-27T11:53:18Z",
+  "closed_at": "2026-11-27T11:53:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-27T11:53:15Z",
   "comments": 0,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37799",

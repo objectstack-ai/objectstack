@@ -2,8 +2,8 @@
   "number": 37620,
   "kind": "issue",
   "title": "skills: objectstack-i18n and objectstack-data teach _relatedLists keys without the refusal #36595 adds for a key under an arrangement that drops the label",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ai",
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T15:49:13Z",
-  "updated_at": "2026-11-27T08:14:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T10:05:37Z",
+  "closed_at": "2026-11-27T10:02:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37620",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① · Source: fleet (the Contract review record 7196757117 on PR #37600, section ③: `Skills-docs: none` does not hold)\n\n## What happens\n\nPR #37600 (Fixes #36595) narrows one lint rule: an `objects.{parent}._relatedLists.{list}` translation key is refused when the related-list tab list the registry serves (after a `.custom` arrangement re-states or hides the entry) no longer carries a `label` for that list. On `main` the key is accepted and silently translates nothing.\n\nTwo shipped skill pages teach this key and say when it resolves, and neither names the case:\n\n- `skills/objectstack-i18n/SKILL.md` (origin/main, the `_relatedLists.{list}` row of the object sub-key table, about :166): \"an entry with no `label` has no key …\".\n- `skills/objectstack-data/rules/relationships.md` (about :367): \"its `label` translates at `objects.{parent}._relatedLists.{list}.label` (none: nothing to translate)\".\n\nAn agent that writes a pair package's arrangement and keeps the owner's translation key learns about the refusal only from `os validate`.\n\n`skills/**` is governed (Tier H), so this text does not ride the code PR.\n\n## Expected\n\n- In each place, one clause: the key follows the label the served tab list carries, so an arrangement that re-states the entry without a `label`, or hides it, drops the key, and `os validate` refuses it. Name the remedy the merged PR's migration entry prescribes.\n- Pay for the words in the same files under the token ratchet (no ceiling moves).\n- Write it against the merged PR's tree (the entry's final remedy wording is still under review).\n\nBlocked-by: #36595 (its code PR merges)\nCategory ①: a shipped skill would teach a key as always valid where the platform now refuses it.\nPriority: p2, the grade of #36595.\nBusiness reason: package authors who build from the skill hit a refusal the skill never mentioned.\nReader: seat 2 area s2-ux-T (repo:objectstack#2), after the code PR merges; Tier H, so os-zhuang approves.\nDedupe: `_relatedLists skills arrangement label refused` (open issues), 0 hits besides #36595.\nRelated: #36595, PR #37600, #36528."

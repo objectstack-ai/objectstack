@@ -1,0 +1,37 @@
+{
+  "number": 37927,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0084 records the ~org Changes + Publish home in the homes table",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T11:41:55Z",
+  "updated_at": "2026-11-27T12:23:06Z",
+  "closed_at": "2026-11-27T12:23:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-27T12:23:04Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37927",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoTeY72VoWMktEtuwWvY1yGw)_\n\nFixes #37685\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：没有。只是把已经上线的做法写进 Studio 的设计文档：组织级（不属于任何软件包）没有「概览」页，它的待发布变更和发布入口是左栏那一行「变更 N」。\n- 为什么做：App Studio 改版专题的一处记账，避免以后有人照文档把这一行删掉。\n- 出错会怎样：只改文档，不影响运行；不对可直接撤回。\n- 要你做什么：审阅并合并这条设计文档修改（受管面，需你亲手合并）。\n\n## What changes\n\nOne file, `docs/adr/0084-application-builder-information-architecture.md`, +3 lines, nothing removed:\n\n- One row in the homes table of `#amendment-2026-11-26-homes` (\"Where the top bar's controls go\"), directly under the pending-changes row: on the package-less `~org` scope, which draws no 概览 Overview, the pending-changes button and Publish live in a 变更 Changes row with its count in the left column (`StudioTopLeft.tsx#StudioScopePendingRow`), drawn only while that scope has something pending; it opens the existing changes sheet, which holds Publish. Its \"By\" column reads `not ruled`.\n- One dated mark under that table, in the ADR's own `*(Amended 2026-11-27, card #37685: …)*` form: why the row exists (the pick sends Changes + Publish to 概览, `~org` has none), that it was built first by the top-bar removal (#37456, PR #37579) and is recorded after the fact as that change's contract review asked (comment 7202356468, finding S3), and that no other row changes.\n\nNot in this PR: the seat's widening comment also asked to turn the type → group table's `datasource` row into a no-row entry. That half is withdrawn (claim comment 7217220011): `studioMenuPlacement.test.ts` ties each table row to the code's placement list, so the row moves with the code card that removes the menu row, as #37564 did.\n\n## Why\n\nADR-0084's 2026-11-26 amendment sends Changes + Publish to 概览's Pending tab. The package-less scope has no 概览, so the shipped code gave it a row of its own, and the ADR did not record that home. A later reader following the ADR could remove the row.\n\n## Tests\n\nRead at `origin/main` `73d5e347`, the code the row is written from:\n\n- `ui/packages/app-shell/src/views/studio-design/StudioTopLeft.tsx:84` `StudioScopePendingRow`: a button labelled `engine.studio.changes` (en \"Changes\", zh 变更) with a count pill; drawn under the package row (:169) and as an icon on the rail (:160).\n- `ui/packages/app-shell/src/views/studio-design/StudioSurfaceFrame.tsx:210-219`: passed only when `packageId === null && !allScope && shownPendingCount > 0`, so on `~org` alone and only while something is pending; it opens the changes sheet (`DraftChangesPanel`, :243-256) with Publish.\n\nLocal gates on head `062fc62c`, exit codes captured before any pipe:\n\n<details><summary>ADR gates</summary>\n\n- `node scripts/check-adr-symbol-anchors.mjs` → 0 (4475 anchors across 164 records resolve; both new symbol anchors resolve as declarations)\n- `node scripts/check-adr-links.mjs` → 0 (1263 relative links resolve)\n- `node scripts/check-adr-anchors.mjs` → 0\n- `node scripts/check-nul-bytes.mjs` → 0\n- ADR index `--check` → 0 (drafter's run)\n- The pin test's row regex (`ADR_ROW` in `studioMenuPlacement.test.ts`) matches 33 lines before and after the edit, the same rows byte for byte; the new lines match 0 times.\n\n</details>\n\nNOT MEASURED locally: `studioMenuPlacement.test.ts` itself and the doc-authoring families (no `node_modules` in this container). CI runs them; the regex reading above is why the pin test is expected green.\n\n## Acceptance notes\n\n- Noted, not filed (carrier: the code card that rewrites the `datasource` row of the same table): the dated notes under the type → group table still read \"33 entries\" and \"AI 4\", while the table now has 34 rows and AI 5; the `knowledge_source` row (added by #37676) cites item 6, which names only `ai_context`, and carries no dated mark.\n- Left for the seat: the Status line and the section's Refs line do not name #37685 (as with #37564 and #37360, recorded only in their in-place marks); the row's retirement (with Studio's `~org` entry) is not written, since no ruling says it.\n\n## Verification\n\nRead first: the new row under the pending-changes row in `#amendment-2026-11-26-homes`, then the dated mark under the table. Two-minute check: `node scripts/check-adr-symbol-anchors.mjs` prints the green line; open Studio on `~org` with a pending flow draft and see the Changes row in the left column open the changes sheet with Publish.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (none added)\n- [x] 3. No formatter ran; `pnpm lint` passes. (CI)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (`docs/adr/**` does not publish: `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (the 速读 block is the maintainer's Chinese channel)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibzqYghcpTQ2yaJPJbE\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibzqYghcpTQ2yaJPJbE)_\n"
+}

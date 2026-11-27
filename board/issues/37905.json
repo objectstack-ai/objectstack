@@ -1,0 +1,36 @@
+{
+  "number": 37905,
+  "kind": "pull_request",
+  "title": "fix(app-shell): Lookup and roll-up target pickers take objects only",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T10:05:33Z",
+  "updated_at": "2026-11-27T12:13:56Z",
+  "closed_at": "2026-11-27T12:13:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T12:13:54Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37905",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao5S6gNFvmKHxrqpXWgottKg)_\nFixes #36747\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 搭建者在 Studio 字段面板里设置关联字段的目标对象、汇总字段的子对象时，以前随手打的文字也会保存，现在只能从列表里选对象。\n- 属于 Studio 搭建体验评审中“元数据写错要当场拒收”这一组，替搭建者挡住打错字就存下一个指向不存在对象的字段。\n- 打了不存在的对象名，面板会提示没有选中对象，原来已选的目标保留不动；只存在于草稿里的对象照样能选；可以直接撤回本次改动。\n- 无。\n\n## What changes\n- `ObjectFieldInspector.tsx`: the Lookup *Related object* door and the roll-up *Child object* door now pass `objectsOnly` to `ObjectPicker`. Neither door accepts an expression. Flow references keep free text (the prop stays off by default).\n- `ObjectPicker.tsx` (rework round 1): with `objectsOnly`, typed text that names no pickable object is a refusal. The input goes back to the stored value, the \"not chosen\" line shows, and nothing is committed, so a typo no longer erases a target the field already has. Clearing the input on purpose still commits no object (an empty name), which the doors turn into removal. While the catalog is unread or its read failed, typed text is committed as before. The trigger-object picker in the new-automation dialog, the only other `objectsOnly` caller, starts empty and behaves as before; if it already holds an object, a refused typo now keeps it.\n\n**Premise verified (draft-only objects stay pickable).** The picker's catalog is `useObjectCatalog`, which reads `GET /meta/object?preview=draft` (`withPreviewDrafts(true).list('object')`). Server-side, `packages/rest/src/meta-draft-read-builder-gate.test.ts` (\"every builder reads the draft overlay ... the draft-only app is listed\") pins that the type-generic preview list carries draft-only items for builders. In the picker, a draft entry is an ordinary enabled option (only out-of-closure entries are disabled). The new pin asserts the draft-only object is absent from the published list and is still chosen at both doors.\n\n## Tests\nNew top-level `describe` in the existing harness `ObjectFieldInspector.objectPicker-11783.test.tsx` (ruling record 6583487846), six cases, three per door:\n- a field that already has a target (`sys_user`): a refused typo leaves it in place, no patch is written, and the refusal is shown;\n- typed text naming no listed object on an empty field: no target saved, refusal shown;\n- a listed object that exists only as a draft: chosen and saved.\n\n`ObjectPicker.test.tsx`: the objectsOnly pin from objectstack#30038 that asserted a typo clears a chosen object now asserts the object is kept, on Enter and on blur. A new pin asserts that an input cleared on purpose still commits an empty name.\n\nBoth test files gain a module-top `import '@objectstack/lint'`, as `check:test-source-alias` prescribes for a test file whose source loads it lazily.\n\n<details><summary>Readings (head 0009f822)</summary>\n\n- `vitest run` (ui root) over ObjectFieldInspector*, ObjectPicker* and the trigger-object dialog's pins (StudioDesignSurface createTaken-26917, flowPresets-11861, newFlowTrigger-11788): Test Files 40 passed (40), Tests 439 passed (439) on d6491f46; final head 0009f822: ObjectPicker.test.tsx + the harness file 25/25 passed.\n- `@object-ui/app-shell` `type-check` (both `tsconfig.json` and `tsconfig.test.json`): exit 0.\n- Ablation, round 0: with both `objectsOnly` lines deleted on disk, the two refusal cases go red (2 failed / 5 passed) and the draft-only cases stay green, as they should.\n- Ablation, round 1: with the old clear-on-refusal branch put back in `commitTyped` on disk, 3 failed / 22 passed: the picker's keep-on-typo pin and both doors' existing-target pins. Restored from HEAD.\n- `dispatch-gates.mjs --commands`: 38 derived families run, all exit 0 (`check:test-source-alias` went red once per edited test file and was fixed each time by the lint import; the rerun exited 0 on 0009f822). `--ran`: 38 derived, 38 run, 0 UNRUN.\n</details>\n\n## Acceptance notes\n- The save door itself does not check that a Lookup or roll-up target exists at authoring time; this PR closes the Studio picker path only.\n\n## Verification\nRead first: `ObjectPicker.tsx` `commitTyped` (the refusal branch, the riskiest hunk), then `ObjectFieldInspector.tsx` (the two `objectsOnly` lines), then the new `describe` at the end of the harness file.\nTwo-minute check: `cd ui && pnpm exec vitest run packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.objectPicker-11783.test.tsx` — expect 9 passed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibzpqH1nQTsbGckLspg\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibzpqH1nQTsbGckLspg)_\n\n<!-- signed: repo:objectstack#3 · os-tesla · session_01L9qibzpqH1nQTsbGckLspg -->\n\n"
+}

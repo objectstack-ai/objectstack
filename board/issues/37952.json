@@ -1,0 +1,37 @@
+{
+  "number": 37952,
+  "kind": "pull_request",
+  "title": "fix(approvals): the stranded-request inspection keeps finding new strands past 500 decided requests",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T12:44:10Z",
+  "updated_at": "2026-11-27T13:56:40Z",
+  "closed_at": "2026-11-27T13:56:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T13:56:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37952",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuRzPnJEdqn6ymW4qaMMQS69)_\n\nFixes #37808\n\nClause-②: no\nMetadata-protocol: none\n\nRelated: #37767, ADR-0162\n\n## 维护者速读\n\n- 是什么：审批插件每 5 分钟会自动检查一次「已经批了、但后续流程走不下去」的审批请求，并写日志提醒管理员。以前它每次只随便取 500 条已决请求，已决请求超过 500 条后，新出问题的那条可能一直轮不到。现在每次先看最新的 500 条，再按顺序轮着看后面的 500 条，所有已决请求都会被定期看到。\n- 为什么：#37767（关闭态锁定）之后，管理员要靠这个检查发现卡住的单据，它不能漏报。\n- 出错会怎样：只是个只读的检查，只写日志，不改任何数据；每次多读最多 500 行。可直接撤回。\n- 要你做的：无，座位复核即可。\n\n## What happens on `main`\n\n`#inspectStrandedRequests` rides the five-minute approvals sweep. It read `limit` (500) rows of every `approved` / `rejected` / `returned` request with **no order and no cursor**. Past 500 decided requests the page is whatever the store hands back (SQLite: insertion order), so a request stranded today, behind 500 older decisions, was never inspected on any sweep.\n\n**Reproduced first** (main `a8396da1`, then rebased on `94b0314c` after #37925 merged; real `ObjectQL` over `SqlDriver`, better-sqlite3 in memory, so order and filters are the store's):\n\n| Test | `main` | this PR |\n|:--|:--|:--|\n| CONTROL: 50 healthy decided requests + 1 strand: reported | green | green |\n| 600 healthy decided requests + 1 strand decided last: reported on the first sweep | **red** (`[]`) | green |\n| 1,200 healthy + 1 strand that is the oldest decision with the highest id: reported within one pass of the walk (sweep 3), and again on the next pass (sweep 6) | **red** (never) | green |\n\n## What changes\n\n`packages/plugins/plugin-approvals/src/approval-service.ts#inspectStrandedRequests` reads two windows of at most `limit` rows, each filtered and ordered by the store (Prime Directive 5: no in-app scan):\n\n1. **The newest decisions:** `where status ∈ strandable, orderBy updated_at desc, id desc, limit`, on the existing `(status, updated_at)` index. A decision whose run could not advance (the request's `updated_at` is set when it is decided) is reported on the next sweep.\n2. **The next page of a walk over every decided request by id:** `where status ∈ strandable [and id > cursor], orderBy id asc, limit`. The cursor (`strandScanCursor`, an instance field) is the last id the previous sweep read; a page shorter than `limit` resets it, so the walk starts again.\n\nRows of the second window already in the first are dropped; `scanned` counts distinct rows. Everything after the read (the three oracles, the mirror read, the log line, the result shape) is unchanged.\n\n### Why this shape cannot miss a strand\n\n- The walk is a keyset on the primary key. An id never changes, and a row that leaves the strandable set (or one that is added) moves no other row's key, so no row is skipped. Every decided request is read at least once every `ceil(decided / limit)` sweeps.\n- That covers the two cases the newest window alone would miss: more than `limit` decisions between two sweeps, and a run that fails after its decision (the request row is not updated then, so it does not come back into the newest window).\n- The newest window keeps the common case fast: a strand made at decision time is reported on the next sweep, not at the end of a pass.\n- A restart drops the cursor, so the walk starts again from the first id: a repeat, never a miss.\n\n**Ablations** (fix committed first, restored from `HEAD` after each):\n- `approval-service.ts` back to `main` → the two >500 pins red (2 failed / 37 passed).\n- newest window only (walk removed) → the old-strand pin red (1 / 38).\n- walk only (newest window removed) → the new-strand pin red (1 / 38).\n\n## Decided in the thread (small, listed per the standing rule)\n\n- **No store-filterable mark.** A column marking \"may be stranded\" would add a field to `sys_approval_request` (a platform object, so `Clause-②: yes`) and a writer on every path that can strand a request. The two ordered windows need neither.\n- **Each window takes `limit`.** A sweep reads at most 2 × 500 rows instead of 500, and makes at most twice as many oracle calls. Halving each window would halve how fast the walk covers a large deployment; I kept the per-window size at the existing default.\n- **The cursor lives in memory.** It is not persisted, because losing it only restarts the walk. Each process of a cluster walks independently.\n- **`updated_at`, not `completed_at`,** for the newest window: it is the column the existing `(status, updated_at)` index covers, and a decision sets both.\n- **Pin location:** a new top-level `describe` in the existing harness file `stranded-request-inspection.test.ts`, on a real SQL engine (the file's fake engine ignores order), with a fresh in-memory store per test.\n- **Docs:** `content/docs/automation/approvals.mdx`, the paragraph on the read-only inspection, says which rows a sweep reads.\n\n## Gates run locally (worktree on `94b0314c` + this diff)\n\n- `pnpm --filter @objectstack/plugin-approvals test`: 131 files, 1979 tests passed\n- `pnpm --filter @objectstack/plugin-approvals typecheck` (incl. `check:test-typecheck`): pass\n- `eslint` on the two touched source files: clean\n- `check:adr-0087-registration`, `check:changeset-fixed`, `check:empty-changeset`, `check:doc-authoring`, `check:test-source-alias`, `check:durability-log-level`: pass\n\nChangeset: `.changeset/37808-stranded-scan-newest-and-walk.md`, `patch` for `@objectstack/plugin-approvals`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgWFxnAUW68b4xGLw1h)_\n"
+}

@@ -2,8 +2,8 @@
   "number": 37796,
   "kind": "issue",
   "title": "skills: stop teaching an agent's model.provider after its retirement (#37712)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-27T03:50:24Z",
-  "updated_at": "2026-11-27T07:16:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T08:41:00Z",
+  "closed_at": "2026-11-27T08:34:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37796",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (the skills follow-up a `Metadata-protocol: narrowed` PR owes, `Skills-docs: follow-up owed`) · Source: fleet (PR #37783, Fixes #37712)\n\n## What happens\n\nPR #37783 retires an agent's `model.provider` under ADR-0049, with an ADR-0087 conversion. An agent source that sets `model.provider` is refused, and the refusal tells the author to delete the key. `os migrate meta` lists the edit, and stored rows are stripped on replay. Two published skill files still teach the key:\n\n- `skills/objectstack-ai/SKILL.md:370`: the `provider` row of the model table.\n- `skills/objectstack-ai/evals/skills-tools-knowledge.json:17`: the expected output names the provider enum.\n\nThe tombstone keeps the identifier inside `packages/`, so neither gate goes red today. An agent that follows the skill would still write a key the platform now refuses.\n\n## Expected\n\n- The model table drops the `provider` row. It says the model is named by `model.model`, and the provider is the deployment's choice.\n- The eval's expected output no longer names the enum, and its prompt still exercises the agent model block.\n- Leave the Model Registry's provider list (`ModelProviderSchema`, `content/docs/ai/index.mdx`) alone: it is a live key, not the agent's.\n\n## Done when\n\n- [ ] Both files are updated in one `domain:skills` PR, with its eval run recorded.\n- [ ] `check:skill-identifier-liveness` and the skills eval gates pass.\n\nReader: the `domain:skills` lane (Tier H: `skills/**` is governed).\nGrade: area:ai · Task · reach: read (the two file rows) → p2, because it follows a p2 card whose retirement makes the taught key refused.\nDedupe: searched open issues for `model.provider skills`: 0 hits.\nRelated: #37712, PR #37783.\n\nBlocked-by: #37783"

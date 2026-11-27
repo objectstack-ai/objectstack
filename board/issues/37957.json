@@ -1,0 +1,31 @@
+{
+  "number": 37957,
+  "kind": "issue",
+  "title": "service-knowledge: search pre-filters by the caller's visible record ids within the record scope",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-27T12:55:16Z",
+  "updated_at": "2026-11-27T13:56:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37957",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ③ maintainer-directed (topic child of #37000) · Source: maintainer (hotlong, cloud project): 「云上需要知识库，用turso」 / 「云端不应该让客户配置向量模型」, recorded on cloud#4993 comment 7218621399 · Spec: objectstack#37000 comment 7218695999\nGrading: area:ai · Feature · p3 (topic) · reach: a non-system caller who can read few of the rows an object source indexes (for example 20 of 1,000 policies) · evidence: read on main bc173343ea57.\nDedupe: `knowledge search visible record ids pre-filter` → 8 (open: #37000 parent, seat posts only) · `knowledge search refill permission filter recall` → 7 (open: #37000 parent, seat posts only; the refill itself shipped under closed #36993) · `knowledge hosted turso` → 27 (no open card on search recall).\n\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：搜索先按相似度取前 5×topK 条，再逐条按调用者的权限过滤，必要时再取 20×topK 条补一轮。调用者只能看到很少的行（1000 条里只有 20 条）时，可能在这个上限内一条自己能看的答案都没有。\n- 做什么：对非系统调用者，先以调用者身份读出他可见的记录 id（带知识源的 where，只取 id，上限 501）。不超过 500 时，把这些 id 作为 `record` 范围条件交给适配器，只在这些行里排序；超过 500 走原来的路径。命中仍逐条复核权限。\n- 谁受益：权限范围窄的用户，搜得到自己有权看的答案。\n- 需要你做的：无。\n\n## What\nPremise re-read on main bc173343ea57: every cited fact holds; line numbers moved.\n- Post-rank re-check: `packages/services/service-knowledge/src/knowledge-service.ts` search path, `filtered`/`widened` at :1563-1568 (first round asks `topK × SEARCH_FIRST_ROUND_FACTOR`, constant = 5 at :2818), `applyPermissionFilter` call at :1574 (method :2514), the one refill round at :1584 (`topK × SEARCH_REFILL_FACTOR`, constant = 20 at :2826); the explanatory note is at :1438-1470 (spec: 1442-1458). The refill is the cap, so a caller whose visible rows rank below 20×topK overall gets none.\n- Record-scope limit: `packages/services/service-knowledge/src/knowledge-search-scope.ts:42-44` (`SEARCH_SCOPE_MAX_ENTRIES = 10`, `SEARCH_SCOPE_MAX_IDS = 500`).\n- Adapters: `packages/plugins/knowledge-turso/src/turso-adapter.ts:516-541` (`source_record_id IN …` for a `record` term at :529, `metadata` terms after it; terms are joined with ` OR ` at :539 and an empty-ids scope ranks nothing at :477); pgvector likewise (`pgvector-adapter.ts:576-598`, `source_record_id = ANY(…)`, terms OR'd).\n- No `source_record_id` index: `packages/plugins/knowledge-turso/src/sql.ts:146` creates only the `document_id` index (the column is at :136).\n\nProblem: hits are re-checked after ranking, so a caller who can read few rows may get none of their visible answers within 20×topK.\n\nWhat: for a non-system caller, per object source, first read the caller's visible ids (as the caller, with the source's `where`, ids only, limit 501). If 500 or fewer, pass them as a `record` term so the adapter ranks only those. Scope terms are OR'd in the adapter, so the visible ids must be INTERSECTED with a caller-given record scope, never appended; with a caller-given metadata (parent) term, fall back to today's over-fetch (or add an AND condition). More than 500: today's path. Hits are still re-checked one by one. The count of removed hits is still never returned.\n\n## Acceptance\n- A caller who may read 20 of 1,000 indexed records finds an answer in one of their 20 when it ranks below 20×topK overall.\n- A caller scope of one record stays one record (intersection, not union).\n- The organization filter is unchanged.\n- A caller with more than 500 visible ids takes today's path; a system caller is unchanged.\n- Note in the PR: this raises recall, it does not cut row reads (no `source_record_id` index, `sql.ts:146`).\n\nParent: #37000."
+}

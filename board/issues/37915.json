@@ -1,0 +1,32 @@
+{
+  "number": 37915,
+  "kind": "issue",
+  "title": "metadata-protocol: while a package is disabled, the bare history read of a name only it holds still lists that name’s versions",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-27T11:00:10Z",
+  "updated_at": "2026-11-27T11:20:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37915",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① product defect, named location, measured. Source: fleet (the #37851 measurement, comment on #37851 at origin/main 0a3ea67c; isolated review of the same).\nGrading: area:package · Bug · p2 · domain:server. Same family as #37608 / #37851, but this is a read of version history, not a write.\nReader: seat repo:objectstack#3, zone o3-package (area:package p2).\nreach: measured through real `RestServer` routes over the real ObjectQL engine and protocol (fixture of PR #37818: `com.acme.mail`, `email_template` `acme.welcome`, member `fr-FR`). While `com.acme.mail` is disabled, bare `GET /history?member=fr-FR` answers `200` with 3 entries; bare `GET` of the item answers `404` and the bare save answers `409`.\nDedupe: searched `disabled package history` (456 hits, ranked): #37851 and #37608 (the write doors), #34144 and #33401 (closed, save and read doors); none covers the history read.\n\nBusiness reason: an admin who disables a package expects everything under its names to disappear until re-enable (topic #36229, 「我觉得停用就该全部消失」; ADR-0150 D3). Today the history panel of such a name still lists its versions while the item itself answers \"not found\". That leaks the edit history of a hidden item and offers versions that the rollback door (refused by #37851's ruling) can no longer restore.\n\n## What happens\n- `packages/metadata-protocol/src/protocol-history-slots.ts` resolves the bare history slot with no disabled-holder judgment. The save, publish and rollback doors ask it (`packagelessHolderRefusal` and its siblings).\n\n## Expected\n- The bare history read of a name only disabled packages hold answers as the bare read does: not found, or the same refusal sentence. Pick whichever matches the item read, and pin the choice with a re-enable control. A named read (`?package=PKG`) follows whatever the named item read does today.\n\n## Acceptance\n- With PKG disabled and the sole holder, bare `GET /history` no longer lists the versions. After re-enable it lists them again.\n- Named reads are unchanged, and pinned."
+}

@@ -2,8 +2,8 @@
   "number": 37730,
   "kind": "issue",
   "title": "对话组件拆分 C：把 AiChatPage.tsx 的 ChatPane 和辅助函数搬到独立文件（不改行为）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,9 +21,13 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-27T00:20:58Z",
-  "updated_at": "2026-11-27T04:41:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T11:55:31Z",
+  "closed_at": "2026-11-27T11:53:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 1,
   "locked": false,

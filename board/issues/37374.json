@@ -2,8 +2,8 @@
   "number": 37374,
   "kind": "issue",
   "title": "skills: View All / Modify All no longer open fields in 19 — re-teach objectstack-ai pitfall 2 and the objectstack-data security eval (follow-up of #36055)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:data",
     "domain:skills",
     "finding",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,9 +22,13 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T00:07:19Z",
-  "updated_at": "2026-11-27T07:53:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T08:40:16Z",
+  "closed_at": "2026-11-27T08:35:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

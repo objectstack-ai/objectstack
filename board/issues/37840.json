@@ -2,7 +2,7 @@
   "number": 37840,
   "kind": "pull_request",
   "title": "fix(formula)!: a flow condition that orders a bare date against text before date arithmetic on record. / previous. is refused",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -23,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T06:31:50Z",
-  "updated_at": "2026-11-27T07:16:05Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-27T08:34:17Z",
+  "closed_at": "2026-11-27T08:34:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-27T08:34:14Z",
   "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37840",

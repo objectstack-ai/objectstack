@@ -1,0 +1,31 @@
+{
+  "number": 37955,
+  "kind": "issue",
+  "title": "service-knowledge: a plugin option keeps the embedder section off the ai settings page",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-27T12:53:24Z",
+  "updated_at": "2026-11-27T13:18:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37955",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ③ maintainer-directed (topic child of #37000) · Source: maintainer (hotlong, cloud project): 「云上需要知识库，用turso」 / 「云端不应该让客户配置向量模型」, recorded on cloud#4993 comment 7218621399 · Spec: objectstack#37000 comment 7218695999\nGrading: area:ai · Feature · p2 (topic) · reach: a host that provides the embedder itself (hosted cloud, cloud#5137), so its customers see no embedder fields · evidence: read on main bc173343ea57.\nDedupe: `knowledge embedder settings ai manifest test_embedder` → 5 (open: #37000 parent only) · `knowledge-settings-contribution embedder switch hosted` → 1 (open: #37000 parent only) · `knowledge hosted turso` → 27 (open: #37680 — the Turso settings group's per-organization fallback, a different page; #37306 — optional adapter on knowledge_source; #37734 — reconcile; none touches the `ai` embedder section).\n\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：知识库服务在设置页「AI」里自动加上向量模型（embedder）的字段和「测试向量模型」按钮；云上由平台自己提供向量模型，不该让客户看到、配置这些。\n- 做什么：给知识库插件加一个开关（例如 `embedderSettings: false`），关掉后不加这些字段、不注册测试动作、也不再每次启动打警告。\n- 谁受益：云上租户（不会误配向量模型）；云端不必靠「复制一份 manifest」这种依赖初始化顺序的绕法。\n- 需要你做的：无。\n\n## What\nPremise re-read on main bc173343ea57: the facts hold; the line numbers moved.\n- `packages/services/service-knowledge/src/knowledge-settings-contribution.ts:145-148` (spec: 138-147): when the served `ai` manifest is the bundled one (`isBundledAiManifest`, defined at :82; checked at :144) or already declares the embedder keys, it registers `withAiEmbedderSection(aiSettingsManifest)` (:146) and the `ai/test_embedder` action (:147), and sets `offered.embedder` (:148). The else branch (:149-155) warns every boot that the embedder settings are not offered when the `ai` manifest is not the bundled one or is absent.\n- The function is `contributeKnowledgeSettings` (:107), called from `knowledge-service-plugin.ts:539`. `KnowledgeServicePluginOptions` is at `knowledge-service-plugin.ts:317` (`enableEventSync` at :340 is the neighbouring switch style).\n\nProblem: a host that provides the embedder itself (hosted cloud, cloud#5137) must not offer the `embedder_*` fields or `ai/test_embedder`. Cloud could dodge it by registering a copied `ai` manifest, but that depends on plugin init order and warns on every boot.\n\nWhat: a `KnowledgeServicePluginOptions` switch (e.g. `embedderSettings: false`, default on), passed to `contributeKnowledgeSettings`. When off: no embedder fields added, no `test_embedder` action registered, no warning (the else branch stays silent as well, since the host chose this).\n\n## Acceptance\n- With the switch off, the `ai` manifest has no `embedder_*` keys and `test_embedder` answers unknown action; no warning is logged at boot.\n- Default unchanged (switch on or omitted behaves exactly as today).\n- The knowledge and Turso settings groups are unaffected.\n\nParent: #37000."
+}

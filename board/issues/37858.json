@@ -2,8 +2,8 @@
   "number": 37858,
   "kind": "issue",
   "title": "入口专题 C3：每页右上角改成带文字的「问 AI」按钮（桌面页头、记录页、手机顶栏、Home，无页头路由兜底）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "pm:epic",
     "priority:p1",
     "size/m"
@@ -25,11 +24,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T07:20:40Z",
-  "updated_at": "2026-11-27T07:38:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T12:24:24Z",
+  "closed_at": "2026-11-27T12:23:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37858",
   "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ④ topic child. Source: topic #37853 (Jack: 「\"页面里加按钮\"的需求 作废」 06:28Z; card 「撤掉 ask_ai」 06:30Z; 「问 AI」 06:33Z; 「同意，立专题卡，非 cloud 的任务，让 objectstack #3 座位接手」 07:12Z, all 2026-11-27). Business reason: carried by the parent.\nParent: objectstack-ai/objectstack#37853 (rulings, target experience, card table, topic acceptance). Evidence: an independent Fable review of objectstack and cloud `main` (2026-11-27) checked every file:line below.\nOwner: **repo:objectstack#3** (Jack 07:12Z 「非 cloud 的任务，让 objectstack #3 座位接手」). Reserved under topic #37853 (`pm:epic`), not `pm:queue`: other seats leave it.\n\nGrading: area:ux · Task · p1 · size M · reach: every page of every app (desktop page headers, record pages, mobile top bar, Home).\nOrder: shares a component with #37788 (the AI home page hides this button). Either may merge first; the later one resolves the conflict.\nDedupe: searched `AssistantTopBarButton`, `问 AI button`: none open.\n\n## 维护者速读\n- 是什么：把每页右上角 32px 的透明机器人图标改成带文字的描边按钮「💬 问 AI」，桌面页头、记录页、手机顶栏、Home 都一样；没有页头的页面加兜底按钮。\n- 影响：所有用户都能一眼看到问 AI 的入口。\n- 要你做什么：无。\n\n## Background (verified)\n- `AssistantTopBarButton` is transparent, 32px, a `Bot` icon only; its name is only in `title` / `aria-label`; an orange dot marks a pending plan; without a drawer host it degrades to a `/ai` link (`ui/packages/app-shell/src/layout/AssistantTopBarButton.tsx:39-64`).\n- **Desktop (≥768px) draws no top bar inside apps** (#36112). The entry lives in the page-header action group `ShellPageActions` (comments · AI · help), drawn by `PageHeader` and by the record page's nav row before ✕ (`layout/ConsoleLayout.tsx:313-321`, `layout/ShellPageActions.tsx:236-258`, `layout/PageHeader.tsx:280-292`, `views/RecordDetailView.tsx:1038,5974`). `AppHeader` appears only on mobile and on Home / org pages. Routes with no shell page header (search results, component pages, app editor) have **no AI entry on desktop**.\n- ⌘/Ctrl+Shift+I toggles the drawer (`layout/chatDockState.ts:186-195`); on non-Mac it collides with browser devtools.\n- Home has its own 「Ask AI」 button (`console/home/HomePage.tsx:315-337`, key `home-ask-ai`, eleven locales) calling `openAssistant({agent:'ask'})`.\n- A test pins \"drawer title = entry button name\" (`layout/__tests__/ChatDock.titleMatchesTopBar-34827.test.tsx`).\n\n## What to do\n1. Change the shared `AssistantTopBarButton`: `variant=\"outline\" size=\"sm\"`, `h-8`, a chat-bubble icon plus 「问 AI」. New key `topbar.askAi` in eleven locales (reuse `home.askAI` translations). Keep the pressed style and the orange dot. Mobile stays `size-11`.\n2. Placement: last in `ShellPageActions` (after help); before ✕ in the record nav row; `AppHeader` on mobile and Home.\n3. Width: `PageHeader` collapses actions by width. When space runs out, hide the text first and keep the icon; never push out the page's own actions. Decide by measured width, not a breakpoint (fr/es/ru/ar are longer).\n4. Routes with no shell header: a top-right fallback button, built like `ShellSidebarExpandFallback`.\n5. Home 「Ask AI」 calls the same entry (its behaviour becomes \"new conversation\" with C4).\n6. Accessibility: with text, the accessible name is the text (no extra `aria-label`); icon-only, `aria-label`=「问 AI」. Tooltip with `aria-keyshortcuts`: show 「⌘⇧I」 on Mac, no shortcut on other platforms.\n7. #34827 test: change to \"drawer title = conversation title, 「新会话」 before the first send\" in coordination with C4 (if C3 lands first, keep the test green and note it on C4).\n8. Apps cannot rename the button (Jack 06:32Z). Visibility rules unchanged.\n\n## Acceptance\n- Checked on a `PageHeader` page, a record page (before ✕) and a header-less route; narrow header hides text first; mobile 44px icon; no overflow in eleven locales; accessible name contains 「问 AI」; Mac tooltip shows ⌘⇧I, others none."

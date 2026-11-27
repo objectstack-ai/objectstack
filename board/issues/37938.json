@@ -1,0 +1,37 @@
+{
+  "number": 37938,
+  "kind": "pull_request",
+  "title": "docs(skills): objectstack-ui gains an eval case for a board's lane statistic and card settings; the kanban note names lookup lanes and the optional keys",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T12:10:50Z",
+  "updated_at": "2026-11-27T13:12:15Z",
+  "closed_at": "2026-11-27T13:12:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-27T13:12:12Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37938",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuWUUzJ4EEzDD7fb56jyq1TP)_\n\nFixes #37074\nFixes #35770\nRelated: #37941\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 是什么：对外发布的界面技能包补一道评测题：做看板时每列底部显示统计（这里是平均工时），卡片不显示字段名、空字段保留位置。同时把看板说明改准：三个设置都是可选的、默认值是什么；原来写的「按查找字段分列时统计只算一页」已经不成立，删掉。\n- 为什么：这块教学上周已经写进技能，但一直没有评测题，技能哪天教错了评测也发现不了；那句「已知缺陷」平台后来已经修好，留着会让 AI 以为这种看板统计不准。\n- 本卡是评测周汇总卡，正文里没有分诊移进来的行；挂靠它的两张里，打分器认旧写法那张已经由别的 PR 修好关卡，只剩这一张，所以这个 PR 只做这一行。\n- 出错会怎样：只动技能文字和一道评测题，写错了最多是 AI 学到一句不准的话或一道题判分偏严，可以直接撤回。\n- 要你做的：无，座位复核后交审批人。\n\n## What changes\n\n**`skills/objectstack-ui/evals/views-apps-actions-pages.json`** gains case 27, appended last. A board grouped by `status` whose lanes show the average of `estimate_hours`, with cards that drop field names and keep empty rows. It must write `groupByField`, `summary`, `avg`, `estimate_hours`, `showFieldLabels: false` and `hideEmptyFields: false`, and must not write `showFieldLabels: true`. `avg` is not a substring of \"average\", so prose alone cannot meet it. `summarizeField` and the list-column shorthand `summary: 'avg'` are named in `expected_output` as wrong, but not forbidden as literals: a correct answer may quote them in prose while rejecting them.\n\n**`skills/objectstack-ui/rules/list-views.md`**, the kanban block:\n\n- The example's two card settings now say `// optional, default true: …`. They keep the non-default `false`, so the example still shows the knob.\n- The note now says `summary`, `showFieldLabels` and `hideEmptyFields` are optional, and that omitting `summary` keeps the older `summarizeField`'s sum, or no statistic without it (the spec describe's own wording, `packages/spec/src/ui/view.zod.ts` `KanbanConfigSchema.summary`).\nDecided in the thread (small, listed per the standing rule):\n\n- **Deviation from the card (seat accepted 12:13Z):** the card asked to give the \"Known gap: over a lookup field or in a grouped view\" sentence its subject. The sentence is deleted instead, because the gap it describes is gone on `main`:\n  - objectstack#36871: the list view hands a board with lanes over a lookup field its query, so `sum` / `avg` / `min` / `max` cover every record of each lane (`view.zod.ts` docblock ~2389-2395; `ui/packages/plugin-list/src/ListView.tsx` `kanbanLaneStatisticHosted`);\n  - objectstack#37327: the same read gives that board's lane counts, so `count` is whole-lane too, falling back to the page count marked `+` only when the read fails (`ui/packages/plugin-kanban/src/KanbanLaneStatistic.ts` ~72-81; `KanbanImpl.tsx` `wholeLaneCount`);\n  - swimlane boards ask the same whole-lane read (`ObjectKanban.tsx` ~1759-1768, #37326).\n  So the note says the positive: \"computed by the query over every record of the lane, lanes over a lookup field included\". The card's done-when phrase \"lanes over a lookup field\" is present.\n- The residual edge (a board handed its records whole, with no query, adds up `sum` over them and draws none of `avg` / `min` / `max`) is not taught: no paid deletion fit, and for such a board the handed records are the whole lane, so `sum` is still right.\n- Out-of-scope finding: the spec docblock and describe (`view.zod.ts` ~2392-2393, ~2521-2522) still say a lookup-lane board's `count` \"counts that page\", which #37327 made stale. Outside this card's write surface; the seat filed it as #37941.\n\n## Size readings (skills/**)\n\n| | lines before | lines after | tokens before | tokens after |\n|:--|--:|--:|--:|--:|\n| `skills/objectstack-ui/rules/list-views.md` | 411 | 410 | 4448 | 4448 (ceiling 4448) |\n| `skills/objectstack-ui/evals/views-apps-actions-pages.json` | 265 | 275 | — | not ratcheted |\n| every published `SKILL.md`, summed | 4959 | 4959 | | |\n| ratcheted (authored) bundle | | | 199689 | 199689 |\n\nNet `skills/**` lines +9, inside the claim's +15. No ceiling row moves.\n\n## Tests\n\nNo code changes. Gates run on the branch:\n\n<details><summary>gate exit codes</summary>\n\n- `node ui/scripts/check-skill-eval-tokens.mjs` 0\n- `node scripts/check-skills-token-ratchet.mjs` 0, `--self-test` 0\n- `pnpm check:skill-links` 0 · `check:skill-identifier-liveness` 0 · `check:skill-frame-sync` 0 · `check:skill-compatibility` 0 · `check:doc-authoring` 0\n- `pnpm --filter @objectstack/spec run check:skill-served-sections` 0\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` 0 (tier MANDATORY `skills/**`)\n- also 0: `check:agent-test-spelling`, `check:ci-filter-parity`, `check:corpus-claim-drift`, `check:cross-package-test-inputs`, `check:pm-expected-skips`, `check:pm-governed-merges`, `check:pm-skill-id-lint`, `check:role-word`, `check-doc-route-spelling.mjs --advisory` and `--self-test`, `check-dts-emitted.mjs --self-test`\n- NOT MEASURED: `pnpm --filter @objectstack/lint run check:doc-formula-expressions` exit 3 (needs a built workspace); the build-dependent closure checks were left to CI.\n- No model run of case 27.\n\n</details>\n\n## Verification\n\nTwo-minute check: `node ui/scripts/check-skill-eval-tokens.mjs` prints 0 red rows, and `node scripts/check-skills-token-ratchet.mjs` shows `rules/list-views.md` at 4448 with ceiling 4448.\n\nBuilt at the mandatory tier for `skills/**` (isolated build sub-agent), reviewed and committed by the card thread.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgTDPAaiTGidYohtQcg\n\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgTDPAaiTGidYohtQcg -->\n"
+}

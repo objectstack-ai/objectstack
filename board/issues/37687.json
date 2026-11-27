@@ -21,11 +21,11 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-26T20:11:48Z",
-  "updated_at": "2026-11-26T20:19:36Z",
+  "updated_at": "2026-11-27T13:00:46Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37687",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbL6Nn3scsU8yvLyU4\n\nFiling gate: ③ · Source: seat 5's contract review 7202356468 on PR #37579 (#37456), nit N5, which the seat recommended as a card. Sub-issue of #37456.\nGrade: area:ux · Feature · p3 · evidence: the switcher's lock on a read-only package and the Pending door's read-only state show their reason only on hover, if at all. Keyboard and assistive-tech users get no reason.\nReader: area `ux-37424`, or the next holder of area:ux.\n\n## 维护者速读\n\n- 用户能看到什么变化：用键盘或读屏的人，在只读软件包上也能听到/看到「为什么不能改、不能发布」。\n- 为什么：现在原因只在鼠标悬停时出现。\n- 需要你做的：无。\n\n## What\n\n- Give the lock in `StudioPackageSwitcher` / `StudioTopLeft` an accessible name that carries the read-only reason, reusing `engine.studio.pkg.readonlyHint`.\n- Give the read-only Pending / publish door an `aria-describedby` with the same reason.\n\n## Acceptance\n\n- The reason is announced in tests (role and name queries), with an ablation that goes red. Wait until PR #37579 merges."

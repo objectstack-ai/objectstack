@@ -1,0 +1,31 @@
+{
+  "number": 37959,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37940 (AI inquiry page recent conversations)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T12:59:45Z",
+  "updated_at": "2026-11-27T13:17:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37959",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwGVgec21LwQTtRY85\n\nFiling gate: ③ L1 follow-up of a landed card's PR (one card per PR, items ticked as done), asked by L1-a in its ACCEPT 7218914559. Source: fleet.\nGrading: area:ai · Task · priority:p3 · size S · reach: the `ai:chat` page's home state (PR #37940), read at L1; not must-fix.\nDedupe: open-issue search `\"PR #37940\"`: none besides this card; `useConversationList backfill`: none.\n\n- [ ] `useConversationList` backfills previews with up to 20 detail GETs for untitled rows on each mount, and the AI inquiry page's home state mounts it on every return to home, so the recent-conversations section waits for the slowest detail GET. Add an option to skip the backfill, or to limit it to the rows actually listed (5 here), and use it from `AppAskPage.tsx`. Acceptance: a test that the home state issues no detail GETs beyond the listed rows."
+}

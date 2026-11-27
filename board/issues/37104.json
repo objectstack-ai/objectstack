@@ -2,8 +2,8 @@
   "number": 37104,
   "kind": "issue",
   "title": "Knowledge settings page: every key has a reader or leaves the page (adapter, chunk_target, chunk_overlap, over_fetch, enforce_rls)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-24T19:37:58Z",
-  "updated_at": "2026-11-26T23:41:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T08:36:34Z",
+  "closed_at": "2026-11-27T08:35:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37104",
   "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed (topic child). Source: topic #37000 (phase 2; the settings the runtime now mounts must not show keys nothing reads); maintainer 2026-11-24 「用fable评审，并分拆第二阶段的任务」. Reviewed by an independent Fable pass before filing.\nGrading: area:ai · Task · p2 (topic; one key is an inert security switch) · reach: deployments that mount `service-knowledge` · evidence: read.\n\n## 维护者速读\n- 问题：知识设置页上有几个键在开源版里没有任何代码读取。页面写「适配器：内存」，实际用的可能是 pgvector 或 turso；「强制行级权限」开关关掉也不起任何作用，看起来像能关掉安全检查。\n- 修法：每个键要么接上真的读取方，要么从页面上拿掉。适配器一项改成显示实际挂载的存储。\n- 需要你做的：无。\n\n## What\n`packages/services/service-settings/src/manifests/knowledge.manifest.ts` and its readers:\n1. `adapter` (default `memory`; options memory / turso / ragflow, turso's fields today): becomes a read-only display of the store actually mounted for each source (pgvector or turso, #37102), or is removed — no stored value that nothing reads. turso's connection fields stay only if #37107 reads them.\n2. `chunk_target`: read by the splitter (#37098); confirm, or remove if #37098 chose otherwise.\n3. `chunk_overlap`: removed (by #37098 if it already did; confirm).\n4. `over_fetch`: read by the refill (#36993 / #37103) or removed.\n5. `enforce_rls`: removed. Answers always read as the asking user (epic ruling); a switch that appears to turn this off must not exist. State in the PR what an environment with a stored `false` sees.\n6. Locale strings and pin tests for the removed keys; a changeset for `@objectstack/service-settings`.\n\n## Acceptance\n- Every remaining knowledge settings key has a reader named in the PR (grep evidence).\n- An environment with stored values for removed keys loads the page without error.\n- Container run per AGENTS.md.\n\n## Out of scope\n- The ragflow option (#37004 removes it).\n- Embedder settings (#37094).\n\nBlocked-by: #37098, #37102, #37004 (same manifest file).\nParent: #37000. Reader: `domain:server` lane (`packages/services/service-settings`).\nDedupe: `enforce_rls` 2 (none open) · `knowledge settings` 130 (open 7: #37004 ragflow retirement, same file, different keys; the rest unrelated or seat posts) · `chunk_overlap` 0."

@@ -1,0 +1,31 @@
+{
+  "number": 37912,
+  "kind": "issue",
+  "title": "ADR-0087: no disposition category names a member removed from a hook's return when its interface is not exported",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T10:47:08Z",
+  "updated_at": "2026-11-27T11:20:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37912",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (a gate admits a disposition its own ADR says to refuse) · Source: fleet (contract review record 7216271239 on PR #37883, nit N1, escalated to the seat)\n\n## What happens\n\nPR #37883 (Part of #37575) removes `appContentLanguages` from what `useObjectTranslation()` and `useI18nContext()` return in the published `@object-ui/i18n`. The member sits on `I18nContextValue`, which the package does not export, and on the hooks' inferred return types.\n\n- `runtime-export-retired` addresses a member only through an exported type (`<package>#<Type>.<member>`), so it cannot name this one.\n- `runtime-interface-only` and `type-surface-only` take a path symbol and do not fit a member of an inferred hook return.\n- The PR therefore carries `not-required (no-migration-prescription)`, while its changeset body does prescribe a migration (\"use `useAppContentLanguages()` instead\"). ADR-0087 (the `no-migration-prescription` paragraph) says that category is refused by such a body. `check:adr-0087-registration` admits it only because its detector reads arrows and framed tables, not a sentence.\n\nThe outcome on #37883 is right: no ledger entry is owed, because nothing an author writes in metadata changes. The vocabulary has no true category for it.\n\n## Expected\n\n- [ ] Either a category (or an addressing form of an existing one) that names a member of a published hook's return when its interface is unexported, re-verified like the others; or a written ruling that `no-migration-prescription` with a prose prescription is right for this shape, and the ADR text says so.\n- [ ] The gate and the ADR agree on whether a prose prescription refuses `no-migration-prescription`.\n\n`docs/adr/**` is governed: the ADR amendment needs the maintainer's word.\n\nGrade: area:fleet · domain:devx · reach: the breaking-change disposition gate · evidence: the record above, ADR-0087 :745-780 on `main`\nSuggested-grade: p3\nSize: S\nRelated: PR #37883, #37575, #37447 (a sibling vocabulary gap: a member kept with its type changed)."
+}

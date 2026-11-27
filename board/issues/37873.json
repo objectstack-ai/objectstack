@@ -2,8 +2,8 @@
   "number": 37873,
   "kind": "issue",
   "title": "问题卡专题 Q2a：QuestionCard 纯组件（单题点选即发、两题停在发送、自己输入、跳过、键盘读屏、全部语种）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -18,15 +18,21 @@
     "priority:p1",
     "size/m"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T08:10:06Z",
-  "updated_at": "2026-11-27T08:10:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T13:15:32Z",
+  "closed_at": "2026-11-27T13:14:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37873",
   "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ④ topic child. Source: topic #37871 (Jack 2026-11-27: 「用户体验相关的非常关键，要启动」 06:56Z; card 「按 v2 立卡，顶替输入框」 08:05Z; 「交给 objectstack #3」 08:06Z). Business reason: carried by the parent.\nParent: objectstack-ai/objectstack#37871 (decisions D1–D6, relations, topic acceptance). Evidence: an independent Fable review of objectstack `main` adb65d16 and cloud `main` 9729319 (2026-11-27) checked every file:line below.\nOwner: **repo:objectstack#3** (Jack 08:06Z 「交给 objectstack #3」; 07:51Z 「你只处理 cloud 的任务，其他任务都交给 objectstack 座位哦」). Reserved under topic #37871 (`pm:epic`), not `pm:queue`: other seats leave it.\n\nGrading: area:ux · Task · p1 · size M.\nDepends on: nothing; can start now (pure component; wiring is Q2b).\nDedupe: searched `QuestionCard`: none in objectstack.\n\n## 维护者速读\n- 是什么：问题卡本身的纯组件：单题点一下就发，两题翻页最后停在「发送」，「自己输入…」，跳过，键盘和读屏，所有语种文案。还不接到对话里。\n\n## What to do (in `plugin-chatbot`, props in, events out)\n1. Input: the parsed envelope (Q1 (#37872) types). Output events: `onAnswer(text)`, `onSkip()`.\n2. Single question: clicking an option sends immediately.\n3. Two questions: an option on question 1 moves to question 2; on question 2 the card does NOT auto-send, it stops on 「发送」 with a one-line summary; 「上一题」 keeps the choices.\n4. 「自己输入…」: always the last item, a one-line input; typing selects it (clears others); Enter = next / send.\n5. Answer text: one question → the chosen label or typed text; two → one line each `header：answer` (question text when no header).\n6. Options show `description` as a second grey line (no hover on mobile); `recommended` shows a 「推荐」 tag.\n7. Keyboard: no forced focus move; when focus is inside the card, digits 1–4 pick options, ↑↓ move, ⌘/Ctrl+↵ next / send. Screen reader: radiogroup with 「第 1/2 题」; an `aria-live` 「有一个问题待回答」 announcement (Q2b triggers it).\n8. Size: max height about 60% of the input area, scrolls inside, bottom buttons fixed; works in full screen, narrow drawer and mobile drawer.\n9. Strings in all current locales: 「第 {n}/{total} 题」「自己输入…」「跳过」「上一题」「下一题」「发送」「推荐」「AI 问：」「有一个问题待回答」. Arabic right-to-left.\n10. The card keeps its selected state when the parent re-renders it after a failed send (Q2b relies on this).\n\n## Acceptance\n- Component tests: single-click send, two-question flow with back, typed answer, skip, keyboard, RTL, answer-text composition."

@@ -2,7 +2,7 @@
   "number": 37846,
   "kind": "pull_request",
   "title": "fix(studio): the condition builder writes the validator's per-site list membership",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T06:44:10Z",
-  "updated_at": "2026-11-27T07:25:48Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-27T08:35:14Z",
+  "closed_at": "2026-11-27T08:35:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T08:35:10Z",
   "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37846",

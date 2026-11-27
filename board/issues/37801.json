@@ -2,8 +2,8 @@
   "number": 37801,
   "kind": "issue",
   "title": "记录页长文本字段阅读样式：多行文本/Markdown/富文本标签在上、占满整列，正文标题缩小一档",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-27T04:09:39Z",
-  "updated_at": "2026-11-27T04:22:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T10:44:26Z",
+  "closed_at": "2026-11-27T10:42:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37801",
   "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ① maintainer-asked. Jack in the seat thread, 2026-11-27: 「现在记录详情页可以配置不按左右栏显示吗？」 (03:34Z); 「我觉得这个应该是一个元数据的配置项吧，这种应该是常见需求。」 (03:36Z); 「我能够具体配置每一个页签显示哪些分组吗？然后还有一个开关控制第一个页面要不要pin到左侧」 (03:40Z); 「是否建议保留 relatedList 这个语法」 (03:51Z, no rename); 「同意，立卡 p1」 (03:52Z); 「刚才的任务以及你现在的建议用 fable 评审」 (03:55Z); decision card 04:07Z: 「例外 + 新键 fieldTabs」 (ADR-0085 ruled exception; field tabs as a sibling object key, `relatedLists` untouched; three cards S, S–M, M).\nFable review (code-verified at objectstack 3ed97b71): `/mnt/project-files/record-page/fable-review.md`. Trigger app: brightrule policy record (long 正文 in a 276 px value cell).\nGrading: domain:ui · Task · p1 · size S · reach: every object's record page (no metadata, no ADR).\nDedupe: searched `long text label on top`, `prose heading record page`, `wide detail field`: none open.\n\n## 维护者速读\n- 是什么：记录页字段区里，多行文本、Markdown、富文本、多文件这类\"宽字段\"改成标签在上、内容占满整列（现在标签占左边 112px，正文只剩 276px）；字段里 Markdown/富文本的标题字号缩小一档。\n- 影响：brightrule 制度正文在左栏从 276px 宽到约 400px；不改元数据，所有对象生效。这是三张卡里最先落地的一张。\n- 要你做什么：无。\n\n## Background (verified, Fable review §S1–S3)\n- Field list label cell is `w-28` (112 px) + `gap-3` in the frameless (field-list) style (`ui/packages/plugin-detail/src/DetailSection.tsx:975-1000`); the boxed style already puts labels on top (:978).\n- Wide types (textarea, markdown, html, richtext, grid, multi-file) already span the full row (`ui/packages/plugin-detail/src/autoLayout.ts:53-63`, :105, `isWideDetailField`), which does nothing in a one-column field list: the label stays left.\n- Document rich text renders with `prose prose-sm` (`ui/packages/fields/src/widgets/richTextDisplay.tsx:59`): h1 ≈ 30 px. The cell variant flattens headings (:62-74, #36344) and the record page deliberately keeps heading size (`ui/packages/fields/src/index.tsx:452`) — this card changes that deliberate state, by size only.\n- `?section=` deep links find h1–h6 elements inside the field (`recordSectionAnchor.ts:279-283`): headings must stay heading elements.\n\n## What to do\n1. S1 `DetailSection.tsx`: in the frameless field-list style, a field for which `isWideDetailField` is true renders label above value, value spanning the full column width. Reuse `isWideDetailField`; do not add a second type list. Other fields unchanged. Click-to-edit hit area and `data-detail-field` attributes unchanged.\n2. S3 `richTextDisplay.tsx`: in the document variant, scale h1–h3 down one step via typography modifiers (e.g. `prose-h1:text-lg` …) — elements unchanged, markdown and html/richtext identical, cell variant unchanged. Note #36344 in the code comment.\n3. Changeset (ui packages patch).\n\n## Acceptance\n- Unit: frameless list, a markdown/textarea/html/multi-file field has label above value at full width; a text/select field still renders as a row; click on the value still enters edit; `data-detail-field` present.\n- Unit: document variant h1 is still an `<h1>` with the smaller class; markdown and html match; cell variant snapshot unchanged; existing `recordSectionAnchor` tests pass.\n- Browser (dogfood-verification skill): a record with a long markdown field at 1204×1007, pinned layout, before/after screenshots with the value width measured."

@@ -1,0 +1,37 @@
+{
+  "number": 37925,
+  "kind": "pull_request",
+  "title": "fix(approvals): a step decided in a subflow child no longer tells the submitter the approval is over",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T11:35:24Z",
+  "updated_at": "2026-11-27T12:40:31Z",
+  "closed_at": "2026-11-27T12:40:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T12:40:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37925",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuRzPnJEdqn6ymW4qaMMQS69)_\n\nFixes #37806\n\nClause-②: no\nMetadata-protocol: none\n\nRelated: #37767, #37766, ADR-0162\n\n## 维护者速读\n\n- 是什么：多步审批里，如果第一步审批放在子流程里，批完后父流程再开第二步，平台之前会提前给提交人发「已批准」通知，而第二步其实还在等人审。现在只有整个审批真正结束时才通知提交人。\n- 为什么：判断「审批结束没有」时，平台只查了被批的那一步所在的子流程里还有没有待审步骤，没查到父流程里新开的那一步。现在改为查这条单据所在的整个运行范围。\n- 出错会怎样：只影响「审批结果通知」何时发出，不改审批状态、不改锁定、不改任何存储数据；可直接撤回。\n- 要你做的：无，座位复核即可。\n\n## What happens on `main`\n\n`#notifyDecisionOutcome` decides whether a finalizing decision ended the approval (tell the submitter `approval.approved` / `approval.rejected`) or only a step (tell no one). It asked for a pending request on the decided request's own `flow_run_id`. A step decided inside a `subflow` child completes the child; the child bubbles into its parent inside the same resume call, and the parent opens the next step under the **parent's** run id. The probe found nothing pending on the child's run, so the submitter was told \"approved\" while the next step was open.\n\n**Reproduced first** (main `c3da7536`, `src/approval-decision-outcome-notification.integration.test.ts`, real `ApprovalService` + `ObjectQL` over `SqlDriver` + real `AutomationEngine` with the built-in `subflow` / `map` nodes): the subflow pin is red on `main` — one `approval.approved` to `u_sub` about step 1 while step 2 (`exec`, parent run) is pending. The single-run CONTROL is green on `main`.\n\n## What changes\n\n`packages/plugins/plugin-approvals/src/approval-service.ts#notifyDecisionOutcome` — the probe asks for a pending request on the run that **carries the request's record** (`record_run_id`, recorded since ADR-0162 Execution item 7 slice A, #37820), not the request's own run alone:\n\n1. a point read of the decided request's `record_run_id` (by `id`, `fields: ['record_run_id']`) — the served row (`ApprovalRequestRow`) does not carry the column, and widening that contract is not needed for this;\n2. `find sys_approval_request where { record_run_id, status: 'pending' } limit 1` — a pushed-down filter on the `record_run_id` index, no in-app scan (Prime Directive 5);\n3. a request with no `record_run_id` (opened before requests recorded it) falls back to its own `flow_run_id`, exactly as before.\n\nA `subflow` child inherits its parent's record run, so the parent's next step and the child's step share it. Both reads sit inside the existing `try`, so a failed read still logs the existing `warn` and tells no one.\n\nThe method's docblock now says \"the run that carries the request's record\" instead of \"the same run\".\n\n`content/docs/automation/approvals.mdx` (the *decision tells the submitter* callout) gains one sentence: the run judged is the one that carries the request's record, so a step decided inside a `subflow` whose parent opens the next step is silent, and each record of a `map` over records is told its own outcome.\n\n## Pins (one shared harness file, a new top-level `describe`)\n\n| Test | `main` | this PR |\n|:--|:--|:--|\n| step 1 in a `subflow` child, parent opens step 2: step 1 tells no one; step 2 tells the submitter | **red** | green |\n| CONTROL: the same two steps on one run | green | green |\n| a request with `record_run_id` nulled (the pre-slice-A shape) falls back to its own run | green | green |\n| a `map` item that is a record is told its own outcome while the batch's next item is pending | green | green |\n\n**Ablations** (fix committed first, restored from `HEAD` after each):\n- revert `approval-service.ts` to `main` → the subflow pin goes red (1 failed / 11 passed); restored → 12/12.\n- probe `root_run_id` instead of `record_run_id` → the `map` pin goes red (1 failed / 11 passed): a root-run probe would make a record-carrying `map` item wait for the next item's decision, a regression from `main`. This is why the key is the record run, not the root run the card names.\n\n## Decided in the thread (small, listed per the standing rule)\n\n- **The record run, not the root run.** The card and brief say \"the root run and every child run\". `root_run_id` covers the subflow case too, but it also joins every `map` item of one batch, so the first item's submitter would stop hearing that item's outcome until the last item is decided. The #37767 design note judges \"over\" for each record (\"the run that carries a record is the root run, or the nearest `map` item run where the item is the record\"), and `record_run_id` is exactly that column. For a subflow it equals the root run; it differs only for record-carrying `map` items, where it keeps `main`'s behaviour. The second ablation above pins the difference.\n- **Read, not served.** `record_run_id` is read off the stored row by a point read rather than added to `ApprovalRequestRow` (a published contract in `@objectstack/spec`), so the diff stays inside the plugin: `Clause-②: no`.\n- **Pending only.** The probe still asks for `pending` requests, as on `main`; a `returned` request elsewhere in the same record run is not considered (out of the card's scope).\n- **Reading, not pinned:** a `map` item whose item is *not* a record has the root as its record run (the column's definition), so its decision now tells no one while a later item of the same batch is pending on that record run. No pin: the approval node over a non-record item was not exercised here.\n\n## Gates run locally (worktree on `c3da7536` + this diff)\n\n- `pnpm --filter @objectstack/plugin-approvals test`: 131 files, 1976 tests passed\n- `pnpm --filter @objectstack/plugin-approvals typecheck` (incl. `check:test-typecheck`): pass\n- `eslint` on the two touched files: clean\n- `check:adr-0087-registration`, `check:changeset-fixed`, `check:empty-changeset`, `check:commit-card-trailers`, `check:doc-authoring`, `check:test-source-alias`: pass\n\nDocs: `check:doc-authoring` re-run after the docs sentence: pass.\n\nChangeset: `.changeset/37806-outcome-notice-across-subflow.md`, `patch` for `@objectstack/plugin-approvals`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgWFxnAUW68b4xGLw1h)_\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgWFxnAUW68b4xGLw1h -->\n"
+}

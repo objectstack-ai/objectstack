@@ -1,0 +1,31 @@
+{
+  "number": 37886,
+  "kind": "issue",
+  "title": "cli: drop the author-time rule count from the \"Running author-time rules (N)...\" step, its four docs transcripts and the drift gate that exists only to keep N in sync; sweep for other volatile counts nobody acts on",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T08:54:01Z",
+  "updated_at": "2026-11-27T09:15:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37886",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed. The maintainer, verbatim, 2026-11-27: 「是不是应该立skills卡，让开发遇到类似的没有意义统计数据直接删除」, then 「同意」 to triage's two-card proposal. This is card 1, the removal. Card 2 is the rule.\n\n## 维护者速读\n\n- 是什么：检查命令打印「正在运行搭建期检查规则（83 条）」，括号里的数字没人用；但四篇文档写死了它，每加一条规则都要改四篇文档，还专门有一道检查盯着它。今天的 p0 误报就是它引起的。\n- 做什么：命令行这一行去掉数字，四篇文档同步删掉，撤掉只为这个数字存在的文档检查；顺带排查还有没有同类「写死、没人用、却要一直同步」的数字，能删的一起删。\n- 要你做什么：无。\n\n## What exists (origin/main)\n\n- The step line prints the count: `packages/cli/src/commands/compile.ts:643`, `validate.ts:675`, `verify.ts:664` (`printStep(\\`Running author-time rules (${…})...\\`)`).\n- Four transcripts write it as a literal `(83)`: `content/docs/deployment/cli.mdx:940`, `content/docs/deployment/validating-metadata.mdx:870`, `content/docs/getting-started/build-with-claude-code.mdx:321`, `content/docs/ui/react-pages.mdx:407`.\n- `scripts/docs-audit/check-docs-transcript-drift.mjs` (#15373) exists to keep that literal equal to `authoringRulesFor(…).length`; its `TOKENS` table has one row, `the author-time rule count` (`:224`). It is wired into the lint lane as gate `cli-transcripts-in-content-docs-match`.\n- Cost today: every PR that adds or removes an author-time rule must edit four docs pages, or the merge queue ejects it. The count went from 41 to 83 under this gate. Between 07:42Z and 08:03Z on 2026-11-27, merge-queue groups went red on it, and triage filed and then withdrew a false p0 (#37875).\n\n## Work\n\n1. Print the step without the count (`Running author-time rules...`) in all three commands. `--json` output keeps whatever it carries today; only the human step line changes.\n2. Remove the count from the four transcripts.\n3. Retire the drift gate: the script, its self-test, its lint-lane step and any `package.json` script or docs that name it. If, at the time of the PR, the gate's `TOKENS` table holds any row other than the rule count, keep the gate and delete only that row.\n4. Sweep. List on this card every other number in `content/docs/**` transcripts, CLI human output, or test baselines that (a) changes when ordinary development adds an entry and (b) has no reader that acts on it. Remove those in the same PR when each is a one-line change. Otherwise file each as a follow-up. Starting searches: `git grep -nE \"\\([0-9]{2,4}\\)\\.\\.\\.\" -- content/docs`; `git grep -nE \"printStep\\(.*\\\\$\\{.*length\" -- packages/cli/src`.\n\n## Acceptance\n\n- No CLI human output and no `content/docs` transcript prints the author-time rule count.\n- No gate or test requires a docs edit when an author-time rule is added.\n- The sweep result is recorded on this card.\n\nGrade: p3 (internal maintenance cost; no user reach). area:build (CLI authoring checks). area:build has no seat taking new cards; triage grades and does not chase.\nDedupe (`is:issue`): `transcript drift author-time rules count` → #37875 (closed, not planned, the false p0), #15373 (closed, the gate's origin)."
+}

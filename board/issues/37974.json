@@ -1,0 +1,31 @@
+{
+  "number": 37974,
+  "kind": "issue",
+  "title": "knowledge-turso/pgvector: hybrid search, a keyword leg (FTS5 trigram / tsvector) merged with the vector leg by RRF",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T13:53:29Z",
+  "updated_at": "2026-11-27T14:16:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37974",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ③ maintainer-directed (topic child of #37000) · Source: maintainer (hotlong, cloud #5 project thread, 2026-11-27 13:41Z): 「但是我们作为元数据开发平台，不能只考虑制度库」 · Spec: objectstack#37000 comment 7220000671 · relayed by seat repo:objectstack#1 (mailbox #37561 comment 7220012379)\nGrading: area:ai · Feature · p3 (topic) · reach: any search that names an exact token (an order number, a model code, a person's name) that the vector leg ranks below topK · evidence: read on main 0b539b6abb; FTS5 behaviour measured on local libSQL 0.15 in the spec comment.\nDedupe: `is:issue knowledge hybrid search keyword` → 2 (open: #37000 parent, #6015 seat post) · `is:issue knowledge search trigram fts` → 0.\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：知识检索现在只有向量一路，订单号、型号、人名这类精确词常常搜不到。\n- 做什么：每个知识源的段落表加一张关键词索引（Turso 用 FTS5 trigram，pgvector 用 Postgres tsvector），检索时关键词和向量两路各取一批，用 RRF 合并，再按调用者权限逐条复核。少于 3 个字的词（如「出差」）退回 LIKE 匹配。\n- 谁受益：用知识检索查具体编号、名称的用户和 AI 助手。\n- 需要你做的：无。\n\n## What\nPremise re-read on main 0b539b6abb: the Turso store ranks by an exact cosine scan only (`packages/plugins/knowledge-turso/README.md:49`, `turso-adapter.ts`); no `fts5` appears under `packages/plugins/knowledge-turso`, `knowledge-pgvector` or `service-knowledge`; the pgvector DDL (`packages/plugins/knowledge-pgvector/src/sql.ts:92`) creates no `tsvector` column.\n\n- Turso: per passage table an FTS5 shadow table (`tokenize='trigram'`) kept in step with passage writes. Search runs both legs and merges them with RRF (k=60) before the permission re-check.\n- Quote the query as an FTS5 phrase (`X-200` unquoted is a syntax error). Trigram matches terms of 3 or more characters (「住宿标准」「三十天」) but not 2-character terms (「出差」), so a term under 3 characters falls back to `content LIKE '%…%'` on the scoped rows.\n- pgvector: the same keyword leg on a Postgres `tsvector`.\n- The organization filter, record scope and metadata filter apply to both legs, as they do today to the vector leg.\n\n## Acceptance\n- A question naming an exact code finds the passage that the vector leg alone ranks below topK.\n- A 2-character Chinese term hits.\n- No regression on the brightrule eval set."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 37908,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37889 (AI inquiry page, AppAskPage.tsx)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T10:34:33Z",
+  "updated_at": "2026-11-27T11:16:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37908",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwGVgec21LwQTtRY85\n\nFiling gate: ③ L1 follow-ups of a landed card's PR (one card per PR, items ticked as done). Source: fleet.\nGrading: area:ai · Task · priority:p3 · size S · reach: the AI inquiry page of #37788 (PR #37889), read at L1; none is must-fix (L1-a 7215194705 \"Nits\", 7216004152 \"Nits left for later\").\nDedupe: open-issue search `\"PR #37889\"`: 1 hit before filing, #37858 (the Ask AI button card, which names #37889 only as an overlap); `AppAskPage`: only #37788 and its siblings.\n\nAll four are in `ui/packages/app-shell/src/console/ai/AppAskPage.tsx` (re-read on main after #37889 merges; line numbers are not carried here):\n- [ ] A transient error on the `?c=` ownership check is read as \"foreign\" and drops `?c=`; only a definite foreign/other-app answer should fall back to the home state.\n- [ ] The `?c=` check downloads the full conversation history to read `metadata`; read the conversation's metadata alone.\n- [ ] An app with no `_packageId` gets a page that cannot create a conversation and says nothing; show a clear state instead.\n- [ ] Duplicate suggestions warn on React `key`; key them so duplicates render without a warning (or drop exact duplicates).\n\nAcceptance: one test per ticked item, in a new test file named for this card.\n"
+}

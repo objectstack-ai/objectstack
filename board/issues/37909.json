@@ -1,0 +1,31 @@
+{
+  "number": 37909,
+  "kind": "issue",
+  "title": "Validation rules: an authored rule message cannot name record values, so a refusal cannot say \"total 8,000 is below received 10,000\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-27T10:35:11Z",
+  "updated_at": "2026-11-27T11:17:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37909",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAk8tegvAi1ECkgCFfc\n\nFiling gate ③ (maintainer-directed) · Source: maintainer — Irene chose 「先合并，提示写字段名」 on the hotcrm project thread's decision card (2026-11-27T10:33Z), whose option filed this platform card. Measured while building hotcrm#2827 (PR hotcrm#2836). · Type: Feature · Grade: left to objectstack triage.\n\n## Today\n\nA `validations[]` rule's `message` is returned as written (or its translation) with no parameters. On objectstack main f7f9345e5a, `packages/objectql/src/validation/rule-validator.ts` `authoredRuleMessage(rule, messages)` (~L4106) returns `rule.message` or the catalog translation verbatim; nothing interpolates values from the record being judged. 18.6.0 behaves the same (`checkPredicate` → `authoredRuleMessage`).\n\nSo a business rule can refuse a write but cannot tell the person by how much. HotCRM#2827 refuses re-confirming a sales order whose Total Price is below what was already received or invoiced. The approved card asked for \"Order SO-0012's total 8,000.00 is below what was received (10,000.00)\". The shipped message can only name the fields: \"This order's Total Price is below what was already received (Received)…\". HotCRM's `contract_same_account` rule on the order records the same limit.\n\n## Ask\n\nLet an authored rule message reference values of the judged record, for example `{total_price}` / `{received_amount}` placeholders (or a `messageParams` map of field → expression), resolved against the same merged record the rule judged and rendered with the field's display format (currency, number, lookup name), in the translated message too. A missing or masked field (no read permission) renders empty, never its raw value.\n\nWho benefits: every app with money or quantity rules (credit limits, quotas, stock, refunds). The person sees the figure to fix without opening another tab.\n\nDedupe: searched `validation message interpolation record values`, `validation rule message params placeholders` (open and closed), 0 hits on this mechanism. Related but different, closed: #28052 (state_machine message cannot name the refused move), #14253 (custom validation messages had no bundle key).\n\nConsumer: hotcrm#2827 adds the amounts to its two messages (`reconfirm_total_below_received`, `reconfirm_total_below_invoiced` in `src/o2c/extensions/sales-order.extension.ts`) once a pinned release carries this."
+}

@@ -1,0 +1,38 @@
+{
+  "number": 37877,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0160 seventh amendment — the shell 问 AI button is the one entry, focus defaults to the page record, ask_ai retired, pack read on demand",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "security",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T08:32:37Z",
+  "updated_at": "2026-11-27T09:52:40Z",
+  "closed_at": "2026-11-27T09:52:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-27T09:52:37Z",
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37877",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao4cQAcSj519z7moNo7rHocp)_\n\nFixes #37854\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户无感：这是设计文档修订，把 11 月 27 日关于「问 AI」入口的裁定写进记录范围问询的设计文档，代码不变。\n- 属于「问 AI 入口改造」专题，是撤掉页面内问 AI 动作、默认带当前记录、按需读取资料这几张实现卡的前置。\n- 写错的话后续实现卡会按错的规则做，但本文档随时可以再修订撤回。\n- 要你做什么：审核席位意见后批准合并这个受管设计文档。\n\n## What changes\nOne file: `docs/adr/0160-record-scoped-ai-inquiry.md`, the seventh amendment (2026-11-27), for card #37854 (C0a of topic #37853). Tree readings taken on `main` at `adb65d16`.\n\n- **Header**: a new `Amended` bullet quoting the maintainer's rulings of 2026-11-27 verbatim with their UTC times (06:27Z, 06:28Z, 06:30Z, 06:32Z, 06:33Z, 07:12Z), and separating them from this record's own settlements.\n- **Title and TL;DR 6–8**: the entry is the shell's 「问 AI」 button; `ask_ai` is retired; the in-app assistant reads the pack on demand.\n- **D6**: the `focus` contract is unchanged. \"Entry point\" is rewritten (the shell button and no other, no app rename, no page button, no focus setter). New paragraph \"The focus of a conversation\": state `{ focus, dismissed }`; before the first send the focus is the page record (`surfaceRecord()`) unless dismissed; × clears it and nothing re-adds it; the first send fixes both; the pin and the 「改为问《X》？」 prompt are removed; the page chip 「正在看：X」 stays when there is no focus.\n- **D7**: kept as a retired section (anchor `#d7` unchanged) with the ruling and the 2026-11-24 text preserved. Adds the ADR-0087 retirement route (`enumWithRetiredValues` on `ActionType`, the action `type` key's second enum and the button rows' open string answering with the same prescription, one conversion in `conversions/entries/19/` retired from the load path, one D3 semantic entry, a `narrowed` changeset with a `registered` disposition) and \"What a legacy `ask_ai` action meets\": refused where authored; `os migrate meta --from 18` deletes only an unreferenced action; metadata at rest is read without the action, with the door's existing conversion notice.\n- **D8, D4 seam 1, rows 6 and 9**: first-turn pre-read becomes read on demand (pointer only; the model calls `get_record_context` when the user refers to the record; fallback `get_record`). Row 6 is marked retired.\n- **Points that go past the card's words**: points 25–32 are this record's settlements, accepted with the maintainer's merge (notably point 31, at-rest behaviour, which no ruling covers and the card asked this record to decide).\n- **Implementation split**: the epic #36996 \"Done when\", old and new text.\n\n## Tests\nDocs-only. No code, no schema, no changeset (`docs/adr/**` ships in no package: `skip-changeset`).\n\n## Acceptance notes\nPremise readings on `adb65d16` (all on the tree):\n- `ActionType` at `packages/spec/src/ui/action.zod.ts:706`; precedent `agent.zod.ts:161,173` holds.\n- Corrected: an action's own `type` key (`action.zod.ts:1446`, in `actionObject()`) is a second enum with its own error, so a prescription on `ActionType` alone would not reach `type:'ask_ai'`. The amendment names that slot and the button rows' open string (`component.zod.ts`) for card #37856.\n- Corrected: `ask_ai` appears only under `## 19.0.0-next.0` in `packages/spec/CHANGELOG.md`; it never shipped in a stable 18.x. The text says so.\n- `applyConversionsToStoredItem` (`packages/spec/src/conversions/stored.ts`) returns a row unchanged when a conversion yields no item, so \"skip at load\" needs card #37856 to extend that seam; the amendment records it.\n- Showcase `task-detail.page.ts:67` names the action `showcase_ask_about_task`, so the conversion must not auto-delete referenced actions.\n\nSettlements the approver may want to check: point 25 (× stays after the first send), points 29–30 (inline actions and button rows included in the retirement), point 31 (at-rest behaviour), and the spec docblocks' word \"pinned\", assigned to card #37861.\n\n## Verification\n<details><summary>Local gates on bf7805d3 (docs-only derived set)</summary>\n\n- `node scripts/check-adr-anchors.mjs` exit 0, OK (135 anchored files)\n- `node scripts/check-adr-links.mjs` exit 0, 1258 relative link destinations resolve\n- `node scripts/check-adr-symbol-anchors.mjs` exit 0, 4423 anchors across 164 records resolve, 0 line anchors; positive control: one broken anchor reds it (exit 1), file restored byte-identical\n- `pnpm check:pm-governed-prose` exit 0\n- `node scripts/pm/dispatch-gates.mjs --commands`: 21 families; 19 exit 0; NOT MEASURED locally: `check:doc-formula-expressions`, `check:pm-governed-merges` (need a workspace install; CI runs them)\n- `adr-index --report`: report-only staleness warning, already present at `adb65d16`\n- Changed lines: 116 (+90 / -26)\n</details>\n\nTwo-minute check: read the new `Amended` bullet at the top and the \"The focus of a conversation\" paragraph under D6.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibxQB9erb9sbLt2bpk9)_\n"
+}

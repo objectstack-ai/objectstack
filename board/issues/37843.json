@@ -2,9 +2,9 @@
   "number": 37843,
   "kind": "pull_request",
   "title": "docs(lint): os explain flow-condition-option-label covers filters and edge conditions",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T06:37:58Z",
-  "updated_at": "2026-11-27T06:41:18Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 1,
+  "updated_at": "2026-11-27T09:36:36Z",
+  "closed_at": "2026-11-27T09:36:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T09:36:33Z",
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37843",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuUCMp9Er3CdRqotD8tK5b8f)_\n\nFixes #37504 (item 2; item 1 landed in #37551).\n\n## What changes\n\n`os explain flow-condition-option-label` said the rule reads a record-change **start condition** only (`covers: 'why a start condition compares option values'`). Since #37491 the same rule id also fires on edge conditions, `decision` branch expressions, and the `filter` of `get_record` / `update_record` / `delete_record` and of a time-relative sweep. An author whose filter was refused read an explanation of a narrower rule than the one that fired.\n\n`packages/lint/src/rule-explanations.ts` `FLOW_CONDITION_OPTION_LABEL_EXPLANATION` now:\n\n- `covers`: `why flow conditions and filters use option values` (49 chars, the test's ≤60 bar).\n- names every position the rule reads, and what the label costs there (the read finds nothing, the update / delete changes nothing, the branch is never taken, the run still reports success);\n- conditions: the comparand shapes, the trigger record's `record.F` / `previous.F` / bare `F`, and a single-row `get_record` `outputVariable` row (`deal.F`); a variable bound elsewhere too is not judged;\n- filters: implicit equality, `$eq` / `$ne`, `$in` / `$nin` members, under `$and` / `$or` / `$not`; not judged: related-object fields, ordering / text operators, braced strings (templates, `{current_user_id}`);\n- the escape hatch for a deliberate label filter: a CEL value envelope `{ dialect: 'cel', source }`, which is not judged;\n- the shared exclusions kept (label also a value, picklist-backed fields).\n\nEvery sentence is read off `validate-flow-trigger-readiness.ts` (`FLOW_CONDITION_OPTION_LABEL` doc, `optionLabelsBeyondStart`) and `flow-select-options.ts` (`optionLabelOperands`) on main 10284387. No rule behaviour changes.\n\n## Gates run\n\n- `vitest run src/rule-explanations.test.ts src/flow-publish-checks-second-batch.test.ts` (packages/lint): 2 files, 58 tests passed.\n- `tsc --noEmit -p packages/lint`: clean.\n- Changeset: `@objectstack/lint` patch (explanation text only).\n\nClause-②: no\nMetadata-protocol: none\n\n\n## Small calls this thread made\n\n- Kept one rule id's explanation in one entry (five paragraphs) rather than splitting per position: `os explain` takes the rule id, and one id has one entry.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgT5oFVDnxy3bMa3NBi\n\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgT5oFVDnxy3bMa3NBi -->\n"

@@ -2,8 +2,8 @@
   "number": 37811,
   "kind": "issue",
   "title": "runtime: localize the remaining fixed-English 501 refusals (about 26 sentences across auth, i18n, mcp, meta, packages and automation)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-27T04:26:14Z",
-  "updated_at": "2026-11-27T08:11:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T08:44:15Z",
+  "closed_at": "2026-11-27T08:40:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37811",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (split out of #37737's fifth item, measured on `main` by the card thread) · Source: fleet (review follow-ups of PR #37721, sized by the #37737 thread on 2026-11-27)\n\n## What happens\n\nPR #37721 localized the own-door `501` refusals for the doors it touched, following the reader's `Accept-Language`. The other fixed-English `501`s in `packages/runtime/src/domains/` still answer English to every reader. The #37737 thread counted them on `main`:\n\n| Module | Fixed-English `501` sentences |\n|---|---|\n| `auth.ts` | 1 |\n| `i18n.ts` | 1 |\n| `mcp.ts` | 2 |\n| `meta.ts` | 4 |\n| `packages.ts` | 8 |\n| `automation.ts` | about 10 (cancel, list runs, restore, resume, screen and flow clone included) |\n\nThat is about 26 sentences in all.\n\n## Expected\n\n- Each sentence comes from the operation-message catalog with `zh-CN`, `ja-JP` and `es-ES` translations. Use the platform's existing terms: Japanese says `自動化`, as #37737 aligns.\n- Each door has a per-door pin.\n- Each localized `501` carries `Vary: Accept-Language`, as #37737 sets the pattern. A `501` is cacheable by default under RFC 9111.\n- Any sentence left in English needs a stated reason.\n\nSize: M. Split from #37737, where it was item 5, because it is larger than that S card.\nReader: the ux i18n area (seat 2, s2-ux-T), after #37737's PR lands.\nGrade: area:ux · Bug · minor · reach: measured (counts read on `main`) → p2, the grade of its parent follow-up.\nDedupe: searched open issues for `fixed-English 501`: 0 hits.\nRelated: #37737, PR #37721.\n\nBlocked-by: #37737"

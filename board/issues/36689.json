@@ -2,8 +2,8 @@
   "number": 36689,
   "kind": "issue",
   "title": "mcp stdio bridge: a system principal, and any caller on a host with no protocol service, is still served a disabled package's data (callData refuses both since #36687)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "bug",
     "domain:server",
     "finding",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-23T11:44:41Z",
-  "updated_at": "2026-11-27T07:52:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T11:31:26Z",
+  "closed_at": "2026-11-27T11:22:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36689",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n① product defect · Source: fleet. Found by the contract review 7100010264 on PR #36687 (note N2), the change for #36393 + #35526. Filed by seat objectstack#1. Related: #35526, #36393.\n\n## What happens (read, not measured)\n\nAfter #36687, `callData` refuses a disabled package's object to every caller, including a system context, with `404 OBJECT_PACKAGE_DISABLED`. It does this both when the object is addressed and when it is a relation target at any hop. That is the maintainer's ruling on #35526 (comment 7077381587, 「系统身份也一律拒绝」).\n\nThe ruling's words name `callData` only. The stdio data bridge (`packages/mcp/src/stdio-data-bridge.ts`) is a second published door, with its own hosts, and it still differs in two ways:\n\n1. **System principal.** For a system context, `enforceApiExposure` returns before its by-name read. So the bridge asks neither the disabled-package question nor the exposure question at any hop. A system principal on stdio is still served a disabled package's data.\n2. **No-protocol host.** On a host with no `protocol` service, the bridge's fallback still serves a disabled package's object when it is addressed directly.\n\nThe system-context page `content/docs/permissions/system-context.mdx`, row 15, says only that the bridge skips the exposure gate. It does not say that it also skips the disabled-package question.\n\n## To decide\n\nShould the stdio bridge match `callData`: a disabled package is off the data plane for every caller, as the protocol already answers? The review expects that to be the answer, by the same reasoning as the ruling, but nobody has ruled on this door. This card is the place for that decision.\n\n## To do once decided\n\n1. Measure both items on main: a system principal over stdio, and a directly addressed object on a no-protocol host.\n2. If the answer is to match: ask the disabled-package question for a system principal at every hop, refuse the addressed object on a no-protocol host, and pin both with real disable-then-re-enable controls.\n3. Correct row 15 of the system-context page either way.\n\n## Grade (suggested)\narea:package · Bug · p2: a disabled package's data stays readable to a system principal or a no-protocol host over stdio. The population is narrower than #35526's, because it needs host-supplied system contexts or a host without the protocol service. The grade is the maintainer's to confirm."

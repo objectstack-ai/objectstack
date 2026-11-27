@@ -1,0 +1,31 @@
+{
+  "number": 37978,
+  "kind": "issue",
+  "title": "check-skill-eval-tokens: read must_contain_any, so any-of tokens are shape-checked and must be taught like must_contain",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T14:01:20Z",
+  "updated_at": "2026-11-27T14:14:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37978",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cxBECSPtHxQMZDHSie\n\nFiling gate: ② follow-up out of #37928. The source is the contract record 7220167777 on PR #37969 (nit N2) and L1-a's ACCEPT 7220192629 on the same head, which asks for this card before any further case moves to the any-of form. The owning area files it under the source card.\nGrading: area:ai · Task · p3 · reach: every skill eval case that uses `must_contain_any` (today only objectstack-ai case 6; next readers case 12's carry 7207779687 and the English-phrase family 7207740184, card #37928 item 4) · evidence: read on `main`.\n\n## 维护者速读\n- 做什么：技能评测有一道检查，确认每个「必含词」都是技能文档真的教过的词。PR #37969 新加了「几种写法任一即算对」的判分方式，但这道检查还不认识它：新写法里的词既不检查格式，也不检查文档有没有教。这张卡让检查也覆盖新写法。\n- 谁受益：以后改用新写法的评测题，不会因为要求了文档没教的词而永远判错。\n- 不做会怎样：今天只有第 6 题用新写法，它的四个词已人工核过都在文档里；等第 12 题等更多题改用时，就没人把关了。\n- 需要你做的：无。\n\n## What\n`ui/scripts/check-skill-eval-tokens.mjs` reads `must_contain` and `must_not_contain` only. After PR #37969 the skill-evals runner (`packages/qa/scenarios/src/skill-evals/cases.ts`) also reads `assertions.must_contain_any`: a list of groups, each a non-empty list of non-empty literal tokens, a group met by any one token.\n1. Shape: the gate's assertion-shape check covers `must_contain_any` with the same refusals `cases.ts` makes (not a list; a group that is not a list of strings; an empty group; an empty token).\n2. Taught: each token of each group must be taught by the bundle the same way a `must_contain` token is (whole token in the bundle's own markdown). Decide and state in the PR whether a group needs every token taught or at least one; the contract record's reading is that every member should be something the skill says, since any one of them passes an answer.\n3. Tally: a case whose only positive assertion is groups is no longer counted under the \"must_contain is EMPTY\" tally.\n4. Self-test rows for each of the three, both directions.\n\n## Acceptance\n- `node ui/scripts/check-skill-eval-tokens.mjs` exits 0 on `main` with objectstack-ai case 6's four tokens checked (all four occur in `skills/objectstack-ai/SKILL.md`), and `--self-test` reds when the new branch is ablated.\n- No verdict moves for any `must_contain`-only case. `Clause-②: no`, `Metadata-protocol: none`.\n- This strengthens an existing gate; it adds no new gate.\n\nBlocked-by: #37928 (PR #37969)\nParent: #37928\nSize: S\nDedupe (objectstack, is:issue): `check-skill-eval-tokens must_contain_any` 1 (only #37928, the source) · `check-skill-eval-tokens` 282 (open hits #34770 #37857 #34996 #34842 are about other bundles or rounds, none about this form). No duplicate."
+}

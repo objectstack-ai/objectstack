@@ -1,0 +1,33 @@
+{
+  "number": 37928,
+  "kind": "issue",
+  "title": "skill-evals grader: an any-of form over literal tokens, so one case can accept any of several correct code spellings (objectstack-ai case 6 first)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-27T11:42:46Z",
+  "updated_at": "2026-11-27T14:02:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37928",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwoXEE1amuRAGHdPBs\n\nFiling gate: ③ maintainer-directed · Source: maintainer — ruling on #37419 (record 7217332972, item 4), option text verbatim 「第 6 题恢复原样,另开一张卡把判分改成几种写法任一即算对,在那之前它仍约半数误判。」 Analysis 7217315886.\nGrading: area:ai · Feature (a new assertion form of the skill-evals runner) · p3 · reach: every reader of a skill-evals round, and every case whose correct answers do not share one literal · evidence: measured (#37419 rounds) and read (`grade.ts`).\nReader: area o1-B under seat repo:objectstack#1, after PR #37797 lands.\nDedupe (objectstack, is:issue): `any-of grader` 48 (none on this grader; #36206 is the scenario scorer, a different grader) · `must_contain any_of` 0 · `\"skill-evals\" grader` 33 (none open on this) · `grade.ts any-of` 14 (same set).\n\n## 维护者速读\n- 做什么：技能评测的判分现在只有「每个必含词都要出现」一种写法。加一种「这几种写法出现任意一种就算对」，仍然逐字匹配、不做归一化、不用模型判分。第 6 题第一个改用它。\n- 谁受益：看技能评测结果的人：红灯才真正代表「文档没教会」，而不是「答对了但措辞不同」。\n- 不做会怎样：第 6 题继续约半数把正确答案判错；第 12 题和一批英文短语必含词的题也一样只能二选一：查太严误判，查太松漏判。\n- 需要你做的：无（改 `skills/**` 下的评测文件需 os-zhuang 批准）。\n\n## What\n`packages/qa/scenarios/src/skill-evals/grade.ts` passes an answer \"when every `must_contain` token appears in it and no `must_not_contain` token does\"; a token is \"a literal, case-sensitive substring\", \"No model judges an answer, and nothing is normalised.\" There is only an all-of form. On #37419, two single-token choices for `skills/objectstack-ai/evals/skills-tools-knowledge.json` case 6 both marked correct answers wrong: the two `main` phrases pool 6/15 with the skill, and `ai:approve` read 5/5 then 2/5 on fresh rounds, where the dev read the three misses as correct answers that never wrote that name.\n\n1. Add one assertion form beside `must_contain`: a list of groups, each group a list of literal tokens; a group is met when at least one of its tokens appears. Same matching as today: literal, case-sensitive substring, no normalisation, no model judge. The key's name and the result's report of an unmet group are the author's choice; say them in the PR body.\n2. `cases.ts` parses and refuses the new form as it does the others (a group must be a non-empty list of strings; a case that asserts nothing still refuses). `hashCase` includes it, so recordings keyed on a case's hash re-key when the form is added; say so in the PR body.\n3. Case 6 moves to it. The token set is drawn from a recorded with-skill round (the earlier recordings are not in the project files, so record one first) and must be code spellings or refusal terms a correct answer of the expected kind uses; `must_not_contain` (`pendingActions.approve(`), the prompt and `expected_output` do not change.\n4. Out of scope, pointed here: case 12's carry 7207779687 (the `get_record_context` binding) and the English-phrase family named in 7207740184. They are the next readers of this form; this card does not move them.\n\n## Acceptance\n- The grader's self-test covers the new form: a group met by its second token passes, a group with none of its tokens fails, all-of and `must_not_contain` unchanged.\n- Case 6 on the pushed head, a fresh round at 10 draws per arm (not the round the tokens were drawn from): with the skill ≥ 8/10, without the skill ≤ 2/10. A miss returns to the decision box; ⛔ no silent lowering of the bar.\n- ⛔ No rewording of the approval paragraph in `skills/objectstack-ai/SKILL.md` on this card.\n- `node scripts/check-skills-token-ratchet.mjs` exits 0 with no ceiling raised. `Clause-②: no`, `Metadata-protocol: none`.\n\nModel: `skills/**` is MANDATORY at the contract review tier (the eval file changes).\nParent: #37419\nSize: S"
+}

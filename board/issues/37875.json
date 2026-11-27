@@ -2,8 +2,8 @@
   "number": 37875,
   "kind": "issue",
   "title": "Merge queue red on every group since #37366: four content/docs CLI transcripts still print \"author-time rules (83)\"; the registry now derives 85",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:fleet",
     "bug",
     "domain:docs",
-    "pm:queue",
-    "priority:p0"
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-27T08:13:16Z",
-  "updated_at": "2026-11-27T08:17:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T08:41:53Z",
+  "closed_at": "2026-11-27T08:41:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37875",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ① a reproducible defect in a required gate that ejects every merge-queue group. Source: triage probe, R1430.\n\n## 维护者速读\n\n- 合并队列从 07:42 起每一批都失败，所有排队的 PR 都进不了主干。原因是 #37366（你用管理员权限合并的改名 PR）新增了两条检查规则，规则总数从 83 变成 85，但有四篇文档里的命令输出示例还写着 83，文档一致性检查因此不通过。\n- 修法是把这四处的 83 改成 85，属于很小的改动；修好之前，next.1 的版本 PR 也不能合并。\n\n## Reading\n\n- Merge-queue runs of `Lint & Type Check` failed on these PR groups from 07:42Z, 2026-11-27: #37837, #37751, #37840, #37841, #37846, #37668 and #37859 (runs 45960367280 … 45961655469). Each fails at job \"Type Check · workspace\", gate `cli-transcripts-in-content-docs-match` (`check-docs-transcript-drift`), with the same 4 findings:\n  - `content/docs/deployment/cli.mdx:940`\n  - `content/docs/deployment/validating-metadata.mdx:872`\n  - `content/docs/getting-started/build-with-claude-code.mdx:321`\n  - `content/docs/ui/react-pages.mdx:407`\n\n  Each prints `author-time rules (83)`; `authoringRulesFor('build' | 'validate')` derives **85** today.\n- Cause: `adb65d1615` (PR #37366, merged 07:14Z with administrator rights, so it skipped the merge queue) adds two rules to `packages/lint/src/authoring-rules.ts` (+32 lines). The transcripts were not regenerated. Every queue group built on `main` since then is red, deterministically. It is not a flake.\n- Re-check: `node scripts/check-docs-transcript-drift.mjs` (or the lint lane's gate) on `origin/main`.\n\n## Fix\n\nUpdate the four transcript lines to `author-time rules (85)`. Prefer the transcripts' own regeneration path if the gate offers one. One docs-only PR, no changeset.\n\n## Grade\n\np0 while the merge queue is stalled for every PR. The next.1 Version PR (#37661, refreshed 07:21Z) also carries this tree. Triage returns the grade to p1 when this card closes."

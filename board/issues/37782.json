@@ -2,8 +2,8 @@
   "number": 37782,
   "kind": "issue",
   "title": "skills(objectstack-ai): the \"two AgentSchema keys are tombstones\" paragraph is stale — agent.tools / agent.knowledge aged out at protocol 18 and its agent.zod.ts:234, :251 citation points at nothing",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ai",
     "documentation",
     "domain:skills",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-27T02:29:30Z",
-  "updated_at": "2026-11-27T03:14:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T13:59:39Z",
+  "closed_at": "2026-11-27T13:56:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37782",
   "body": "epic:#5055#1 · hotlong · session_01Q4EjjMmczBEaeiAQ48oDtz\n\nFiling gate: ② review finding follow-up · Source: contract review of objectstack-ai/objectstack#37765 (card #37711), finding S1 (should-fix), outside that PR's claimed surface and pre-existing.\nGrade: p3 · domain:skills · Task · evidence: read (`main` `agent.zod.ts`, `agent.test.ts`)\nReader: domain:skills lane.\nDedupe: searched open issues for the paragraph and the citation: none.\n\n## 维护者速读\n- 是什么：AI 技能文档里有一段说 agent 的 `tools` / `knowledge` 两个旧字段是「墓碑」（写了会报错并给迁移提示），还引用了 schema 的两个行号。那两个墓碑在协议 18 就已经撤掉了，现在只是普通的「未知字段」报错，行号也早就对不上。\n- 影响：AI 照文档写会得到正确的报错，只是文档描述的报错方式和行号不对。\n- 要你做什么：无。\n\n## What is wrong\n`skills/objectstack-ai/SKILL.md` (~`:453-455` on main) says \"Two `AgentSchema` keys are **tombstones** … authoring either is a parse error carrying its migration (`packages/spec/src/ai/agent.zod.ts:234, :251`)\". On `main`:\n- `agent.zod.ts:234` is a blank line and `:251` is inside `checkAgentMemoryContract`; there is no `tools` or `knowledge` key or `retiredKey()` for either in the file.\n- `packages/spec/src/ai/agent.test.ts:115-121` and `:248-258`: both tombstones \"aged out at 18 with its kit (#25767)\"; `AgentSchema` is a `strictObject`, so either key is refused as an unrecognized key whose message names the upgrade guide.\n\n## What to do\nRewrite the paragraph (and its table header, \"REMOVED in protocol 17\") to teach what `main` does: both keys are refused as unknown keys by the strict `AgentSchema`, the refusal names `https://objectstack.ai/docs/protocol-upgrade`, and their replacements (skills for tools, the table's knowledge prescription) stay as taught. Cite the test or the strict-object refusal, not stale line numbers. The file sits at its token ceiling (6801/6801 after #37765), so pay for the words in the same section.\n\n## Acceptance\n- Every `agent.zod.ts` / `agent.test.ts` citation in the section matches `main`; skills gates green."

@@ -1,0 +1,37 @@
+{
+  "number": 37940,
+  "kind": "pull_request",
+  "title": "feat(app-shell): the AI inquiry page lists this app's recent conversations",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T12:13:20Z",
+  "updated_at": "2026-11-27T13:22:32Z",
+  "closed_at": "2026-11-27T13:22:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T13:22:30Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37940",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D3PqTGGb1rgoRqKj4rT4Xjk)_\nFixes #37790\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化：在应用的 AI 问询页首页，提问框下方新增「最近的对话」，列出在本页、为本应用发起的最近 5 条对话（标题 + 多久以前），点一下就在本页打开；没有时显示一句空状态。\n- 为什么做：AI 问询首页史诗的第三步，让常来提问的用户能接着上次的问题继续，不必再去右上角机器人里找。\n- 出错会怎样：最坏是列表漏掉或多列出一条对话；打开时仍走原有的归属校验，别的应用或抽屉里的对话不会被打开；改动可直接撤回。\n- 要你做什么：无。\n\n## What changes\n- `AppAskPage` home state: a \"Recent conversations\" section below the question box. It reads the caller's newest 50 conversations through the existing list hook (`useConversationList`, `GET /conversations?limit=50`), keeps those whose `metadata.activePackageId` is this app's package, and shows the newest 5 with title and relative time (`timeAgo`, display locale). Empty state when none; nothing drawn while the list loads or fails.\n- A click writes `?c=ID` (push), so the page's existing restore path judges it exactly as a reload does: no second ownership check.\n- `appAskPageModel.ts`: `recentAskPageConversations` (reuses `conversationBelongsToAskPage`), `ASK_RECENT_FETCH_LIMIT`, `MAX_ASK_RECENT`.\n- `useConversationList.ts`: `ConversationListItem` carries `metadata` when the row's value is a record (`AiConversationSchema.metadata`); any other value reads as absent, so such a row is not listed.\n- i18n: `console.ai.askPage.recentTitle` / `recentEmpty` in all eleven locales.\n- Item 2 of the card (the drawer opener) is cut per the seat's Premise corrected (ADR-0057 Amendment A4, \"No drawer on the page\"); nothing here opens the drawer.\n\n## Tests\n- `appAskPageModel.test.ts`, new top-level describe `recentAskPageConversations (objectstack#37790)`: package filter (another app, a drawer row with no metadata, a drawer row with other metadata), the cap of 5, the empty answer.\n- `AppAskPage-37788.test.tsx`, new top-level describe `AppAskPage recent conversations (objectstack#37790)` over the real page and real list hook with a stubbed fetch: only this app's rows listed newest first and capped (another app's, a drawer row and a string-metadata row excluded); empty state; a failing list draws nothing; a click opens the conversation in the page through `?c=`.\n- Ablation of the package filter (`scripts/ablation-replace.mjs`, filter predicate mutated to keep every row): 4 of the new cases red, restore proven by blob hash equal to HEAD.\n\n## Acceptance notes\n- The list wire is the spec's `AiConversationSchema.metadata`, a record. The client does not JSON-parse a string-valued `metadata` (contract-first): such a row is simply not listed, and a pinned case shows it. If the cloud list route ever ships a string there, that is the route's contract defect.\n- Drawer create paths (`ChatDockConversation`, `AiChatPage`) pass no `createMetadata`, so a drawer thread carries no `activePackageId` and never lists.\n- The card's claim named `useChatConversation.ts` for the type; its `ServerConversation` already carries `metadata` from #37788. The list row type lives in `useConversationList.ts`, which is the file changed here.\n\n## Verification\nTwo-minute check: open an app that has an `ai:chat` entry, ask a question, press \"New conversation\": the question appears under \"Recent conversations\"; clicking it reopens it with `?c=` in the address. A thread started from the top-bar robot elsewhere does not appear.\n\n<details><summary>Local readings</summary>\n\nSee the os-dev-report comment on #37790 for the commands, exit codes and the ablation log.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cwGVgec21LwQTtRY85\n"
+}

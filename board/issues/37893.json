@@ -1,0 +1,37 @@
+{
+  "number": 37893,
+  "kind": "pull_request",
+  "title": "docs(metadata-protocol): name the disabled-package predicate on the $expand and relation-target checks, and pin its order",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T09:14:05Z",
+  "updated_at": "2026-11-27T10:19:00Z",
+  "closed_at": "2026-11-27T10:18:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T10:18:58Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37893",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoLphuot5c2R2SFweEMeNTrP)_\nFixes #35528\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化:用户无感;只改了代码注释、部署手册里\"数据面\"一条说明,外加一条测试。\n- 为什么做:停用模块的关联展开与关联条件修好后(上一轮合并的修复),注释和手册仍只讲\"接口是否开放\",没讲\"所属模块已停用\"这一条。\n- 出错会怎样:说明写错只会误导读文档的人,不影响运行;这次改动可以直接撤回。\n- 要你做什么:无。\n\n## What changes\n\n- **N1 docblocks** (`packages/metadata-protocol/src/protocol.ts`, `protocol-query-validation.ts`): `refuseUnservedRelationTarget`, `servedExpand` and `servesExpansionTarget` now name the disabled-package predicate (`isObjectPackageDisabled`) beside the exposure decision, and say the package refusal is asked first. No code change.\n- **`EXPANSION_TARGET_OPERATION`**: the card said its \"alike on both doors\" sentence no longer held for a disabled target. Re-measured on `origin/main` e69fa46d: it holds again. The dataset door's label pass now withholds a disabled package's target too (`analytics-service.ts` ~1737, wired in `service-analytics/src/plugin.ts` ~1803). So the sentence stays, and one added sentence says the disabled case renders the stored id on both doors.\n- **N2 pin**: a top-level `describe` in the existing harness file `protocol.expand-disabled-package-35427.test.ts`, which holds the PR #35444 pins. It covers a target that is both package-disabled and unexposed, in two forms: `apiEnabled: false`, and an `apiMethods: ['get']` whitelist that serves `$expand` but not `list`. The relation condition answers `404 OBJECT_PACKAGE_DISABLED` (`code` + `status` + `object`), the engine is never called, and `$expand` withholds both entries. A re-enable control shows each target's own exposure answer: `OBJECT_API_DISABLED` 404, `OBJECT_API_METHOD_NOT_ALLOWED` 405, and the whitelist target expanded. The whitelist case discriminates in both directions.\n- **N3 handbook** (`content/docs/deployment/marketplace-handbook.mdx`, Data plane bullet): a lookup from an enabled object into a disabled module keeps the stored id under `$expand`, and a condition on the related object's fields is refused `404 OBJECT_PACKAGE_DISABLED`.\n- Changeset: `@objectstack/metadata-protocol` patch.\n\n## Tests\n\n<details><summary>metadata-protocol pin files + typecheck at 224d7072; full package suite at 13b9b1b4 (the later commit is docblock-only)</summary>\n\n```\nvitest run src/protocol.expand-disabled-package-35427.test.ts src/protocol.expand-target-exposure.test.ts\n Test Files  2 passed (2)\n      Tests  30 passed (30)\ntsc --noEmit (package typecheck; --listFiles counts the pin file: 1)\nos-verify-lock: VERDICT command-exit 0\nvitest run (whole @objectstack/metadata-protocol)\n Test Files  372 passed | 9 skipped (381)\n      Tests  23579 passed | 45 skipped (23624)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n## Acceptance notes\n\n- The pin went green on `main` as written, so this PR adds no fix. The behaviour already held.\n- **Deviation from the claim's file surface:** the claim named \"one new pin test file\". AGENTS.md binds a new pin for a component that already has a shared harness file to go into that file as a top-level `describe` (ruling record 6583487846). The PR #35444 harness (`SCHEMAS` + `makeProtocol`) is exactly what this pin needs, so the pin is in that file under a `[#35528]` describe and the harness is not copied. Two schema rows and two lookups were added to its `SCHEMAS`.\n\n## Verification\n\nRead first: (1) the new `describe` at the end of `protocol.expand-disabled-package-35427.test.ts`, (2) the `refuseUnservedRelationTarget` docblock in `protocol.ts`, (3) the `EXPANSION_TARGET_OPERATION` docblock.\n\nTwo-minute check: `pnpm --filter @objectstack/metadata-protocol exec vitest run src/protocol.expand-disabled-package-35427.test.ts` should report 15 passed, 3 of them under `[#35528]`.\n\n<details><summary>Derived gate families, local run at head 224d7072</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 104 families from the 5 changed paths. All 104 were run after the final commit. Each exit code was captured before any pipe, and the `--ran` reconciliation over that record says: `104 derived famil(ies) accounted for — 103 run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3)`.\n\n- 103 exited 0, including `pnpm check:facade-delegation-only`: `packages/metadata-protocol/src/protocol.ts: 11705 lines, ceiling 11705 (0 left)`.\n- NOT MEASURED: `node scripts/check-plugin-teardown-shape.mjs --self-test` exited 3. The reason is a shallow clone: it cannot read its positive-control commit `621a4876`, and this run did not deepen the shared clone. CI runs it.\n</details>\n\nCeiling note: the first head (13b9b1b4) grew `protocol.ts` by 11 lines, and the facade line ceiling (0 margin, ruling 6897467376) went red on that. The second commit rewrites the docblocks so they take exactly the lines they replace, net 0 in `protocol.ts`. The ceiling was not raised.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibyBJGiLjzCtE4F6HHB)_\n"
+}

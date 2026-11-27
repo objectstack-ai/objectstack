@@ -1,0 +1,36 @@
+{
+  "number": 37946,
+  "kind": "pull_request",
+  "title": "fix(app-shell): on a phone, a list authored to open nothing opens nothing",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T12:34:29Z",
+  "updated_at": "2026-11-27T13:19:34Z",
+  "closed_at": "2026-11-27T13:19:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T13:19:32Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37946",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoAoNwrZVJoUEFfvMURpRPKJ)_\nFixes #33719\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 手机上打开一个设为「不打开记录」的列表时，点卡片不再进入记录页，卡片也不再显示为可点；分享来的带记录参数的链接同样不打开，和桌面一致。\n- 落实你在该卡上裁定的 A：作者声明的「不打开」在手机上也算数，属于 Console 手机端体验收口。\n- 只影响本来就声明了「不打开」的列表；出错表现为这类列表在手机上又能点开或其他列表点不开，可直接撤回本改动。\n- 无\n\n## What changes\n\nRuling A on #33719 (triage comment 6897459964, maintainer 「都同意」): on a phone, an authored `navigation.mode: 'none'` and `navigation.preventNavigation: true` hold, as on a desktop.\n\n- `detailNavigation` in `ui/packages/app-shell/src/views/objectViewRecordNavigation.ts` now reads the authored navigation once and returns `none` for `preventNavigation` or `mode === 'none'` **before** the phone rule (#27058), which still answers `page` for every list that does open. The tap handler and the card's tappable face both read the resolved mode (`rowOpensRecord`, #33548), so the one move carries both.\n- Scope item 2, the `?recordId=` deep link: on a desktop a `none` list's link draws no pane (`NavigationOverlay` shows a record only in `drawer` mode). The phone branch of the URL-sync effect navigated to the record page regardless of the mode; it now returns when the resolved mode is `none`, so a phone opens no page either. The URL is left as it is, as on a desktop.\n- Scope item 3: one docs sentence in `content/docs/ui/views.mdx` (How a list opens a record): on a phone the columns a card does not show are unreachable on such a list, so declare `none` / `preventNavigation` only where the rows need no detail view.\n- File header of `objectViewRecordNavigation.ts` updated to say the phone rule decides how a record opens, never whether (consistent with the #35854 header text already there).\n- Changeset: `@object-ui/app-shell` patch.\n\n## Tests\n\nNew pin `ui/packages/app-shell/src/views/ObjectView.phoneNavigationNone-33719.test.tsx`, driven at 375 px through the real `ObjectView`, `ListView`, grid and `MePermissionsProvider`:\n\n- for each of `mode: 'none'` and `preventNavigation: true`: the phone card draws no pointer / hover wash and a tap opens nothing (no `/record/`, no `window.open`);\n- for each spelling: a `?recordId=c1` link leaves the console on the list URL and draws no drawer;\n- CONTROL: a list with no authored navigation keeps its pointer, and both its tap and its `?recordId=` link open the record page.\n\n<details><summary>Readings (head 6b4f34b9)</summary>\n\n- New pin + neighbours (`ObjectView.cardFacesOpenNothing-33548`, `ObjectView.phoneRecordPage-27058`, `objectViewRecordNavigation.phonePush-29074`, `objectViewRecordNavigation.listRows-27524`): Test Files 5 passed (5), Tests 44 passed (44); lock VERDICT command-exit 0.\n- Ablation, whole fix reverted to base (`git restore --source=73d5e347`): Tests 4 failed, 2 passed (6) — all four `none` / `preventNavigation` pins red, both CONTROLs green.\n- Ablation, only the deep-link guard removed: Tests 2 failed, 4 passed (6) — exactly the two `?recordId=` pins red.\n- `pnpm --filter @object-ui/app-shell run type-check` (both `tsc --noEmit` and `tsconfig.test.json`, which compiles the new test): exit 0.\n- `pnpm --dir ui check:new-line-citations`: 0 new citations.\n</details>\n\n## Acceptance notes\n\n- AGENTS.md asks a new pin for a component with a shared harness file to go into that file. `ObjectView` has no shared harness file (only per-card files), and the dispatch named one new file for this card, so the pin carries its own copy of the 33548 file's mount harness (grid face only).\n- The `?recordId=` link on a `none` list keeps its `?recordId=` in the URL on both viewports; nothing reads it there. Not changed (desktop behaviour is the reference per the ruling).\n\n## Verification\n\nRead first, by risk:\n1. `ui/packages/app-shell/src/views/objectViewRecordNavigation.ts` — the `detailNavigation` reorder, and the `detailNavigation.mode === 'none'` guard in the phone branch of the URL-sync effect.\n2. `ui/packages/app-shell/src/views/ObjectView.phoneNavigationNone-33719.test.tsx`.\n3. `content/docs/ui/views.mdx`.\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/app-shell/src/views/ObjectView.phoneNavigationNone-33719.test.tsx` — expect 6 passed.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibx7DSQZnugnuX8CpCM)_\n"
+}

@@ -2,8 +2,8 @@
   "number": 37234,
   "kind": "issue",
   "title": "maintainer: run one fresh order_to_cash scratch build on main, so its verified build can be committed as a fixture (#34920)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "area:ai",
     "domain:devx",
-    "pm:awaiting-maintainer",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-25T05:38:30Z",
-  "updated_at": "2026-11-25T07:59:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T08:46:48Z",
+  "closed_at": "2026-11-27T08:45:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37234",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYo86w1wqy2z2fMrryr\n\nMaintainer-action: run one fresh `order_to_cash` scratch build of the scenario runner on current `main` (Claude Code subscription login, authoring model `opus` at effort `high`, as `travel_expense`'s fixture was built) and post the run's `dist/objectstack.json` from before its iterate turn, with its Build and Seed scores, on #34920 — done when #34920 carries that file (or a link to it) whose sha256 re-scores Build all-pass and Seed all-pass against the card.\n\n## Why this is the maintainer's\n\n#34920's remaining item is `docs/qa/scenarios/builds/order_to_cash.json`: byte for byte the `dist/objectstack.json` a PASSING scratch run built (`docs/qa/scenarios/README.md` § Verified builds). Producing it is a live model run — the runner drives `claude -p` to author the app. Live eval runs are the maintainer's (triage 7153950653; seat routing). Everything after the file exists is a seat's: commit it with its `.provenance.json` (sha256, card sha256, runner sha, packages, author model/effort), plus #34920's L2 notes N1–N7 (6986428648).\n\n## What changed since the last attempt\n\nThe 2026-11-18 attempt (#34920 dev report 6985513722) failed two ways:\n- Seed 553/619: the build's own open-balance rule refused 66 `demoorder_payment` rows — the #34986 shape. #34986 is closed and PR #37156 (merged 2026-11-25 03:39Z) makes `os validate` / `os build` refuse such seed rows before load, so the authoring turn now sees the refusal and fixes it.\n- Build 169/170: `security-rollup-source-unreadable` on `demoorder_invoice.amount_paid` for `demoorder_sales_rep`. No card owns this one (L2 note N3). If it recurs, the run is not a verified build; post the reading on #34920 and the seat files that trap as its own card.\n\n## How (from the README; the runner's own docs are canonical)\n\n- A scratch run of `docs/qa/scenarios/order_to_cash.json` with `--packages workspace` built at the run's `origin/main` sha (the maintainer's 2026-11-24 order that testing does not wait for releases), authoring `opus` / `high`.\n- Keep the `dist/objectstack.json` written after the Build half, before the iterate turn; note the runner sha, the card sha256 and the served model.\n\nBlocks: #34920"

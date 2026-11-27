@@ -1,0 +1,38 @@
+{
+  "number": 37930,
+  "kind": "pull_request",
+  "title": "feat(spec): ask-question envelope for the question card, with legacy ask_which reading",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ai",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T11:49:33Z",
+  "updated_at": "2026-11-27T14:01:26Z",
+  "closed_at": "2026-11-27T14:01:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T14:01:24Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37930",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibvQHY8a6PKzfR6E7SD\n\n<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoPWEpXrQu4nUSnLvgeK8Cke)_\n\nFixes #37872\n\nClause-②: yes\nMetadata-protocol: added\nSkills-docs: none — the envelope is a tool result between the AI service's question tool and the console's chat; no skill teaches tool-result envelopes, and nobody authors one as metadata\n\n## 维护者速读\n- 用户能看到什么变化：暂时看不到；这是问题卡的数据格式，控制台的问题卡和云端提问工具都按它来写。\n- 为什么做：问题卡专题第一步，AI 反问时把纯文字问题换成可点选的卡片，先在协议里定好格式并兼容现有的歧义提问。\n- 出错会怎样：格式不对的结果读不出卡，控制台照旧显示文字，不会报错；只新增、不改旧行为，可直接撤回。\n- 要你做什么：无。\n\n## What changes\n\nNew module `packages/spec/src/ai/ask-question.zod.ts`, exported from `@objectstack/spec/ai`:\n\n- `AskQuestionEnvelopeSchema` — `{ success: true, status: 'asked', reply, preface?, questions }`; `questions` is 1–2 of `AskQuestionSchema` (`{ header?, question, options }`), `options` is 2–4 of `AskQuestionOptionSchema` (`{ label, description?, recommended? }`). Limits exactly as the card states (preface 80, header 16, question 120, label 24, description 60), exported as `ASK_QUESTION_LIMITS` so the card component and the producer read the same numbers. Labels unique within a question (compared trimmed), at most one `recommended`. Every level is closed (`strictObject`): an unknown key is refused, never dropped. Blank strings are refused.\n- `parseAskQuestionEnvelope(value)` — takes the already-unwrapped object (peeling the stream's text wrapper stays with the console's `parseResultEnvelope`), answers the parsed envelope or `null`.\n- Legacy: `{ success: true, status: 'asked_which', question, readings, reply }` reads as one question whose options are the readings with no description. The converted value is held to the same `AskQuestionEnvelopeSchema`, so one contract and one set of limits; a legacy result the card cannot draw answers `null` and stays text as today. The legacy reader is open (extra keys ignored) and not exported: it reads a shape an existing producer writes and stored conversations hold.\n- Constants `ASK_QUESTION_STATUS`, `ASK_WHICH_LEGACY_STATUS`; types `AskQuestionEnvelope` / `AskQuestion` / `AskQuestionOption` and their `…Parsed` pairs (ADR-0122).\n- Regenerated: `api-surface/`, `export-origins/`, `declaration-map/`, `json-schema.manifest/`, `authorable-surface/`, `content/docs/references/**`, the strictness-ledger counts. `llms.txt` inventory count for `ai` 16 → 17.\n- `dropped-refinements.baseline.json`: two new rows (`ai/AskQuestion` root, `ai/AskQuestionEnvelope` `questions.element`). The unique-label and single-recommended rules are `superRefine`s over object items, which no arm of the closed projection list covers (`unique-items` is scalar-only), so the published JSON Schema is wider than the runtime there; the build printed the rows and they are declared as it asks.\n\n## Tests\n\n`packages/spec/src/ai/ask-question.test.ts`, 17 cases: full shape round-trips; unknown key refused at all three levels; status / success literals; reply empty or missing; 1 and 2 questions pass, 0 and 3 refused; 2–4 options pass, 1 and 5 refused; every length limit at max and max+1 with its path; blank question and empty label; duplicate labels (including a trailing-space duplicate) refused within a question and allowed across questions; one recommended passes, two refused; the parser on a valid envelope, on contract breaks, on garbage (`null`, `undefined`, strings, numbers, arrays, `{}`, another status, the un-peeled text wrapper); legacy conversion, legacy extra keys, legacy over the limits (1 or 5 readings, duplicates, an over-long reading), malformed legacy (success false, readings not a string array, missing reply or question). Refusal legs assert zod's issue code and path.\n\n## Acceptance notes\n\n- Legacy limits are a reading choice: the card says the legacy result \"reads as one question whose options have no description\", so the converted value is an `AskQuestionEnvelope` and carries its limits. If the cloud `ask_which` readings commonly exceed 24 characters or 4 entries, stage 1 shows fewer cards than hoped (they stay text, no regression). The cloud producer is outside this session's repositories: reading lengths and the exact legacy key set (`ask-which.tool.ts:116`) are NOT MEASURED here and rest on the card's Fable-checked citation.\n- `Metadata-protocol: added` is copied from the claim; the envelope is a wire shape rather than authored metadata, so the `minor` level follows the kind as declared.\n- `parseAskQuestionEnvelope` is a pure parse helper in `packages/spec`, as the card asks; precedent `parseFilterAST`, `parseDateMacroParam`.\n\n## Verification\n\n- Two-minute check: `pnpm --filter @objectstack/spec exec vitest run src/ai/ask-question.test.ts` — 17 passed.\n- Read first: `packages/spec/src/ai/ask-question.zod.ts` (the `superRefine` on `AskQuestionSchema` and `parseAskQuestionEnvelope`), then `dropped-refinements.baseline.json`.\n\n- Local, head a8d843b3: `@objectstack/spec` build, `check:generated` (all 14 artifacts current), `typecheck`, vitest `src/ai` + `src/shared` + the ADR-0122 pin (65 files, 1634 tests) and `scripts` (81 files, 1656 tests) green. Derived gate list: 109 commands, 101 exit 0, `check:llms-txt` fixed in this PR, 7 exit 3 (prerequisite not built on this clone: NOT MEASURED locally, all covered by CI). CI on a8d843b3: 70 check-runs, 60 success, 10 skipped, 0 failed. Full report: the os-dev-report comment on #37872.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibvQHY8a6PKzfR6E7SD)_\n"
+}
