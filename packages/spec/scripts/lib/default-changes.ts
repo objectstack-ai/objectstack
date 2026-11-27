@@ -811,7 +811,9 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'the name, `temperature` and `maxTokens` only), so no deployed agent changes behaviour; what '
         + 'changes is the parsed value. Reading `AgentParsed[\'model\'][\'provider\']` now yields the '
         + 'enum or `undefined` where it yielded the enum, and a display that showed `openai` for a '
-        + 'block that never wrote it shows nothing. To keep `openai`, write `provider: \'openai\'`.',
+        + 'block that never wrote it shows nothing. The key itself leaves the spec in the same major '
+        + '(#37712, `agent-model-provider-removed`): delete `provider`; the deployment\'s AI settings '
+        + 'choose the provider.',
     },
   ],
 };

@@ -342,7 +342,7 @@ const FIXTURES: Record<string, Fixture> = {
             label: 'Sweep',
             role: 'Sweep test agent',
             instructions: 'be helpful',
-            model: { provider: 'openai', model: 'gpt-4o-mini' },
+            model: { model: 'gpt-4o-mini' },
         },
         invalid: { name: 'sweep_agent', label: 'Sweep' },
         invalidatedField: 'instructions',

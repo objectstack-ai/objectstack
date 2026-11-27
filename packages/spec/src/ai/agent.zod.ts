@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { ROUTER_ADDRESSABLE_NAME_MESSAGE, ROUTER_ADDRESSABLE_NAME_PATTERN } from '../kernel/address-grammar';
-import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
+import { acceptRetiredDefaultResidue, enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { lazySchema } from '../shared/lazy-schema';
@@ -21,10 +21,45 @@ const AGENT_HISTORY =
   'Until this shape was closed these were dropped silently — the agent still registered '
   + 'and still answered, minus whatever the key was meant to configure or constrain.';
 
+// ── Retired `model.provider` (ADR-0049 enforce-or-remove, #37712) ───────────
+//
+// The block once declared which provider served the agent — an enum of
+// `openai`, `azure_openai`, `anthropic` and `local`. No runtime ever read it:
+// the cloud AI runtime, the one runtime that executes agents, applies the
+// model name, `temperature` and `maxTokens` and nothing else from this block,
+// and the providers a deployment can turn on are its own AI settings
+// (`AI_PROVIDERS` in service-settings: `gateway`, `openai`, `anthropic`,
+// `google`, …), a list the enum neither matched nor could follow — two of its
+// four values name no provider a deployment has. The model name is the one
+// choice an agent makes; the deployment resolves it among the providers it
+// has turned on. Tombstoned with `retiredKey()`: `tsc` refuses the key and the
+// parse answers with this prescription; the ADR-0087 conversion
+// `agent-model-provider-removed` deletes it from stored rows and existing
+// sources. Module-private and written with `//`: prose the refusal consumes.
+const MODEL_PROVIDER_RETIRED =
+  '`agent.model.provider` was removed in @objectstack/spec 19.0.0 (ADR-0049 enforce-or-remove) — '
+  + 'it never had an effect: no runtime read it, and the provider that serves an agent is chosen by '
+  + 'the deployment\'s AI settings, never by the agent. Delete the key. To pin a model, name it in '
+  + '`agent.model.model`; the deployment resolves that name among the providers it has turned on, '
+  + 'and an agent that names no model runs on the deployment\'s default model. '
+  + 'Run `os migrate meta --from 18` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
+// [#37712] The default the retired `provider` emitted, captured as a literal
+// at retirement (`acceptRetiredDefaultResidue`, the #12840 rule for a retired
+// DEFAULTED key). Every agent a released 18.x toolchain parsed with a `model`
+// block carries `provider: 'openai'` written out although no author wrote it;
+// that residue is accepted and stripped, and every other value (the ones an
+// author did write) keeps the tombstone's refusal.
+const MODEL_PROVIDER_RETIRED_KEY_RESIDUE = { provider: 'openai' } as const;
+
 /**
  * AI Model Configuration
+ *
+ * The model an agent runs on and its sampling settings. Which provider serves
+ * the model is the deployment's choice: `provider` was retired (#37712,
+ * ADR-0049) because no runtime ever read it.
  */
-export const AIModelConfigSchema = lazySchema(() => strictObject({
+export const AIModelConfigSchema = lazySchema(() => acceptRetiredDefaultResidue(strictObject({
   surface: 'this model configuration',
   history: AGENT_HISTORY,
   aliases: {
@@ -34,7 +69,13 @@ export const AIModelConfigSchema = lazySchema(() => strictObject({
     top_p: 'topP', nucleus: 'topP',
   },
 }, {
-  provider: z.enum(['openai', 'azure_openai', 'anthropic', 'local']).optional(),
+  /**
+   * REMOVED (#37712, ADR-0049) — the provider is the deployment's choice, never
+   * the agent's; see `MODEL_PROVIDER_RETIRED` above. A tombstone, not a bare
+   * delete, so authoring it is a `tsc` error and a parse error that carries
+   * the prescription instead of an anonymous unrecognized-key refusal.
+   */
+  provider: retiredKey(MODEL_PROVIDER_RETIRED),
   model: z.string().optional().describe(
     'Model name (e.g. gpt-4, claude-3-opus). Optional: when absent, the agent runs on the '
     + 'host\'s default model for this environment, so an agent that only tunes sampling '
@@ -43,7 +84,7 @@ export const AIModelConfigSchema = lazySchema(() => strictObject({
   temperature: z.number().min(0).max(2).default(0.7),
   maxTokens: z.number().optional(),
   topP: z.number().optional(),
-}));
+}), MODEL_PROVIDER_RETIRED_KEY_RESIDUE));
 
 /*
  * REMOVED — `AIKnowledgeSchema` / `AIKnowledge` (#3896 audit close-out). It

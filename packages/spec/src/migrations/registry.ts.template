@@ -3727,6 +3727,8 @@ const step19: MigrationStep = {
     'Protocol 19 moves the load-time handshake: a manifest whose `engines.protocol` range admits '
     + 'protocol 18 and not 19 is refused before any of its metadata loads, so each manifest an app '
     + 'or package declares moves its range to `^19`, together with its `@objectstack/*` versions. '
+    + 'An agent\'s `model.provider` leaves the shape: no runtime ever read it, and the provider that '
+    + 'serves an agent is the deployment\'s choice, so the key is deleted and the model name stays. '
     + 'View All and Modify All stop casting a field vote: `viewAllFields: true` is written beside them '
     + 'in every permission set entry of a source that predates the switch, so the migrated source keeps '
     + 'the field reads those bits cast; the semantic entry names what it does not keep.',
