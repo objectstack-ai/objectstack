@@ -248,7 +248,7 @@ describe('ObjectFormDesigner — object translations (objectui#3134)', () => {
 describe('ObjectFormDesigner — emits the one legal `FormField.type` spelling (objectui#4838)', () => {
   // Maintainer ruling 2026-08-19: a bare spec-type name is NOT a legal
   // `FormField.type`. The canvas is a PRODUCER of that vocabulary (it hands a
-  // type to `isWideFieldType`), so it is the producer that was fixed — the
+  // type to `resolveColSpan`, once `isWideFieldType`), so it is the producer that was fixed — the
   // tolerant `field:`-prefix fallback in `renderFieldComponent` and the
   // dual-spelling `WIDE_FIELD_TYPES` set are deliberately untouched.
 
@@ -283,13 +283,13 @@ describe('ObjectFormDesigner — emits the one legal `FormField.type` spelling (
   });
 
   it('lays a `repeater` field out the way the runtime form resolves it', () => {
-    // The canvas asks the width question through `mapFieldTypeToFormType`, the
-    // runtime form's own resolution, so the two cannot drift. `repeater` is an
-    // untyped JSON array in the spec and resolves to the JSON editor
-    // (`field:object`) beside `composite` and `record`; that widget is not
-    // wide, so the canvas lays it out at normal width, as the form does. (It
-    // resolved to the WIDE line-items grid until that grid was found drawing
-    // bare rows for a column-less repeater.)
+    // The canvas asks the width question through the runtime form's own
+    // `span: 'auto'` default (`resolveColSpan`), so the two cannot drift.
+    // `repeater` is an untyped JSON array in the spec and resolves to the JSON
+    // editor (`field:object`) beside `composite` and `record`; that widget is
+    // not wide, but the spec `span` docblock lists repeater as wide, and the
+    // form widens it by its declared type (objectstack#37677). So the canvas
+    // gives it the whole row, as the record form and `/forms/NAME` do.
     expect(toFormFieldType('repeater')).toBe('field:object');
     render(
       <ObjectFormDesigner
@@ -300,6 +300,21 @@ describe('ObjectFormDesigner — emits the one legal `FormField.type` spelling (
       />,
     );
     const card = screen.getByText('Line Items').closest('.cursor-grab') as HTMLElement;
+    expect(card).toBeTruthy();
+    expect(card.className).toContain('col-span-full');
+  });
+
+  it('CONTROL — a `json` field, on the same JSON editor, stays one cell on the canvas', () => {
+    expect(toFormFieldType('json')).toBe('field:object');
+    render(
+      <ObjectFormDesigner
+        draft={{ fields: [...textFields(15), { name: 'payload', type: 'json', label: 'Payload' }] }}
+        systemFieldNames={new Set()}
+        onChange={noop}
+        onSelectField={noop}
+      />,
+    );
+    const card = screen.getByText('Payload').closest('.cursor-grab') as HTMLElement;
     expect(card).toBeTruthy();
     expect(card.className).not.toContain('col-span-full');
   });
