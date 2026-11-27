@@ -5546,6 +5546,7 @@ const en = {
       add_field: 'Add a field',
       apply_blueprint: 'Build the app from the plan',
       apply_edit: 'Apply the change',
+      ask_which: 'Clarify the question',
       create_metadata: 'Create a metadata item',
       create_object: 'Create an object',
       create_package: 'Create a package',

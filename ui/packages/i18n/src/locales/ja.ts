@@ -4610,6 +4610,7 @@ const ja = {
       add_field: "オブジェクトに項目を追加する",
       apply_blueprint: "設計案どおりにアプリを構築する",
       apply_edit: "この変更を適用する",
+      ask_which: "質問の意図を確認",
       create_metadata: "メタデータを新しく作成する",
       create_object: "オブジェクトを新しく作成する",
       create_package: "パッケージを新しく作成する",

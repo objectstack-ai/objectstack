@@ -4698,6 +4698,7 @@ const fr = {
       add_field: "Ajouter un champ à l’objet",
       apply_blueprint: "Construire l’application selon le plan",
       apply_edit: "Appliquer la modification",
+      ask_which: "Préciser la question",
       create_metadata: "Créer un élément de métadonnées",
       create_object: "Créer un nouvel objet",
       create_package: "Créer un nouveau paquet",

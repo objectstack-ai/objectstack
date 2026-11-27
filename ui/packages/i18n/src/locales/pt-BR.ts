@@ -4697,6 +4697,7 @@ const pt = {
       add_field: "Adicionar um campo",
       apply_blueprint: "Construir o aplicativo conforme o plano",
       apply_edit: "Aplicar a alteração",
+      ask_which: "Esclarecer a pergunta",
       create_metadata: "Criar um item de metadados",
       create_object: "Criar um objeto",
       create_package: "Criar um pacote",

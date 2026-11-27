@@ -4702,6 +4702,7 @@ const es = {
       add_field: "Añadir un campo",
       apply_blueprint: "Construir la aplicación según el plan",
       apply_edit: "Aplicar el cambio",
+      ask_which: "Aclarar la pregunta",
       create_metadata: "Crear un elemento de metadatos",
       create_object: "Crear un objeto",
       create_package: "Crear un paquete",
