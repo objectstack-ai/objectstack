@@ -3963,11 +3963,11 @@ const FIELD_OPTION_COLOR_RENDERS_NEUTRAL_EXPLANATION: RuleExplanation = {
       'the option\'s value. The option badge (a select value in a list cell, a record page, a kanban ' +
       'card, a grid group header, a filter chip) paints exactly two spellings: one of the nine palette ' +
       'families `gray`, `red`, `orange`, `yellow`, `green`, `blue`, `indigo`, `purple`, `pink`, ' +
-      'lowercase as written; or a hex of three or six digits after a `#` (`#14b8a6`), which the badge ' +
+      'lowercase as written; or a hex of three or six digits after a `#` (`#a855f7`), which the badge ' +
       'paints as that exact colour. Any other value renders the same neutral grey as an option with no ' +
       'colour, and nothing on the page says the colour was not used.',
     'Judged as not painted: other colour names (`teal`, `amber`, `sky`), a family in another case ' +
-      '(`Red`), a hex with no `#` or with alpha digits (`#14b8a6cc`), and `rgb(…)` / `hsl(…)`. Other ' +
+      '(`Red`), a hex with no `#` or with alpha digits (`#a855f7cc`), and `rgb(…)` / `hsl(…)`. Other ' +
       'surfaces read the same value differently: a chart series, a gantt bar and a timeline marker hand ' +
       'it to the browser as a CSS colour, so `teal` paints there; a calendar event paints a family, a ' +
       'hex (alpha included) and `rgb(…)` / `hsl(…)`, and its default colour for any other name. The ' +

@@ -584,6 +584,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'lintAutonumberFormats',
       'lintSummaryRollups', // see the roster pin above
       'lintFieldReferenceShapes', // [#35143] — see the roster pin above
+      'lintOptionColors', // [#37435] — see the roster pin above
       'lintDuplicateFieldLabels', // see the roster pin above
       'validateSecurityPosture',
       'validateSecurityRoleWord', // [#19370] — see the roster pin above
