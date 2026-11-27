@@ -101,6 +101,7 @@ export * from './item-key-discriminators.js';
 // axis. Sunk here because the doors live in `@objectstack/runtime` and
 // `@objectstack/rest`, which share no other common home.
 export * from './meta-write-capability.js';
+export * from './knowledge-source-save-admission.js';
 // [#27884] The read-side twin: which readers a stored metadata document of a
 // capability-gated type (datasource, external_catalog) is served to, asked by the
 // `/meta` type gate (`@objectstack/rest`) and the engine's stored-row read gate

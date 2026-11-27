@@ -22,6 +22,7 @@ const de = {
       manage_metadata: "Metadaten verwalten",
       manage_mailboxes: "Postfächer verwalten",
       manage_connector_connections: "Konnektor-Verbindungen verwalten",
+      manage_knowledge_sources: "Wissensquellen verwalten",
       manage_platform_settings: "Plattformeinstellungen verwalten",
       setup_access: "Zugriff auf die Einrichtung",
       setup_write: "Einstellungen schreiben",
@@ -2249,6 +2250,10 @@ const de = {
       noChatsDescription: "Starten Sie eine neue Unterhaltung, um sie hier zu sehen.",
       noMatchingChats: "Keine passenden Chats.",
       newConversation: "Neue Unterhaltung",
+      // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
+      askPage: {
+        scopeBadge: "Diese App zuerst",
+      },
       renameConversation: "Unterhaltung umbenennen",
       deleteConversation: "Unterhaltung löschen",
       saveRename: "Umbenennung speichern",
@@ -5100,6 +5105,9 @@ const de = {
         form: '{{count}} Formulare',
         form_one: '{{count}} Formular',
         form_other: '{{count}} Formulare',
+        knowledge_source: '{{count}} Wissensquellen',
+        knowledge_source_one: '{{count}} Wissensquelle',
+        knowledge_source_other: '{{count}} Wissensquellen',
         datasource: '{{count}} Datenquellen',
         datasource_one: '{{count}} Datenquelle',
         datasource_other: '{{count}} Datenquellen',

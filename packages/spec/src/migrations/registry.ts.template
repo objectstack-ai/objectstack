@@ -3719,7 +3719,8 @@ const step18: MigrationStep = {
  * 18. That refusal is this step's first semantic entry, and the one every
  * upgrading author meets first. Later retirements on the v19 line add their
  * entries as files; a major-19 conversion graduates here the way step 18's do
- * (the first is `permission-view-all-fields-beside-record-bypass`).
+ * (the first are `permission-view-all-fields-beside-record-bypass` and the
+ * knowledge source's, ADR-0161 K6).
  */
 const step19: MigrationStep = {
   toMajor: 19,
@@ -3735,7 +3736,13 @@ const step19: MigrationStep = {
     + 'Action locations say what an action acts on: `list_toolbar` becomes `list`, `record_header` and '
     + '`record_more` become `record_page`, `list_item` becomes `record_row`, and an action on both a row and '
     + 'the record page becomes `record`; an action that sat in the record page\'s ⋯ menu only keeps that fold '
-    + 'with `component: \'action:menu\'`, so every action is drawn where it was.',
+    + 'with `component: \'action:menu\'`, so every action is drawn where it was. '
+    + 'It also admits the knowledge source as a metadata type (`knowledge_source`, ADR-0161 K4) and '
+    + 'settles its keys on the way in: `id` becomes `name` and `source.contentFields` becomes '
+    + '`source.content`, a list of field names in which `\'*\'` is refused, because each listed field '
+    + 'is sent to the embedding provider; `embedding`, `vectorStore`, `adapterConfig` and '
+    + '`refresh.cron`, which nothing read, are removed; and the `file` and `http` source kinds leave '
+    + 'with their four keys, so a source indexes the records of one object.',
   // Derived, not listed, as step 18's are: every major-19 conversion graduates
   // into this step in the order `CONVERSIONS_BY_MAJOR[19]` applies them. Add a
   // conversion there, never here.

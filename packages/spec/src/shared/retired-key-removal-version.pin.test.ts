@@ -103,6 +103,7 @@ import { TranslationBundleSchema, TranslationItemSchema } from '../system/transl
 import { PROTOCOL_MAJOR } from '../kernel/protocol-version';
 import { ActionLocationSchema } from '../ui/action.zod';
 import { EmailTemplateDefinitionSchema } from '../system/email-template.zod';
+import { KnowledgeRefreshPolicySchema, KnowledgeSourceSchema, ObjectKnowledgeSourceSchema } from '../ai/knowledge-source.zod';
 import {
   ActionButtonPropsSchema,
   ActionGroupPropsSchema,
@@ -675,6 +676,17 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   'object-kanban-quick-add-removed': [tombstone(ObjectKanbanPropsSchema, 'object-kanban', 'quickAdd')],
   'cube-sub-day-granularities-removed': [
     refusal('a sub-day TimeUpdateInterval member', () => TimeUpdateInterval.safeParse('minute')),
+  ],
+  // #37304 (ADR-0161 K6): the knowledge source's keys, settled as the type is admitted.
+  'knowledge-source-id-to-name': [tombstone(KnowledgeSourceSchema, 'knowledge_source', 'id')],
+  'knowledge-source-content-fields-to-content': [
+    tombstone(ObjectKnowledgeSourceSchema, 'knowledge_source.source', 'contentFields'),
+  ],
+  'knowledge-source-inert-keys-removed': [
+    tombstone(KnowledgeSourceSchema, 'knowledge_source', 'embedding'),
+    tombstone(KnowledgeSourceSchema, 'knowledge_source', 'vectorStore'),
+    tombstone(KnowledgeSourceSchema, 'knowledge_source', 'adapterConfig'),
+    tombstone(KnowledgeRefreshPolicySchema, 'knowledge_source.refresh', 'cron'),
   ],
   // Protocol 19's View All / Modify All field-axis split, a default flip: View
   // All without `viewAllFields` still parses and now casts no field vote, so the

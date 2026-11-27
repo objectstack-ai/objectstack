@@ -154,6 +154,20 @@ const OBJECT_CONTEXT = [
   { name: 'leave_request', sharingModel: 'private', fields: { owner: { type: 'text' } } },
 ];
 
+/**
+ * [#35143] An action write whose L2 body writes through `ctx.api` with no
+ * `api.write` grant: refused by `validateActionBodyCapabilities`, which is what
+ * keeps the action leg's clean parser read falsifiable.
+ */
+const GATED_ACTION = {
+  name: 'leave_approve',
+  label: 'Approve',
+  objectName: 'leave_request',
+  type: 'script',
+  locations: ['record_page'],
+  body: { language: 'js', source: "await ctx.api.object('leave_request').update({ id: ctx.recordId, owner: 'x' });" },
+};
+
 // Same shape as lazy-deps.test.ts: a spawned child is the only place a native
 // require-cache probe means anything, because vitest inlines static imports
 // through its transform and they never reach that cache.
@@ -208,6 +222,25 @@ const childBody = `
       if (loaded(dep)) {
         fail(dep + ' was loaded by RUNNING the runtime publish gate on an object write carrying NO json_schema validation');
       }
+    }
+
+    // [#35143] An ACTION write carrying an L2 body: the reference suite and the
+    // body-capability rule both gate it, and neither may reach a source parser
+    // — the suite dispatches only the members that declare \`action\`, and the
+    // capability rule reads the source without parsing it.
+    const actionResult = mod.runRuntimeAuthoringRules({
+      type: 'action',
+      item: ${JSON.stringify(GATED_ACTION)},
+      context: { objects: ${JSON.stringify(OBJECT_CONTEXT)} },
+    });
+    if (!actionResult.rulesRun.includes('validateReferenceIntegrity')) {
+      fail('the reference suite is not dispatched for action writes — the action leg would assert nothing');
+    }
+    if (!actionResult.errors.some((f) => f.rule === 'action-body-write-capability-undeclared')) {
+      fail('the gate did not refuse the action body that writes with no api.write grant — the probe below would be vacuously true');
+    }
+    for (const dep of ${JSON.stringify(PARSER_DEPS)}) {
+      if (loaded(dep)) fail(dep + ' was loaded while gating an action write — no written type may reach a source parser');
     }
 
     // Tier 3 (#4716): the SAME write carrying a json_schema validation must be

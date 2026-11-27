@@ -281,6 +281,10 @@ export const PACKAGE_SCOPED_TYPES = Object.freeze([
   // [ADR-0150 addendum 2026-11-25] the context pack joins bucket 3 beside
   // `skill`: `get_record_context` resolves a bare pack name by this rule.
   'ai_context',
+  // [ADR-0150 addendum 2026-11-25, D3] the knowledge source joins bucket 3:
+  // `search_knowledge` and the knowledge service resolve a bare source name
+  // by this rule.
+  'knowledge_source',
 ] as const);
 
 /** A type addressed by `(package, name)` ({@link PACKAGE_SCOPED_TYPES}). */

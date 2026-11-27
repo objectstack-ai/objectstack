@@ -12,7 +12,7 @@ import type { KnowledgeSource } from '@objectstack/spec/ai';
 import { PgvectorKnowledgeAdapter, type PgClientLike, type PgPoolLike } from '../index.js';
 import { FakeEmbedder } from './live-pg.testkit.js';
 
-const source = { id: 'locked', label: 'locked', adapter: 'pgvector', source: { kind: 'object', object: 'a', contentFields: ['b'] } } as KnowledgeSource;
+const source = { name: 'locked', label: 'locked', adapter: 'pgvector', source: { kind: 'object', object: 'a', content: ['b'] } } as KnowledgeSource;
 const index = { fingerprint: 'fp', recipeHash: 'rh' };
 
 /** A store that answers every statement the build's start and end run; the unlock answers `unlocked`. */

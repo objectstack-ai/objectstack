@@ -27,3 +27,16 @@ export function isRecordPagePath(pathname: string): boolean {
 export function isAppDocsPath(pathname: string): boolean {
   return /^\/apps\/[^/]+\/docs(?:\/|$)/.test(pathname);
 }
+
+/**
+ * Is `pathname` an app's AI inquiry page, the `ai:chat` component route
+ * `/apps/APP/component/ai/chat` (ui ADR-0057 Amendment A4)? While it is the
+ * active route the assistant drawer stays closed and its triggers are hidden
+ * or inert, so one screen never holds two `ask` conversations. The segments
+ * are `AI_CHAT_COMPONENT_REF` (`@objectstack/spec/ui`) through
+ * `componentRefToUrlSegments`, spelled here so the boot path imports neither;
+ * a test holds the two equal.
+ */
+export function isAppAskPagePath(pathname: string): boolean {
+  return /^\/apps\/[^/]+\/component\/ai\/chat\/?$/.test(pathname);
+}

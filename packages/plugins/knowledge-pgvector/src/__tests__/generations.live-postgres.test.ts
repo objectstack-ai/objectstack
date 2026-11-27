@@ -31,10 +31,10 @@ const FP_C = { fingerprint: 'fp-gen:c', recipeHash: 'rh-gen:1' };
 
 const source = (id: string): KnowledgeSource =>
   ({
-    id,
+    name: id,
     label: id,
     adapter: 'under_test',
-    source: { kind: 'object', object: 'article', contentFields: ['body'], metadataFields: ['status'] },
+    source: { kind: 'object', object: 'article', content: ['body'], metadataFields: ['status'] },
   }) as KnowledgeSource;
 
 const ctx = (s: KnowledgeSource, index: { fingerprint: string; recipeHash: string } = FP_A): AdapterContext => ({
@@ -44,10 +44,10 @@ const ctx = (s: KnowledgeSource, index: { fingerprint: string; recipeHash: strin
 });
 
 function doc(s: KnowledgeSource, n: string, content: string): KnowledgeDocument {
-  const id = `${s.id}:${n}`;
+  const id = `${s.name}:${n}`;
   return {
     id,
-    sourceId: s.id,
+    sourceId: s.name,
     sourceRecordId: n,
     content,
     docHash: `h:${content}`,
@@ -143,24 +143,24 @@ describe.skipIf(!PG_URL)('knowledge-pgvector generations on a LIVE PostgreSQL', 
     svc.registerAdapter('under_test', adapter);
     const s = source('model_change');
     svc.registerSource(s);
-    expect(await svc.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 2 });
+    expect(await svc.reindexSource(s.name)).toMatchObject({ ok: true, indexed: 2 });
     const before = await adapter.indexStatus({ source: s, reason: 'manual' });
-    expect(await generationRows(schema, s.id)).toEqual([{ generation: 1, fingerprint: before.fingerprint, state: 'active' }]);
+    expect(await generationRows(schema, s.name)).toEqual([{ generation: 1, fingerprint: before.fingerprint, state: 'active' }]);
 
     // Another model of the same width: the fingerprint moves, and the boot reading says so.
     embedder.model = 'model-two';
-    expect(await svc.readIndexState(s.id)).toMatchObject({ state: 'new-fingerprint', due: true });
+    expect(await svc.readIndexState(s.name)).toMatchObject({ state: 'new-fingerprint', due: true });
 
     // The build starts, and its first page's embed call is held.
     const gate = embedder.holdNext();
-    const build = svc.reindexSource(s.id);
+    const build = svc.reindexSource(s.name);
     await gate.entered;
     expect(await adapter.indexStatus({ source: s, reason: 'manual' })).toEqual({
       fingerprint: before.fingerprint,
       recipeHash: before.recipeHash,
       building: true,
     });
-    expect((await generationRows(schema, s.id)).map((g) => [g.generation, g.state])).toEqual([
+    expect((await generationRows(schema, s.name)).map((g) => [g.generation, g.state])).toEqual([
       [1, 'active'],
       [2, 'building'],
     ]);
@@ -177,7 +177,7 @@ describe.skipIf(!PG_URL)('knowledge-pgvector generations on a LIVE PostgreSQL', 
     const late = { id: 'r0', body: 'basalt columns', status: 'published' };
     rows.push(late);
     await svc.handleRecordUpsert('article', late);
-    expect(await passagesByGeneration(schema, s.id)).toEqual({ 1: 2, 2: 1 });
+    expect(await passagesByGeneration(schema, s.name)).toEqual({ 1: 2, 2: 1 });
 
     gate.release();
     // The walk wrote both rows, the purge removed nothing written during the build, and the switch ran.
@@ -186,12 +186,12 @@ describe.skipIf(!PG_URL)('knowledge-pgvector generations on a LIVE PostgreSQL', 
     const after = await adapter.indexStatus({ source: s, reason: 'manual' });
     expect(after.fingerprint).not.toBe(before.fingerprint);
     expect(after.building).toBeUndefined();
-    expect(await generationRows(schema, s.id)).toEqual([{ generation: 2, fingerprint: after.fingerprint, state: 'active' }]);
+    expect(await generationRows(schema, s.name)).toEqual([{ generation: 2, fingerprint: after.fingerprint, state: 'active' }]);
     // The old generation is deleted; the write made during the build is there.
-    expect(await passagesByGeneration(schema, s.id)).toEqual({ 2: 3 });
-    expect((await svc.search('basalt', { topK: 3, executionContext: SYSTEM })).map((h) => h.documentId)).toEqual([`${s.id}:r0`]);
-    expect((await svc.search('granite', { topK: 3, executionContext: SYSTEM })).map((h) => h.documentId)).toEqual([`${s.id}:r1`]);
-    expect(await svc.readIndexState(s.id)).toMatchObject({ state: 'current', due: false });
+    expect(await passagesByGeneration(schema, s.name)).toEqual({ 2: 3 });
+    expect((await svc.search('basalt', { topK: 3, executionContext: SYSTEM })).map((h) => h.documentId)).toEqual([`${s.name}:r0`]);
+    expect((await svc.search('granite', { topK: 3, executionContext: SYSTEM })).map((h) => h.documentId)).toEqual([`${s.name}:r1`]);
+    expect(await svc.readIndexState(s.name)).toMatchObject({ state: 'current', due: false });
   });
 
   it('two concurrent builds of one source: one builds, the other is refused LOCK_CONFLICT and walks nothing', async () => {
@@ -210,9 +210,9 @@ describe.skipIf(!PG_URL)('knowledge-pgvector generations on a LIVE PostgreSQL', 
     svcB.registerSource(s);
 
     const gate = first.holdNext();
-    const buildA = svcA.reindexSource(s.id);
+    const buildA = svcA.reindexSource(s.name);
     await gate.entered;
-    const refusedB = await svcB.reindexSource(s.id);
+    const refusedB = await svcB.reindexSource(s.name);
     expect(refusedB).toMatchObject({ ok: false, indexed: 0, discovered: 0 });
     expect(refusedB.message).toContain('is being built by another process');
     expect(second.calls).toBe(0);
@@ -221,7 +221,7 @@ describe.skipIf(!PG_URL)('knowledge-pgvector generations on a LIVE PostgreSQL', 
     gate.release();
     expect(await buildA).toMatchObject({ ok: true, indexed: 1 });
     // The lock went with the completed build: the other process may build now.
-    expect(await svcB.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 0, skipped: 1 });
+    expect(await svcB.reindexSource(s.name)).toMatchObject({ ok: true, indexed: 0, skipped: 1 });
   });
 
   it('a build whose session died is resumed by the next one: what it wrote is kept, and only the rest is written', async () => {
@@ -233,7 +233,7 @@ describe.skipIf(!PG_URL)('knowledge-pgvector generations on a LIVE PostgreSQL', 
     await a.upsert([doc(s, '1', 'granite quarry')], ctx(s, FP_B));
 
     // The process dies: PostgreSQL ends its session, and the advisory lock with it.
-    const lock = (a as unknown as { builders: Map<string, { client: { query: PgPoolLike['query'] } }> }).builders.get(s.id)!;
+    const lock = (a as unknown as { builders: Map<string, { client: { query: PgPoolLike['query'] } }> }).builders.get(s.name)!;
     const pid = (await lock.client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid;
     await store.pool().query('SELECT pg_terminate_backend($1)', [pid]);
 
@@ -241,11 +241,11 @@ describe.skipIf(!PG_URL)('knowledge-pgvector generations on a LIVE PostgreSQL', 
     await expect(b.beginBuild(ctx(s, FP_B))).resolves.toBeUndefined();
     // Resumed, not restarted: the generation under construction keeps the passage written before.
     const listed = await b.listDocuments(ctx(s, FP_B), { limit: 10 });
-    expect(listed.documents).toEqual([{ documentId: `${s.id}:1`, docHash: 'h:granite quarry' }]);
-    expect(await passagesByGeneration(schema, s.id)).toEqual({ 1: 2, 2: 1 });
+    expect(listed.documents).toEqual([{ documentId: `${s.name}:1`, docHash: 'h:granite quarry' }]);
+    expect(await passagesByGeneration(schema, s.name)).toEqual({ 1: 2, 2: 1 });
     await b.upsert([doc(s, '2', 'marble quarry')], ctx(s, FP_B));
     await b.completeBuild(ctx(s, FP_B));
-    expect(await passagesByGeneration(schema, s.id)).toEqual({ 2: 2 });
+    expect(await passagesByGeneration(schema, s.name)).toEqual({ 2: 2 });
     expect(await b.indexStatus(ctx(s))).toEqual({ fingerprint: FP_B.fingerprint, recipeHash: FP_B.recipeHash });
   });
 
@@ -296,11 +296,11 @@ describe.skipIf(!PG_URL)('knowledge-pgvector generations on a LIVE PostgreSQL', 
     await adapter.beginBuild(ctx(s, FP_B));
     await adapter.upsert([doc(s, '1', 'stone 1')], ctx(s, FP_B));
     await adapter.beginBuild(ctx(s, FP_C));
-    expect((await generationRows(schema, s.id)).map((g) => [g.generation, g.fingerprint, g.state])).toEqual([
+    expect((await generationRows(schema, s.name)).map((g) => [g.generation, g.fingerprint, g.state])).toEqual([
       [1, FP_A.fingerprint, 'active'],
       [3, FP_C.fingerprint, 'building'],
     ]);
-    expect(await passagesByGeneration(schema, s.id)).toEqual({ 1: 5 });
+    expect(await passagesByGeneration(schema, s.name)).toEqual({ 1: 5 });
     // A write under the abandoned fingerprint is refused; nothing reaches the active generation.
     await expect(adapter.upsert([doc(s, '9', 'stone 9')], ctx(s, FP_B))).rejects.toMatchObject({ code: KNOWLEDGE_REBUILD_REQUIRED });
 
@@ -309,7 +309,7 @@ describe.skipIf(!PG_URL)('knowledge-pgvector generations on a LIVE PostgreSQL', 
     await adapter.completeBuild(ctx(s, FP_C));
     // Five passages, two a statement: three statements, all for generation 1.
     expect(batches).toEqual(['1', '1', '1']);
-    expect(await generationRows(schema, s.id)).toEqual([{ generation: 3, fingerprint: FP_C.fingerprint, state: 'active' }]);
-    expect(await passagesByGeneration(schema, s.id)).toEqual({ 3: 1 });
+    expect(await generationRows(schema, s.name)).toEqual([{ generation: 3, fingerprint: FP_C.fingerprint, state: 'active' }]);
+    expect(await passagesByGeneration(schema, s.name)).toEqual({ 3: 1 });
   });
 });

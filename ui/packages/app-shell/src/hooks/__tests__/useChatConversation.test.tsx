@@ -1551,3 +1551,59 @@ describe('sanitizeChatMessagesForCache — a pending approval survives the cache
     });
   });
 });
+
+// ui ADR-0057 Amendment A4 — the app's AI inquiry page records the app its
+// conversation belongs to: the create on the first send carries the host's
+// `createMetadata`; every other caller still sends an empty body.
+describe('useChatConversation — createMetadata rides the first-send create (objectstack#37788)', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const creates = () =>
+    fetchMock.mock.calls.filter(
+      (c) => c[0] === `${API_BASE}/conversations` && (c[1] as RequestInit | undefined)?.method === 'POST',
+    );
+
+  beforeEach(() => {
+    localStorage.clear();
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sends { metadata } when the host passes createMetadata', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'conv-app', messages: [] }));
+    const { result } = renderHook(() =>
+      useChatConversation({
+        userId: 'u1',
+        scope: 'app:com.acme.policy:ask',
+        apiBase: API_BASE,
+        forceNew: true,
+        createMetadata: { activePackageId: 'com.acme.policy' },
+      }),
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await act(async () => {
+      await result.current.ensureConversation();
+    });
+    expect(result.current.conversationId).toBe('conv-app');
+    expect(creates()).toHaveLength(1);
+    expect(JSON.parse(String((creates()[0][1] as RequestInit).body))).toEqual({
+      metadata: { activePackageId: 'com.acme.policy' },
+    });
+  });
+
+  it('keeps the empty body for a caller that passes none (the drawer)', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'conv-dock', messages: [] }));
+    const { result } = renderHook(() =>
+      useChatConversation({ userId: 'u1', scope: 'ask', apiBase: API_BASE, forceNew: true }),
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await act(async () => {
+      await result.current.ensureConversation();
+    });
+    expect(creates()).toHaveLength(1);
+    expect((creates()[0][1] as RequestInit).body).toBe('{}');
+  });
+});

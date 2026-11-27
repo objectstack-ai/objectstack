@@ -70,10 +70,25 @@ export async function writeAuditSealSecret(engine: SealStorageEngine, handle: Cr
   });
 }
 
-/** Remove a `sys_secret` row this producer wrote and no holder came to name. Best-effort; never throws. */
-export async function dropAuditSealSecret(engine: SealStorageEngine, id: string): Promise<void> {
+/**
+ * Remove a `sys_secret` row this producer wrote and no holder came to name, or
+ * whose holder is gone. Best-effort; never throws. With `expected`, the row is
+ * removed only when it is the secret sealed under that context (its
+ * `namespace` and `key`): a handle that names any other row removes nothing.
+ */
+export async function dropAuditSealSecret(
+  engine: SealStorageEngine,
+  id: string,
+  expected?: Pick<CryptoContext, 'namespace' | 'key'>,
+): Promise<void> {
   try {
-    await engine.getDriverForObject('sys_secret')?.delete?.('sys_secret', id);
+    const driver = engine.getDriverForObject('sys_secret');
+    if (!driver?.delete) return;
+    if (expected) {
+      const [row] = await driver.find('sys_secret', { where: { id }, limit: 1 });
+      if (!row || row.namespace !== expected.namespace || row.key !== expected.key) return;
+    }
+    await driver.delete('sys_secret', id);
   } catch {
     /* an unreferenced audit_seal row is what `os secret orphans` reports */
   }

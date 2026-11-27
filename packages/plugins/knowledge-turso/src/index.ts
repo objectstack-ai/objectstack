@@ -17,4 +17,11 @@ export {
   resolveStoreUrl,
   type KnowledgeTursoPluginOptions,
 } from './plugin.js';
+export {
+  KNOWLEDGE_SETTINGS_NAMESPACE,
+  contributeKnowledgeTursoSettings,
+  knowledgeTursoSettingsSpecifiers,
+  knowledgeTursoSettingsTranslations,
+  withKnowledgeTursoSection,
+} from './settings-contribution.js';
 export { GENERATION_TABLE, SAFE_SOURCE_ID, generationTable, legacyTable } from './sql.js';

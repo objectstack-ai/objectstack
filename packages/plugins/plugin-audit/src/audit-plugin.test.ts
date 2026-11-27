@@ -624,3 +624,56 @@ describe('AuditPlugin — a host hands an app-supplied instance its crypto provi
     expect(sealer?.crypto).toBeUndefined();
   });
 });
+
+describe('AuditPlugin — hands its sealer\'s expiry to the lifecycle service (ADR-0154 D8)', () => {
+  /** Start the sealer over a storage double whose registry holds no sealed object, with `lifecycle` as the service. */
+  const start = async (plugin: AuditPlugin, lifecycle: unknown) => {
+    const engine = { getDriverForObject: () => undefined, registry: { getAllObjects: () => [] } };
+    const ctx = {
+      logger: { info() {}, warn() {}, error() {}, debug() {} },
+      getService: (name: string) => {
+        if (name === 'lifecycle') return lifecycle;
+        throw new Error(`no '${name}' service`);
+      },
+    };
+    (plugin as unknown as { startSealer(e: unknown, c: unknown): void }).startSealer(engine, ctx);
+    await (plugin as unknown as { sealer: { stop(): Promise<void> } | null }).sealer?.stop();
+  };
+  const lifecycleDouble = () => {
+    const registered: Array<{ plan(request: unknown): Promise<unknown> }> = [];
+    let unregistered = 0;
+    return {
+      registered,
+      unregistered: () => unregistered,
+      service: {
+        registerExpiryPrefix(expiry: { plan(request: unknown): Promise<unknown> }) {
+          registered.push(expiry);
+          return () => void (unregistered += 1);
+        },
+        registerRetentionFloor() {},
+      },
+    };
+  };
+
+  it('registers one expiry whose plan is the sealer\'s, and unregisters it on destroy', async () => {
+    const plugin = new AuditPlugin({ cryptoProvider: { label: 'host' } as never });
+    const lifecycle = lifecycleDouble();
+    await start(plugin, lifecycle.service);
+    expect(lifecycle.registered).toHaveLength(1);
+    // The sealer holds no sealed object, so its plan answers no run.
+    await expect(lifecycle.registered[0].plan({ object: 'sys_audit_log', policy: 'archive.keep', policyValue: '7y', cutoff: new Date(0).toISOString() })).resolves.toEqual([]);
+    await plugin.destroy();
+    expect(lifecycle.unregistered()).toBe(1);
+  });
+
+  it('registers none with no crypto provider: nothing can be signed, so the lifecycle service keeps the sealed rows', async () => {
+    const lifecycle = lifecycleDouble();
+    await start(new AuditPlugin(), lifecycle.service);
+    expect(lifecycle.registered).toEqual([]);
+  });
+
+  it('registers none, and still starts, beside a lifecycle service without the seam or with none at all', async () => {
+    await expect(start(new AuditPlugin({ cryptoProvider: { label: 'host' } as never }), {})).resolves.toBeUndefined();
+    await expect(start(new AuditPlugin({ cryptoProvider: { label: 'host' } as never }), undefined)).resolves.toBeUndefined();
+  });
+});

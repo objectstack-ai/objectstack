@@ -28,6 +28,7 @@ import type { KnowledgeSource } from '@objectstack/spec/ai';
 import type { IKnowledgeAdapter } from '@objectstack/spec/contracts';
 import { KnowledgeServicePlugin } from '../knowledge-service-plugin.js';
 import type { KnowledgeService } from '../knowledge-service.js';
+import { indexKeyOf } from '../knowledge-source-registry.js';
 
 const FIXED_NOW = 1_700_000_000_000;
 const OLD = '2020-01-01T00:00:00Z'; // comfortably past every cutoff below
@@ -40,10 +41,10 @@ const OBJECTS: LifecycleObjectLike[] = [
 
 function noteSource(overrides: Partial<KnowledgeSource> = {}): KnowledgeSource {
   return {
-    id: 'task_notes',
+    name: 'task_notes',
     label: 'Task notes',
     adapter: 'fake',
-    source: { kind: 'object', object: 'task', contentFields: ['notes'] },
+    source: { kind: 'object', object: 'task', content: ['notes'] },
     ...overrides,
   } as KnowledgeSource;
 }
@@ -337,11 +338,11 @@ describe('#4672 — registration seam', () => {
         sources: [
           noteSource(),
           // A second source on the SAME object must not register a second guard…
-          noteSource({ id: 'task_titles' }),
+          noteSource({ name: 'task_titles' }),
           // …and a source on another object gets its own.
           noteSource({
-            id: 'doc_body',
-            source: { kind: 'object', object: 'doc', contentFields: ['body'] },
+            name: 'doc_body',
+            source: { kind: 'object', object: 'doc', content: ['body'] },
           } as Partial<KnowledgeSource>),
         ],
       },
@@ -363,13 +364,9 @@ describe('#4672 — registration seam', () => {
     expect(ctx.logger.info).not.toHaveBeenCalledWith(expect.stringContaining('reap guards registered'));
   });
 
-  it('never asks for the lifecycle service when no object source is declared', async () => {
+  it('never asks for the lifecycle service when no source is declared', async () => {
     const { asked } = await boot(
-      {
-        sources: [
-          { id: 'handbooks', label: 'Handbooks', adapter: 'fake', source: { kind: 'file', prefix: 'kb/' } } as KnowledgeSource,
-        ],
-      },
+      { sources: [] },
       { lifecycle: lifecycleOver(reapEngine({ task: [], audit_log: [] }).engine) },
     );
 
@@ -396,5 +393,61 @@ describe('#4672 — registration seam', () => {
       { lifecycle: fakeLifecycle },
     );
     expect(registrations).toEqual([]);
+  });
+});
+
+describe('ADR-0161 K3, item 2 — the guarded object set follows the sources', () => {
+  it('a source registered in code after boot, on an object no source indexed before, is guarded from then on', async () => {
+    const { engine, deleted, idsLeft } = reapEngine({ task: [{ id: 'k1', deleted_at: OLD }], audit_log: [] });
+    const lifecycle = lifecycleOver(engine);
+    const { adapter, deletedDocs, reasons } = fakeAdapter();
+    const { service } = await boot({ sources: [] }, { lifecycle, adapter });
+
+    service.registerSource(noteSource());
+    await lifecycle.sweep();
+
+    expect(deletedDocs).toEqual(['task_notes:k1']);
+    expect(reasons).toEqual(['lifecycle-reap']);
+    expect(deleted).toEqual([{ object: 'task', id: 'k1' }]);
+    expect(idsLeft('task')).toEqual([]);
+  });
+
+  it("a package's knowledge_source item loaded after boot is guarded, and de-indexed under its own index key", async () => {
+    const { engine, deleted } = reapEngine({ task: [{ id: 'k1', deleted_at: OLD }], audit_log: [] });
+    const lifecycle = lifecycleOver(engine);
+    const { adapter, deletedDocs } = fakeAdapter();
+    const { service } = await boot({ sources: [] }, { lifecycle, adapter });
+
+    const entry = service.registerMetadataSource(noteSource(), { packageId: 'com.acme.kb', namespace: 'acme' });
+    await lifecycle.sweep();
+
+    expect(entry.key).toBe(indexKeyOf('com.acme.kb', 'task_notes'));
+    expect(deletedDocs).toEqual([`${entry.key}:k1`]);
+    expect(deleted).toEqual([{ object: 'task', id: 'k1' }]);
+  });
+
+  it('an object is registered once: a later source on it, and a source that reloads, register nothing again', async () => {
+    const registered: string[] = [];
+    const fakeLifecycle: any = { registerReapGuard: (object: string) => registered.push(object) };
+    const { service } = await boot({ sources: [noteSource()] }, { lifecycle: fakeLifecycle });
+    expect(registered).toEqual(['task']);
+
+    service.registerSource(noteSource({ name: 'task_titles' }));
+    service.registerMetadataSource(noteSource({ name: 'task_bodies' }), { packageId: 'com.acme.kb' });
+    service.registerMetadataSource(noteSource({ name: 'task_bodies', label: 'again' }), { packageId: 'com.acme.kb' });
+    expect(registered).toEqual(['task']);
+
+    service.registerMetadataSource(
+      noteSource({ name: 'doc_body', source: { kind: 'object', object: 'doc', content: ['body'] } } as Partial<KnowledgeSource>),
+    );
+    expect(registered).toEqual(['task', 'doc']);
+  });
+
+  it('a source whose index an external indexer owns adds no guard when it arrives after boot', async () => {
+    const registered: string[] = [];
+    const fakeLifecycle: any = { registerReapGuard: (object: string) => registered.push(object) };
+    const { service } = await boot({ sources: [] }, { lifecycle: fakeLifecycle });
+    service.registerSource(noteSource({ refresh: { onRecordChange: false } }));
+    expect(registered).toEqual([]);
   });
 });

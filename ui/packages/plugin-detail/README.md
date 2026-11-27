@@ -908,6 +908,15 @@ ignored. `tier` (`recordPageTierFor`) is still taken and stamped on the page as
 `data-record-page-tier`, but the layout above is decided by the page
 content's own measured width.
 
+Wherever the details take one field a row, a row is the label left in a 112 px
+column and the value beside it. A wide field (`textarea`, `markdown`, `html`,
+`richtext`, `grid`, or `file` / `image` declared `multiple: true` — the fields
+`isWideDetailField` spans across a full row) draws its label above the value
+instead, and the value takes the column's whole width. A click on the value
+still edits it. A `markdown`, `html` or `richtext` body draws its `h1`–`h3`
+one step smaller than `prose-sm` (18 / 16 / 14 px); they stay heading elements,
+so a `?section=` link still finds them.
+
 On a pinned page the left column narrows on its own to leave the tabs 400 px,
 never below 320 px; under that the page is no longer pinned and the details
 become its first tab again. The divider between the column and the tabs is a

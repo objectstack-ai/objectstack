@@ -195,6 +195,10 @@ async function serve(
     tenancy?: { posture: string };
     /** [#36856] The automation service the door resolves for a flow's switch. */
     automation?: unknown;
+    /** [ADR-0161 K4] The knowledge service the save asks to admit a source for its author. */
+    knowledge?: unknown;
+    /** The rejection the classified lookup raises for `knowledge`: registered, and not resolvable. */
+    knowledgeFault?: Error;
   } = {},
 ): Promise<Served> {
   const { ql, reads } = userQl(opts.systemPermissions ?? ADMIN);
@@ -221,7 +225,16 @@ async function serve(
       }
       return name === 'mcp' ? mcp : name === 'protocol' ? protocol : name === 'security' ? security : undefined;
     },
-    resolveServiceOrLoud: async (_ctx: unknown, name: string) => (name === 'tenancy' ? opts.tenancy : undefined),
+    // The classified lookup: `tenancy`, and the knowledge service the draft
+    // save asks. A `knowledgeFault` is a registered service that cannot be
+    // resolved, which this lookup re-raises and the quiet probe would absorb.
+    resolveServiceOrLoud: async (_ctx: unknown, name: string) => {
+      if (name === 'knowledge') {
+        if (opts.knowledgeFault) throw opts.knowledgeFault;
+        return opts.knowledge;
+      }
+      return name === 'tenancy' ? opts.tenancy : undefined;
+    },
     getObjectQL: async () => {
       if (opts.qlThrows) throw new Error('engine lookup failed');
       return ql;
@@ -938,6 +951,113 @@ describe('save_metadata_draft saves a draft and answers with its publish verdict
       expect(JSON.parse(result.output.value).error, toolName).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
     }
     expect(calls).toEqual([]);
+  });
+});
+
+/**
+ * [ADR-0161 K4, guard one; ruled on #37304, Q2 = B] The draft door asks the
+ * `/meta` type-level write admission (`metaTypeWriteRefusal`: a
+ * `knowledge_source` needs `manage_knowledge_sources` beside
+ * `manage_metadata`) with the HUMAN as the caller.
+ */
+describe('[ADR-0161 K4] a knowledge_source draft needs the human to hold manage_knowledge_sources too', () => {
+  const SOURCE = { name: 'faq', label: 'FAQ', adapter: 'memory', source: { kind: 'object', object: 'article', content: ['body'] } };
+  const save = (authoring: OpenAuthoringInjection, type = 'knowledge_source') =>
+    call(authoring, 'save_metadata_draft', { type, name: 'faq', item: SOURCE, package: 'com.acme.crm' });
+  const discard = (authoring: OpenAuthoringInjection, type = 'knowledge_source') =>
+    call(authoring, 'delete_metadata_draft', { type, name: 'faq', package: 'com.acme.crm' });
+
+  it('a human holding manage_metadata without it is refused 403 PERMISSION_DENIED on the save and the discard, naming the capability, before anything is written', async () => {
+    const { authoring, served } = await authorThroughDomain({ systemPermissions: ['manage_metadata'] });
+    for (const type of ['knowledge_source', 'knowledge_sources']) {
+      const refused = await save(authoring, type);
+      expect(refused.body.error, type).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+      expect(refused.body.error.message, type).toBe('Writing knowledge_source metadata requires the `manage_knowledge_sources` capability.');
+      const discarded = await discard(authoring, type);
+      expect(discarded.body.error, type).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+      expect(discarded.body.error.message, type).toContain('`manage_knowledge_sources`');
+    }
+    expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem' || c[0] === 'deleteMetaItem')).toEqual([]);
+  });
+
+  it("the grant read is the human's: an envelope that carries the capability does not stand in for a human who lacks it", async () => {
+    // The request envelope is handed carrying both capabilities; the human's
+    // own permission set, read by the door, carries `manage_metadata` only.
+    const resolved = await oauthEnvelope(['metadata:write'], ['manage_metadata']);
+    const envelope = { ...(resolved as object), systemPermissions: ['manage_metadata', 'manage_knowledge_sources'] };
+    const served = await serve(envelope, { systemPermissions: ['manage_metadata'] });
+    const refused = await save(served.authoring!);
+    expect(refused.body.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403, message: expect.stringContaining('manage_knowledge_sources') });
+    expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
+  });
+
+  it('CONTROL: a human holding both saves and discards; the same human still saves another type', async () => {
+    const { authoring, served } = await authorThroughDomain({ systemPermissions: ['manage_metadata', 'manage_knowledge_sources'] });
+    expect((await save(authoring)).isError).toBe(false);
+    expect((await discard(authoring)).body).toEqual({ discarded: { type: 'knowledge_source', name: 'faq', package: 'com.acme.crm' } });
+    expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem').map((c: any) => c[1].type)).toEqual(['knowledge_source']);
+
+    const author = await authorThroughDomain({ systemPermissions: ['manage_metadata'] });
+    const flow = await call(author.authoring, 'save_metadata_draft', { type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm' });
+    expect(flow.isError).toBe(false);
+  });
+});
+
+/**
+ * [ADR-0161 K4, guard two] The draft save asks the environment's knowledge
+ * service whether the HUMAN may search what the source would index.
+ */
+describe('[ADR-0161 K4] save_metadata_draft asks the knowledge service to admit a source for the human', () => {
+  const SOURCE = { name: 'faq', label: 'FAQ', adapter: 'memory', source: { kind: 'object', object: 'article', content: ['body', 'salary'] } };
+  const BOTH = ['manage_metadata', 'manage_knowledge_sources'];
+  const REFUSAL = {
+    admitted: false, status: 403, code: 'PERMISSION_DENIED',
+    message: "The knowledge source 'faq' was not saved: you may not query field 'salary' of object 'article'.",
+  };
+  const save = (authoring: OpenAuthoringInjection, type = 'knowledge_source', item: unknown = SOURCE) =>
+    call(authoring, 'save_metadata_draft', { type, name: 'faq', item, package: 'com.acme.crm' });
+
+  it('a source the human may not search is refused 403 PERMISSION_DENIED with the gate\'s sentence, before anything is written', async () => {
+    const admitAuthoredSource = vi.fn(async () => REFUSAL);
+    const { authoring, served } = await authorThroughDomain({ systemPermissions: BOTH, knowledge: { admitAuthoredSource } });
+    const refused = await save(authoring);
+    expect(refused.body.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403, message: REFUSAL.message });
+    expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
+    // Judged for the admitted human: their id and grants, never a system identity.
+    const [item, caller] = admitAuthoredSource.mock.calls[0] as unknown as [unknown, any];
+    expect(item).toEqual(SOURCE);
+    expect(caller).toMatchObject({ userId: 'u1', isSystem: false, systemPermissions: BOTH });
+  });
+
+  it('fails closed: a verdict that throws is 503 SERVICE_UNAVAILABLE, and nothing is written', async () => {
+    const knowledge = { admitAuthoredSource: async () => { throw new Error('registry unavailable'); } };
+    const { authoring, served } = await authorThroughDomain({ systemPermissions: BOTH, knowledge });
+    const refused = await save(authoring);
+    expect(refused.body.error).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
+  });
+
+  it('fails closed: a knowledge service that is registered and cannot be resolved is 503 SERVICE_UNAVAILABLE, and nothing is written', async () => {
+    const { authoring, served } = await authorThroughDomain({
+      systemPermissions: BOTH,
+      knowledgeFault: new Error('knowledge factory: datasource unreachable'),
+    });
+    const refused = await save(authoring);
+    expect(refused.body.error).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    expect(refused.body.error.message).toContain('the knowledge service could not be resolved');
+    expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
+  });
+
+  it('CONTROL: an admitted source is saved; another type is never asked about; no knowledge service judges nothing', async () => {
+    const admitAuthoredSource = vi.fn(async () => ({ admitted: true }));
+    const { authoring, served } = await authorThroughDomain({ systemPermissions: BOTH, knowledge: { admitAuthoredSource } });
+    expect((await save(authoring)).isError).toBe(false);
+    expect((await call(authoring, 'save_metadata_draft', { type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm' })).isError).toBe(false);
+    expect(admitAuthoredSource).toHaveBeenCalledTimes(1);
+    expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem').map((c: any) => c[1].type)).toEqual(['knowledge_source', 'flow']);
+
+    const none = await authorThroughDomain({ systemPermissions: BOTH });
+    expect((await save(none.authoring)).isError).toBe(false);
   });
 });
 

@@ -715,21 +715,12 @@ export const de: PlatformTranslationData = {
       title: 'Wissen',
       description: 'Vektorspeicher-Backend für RAG und Wissensquellen.',
       groups: {
-        turso: {
-          title: 'Turso / libSQL',
-          description: 'Wird nur verwendet, wenn die Plattformdatenbank nicht PostgreSQL ist; unter PostgreSQL liegt der Wissensspeicher in der Plattformdatenbank, und diese Felder werden nicht gelesen. Funktioniert mit verwaltetem Turso, lokaler Datei oder im Arbeitsspeicher.',
-        },
         indexing: {
           title: 'Standardwerte für die Indexierung',
           description: 'Ein an der Wissensquelle selbst gesetzter Wert hat Vorrang vor diesen Standardwerten.',
         },
       },
       keys: {
-        turso_url: {
-          label: 'Verbindungs-URL',
-          help: 'Beispiele: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
-        },
-        turso_auth_token: { label: 'Auth-Token', help: 'Nur für verwaltete Turso-URLs erforderlich.' },
         chunk_target: {
           label: 'Ziel-Chunkgröße (Zeichen)',
           help: 'Längste Passage in Zeichen, wenn der Wissensdienst ein Dokument aufteilt. Eine an der Wissensquelle selbst gesetzte Größe hat Vorrang; das Eingabelimit des Embedding-Modells kann den Wert senken.',

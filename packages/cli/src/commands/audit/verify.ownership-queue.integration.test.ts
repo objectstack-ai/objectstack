@@ -206,7 +206,8 @@ describe('os audit verify on a stack that declares queues and assignmentRules (A
     expect(run.code, `${run.stdout.slice(0, 2000)}\n${run.stderr.slice(-2000)}`).toBe(0);
     const doc = JSON.parse(run.stdout);
     expect(doc.error).toBeUndefined();
-    expect(doc.report).toMatchObject({ ok: true, sealed: true, objects: [LEDGER], faults: [], rows: [] });
+    // `sys_audit_log` is sealed by its own declaration (ADR-0154 D10), so it is checked beside the ledger.
+    expect(doc.report).toMatchObject({ ok: true, sealed: true, objects: [LEDGER, 'sys_audit_log'], faults: [], rows: [] });
     expect(doc.report.totals.unmodified).toBe(3);
   });
 });

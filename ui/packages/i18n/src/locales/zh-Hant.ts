@@ -36,6 +36,7 @@ const zhHant = {
       manage_metadata: '管理中繼資料',
       manage_mailboxes: '管理郵箱',
       manage_connector_connections: '管理聯結器連線',
+      manage_knowledge_sources: '管理知識源',
       manage_platform_settings: '管理平台設定',
       setup_access: '訪問 Setup',
       setup_write: '儲存設定',
@@ -2594,6 +2595,10 @@ const zhHant = {
       noChatsDescription: '開始新的對話後會顯示在這裡。',
       noMatchingChats: '沒有匹配的對話。',
       newConversation: '新對話',
+      // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
+      askPage: {
+        scopeBadge: '本應用優先',
+      },
       renameConversation: '重新命名對話',
       deleteConversation: '刪除對話',
       saveRename: '儲存重新命名',
@@ -4134,6 +4139,9 @@ const zhHant = {
         form: '表單 {{count}}',
         form_one: '表單 {{count}}',
         form_other: '表單 {{count}}',
+        knowledge_source: '知識源 {{count}}',
+        knowledge_source_one: '知識源 {{count}}',
+        knowledge_source_other: '知識源 {{count}}',
         datasource: '資料來源 {{count}}',
         datasource_one: '資料來源 {{count}}',
         datasource_other: '資料來源 {{count}}',

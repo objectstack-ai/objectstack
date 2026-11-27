@@ -30,14 +30,14 @@ const store = liveStore('kpg_fence');
 const FP_A = { fingerprint: 'fp-fence:a', recipeHash: 'rh-fence:1' };
 const FP_B = { fingerprint: 'fp-fence:b', recipeHash: 'rh-fence:1' };
 
-const source = (id: string): KnowledgeSource =>
-  ({ id, label: id, adapter: 'under_test', source: { kind: 'object', object: 'article', contentFields: ['body'] } }) as KnowledgeSource;
+const source = (name: string): KnowledgeSource =>
+  ({ name, label: name, adapter: 'under_test', source: { kind: 'object', object: 'article', content: ['body'] } }) as KnowledgeSource;
 
 const ctx = (s: KnowledgeSource, index = FP_A, reason: AdapterContext['reason'] = 'reindex'): AdapterContext => ({ source: s, reason, index });
 
 function doc(s: KnowledgeSource, n: string, content: string): KnowledgeDocument {
-  const id = `${s.id}:${n}`;
-  return { id, sourceId: s.id, sourceRecordId: n, content, docHash: `h:${content}`, metadata: {}, chunks: [{ id: `${id}#0`, documentId: id, index: 0, content }] };
+  const id = `${s.name}:${n}`;
+  return { id, sourceId: s.name, sourceRecordId: n, content, docHash: `h:${content}`, metadata: {}, chunks: [{ id: `${id}#0`, documentId: id, index: 0, content }] };
 }
 
 const schemaOf = (adapter: PgvectorKnowledgeAdapter): string => (adapter as unknown as { schema: string }).schema;
@@ -99,12 +99,12 @@ describe.skipIf(!PG_URL)('knowledge-pgvector build fence on a LIVE PostgreSQL', 
       await upsert(batch, c);
       pages += 1;
       // The session holding the builder lock drops after the first page.
-      if (pages === 1) await endLockSession(adapter, s.id);
+      if (pages === 1) await endLockSession(adapter, s.name);
     };
     service.registerAdapter('under_test', adapter);
     service.registerSource(s);
 
-    const result = await service.reindexSource(s.id);
+    const result = await service.reindexSource(s.name);
 
     expect(result).toMatchObject({ ok: false, discovered: 100, indexed: 100 });
     expect(result.message).toContain('stopped at page 2');
@@ -134,7 +134,7 @@ describe.skipIf(!PG_URL)('knowledge-pgvector build fence on a LIVE PostgreSQL', 
     // ... and so is its completion, which would switch the generation the second one is still writing.
     await expect(a.completeBuild(ctx(s, FP_B))).rejects.toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
     // Nothing switched: the old generation is still the active one, the new one still building.
-    expect((await generationRows(schema, s.id)).map((g) => [g.fingerprint, g.state])).toEqual([
+    expect((await generationRows(schema, s.name)).map((g) => [g.fingerprint, g.state])).toEqual([
       [FP_A.fingerprint, 'active'],
       [FP_B.fingerprint, 'building'],
     ]);
@@ -155,7 +155,7 @@ describe.skipIf(!PG_URL)('knowledge-pgvector build fence on a LIVE PostgreSQL', 
     await b.beginBuild(ctx(s, FP_B));
 
     await expect(a.completeBuild(ctx(s, FP_B))).rejects.toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
-    expect((await generationRows(schemaOf(a), s.id)).map((g) => g.state)).toEqual(['active', 'building']);
+    expect((await generationRows(schemaOf(a), s.name)).map((g) => g.state)).toEqual(['active', 'building']);
     await b.completeBuild(ctx(s, FP_B));
   });
 
@@ -167,14 +167,14 @@ describe.skipIf(!PG_URL)('knowledge-pgvector build fence on a LIVE PostgreSQL', 
     await a.beginBuild(ctx(s, FP_B));
     // Another generation under the same fingerprint takes the place of the one this build began.
     const t = `"${schema}"."knowledge_generation"`;
-    await store.pool().query(`UPDATE ${t} SET state = 'retired' WHERE source_id = $1 AND state = 'building'`, [s.id]);
+    await store.pool().query(`UPDATE ${t} SET state = 'retired' WHERE source_id = $1 AND state = 'building'`, [s.name]);
     await store.pool().query(
       `INSERT INTO ${t} (source_id, generation, fingerprint, dim, model, state) VALUES ($1, 9, $2, 384, 'x', 'building')`,
-      [s.id, FP_B.fingerprint],
+      [s.name, FP_B.fingerprint],
     );
 
     await expect(a.completeBuild(ctx(s, FP_B))).rejects.toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
-    expect((await generationRows(schema, s.id)).find((g) => g.state === 'active')?.fingerprint).toBe(FP_A.fingerprint);
+    expect((await generationRows(schema, s.name)).find((g) => g.state === 'active')?.fingerprint).toBe(FP_A.fingerprint);
   });
 
   it('a lock kept from an earlier build is re-checked: a session that ended is not taken for a held lock', async () => {
@@ -182,7 +182,7 @@ describe.skipIf(!PG_URL)('knowledge-pgvector build fence on a LIVE PostgreSQL', 
     const b = store.adapter({ schema: schemaOf(a) });
     const s = source('kept_session');
     await a.beginBuild(ctx(s, FP_A));
-    await endLockSession(a, s.id);
+    await endLockSession(a, s.name);
 
     // The lock went with the session: another process takes it.
     await b.beginBuild(ctx(s, FP_A));
@@ -200,10 +200,10 @@ describe.skipIf(!PG_URL)('knowledge-pgvector build fence on a LIVE PostgreSQL', 
     await adapter.upsert([doc(s, '1', 'granite quarry')], ctx(s, FP_B));
     // The change is reverted before the build completes: the next build is under the active fingerprint.
     await adapter.beginBuild(ctx(s, FP_A));
-    expect((await generationRows(schema, s.id)).map((g) => [g.fingerprint, g.state])).toEqual([[FP_A.fingerprint, 'active']]);
+    expect((await generationRows(schema, s.name)).map((g) => [g.fingerprint, g.state])).toEqual([[FP_A.fingerprint, 'active']]);
     const passages = await store.pool().query<{ n: string }>(
       `SELECT count(*) AS n FROM "${schema}"."knowledge_vec_d384" WHERE source_id = $1 AND generation <> 1`,
-      [s.id],
+      [s.name],
     );
     expect(Number(passages.rows[0].n)).toBe(0);
     await adapter.completeBuild(ctx(s, FP_A));

@@ -36,6 +36,11 @@ export default defineConfig({
         find: /^@objectstack\/service-knowledge$/,
         replacement: path.resolve(__dirname, '../../services/service-knowledge/src/index.ts'),
       },
+      // The settings service the contribution's kernel pins boot.
+      {
+        find: /^@objectstack\/service-settings$/,
+        replacement: path.resolve(__dirname, '../../services/service-settings/src/index.ts'),
+      },
       // #9457: ONE anchored rule for every `@objectstack/spec` namespace, in place
       // of the hand-maintained list of the subpaths this package's tests happened
       // to reach. A string `find` matches by PREFIX, so with a FILE replacement the

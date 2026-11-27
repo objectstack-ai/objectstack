@@ -91,7 +91,8 @@ export type NamespaceUniqueType =
   | 'hook' | 'job'
   | 'app' | 'page' | 'dashboard' | 'report' | 'book' | 'analytics_cube'
   | 'tool'
-  | 'ai_context';
+  | 'ai_context'
+  | 'knowledge_source';
 
 /**
  * The covered types, in the order a refusal lists them — ADR-0150's
@@ -113,6 +114,10 @@ export const NAMESPACE_UNIQUE_TYPES: readonly NamespaceUniqueType[] = Object.fre
   'tool',
   // [ADR-0150 addendum 2026-11-25, point 3] admitted by the maintainer's merge.
   'ai_context',
+  // [ADR-0150 addendum 2026-11-25 (`knowledge_source`), point 1] admitted by the
+  // maintainer's merge of that addendum: one holder of a source name inside a
+  // namespace, so `NS-NAME` names one source.
+  'knowledge_source',
 ]);
 
 /** Is `type` one of the covered types? */

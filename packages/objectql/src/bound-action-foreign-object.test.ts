@@ -494,10 +494,14 @@ describe('a bound action saved at runtime through the metadata door reaches its 
         expect(actionNames(engine.registry.getArtifactItem('object', 'ba_org'))).toEqual(['own_action', 'rename_org']);
     });
 
-    it('a runtime action naming an object no package registers is listed nowhere, and the boot audit stays code-only', async () => {
+    // [#35143] Before, the save answered 200 and the action registered against
+    // no object, listed nowhere. The publish gate now refuses the binding.
+    it('a runtime action naming an object no package registers is refused at the save, registered nowhere, and the boot audit stays code-only', async () => {
         const { engine, protocol } = await hostWith([OWNER]);
-        await save(protocol, { ...RUNTIME, name: 'rt_orphan', objectName: 'ba_missing' });
-        expect(engine.registry.getItem('action', 'rt_orphan')).toBeDefined();
+        const err: any = await save(protocol, { ...RUNTIME, name: 'rt_orphan', objectName: 'ba_missing' }).then(() => null, (e: unknown) => e);
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect((err.issues ?? []).map((i: any) => [i.rule, i.path])).toEqual([['object-reference-unknown', 'actions[0].objectName']]);
+        expect(engine.registry.getItem('action', 'rt_orphan')).toBeUndefined();
         expect(actionNames(engine.registry.getObject('ba_org'))).toEqual(['own_action']);
         expect(engine.registry.findUnboundActionTargets()).toEqual([]);
     });

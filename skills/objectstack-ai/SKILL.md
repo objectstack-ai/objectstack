@@ -291,13 +291,13 @@ dev/test), `@objectstack/knowledge-pgvector` (`'pgvector'`) or `@objectstack/kno
 import { KnowledgeSourceSchema, type KnowledgeSource } from '@objectstack/spec/ai';
 
 export const supportKb: KnowledgeSource = KnowledgeSourceSchema.parse({
-  id: 'support_kb',
+  name: 'support_kb',
   label: 'Support Knowledge Base',
   adapter: 'pgvector',
   source: {
     kind: 'object',
     object: 'kb_article',
-    contentFields: ['title', 'body'],       // concatenated into document content
+    content: ['title', 'body'],             // joined into document content
     metadataFields: ['category', 'owner_id'], // projected for search-time filtering
     where: { published: true },             // index published articles only
   },

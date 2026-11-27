@@ -22,6 +22,7 @@ const ja = {
       manage_metadata: "メタデータ管理",
       manage_mailboxes: "メールボックスの管理",
       manage_connector_connections: "コネクタ接続の管理",
+      manage_knowledge_sources: "ナレッジソースの管理",
       manage_platform_settings: "プラットフォーム設定の管理",
       setup_access: "設定へのアクセス",
       setup_write: "設定の書き込み",
@@ -2251,6 +2252,10 @@ const ja = {
       noChatsDescription: "新しい会話を開始するとここに表示されます。",
       noMatchingChats: "一致するチャットはありません。",
       newConversation: "新しい会話",
+      // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
+      askPage: {
+        scopeBadge: "このアプリを優先",
+      },
       renameConversation: "会話の名前を変更",
       deleteConversation: "会話を削除",
       saveRename: "名前を保存",
@@ -5102,6 +5107,9 @@ const ja = {
         form: 'フォーム {{count}}',
         form_one: 'フォーム {{count}}',
         form_other: 'フォーム {{count}}',
+        knowledge_source: 'ナレッジソース {{count}}',
+        knowledge_source_one: 'ナレッジソース {{count}}',
+        knowledge_source_other: 'ナレッジソース {{count}}',
         datasource: 'データソース {{count}}',
         datasource_one: 'データソース {{count}}',
         datasource_other: 'データソース {{count}}',

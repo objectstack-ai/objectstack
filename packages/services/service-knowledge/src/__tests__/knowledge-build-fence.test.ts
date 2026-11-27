@@ -88,10 +88,10 @@ function makeAdapter() {
 
 function source(): KnowledgeSource {
   return {
-    id: 'kb',
+    name: 'kb',
     label: 'Knowledge base',
     adapter: 'memory',
-    source: { kind: 'object', object: 'kb_article', contentFields: ['title', 'body'] },
+    source: { kind: 'object', object: 'kb_article', content: ['title', 'body'] },
   };
 }
 

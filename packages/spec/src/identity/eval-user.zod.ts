@@ -178,6 +178,11 @@ export const ADMIN_FULL_ACCESS_CAPABILITIES: Pick<PermissionSet, 'objects' | 'sy
     // administrators (ruling B, record 6545223261); every other position only
     // by explicit grant.
     'manage_connector_connections',
+    // [ADR-0161 K4, ruling Q2 = B on #37304] The knowledge source capability:
+    // asked beside `manage_metadata` to create, change or remove a
+    // `knowledge_source`. Platform administrators hold it by default; every
+    // other position, organization administrators included, only by grant.
+    'manage_knowledge_sources',
   ],
 };
 

@@ -497,10 +497,13 @@ describe('ListView.contractEnvelope-6917', () => {
   } as unknown as ListViewSchema);
 
   /**
-   * Render against a `find()` answering `answer` and return the record-count
-   * bar's text. Scoped by test id rather than queried globally: the digits of a
-   * total can collide with row text, and `queryByText` throws on multiple
-   * matches exactly as it does on none.
+   * Render against a `find()` answering `answer` and return the record count's
+   * text. A grid draws the count in its resident footer row
+   * (`data-table-summary-lead`, objectstack#35702), and the record-count bar is
+   * then not drawn; it showed here only for the frames before the grid said so,
+   * so it is not read. Scoped by test id rather than queried globally: the
+   * digits of a total can collide with row text, and `queryByText` throws on
+   * multiple matches exactly as it does on none.
    */
   async function recordCountText(answer: unknown): Promise<string> {
     const ds = makeDataSource(answer);
@@ -513,12 +516,12 @@ describe('ListView.contractEnvelope-6917', () => {
         </SchemaRendererProvider>
       </I18nProvider>,
     );
-    let bar!: HTMLElement;
+    let lead!: HTMLElement;
     await waitFor(() => {
-      bar = getByTestId('record-count-bar');
-      expect(within(bar).getByText(/record/)).toBeInTheDocument();
+      lead = getByTestId('data-table-summary-lead');
+      expect(lead).toHaveTextContent(/record/);
     });
-    return within(bar).getByText(/record/).textContent ?? '';
+    return lead.textContent ?? '';
   }
 
   describe('ListView find() envelope — objectui#6917', () => {

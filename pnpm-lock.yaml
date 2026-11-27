@@ -254,6 +254,9 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../packages/drivers/driver-sql
+      '@objectstack/knowledge-memory':
+        specifier: workspace:*
+        version: link:../../packages/plugins/knowledge-memory
       '@objectstack/organizations':
         specifier: workspace:*
         version: link:../../packages/plugins/organizations
@@ -266,6 +269,9 @@ importers:
       '@objectstack/service-i18n':
         specifier: workspace:*
         version: link:../../packages/services/service-i18n
+      '@objectstack/service-knowledge':
+        specifier: workspace:*
+        version: link:../../packages/services/service-knowledge
       '@objectstack/service-print':
         specifier: workspace:*
         version: link:../../packages/services/service-print
@@ -1859,6 +1865,9 @@ importers:
       '@objectstack/service-knowledge':
         specifier: workspace:*
         version: link:../../services/service-knowledge
+      '@objectstack/service-settings':
+        specifier: workspace:*
+        version: link:../../services/service-settings
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5

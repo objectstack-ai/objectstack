@@ -3,8 +3,12 @@
 /**
  * ShellPageActions — the page's top-right button group (objectstack#36111,
  * phase 1 of the top-bar removal, objectstack#36107): from left to right the
- * comments slot, the AI assistant and help, at the same place on every in-app
- * page — a list, a record, a dashboard, a report, a custom page.
+ * comments slot, help and the assistant's 「Ask AI」 button (objectstack#37858:
+ * last, so it ends the row), at the same place on every in-app page — a list,
+ * a record, a dashboard, a report, a custom page. A route whose page draws no
+ * group gets the assistant's button at its top end corner
+ * (`ShellAssistantFallback`); a page whose own top bar holds controls at that
+ * corner draws the group in that bar through the slot instead.
  *
  * The group carries nothing that edits the app (objectstack#36485): the
  * design mode is entered from the app-name menu's 「Edit app」
@@ -17,7 +21,8 @@
  * module and its metadata, Studio and AI reads), and each header draws it
  * where its top-right is — the console `PageHeader` after the page's own
  * actions (reports and every custom page draw that header too), the record
- * page's navigation row before its ✕.
+ * page's navigation row at its right end (its ✕ is the row's first control,
+ * objectstack#36557).
  *
  * From 768 px up the app shell draws no top bar (objectstack#36112), so the
  * group is the page's only home for these buttons; the scope is on unless a
@@ -52,6 +57,7 @@ import { matchAppBySegment } from '../utils/index.js';
 import { appStudioRoutePath } from '../utils/appRoute.js';
 import { useStudioEntryGate, type StudioEntry } from '../hooks/useStudioDesignGate.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import {
   ShellPageActionsSlotContext,
   ShellSidebarExpandSlotContext,
@@ -96,6 +102,19 @@ function createExpandHeaderRegistry(): ExpandHeaderRegistry {
 const ExpandHeaderRegistryContext = React.createContext<ExpandHeaderRegistry | null>(null);
 
 /**
+ * objectstack#37858 — counts the groups drawn under a scope that turned the
+ * group on, so the assistant's corner button is drawn only on a route whose
+ * page draws no group at all. The same counter as the expand button's.
+ */
+const ShellGroupRegistryContext = React.createContext<ExpandHeaderRegistry | null>(null);
+
+/** A drawn group counts itself for the assistant's corner fallback. */
+function useCountShellGroup() {
+  const registry = React.useContext(ShellGroupRegistryContext);
+  React.useLayoutEffect(() => registry?.add(), [registry]);
+}
+
+/**
  * The shell's decision for the pages under it: the group, on unless `on` is
  * `false`; and, with `sidebarExpand` (only inside the sidebar provider), the
  * expand button for the headers' left edge. Both reach the headers through
@@ -114,7 +133,9 @@ export function ShellPageActionsScope({
   children: React.ReactNode;
 }) {
   const [registry] = React.useState(createExpandHeaderRegistry);
+  const [groups] = React.useState(createExpandHeaderRegistry);
   return (
+    <ShellGroupRegistryContext.Provider value={on ? groups : null}>
     <ExpandHeaderRegistryContext.Provider value={sidebarExpand ? registry : null}>
       <ShellSidebarExpandSlotContext.Provider value={sidebarExpand ? renderShellSidebarExpand : null}>
         <ShellPageActionsSlotContext.Provider
@@ -124,6 +145,7 @@ export function ShellPageActionsScope({
         </ShellPageActionsSlotContext.Provider>
       </ShellSidebarExpandSlotContext.Provider>
     </ExpandHeaderRegistryContext.Provider>
+    </ShellGroupRegistryContext.Provider>
   );
 }
 
@@ -180,6 +202,35 @@ export function ShellSidebarExpandFallback() {
   );
 }
 
+/**
+ * objectstack#37858 — the assistant's entry for a route whose page draws no
+ * group (search results, a component page, the app editor): the same button,
+ * pinned at the content's top end corner (top-right; top-left in a
+ * right-to-left language), the corner every other page has it in. Like the
+ * expand button's fallback it takes no room of its own, so it may only sit
+ * over an empty corner: a page that keeps its own controls in its top end
+ * corner (the report builder's Save, the inbox's buttons) draws the group in
+ * its own header through the slot instead, which also counts it here. Drawn
+ * only inside a scope that turned the group on, never on a phone (its top bar
+ * carries the entry) and only where the runtime serves AI.
+ */
+export function ShellAssistantFallback() {
+  const registry = React.useContext(ShellGroupRegistryContext);
+  const groups = React.useSyncExternalStore(
+    registry?.subscribe ?? noSubscription,
+    registry?.count ?? noHeaders,
+    noHeaders,
+  );
+  const phone = usePhoneViewport();
+  const { enabled: aiEnabled } = useAiSurfaceEnabled();
+  if (!registry || groups > 0 || phone || !aiEnabled) return null;
+  return (
+    <div className="sticky top-0 z-20 h-0" data-testid="shell-assistant-fallback">
+      <AssistantTopBarButton className="absolute end-2 top-2 bg-background/80 backdrop-blur" />
+    </div>
+  );
+}
+
 /** Whether the group is drawn here: inside a scope that turned it on, and not on a phone. */
 export function useShellPageActionsOn(): boolean {
   return useShellPageActionsSlot() !== null;
@@ -232,28 +283,31 @@ function renderApplessShellPageActionsGroup(props: ShellPageActionsSlotProps): R
   return <ApplessShellPageActionsGroup {...props} />;
 }
 
-/** The group on a page in no app: the assistant, and help without an app's docs or shortcuts. */
-function ApplessShellPageActionsGroup({ comments }: ShellPageActionsProps) {
+/** The group on a page in no app: help without an app's docs or shortcuts, then the assistant. */
+function ApplessShellPageActionsGroup({ comments, assistantIconOnly }: ShellPageActionsProps) {
   const { enabled: aiEnabled } = useAiSurfaceEnabled();
+  useCountShellGroup();
   return (
     <div className="flex shrink-0 items-center gap-0.5" data-testid="shell-page-actions">
       {comments}
-      {aiEnabled && <AssistantTopBarButton className="max-md:size-8" />}
       <HelpMenu inApp={false} triggerClassName="h-8 w-8 shrink-0" triggerTestId="shell-page-actions-help" />
+      {aiEnabled && <AssistantTopBarButton iconOnly={assistantIconOnly} className="ml-1" />}
     </div>
   );
 }
 
-function ShellPageActionsGroup({ comments }: ShellPageActionsProps) {
+function ShellPageActionsGroup({ comments, assistantIconOnly }: ShellPageActionsProps) {
   // The app only: the group draws no Studio entry, so it reads no gate.
   const { currentApp } = useAppStudioEntry(false);
   const { enabled: aiEnabled } = useAiSurfaceEnabled();
+  useCountShellGroup();
   const appPackageId = (currentApp as { _packageId?: string } | undefined)?._packageId;
   return (
     <div className="flex shrink-0 items-center gap-0.5" data-testid="shell-page-actions">
       {comments}
-      {aiEnabled && <AssistantTopBarButton className="max-md:size-8" />}
       <HelpMenu inApp appPackageId={appPackageId} triggerClassName="h-8 w-8 shrink-0" triggerTestId="shell-page-actions-help" />
+      {/* objectstack#37858 — Ask AI ends the group, so it ends the header's row. */}
+      {aiEnabled && <AssistantTopBarButton iconOnly={assistantIconOnly} className="ml-1" />}
     </div>
   );
 }

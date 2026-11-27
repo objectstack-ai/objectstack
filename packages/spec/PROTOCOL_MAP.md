@@ -82,7 +82,6 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`conversation.zod.ts`](src/ai/conversation.zod.ts) | | **Chat Session**. History and context management for AI chats. |
 | [`knowledge-source.zod.ts`](src/ai/knowledge-source.zod.ts) | | **Knowledge Source**. What to index and which adapter to use (the RAG retrieval binding). |
 | [`knowledge-document.zod.ts`](src/ai/knowledge-document.zod.ts) | | **Knowledge Document**. Document / chunk / hit shapes shared by every knowledge adapter. |
-| [`embedding.zod.ts`](src/ai/embedding.zod.ts) | | **Embeddings**. Embedding model and vector store configuration. |
 | [`solution-blueprint.zod.ts`](src/ai/solution-blueprint.zod.ts) | | **Solution Blueprint**. Plan-first authoring target for high-level goals (ADR-0033). |
 | [`usage.zod.ts`](src/ai/usage.zod.ts) | | **Usage**. Token consumption measurement. Was `cost`. |
 

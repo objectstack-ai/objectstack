@@ -329,6 +329,7 @@ const FIELD_DEFAULTS: Record<string, string> = {
   'capability.label.view_all_audit_log': 'View All Audit Log',
   'capability.label.manage_mailboxes': 'Manage Mailboxes',
   'capability.label.manage_connector_connections': 'Manage Connector Connections',
+  'capability.label.manage_knowledge_sources': 'Manage Knowledge Sources',
 };
 
 export const useFieldTranslation = createSafeTranslation(

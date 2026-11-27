@@ -384,6 +384,7 @@ const SINGLE: unknown = {
         posture: 'PLATFORM_ADMIN',
         systemPermissions: [
           'manage_connector_connections',
+          'manage_knowledge_sources',
           'manage_mailboxes',
           'manage_metadata',
           'manage_platform_settings',
@@ -477,6 +478,7 @@ const WALLED: unknown = {
         posture: 'PLATFORM_ADMIN',
         systemPermissions: [
           'manage_connector_connections',
+          'manage_knowledge_sources',
           'manage_mailboxes',
           'manage_metadata',
           'manage_platform_settings',

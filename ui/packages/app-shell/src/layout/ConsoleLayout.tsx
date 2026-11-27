@@ -31,7 +31,7 @@ import { useLastApp } from '../context/LastAppProvider.js';
 import { rememberAppReturnPage } from '../utils/appReturnPage.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { appAddressSegment } from '../utils/appRoute.js';
-import { ShellPageActionsScope, ShellSidebarExpandFallback } from './ShellPageActions.js';
+import { ShellAssistantFallback, ShellPageActionsScope, ShellSidebarExpandFallback } from './ShellPageActions.js';
 import { ChromeBannerHost } from './chromeBannerHost.js';
 import { ConnectionBanner } from './ConnectionBanner.js';
 import { useGoHomeShortcut } from '../chrome/goHomeShortcut.js';
@@ -43,7 +43,7 @@ import { useDesignModeArrival } from './useDesignModeArrival.js';
 import { useResponsiveSidebar } from '../hooks/useResponsiveSidebar.js';
 import { usePhoneNavDrawerHistory } from './usePhoneNavDrawerHistory.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
-import { isAppDocsPath, isRecordPagePath } from './consoleRoutePaths.js';
+import { isAppAskPagePath, isAppDocsPath, isRecordPagePath } from './consoleRoutePaths.js';
 import { SIDEBAR_TOGGLE_CHORD, primeConsoleSidebarOpen } from './consoleSidebarRail.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import { servedObjectLabel } from '../hooks/servedObjectLabel.js';
@@ -273,6 +273,9 @@ export function ConsoleLayout({
     appPackageId: activeApp?._packageId,
     surfaceContext: dockSurface,
     surfaceArtifactLabel: dockSurfaceLabel,
+    // ui ADR-0057 Amendment A4 — the app's AI inquiry page draws its own ask
+    // conversation, so the drawer stays closed there.
+    askPageActive: isAppAskPagePath(location.pathname),
   });
 
   // Set navigation context to 'app' when this layout mounts
@@ -417,6 +420,9 @@ export function ConsoleLayout({
           )}
         >
         <ShellSidebarExpandFallback />
+        {/* objectstack#37858 — a route whose page draws no button group gets
+            the assistant's entry at its top-right corner. */}
+        <ShellAssistantFallback />
         {children}
         </div>
         </ShellPageActionsScope>

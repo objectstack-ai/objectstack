@@ -12,16 +12,15 @@ describe('knowledgeSettingsManifest', () => {
     expect(() => SettingsManifestSchema.parse(knowledgeSettingsManifest)).not.toThrow();
   });
 
-  it('declares namespace=knowledge, scope=global, version=4 (chunk_overlap, the ragflow option, then adapter, over_fetch and enforce_rls, retired)', () => {
+  it('declares namespace=knowledge, scope=global, version=5 (chunk_overlap, the ragflow option, then adapter, over_fetch and enforce_rls retired; the Turso group left for its store)', () => {
     const parsed = SettingsManifestSchema.parse(knowledgeSettingsManifest);
     expect(parsed.namespace).toBe('knowledge');
     expect(parsed.scope).toBe('global');
-    expect(parsed.version).toBe(4);
+    expect(parsed.version).toBe(5);
     const keys = parsed.specifiers.map((sp: any) => sp.key).filter(Boolean);
-    // Every key left has a named reader (#37104): `turso_url` and
-    // `turso_auth_token` by @objectstack/knowledge-turso, `chunk_target` by the
+    // Every key left has a named reader (#37104): `chunk_target`, the
     // knowledge service's splitter. A key added here owes its reader first.
-    expect(keys).toEqual(['turso_url', 'turso_auth_token', 'chunk_target']);
+    expect(keys).toEqual(['chunk_target']);
     for (const key of [
       'chunk_overlap',
       'ragflow_base_url', 'ragflow_api_key', 'ragflow_default_dataset',
@@ -30,31 +29,27 @@ describe('knowledgeSettingsManifest', () => {
       expect(keys, key).not.toContain(key);
     }
     const groups = parsed.specifiers.filter((sp: any) => sp.type === 'group').map((sp: any) => sp.id);
-    expect(groups).toEqual(['turso', 'indexing']);
+    expect(groups).toEqual(['indexing']);
+  });
+
+  // The Turso fields' one reader is @objectstack/knowledge-turso, which adds
+  // them to this page where it reads them (`contributeKnowledgeTursoSettings`;
+  // its own tests pin both mount cases). Declared here, they would show on a
+  // deployment whose store is pgvector, where nothing reads them.
+  it('declares no Turso group or field: the store that reads them contributes them', () => {
+    const specs = knowledgeSettingsManifest.specifiers as any[];
+    for (const id of ['turso', 'turso_url', 'turso_auth_token']) {
+      expect(specs.some((s) => (s.key ?? s.id) === id), id).toBe(false);
+    }
+    expect(JSON.stringify(knowledgeSettingsManifest)).not.toMatch(/turso/i);
   });
 
   it('gates nothing on the retired adapter: no specifier declares a visibility predicate', () => {
     const specs = knowledgeSettingsManifest.specifiers as any[];
     // Non-vacuity: the specifiers are there to inspect.
-    expect(specs.length).toBeGreaterThan(3);
+    expect(specs.length).toBeGreaterThanOrEqual(3);
     for (const s of specs) expect(s.visible, s.key ?? s.id).toBeUndefined();
     expect(JSON.stringify(knowledgeSettingsManifest)).not.toContain('data.adapter');
-  });
-
-  it('says on the Turso group when its fields are read, and when they are not', () => {
-    const group = (knowledgeSettingsManifest.specifiers as any[]).find((s) => s.type === 'group' && s.id === 'turso');
-    expect(group.description).toMatch(/not PostgreSQL/);
-    expect(group.description).toMatch(/not read/);
-  });
-
-  it('marks every secret field as encrypted password', () => {
-    const secretKeys = ['turso_auth_token'];
-    for (const key of secretKeys) {
-      const f = (knowledgeSettingsManifest.specifiers as any[]).find((s) => s.key === key);
-      expect(f, `${key} missing`).toBeDefined();
-      expect(f.type).toBe('password');
-      expect(f.encrypted).toBe(true);
-    }
   });
 
   it('exposes a test action wired to /api/settings/knowledge/test', () => {

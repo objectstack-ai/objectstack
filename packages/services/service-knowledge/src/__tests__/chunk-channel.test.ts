@@ -6,7 +6,7 @@
  *
  * - the event path removes a `whole` document over the embedder's budget and
  *   reports it at `error`, naming the source, the record, the estimate and the
- *   limit; `indexDocument` removes it and throws;
+ *   limit;
  * - a reindex names at most `MAX_REINDEX_FAILURES` failures and counts them all;
  * - `maxChars` comes from the source's `split.maxChars`, else the settings
  *   page's `knowledge.chunk_target` (read through the real settings service),
@@ -15,7 +15,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
-import type { AdapterContext, IDataEngine, IKnowledgeAdapter, IKnowledgeService } from '@objectstack/spec/contracts';
+import type { AdapterContext, IDataEngine, IKnowledgeAdapter } from '@objectstack/spec/contracts';
 import type { KnowledgeDocument, KnowledgeSource, KnowledgeSplit } from '@objectstack/spec/ai';
 import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
 import { SettingsServicePlugin, type SettingsService } from '@objectstack/service-settings';
@@ -43,10 +43,10 @@ function recordingAdapter(limit?: { maxInputTokens?: number }) {
 
 function source(split?: KnowledgeSplit): KnowledgeSource {
   return {
-    id: 'kb',
+    name: 'kb',
     label: 'kb',
     adapter: 'rec',
-    source: { kind: 'object', object: 'article', contentFields: ['body'], ...(split ? { split } : {}) },
+    source: { kind: 'object', object: 'article', content: ['body'], ...(split ? { split } : {}) },
   } as KnowledgeSource;
 }
 
@@ -119,17 +119,6 @@ describe('chunk channel — whole over the budget', () => {
     expect(deleted).toEqual([]);
     expect(upserted).toHaveLength(1);
     expect(upserted[0].chunks).toEqual([{ id: 'kb:r1#0', documentId: 'kb:r1', index: 0, content: LONG }]);
-  });
-
-  it('indexDocument removes it and throws, naming the estimate and the budget', async () => {
-    const { adapter, upserted, deleted } = recordingAdapter({ maxInputTokens: 512 });
-    const svc = new KnowledgeService({ logger: { warn: vi.fn() } });
-    svc.registerAdapter('rec', adapter);
-    svc.registerSource(source({ strategy: 'whole' }));
-    await expect(svc.indexDocument('kb', { id: 'kb:x', sourceId: 'kb', content: LONG }))
-      .rejects.toThrow(/did not index document 'kb:x' and removed it from the index: the whole document estimates \d+ tokens, over the embedder's input budget of 409/);
-    expect(upserted).toEqual([]);
-    expect(deleted).toEqual(['kb:x']);
   });
 
   it(`a reindex counts every failure and names the first ${MAX_REINDEX_FAILURES}`, async () => {
@@ -209,17 +198,17 @@ describe('chunk channel — what the split is resolved from, read at use', () =>
     kernel.use(new SettingsServicePlugin({ env: {}, registerRoutes: false }));
     await kernel.bootstrap();
     const settings = kernel.getService<SettingsService>('settings');
-    const svc = kernel.getService<IKnowledgeService>(KNOWLEDGE_SERVICE);
+    const svc = kernel.getService<KnowledgeService>(KNOWLEDGE_SERVICE);
     const { adapter, upserted } = recordingAdapter(undefined);
     svc.registerAdapter('rec', adapter);
     svc.registerSource(source({ strategy: 'recursive', minChars: 100_000 }));
 
-    await svc.indexDocument('kb', { id: 'kb:a', sourceId: 'kb', content: LONG.repeat(3) });
+    await svc.handleRecordUpsert('article', { id: 'a', body: LONG.repeat(3) });
     expect(Math.max(...lengths(upserted))).toBeGreaterThan(640); // 800, nothing stored
     upserted.length = 0;
     // Saved after boot: the next write is cut by it.
     await settings.set('knowledge', 'chunk_target', 200);
-    await svc.indexDocument('kb', { id: 'kb:a', sourceId: 'kb', content: LONG.repeat(3) });
+    await svc.handleRecordUpsert('article', { id: 'a', body: LONG.repeat(3) });
     expect(Math.max(...lengths(upserted))).toBeLessThanOrEqual(200);
     await kernel.shutdown();
   });

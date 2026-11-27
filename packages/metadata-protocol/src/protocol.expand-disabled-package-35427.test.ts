@@ -53,6 +53,8 @@ const SCHEMAS: Record<string, unknown> = {
         beta: lookup('beta', 'dp_beta'),
         open: lookup('open', 'dp_open'),
         hidden: lookup('hidden', 'dp_hidden'),
+        off: lookup('off', 'dp_off'),
+        listed: lookup('listed', 'dp_listed'),
     }),
     // The object the disable takes offline.
     dp_beta: object('dp_beta', undefined, { secret_note: { name: 'secret_note', label: 'Note', type: 'text' } }),
@@ -60,6 +62,10 @@ const SCHEMAS: Record<string, unknown> = {
     dp_open: object('dp_open', undefined, { inner: lookup('inner', 'dp_beta') }),
     // CONTROL: switched off by its own exposure, not by a package disable.
     dp_hidden: object('dp_hidden', { apiEnabled: false }),
+    // [#35528] Disabled AND unexposed: the off switch, and a whitelist that
+    // serves `get` (so `$expand`) but not `list` (so a relation condition).
+    dp_off: object('dp_off', { apiEnabled: false }),
+    dp_listed: object('dp_listed', { apiMethods: ['get'] }),
 };
 
 function makeProtocol(opts: { disabled: Set<string>; registryAnswers?: boolean }) {
@@ -159,5 +165,32 @@ describe('[#35427] a nested-relation condition on a disabled package\'s object i
         const { p, find } = makeProtocol({ disabled: DISABLED });
         await p.findData({ object: 'dp_source', query: { where: { beta: 'b1' } }, context: SYSTEM } as any);
         expect(find).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('[#35528] a target both package-disabled and unexposed answers the package refusal first', () => {
+    const BOTH = new Set(['dp_off', 'dp_listed']);
+    const conditionError = async (disabled: Set<string>, rel: string): Promise<any> => {
+        const { p, find } = makeProtocol({ disabled });
+        const err: any = await p.findData({ object: 'dp_source', query: { where: { [rel]: { name: 'x' } } }, context: SYSTEM } as any).catch((e) => e);
+        expect(find).not.toHaveBeenCalled();
+        return { code: err.code, status: err.status, object: err.object };
+    };
+
+    it('THE PIN: the relation condition answers 404 OBJECT_PACKAGE_DISABLED, not the exposure refusal', async () => {
+        expect(await conditionError(BOTH, 'off')).toEqual({ code: 'OBJECT_PACKAGE_DISABLED', status: 404, object: 'dp_off' });
+        expect(await conditionError(BOTH, 'listed')).toEqual({ code: 'OBJECT_PACKAGE_DISABLED', status: 404, object: 'dp_listed' });
+    });
+
+    it('THE PIN: $expand withholds both entries', async () => {
+        expect(await expandHandedToFind(BOTH, { expand: { off: { object: 'off' }, listed: { object: 'listed' }, open: { object: 'open' } } }))
+            .toEqual({ open: { object: 'open' } });
+    });
+
+    it('CONTROL: re-enabled, each answers its own exposure (off 404 / whitelist 405, the whitelist expanded)', async () => {
+        expect(await conditionError(ENABLED, 'off')).toEqual({ code: 'OBJECT_API_DISABLED', status: 404, object: 'dp_off' });
+        expect(await conditionError(ENABLED, 'listed')).toEqual({ code: 'OBJECT_API_METHOD_NOT_ALLOWED', status: 405, object: 'dp_listed' });
+        expect(await expandHandedToFind(ENABLED, { expand: { off: { object: 'off' }, listed: { object: 'listed' } } }))
+            .toEqual({ listed: { object: 'listed' } });
     });
 });

@@ -220,7 +220,9 @@ const INTERNAL_FIELD_WALK_DEPTH = 8;
  * that serves exactly those records by id; it is not the read this is. The
  * dataset door's dimension-label pass asks the same operation of the same
  * target (`@objectstack/service-analytics`), so a lookup renders its name, or
- * its stored id, alike on both doors.
+ * its stored id, alike on both doors. A target of a disabled package renders
+ * its stored id on both too: each door also asks the registry's
+ * `isObjectPackageDisabled` and withholds it ({@link servesExpansionTarget}).
  */
 const EXPANSION_TARGET_OPERATION = 'get';
 
