@@ -373,6 +373,11 @@ export {
   CAPABILITY_REFERENCE_UNKNOWN,
 } from './validate-capability-references.js';
 export type { CapabilityRefFinding, CapabilityRefSeverity } from './validate-capability-references.js';
+export {
+  validateBookAudienceClaims,
+  BOOK_GATED_CATCH_ALL_INCLUDE,
+} from './validate-book-audience-claims.js';
+export type { BookAudienceClaimFinding } from './validate-book-audience-claims.js';
 
 export {
   validateApprovalApprovers,

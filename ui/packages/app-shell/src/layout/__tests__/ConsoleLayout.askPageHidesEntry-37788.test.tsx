@@ -12,8 +12,10 @@
  * ## Real subjects
  *
  * `ConsoleLayout` with its real `AppShell`, the real `useConsoleChatDock`
- * host, the real `useChatDockState` and the real `AssistantTopBarButton`,
- * drawn in the page as the page header's button group draws it from 768 px up.
+ * host, the real `useChatDockState` and the real `AssistantTopBarButton`. The
+ * page draws no header, so the entry under test is the layout's own corner
+ * button (objectstack#37858, `ShellAssistantFallback`), the same button the
+ * page header's group draws from 768 px up.
  * The rail body is a stand-in: which chrome mounts is the subject here.
  */
 
@@ -55,7 +57,6 @@ vi.mock('../../preview/DraftPreviewBar', () => ({ DraftPreviewBar: () => null })
 vi.mock('../../preview/UnpublishedAppBar', () => ({ UnpublishedAppBar: () => null }));
 
 import { ConsoleLayout } from '../ConsoleLayout';
-import { AssistantTopBarButton } from '../AssistantTopBarButton';
 import { NavigationProvider } from '../../context/NavigationContext';
 
 const APP = { name: 'crm', label: 'CRM', active: true, navigation: [] };
@@ -77,7 +78,6 @@ function mountConsole(entry: string) {
     <MemoryRouter initialEntries={[entry]}>
       <NavigationProvider>
         <ConsoleLayout activeAppName="crm" activeApp={APP} onAppChange={vi.fn()} objects={[]}>
-          <AssistantTopBarButton />
           <Links />
         </ConsoleLayout>
       </NavigationProvider>
