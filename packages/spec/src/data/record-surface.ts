@@ -122,7 +122,12 @@ export interface RecordFlowSurface {
    */
   container: RecordFlowContainer;
   surface: RecordSurface;
-  /** Maps onto `navigation.size` / `FormView.modalSize`; routes ignore it. */
+  /**
+   * The task-flow dialog's size: the console's create / edit dialog turns
+   * `'full'` into its full-screen sheet and lets `'auto'` size itself. The
+   * record drawer's width does not read it (that is `navigation.size`'s), and
+   * routes ignore it.
+   */
   size: 'auto' | 'full';
 }
 

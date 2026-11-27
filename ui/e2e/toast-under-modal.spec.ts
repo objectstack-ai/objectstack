@@ -284,7 +284,7 @@ interface Configuration {
    * objectstack#26677).
    */
   mode: 'drawer' | 'dialog';
-  /** What `ObjectView` passes: `overlayWidthFor(...)`, `min(92vw, BUCKET px)`. */
+  /** What `ObjectView` passes: `recordPaneWidth(...)`, `min(92vw, N px)`: 460 for `auto`, else the bucket's cap. */
   drawerWidth: string;
   /**
    * Where objectui#11685 puts the toaster for this window and overlay: beside

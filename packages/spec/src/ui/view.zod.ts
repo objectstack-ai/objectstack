@@ -3193,9 +3193,10 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
 
   /**
    * @deprecated [#2578 → `size`] A pixel/percent width cannot be authored blind:
-   * the author (often an AI) does not know the client viewport. Kept only as a
-   * renderer fallback for pre-#2578 metadata; new metadata sets `size` (or omits
-   * it for `auto`).
+   * the author (often an AI) does not know the client viewport. It is still
+   * honoured, and where a renderer reads both keys an authored `width` wins over
+   * `size` (the console's record drawer does), so new metadata sets `size` (or
+   * omits it for `auto`) and leaves `width` out.
    */
   width: z.union([z.string(), z.number()]).optional().describe('[DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket.'),
 }));
