@@ -126,6 +126,29 @@ describe('field gate — a source serving a field the caller may not query is no
     expect(searched()).toEqual(['bodies']); // never searched, not searched-then-dropped
   });
 
+  it('the fields a source\'s `where` reads are judged too: one the caller may not query refuses the source', async () => {
+    const selecting = (id: string, where: Record<string, unknown>): KnowledgeSource => {
+      const source = objectSource(id, 'ticket', ['body']);
+      return { ...source, source: { ...source.source, where } as ObjectKnowledgeSource };
+    };
+    const { svc, searched } = setup({
+      sources: [
+        selecting('by_key', { salary_note: { $ne: null } }),
+        selecting('nested', { $and: [{ status: 'open' }, { $or: [{ $not: { salary_note: 'x' } }] }] }),
+        selecting('dotted', { 'salary_note.grade': 3 }),
+        selecting('comparand', { body: { $eq: { $field: 'salary_note' } } }),
+        selecting('open_only', { status: 'open' }),
+      ],
+      security: salaryHiddenFromMembers,
+    });
+    expect(ids(await svc.search('raise', { executionContext: MEMBER }))).toEqual(['open_only']);
+    expect(searched()).toEqual(['open_only']); // never searched, not searched-then-dropped
+    // Preservation: a caller who may query the field is served every one of them.
+    expect(ids(await svc.search('raise', { executionContext: MANAGER }))).toEqual(
+      ['by_key', 'comparand', 'dotted', 'nested', 'open_only'],
+    );
+  });
+
   it('preservation: a manager who may query every field, and the system context, get the hit', async () => {
     const { svc } = setup({
       sources: [objectSource('notes', 'ticket', ['body', 'salary_note'])],
@@ -435,6 +458,36 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
     const retired = { name: 'authored', label: 'A', adapter: 'memory', source: { kind: 'object', object: 'ticket', contentFields: ['salary_note'] } };
     expect(await svc.admitAuthoredSource(retired, MEMBER))
       .toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, field: 'salary_note' });
+  });
+
+  it.each([
+    ['a condition key', { salary_note: { $ne: null } }],
+    ['a key under $and / $or / $not', { $and: [{ status: 'open' }, { $or: [{ $not: { salary_note: 'x' } }] }] }],
+    ['a dotted path, by its first segment', { 'salary_note.grade': 3 }],
+    ['a cross-field comparand', { body: { $eq: { $field: 'salary_note' } } }],
+  ])('a field the `where` reads is judged like a served one: %s', async (_label, where) => {
+    const { svc } = setup({ sources: [], security: salaryHiddenFromMembers });
+    const verdict = await svc.admitAuthoredSource(item('ticket', ['body'], { where }), MEMBER);
+    expect(verdict).toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, object: 'ticket', field: 'salary_note' });
+    const message = (verdict as { message: string }).message;
+    expect(message).toContain("its `where` reads field 'salary_note' of object 'ticket'");
+    expect(message).toContain('Remove the field from `where`');
+    // The same source, by an author who may query the field, and by the engine itself.
+    expect(await svc.admitAuthoredSource(item('ticket', ['body'], { where }), MANAGER)).toEqual({ admitted: true });
+    expect(await svc.admitAuthoredSource(item('ticket', ['body'], { where }), SYSTEM)).toEqual({ admitted: true });
+  });
+
+  it('CONTROL: a `where` over fields the author may query is admitted, and a `where` that is no condition names no field', async () => {
+    const { svc } = setup({ sources: [], security: salaryHiddenFromMembers });
+    expect(await svc.admitAuthoredSource(item('ticket', ['body'], { where: { status: { $in: ['open', 'new'] } } }), MEMBER))
+      .toEqual({ admitted: true });
+    expect(await svc.admitAuthoredSource(item('ticket', ['body'], { where: 'status = open' }), MEMBER)).toEqual({ admitted: true });
+  });
+
+  it('a `where` key that is neither a logical key nor a field the author may query is refused: an unknown operator is not a pass', async () => {
+    const { svc } = setup({ sources: [], security: salaryHiddenFromMembers });
+    expect(await svc.admitAuthoredSource(item('ticket', ['body'], { where: { $nor: [{ status: 'open' }] } }), MEMBER))
+      .toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, field: '$nor' });
   });
 
   it("the object's display field is indexed as the title: an author who may not query it is refused though the source does not list it", async () => {

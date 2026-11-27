@@ -2289,8 +2289,8 @@ export class KnowledgeService implements IKnowledgeService {
    * `@objectstack/metadata-core`), never by the metadata protocol.
    *
    * `item` is the body as the door hands it to the protocol, not yet parsed.
-   * What is read of it is `source.object`, `source.content` and
-   * `source.metadataFields` (and `source.contentFields`, the spelling the
+   * What is read of it is `source.object`, `source.content`,
+   * `source.metadataFields` and the fields `source.where` reads (and `source.contentFields`, the spelling the
    * ADR-0087 kit renames to `content`, so a converted save is judged on the
    * fields it will index). An item with no object to judge is admitted here:
    * the protocol's parse refuses it with the schema's own prescription.
@@ -2308,19 +2308,23 @@ export class KnowledgeService implements IKnowledgeService {
     if (ctx?.isSystem) return { admitted: true };
     const body = (item as { name?: unknown; source?: unknown } | null | undefined) ?? {};
     const declared = body.source as
-      | { object?: unknown; content?: unknown; contentFields?: unknown; metadataFields?: unknown }
+      | { object?: unknown; content?: unknown; contentFields?: unknown; metadataFields?: unknown; where?: unknown }
       | null
       | undefined;
     const object = declared && typeof declared === 'object' ? declared.object : undefined;
     if (typeof object !== 'string' || object === '') return { admitted: true };
     const names = (value: unknown): string[] =>
       Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && v !== '') : [];
-    const listed = declared as { content?: unknown; contentFields?: unknown; metadataFields?: unknown };
+    const listed = declared as { content?: unknown; contentFields?: unknown; metadataFields?: unknown; where?: unknown };
+    const where = listed.where;
     const objSource: ObjectKnowledgeSource = {
       kind: 'object',
       object,
       content: [...names(listed.content), ...names(listed.contentFields)],
       metadataFields: names(listed.metadataFields),
+      ...(where !== null && typeof where === 'object' && !Array.isArray(where)
+        ? { where: where as Record<string, unknown> }
+        : {}),
     };
     const named = `The knowledge source${describeName(body)} was not saved`;
     const refuse = (status: number, code: string, message: string, field?: string) =>
@@ -2372,6 +2376,16 @@ export class KnowledgeService implements IKnowledgeService {
         );
       case 'field-not-queryable': {
         const field = verdict.field ?? '';
+        if (verdict.use === 'where') {
+          return refuse(
+            403,
+            'PERMISSION_DENIED',
+            `${named}: its \`where\` reads field '${field}' of object '${object}', which you may not query (it is ` +
+              'hidden from you, or served to you masked), and the source would select its records by that field. ' +
+              'Remove the field from `where`, or have someone who may query it save the source.',
+            field,
+          );
+        }
         const listedByAuthor = objSource.content.includes(field) || (objSource.metadataFields ?? []).includes(field);
         return refuse(
           403,

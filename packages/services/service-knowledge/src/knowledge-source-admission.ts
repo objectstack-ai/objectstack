@@ -48,6 +48,12 @@
  * one unit), and searching it at all would make row presence an oracle on the
  * hidden value.
  *
+ * The fields the source's `where` reads ({@link selectingFieldsOf}) are judged
+ * by the same rule, at save and at search: the source selects its records by
+ * them, so they are part of what the source reads of the object. None is
+ * subtracted for being withheld from the index; the filter reads the field
+ * whether or not a passage carries it.
+ *
  * ## Where the field answer comes from
  *
  * The `security` service's `getQueryableFields`; absent that method, or when it
@@ -69,6 +75,7 @@
  */
 
 import {
+  FieldReferenceSchema,
   canServeApiOperation,
   isAiReadExposed,
   resolveDisplayField,
@@ -105,7 +112,14 @@ export type KnowledgeSourceRefusal =
 
 export type KnowledgeSourceAdmission =
   | { admitted: true }
-  | { admitted: false; reason: KnowledgeSourceRefusal; object: string; field?: string };
+  | {
+      admitted: false;
+      reason: KnowledgeSourceRefusal;
+      object: string;
+      field?: string;
+      /** For `field-not-queryable`: how the source uses the field. Absent means it serves it. */
+      use?: 'where';
+    };
 
 /** What the gates read, handed over by the service. Any member may throw: the caller refuses on a throw. */
 export interface KnowledgeAdmissionDeps {
@@ -266,6 +280,46 @@ export function servedFieldsOf(objSource: ObjectKnowledgeSource, schema: unknown
   return served;
 }
 
+/** Logical keys of the filter grammar: never field names. */
+const WHERE_LOGICAL_KEYS: ReadonlySet<string> = new Set(['$and', '$or', '$not']);
+
+/**
+ * The fields a source's `where` reads: every condition key and every
+ * cross-field comparand (`FieldReferenceSchema`, `{ $field }`), each by its
+ * first segment, so a dotted path is judged on the local field it starts
+ * from. It is the reading the engine's own predicate guard takes of a
+ * caller's filter. A key that is no logical key is a field name, so an
+ * operator the grammar does not know is judged as a field no caller may query
+ * and the source is refused: the direction is closed.
+ */
+export function selectingFieldsOf(objSource: Pick<ObjectKnowledgeSource, 'where'>): Set<string> {
+  const out = new Set<string>();
+  const comparands = (operand: unknown): void => {
+    if (!operand || typeof operand !== 'object') return;
+    if (Array.isArray(operand)) {
+      for (const member of operand) comparands(member);
+      return;
+    }
+    const reference = FieldReferenceSchema.safeParse(operand);
+    if (reference.success) out.add(reference.data.$field.split('.')[0]!);
+    for (const member of Object.values(operand as Record<string, unknown>)) comparands(member);
+  };
+  const walk = (condition: unknown): void => {
+    if (!condition || typeof condition !== 'object' || Array.isArray(condition)) return;
+    for (const [key, value] of Object.entries(condition as Record<string, unknown>)) {
+      if (WHERE_LOGICAL_KEYS.has(key)) {
+        if (Array.isArray(value)) for (const member of value) walk(member);
+        else walk(value);
+        continue;
+      }
+      out.add(key.split('.')[0]!);
+      comparands(value);
+    }
+  };
+  walk(objSource.where);
+  return out;
+}
+
 /** The field gate for one source over an object the object-level gates admitted. */
 export function admitSourceFields(
   objSource: ObjectKnowledgeSource,
@@ -276,14 +330,16 @@ export function admitSourceFields(
     return { admitted: false, reason: 'field-answer-unavailable', object };
   }
   const served = servedFieldsOf(objSource, admission.schema);
-  if (fields.kind === 'masked-only') {
-    for (const field of served) {
-      if (fields.masked.has(field)) return { admitted: false, reason: 'field-not-queryable', object, field };
-    }
-    return { admitted: true };
-  }
+  const selecting = selectingFieldsOf(objSource);
+  const queryable =
+    fields.kind === 'masked-only'
+      ? (field: string) => !fields.masked.has(field)
+      : (field: string) => fields.queryable.has(field);
   for (const field of served) {
-    if (!fields.queryable.has(field)) return { admitted: false, reason: 'field-not-queryable', object, field };
+    if (!queryable(field)) return { admitted: false, reason: 'field-not-queryable', object, field };
+  }
+  for (const field of selecting) {
+    if (!queryable(field)) return { admitted: false, reason: 'field-not-queryable', object, field, use: 'where' };
   }
   return { admitted: true };
 }
