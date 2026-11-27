@@ -7,6 +7,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { recordNotFoundError } from '@objectstack/core';
 import { OWNER_FIELD_DEF } from '@objectstack/spec/data';
 import { RestServer } from './rest-server';
 import { DEFAULT_ORGANIZATION_ID, installDefaultOrganization } from './default-organization.testkit.js';
@@ -45,7 +46,11 @@ const transferDenied = () => Object.assign(
   { name: 'PermissionDeniedError', code: 'PERMISSION_DENIED', status: 403 },
 );
 
-function mockEngine(refuse: (id: string) => unknown = () => undefined, disabledPackageObjects: string[] = []) {
+/**
+ * `leavesScope`: the rows a write moves out of the caller's row scope — the
+ * update lands and reads back `null`, as the engine answers one.
+ */
+function mockEngine(refuse: (id: string) => unknown = () => undefined, disabledPackageObjects: string[] = [], leavesScope: (id: string) => boolean = () => false) {
   const rows: Record<string, any>[] = [{ id: 'l1', owner_id: 'u_a' }, { id: 'l2', owner_id: 'u_b' }];
   const users = [{ id: 'u_next', banned: false }, { id: 'u_gone', banned: true }];
   const tasks: Record<string, any>[] = [{ id: 't1', lead: 'l1', owner_id: 'u_a' }, { id: 't2', lead: 'l1', owner_id: 'u_b' }];
@@ -68,11 +73,12 @@ function mockEngine(refuse: (id: string) => unknown = () => undefined, disabledP
     update: vi.fn(async (o: string, data: any, opts: any) => {
       assertEngineUpdateDispatch(data, opts);
       const row = tableOf(o).find((r) => r.id === opts.where.id);
-      if (!row) return null;
+      // The engine's not-found gate: read first, thrown before the write.
+      if (!row) throw recordNotFoundError(o, String(opts.where.id), opts.context);
       const refusal = refuse(row.id);
       if (refusal) throw refusal;
       Object.assign(row, data);
-      return row;
+      return leavesScope(row.id) ? null : row;
     }),
   };
 }
@@ -166,6 +172,21 @@ describe('[#35402] POST /data/:object/:id/change-owner', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.data).toEqual({ object: 'lead', id: 'l1', ownerId: null, queue: 'triage', notified: false });
     expect(engine.update).toHaveBeenCalledWith('lead', { owner_id: null, queue: 'triage' }, { where: { id: 'l1' }, context: CALLER, strictReadonlyWrites: true });
+  });
+
+  it('a hand-away whose read-back is out of the caller\'s scope answers 200 and notifies, single and bulk', async () => {
+    const messaging = { emit: vi.fn(async () => ({ delivered: 0, enqueued: 1 })) };
+    const engine = mockEngine(undefined, [], () => true);
+    const { single, bulk } = buildServer(engine, { messaging });
+    const res = mockRes();
+    await single!.handler(req({ object: 'lead', id: 'l1' }, { ownerId: 'u_next', notify: true }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data).toEqual({ object: 'lead', id: 'l1', ownerId: 'u_next', notified: true });
+    const many = mockRes();
+    await bulk!.handler(req({ object: 'lead' }, { ids: ['l2'], ownerId: 'u_next' }), many);
+    expect(many.statusCode).toBe(200);
+    expect(many.body.data).toMatchObject({ updated: 1, failed: 0, failures: [] });
+    expect(engine.rows.map((r) => r.owner_id)).toEqual(['u_next', 'u_next']);
   });
 
   it('notify sends through the messaging service and says so', async () => {
