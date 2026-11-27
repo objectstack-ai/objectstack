@@ -14,6 +14,16 @@
         "structuredOutput.schema"
       ]
     },
+    "ai/AskQuestion": {
+      "sites": [
+        ""
+      ]
+    },
+    "ai/AskQuestionEnvelope": {
+      "sites": [
+        "questions.element"
+      ]
+    },
     "ai/AiContext": {
       "sites": [
         "related",
