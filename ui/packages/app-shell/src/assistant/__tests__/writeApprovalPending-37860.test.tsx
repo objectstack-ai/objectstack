@@ -14,6 +14,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
+// `ChatPane` reaches `import('@object-ui/plugin-grid')`; pay its first load at
+// collection, never inside a clocked case (`check:test-source-alias`).
+import '@object-ui/plugin-grid';
 import { useHitlInChat } from '@object-ui/plugin-chatbot';
 import { hydratedMessagesToChatMessages } from '../../console/ai/AiChatPage';
 import { aiMessageRowsToServerMessages, toUIMessages } from '../../hooks/useChatConversation';
