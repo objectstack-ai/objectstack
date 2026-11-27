@@ -646,10 +646,14 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       const s = source('ob_own');
       await adapter.upsert([doc(s, '1', 'pine shelf')], ctx(s));
       await adapter.beginBuild(ctx(s, FP_B));
+      await adapter.upsert([doc(s, '2', 'pine crate')], ctx(s, FP_B));
+      // FP_B's unfinished build is dropped, and generation 2 made afresh for FP_C.
       await adapter.beginBuild(ctx(s, FP_C));
+      expect(await adapter.listDocuments(ctx(s, FP_C), { limit: 5 })).toEqual({ documents: [] });
       await adapter.upsert([doc(s, '1', 'pine shelf')], ctx(s, FP_C));
       await adapter.completeBuild(ctx(s, FP_C));
-      expect(await tables(client, 'knowledge_ob_own%')).toEqual(['knowledge_ob_own_g3']);
+      expect(await tables(client, 'knowledge_ob_own%')).toEqual(['knowledge_ob_own_g2']);
+      expect(await generationRows(client, s.name)).toEqual(['2:active']);
       await adapter.dropSource(ctx(s));
       expect(await tables(client, 'knowledge_ob_own%')).toEqual([]);
       expect(await generationRows(client, s.name)).toEqual([]);
