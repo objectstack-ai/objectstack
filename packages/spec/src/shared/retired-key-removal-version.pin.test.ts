@@ -79,6 +79,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ALL_CONVERSIONS } from '../conversions/registry';
 import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
+import { AIModelConfigSchema } from '../ai/agent.zod';
 import { TimeUpdateInterval } from '../data/analytics.zod';
 import { CurrencyConfigSchema, FieldSchema } from '../data/field.zod';
 import { IndexSchema, ObjectSchema } from '../data/object.zod';
@@ -336,6 +337,8 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
     refusal("manifest.packaging 'manifest-deps'", () => PluginPackagingSchema.safeParse('manifest-deps')),
   ],
   // #35926: a relationship field's boolean `inlineEdit`, refused by the enum's own error map.
+  // #37712: an agent's `model.provider`, tombstoned on the model block.
+  'agent-model-provider-removed': [tombstone(AIModelConfigSchema, 'agent.model', 'provider')],
   'field-inline-edit-boolean-removed': [
     refusal(
       'field.inlineEdit: true',

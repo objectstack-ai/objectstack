@@ -3300,7 +3300,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       model: {
         label: "Modèle",
-        helpText: "Configuration du modèle d’IA (fournisseur, nom du modèle, température, etc.)"
+        helpText: "Configuration du modèle d’IA (nom du modèle, température, etc.)"
       },
       planning: {
         label: "Planification",

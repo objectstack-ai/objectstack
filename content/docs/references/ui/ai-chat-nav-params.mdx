@@ -1,0 +1,40 @@
+---
+title: Ai Chat Nav Params — UI Protocol reference
+navTitle: Ai Chat Nav Params
+description: "Ai Chat Nav Params schemas of the ObjectStack UI Protocol: AiChatNavParams — each property with its type, default and a TypeScript example."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+<Callout type="info">
+**Source:** `packages/spec/src/ui/ai-chat-nav-params.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { AiChatNavParamsSchema } from '@objectstack/spec/ui';
+import type { AiChatNavParams } from '@objectstack/spec/ui';
+
+// Validate data
+const result = AiChatNavParamsSchema.parse(data);
+```
+
+---
+
+## AiChatNavParams
+
+Params of an `ai:chat` navigation entry: the copy the AI inquiry home page draws before the first question.
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **title** | `string` | optional | Welcome heading drawn above the question box (at most 60 characters). Absent: the page's default heading. |
+| **subtitle** | `string` | optional | One or two lines under the heading saying what the reader can ask about (at most 200 characters). |
+| **placeholder** | `string` | optional | Placeholder text inside the empty question box (at most 100 characters). |
+| **suggestions** | `string[]` | optional | Suggested questions offered as one-click starters, 1 to 4 non-empty entries of at most 100 characters each, shown in this order. |
+
+
+---
+

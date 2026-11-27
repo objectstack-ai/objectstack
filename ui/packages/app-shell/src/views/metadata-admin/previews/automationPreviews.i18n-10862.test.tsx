@@ -314,7 +314,7 @@ const AGENT_FULL = {
   label: 'Sales Copilot',
   role: 'Account assistant',
   instructions: 'Be kind.',
-  model: { provider: 'openai', model: 'gpt-x', temperature: 0.2, maxTokens: 1000 },
+  model: { model: 'gpt-x', temperature: 0.2, maxTokens: 1000 },
   skills: [],
   planning: { maxIterations: 5 },
   memory: { shortTerm: {} },
@@ -352,7 +352,7 @@ describe('AgentPreview — the designer words read engine.agentPreview.* (object
         { key: 'engine.agentPreview.guardrails' },
         { key: 'engine.agentPreview.permissions' },
       ]);
-      expectAsWritten(['Sales Copilot', 'Account assistant', 'Be kind.', 'openai · gpt-x', 'maxIterations', 'maxCost', 'ai.use']);
+      expectAsWritten(['Sales Copilot', 'Account assistant', 'Be kind.', 'gpt-x', 'maxIterations', 'maxCost', 'ai.use']);
     });
 
     it(`${lang}: a disabled agent with no prompt and nothing on the rail`, () => {
