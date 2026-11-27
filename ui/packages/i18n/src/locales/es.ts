@@ -2444,7 +2444,29 @@ const es = {
           availableObjects: "Enumera los objetos de datos disponibles.",
           recentActivity: "Resume mi actividad reciente.",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'Resumir este registro',
+            related: '¿Qué está relacionado con este registro?',
+          },
+          list: {
+            summarize: 'Resumir los registros de esta lista',
+            recent: '¿Qué registros se añadieron esta semana?',
+          },
+          dashboard: {
+            explain: '¿Qué muestra este panel?',
+            standOut: '¿Qué destaca en este panel?',
+          },
+          report: {
+            summarize: 'Resumir este informe',
+            takeaways: '¿Cuáles son las conclusiones clave de este informe?',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'Preguntas sugeridas',
       discussing: "Viendo: {{target}}",
       focus: {
         pin: "Seguir preguntando sobre este registro",
@@ -3580,6 +3602,7 @@ const es = {
     recent: "Reciente",
     starred: "Destacados",
     removeFromFavorites: "Quitar {{name}} de favoritos",
+    conversationUnavailable: "Esta conversación ya no está disponible",
     allReports: "Todos los informes",
     collapse: 'Contraer la barra lateral',
     expand: 'Expandir la barra lateral',
@@ -5620,6 +5643,7 @@ const es = {
       toggleFailed: "Error al cambiar el estado de la aplicación: {{reason}}",
       setDefaultDone: "{{name}} establecida como predeterminada",
       setDefaultFailed: "Error al establecer la aplicación predeterminada: {{reason}}",
+      restoreDefaultFailed: "No se pudo restaurar {{name}} como aplicación predeterminada, por lo que ya no es la predeterminada: {{reason}}",
       appDeleted: "{{name}} eliminada",
       deleteFailed: "Error al eliminar la aplicación: {{reason}}",
       nothingToDelete: "Nada que eliminar para {{name}}: {{reason}}",

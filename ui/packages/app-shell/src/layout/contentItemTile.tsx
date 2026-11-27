@@ -30,6 +30,8 @@ export const CONTENT_KIND_ICON: Readonly<Record<string, string>> = {
   ...NAV_KIND_ICON,
   package: 'package',
   metadata: 'file-code',
+  // objectstack#37863 — a favourite conversation, the glyph of the "Ask AI" entry.
+  conversation: 'message-circle',
 };
 
 /**

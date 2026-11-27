@@ -39,7 +39,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@object-ui/components';
-import { History, Maximize2, MessagesSquare, Minimize2, MoreHorizontal, Plus, Share2, X } from 'lucide-react';
+import { History, Maximize2, MessagesSquare, Minimize2, MoreHorizontal, Plus, Share2, Star, X } from 'lucide-react';
 import { formatNumber, useObjectTranslation } from '@object-ui/i18n';
 import { useAgents } from '@object-ui/plugin-chatbot/core';
 import { resolveApiBase } from '../console/ai/resolveApiBase.js';
@@ -48,6 +48,8 @@ import { useAiUsage } from '../hooks/useAiUsage.js';
 import { cloudConsoleUrl } from '../console/marketplace/marketplaceApi.js';
 import { getUpgradeUrl } from '../runtime-config.js';
 import { usePlanApprovalPending } from '../assistant/assistantBus.js';
+import { useFavorites } from '../context/FavoritesProvider.js';
+import { conversationFavoriteId, conversationFavoriteItem } from './conversationFavorites.js';
 import type { ChatSurfaceContext } from './chatSurfaceContext.js';
 import {
   readStoredDockFullWindow,
@@ -394,7 +396,64 @@ interface DockHeaderButtonsProps {
 }
 
 /**
- * ui ADR-0057 Amendment A5 — the header's ＋ and history buttons, as icons:
+ * objectstack#37863 — the header's ☆: adds the thread in view to the user's
+ * favourites, or removes it (pressed while it is one). Drawn once the first
+ * send has created the thread. While it is a favourite, the stored label
+ * follows the label the header reads.
+ */
+function DockFavoriteButton({
+  actions,
+  box,
+  icon,
+  testId,
+}: {
+  actions: ChatDockConversationActions;
+  box: string;
+  icon: string;
+  testId: string;
+}) {
+  const { t } = useObjectTranslation();
+  const { isFavorite, toggleFavorite, refreshLabel } = useFavorites();
+  const conversationId = actions.conversationId as string;
+  const id = conversationFavoriteId(conversationId);
+  const starred = isFavorite(id);
+  const label = actions.labelPending ? undefined : actions.label;
+  const refreshLabelRef = React.useRef(refreshLabel);
+  React.useLayoutEffect(() => {
+    refreshLabelRef.current = refreshLabel;
+  });
+  React.useEffect(() => {
+    if (starred && label) refreshLabelRef.current(id, label);
+  }, [starred, id, label]);
+  const name = starred
+    ? t('common.removeFromFavorites', { defaultValue: 'Remove from favorites' })
+    : t('common.addToFavorites', { defaultValue: 'Add to favorites' });
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className={cn(box, 'text-muted-foreground hover:text-foreground', starred && 'text-amber-500 hover:text-amber-600')}
+      onClick={() =>
+        toggleFavorite(
+          conversationFavoriteItem({
+            conversationId,
+            agent: actions.agent as string,
+            label: label ?? t('console.ai.newConversation', { defaultValue: 'New conversation' }),
+          }),
+        )
+      }
+      aria-pressed={starred}
+      aria-label={name}
+      title={name}
+      data-testid={testId}
+    >
+      <Star className={cn(icon, starred && 'fill-current')} />
+    </Button>
+  );
+}
+
+/**
+ * ui ADR-0057 Amendment A5 — the header's ☆ (objectstack#37863), ＋ and history buttons, as icons:
  * ＋ starts a new conversation on the agent in use, the clock shows the
  * history over the chat (pressed while it does) and goes back to the chat.
  */
@@ -409,6 +468,14 @@ function DockHeaderButtons({ actions, history, size, onStartNew }: DockHeaderBut
     : t('console.ai.dock.history', { defaultValue: 'History' });
   return (
     <>
+      {actions?.conversationId && actions.agent ? (
+        <DockFavoriteButton
+          actions={actions}
+          box={box}
+          icon={icon}
+          testId={size === 'sheet' ? 'chat-dock-mobile-favorite' : 'chat-dock-favorite'}
+        />
+      ) : null}
       {startNew ? (
         <Button
           variant="ghost"

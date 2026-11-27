@@ -66,7 +66,6 @@ export const ReassignLeadAction = defineAction({
   objectName: 'lead',
   type: 'api',
   target: 'lead',
-  locations: ['record_header', 'list_item'],
   disabled: P`record.status == "converted"`,
   disabledReason: 'A converted lead is reassigned from its opportunity.',
   params: [{ field: 'owner_id', required: true }],
@@ -93,7 +92,6 @@ export const ConvertLeadAction = defineAction({
   icon: 'arrow-right-circle',
   type: 'flow',
   target: 'crm_lead_conversion',
-  locations: ['record_header', 'list_item'],
   visible: P`record.status == "qualified" && record.is_converted == false`,
   confirmText: 'Convert this lead?',
   successMessage: 'Lead converted.',
@@ -177,7 +175,6 @@ export const PrintA3Action = defineAction({
   type: 'url',
   target: '/print/a3?id=${ctx.recordId}',   // interpolated at click
   openIn: 'new-tab',
-  locations: ['record_header'],
 });
 ```
 
@@ -202,7 +199,6 @@ export const OpenInvoicePdfAction = defineAction({
   target: 'crm_open_invoice_pdf',
   opensInNewTab: true,
   newTabUrl: '/api/v1/invoice/{recordId}/pdf',
-  locations: ['record_header'],
 });
 ```
 
@@ -236,7 +232,6 @@ export const AddInvoiceLineAction = defineAction({
   label: 'Add Line',
   objectName: 'invoice',
   type: 'script',
-  locations: ['record_header'],
   params: [
     { field: 'product', objectOverride: 'invoice_line', required: true },
     { field: 'quantity', objectOverride: 'invoice_line', required: true },

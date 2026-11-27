@@ -216,7 +216,13 @@ describe("the table's order is the ‹ › order (objectstack#36897)", () => {
   it('a click on the Label header sorts the list by label, in the address, and the detail follows', async () => {
     mount(`${LIST}?scope=environment`);
     await rowNames();
-    fireEvent.click(screen.getByRole('columnheader', { name: /Label/ }));
+    // The rows paint before the grid has read its column types, and until it
+    // has, every column is withheld: a header click on it sorts nothing. So
+    // the click waits for the header's sort icon, which the table draws only
+    // on a column it will sort.
+    const labelHeader = () => screen.getByRole('columnheader', { name: /Label/ });
+    await waitFor(() => expect(labelHeader().querySelector('svg.lucide-chevrons-up-down')).not.toBeNull());
+    fireEvent.click(labelHeader());
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`${LIST}?scope=environment&sort=label`));
     const shown = await rowNames();
     expect(shown).toEqual(['translate', 'billing', 'triage', 'tribute']);

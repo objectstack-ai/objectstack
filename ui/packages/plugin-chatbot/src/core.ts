@@ -68,3 +68,7 @@ export type { StoredAnswerData, StoredAnswerPart } from './toolResultParsers';
 // conversation list preview and the conversation-language probe all skip a
 // user turn that `useHitlInChat` composed for the model.
 export { isHitlContinuation } from './hitlContinuation';
+
+// The localStorage prefix of the question card's skip marks, for a host's
+// sign-out cleanup.
+export { QUESTION_SKIP_STORAGE_PREFIX } from './chat/questionSkip';

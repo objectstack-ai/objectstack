@@ -2376,7 +2376,29 @@ const ja = {
           availableObjects: "利用できるデータオブジェクトを一覧にしてください。",
           recentActivity: "最近の自分の活動を要約してください。",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'このレコードを要約',
+            related: 'このレコードに関連するものは？',
+          },
+          list: {
+            summarize: 'この一覧のレコードを要約',
+            recent: '今週追加されたレコードは？',
+          },
+          dashboard: {
+            explain: 'このダッシュボードは何を示していますか？',
+            standOut: 'このダッシュボードで目立つ点は？',
+          },
+          report: {
+            summarize: 'このレポートを要約',
+            takeaways: 'このレポートの要点は？',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'おすすめの質問',
       discussing: "表示中: {{target}}",
       focus: {
         pin: "このレコードについて質問し続ける",
@@ -3502,6 +3524,7 @@ const ja = {
     recent: "最近",
     starred: "スター付き",
     removeFromFavorites: "お気に入りから {{name}} を削除",
+    conversationUnavailable: "この会話はもう利用できません",
     allReports: "すべてのレポート",
     collapse: 'サイドバーを折りたたむ',
     expand: 'サイドバーを展開',
@@ -5471,6 +5494,7 @@ const ja = {
       toggleFailed: "アプリの状態の切り替えに失敗しました：{{reason}}",
       setDefaultDone: "{{name}} をデフォルトに設定しました",
       setDefaultFailed: "デフォルトアプリの設定に失敗しました：{{reason}}",
+      restoreDefaultFailed: "{{name}} をデフォルトアプリに戻せなかったため、デフォルトではなくなりました：{{reason}}",
       appDeleted: "{{name}} を削除しました",
       deleteFailed: "アプリの削除に失敗しました：{{reason}}",
       nothingToDelete: "{{name}} に削除するものはありません：{{reason}}",

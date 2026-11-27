@@ -2516,7 +2516,29 @@ const ru = {
           availableObjects: "Перечисли доступные объекты данных.",
           recentActivity: "Сделай сводку моей недавней активности.",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'Кратко изложить эту запись',
+            related: 'Что связано с этой записью?',
+          },
+          list: {
+            summarize: 'Кратко изложить записи в этом списке',
+            recent: 'Какие записи добавлены на этой неделе?',
+          },
+          dashboard: {
+            explain: 'Что показывает эта панель?',
+            standOut: 'Что выделяется на этой панели?',
+          },
+          report: {
+            summarize: 'Кратко изложить этот отчёт',
+            takeaways: 'Каковы главные выводы из этого отчёта?',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'Предлагаемые вопросы',
       discussing: "Просмотр: {{target}}",
       focus: {
         pin: "Продолжать спрашивать об этой записи",
@@ -3665,6 +3687,7 @@ const ru = {
     recent: "Недавние",
     starred: "Отмеченные",
     removeFromFavorites: "Убрать {{name}} из избранного",
+    conversationUnavailable: "Этот диалог больше недоступен",
     allReports: "Все отчёты",
     collapse: 'Свернуть боковую панель',
     expand: 'Развернуть боковую панель',
@@ -5780,6 +5803,7 @@ const ru = {
       toggleFailed: "Не удалось изменить состояние приложения: {{reason}}",
       setDefaultDone: "{{name}} установлено по умолчанию",
       setDefaultFailed: "Не удалось установить приложение по умолчанию: {{reason}}",
+      restoreDefaultFailed: "Не удалось восстановить {{name}} как приложение по умолчанию, поэтому оно больше не используется по умолчанию: {{reason}}",
       appDeleted: "{{name}} удалено",
       deleteFailed: "Не удалось удалить приложение: {{reason}}",
       nothingToDelete: "Нечего удалять для {{name}}: {{reason}}",

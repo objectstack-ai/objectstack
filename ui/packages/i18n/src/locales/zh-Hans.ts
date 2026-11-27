@@ -2729,7 +2729,29 @@ const zh = {
           availableObjects: '列出可用的数据对象。',
           recentActivity: '总结我的最近动态。',
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: '总结这条记录',
+            related: '这条记录关联了哪些内容？',
+          },
+          list: {
+            summarize: '总结这个列表里的记录',
+            recent: '本周新增了哪些记录？',
+          },
+          dashboard: {
+            explain: '这个仪表盘展示了什么？',
+            standOut: '这个仪表盘里有什么值得注意的？',
+          },
+          report: {
+            summarize: '总结这份报表',
+            takeaways: '这份报表的要点是什么？',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: '推荐问题',
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
       // connection banner and plan/publish cards, the ChatDock chrome, and the
       // conversation-list date buckets. `group.*` is the template-key family
@@ -3633,6 +3655,7 @@ const zh = {
     recent: '最近使用',
     starred: '已收藏',
     removeFromFavorites: '从收藏中移除 {{name}}',
+    conversationUnavailable: '该对话已不可用',
     allReports: '全部报表',
     collapse: '收起侧边栏',
     expand: '展开侧边栏',
@@ -5515,6 +5538,7 @@ const zh = {
       toggleFailed: '切换应用状态失败：{{reason}}',
       setDefaultDone: '{{name}} 已设为默认',
       setDefaultFailed: '设置默认应用失败：{{reason}}',
+      restoreDefaultFailed: '无法将 {{name}} 恢复为默认应用，因此它已不再是默认应用：{{reason}}',
       appDeleted: '{{name}} 已删除',
       deleteFailed: '删除应用失败：{{reason}}',
       nothingToDelete: '{{name}} 无可删除：{{reason}}',

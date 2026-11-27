@@ -386,6 +386,16 @@ export interface KnowledgeServicePluginOptions {
    * seven waits sum to 395 s, so a provider outage of six minutes is ridden out
    */
   recordSyncRetry?: Partial<KnowledgeRecordSyncRetry>;
+  /**
+   * Offer the embedder section (`ai.embedder_*`) and its **Test embedder**
+   * action (`ai/test_embedder`) on the `ai` settings page. Set to `false` on a
+   * host that provides the embedder itself (registers the `embedder` service,
+   * which this plugin then keeps): neither is offered, and the boot line that
+   * says why they are missing is not logged. The knowledge settings page is
+   * offered either way.
+   * @default true
+   */
+  embedderSettings?: boolean;
   /** Default top-K when callers omit it. @default 10 */
   defaultTopK?: number;
   /**
@@ -626,7 +636,9 @@ export class KnowledgeServicePlugin implements Plugin {
     // The knowledge settings page, the `ai` embedder section, both test
     // actions and the Setup entry are offered only where this service is
     // mounted — never by default (`@objectstack/service-settings`).
-    contributeKnowledgeSettings(ctx, this.version, this.service);
+    contributeKnowledgeSettings(ctx, this.version, this.service, {
+      embedderSettings: this.options.embedderSettings,
+    });
     ctx.logger.info?.(
       `KnowledgeServicePlugin: registered '${KNOWLEDGE_SERVICE}' service (eventSync=${
         this.options.enableEventSync !== false

@@ -875,8 +875,9 @@ export function localRunsStand(reading) {
  *   Contract-review-handoff: l2-review#1 — CONTRACT_REVIEW_TIER unavailable (HTTP 429, 2026-10-27T13:00Z) · head 1b03a9c3
  *
  * Three facts, each required: the TARGET (an L2 seat `l2-review#N` -- old spelling `review#N`, still read -- or a
- * sibling seat of the lane `domain:<lane>#N` while no L2 seat is seated --
- * the closed set of two shapes; ⛔ never `triage`, which takes no contract
+ * sibling seat while no L2 seat is seated: a repo seat `repo:<name>#N` or an epic seat `epic:#<N>#<k>`, the
+ * seat spellings a live seat signs with since the domain seats retired, and a retired domain seat's
+ * `domain:<lane>#N`, still read -- a closed set of seat shapes; ⛔ never `triage`, which takes no contract
  * review, so a line naming it is unreadable), the TIER that was unavailable -- the constant's NAME, exactly as `Served-tier:`
  * spells it, ⛔ never a model id -- with its reason and UTC time in the
  * parentheses, and the HEAD the hand-off is for, 7 to 40 hex. A line missing
@@ -898,10 +899,13 @@ const CONTRACT_REVIEW_HANDOFF_LINE = keyLineRegex(CONTRACT_REVIEW_HANDOFF_KEY);
 /** The same key as a MARKER over a whole comment body -- `latestMarkedComment`'s convention (multiline, `g`-less). */
 const CONTRACT_REVIEW_HANDOFF_MARKER = new RegExp(CONTRACT_REVIEW_HANDOFF_LINE.source, 'm');
 /**
- * The target -- `l2-review#N` (or its old spelling `review#N`: the opener's two L2 lane words) or `domain:<lane>#N`, the seat number required -- a separator (an em dash, a
- * hyphen pair, a hyphen or a colon), then the rest. `triage` and every other seat word match nothing.
+ * The target -- `l2-review#N` (or its old spelling `review#N`: the opener's two L2 lane words), a repo seat
+ * `repo:<name>#N` (a repo name may carry `.` and `-`, `repo:www.objectos.ai#2`), an epic seat `epic:#<N>#<k>` (seat
+ * k of epic N, both numbers required) or a retired domain seat `domain:<lane>#N`, the seat number required -- a
+ * separator (an em dash, a hyphen pair, a hyphen or a colon), then the rest. `triage` and every other seat word
+ * match nothing.
  */
-const HANDOFF_TARGET = new RegExp(`^((?:${L2_REVIEW_LANE_WORDS.join('|')})#[1-9][0-9]*|domain:[a-z][a-z0-9._-]*#[1-9][0-9]*)(?![0-9])[ \\t]*(?:—|--|-|:)?[ \\t]*(.*)$`, 'i');
+const HANDOFF_TARGET = new RegExp(`^((?:${L2_REVIEW_LANE_WORDS.join('|')})#[1-9][0-9]*|(?:repo:[a-z0-9][a-z0-9._-]*|domain:[a-z][a-z0-9._-]*|epic:#[1-9][0-9]*)#[1-9][0-9]*)(?![0-9])[ \\t]*(?:—|--|-|:)?[ \\t]*(.*)$`, 'i');
 /** `(reason, UTC time)` then ` · head SHA` -- the time is the LAST comma-separated item in the parentheses. */
 const HANDOFF_TAIL = /^\(([^()]*?)[ \t]*,[ \t]*([^,()]+)\)[ \t]*·[ \t]*head[ \t]+`?([0-9a-fA-F]{7,40})`?[ \t]*$/;
 
@@ -911,7 +915,7 @@ const HANDOFF_TAIL = /^\(([^()]*?)[ \t]*,[ \t]*([^,()]+)\)[ \t]*·[ \t]*head[ \t
  * @returns {{ state: 'missing' }
  *          | { state: 'unreadable', line: string }
  *          | { state: 'read', to: string, tier: string, reason: string, at: string, head: string }}
- *          `to` is the target seat, lower-cased (`l2-review#1`, `review#1`, `domain:ui#2`).
+ *          `to` is the target seat, lower-cased (`l2-review#1`, `review#1`, `repo:objectstack#2`, `epic:#35205#1`).
  */
 export function readContractReviewHandoff(text) {
   for (const line of String(text ?? '').split(/\r?\n/)) {
@@ -2885,7 +2889,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // Raised 22 → 24 with the brief's `Security-touching:` duty: where the record says so, and never on a brief whose record lacks the line.
   '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 24,
   '⭐ letter B: a declared NARROWING is a face of its own at CONTRACT_REVIEW_TIER — keyed on the `Clause-②:` line, exact': 17,
-  '⭐ the `Contract-review-handoff:` line — names the current head ⇒ the named review or sibling seat\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own; `triage` unreadable': 17,
+  '⭐ the `Contract-review-handoff:` line — names the current head ⇒ the named review or sibling seat\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own; `triage` unreadable': 19,
   // Raised 27 → 40 with the scenario table's seven admitted keys and the `seat-online` patrol field: one pin
   // per new key reading, the patrol and `patrol none` readings, the both-ways table pin that replaced the
   // verbatim-template pin, the placeholder-is-no-event pin, the `--mailbox-keys` printout, the invented
@@ -3404,6 +3408,8 @@ export async function selfTest() {
   t('⛔ the TEMPLATE sent verbatim is unreadable — a placeholder names no seat and no head', readContractReviewHandoff(CONTRACT_REVIEW_HANDOFF_TEMPLATE).state === 'unreadable' && contractReviewHandoff([HO_ROW(CONTRACT_REVIEW_HANDOFF_TEMPLATE, 4407)], HO_HEAD).state === 'unreadable');
   t('⭐ the L2 seat is a target under its new word and under the old one: `l2-review#N` reads, lower-cased, and hands the head to it; `review#N` still reads; `l2-review` with no number, `l2#1` and `l1-review#1` are unreadable', (() => { const line = (to) => `${CONTRACT_REVIEW_HANDOFF_KEY}: ${to} — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`; const r = contractReviewHandoff([HO_ROW(line('L2-Review#2'))], HO_HEAD); return r.state === 'handed' && r.to === 'l2-review#2' && readContractReviewHandoff(line('l2-review#12')).to === 'l2-review#12' && readContractReviewHandoff(line('review#1')).to === 'review#1' && ['l2-review', 'l2#1', 'l1-review#1'].every((to) => readContractReviewHandoff(line(to)).state === 'unreadable'); })());
   t('⭐ a sibling seat of the lane is a target while no L2 seat is seated: `domain:<lane>#N` reads, lower-cased, and hands the head to it', (() => { const line = `${CONTRACT_REVIEW_HANDOFF_KEY}: Domain:UI#2 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`; const r = contractReviewHandoff([HO_ROW(line)], HO_HEAD); return readContractReviewHandoff(line).to === 'domain:ui#2' && r.state === 'handed' && r.to === 'domain:ui#2' && readContractReviewHandoff(`${CONTRACT_REVIEW_HANDOFF_KEY}: review#12 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`).to === 'review#12'; })());
+  t('⭐ a sibling REPO seat is a target — the spelling a live seat signs with since the domain seats retired: `repo:<name>#N` reads, lower-cased, a dotted repo name included, and hands the head to it; `repo:<name>` with no number is unreadable', (() => { const line = (to) => `${CONTRACT_REVIEW_HANDOFF_KEY}: ${to} — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`; const r = contractReviewHandoff([HO_ROW(line('Repo:ObjectStack#2'))], HO_HEAD); return r.state === 'handed' && r.to === 'repo:objectstack#2' && readContractReviewHandoff(line('repo:www.objectos.ai#12')).to === 'repo:www.objectos.ai#12' && ['repo:objectstack', 'repo:#2', 'repo:objectstack#0'].every((to) => readContractReviewHandoff(line(to)).state === 'unreadable'); })());
+  t('⭐ a sibling EPIC seat is a target: `epic:#<N>#<k>` reads as seat k of epic N and hands the head to it; the epic alone, `epic:#N` with no seat, and `epic:N#k` without its `#` are unreadable', (() => { const line = (to) => `${CONTRACT_REVIEW_HANDOFF_KEY}: ${to} — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`; const r = contractReviewHandoff([HO_ROW(line('epic:#35205#1'))], HO_HEAD); return r.state === 'handed' && r.to === 'epic:#35205#1' && ['epic:#35205', 'epic:35205#1', 'epic:#35205#'].every((to) => readContractReviewHandoff(line(to)).state === 'unreadable'); })());
   t('⛔ a line still naming `triage` hands the review to NOBODY: newest on the thread it is unreadable, never handed — triage takes no contract review', (() => { const r = contractReviewHandoff([HO_ROW(`${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, 4406)], HO_HEAD); return r.state === 'unreadable' && r.gaps[0].includes('4406'); })());
   t('an unreadable NEWEST line makes the thread unreadable, naming the comment — never absent, never stale', (() => { const r = contractReviewHandoff([HO_ROW(`${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429) · head ${HO_HEAD}`, 4405)], HO_HEAD); return r.state === 'unreadable' && r.gaps.length === 1 && r.gaps[0].includes('4405'); })());
   t('a thread that is not an array, or a head too short to match, is a read that could not be made', contractReviewHandoff(null, HO_HEAD).state === 'unreadable' && contractReviewHandoff([], 'abc').state === 'unreadable' && contractReviewHandoff([], HO_HEAD).state === 'absent');

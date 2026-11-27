@@ -2440,7 +2440,29 @@ const fr = {
           availableObjects: "Liste les objets de données disponibles.",
           recentActivity: "Résume mon activité récente.",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'Résumer cet enregistrement',
+            related: "Qu'est-ce qui est lié à cet enregistrement ?",
+          },
+          list: {
+            summarize: 'Résumer les enregistrements de cette liste',
+            recent: 'Quels enregistrements ont été ajoutés cette semaine ?',
+          },
+          dashboard: {
+            explain: 'Que montre ce tableau de bord ?',
+            standOut: "Qu'est-ce qui ressort de ce tableau de bord ?",
+          },
+          report: {
+            summarize: 'Résumer ce rapport',
+            takeaways: 'Quels sont les points clés de ce rapport ?',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'Questions suggérées',
       discussing: "Affiché : {{target}}",
       focus: {
         pin: "Continuer à poser des questions sur cet enregistrement",
@@ -3576,6 +3598,7 @@ const fr = {
     recent: "Récent",
     starred: "Étoilés",
     removeFromFavorites: "Retirer {{name}} des favoris",
+    conversationUnavailable: "Cette conversation n’est plus disponible",
     allReports: "Tous les rapports",
     collapse: 'Réduire la barre latérale',
     expand: 'Développer la barre latérale',
@@ -5616,6 +5639,7 @@ const fr = {
       toggleFailed: "Échec du changement d'état de l'application : {{reason}}",
       setDefaultDone: "{{name}} définie par défaut",
       setDefaultFailed: "Échec de la définition de l'application par défaut : {{reason}}",
+      restoreDefaultFailed: "Impossible de rétablir {{name}} comme application par défaut ; elle n'est donc plus l'application par défaut : {{reason}}",
       appDeleted: "{{name}} supprimée",
       deleteFailed: "Échec de la suppression de l'application : {{reason}}",
       nothingToDelete: "Rien à supprimer pour {{name}} : {{reason}}",

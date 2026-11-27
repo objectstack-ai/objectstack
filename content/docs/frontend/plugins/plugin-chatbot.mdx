@@ -595,6 +595,27 @@ export function PendingQuestion({ messageId, onSend, onDismiss }: {
 - Strings come from the `chatbot.questionCard.*` keys of `@object-ui/i18n`; the
   card is right-to-left in Arabic.
 
+`ChatbotEnhanced` draws the card itself. When a turn ends on a question tool's
+result that `parseAskQuestionEnvelope` (`@objectstack/spec/ai`) reads — the
+question envelope, or a legacy `ask_which` result — and the envelope's `reply`
+is the turn's last text, the card takes the composer's place:
+
+- It shows only once the stream has ended, and never while a typed message is
+  queued, while a write approval waits in the same turn, after a skip, or on a
+  `readOnly` transcript.
+- The composer is not unmounted: it is hidden and `inert`, so a draft and its
+  attachments come back after Skip or an answer.
+- An answer is sent through `onSendMessage` as the next user message. If the
+  send fails and the message is rolled back, the card returns with its choice.
+- Skip is remembered on this device, per conversation, when the host passes
+  `conversationId`: the key is `QUESTION_SKIP_STORAGE_PREFIX` followed by
+  `:` and the conversation id. A host's sign-out cleanup should clear that
+  prefix.
+- The conversation draws the question from its envelope: pending, the question
+  alone; answered or skipped, a collapsed "AI asks: …" that expands to its
+  options. Copy still copies the full reply, and a pending question has no
+  Regenerate.
+
 ## Examples
 
 ### Simple AI Chat
