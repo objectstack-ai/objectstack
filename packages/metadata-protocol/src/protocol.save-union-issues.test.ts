@@ -35,7 +35,8 @@ import { z } from 'zod';
 // #5619 sank the two predicates into a package both sides already depend on.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
-import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
+import { CONTROLLED_BY_PARENT_MASTER_INVALID } from '@objectstack/spec/data';
+import { getMetadataTypeSchema, PLUGIN_UI_REQUIRED_KEY_MISSING, PluginSchema } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation, zodIssuesToMetadataIssues } from './protocol.js';
 import { ZOD_UNION_DEFAULT_MESSAGE } from './protocol-metadata-issues.js';
 
@@ -700,5 +701,84 @@ describe('#35500 a member that is itself a bare union of kinds explains nothing'
     it('CONTROL — a member with a located cause is still selected and expanded', () => {
         const schema = z.object({ u: z.union([z.union([z.string(), z.number()]), z.object({ a: z.string() }).strict()]) });
         expect(zodIssuesToMetadataIssues(issuesOf(schema, { u: { a: 1 } })).map((e) => [e.path, e.code])).toEqual([['u.a', 'invalid_type']]);
+    });
+});
+
+/**
+ * #36594 — a spec refusal's registered code reaches the save door's 422.
+ *
+ * A spec refinement that owns an ADR-0112 code stamps it on its zod issue as
+ * `params.code`, beside the fields that say which fix applies; zod's own issue
+ * code for every such refinement is `'custom'`. The entry kept `path`, `message`
+ * and that `'custom'` and dropped `params`, so a client of the 422 could not
+ * tell one refusal from another except by its English sentence. The entry now
+ * carries the issue's `params` verbatim, and its `code` is unchanged.
+ *
+ * `err.issues` is the 422 body's `issues` member as sent: the REST error
+ * answer spreads it unchanged (`packages/rest/src/error-response.ts`).
+ */
+describe('#36594 the 422 INVALID_METADATA entry carries the zod issue\'s params', () => {
+    const detailWithReadonlyMaster = () => ({
+        name: 'work_order_item',
+        label: 'Work Order Item',
+        sharingModel: 'controlled_by_parent',
+        fields: {
+            order: { name: 'order', type: 'master_detail', label: 'Order', reference: 'work_order', required: true, readonly: true },
+            note: { name: 'note', type: 'text', label: 'Note' },
+        },
+    });
+
+    it('CONTROLLED_BY_PARENT_MASTER_INVALID: an object save names the code and its shape; `code` stays \'custom\'', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const err = await rejection(save(protocol, detailWithReadonlyMaster(), 'work_order_item', 'object'));
+
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(err.status).toBe(422);
+        expect(err.issues).toEqual([{
+            path: 'fields',
+            message: expect.any(String),
+            code: 'custom',
+            params: { code: CONTROLLED_BY_PARENT_MASTER_INVALID, shape: 'master-not-writable' },
+        }]);
+        expect(rows.size).toBe(0);
+    });
+
+    it('PLUGIN_UI_REQUIRED_KEY_MISSING: the real `PluginSchema` refusal, through the door\'s mapper, names the code and the missing key', () => {
+        // No metadata type the save door accepts parses with `PluginSchema` on
+        // this tree (a type it does not know is refused `INVALID_REQUEST` before
+        // any schema runs), so this pins the one mapper every 422 INVALID_METADATA
+        // producer shares, fed the issues the real schema raises.
+        const parsed = PluginSchema.safeParse({ id: 'com.example.panel', name: 'Panel', version: '1.0.0', type: 'ui', slug: 'panel' });
+        expect(parsed.success).toBe(false);
+
+        const issues = zodIssuesToMetadataIssues(parsed.error!.issues);
+
+        expect(issues).toEqual([{
+            path: 'staticPath',
+            message: expect.stringMatching(new RegExp(`^${PLUGIN_UI_REQUIRED_KEY_MISSING}: `)),
+            code: 'custom',
+            params: { code: PLUGIN_UI_REQUIRED_KEY_MISSING, key: 'staticPath' },
+        }]);
+    });
+
+    it('CONTROL — an issue zod raised without params gets no `params` member', async () => {
+        const { protocol } = makeProtocol();
+        const body = { ...detailWithReadonlyMaster(), sharingModel: 'controlled_by_parent', label: 42 };
+
+        const err = await rejection(save(protocol, body, 'work_order_item', 'object'));
+
+        expect(err.status).toBe(422);
+        const label = err.issues.find((i: any) => i.path === 'label');
+        expect(label).toEqual({ path: 'label', message: expect.any(String), code: 'invalid_type' });
+        expect(Object.prototype.hasOwnProperty.call(label, 'params')).toBe(false);
+    });
+
+    it('the mapper copies `params` and does not hand out the issue\'s own object', () => {
+        const params = { code: 'SOME_REGISTERED_CODE', detail: 'x' };
+        const [entry] = zodIssuesToMetadataIssues([{ code: 'custom', path: ['a'], message: 'm', params }]);
+
+        expect(entry).toEqual({ path: 'a', message: 'm', code: 'custom', params });
+        expect(entry.params).not.toBe(params);
     });
 });
