@@ -1343,7 +1343,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // `uiReadonlyWhen` rows (the hand lock), authored in every locale.
       // 840 since #37141: the skill form's `context` row (ADR-0160 D8) — one
       // row label, authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(840);
+      // 843 since #34908: the view and dashboard forms offer the audience gate
+      // (`requiredPermissions`) — two row labels and the dashboard's `access`
+      // section label, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(843);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
