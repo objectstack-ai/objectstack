@@ -35,7 +35,7 @@ import { writeRecord as writeGalleryRecord } from '../export/fixture.js';
 import { loadedCardStamp, main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../../src/runner/cli.js';
 import { citationLabels, namespacedScenario } from '../../src/runner/namespace.js';
 import { askModeRefusal, buildPassed, doorHarnessGap, confirmationAmbiguous, confirmationNotRecorded, hiddenValues, readRollupSourceFinding, restoreObjects, restoreSeededRows, rollupSourceCharges, runCard, runHalf, seededRows, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
-import { derivedFields, RESTORE_UNCOMPARED, rowDrift } from '../../src/runner/seed.js';
+import { derivedFields, RESTORE_UNCOMPARED, rollupFields, rowDrift } from '../../src/runner/seed.js';
 import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, cardStampOf, confirmationTally, datasetTally, confirmedWriteTally, elapsedText, guardrailTally, kindCell, kindTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
 import { askKindCounts } from '../../src/ask-kinds.js';
 import { ASK_KINDS, PersonaSchema } from '../../src/schema.js';
@@ -913,6 +913,73 @@ describe('seedApp — the requisition_to_receipt seed loads whole through its de
       refused: [{ object: 'demopurchase_department', id: 'dep_fin', fields: ['manager'], code: 'PERMISSION_DENIED', message: 'manager is read-only' }],
       secondPass: { 'demopurchase_department.manager': 4 },
     });
+  });
+});
+
+const O2C_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/order_to_cash.json');
+const O2C_BUILD = resolve(HERE, '../../../../../docs/qa/scenarios/builds/order_to_cash.json');
+
+/**
+ * An order_to_cash build that declares `amount_paid` a roll-up of its payments and caps a payment at the
+ * invoice's open balance (#35654), as the platform runs it on the seed path: a roll-up value the row is sent
+ * is stored as written, one it is not sent starts at the empty-child value (0), and each payment admitted
+ * adds to its invoice's total before the next is judged.
+ */
+class PaymentCapApp extends FakeApp {
+  static readonly CAP_REFUSAL = "A payment may not exceed the invoice's open balance.";
+  override async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
+    if (object === 'demoorder_invoice') return super.insertRow(object, { amount_paid: 0, ...row });
+    if (object === 'demoorder_payment') {
+      const invoice = (this.rows.demoorder_invoice ?? []).find((r) => r.id === row.invoice);
+      if (!invoice) return { ok: false, status: 400, body: {}, message: `Invoice: no demoorder_invoice record has id "${String(row.invoice)}"` };
+      if (Number(row.amount) > Number(invoice.amount) - Number(invoice.amount_paid) + 0.005) return { ok: false, status: 400, body: {}, message: PaymentCapApp.CAP_REFUSAL };
+      invoice.amount_paid = Number(invoice.amount_paid) + Number(row.amount);
+    }
+    return super.insertRow(object, row);
+  }
+}
+
+describe('[#35654] seedApp — the card states a roll-up as its end state, so the seed leaves out the build\'s roll-ups', () => {
+  const o2c = () => namespacedScenario(load(O2C_FILE));
+  const build = () => JSON.parse(readFileSync(O2C_BUILD, 'utf8')) as unknown;
+
+  it('the committed build computes the invoice roll-up the card states, and the card states it as the sum of each invoice\'s payments', () => {
+    expect(rollupFields(build()).get('demoorder_invoice')).toEqual(new Set(['amount_paid']));
+    expect(derivedFields(build()).get('demoorder_invoice')).toEqual(new Set(['name', 'amount_paid'])); // the autonumber `name` (INV-1058) stays sent: the questions cite it
+    const seed = o2c().card.run.seed;
+    const paid = new Map<string, number>();
+    for (const p of seed.demoorder_payment!) paid.set(String(p.invoice), (paid.get(String(p.invoice)) ?? 0) + Number(p.amount));
+    expect(seed.demoorder_invoice!.filter((i) => Number(i.amount_paid) !== (paid.get(String(i.id)) ?? 0))).toEqual([]);
+  });
+
+  it('every one of the 72 payments loads, and each invoice ends at the amount paid the card states', async () => {
+    const scenario = o2c();
+    const app = new PaymentCapApp();
+    const seed = await seedApp(scenario, app, [], undefined, undefined, rollupFields(build()));
+    expect(seed.refused).toEqual([]);
+    expect(seed.leftOut).toEqual(['demoorder_invoice.amount_paid', 'demoorder_sales_order.total_amount']);
+    expect(app.rows.demoorder_invoice!.find((r) => r.id === 'inv058')).toMatchObject({ name: 'INV-1058' });
+    expect(app.rows.demoorder_payment).toHaveLength(72);
+    const held = new Map(app.rows.demoorder_invoice!.map((r) => [r.id, r.amount_paid]));
+    expect(scenario.card.run.seed.demoorder_invoice!.filter((i) => held.get(i.id) !== i.amount_paid)).toEqual([]);
+  });
+
+  it('control: sent the end state, the cap reads a paid invoice as owing nothing and refuses its 66 payments', async () => {
+    const seed = await seedApp(o2c(), new PaymentCapApp(), []);
+    expect(seed.leftOut).toBeUndefined();
+    expect(seed.refused).toHaveLength(66);
+    expect(new Set(seed.refused.map((r) => r.object))).toEqual(new Set(['demoorder_payment']));
+    expect(seed.refused[0]!.message).toContain(PaymentCapApp.CAP_REFUSAL);
+  });
+
+  it('restoreSeededRows puts a removed invoice back without its roll-up value either', async () => {
+    const scenario = o2c();
+    const app = new PaymentCapApp();
+    await seedApp(scenario, app, [], undefined, undefined, rollupFields(build()));
+    const seeded = await seededRows(app, restoreObjects(scenario.card));
+    app.rows.demoorder_invoice = app.rows.demoorder_invoice!.filter((r) => r.id !== 'inv005'); // unpaid: no payment hangs off it
+    expect(await restoreSeededRows(scenario, app, [], seeded, build())).toEqual({ restored: { reinserted: ['demoorder_invoice/inv005'] } });
+    expect(app.rows.demoorder_invoice!.find((r) => r.id === 'inv005')).toMatchObject({ amount_paid: 0, balance: 4300 });
   });
 });
 

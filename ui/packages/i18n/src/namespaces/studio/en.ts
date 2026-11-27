@@ -1855,6 +1855,18 @@ const STUDIO_EN: Record<string, string> = {
   'engine.form.addPermissionSetPlain': 'Add permission set',
   'engine.form.addPermissionSet': 'Add permission set…',
   'engine.form.allPermissionSetsAdded': 'All permission sets added',
+  // The `ref-multi:capability` picker of an audience gate (`requiredPermissions`
+  // on a list view or a dashboard) and its position preview.
+  'engine.form.addCapabilityPlain': 'Add capability',
+  'engine.form.addCapability': 'Add capability…',
+  'engine.form.allCapabilitiesAdded': 'All capabilities added',
+  'engine.form.audienceEveryone': 'No capability picked: everyone who can see the list sees it.',
+  'engine.form.audiencePositions': 'Positions that will see it: {positions}.',
+  'engine.form.audienceNoPosition': 'No single position holds every picked capability: only people who hold all of them, directly or through several positions, will see it.',
+  'engine.form.capabilityGrantedBy': 'Granted by {sets}',
+  'engine.form.capabilitiesUnread': 'The capability list is not available here, so none can be added.',
+  'engine.form.capabilitiesNone': 'No capability is defined yet. Capabilities are granted on permission sets, in Setup.',
+  'engine.form.audiencePositionsUnread': 'The positions could not be read, so who will see it is not shown.',
   'engine.form.noObjectFields': 'No object fields ({error}).',
   // objectui#10862, slice 4 — the not-found `error` the field and dataset
   // catalogue hooks (`useObjectFields`, `useDatasetSemantics`) publish, read

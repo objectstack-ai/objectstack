@@ -1345,7 +1345,9 @@ export class KnowledgeService implements IKnowledgeService {
    * trigger `boot`). A source with `refresh.onRecordChange: false` is left
    * alone — an external indexer owns its index — and so is one whose state
    * builds nothing; a state that cannot be read or seen is logged at `warn`,
-   * once. Resolves when the pass is done; never rejects. Run in the
+   * once. A source whose adapter is not mounted is skipped without a line:
+   * {@link reportUnmountedAdapters} names it at boot, so it is said once.
+   * Resolves when the pass is done; never rejects. Run in the
    * background by `KnowledgeServicePlugin`, so the boot never waits for it.
    */
   async buildSourcesAtBoot(): Promise<void> {
@@ -1383,6 +1385,11 @@ export class KnowledgeService implements IKnowledgeService {
         logger?.debug?.(`[knowledge] source '${entry.face}': refresh.onRecordChange is false, so an external indexer owns its index; it is not built ${when}.`);
         return;
       }
+      // A source whose adapter is not mounted is named once at boot, at
+      // `error`, by the boot's reading (`reportUnmountedAdapters`); the pass
+      // adds no second line for it. On reload no reading runs, so the line
+      // below is the one that names it.
+      if (trigger === 'boot' && !this.adapters.has(entry.handed.adapter)) return;
       const reading = await this.readIndexStateOf(entry);
       if (reading.due) {
         logger?.info?.(`[knowledge] source '${entry.face}' is built now: ${reading.detail}`);

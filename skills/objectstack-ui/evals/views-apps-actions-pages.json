@@ -260,6 +260,16 @@
         "must_contain": ["requiresConfirmation: true", "exposed: true", "confirmText", "project_task"],
         "must_not_contain": ["requireConfirmation:", "confirm: true"]
       }
+    },
+    {
+      "id": 27,
+      "prompt": "`project_task` has a `status` select and a number field `estimate_hours`. Add a board grouped by status. Each lane shows the average estimate of all its tasks. Cards show `title`, `owner_id` and `due_date` as values without the field names, and a task with no due date keeps that row empty so the cards of a lane line up. Write the view.",
+      "expected_output": "A new `listViews` entry (`type: 'kanban'`, the required top-level `columns`) whose `kanban` block carries `groupByField: 'status'`, `summary: { type: 'avg', field: 'estimate_hours' }`, `showFieldLabels: false` and `hideEmptyFields: false`. `summary` is an object naming the statistic and its `field`, computed by the query over every task of the lane, not only the loaded cards. Both card settings default to true, so each is written only because the request asks for the opposite. Not the list column shorthand `summary: 'avg'`, and not `summarizeField`, which only sums.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["groupByField", "summary", "avg", "estimate_hours", "showFieldLabels: false", "hideEmptyFields: false"],
+        "must_not_contain": ["showFieldLabels: true"]
+      }
     }
   ]
 }

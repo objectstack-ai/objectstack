@@ -376,6 +376,30 @@ describe('buildSourcesAtBoot — the first build', () => {
     expect(logger.warn.mock.calls.map((c) => String(c[0])).some((l) => l.includes('redis unreachable'))).toBe(true);
   });
 
+  it('a source naming an unmounted adapter gets exactly one boot log line: the reading, at error', async () => {
+    const db = makeEngine(ROWS);
+    const { adapter, calls } = makeAdapter();
+    const { service, logger } = makeService(db.engine, adapter);
+    service.registerSource(source());
+    service.registerSource(source({ name: 'docs', adapter: 'pgvector' }));
+
+    // What the plugin does at kernel:bootstrapped: the first-build pass and the reading.
+    await service.buildSourcesAtBoot();
+    service.reportUnmountedAdapters();
+
+    const lines = (['debug', 'info', 'warn', 'error'] as const).flatMap((level) =>
+      logger[level].mock.calls.map((c) => [level, String(c[0])] as const),
+    );
+    // Registration's own line names the adapter; past it, one line says the source is unservable.
+    const boot = lines.filter(([, m]) => m.includes("'docs'"));
+    expect(boot).toHaveLength(1);
+    expect(boot[0]?.[0]).toBe('error');
+    expect(boot[0]?.[1]).toContain("source 'docs' names adapter 'pgvector', which is not mounted");
+    // The mounted source is still built by the same pass.
+    expect(calls.upserted).toBeGreaterThan(0);
+    expect(service.buildRecord('kb')).toMatchObject({ status: 'done' });
+  });
+
   it('a source with refresh.onRecordChange: false is left to its external indexer', async () => {
     const db = makeEngine(ROWS);
     const { adapter, calls } = makeAdapter();
