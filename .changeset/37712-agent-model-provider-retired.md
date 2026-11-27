@@ -3,13 +3,14 @@
 '@objectstack/cli': patch
 '@objectstack/platform-objects': patch
 '@object-ui/app-shell': patch
+'@object-ui/console': patch
 ---
 
 feat(spec)!: retire an agent's `model.provider` — no runtime read it; the deployment's AI settings choose the provider
 
 Clause-②: no (narrowing)
 Metadata-protocol: narrowed
-Skills-docs: follow-up owed
+Skills-docs: follow-up #37796
 
 <!-- adr-0087: registered agent-model-provider-removed, agent-model-provider-retired -->
 
@@ -27,4 +28,5 @@ The retirement kit:
 - **`@objectstack/spec`**: `provider` is a `retiredKey()` tombstone on `AIModelConfigSchema`, and the 18.x emitted default is stripped by `acceptRetiredDefaultResidue`. The D2 conversion `agent-model-provider-removed` (lossless, retired from the load path) deletes the key from `agents[]` on every data-at-rest seam (stored rows, built artifacts, `os migrate meta`); the D3 entry `agent-model-provider-retired` names what the upgrade still owes: whether an agent whose author wrote a provider should now name a model the deployment offers or run on its default model. The key is registered in `RETIRED_KEYS_BY_MAJOR[19]`. The liveness ledger's `model` row records the removal. The agent form's model help text no longer names a provider.
 - **`@objectstack/platform-objects`**: the agent form's regenerated help-text labels.
 - **`@object-ui/app-shell`**: the agent metadata preview shows the model name alone and never a provider pill.
+- **`@object-ui/console`**: the agent preview sample no longer writes `provider`.
 - **`@objectstack/cli`**: `os explain agent` describes the `model` block without `provider`, and its example drops it.
