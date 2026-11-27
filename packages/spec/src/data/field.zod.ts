@@ -3105,9 +3105,9 @@ export const FieldSchema = lazySchema(() => {
    * record page's inline edit and stage path, the highlight-strip chip, grid
    * inline edit and its multi-row save, kanban drag between columns grouped by
    * the field (a swimlane board's drag writes the column's field only, never
-   * the swimlane's), calendar drag, the Gantt's drag, resize, progress
-   * handle, dependency link and in-place edit, the timesheet cell, the command
-   * palette's create-as prefill, the line-item grid, and the in-app assistant
+   * the swimlane's), calendar drag and quick-create, the Gantt's drag,
+   * resize, progress handle, dependency link and in-place edit, the timesheet
+   * cell, the command palette's create-as prefill, the line-item grid, and the in-app assistant
    * acting for a person. Every console surface honours it; the in-app
    * assistant, whose writes run in the AI service, does not read it yet
    * (#37448). NOT by hand = REST create/update,
@@ -3129,7 +3129,7 @@ export const FieldSchema = lazySchema(() => {
    * boundary: a caller who may edit the object can write the field through
    * the API; field permissions (`editable` on a permission set) are that.
    */
-  uiReadonly: z.boolean().optional().describe("Read-only BY HAND: the console's editing surfaces do not let a person edit the field — the create and edit dialogs (it is left off them and out of their payload), record-page inline edit and the stage path, the highlight-strip chip, grid inline edit and multi-row save, kanban column drag, calendar drag, the Gantt's drag, resize, progress handle, dependency link and in-place edit, the timesheet cell, the command palette's create-as prefill and the line-item grid — every console surface; the in-app assistant acting for a person does not honour it yet. Every other write KEEPS it — REST create/update, import, declarative and script actions and flows write it, judged by the object's validations exactly as an ordinary field (a `state_machine` rule included). For a field that changes only through actions, e.g. an order `status` moved by Confirm / Cancel buttons. A console create leaves the field out and the server applies its `defaultValue`, so a `required` field needs a `defaultValue`: without one every create from the console fails. An API, import or action insert may set it, judged by validations (a state machine's `initialStates`). Absent = false. Refused beside `readonly: true`, which already keeps every client out: `readonly` when no client may write the field, `uiReadonly` when only people at the console may not. Not a security boundary — field permissions are. The conditional twin is `uiReadonlyWhen`."),
+  uiReadonly: z.boolean().optional().describe("Read-only BY HAND: the console's editing surfaces do not let a person edit the field — the create and edit dialogs (it is left off them and out of their payload), record-page inline edit and the stage path, the highlight-strip chip, grid inline edit and multi-row save, kanban column drag, calendar drag and quick-create, the Gantt's drag, resize, progress handle, dependency link and in-place edit, the timesheet cell, the command palette's create-as prefill and the line-item grid — every console surface; the in-app assistant acting for a person does not honour it yet. Every other write KEEPS it — REST create/update, import, declarative and script actions and flows write it, judged by the object's validations exactly as an ordinary field (a `state_machine` rule included). For a field that changes only through actions, e.g. an order `status` moved by Confirm / Cancel buttons. A console create leaves the field out and the server applies its `defaultValue`, so a `required` field needs a `defaultValue`: without one every create from the console fails. An API, import or action insert may set it, judged by validations (a state machine's `initialStates`). Absent = false. Refused beside `readonly: true`, which already keeps every client out: `readonly` when no client may write the field, `uiReadonly` when only people at the console may not. Not a security boundary — field permissions are. The conditional twin is `uiReadonlyWhen`."),
 
   /**
    * [ADR-0066 D3] Capabilities required to READ/EDIT this field. A field

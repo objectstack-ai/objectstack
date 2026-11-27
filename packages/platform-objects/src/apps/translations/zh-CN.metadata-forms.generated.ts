@@ -1069,7 +1069,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       uiReadonly: {
         label: "界面只读",
-        helpText: "用户无法在控制台中编辑此字段（对话框、记录页、表格、看板、日历和甘特图拖动、工时表），而动作、导入、API 和流程仍可写入，每次写入都由对象的校验规则裁决。已开启“只读”时请保持关闭：只读已经阻止所有客户端写入。"
+        helpText: "用户无法在控制台中编辑此字段（对话框、记录页、表格、看板、日历和甘特图拖动、工时表），而动作、导入、API 和流程仍可写入，每次写入都由对象的校验规则裁决。已开启“只读”时请保持关闭：只读已经阻止所有客户端写入。代表用户操作的应用内助手暂不遵循此设置。"
       },
       hidden: {
         label: "隐藏",
@@ -1097,7 +1097,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       uiReadonlyWhen: {
         label: "界面只读条件",
-        helpText: "基于记录的 CEL 谓词（例如 record.status != 'draft'）——为 TRUE 时，用户无法在控制台中编辑已有记录的该字段（编辑对话框、记录页、表格、看板、日历和甘特图拖动、工时表）；新建记录的创建对话框不做判断。动作、导入、API 和流程仍可写入，并由对象的校验规则裁决。与“只读条件”一样读取记录自身的列。"
+        helpText: "基于记录的 CEL 谓词（例如 record.status != 'draft'）——为 TRUE 时，用户无法在控制台中编辑已有记录的该字段（编辑对话框、记录页、表格、看板、日历和甘特图拖动、工时表）；新建记录的创建对话框不做判断。动作、导入、API 和流程仍可写入，并由对象的校验规则裁决。与“只读条件”一样读取记录自身的列。代表用户操作的应用内助手暂不遵循此设置。"
       },
       requiredWhen: {
         label: "必填条件",

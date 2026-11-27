@@ -26,8 +26,8 @@
  * The hand surfaces (each reads this module, never `def.readonly` alone): the
  * create and edit dialogs and the payload they submit, the record page's
  * inline edit, the highlight-strip chip, grid inline edit and its multi-row
- * save, kanban drag between columns grouped by the field, calendar drag, the
- * Gantt's drag, resize, progress handle, dependency link and in-place edit
+ * save, kanban drag between columns grouped by the field, calendar drag and
+ * quick-create, the Gantt's drag, resize, progress handle, dependency link and in-place edit
  * (`@object-ui/plugin-gantt` `ganttHandLock.ts`), the timesheet cell, and the
  * command palette's create-as prefill. The in-app assistant acting for a
  * person is a hand surface too; its writes run in the AI service, which does
