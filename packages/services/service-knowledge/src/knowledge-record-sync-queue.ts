@@ -100,13 +100,18 @@ export function readRecordSyncMessage(data: unknown): KnowledgeRecordSyncMessage
 }
 
 /**
- * The `queue` service when it is durable, else `undefined`: none registered,
- * one that cannot publish and subscribe, or the kernel's built-in fallback,
- * which labels itself `degraded` (synchronous in-process delivery, no
- * durability, no retry). The same reading as `resolveDurableQueue` in
- * `@objectstack/plugin-email`.
+ * The `queue` service the record sync can run through, else `undefined`:
+ * none registered, one that cannot publish and subscribe, the kernel's
+ * built-in fallback (it labels itself `degraded`: synchronous in-process
+ * delivery, no durability, no retry — the reading of `resolveDurableQueue`
+ * in `@objectstack/plugin-email`), or one with no dead-letter surface
+ * (`listFailed`). The last is this sync's own condition: a sync that fails
+ * every attempt must stay somewhere an operator can list, and an in-memory
+ * queue (`MemoryQueueAdapter`) retries nothing and keeps nothing, so a failed
+ * sync there would be lost without a line in any log. The platform's
+ * database queue (`DbQueueAdapter`) has one.
  */
-export function resolveDurableQueue(getService: (name: string) => unknown): IQueueService | undefined {
+export function resolveRecordSyncQueue(getService: (name: string) => unknown): IQueueService | undefined {
   let queue: unknown;
   try {
     queue = getService('queue');
@@ -116,6 +121,7 @@ export function resolveDurableQueue(getService: (name: string) => unknown): IQue
   const candidate = queue as (Partial<IQueueService> & { __serviceInfo?: { status?: unknown } }) | undefined;
   if (!candidate || typeof candidate.publish !== 'function' || typeof candidate.subscribe !== 'function') return undefined;
   if (candidate.__serviceInfo?.status === 'degraded') return undefined;
+  if (typeof candidate.listFailed !== 'function') return undefined;
   return candidate as IQueueService;
 }
 

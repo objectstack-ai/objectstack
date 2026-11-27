@@ -39,7 +39,7 @@ import {
   KNOWLEDGE_RECORD_SYNC_QUEUE,
   readRecordSyncMessage,
   recordSyncPublishOptions,
-  resolveDurableQueue,
+  resolveRecordSyncQueue,
   resolveRecordSyncRetry,
   type KnowledgeRecordSyncRetry,
 } from './knowledge-record-sync-queue.js';
@@ -789,7 +789,7 @@ export class KnowledgeServicePlugin implements Plugin {
 
   /**
    * Run the record sync through the composed `queue` service when it is
-   * durable ({@link resolveDurableQueue}) and the service has a data engine
+   * durable ({@link resolveRecordSyncQueue}) and the service has a data engine
    * (the worker re-reads the row): subscribe the worker on
    * {@link KNOWLEDGE_RECORD_SYNC_QUEUE} and route the service's syncs there
    * (`KnowledgeService.routeRecordSyncs`). Otherwise the sync stays inline,
@@ -803,10 +803,14 @@ export class KnowledgeServicePlugin implements Plugin {
    */
   private async startRecordSyncQueue(ctx: PluginContext, service: KnowledgeService): Promise<void> {
     const hasEngine = this.dataEngineBound;
-    const queue = resolveDurableQueue((name) => ctx.getService<unknown>(name));
+    const queue = resolveRecordSyncQueue((name) => ctx.getService<unknown>(name));
     if (!queue || !hasEngine) {
       ctx.logger.warn?.(
-        `KnowledgeServicePlugin: ${!hasEngine ? 'no data engine is bound to re-read a row' : 'no durable queue service is composed'}, ` +
+        `KnowledgeServicePlugin: ${
+          !hasEngine
+            ? 'no data engine is bound to re-read a row'
+            : 'no durable queue service is composed (the kernel\'s fallback queue and an in-memory queue keep no message across a restart and no dead letter)'
+        }, ` +
           'so record changes are synced inline: a save of an indexed record waits for the embedder, a failed sync is ' +
           "logged and not retried, and with a realtime service the sync runs inside the write's unit of work, so a " +
           'write that rolls back can leave its document in the index until the reconcile. Compose the queue ' +

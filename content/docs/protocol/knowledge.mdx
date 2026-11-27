@@ -1006,8 +1006,9 @@ queue (ADR-0161 K1). The standard runtime always mounts `queue`.
 ### Without a durable queue
 
 With only the kernel's built-in fallback queue (synchronous, in-process, no
-durability, no retry; it labels itself `degraded`), or with no data engine
-bound, the sync runs inline and the plugin says so once at boot, at `warn`. A
+durability, no retry; it labels itself `degraded`), a queue with no dead-letter
+surface (`listFailed` — the in-memory `MemoryQueueAdapter` has none), or no data
+engine bound, the sync runs inline and the plugin says so once at boot, at `warn`. A
 host that mounts the service by hand adds `QueueServicePlugin` over the
 ObjectQL engine to get the queued sync.
 
