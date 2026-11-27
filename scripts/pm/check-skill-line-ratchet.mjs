@@ -240,7 +240,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   // the `domain:engine` row. Landed width, headroom 0 (lowering is always
   // legitimate).
   // Lowered 342 → 341 by the domain:server lane merge (maintainer ruling
-  // 2026-10-22, letter 乙): the engine, services and cli rows of the 域车道
+  // 2026-10-22, letter 乙): the engine, services and cli rows of the 车道与域
   // table consolidated into one `domain:server` row that names package
   // families and points at lanes/server.md for the enumeration. The widest
   // survivor is that row. Landed width, headroom 0.
