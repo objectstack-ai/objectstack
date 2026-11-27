@@ -2,82 +2,41 @@
 
 /**
  * StudioRightSlot — the one right-hand slot of the Studio design surface
- * (objectui#12725, the maintainer's 「按「右栏二选一」定稿」): it shows EITHER the
- * open item's properties OR the AI copilot, never both, and never beside a
+ * (objectui#12725): it shows the open item's properties, never beside a
  * second right-hand panel.
  *
- *  - objectstack#34725 — ONE header row, the console drawer's: on the left a
- *    segmented 属性 | AI 助手 switch (`⌘.` / `Ctrl+.` does the same,
- *    `matchStudioSlotShortcut`); on the right, while the copilot shows,
- *    History, the in-place widen (objectstack#34610) and Close. The top bar's
- *    robot opens and closes the slot as the console's robot opens its drawer.
- *  - Its width is resizable from the left edge within 320–560 px, and each
- *    pane keeps its own (objectstack#35061: properties 360, copilot 420 by default,
- *    `useStudioSlotWidth`); under `md` it overlays the page at its own width.
+ *  - objectstack#34725 — ONE header row: the title on the left, Close on the
+ *    right. The title row's panel icon (and `⌘.` / `Ctrl+.`,
+ *    `matchStudioSlotShortcut`) opens and closes it.
+ *  - Its width is resizable from the left edge within 320–560 px (360 by
+ *    default, `useStudioSlotWidth`); under `md` it overlays the page at its own
+ *    width.
  *  - Properties are a portal target: a pillar that hosts its inspector here
  *    claims the slot through `useStudioRightSlot` (`studioRightSlotState.ts`)
- *    and renders into
- *    `propsTarget`. A pillar that claims nothing keeps its own aside, and the
- *    slot shows the copilot alone (the header reads as a title, not a switch).
- *  - objectstack#35018 — while the properties show, the header's 属性 | AI 助手
- *    switch is the one way back to the conversation: the 40 px 「AI 助手 /
- *    回到对话 →」 strip that also stood at the slot's foot is gone.
- *  - The copilot segment says how many items the copilot proposed await the
- *    author's confirmation (「N 项待确认」, objectstack#25943).
- *  - Both bodies stay MOUNTED and are hidden by mode: a turn the copilot is
- *    streaming survives a look at the properties, and a pillar's portal target
- *    never disappears under an open editor.
- *
- * The copilot itself (`StudioChatDock`) is passed in as `copilot`, so its agent,
- * conversation and requests are untouched by the move; it reports whether the
- * agent catalog serves one (`copilotAvailable`) and the slot draws nothing for
- * a copilot that is not there.
+ *    and renders into `propsTarget`. A pillar that claims nothing keeps its own
+ *    aside, and the slot draws nothing.
+ *  - The body stays MOUNTED and is hidden with the slot, so a pillar's portal
+ *    target never disappears under an open editor.
  */
 
 import * as React from 'react';
-import { History, Maximize2, Minimize2, SlidersHorizontal, Sparkles, X } from 'lucide-react';
+import { SlidersHorizontal, X } from 'lucide-react';
 import { Button, cn } from '@object-ui/components';
-import { useObjectTranslation } from '@object-ui/i18n';
-import { t, tFormat } from '../metadata-admin/i18n.js';
+import { t } from '../metadata-admin/i18n.js';
 import {
   STUDIO_SLOT_MAX_WIDTH,
   STUDIO_SLOT_MIN_WIDTH,
   useStudioSlotWidth,
-  type StudioSlotMode,
 } from './studioRightSlotState.js';
 
 export interface StudioRightSlotProps {
-  /** Whether the slot is shown (the top bar's toggle). */
+  /** Whether the slot is shown (the title row's toggle). */
   open: boolean;
-  /** The mode the slot shows; the caller has already folded in what exists. */
-  mode: StudioSlotMode;
-  onModeChange: (mode: StudioSlotMode) => void;
-  /** A pillar has claimed the properties half. */
+  /** A pillar has claimed the properties. */
   hasProps: boolean;
-  /** The agent catalog serves a copilot (reported by `copilot`). */
-  copilotAvailable: boolean;
-  /**
-   * objectui#11666 / objectstack#25943 — how many items the copilot proposed
-   * await the author's confirmation; 0 when none.
-   */
-  planPendingCount: number;
-  /** The copilot body (`StudioChatDock`). Always mounted, hidden by mode. */
-  copilot: React.ReactNode;
   /** Callback ref for the properties portal target. */
   propsTargetRef: (el: HTMLElement | null) => void;
-  /** A width in px while the copilot is widened in place (objectstack#34610); `undefined` otherwise. */
-  wideWidth?: number;
-  /**
-   * objectstack#34610 / objectstack#34725 — whether the copilot is widened in
-   * place, and the header control that widens and narrows it (absent: no
-   * control). Drawn while the copilot shows, never in the phone overlay.
-   */
-  wide?: boolean;
-  onWideChange?: (wide: boolean) => void;
-  /** objectstack#34725 — the copilot's conversation history is open over it; the header's History button toggles it. */
-  historyOpen?: boolean;
-  onHistoryOpenChange?: (open: boolean) => void;
-  /** objectstack#34725 — the header's Close: hides the slot, as the top bar's robot does. */
+  /** objectstack#34725 — the header's Close: hides the slot, as the title row's toggle does. */
   onClose?: () => void;
   /** Under `md`: the slot overlays the page instead of reflowing it. */
   overlay?: boolean;
@@ -87,54 +46,16 @@ export interface StudioRightSlotProps {
 
 export function StudioRightSlot({
   open,
-  mode,
-  onModeChange,
   hasProps,
-  copilotAvailable,
-  planPendingCount,
-  copilot,
   propsTargetRef,
-  wideWidth,
-  wide = false,
-  onWideChange,
-  historyOpen = false,
-  onHistoryOpenChange,
   onClose,
   overlay = false,
   onOverlayDismiss,
   locale,
 }: StudioRightSlotProps): React.ReactElement {
-  const { t: tc } = useObjectTranslation();
-  const slotWidth = useStudioSlotWidth(mode);
-  const shown = open && (hasProps || copilotAvailable);
-  const showsProps = mode === 'props';
-  const switchable = hasProps && copilotAvailable;
-  const planPending = planPendingCount > 0;
-  const planMarkerId = React.useId();
-  const pendingText = planPending
-    ? tFormat('engine.studio.slot.pendingCount', locale, { count: planPendingCount })
-    : '';
-  const planMarker = planPending ? (
-    <span
-      aria-hidden="true"
-      data-testid="studio-slot-plan-pending"
-      className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold leading-none text-white tabular-nums"
-    >
-      {planPendingCount}
-    </span>
-  ) : null;
-  const copilotShown = !showsProps && copilotAvailable;
-  const widened = Boolean(wideWidth) && !showsProps;
-  const wideLabel = wide
-    ? tc('console.ai.dock.restore', { defaultValue: 'Restore side panel' })
-    : tc('console.ai.dock.expand', { defaultValue: 'Expand' });
-  const historyLabel = t('engine.studio.slot.history', locale);
+  const slotWidth = useStudioSlotWidth();
+  const shown = open && hasProps;
   const headerButton = 'h-7 w-7 text-muted-foreground hover:text-foreground';
-  const segment = (value: StudioSlotMode) =>
-    cn(
-      'inline-flex h-7 items-center justify-center gap-1.5 rounded-md px-3 text-[13px] transition-colors',
-      mode === value ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-    );
   return (
     <>
       {overlay && shown && (
@@ -142,10 +63,9 @@ export function StudioRightSlot({
       )}
       <aside
         data-testid="studio-right-slot"
-        data-mode={mode}
         aria-label={t('engine.studio.slot.label', locale)}
         hidden={!shown}
-        style={overlay ? undefined : { width: widened ? wideWidth : slotWidth.width }}
+        style={overlay ? undefined : { width: slotWidth.width }}
         className={cn(
           'relative shrink-0 flex-col overflow-hidden border-l bg-background [&:not([hidden])]:flex',
           overlay && 'fixed inset-y-0 right-0 z-40 w-[min(420px,100vw)] shadow-xl',
@@ -153,7 +73,7 @@ export function StudioRightSlot({
         )}
       >
         {/* objectstack#34725 — the left-edge resize handle, the console drawer's. */}
-        {overlay || widened ? null : (
+        {overlay ? null : (
           <div
             role="separator"
             aria-orientation="vertical"
@@ -172,82 +92,11 @@ export function StudioRightSlot({
           />
         )}
         <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b px-3" data-testid="studio-slot-header">
-          {switchable ? (
-            <div
-              role="tablist"
-              aria-label={t('engine.studio.slot.label', locale)}
-              title={t('engine.studio.slot.switchHint', locale)}
-              className="flex h-8 min-w-0 items-center gap-0.5 rounded-lg bg-muted p-0.5"
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={showsProps}
-                data-testid="studio-slot-tab-props"
-                onClick={() => onModeChange('props')}
-                className={segment('props')}
-              >
-                <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-                {t('engine.studio.inspector.props', locale)}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={!showsProps}
-                aria-describedby={planPending ? planMarkerId : undefined}
-                data-testid="studio-slot-tab-copilot"
-                onClick={() => onModeChange('copilot')}
-                className={segment('copilot')}
-              >
-                <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-                {t('engine.studio.aiCopilot', locale)}
-                {planMarker}
-              </button>
-            </div>
-          ) : (
-            <span className="inline-flex h-8 min-w-0 items-center gap-1.5 px-1 text-[13px] font-medium" data-testid="studio-slot-title">
-              {showsProps ? (
-                <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-              ) : (
-                <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-              )}
-              {t(showsProps ? 'engine.studio.inspector.props' : 'engine.studio.aiCopilot', locale)}
-            </span>
-          )}
-          {planPending && (
-            <span id={planMarkerId} hidden>
-              {pendingText}
-            </span>
-          )}
+          <span className="inline-flex h-8 min-w-0 items-center gap-1.5 px-1 text-[13px] font-medium" data-testid="studio-slot-title">
+            <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+            {t('engine.studio.inspector.props', locale)}
+          </span>
           <span className="flex shrink-0 items-center gap-0.5">
-            {copilotShown && onHistoryOpenChange ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn('h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground', historyOpen && 'bg-accent text-foreground')}
-                onClick={() => onHistoryOpenChange(!historyOpen)}
-                aria-pressed={historyOpen}
-                aria-label={historyOpen ? t('engine.studio.slot.backToChat', locale) : historyLabel}
-                data-testid="studio-slot-history"
-              >
-                <History className="h-3.5 w-3.5" aria-hidden="true" />
-                {historyLabel}
-              </Button>
-            ) : null}
-            {copilotShown && onWideChange && !overlay ? (
-              <Button
-                variant="ghost"
-                size="icon"
-                className={headerButton}
-                onClick={() => onWideChange(!wide)}
-                aria-label={wideLabel}
-                title={wideLabel}
-                aria-pressed={wide}
-                data-testid="studio-copilot-maximize"
-              >
-                {wide ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-              </Button>
-            ) : null}
             {onClose ? (
               <Button
                 variant="ghost"
@@ -266,16 +115,8 @@ export function StudioRightSlot({
         <div
           ref={propsTargetRef}
           data-testid="studio-slot-props"
-          hidden={!showsProps}
-          className="min-h-0 flex-1 flex-col overflow-hidden [&:not([hidden])]:flex"
+          className="min-h-0 flex-1 flex-col overflow-hidden flex"
         />
-        <div
-          data-testid="studio-slot-copilot"
-          hidden={showsProps}
-          className="min-h-0 flex-1 flex-col overflow-hidden [&:not([hidden])]:flex"
-        >
-          {copilot}
-        </div>
       </aside>
     </>
   );

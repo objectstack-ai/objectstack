@@ -90,9 +90,6 @@ vi.mock('../../components/SuggestedBindingsPanel', () => ({
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({
   AccessExplainPanel: () => null,
 }));
-vi.mock('./StudioAiCopilot', () => ({
-  StudioChatDock: () => null,
-}));
 vi.mock('../../preview/DraftChangesPanel', () => ({
   DraftChangesPanel: () => null,
 }));
@@ -241,7 +238,6 @@ async function renderSurfaceOnOwd() {
   await renderSurfaceAt('/studio/app.a/owd');
   await screen.findByTestId('owd-internal-a_account', undefined, { timeout: 8000 });
 }
-
 
 /** objectstack#36899 — a left-menu entry: a real router Link. */
 const menuEntry = (key: string) => within(screen.getByTestId('studio-menu')).getByTestId(`studio-menu-entry-${key}`);

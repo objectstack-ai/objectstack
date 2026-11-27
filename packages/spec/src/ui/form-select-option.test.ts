@@ -49,7 +49,7 @@ function unknownKeyMessage(
   return hit?.message ?? '';
 }
 
-/** Minimal valid option body (`value` is a SystemIdentifier — min 2 chars). */
+/** Minimal valid option body (`value` is an option value — lowercase, min 1 char). */
 const OPTION = { label: 'Open', value: 'open' } as const;
 
 // ===========================================================================

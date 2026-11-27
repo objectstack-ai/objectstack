@@ -94,7 +94,6 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({
   DraftChangesPanel: ({ onPublish }: { onPublish?: () => void | Promise<void> }) => (
     <button type="button" data-testid="changes-panel-publish" onClick={() => void onPublish?.()}>

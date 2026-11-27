@@ -15,11 +15,11 @@ export const AccountBrief: AiContext = {
   name: 'account_brief',
   label: 'Account brief for sales',
   object: 'account',
-  fields: ['name', 'industry', 'tier', 'annual_revenue'],
+  fields: ['name', 'industry'],
   related: [{
     object: 'opportunity',
     field: 'account',
-    fields: ['name', 'stage', 'amount', 'close_date'],
+    fields: ['name', 'stage'],
     where: { stage: { $nin: ['closed_won', 'closed_lost'] } },
     orderBy: [{ field: 'close_date', order: 'asc' }],
     limit: 10,
@@ -38,7 +38,7 @@ Strict: an unknown key, or a pack over a bound, is refused at parse. `name`,
 | `name` | snake_case |
 | `label` | The answer's header. Say the audience here: there is no `description` key |
 | `object` | The root object |
-| `fields` | Up to 30 fields, in order, none twice. A lookup is answered with the name of the record it points at |
+| `fields` | Up to 30 fields, in order, none twice. A lookup is answered with its target's name |
 | `related` | Up to 3 child lists, one level deep |
 | `body` | `{ field }`: a `textarea`, `markdown`, `html` or `richtext` field of the root |
 
@@ -60,8 +60,8 @@ matter and not the first 20.
 back as an outline of its headings; the model reads one section by
 calling again with a heading's `anchor`. Headings are Markdown `#`
 lines in `textarea` / `markdown`, `<h1>` to `<h6>` in `html` / `richtext`. A
-long body with no headings is cut at the bound and marked `truncated`, so give
-a long body headings.
+long body with no headings is cut at the bound and marked `truncated`: give
+it headings.
 
 ## Serving and calling it
 
@@ -110,7 +110,8 @@ caller whose target is such a system object.
 | Rule | Reported for |
 |:--|:--|
 | `ai-context-object-unknown` | a root or `related` object the stack does not define |
-| `ai-context-field-unknown` | a field its object lacks. In a `where` or `orderBy`, the whole list is left out of every answer |
+| `ai-context-field-unknown` | a field its object lacks. In a `where` or `orderBy`, the list is left out |
+| `ai-context-field-unprovisioned` | an injected column with no storage on an `external` object |
 | `ai-context-related-link-unknown` | no reference field to the root, or several and no `field` |
 | `ai-context-body-not-long-text` | a `body.field` that is not long text: the answer carries no body |
 | `ai-context-sort-field-unsortable` | an `orderBy` field that is a formula or declares `sortable: false`: the list is left out |

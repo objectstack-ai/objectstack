@@ -925,3 +925,54 @@ describe('[#31696] a name two packages hold, on a kernel with no http.server', (
         }
     });
 });
+
+// [#37662] The inbound hook route's two `501` sentences are the
+// operation-message catalog's, in the request's top `Accept-Language` tag, as
+// the own-door bridge answers its doors' own. The English is byte for byte the
+// sentence the route answered before, the code and status are unchanged, and
+// no `userMessage` is added.
+describe('[#37662] the inbound hook route\'s 501 follows the request\'s language', () => {
+    const SENTENCES = {
+        unregistered: {
+            en: 'Inbound automation hooks are not available: no trigger-api service is registered. The inbound-hook trigger (@objectstack/trigger-api) serves this route through that service; compose it on the environment that owns the flow.',
+            'zh-CN': '入站自动化钩子不可用：未注册 trigger-api 服务。入站钩子触发器（@objectstack/trigger-api）通过该服务提供此路由；请在拥有该流程的环境上组合它。',
+            'ja-JP': '受信オートメーションフックは利用できません。trigger-api サービスが登録されていません。受信フックトリガー（@objectstack/trigger-api）がこのサービスを通じてこのルートを提供します。フローを所有する環境に組み込んでください。',
+            'es-ES': 'Los ganchos de automatización entrantes no están disponibles: no hay ningún servicio trigger-api registrado. El disparador de ganchos entrantes (@objectstack/trigger-api) sirve esta ruta a través de ese servicio; compóngalo en el entorno al que pertenece el flujo.',
+        },
+        memberMissing: {
+            en: 'Inbound automation hooks are not available: the registered trigger-api service does not implement handleInboundHook.',
+            'zh-CN': '入站自动化钩子不可用：已注册的 trigger-api 服务未实现 handleInboundHook。',
+            'ja-JP': '受信オートメーションフックは利用できません。登録されている trigger-api サービスは handleInboundHook を実装していません。',
+            'es-ES': 'Los ganchos de automatización entrantes no están disponibles: el servicio trigger-api registrado no implementa handleInboundHook.',
+        },
+    };
+    const HEADERS: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', Array<Record<string, string>>> = {
+        en: [{ 'accept-language': 'en-US,en;q=0.9' }, {}],
+        'zh-CN': [{ 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8' }],
+        'ja-JP': [{ 'accept-language': 'ja-JP,ja;q=0.9' }],
+        'es-ES': [{ 'accept-language': 'es-ES,es;q=0.9' }],
+    };
+
+    for (const site of [
+        { name: 'no trigger-api slot on the kernel', services: {} as Record<string, unknown>, sentences: SENTENCES.unregistered },
+        { name: 'a trigger-api service without handleInboundHook', services: { 'trigger-api': { somethingElse: vi.fn() } }, sentences: SENTENCES.memberMissing },
+    ]) {
+        it(`${site.name}: 501 NOT_IMPLEMENTED in en (and with no header), zh-CN, ja-JP and es-ES`, async () => {
+            for (const [locale, list] of Object.entries(HEADERS) as Array<[keyof typeof HEADERS, Array<Record<string, string>>]>) {
+                for (const headers of list) {
+                    const { dispatcher } = makeDispatcher(site.services);
+                    const request = new Request(`${ORIGIN}/api/v1${ROUTE}`, {
+                        method: 'POST',
+                        headers: { ...JSON_HEADERS, 'x-objectstack-signature': sign(BODY, SECRET), ...headers },
+                        body: BODY,
+                    });
+                    const label = JSON.stringify(headers);
+                    const result = await dispatcher.dispatch('POST', ROUTE, {}, {}, ctx(request));
+                    expect(envelope(result), label).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
+                    expect(result.response?.body?.error?.message, label).toBe(site.sentences[locale]);
+                    expect(result.response?.body?.error?.userMessage, label).toBeUndefined();
+                }
+            }
+        });
+    }
+});

@@ -44,7 +44,7 @@ import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } 
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Plus, Trash2, ChevronUp, ChevronDown, ChevronsUpDown, PanelTop, Settings2 } from 'lucide-react';
 import { cn } from '@object-ui/components';
-import { inferColumns, containerGridColsFor, isWideFieldType } from '@object-ui/plugin-form/core';
+import { inferColumns, containerGridColsFor, resolveColSpan } from '@object-ui/plugin-form/core';
 import { toFormFieldType } from './formFieldType.js';
 import { resolveBooleanControl } from '@object-ui/fields';
 import {
@@ -524,13 +524,19 @@ function SortableField({
   });
   const type = String(entry.def.type ?? 'text');
   const required = !!entry.def.required;
-  // Mirror the real form: wide widgets (textarea/markdown/html/…) take the whole
-  // row. `col-span-full` (grid-column: 1/-1) spans every column at ANY container
-  // width, so it stays correct as the responsive grid collapses to one column.
-  // `isWideFieldType` reads FORM vocabulary, so the raw object type is
-  // normalized to its widget id first (see `toFormFieldType`). `type` itself
+  // Mirror the real form: wide widgets (textarea/markdown/html/…) and a
+  // repeater take the whole row. `col-span-full` (grid-column: 1/-1) spans every
+  // column at ANY container width, so it stays correct as the responsive grid
+  // collapses to one column. The question goes through the runtime form's own
+  // `span: 'auto'` default (`resolveColSpan`): its widget-id rule reads FORM
+  // vocabulary, so the raw object type is normalized to its widget id first
+  // (see `toFormFieldType`), and its declaration rule reads the raw type off the
+  // stash, as the record form's object-field stash carries it (objectstack#37677:
+  // a repeater maps to the shared JSON editor, which is not wide). `type` itself
   // stays the spec spelling — that is what `FieldControlPreview` switches on.
-  const spanFull = columns > 1 && isWideFieldType(toFormFieldType(type));
+  const spanFull =
+    columns > 1 &&
+    resolveColSpan({ name: entry.name, type: toFormFieldType(type), field: { type } }, columns) >= columns;
   // objectui#13148 — the type tag names the type the way the type picker and
   // the inspector do (`select` reads "Picklist"), never by its spec id.
   const typeName = fieldTypeName(type, locale);

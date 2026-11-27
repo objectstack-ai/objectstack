@@ -63,7 +63,6 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 /** objectstack#36900 — the item page holds unsaved edits, registered with the shell's seam as `ResourceEditPage` does. */

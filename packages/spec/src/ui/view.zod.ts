@@ -4354,7 +4354,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * The read points (`resolveColSpan`, the wide-type list, the span ladder)
    * are recorded in `packages/spec/liveness/view.json`, row `form.sections`.
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — only textarea, markdown, html, richtext and repeater, plus a file or image field whose object field declares `multiple: true`, resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to); an authored `colSpan` still wins over that default (`colSpan: 1` keeps such a field in one cell). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — only textarea, markdown, html, richtext and repeater, plus a file or image field whose object field declares `multiple: true`, resolve to the full column count (repeater by its object-field type: the JSON editor it maps to is shared with json, composite and record, which stay one cell); an authored `colSpan` still wins over that default (`colSpan: 1` keeps such a field in one cell). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
@@ -8358,25 +8358,25 @@ export function defineList(
  * members inline, and the wall names the derive path for a row whose members
  * cannot be spelled.
  *
- * The refusal itself is `SystemIdentifierSchema`'s grammar message
- * (`shared/identifiers.zod.ts`), reached through `SelectOptionSchema.value`,
+ * The refusal itself is the option-value grammar message
+ * (`SelectOptionValueSchema`, `data/field.zod.ts`), reached through `SelectOptionSchema.value`,
  * which the form face reuses BY REFERENCE (pinned in
  * `form-select-option.test.ts`). That message cannot carry this remedy where it
- * is declared: the same grammar bounds object-field options and three
- * object-storage names, and "derive the members from the served JSON Schema"
+ * is declared: the same grammar bounds object-field options and picklist
+ * items, and "derive the members from the served JSON Schema"
  * is true only on a schema-bound form. `defineForm` is exactly that door — it
  * stamps `data.provider: 'schema'` on every form it builds — so the remedy is
  * appended here, to the issue that door raises, and nowhere else.
  */
 const FORM_OPTION_VALUE_DERIVE_REMEDY =
-  'An enum member carrying a hyphen, a capital or a single character cannot be a form option '
+  'An enum member carrying a hyphen or a capital cannot be a form option '
   + '`value`, which is a lowercase system identifier. When this row edits a spec enum whose '
   + 'members cannot be spelled as option values, omit `options`: the control derives the '
   + 'members from the served JSON Schema, and their meanings go in `helpText`.';
 
 /**
- * The two issue codes the system-identifier grammar raises on a string: the
- * pattern (`invalid_format`) and the two-character floor (`too_small`).
+ * The two issue codes the option-value grammar raises on a string: the
+ * pattern (`invalid_format`) and the empty-value floor (`too_small`).
  */
 const OPTION_VALUE_GRAMMAR_CODES: ReadonlySet<string> = new Set(['invalid_format', 'too_small']);
 

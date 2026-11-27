@@ -151,7 +151,7 @@ const MONOREPO_ONLY: MonorepoOnlyPattern[] = [
   // "the shallowest point a path reaches"). In THIS population the two give
   // the same answer, for a measured reason: every relative reference the
   // shipped tree carries is `./`-anchored and points DOWNWARD from the file
-  // that writes it (`./note.object.js`, `./src/objects`), so the
+  // that writes it (`./company.object.js`, `./src/objects`), so the
   // count of `../` here — escaping or merely climbing — is zero. The bare
   // anchor therefore has no correct text to redden. The leading lookbehind is
   // what keeps it that way: it refuses a `..` that is itself part of a longer
@@ -176,9 +176,12 @@ const MONOREPO_ONLY: MonorepoOnlyPattern[] = [
   // exemption back.
   //
   // That condition arrived with card #32152: the blank template's starter app
-  // and list view (`src/apps/main.app.ts`, `src/views/note.view.ts`) import the
-  // sample object as `../objects/note.object.js`, a climb that stays inside the
-  // project. So the depth judgement is now in place: every `../` run is still
+  // and list view (`src/apps/main.app.ts`, `src/views/note.view.ts`) imported
+  // the sample object as `../objects/note.object.js`, a climb that stays inside
+  // the project. Card #36945 replaced that sample object with the Starter's
+  // company and contact, whose app and views name each object by its string
+  // name and so climb nowhere; the depth judgement stays in place regardless,
+  // so the next intra-project climb is judged correctly: every `../` run is still
   // matched, and each one is resolved from the directory of the file that
   // writes it; it is a hit only when the path it reaches lies outside that
   // file's project (`escapesProject`). The escaping spelling this entry exists
@@ -205,7 +208,7 @@ function projectRootOf(rel: string): string {
  * Whether the relative path `found`, written in the shipped file `rel`,
  * reaches outside that file's project — the shallowest point the path walks
  * to is above the project root. A climb that stays inside the project
- * (`../objects/note.object.js` from `src/apps/`) is not.
+ * (`../objects/company.object.js` from `src/apps/`) is not.
  */
 function escapesProject(rel: string, found: string): boolean {
   const root = projectRootOf(rel);
@@ -288,7 +291,7 @@ describe('shipped template comments are followable by a stranger', () => {
       // Commit 21756b325's two rewrites (ADR-0097 -> a public docs link; "the ObjectStack
       // framework repo" -> the followable install form) are RATIONALE entries
       // too, for the same reason blank/objectstack.config.ts and
-      // note.object.ts already are: assertions 1/3/4 only ever check that
+      // company.object.ts already are: assertions 1/3/4 only ever check that
       // something UNFOLLOWABLE is absent or that a present URL resolves --
       // none of them notice a fact quietly disappearing along the way.
       file: 'blank/README.md',

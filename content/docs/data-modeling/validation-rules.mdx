@@ -221,7 +221,7 @@ These properties apply to **all** field types and are validated by the base `Fie
 | `options` | `SelectOption[]` | — | **Required** — a non-empty static option list, or a `picklist` naming a shared list instead. With neither (or `options: []`) the field is refused at parse. |
 | `defaultValue` | `string` | — | Must match an option `value` |
 
-**Option validation:** Each option `value` must be a lowercase system identifier — starts with a letter, then letters/digits/underscores/dots (`^[a-z][a-z0-9_.]*$`), minimum 2 characters.
+**Option validation:** Each option `value` must be a lowercase system identifier — starts with a letter, then letters/digits/underscores/dots (`^[a-z][a-z0-9_.]*$`), minimum 1 character (`a`, `b`, `c` are valid).
 
 ### `multiselect`
 

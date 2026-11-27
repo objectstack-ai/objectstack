@@ -2562,21 +2562,7 @@ const zhHant = {
     },
     ai: {
       pendingDrafts: {
-        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
-        publishFromBar: '有 {{count}} 項未釋出的改動，請在頂部的草稿欄釋出。',
-        publishFromBar_one: '有 {{count}} 項未釋出的改動，請在頂部的草稿欄釋出。',
-        publishFromBar_other: '有 {{count}} 項未釋出的改動，請在頂部的草稿欄釋出。',
-        showDraftToPublish: '有 {{count}} 項未釋出的改動，開啟草稿檢視並發布。',
-        showDraftToPublish_one: '有 {{count}} 項未釋出的改動，開啟草稿檢視並發布。',
-        showDraftToPublish_other: '有 {{count}} 項未釋出的改動，開啟草稿檢視並發布。',
-        showDraft: '檢視草稿',
-        receipt: '已釋出，改動已生效。',
-        dismissReceipt: '關閉',
         count: '有 {{count}} 項改動尚未釋出——使用者還看不到。',
-        publish: '釋出',
-        published: '全部待發布改動已生效。',
-        failed: '釋出失敗。',
-        publishedWithFindings: '已釋出，但執行環境探針發現問題：{{detail}}',
       },
       usage: {
         title: 'AI 用量',
@@ -2602,31 +2588,6 @@ const zhHant = {
       share: '分享',
       shareTitle: '分享此對話',
       shareDisabledTitle: '開始對話後即可分享',
-      buildDoctor: '構建診斷',
-      buildDoctorTitle: '構建診斷 — 實際生效了哪些變更？',
-      buildDoctorDisabledTitle: '請先發送一條訊息',
-      buildDoctorDrawer: {
-        description: '智慧體聲稱的變更與實際已生效的內容對照。只讀診斷。',
-        reconciling: '正在核對…',
-        notAvailable: '不可用——未找到該對話，或你沒有訪問權限。',
-        untitled: '（無標題）',
-        summary: '{{turns}} 輪 · {{messages}} 條訊息 · {{tokens}} tok · LLM {{seconds}} 秒',
-        allLive: '全部 {{count}} 項嘗試的變更均已生效——沒有丟失。',
-        discrepancies: '{{count}} 處不一致——對話中所說的與實際生效的內容不符。',
-        orphanedTitle: '已提議但從未應用',
-        orphanedHint: '智慧體提議了確認卡片，但之後沒有任何一輪應用它——該變更被靜默丟棄。',
-        missingTitle: '聲稱已應用但缺失',
-        missingHint: '工具結果稱已應用，但該產物並未在 sys_metadata 中生效。',
-        toolErrorsTitle: '工具錯誤',
-        toolErrorsHint: '構建期間返回錯誤的工具呼叫。',
-        verifyTitle: '構建檢查（verify_build）',
-        yourApp: '你的應用：',
-        noIssues: '0 個問題',
-        issueCount: '{{count}} 個問題',
-        platformNoise: '已隱藏 {{count}} 條平台 sys_* 發現',
-        pendingActions: '待處理操作',
-        timeline: '時間線（{{count}}）',
-      },
       newChat: '新對話',
       searchChats: '搜尋對話…',
       noChatsYet: '暫無對話',
@@ -2648,28 +2609,14 @@ const zhHant = {
       liveCanvasLive: '執行預覽 · {{app}}',
       loadingAgents: '正在載入助手…',
       askAnything: '輸入你的問題…',
-      askOrChangeApp: '問問資料，或讓我改改這個應用…',
-      describeAppToBuild: '描述你想搭建的應用，或要改的地方…',
       emptyTitle: '開始對話',
       emptyDescription: '可以直接提問，助手會結合當前應用上下文提供幫助。',
       switchAssistant: '切換助手',
       chooseAgent: '選擇助手…',
       empty: {
-        build: {
-          title: '用 AI 搭建',
-          description: '用自然語言描述一個應用 —— 我會起草物件、介面和示例資料，隨後你審閱並發布。',
-        },
         ask: {
           title: '向你的資料提問',
           description: '針對你的記錄提問 —— 在你有權訪問的資料範圍內進行計數、列舉和彙總。',
-        },
-        editApp: {
-          title: '正在編輯「{{app}}」',
-          titleGeneric: '編輯此應用',
-          description: '想改點什麼？我會就地修改這個應用 —— 加欄位、物件、檢視或儀表盤，或調整已有內容。',
-          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
-          askOrChangeDescription:
-            '問資料，或者讓我改這個應用 —— 可以問記錄的計數、列表和彙總，也可以告訴我要改什麼，我會就地修改：欄位、物件、檢視或儀表盤。',
         },
       },
       clearConversation: '清空',
@@ -2682,9 +2629,6 @@ const zhHant = {
       toolFailed: '失敗',
       toolDetailsHidden: '已隱藏工具引數和原始結果，僅保留過程摘要。',
       toolDenyReason: '操作員已在對話中拒絕',
-      builderHandoffTitle: '在構建器中搭建',
-      builderHandoffOpen: '在構建器中開啟 →',
-      builderHandoffSuperseded: '已有更新的請求',
       recordWriteCreateTitle: '新建{{object}}',
       recordWriteUpdateTitle: '修改{{object}}',
       recordWriteConfirm: '確認',
@@ -2731,43 +2675,10 @@ const zhHant = {
       stopResponse: '停止生成',
       trace: '除錯 trace',
       viewTrace: '檢視除錯 trace',
-      // 搭建流程的草稿與「方案預覽」確認卡片（AiChatPage /ai/build）。
-      // 與 ConsoleFloatingChatbot 的 locale 物件保持一致，兩個 AI 介面文案統一。
-      nextSteps: '下一步',
-      publishDrafts: '釋出',
-      publishOk: '已釋出，物件已生效。',
-      seedWarn: '已釋出，但部分示例資料未能載入。',
-      openBuiltApp: '開啟應用',
-      viewBuiltAppInStudio: '在 Studio 中檢視',
-      previewDraft: '預覽',
       previewApp: '預覽應用',
       resizeSplit: '調整對話與預覽的寬度',
       hideChats: '隱藏對話列表',
       showChats: '顯示對話列表',
-      planTitle: '方案預覽',
-      planQuestions: '搭建前請確認',
-      planAssumptions: '假設',
-      planApproveHint: '回覆以確認或調整該方案。',
-      planApprove: '開始搭建',
-      planAdjust: '調整方案',
-      // The two messages the "開始搭建" button SENDS (not the label above) must
-      // match the cloud confirm gate's APPROVAL_RE (service-ai-studio
-      // confirm-gate.ts), or the agent re-proposes instead of building and the
-      // button looks inert. The gate anchors Chinese approval on 確認 (or
-      // 直接搭建) — a bare "…搭建吧" does NOT match. Keep these 確認-anchored.
-      // planApproveMessage: gate-only, read from zh-Hans (GATE_ONLY_KEYS, scripts/zh-hant.mjs).
-      // planApproveDefaultsMessage: gate-only, read from zh-Hans (GATE_ONLY_KEYS, scripts/zh-hant.mjs).
-      // planAnswerMessage: gate-only, read from zh-Hans (GATE_ONLY_KEYS, scripts/zh-hant.mjs).
-      // planExtendExistingMessage: gate-only, read from zh-Hans (GATE_ONLY_KEYS, scripts/zh-hant.mjs).
-      // planBuildNewAppMessage: gate-only, read from zh-Hans (GATE_ONLY_KEYS, scripts/zh-hant.mjs).
-      changesTitle: '確認改動',
-      changesConfirmed: '已確認',
-      changesConfirm: '確認修改',
-      changesConfirmHint: '回覆以確認或調整該改動。',
-      changesApplying: '應用中…',
-      changesApplied: '已生效',
-      changesDrafted: '已暫存為草稿',
-      changesFailed: '未生效',
       discussing: '正在看：{{target}}',
       focus: {
         pin: '釘住這條記錄，換頁後仍問它',
@@ -2777,27 +2688,14 @@ const zhHant = {
         switchAccept: '改為問它',
         switchDecline: '不用',
       },
-      // changesConfirmMessage: gate-only, read from zh-Hans (GATE_ONLY_KEYS, scripts/zh-hant.mjs).
-      changeVerb: {
-        createObject: '新建物件',
-        addField: '新增欄位',
-        modifyField: '修改欄位',
-        deleteField: '刪除欄位',
-        createMetadata: '新建',
-        updateMetadata: '修改',
-        createSeed: '生成示例資料',
-        createPackage: '新建應用包',
-      },
       justNow: '剛剛',
       minutesAgo: '{{count}} 分鐘前',
       hoursAgo: '{{count}} 小時前',
       daysAgo: '{{count}} 天前',
       agentLabels: {
         ask: '提問',
-        build: '構建',
         // 舊鍵保留，相容外部覆蓋。
         dataChat: '智慧助手',
-        metadataAssistant: '中繼資料開發助手',
       },
       suggestions: {
         dataChat: {
@@ -2805,41 +2703,10 @@ const zhHant = {
           recentRecords: '幫我列出最近建立的 5 條記錄。',
           recordCounts: '統計每個物件的記錄數。',
         },
-        // cloud#1984 — these five chips are the maker's own recommendations, so
-        // they may only ask for what ADR-0112 v1 BUILDS: objects, fields, views
-        // (grid/kanban/calendar/gallery), pages, dashboards and sample data. No
-        // wording that promises autonomous behaviour (alert / remind / notify /
-        // automate / status workflow) — v1 has no flows, actions or schedules, and
-        // the model silently degrades such a request into a board or a filtered
-        // view, so the chip would promise an alert and deliver a page. REVERT to
-        // the automation wording when ADR-0112 v2 re-adds flows and actions.
-        metadataAssistant: {
-          buildCrm: '幫我搭建一個 CRM：客戶、聯絡人、商機，以及一個按階段彙總商機金額的儀表盤。',
-          buildApp: '做一個專案管理應用：專案、任務（負責人、截止日期），按狀態分組的看板，以及按截止日期的日曆檢視。',
-          buildFlow: '設計一個工單系統：工單、優先順序、狀態（下拉），以及按狀態分組的看板。',
-          buildInventory: '做一個庫存管理應用：商品、庫存量、供應商，並用一個檢視篩出低於安全庫存的商品。',
-          buildRecruiting: '做一個招聘跟蹤應用：候選人、在招崗位、面試階段欄位，以及按階段分組的看板。',
-        },
         generic: {
           help: '你可以幫我做什麼？',
           availableObjects: '列出可用的資料物件。',
           recentActivity: '總結我的最近動態。',
-        },
-        // objectui#7709 — the edit-mode starters, shown when the maker is bound
-        // to an EXISTING app (`?package=`). Same rule as the five above: they
-        // may only ask for what ADR-0112 v1 BUILDS. The fourth chip used to be
-        // `addAutomation` ("an approval, a status flow, or a notification") and
-        // every capability it named is refused by v1 (cloud#1956 / PR #1970), so
-        // it now asks for sample data — `seed` IS on v1's whitelist, and having
-        // no data is what an existing app most often lacks. REVERT: when
-        // ADR-0112 v2 re-adds flows and actions, THIS chip's automation wording
-        // comes back as `addAutomation`; the retired string is pinned for every
-        // pack in `packages/i18n/src/__tests__/makerEditChips-v1-scope-7709.test.ts`.
-        editApp: {
-          addField: '給某個物件加一個欄位。',
-          addObject: '新增一個物件，並關聯到已有物件。',
-          addDashboard: '加一個展示關鍵指標的儀表盤。',
-          addSampleData: '給現有物件補一批貼近真實的示例資料，好拿去演示。',
         },
       },
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
@@ -2848,31 +2715,9 @@ const zhHant = {
       // `console.ai.group.${key}` (ConversationsSidebar), enumerated from the
       // ConversationGroupKey union — all five members, no wildcard.
       collapseToDock: '收起到側邊欄',
-      switchApp: '切換應用',
-      switchAppLabel: '按應用檢視搭建對話',
-      newApp: '新建應用',
       connectionWaiting: '正在等待伺服器…',
       connectionStalled: '仍在處理…',
       connectionOffline: '連線已斷開 — 正在重新連線…',
-      designingPlan: '正在設計你的應用…',
-      designingPlanHint: {
-        data: '正在梳理你要跟蹤的資料…',
-        objects: '正在設計物件及其欄位…',
-        relations: '正在關聯相關記錄…',
-        lookups: '正在設定關係與關聯查詢…',
-        views: '正在規劃介面與檢視…',
-        forms: '正在排布表單與列表…',
-        defaults: '正在新增合理的預設值與校驗…',
-        dashboard: '正在勾畫用於跟蹤的儀表盤…',
-        review: '正在複核整體結構是否自洽…',
-        finalize: '正在彙總方案…',
-      },
-      planBuilding: '正在搭建…',
-      planBuilt: '已搭建',
-      planDeferred: '尚未搭建',
-      planReady: '方案已就緒。現在就開始搭建，或者告訴我需要調整什麼。',
-      published: '已釋出',
-      publishFailed: '釋出失敗',
       unavailableTitle: 'AI 助手不可用',
       unavailableDescription: '當前部署未啟用 AI 助手。其他功能一切正常。',
       unavailableError: '無法連線 AI 服務。它可能暫時離線 — 請重試，或返回首頁。',
@@ -4446,6 +4291,8 @@ const zhHant = {
     bulkDeleteSuccess_one: '已刪除 {{count}} 條 {{label}} 記錄',
     bulkDeleteSuccess_other: '已刪除 {{count}} 條 {{label}} 記錄',
     bulkDeletePartial: '成功 {{succeeded}} 條，失敗 {{failed}} 條',
+    bulkDeleteRefusedNamed: '{{names}}：{{reason}}',
+    bulkDeleteMoreReasons: '另有 {{more}} 個原因',
   },
   objectViewActions: {
     renameFailed: '重新命名檢視失敗',
@@ -4783,18 +4630,6 @@ const zhHant = {
       derivedAiAccess: '已開啟 AI 訪問',
     },
   },
-  excelImport: {
-    noImportableFields: '該物件沒有可匯入的欄位。',
-    schemaReadFailed: '無法讀取物件結構。',
-    imported: '已把 {{count}} 行真實資料匯入「{{object}}」。',
-    imported_one: '已把 {{count}} 行真實資料匯入「{{object}}」。',
-    imported_other: '已把 {{count}} 行真實資料匯入「{{object}}」。',
-    importFrom: '把真實資料匯入自',
-    into: '到',
-    opening: '開啟中…',
-    importAction: '匯入',
-    dismiss: '忽略',
-  },
   cloudWorkspaceTimezoneNotice: {
     seeded: '環境時區在建立時已按你的瀏覽器設為 {{zone}}，可在「設定 → 本地化」中修改。',
   },
@@ -5019,121 +4854,16 @@ const zhHant = {
       failed: '失敗',
     },
     phase: {
-      build: '搭建',
-      design: '設計方案',
       stepCount: '{{count}} 步',
       stepCount_one: '{{count}} 步',
       stepCount_other: '{{count}} 步',
       expand: '展開步驟',
       collapse: '收起步驟',
     },
-    plan: {
-      countObjects: '{{count}} 個物件',
-      countObjects_one: '{{count}} 個物件',
-      countObjects_other: '{{count}} 個物件',
-      countViews: '{{count}} 個檢視',
-      countViews_one: '{{count}} 個檢視',
-      countViews_other: '{{count}} 個檢視',
-      countDashboards: '{{count}} 個儀表盤',
-      countDashboards_one: '{{count}} 個儀表盤',
-      countDashboards_other: '{{count}} 個儀表盤',
-      countSeedData: '示例資料',
-      extendTarget: '新增到現有應用：{{app}}',
-      awaitingConfirm: '等待確認',
-      // objectstack#32984 — the plan card's build states.
-      confirmed: '已確認',
-      buildFailed: '未搭建成功 · 沒有建立任何內容',
-      iterateOrNew: {
-        question: '這個方案和你已有的應用「{{app}}」重疊。要在它上面繼續完善，還是另建一個獨立應用？',
-        questionUnnamed: '這個方案和你已有的一個應用重疊。要在那個應用上繼續完善，還是另建一個獨立應用？',
-        extend: '在「{{app}}」上繼續完善',
-        buildNew: '另建一個獨立應用',
-        replyHint: '回覆告訴我選哪一個。',
-      },
-      objectsAndFields: '物件與欄位',
-      views: '檢視',
-      suggestedField: '補充',
-      suggestedFieldLegend: '標「{{mark}}」的欄位是 AI 自行補充的，你沒有要求。',
-      nameField: '名稱：{{field}}',
-    },
     build: {
-      building: '正在構建 · {{app}}…',
-      built: '已構建 · {{app}}',
-      builtAndLive: '已搭建並上線 · {{app}}',
-      appFallback: '你的應用',
-      addingSampleData: '正在新增示例資料',
-      group: {
-        object: '物件',
-        view: '檢視',
-        dashboard: '儀表盤',
-        app: '應用',
-        seed: '示例資料',
-        dataset: '資料集',
-        permission: '權限',
-        other: '其他',
-      },
-      moreArtifacts: '+{{n}} 個',
-      verifying: '正在檢查改動…',
-      verifyStep: '第 {{n}} 步',
-      verified: '已檢查改動',
-      // objectstack#32984 — the build card's issues line, in the customer's words.
-      issuesCount: '{{count}} 處待修復',
       issuesSummary: '這次搭建有部分內容需要修復後才能使用。回覆「修復這些問題」，助手會幫你處理。',
-      warningsSummary: '應用已搭建好，有幾處值得檢查。想進一步完善的話，可以問問助手具體是哪些。',
-      issuesDetails: '技術詳情',
-      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
-      needsAttention: '{{count}} 項需要處理',
-      needsAttention_one: '{{count}} 項需要處理',
-      needsAttention_other: '{{count}} 項需要處理',
       health: {
-        sampleRowsLive: '{{count}} 條示例資料已上線',
-        sampleRowsLive_one: '{{count}} 條示例資料已上線',
-        sampleRowsLive_other: '{{count}} 條示例資料已上線',
-        views: '{{count}} 個檢視',
-        views_one: '{{count}} 個檢視',
-        views_other: '{{count}} 個檢視',
-        widgets: '{{count}} 個儀表盤元件',
-        widgets_one: '{{count}} 個儀表盤元件',
-        widgets_other: '{{count}} 個儀表盤元件',
-        seeds: '{{count}} 組示例資料',
-        seeds_one: '{{count}} 組示例資料',
-        seeds_other: '{{count}} 組示例資料',
-        verified: '已核對 {{checks}}',
         seedFailed: '示例資料未能載入。',
-      },
-      unknownPhase: '未知的構建階段',
-      nextStepsLead: '接下來可以說：{{steps}}',
-      nextStepQuote: '「{{step}}」',
-      draftPosture: '之後的修改先存草稿，在對話裡點「釋出」即可上線。',
-      checksPassed: '核對通過 {{passed}}/{{total}}',
-    },
-    changes: {
-      planTitle: '修改方案 · {{count}} 項',
-      planTitle_one: '修改方案 · {{count}} 項',
-      planTitle_other: '修改方案 · {{count}} 項',
-      saveDraft: '存為草稿',
-      reviewAndPublish: '檢視變更並發布',
-      undo: '撤銷',
-      undoWithOthers: '撤銷（連同另外 {{count}} 項草稿）',
-      undoWithOthers_one: '撤銷（連同另外 {{count}} 項草稿）',
-      undoWithOthers_other: '撤銷（連同另外 {{count}} 項草稿）',
-      undoConfirm: '撤銷會丟棄這個應用包全部 {{total}} 項未釋出的草稿，其中 {{count}} 項不屬於這次修改。',
-      undoConfirm_one: '撤銷會丟棄這個應用包全部 {{total}} 項未釋出的草稿，其中 {{count}} 項不屬於這次修改。',
-      undoConfirm_other: '撤銷會丟棄這個應用包全部 {{total}} 項未釋出的草稿，其中 {{count}} 項不屬於這次修改。',
-      undoConfirmUnknown: '撤銷會丟棄這個應用包裡全部未釋出的草稿，不只是這次修改。',
-      undoConfirmAction: '全部撤銷',
-      undoCancel: '取消',
-      undoing: '正在撤銷…',
-      undone: '已撤銷',
-      undoFailed: '撤銷失敗',
-      kind: {
-        field: '欄位',
-        object: '物件',
-        view: '檢視',
-        dashboard: '儀表盤',
-        app: '應用',
-        seed: '示例資料',
-        package: '應用包',
       },
     },
   },

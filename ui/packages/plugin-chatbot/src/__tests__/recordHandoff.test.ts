@@ -5,8 +5,8 @@
  *
  * The server half of this hand-off shipped first and was HALF-ALIVE: the ask
  * agent emitted `status:'record_handoff'` with a real recordId, the reply said
- * "点击上方链接打开", and there was no link — the console had a detector for
- * `build_handoff` and none for this. These tests pin the client half.
+ * "点击上方链接打开", and there was no link — the console had no detector
+ * for it. These tests pin the client half.
  *
  * Wrapper coverage is not optional (the replay-envelope lesson): persisted
  * tool outputs arrive as `{ type:'text', value:'<json-string>' }`, so a
@@ -56,7 +56,7 @@ describe('detectRecordHandoff', () => {
     expect(detectRecordHandoff({ status: 'record_handoff', objectName: ' ', recordId: 'r1' })).toBeUndefined();
   });
 
-  it('ignores every other status — build_handoff stays the Builder card', () => {
+  it('ignores every other status', () => {
     expect(detectRecordHandoff({ status: 'build_handoff', prompt: 'x' })).toBeUndefined();
     expect(detectRecordHandoff({ status: 'published' })).toBeUndefined();
     expect(detectRecordHandoff(undefined)).toBeUndefined();

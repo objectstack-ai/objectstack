@@ -141,6 +141,18 @@ export type ActivitySummaryMessage =
       value: string;
       /** Each `{token}` the authored template interpolated, by token name. */
       tokens: Record<string, ActivitySummaryValue>;
+      /**
+       * [#37635] Every `{token}` name the fired template held when the row was
+       * written, interpolated or not ({@link milestoneTokenNames}). It is what
+       * tells a token whose value was empty (listed, no entry in `tokens`)
+       * from one the template gained after the row was written (not listed),
+       * which this row has no value for: a translation naming such a token
+       * cannot be composed whole, so the row keeps its stored sentence. A row
+       * written before #37635 carries no list, so no token missing from
+       * `tokens` can be told empty, and it keeps its stored sentence whenever
+       * its translation names one.
+       */
+      names?: string[];
     };
 
 /** One language a summary is composed in. */
@@ -162,6 +174,24 @@ export interface ActivitySummaryLocale {
    * rewording of the packaged one. Absent on the writer's locale.
    */
   milestoneSummary?(objectName: string, field: string, value: string): string | undefined;
+}
+
+/**
+ * [#7290] The `{token}` pattern of an `activityMilestones` summary template —
+ * the ONE definition: the writer plans its reads and renders the stored
+ * sentence with it, and a reader composes a translated template with it.
+ *
+ * A FRESH instance per call, deliberately: a module-level `/g` regex carries
+ * `lastIndex` between callers, and a fired milestone reads this more than
+ * once. One definition, no shared cursor.
+ */
+export function milestoneTokenRe(): RegExp {
+  return /\{(\w+)\}/g;
+}
+
+/** [#37635] The distinct `{token}` names of `template`, in the order they first appear. */
+export function milestoneTokenNames(template: string): string[] {
+  return [...new Set(Array.from(template.matchAll(milestoneTokenRe()), (match) => match[1]))];
 }
 
 /** Interpolate one `{{param}}` template, the shared convention (`createMemoryI18n`, FileI18nAdapter). */
@@ -295,14 +325,23 @@ export function composeActivitySummary(
       const template = locale.milestoneSummary?.(message.object, message.field, message.value);
       if (template === undefined) return undefined;
       const fields = locale.getObjectDef(message.object)?.fields;
-      // The authored template's tokens are the ones with a stored value; a
-      // token the translation adds, or one whose value was empty, renders
-      // empty, as an empty value does in the authored sentence.
-      return template.replace(/\{(\w+)\}/g, (_match: string, token: string) => {
+      // The tokens with a stored value render it. A token the fired template
+      // held whose value was empty renders empty, as it does in the stored
+      // sentence. [#37635] Any other token (one the template gained after
+      // the row was written, or one only the translation names) has no value
+      // this row could give it, so the row keeps its stored sentence rather
+      // than show a hole where that sentence has none.
+      const written = new Set(message.names ?? []);
+      let whole = true;
+      const text = template.replace(milestoneTokenRe(), (_match: string, token: string) => {
         const value = Object.prototype.hasOwnProperty.call(message.tokens, token) ? message.tokens[token] : undefined;
-        if (!value) return '';
+        if (!value) {
+          if (!written.has(token)) whole = false;
+          return '';
+        }
         return value.option !== undefined ? (optionLabelOn(fields?.[token], value.option) ?? value.text) : value.text;
       });
+      return whole ? text : undefined;
     }
   }
 }
@@ -336,7 +375,8 @@ export function readActivitySummaryMessage(value: unknown): ActivitySummaryMessa
     return typeof value.field === 'string' &&
       typeof value.value === 'string' &&
       isRecord(tokens) &&
-      Object.values(tokens).every(isValue)
+      Object.values(tokens).every(isValue) &&
+      (value.names === undefined || isStringList(value.names))
       ? (value as ActivitySummaryMessage)
       : null;
   }
@@ -450,6 +490,17 @@ export function readerSummaryLocale(
   const locale = negotiatedLocale(service, requested);
   let translation: { value: ReturnType<typeof labelTranslationOf> } | undefined;
   const definitions = new Map<string, any>();
+  // [#37635] One answer per milestone for the read: a feed page holds many
+  // rows of the same milestone, and each answer walks the authored and the
+  // packaged definitions.
+  const milestoneTemplates = new Map<string, string | undefined>();
+  // The packaged base, read once per object for the read: the translated
+  // definition and every milestone answer ask it.
+  const packagedBases = new Map<string, unknown>();
+  const packagedBaseOf = (objectName: string): unknown => {
+    if (!packagedBases.has(objectName)) packagedBases.set(objectName, getPackagedObjectBase?.(objectName));
+    return packagedBases.get(objectName);
+  };
   const translatedObjectDef = (objectName: string): any => {
     if (definitions.has(objectName)) return definitions.get(objectName);
     const def = getObjectDef(objectName);
@@ -458,7 +509,7 @@ export function readerSummaryLocale(
       try {
         translation ??= { value: labelTranslationOf(service, locale) };
         if (translation.value) {
-          const packagedBase = getPackagedObjectBase?.(objectName);
+          const packagedBase = packagedBaseOf(objectName);
           served = translateObject({ ...def, name: objectName }, translation.value.bundle, {
             ...translation.value.options,
             ...(packagedBase && typeof packagedBase === 'object' ? { packagedBase } : {}),
@@ -485,21 +536,35 @@ export function readerSummaryLocale(
     locale,
     getObjectDef: translatedObjectDef,
     milestoneSummary: (objectName, field, value) => {
+      // NUL cannot occur in an object, field or value name, so the key is unambiguous.
+      const cacheKey = `${objectName}\u0000${field}\u0000${value}`;
+      if (milestoneTemplates.has(cacheKey)) return milestoneTemplates.get(cacheKey);
+      let template: string | undefined;
       try {
         translation ??= { value: labelTranslationOf(service, locale) };
-        if (!translation.value) return undefined;
-        // ADR-0029 D9.2a: a tenant's rewording of a packaged milestone is
-        // authored data and keeps its words, judged as a validation message
-        // is — the served milestone against the packaged one of the same pair,
-        // through the resolver's one predicate (never a copy of it).
-        const served = milestoneOn(getObjectDef(objectName), field, value);
-        const packaged = milestoneOn(getPackagedObjectBase?.(objectName), field, value);
-        if (scalarOverridesPackagedBase(packaged, 'summary', served?.summary)) return undefined;
-        return resolveObjectMilestoneSummary(translation.value.bundle, objectName, field, value, translation.value.options);
+        if (translation.value) {
+          // ADR-0029 D9.2a: a tenant's rewording of a packaged milestone is
+          // authored data and keeps its words, judged as a validation message
+          // is — the served milestone against the packaged one of the same pair,
+          // through the resolver's one predicate (never a copy of it).
+          const served = milestoneOn(getObjectDef(objectName), field, value);
+          const packaged = milestoneOn(packagedBaseOf(objectName), field, value);
+          if (!scalarOverridesPackagedBase(packaged, 'summary', served?.summary)) {
+            template = resolveObjectMilestoneSummary(
+              translation.value.bundle,
+              objectName,
+              field,
+              value,
+              translation.value.options,
+            );
+          }
+        }
       } catch {
         // A misbehaving i18n service must not fail the read: the stored text stands.
-        return undefined;
+        template = undefined;
       }
+      milestoneTemplates.set(cacheKey, template);
+      return template;
     },
   };
 }

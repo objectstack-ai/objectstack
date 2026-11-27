@@ -6,20 +6,22 @@
  * Since the in-app build entry closed, the agent catalog usually offers only
  * the ask agent. The header row then had nothing to switch, and drew the lone
  * agent's name (「提问」 / "Ask") as plain text. In the right-side drawer the
- * host lifts Share and the Build Doctor into its own title bar
+ * host lifts Share into its own title bar
  * (`actionsInHost`, objectstack#35445), so that name was the row's only
  * content.
  *
  *  - one agent: no switcher and no agent name; in the drawer (actions lifted)
  *    no header row at all; on the full page the row stays for Share.
  *  - two agents: the switcher renders, in the drawer and on the full page.
- *  - one agent on the build surface: the row stays for the package chip.
  *
  * Real subjects: `ChatPane` and the real `ChatbotEnhanced` that draws its
  * `headerSlot`. Stand-ins: the chat transport (idle and empty), the models
  * list, the metadata and adapter providers.
  */
 
+// AiChatPage reads a dropped spreadsheet through `import('@object-ui/plugin-grid')`; load it
+// here so collection pays that transform, not a clocked case (check-test-source-alias).
+import '@object-ui/plugin-grid';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
@@ -52,12 +54,6 @@ vi.mock('../../../providers/AdapterProvider', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAdapter: () => null,
 }));
-// A user who may not author metadata: for a maker, a served build agent
-// converges the catalog onto build alone (`makerVisibleAgents`), which would
-// leave one launchable agent in the two-agent cases.
-vi.mock('../../../hooks/useCanAuthorMetadata', () => ({
-  useCanAuthorMetadata: () => false,
-}));
 
 import { I18nProvider } from '@object-ui/i18n';
 import type { AgentDescriptor } from '@object-ui/plugin-chatbot';
@@ -75,7 +71,7 @@ window.matchMedia = ((query: string) => ({
 })) as unknown as typeof window.matchMedia;
 
 const ASK = { name: 'ask', label: 'Ask' } as unknown as AgentDescriptor;
-const BUILD = { name: 'build', label: 'Build' } as unknown as AgentDescriptor;
+const ANALYST = { name: 'analyst', label: 'Analyst' } as unknown as AgentDescriptor;
 
 function renderPane(opts: { agents: AgentDescriptor[]; activeAgent: string; actionsInHost: boolean }) {
   return render(
@@ -129,21 +125,15 @@ describe('AI pane header with one launchable agent (objectstack#37146)', () => {
   });
 
   it('drawer, two agents: the switcher renders', () => {
-    renderPane({ agents: [BUILD, ASK], activeAgent: 'ask', actionsInHost: true });
+    renderPane({ agents: [ANALYST, ASK], activeAgent: 'ask', actionsInHost: true });
     expect(headerRow()).not.toBeNull();
     expect(screen.getByTestId('ai-chat-agent-picker')).toBeInTheDocument();
   });
 
   it('full page, two agents: the switcher renders beside Share', () => {
-    renderPane({ agents: [BUILD, ASK], activeAgent: 'ask', actionsInHost: false });
+    renderPane({ agents: [ANALYST, ASK], activeAgent: 'ask', actionsInHost: false });
     expect(screen.getByTestId('ai-chat-agent-picker')).toBeInTheDocument();
     expect(screen.getByTestId('ai-chat-share-button')).toBeInTheDocument();
   });
 
-  it('drawer, one agent on the build surface: the row stays for the package chip', () => {
-    renderPane({ agents: [BUILD], activeAgent: 'build', actionsInHost: true });
-    expect(screen.queryByTestId('ai-chat-agent-picker')).not.toBeInTheDocument();
-    expect(headerRow()).not.toBeNull();
-    expect(screen.getByTestId('ai-build-package-chip')).toBeInTheDocument();
-  });
 });

@@ -103,7 +103,6 @@ const listing = vi.hoisted(() => ({ pair: false }));
 const panel = vi.hoisted(() => ({ props: null as null | Record<string, unknown> }));
 /** Read through a call, so a reset between renders does not narrow it away. */
 const panelProps = (): Record<string, unknown> | null => panel.props;
-const chatDock = vi.hoisted(() => ({ mounts: 0 }));
 
 vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../metadata-admin/useMetadata')>();
@@ -134,13 +133,6 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@object-ui/react')>();
   return { ...mod, useAdapter: () => dataSource };
 });
-
-vi.mock('./StudioAiCopilot', () => ({
-  StudioChatDock: () => {
-    chatDock.mounts += 1;
-    return null;
-  },
-}));
 
 vi.mock('../../preview/DraftChangesPanel', async () => {
   const { createElement } = await import('react');
@@ -228,7 +220,6 @@ beforeEach(() => {
   server.publishedByRef.length = 0;
   server.packageBatches.length = 0;
   panel.props = null;
-  chatDock.mounts = 0;
   listing.pair = false;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
   // Two packaged flows on the read-only showcase, and the clone, which names no package.
@@ -335,7 +326,7 @@ describe('the package-less scope lists a package-less flow and opens it editable
     expect(saved!.options?.packageId).toBeUndefined();
   });
 
-  it('offers its one page, no Create app, no package copilot, and names the scope beside the way back', async () => {
+  it('offers its one page, no Create app, no right slot, and names the scope beside the way back', async () => {
     renderAt(ORG_CLONE);
     await openedFlow('qa_urgent_alert_clone');
 
@@ -352,7 +343,7 @@ describe('the package-less scope lists a package-less flow and opens it editable
     expect(menu.queryByTestId('studio-menu-entry-owd')).toBeNull();
     expect(menu.queryByTestId('studio-menu-entry-diagnostics')).toBeNull();
     expect(screen.queryByRole('button', { name: /Create app/ })).not.toBeInTheDocument();
-    expect(chatDock.mounts).toBe(0);
+    expect(screen.queryByTestId('studio-right-slot')).toBeNull();
     // objectstack#36501, decision 5 (objectstack#36899) — no app owns the
     // scope, so it is named, as a package with no app is: objectstack#37456 —
     // by the package row's switcher, beside the way back to the apps home.

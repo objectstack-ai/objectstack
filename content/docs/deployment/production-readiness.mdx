@@ -142,6 +142,10 @@ and per-class budgets:
 ## Go-live checklist
 
 - [ ] HSTS enabled (after TLS is confirmed and you accept the lock-in).
+- [ ] Browsers reach the public origin over HTTP/2 (DevTools shows `h2` for the
+      Console's scripts), so the first screen's script files (well over a
+      hundred) do not queue on six HTTP/1.1 connections. See
+      [Self-hosting § Serve HTTP/2 to browsers](/docs/deployment/self-hosting#serve-http2-to-browsers).
 - [ ] CSP tuned for your serving topology (deny-all API, looser for
       SPA-on-same-origin).
 - [ ] `server.security.rateLimit` enabled with a budget sized for your

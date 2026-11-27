@@ -7,9 +7,7 @@
  *    pending-changes sheet) and 放弃全部未发布改动 (the package's discard door,
  *    `packages.discardDrafts`, after a confirm) — the one undo there is;
  *  - the Form canvas's card of each field the assistant changed carries the
- *    草稿 chip;
- *  - item 6: the copilot's chip names the open object by its label and the view
- *    on screen (`Task · Records`), never its internal name.
+ *    草稿 chip.
  * CONTROL: entries a person wrote in Studio, or no draft, draw no line.
  *
  * The records grid's column marks ride on `GridFieldAuthoring.columnMarks`,
@@ -192,24 +190,6 @@ describe('the AI assistant’s drafts on the Data canvas (objectstack#34725)', (
     expect(message.textContent).not.toContain('object/');
     expect(screen.getByTestId('studio-refusal-detail')).toHaveTextContent('object/showcase_task: E_LOCKED: row held by txn 42');
     window.confirm = original;
-  });
-
-  it('the copilot’s chip reads the object’s label and the view on screen', async () => {
-    const onSurfaceLabelChange = vi.fn();
-    renderPillar({ onSurfaceLabelChange });
-    await waitFor(() =>
-      expect(onSurfaceLabelChange).toHaveBeenLastCalledWith({
-        type: 'object',
-        name: 'showcase_task',
-        label: `Task · ${L('engine.studio.data.tab.records')}`,
-      }),
-    );
-    fireEvent.click(await screen.findByRole('button', { name: L('engine.studio.data.tab.form') }));
-    await waitFor(() =>
-      expect(onSurfaceLabelChange).toHaveBeenLastCalledWith(
-        expect.objectContaining({ label: `Task · ${L('engine.studio.data.tab.form')}` }),
-      ),
-    );
   });
 
   it('CONTROL: entries a person wrote in Studio, or no draft at all, draw no line', async () => {

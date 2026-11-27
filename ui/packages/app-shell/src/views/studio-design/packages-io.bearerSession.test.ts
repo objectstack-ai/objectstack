@@ -23,7 +23,6 @@ import { TokenStorage } from '@object-ui/auth';
 import { duplicatePackage, fetchListedPackageIds, fetchPackages, forgetPackageListReads } from './packages-io';
 import { fetchCommits, revertCommit } from '../../preview/commitHistory';
 import { listSuggestedBindings } from '../../services/suggestedBindingsApi';
-import { fetchBuildDebug } from '../../console/ai/buildDebugApi';
 
 const TOKEN = 'stored-session-token';
 
@@ -44,7 +43,6 @@ function answer(path: string, method: string): Response {
   if (path.endsWith('/commits') && method === 'GET') return reply({ success: true, data: { commits: [] } });
   if (path.endsWith('/revert') && method === 'POST') return reply({ success: true, data: { success: true } });
   if (path.startsWith('/api/v1/security/suggested-bindings')) return reply({ success: true, data: { suggestions: [] } });
-  if (path.endsWith('/debug')) return reply({ conversationId: 'c1', findings: [] });
   return reply({ success: false, error: { code: 'NOT_FOUND', message: `no route ${method} ${path}` } }, 404);
 }
 
@@ -101,7 +99,6 @@ const CALLS: Array<[string, () => Promise<unknown>]> = [
   ['timeline: commit history', () => fetchCommits('com.example.crm')],
   ['timeline: revert a commit', () => revertCommit('com.example.crm', 'c-1')],
   ['access: suggested bindings', () => listSuggestedBindings()],
-  ['ai: build debug report', () => fetchBuildDebug('/api/v1/ai', 'c1')],
 ];
 
 describe('the converted doors send the stored bearer token', () => {

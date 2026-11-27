@@ -86,6 +86,7 @@ export function namespacedScenario(scenario: LoadedScenario): LoadedScenario {
           ...(p.hidden.objects ? { objects: p.hidden.objects.map(o) } : {}),
           ...(p.hidden.fields ? { fields: p.hidden.fields.map((f) => ({ ...f, object: o(f.object) })) } : {}),
         },
+        ...(p.withheldRollups ? { withheldRollups: p.withheldRollups.map((r) => ({ ...r, object: o(r.object) })) } : {}),
         ...(p.scope ? { scope: p.scope.map((s) => ({ ...s, object: o(s.object) })) } : {}),
         ...(p.record ? { record: { ...p.record, object: o(p.record.object) } } : {}),
       })),

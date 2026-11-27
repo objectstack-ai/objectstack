@@ -153,7 +153,9 @@ export function AgentPreview({ name, draft, locale }: MetadataPreviewProps) {
                     label={tr(active ? 'engine.agentPreview.active' : 'engine.agentPreview.disabled', locale)}
                     tone={active ? 'green' : 'gray'}
                   />
-                  {model.provider && <Pill icon={Sparkles} label={`${model.provider}${model.model ? ` · ${model.model}` : ''}`} mono />}
+                  {(model.provider || model.model) && (
+                    <Pill icon={Sparkles} label={[model.provider, model.model].filter(Boolean).join(' · ')} mono />
+                  )}
                   {model.temperature != null && (
                     <Pill icon={Gauge} label={tFormat('engine.agentPreview.temperature', locale, { value: String(model.temperature) })} />
                   )}

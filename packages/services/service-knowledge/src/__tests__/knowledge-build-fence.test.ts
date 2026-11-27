@@ -477,6 +477,150 @@ describe('a build that stalls is cancelled at the bound', () => {
   });
 });
 
+describe('the fence is asked before beginBuild and before each purge deletion', () => {
+  /**
+   * An adapter whose first upsert answers only when the test says so: a plain
+   * `reindexSource` (no build, no fence) holds the source's walk queue until then.
+   */
+  function holdFirstUpsert(adapter: IKnowledgeAdapter) {
+    const upsert = adapter.upsert.bind(adapter);
+    let answer: () => void = () => {};
+    let first = true;
+    adapter.upsert = (batch, ctx) => {
+      if (!first) return upsert(batch, ctx);
+      first = false;
+      return new Promise<void>((resolve) => {
+        answer = () => void upsert(batch, ctx).then(resolve);
+      });
+    };
+    return { answer: () => answer() };
+  }
+
+  it('a build cancelled while queued behind another walk never begins its build once that walk ends', async () => {
+    vi.useFakeTimers();
+    const db = makeEngine(rows(10));
+    const { adapter, pages, calls } = makeAdapter();
+    const held = holdFirstUpsert(adapter);
+    const { lock, state } = makeLock();
+    const { service } = makeService(db.engine, adapter, lock);
+
+    const plain = service.reindexSource('kb', { limit: 5 });
+    await vi.advanceTimersByTimeAsync(0);
+    const pending = service.rebuildSource('kb', { trigger: 'operator' });
+    await vi.advanceTimersByTimeAsync(BUILD_STALL_LIMIT_MS + 1_000);
+    const record = await pending;
+    expect(record.status).toBe('timed-out');
+    expect(state.released).toBe(1);
+
+    // The earlier walk ends; the cancelled build's walk, queued behind it, runs
+    // now. A walk queued behind THAT one returns only once it has finished.
+    held.answer();
+    expect((await plain).ok).toBe(true);
+    expect((await service.reindexSource('kb', { limit: 1 })).ok).toBe(true);
+
+    expect(calls.beginBuild).toBe(0);
+    expect(calls.completeBuild).toBe(0);
+    expect(pages).toHaveLength(2); // the two plain walks' pages, none of the build's
+    expect(service.buildRecord('kb')?.status).toBe('timed-out');
+  });
+
+  it('a build whose lease is lost while queued never begins its build, and ends lease-lost', async () => {
+    vi.useFakeTimers();
+    const db = makeEngine(rows(10));
+    const { adapter, pages, calls } = makeAdapter();
+    const held = holdFirstUpsert(adapter);
+    const { lock, state } = makeLock();
+    const { service } = makeService(db.engine, adapter, lock);
+
+    const plain = service.reindexSource('kb', { limit: 5 });
+    await vi.advanceTimersByTimeAsync(0);
+    const pending = service.rebuildSource('kb', { trigger: 'operator' });
+    await vi.advanceTimersByTimeAsync(0);
+    // The lease lapses while the build waits its turn.
+    state.held = false;
+    held.answer();
+    expect((await plain).ok).toBe(true);
+    const record = await pending;
+
+    expect(calls.beginBuild).toBe(0);
+    expect(calls.completeBuild).toBe(0);
+    expect(pages).toHaveLength(1); // the plain walk's page only
+    expect(record).toMatchObject({ status: 'lease-lost', progress: { pages: 0, discovered: 0 }, result: { ok: false, purged: null } });
+    expect(record.message).toMatch(/stopped before its build began/);
+    expect(record.message).toMatch(/lease was lost/);
+    expect(state.released).toBe(1);
+  });
+
+  it('a lease lost mid-purge stops before the next deletion and completes nothing', async () => {
+    const db = makeEngine(rows(10));
+    const { adapter, calls } = makeAdapter();
+    // Three stored documents whose rows are gone: three purge candidates.
+    const stored = new Set(['kb:gone1', 'kb:gone2', 'kb:gone3']);
+    adapter.listDocuments = async () => ({ documents: [...stored].map((documentId) => ({ documentId, docHash: 'h' })) });
+    const { lock, state } = makeLock();
+    const removed: string[][] = [];
+    adapter.delete = async (ids) => {
+      removed.push(ids);
+      for (const id of ids) stored.delete(id);
+      // The lease lapses while the first deletion lands.
+      state.held = false;
+    };
+    const { service } = makeService(db.engine, adapter, lock);
+
+    const record = await service.rebuildSource('kb', { trigger: 'operator' });
+
+    expect(removed).toEqual([['kb:gone1']]);
+    expect([...stored]).toEqual(['kb:gone2', 'kb:gone3']);
+    expect(calls.completeBuild).toBe(0);
+    expect(record).toMatchObject({ status: 'lease-lost', result: { ok: false, purged: 1 } });
+    expect(record.message).toMatch(/stopped during its purge after 1 deletion/);
+    expect(record.message).toMatch(/lease was lost/);
+    expect(state.released).toBe(1);
+  });
+
+  it('a build cancelled mid-purge deletes nothing further once the deletion it stopped waiting on answers', async () => {
+    vi.useFakeTimers();
+    const db = makeEngine(rows(10));
+    const { adapter, calls } = makeAdapter();
+    const stored = new Set(['kb:gone1', 'kb:gone2', 'kb:gone3']);
+    adapter.listDocuments = async () => ({ documents: [...stored].map((documentId) => ({ documentId, docHash: 'h' })) });
+    const removals: string[][] = [];
+    let answer: () => void = () => {};
+    adapter.delete = (ids) => {
+      removals.push(ids);
+      const remove = () => { for (const id of ids) stored.delete(id); };
+      if (removals.length > 1) {
+        remove();
+        return Promise.resolve();
+      }
+      // The first deletion answers only when the test says so.
+      return new Promise<void>((resolve) => {
+        answer = () => {
+          remove();
+          resolve();
+        };
+      });
+    };
+    const { lock, state } = makeLock();
+    const { service } = makeService(db.engine, adapter, lock);
+
+    const pending = service.rebuildSource('kb', { trigger: 'operator' });
+    await vi.advanceTimersByTimeAsync(BUILD_STALL_LIMIT_MS + 1_000);
+    expect((await pending).status).toBe('timed-out');
+    expect(state.released).toBe(1);
+
+    // The hung deletion answers. The walk stopped waiting on its purge at the
+    // cancel, so the purge goes on unobserved: let it run to its end.
+    answer();
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(0);
+    expect((await service.reindexSource('kb', { limit: 1 })).ok).toBe(true);
+
+    expect(removals).toEqual([['kb:gone1']]);
+    expect([...stored]).toEqual(['kb:gone2', 'kb:gone3']);
+    expect(calls.completeBuild).toBe(0);
+  });
+});
+
 describe('startBuildFence', () => {
   it('keeps the first stop it saw, and close() disarms the bound', async () => {
     vi.useFakeTimers();

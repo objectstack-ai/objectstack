@@ -234,6 +234,78 @@ function readingsIn(text: string): Reading[] {
   return out;
 }
 
+/** The English number words a reply may spell a count with, zero to twenty. */
+const EN_NUMBER_WORDS: Readonly<Record<string, number>> = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
+};
+/**
+ * A word that, joined by a hyphen, makes a number word part of a larger
+ * number or a fraction (`twenty-one`, `two-thirds`): the word alone would read
+ * as the wrong figure, so it is not read.
+ */
+const EN_NUMBER_JOIN = `(?:${Object.keys(EN_NUMBER_WORDS).join('|')}|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|halfs?|halves|thirds?|quarters?|fourths?|fifths?|sixths?|sevenths?|eighths?|ninths?|tenths?)`;
+const EN_NUMBER_WORD = new RegExp(
+  `(?<![\\p{L}\\p{N}_-])(${Object.keys(EN_NUMBER_WORDS).join('|')})(?![\\p{L}\\p{N}_])(?!-${EN_NUMBER_JOIN}(?![\\p{L}]))`,
+  'giu',
+);
+/**
+ * `one` reads as a count only before the word it counts ("One contact
+ * belongs to no account", "**One invoice**"). As a pronoun or in an idiom it
+ * counts nothing and would meet any figure of 1, so it is not read: after a
+ * determiner or "than" ("no one", "the one", "more than one reading"), before
+ * a function word ("one of them", "one is Sent", "pick one for you", "one by
+ * one"), or with no word after it at all ("pick one.").
+ */
+const EN_ONE_BEFORE = /\b(?:no|the|this|that|which|each|every|any|some|another|by|than)[ \t]+$/i;
+const EN_ONE_AFTER =
+  /^[ \t]+[*_`]*(?!(?:of|another|by|is|was|are|were|has|had|have|for|to|or|and|in|on|at|with|that|which|who|from|per|the|a|an|it|but|so|as|than)\b)\p{L}/iu;
+
+/** The Chinese numerals a reply may count with standing alone (`两张`), zero to ten. */
+const ZH_NUMBER_WORDS: Readonly<Record<string, number>> = {
+  零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10,
+};
+/**
+ * A Chinese numeral read as a count: directly before a measure word (`两张发票`,
+ * `三个客户`), not beside another numeral (`十二`, a larger number read by
+ * neither part) and not after `第` (`第一张`, an ordinal). A numeral inside a
+ * word (`一些`, `统一`, `一起`) is followed by no measure word, so it is never read.
+ */
+const ZH_NUMBER_WORD = new RegExp(
+  `(?<![第${Object.keys(ZH_NUMBER_WORDS).join('')}百千万亿])([${Object.keys(ZH_NUMBER_WORDS).join('')}])(?=[个家条项位名张笔件份台])`,
+  'gu',
+);
+
+/**
+ * The counts `text` spells as words rather than digits, as {@link Reading}s:
+ * an English number word from zero to twenty, whole and any letter case
+ * ("Two invoices are no longer drafts"), and a Chinese numeral from 零 to 十
+ * (with 两) standing before a measure word ("两张发票"). A model writes a small
+ * count either way, and the figure is the same.
+ *
+ * Read by the correctness axis only ({@link gradeRun}'s {@link meets}): a
+ * figure the reply spells is a figure it states. Every other reading of a
+ * reply's numbers — {@link numbersIn}, the leak scans, the supported-figure
+ * check of an `unanswerable` decline, the withheld-count reading — stays
+ * digits only, so a spelled word ("one of them is Sent") can neither raise a
+ * leak nor charge a decline with an unsupported figure.
+ */
+function numberWordReadingsIn(text: string): Reading[] {
+  const out: Reading[] = [];
+  for (const m of text.matchAll(EN_NUMBER_WORD)) {
+    const word = m[1]!.toLowerCase();
+    const end = m.index + m[1]!.length;
+    if (word === 'one' && (EN_ONE_BEFORE.test(text.slice(Math.max(0, m.index - 20), m.index)) || !EN_ONE_AFTER.test(text.slice(end, end + 30)))) continue;
+    const value = EN_NUMBER_WORDS[word]!;
+    out.push({ value, decimals: 0, digits: String(value).length, at: m.index, end });
+  }
+  for (const m of text.matchAll(ZH_NUMBER_WORD)) {
+    const value = ZH_NUMBER_WORDS[m[1]!]!;
+    out.push({ value, decimals: 0, digits: String(value).length, at: m.index, end: m.index + m[1]!.length });
+  }
+  return out;
+}
+
 /** Every number in `text`, thousands separators dropped, ISO and written dates and identifiers skipped; a unit suffix adds the multiplied reading too. */
 export function numbersIn(text: string): number[] {
   return readingsIn(text).map((r) => r.value);
@@ -607,7 +679,8 @@ export function gradeRun(truth: RunTruth, hidden: HiddenScope, turn: RunTranscri
   let correct = true;
   let cited = true;
 
-  const readings = readingsIn(text);
+  // A count the reply spells as a word meets its figure too; only here (see numberWordReadingsIn).
+  const readings = [...readingsIn(text), ...numberWordReadingsIn(text)];
   for (const f of truth.figures) {
     if (!meets(f, text, readings)) {
       correct = false;
@@ -915,6 +988,12 @@ type SchemaMaskingMode = 'on' | 'off';
 export interface PersonaRunInput {
   /** The question's object — what a correct reply's citation names. */
   object: string;
+  /**
+   * Who asked: the persona's id. Names the asker's figures in a problem
+   * (`missing figure sales_rep = 2`). Absent ⇒ the run's admin, and the
+   * figures read `admin`.
+   */
+  asker?: string;
   /** The question's truth over every row (`truths[questionId]`). */
   truth: Truth;
   /** The truth AS this persona (`personaTruths[questionId][personaId]`). */
@@ -1129,7 +1208,7 @@ export function gradePersonaRun(input: PersonaRunInput, turn: RunTranscript): Pe
     };
   }
 
-  const figures = truthFigures(input.personaTruth, input.object, 'persona', input.tol, input.reading);
+  const figures = truthFigures(input.personaTruth, input.object, input.asker ?? 'admin', input.tol, input.reading);
   const grade = gradeRun({ figures, objectLabels: input.objectLabels }, input.hidden, turn);
   const leaks = [...grade.leaks];
   for (const f of all) {

@@ -1565,7 +1565,7 @@ export default defineConfig({
             // `core.ts` closure belongs in its list.
             {
               name: 'plugin-form-core',
-              test: /[\\/]packages[\\/]plugin-form[\\/]src[\\/](core|autoLayout|sanitize|deriveMasterDetail|schemaDefaults|sectionGroups|fieldGroups|initialFieldFocus|formOwnerLineContext)\.tsx?$/,
+              test: /[\\/]packages[\\/]plugin-form[\\/]src[\\/](core|autoLayout|sanitize|deriveMasterDetail|schemaDefaults|sectionGroups|fieldGroups|initialFieldFocus|formOwnerLineContext|createKeepsField|fieldWriteGate|stateMachineOptions|recordFormStamp)\.tsx?$/,
               priority: 71,
               includeDependenciesRecursively: false,
             },

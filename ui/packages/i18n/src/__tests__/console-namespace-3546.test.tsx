@@ -79,7 +79,12 @@ const REPO_ROOT = decodeURIComponent(new URL(import.meta.url).pathname)
   .join('/');
 
 
-/** The 46 keys this slice backfilled, grouped as the packs group them. */
+/**
+ * The keys this slice backfilled that are still live, grouped as the packs
+ * group them. It backfilled 46; objectstack#37682 retired the 18 that only the
+ * build chat read (the app switcher, the plan-design wait and its hints, and
+ * the plan / publish card), so 26 remain.
+ */
 const KEYS = [
   // console.shortcuts — the AI group of the ?-shortcuts dialog (3)
   'console.shortcuts.groups.aiChat',
@@ -89,33 +94,11 @@ const KEYS = [
   'console.notFound.title',
   'console.notFound.description',
   'console.notFound.back',
-  // console.ai — the /ai chat page chrome (9)
+  // console.ai — the /ai chat page chrome (4)
   'console.ai.collapseToDock',
-  'console.ai.switchApp',
-  'console.ai.switchAppLabel',
-  'console.ai.newApp',
   'console.ai.connectionWaiting',
   'console.ai.connectionStalled',
   'console.ai.connectionOffline',
-  'console.ai.designingPlan',
-  'console.ai.planReady',
-  // console.ai.designingPlanHint — the rotating propose_blueprint hints (10)
-  'console.ai.designingPlanHint.data',
-  'console.ai.designingPlanHint.objects',
-  'console.ai.designingPlanHint.relations',
-  'console.ai.designingPlanHint.lookups',
-  'console.ai.designingPlanHint.views',
-  'console.ai.designingPlanHint.forms',
-  'console.ai.designingPlanHint.defaults',
-  'console.ai.designingPlanHint.dashboard',
-  'console.ai.designingPlanHint.review',
-  'console.ai.designingPlanHint.finalize',
-  // console.ai — the plan / publish confirm-gate card (5)
-  'console.ai.planBuilding',
-  'console.ai.planBuilt',
-  'console.ai.planDeferred',
-  'console.ai.published',
-  'console.ai.publishFailed',
   // console.ai — the "no AI in this deployment" dead end (5)
   'console.ai.unavailableTitle',
   'console.ai.unavailableDescription',
@@ -137,7 +120,7 @@ const KEYS = [
   'console.ai.group.older',
 ] as const;
 
-/** The 41 of those that the guard measured; the other 5 are the prefix family. */
+/** The 21 of those that the guard measured; the other 5 are the prefix family. */
 const MEASURED_KEYS = KEYS.filter((k) => !k.startsWith('console.ai.group.'));
 
 // Derived from the map rather than left as `string[]`: `Object.keys` erases
@@ -191,19 +174,19 @@ beforeEach(() => {
 });
 
 describe('objectui#3546 slice four — the console namespace', () => {
-  it('covers all ten packs and all forty-six keys (guards the loops from emptying)', () => {
+  it('covers all ten packs and all twenty-six live keys (guards the loops from emptying)', () => {
     expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
-    expect(KEYS).toHaveLength(46);
-    expect(new Set(KEYS).size).toBe(46);
-    // 41 measured missing keys + 5 that came from the prefix family. Splitting the
-    // two apart here is what stops a later reader reading "46" off the ratchet.
-    expect(MEASURED_KEYS).toHaveLength(41);
+    expect(KEYS).toHaveLength(26);
+    expect(new Set(KEYS).size).toBe(26);
+    // 21 live measured keys + 5 that came from the prefix family. Splitting the
+    // two apart here is what stops a later reader reading "26" off the ratchet.
+    expect(MEASURED_KEYS).toHaveLength(21);
     const perArea = KEYS.reduce<Record<string, number>>((acc, k) => {
       const area = k.startsWith('console.ai.') ? 'console.ai' : k.split('.').slice(0, 2).join('.');
       acc[area] = (acc[area] ?? 0) + 1;
       return acc;
     }, {});
-    expect(perArea).toEqual({ 'console.shortcuts': 3, 'console.notFound': 3, 'console.ai': 40 });
+    expect(perArea).toEqual({ 'console.shortcuts': 3, 'console.notFound': 3, 'console.ai': 20 });
   });
 
   it.each(LANGS)('%s defines every console key as a non-empty string', (lang) => {
@@ -237,7 +220,7 @@ describe('objectui#3546 slice four — the console namespace', () => {
   });
 
   it('no key in this slice interpolates — so no pack may invent a placeholder', () => {
-    // Unlike slice three, not one of these 46 strings takes an option: every
+    // Unlike slice three, not one of these 26 strings takes an option: every
     // measured call site passes `defaultValue` and nothing else. A translator
     // adding `{{name}}` would render the braces to the user verbatim, and a
     // single-brace `{seconds}`-style hole would be read by nothing at all.
@@ -252,12 +235,11 @@ describe('objectui#3546 slice four — the console namespace', () => {
   it('the ellipsis character follows en in every pack', () => {
     // The packs mirror `en`'s ellipsis byte rather than picking their own: where
     // en writes U+2026 they write U+2026, where en writes "..." they write "...".
-    // 15 of these keys end in an ellipsis (the three connection banners, the
-    // designingPlan lead-in plus its ten hints, and planBuilding), and a pack that
+    // 3 of these keys end in an ellipsis (the three connection banners), and a pack that
     // swapped in three dots would read as a different typographic register on the
     // same card as its neighbours.
     const ellipsised = KEYS.filter((k) => (at(builtInLocales.en, k) as string).endsWith('…'));
-    expect(ellipsised).toHaveLength(15);
+    expect(ellipsised).toHaveLength(3);
     for (const lang of LANGS) {
       for (const key of ellipsised) {
         const value = at(builtInLocales[lang], key) as string;
@@ -322,69 +304,6 @@ describe('objectui#3546 slice four — the console namespace', () => {
     });
   });
 
-  it('zh planBuilding is REACHABLE — no conversation-language gate shadows the pack (#3837)', () => {
-    // Slice four measured `planBuildingLabel` in `AiChatPage.tsx` gated on
-    // `convZh` (the CONVERSATION's language, #772/#2884) handing back a literal
-    // '正在搭建…' instead of the pack, which made the zh value below DEAD for every
-    // Chinese conversation — the pack could be re-worded and no zh reader would
-    // see it. That was filed as #3837 and fixed there; this assertion used to pin
-    // the literal and the pack byte-identical (the containment measure while the
-    // defect stood) and now pins its removal, which is the state that makes the
-    // pack the single source of the badge's text.
-    const src = sourceOf('packages/app-shell/src/console/ai/AiChatPage.tsx');
-    expect(
-      src,
-      'the convZh gate is back over planBuildingLabel — the zh pack value is dead again (#3837)',
-    ).not.toMatch(/convZh \? '[^']*' : t\('console\.ai\.planBuilding'/);
-    expect(src, 'planBuildingLabel no longer reads the pack directly (#3837)').toMatch(
-      /planBuildingLabel=\{t\('console\.ai\.planBuilding'/,
-    );
-    // Same invariant one step wider, so the next label to drift in is caught too:
-    // `convZh` may gate OUTBOUND message text only — the cloud confirm gate reads
-    // those two languages (see outbound-agent-messages.test.ts) — never anything
-    // RENDERED. Whole-line comments are stripped first so prose naming the
-    // identifier (there is some, right above it) can't be counted as a read.
-    //
-    // Shape as of #3896: the four outbound messages no longer inline
-    // `convZh ? '<zh literal>' : t(key)` — they go through
-    // `resolveOutboundAgentText`, which reads the `zh`/`en` packs by conversation
-    // language. So `convZh` now has exactly ONE consumer, and that consumer is
-    // the resolver bridge; anything else reading it is a label drifting back in.
-    const code = src.replace(/^\s*\/\/.*$/gm, '');
-    const convZhLines = code.split('\n').filter((line) => /\bconvZh\b/.test(line));
-    expect(
-      convZhLines,
-      'a convZh read appeared outside the outbound-text resolver — if it feeds anything rendered, it follows the UI locale instead (#3837/#3896)',
-    ).toHaveLength(3);
-    expect(convZhLines[0], 'the convZh memo itself').toMatch(/const convZh = useMemo\(/);
-    expect(convZhLines[1], 'its only consumer is the outbound-text resolver').toMatch(
-      /resolveOutboundAgentText\(\s*convZh\s*,/,
-    );
-    expect(convZhLines[2], "the bridge's dep array").toMatch(/^\s*\[convZh\],\s*$/);
-    // And the resolver is asked for outbound MESSAGES only — the same list the
-    // i18n guard owns (`outbound-agent-messages.test.ts` OUTBOUND_KEYS). A
-    // `*Label` appearing here would be #3837 all over again, one indirection out.
-    const resolved = [...code.matchAll(/outboundText\('(\w+)'/g)].map((m) => m[1]).sort();
-    expect(resolved).toEqual([
-      'changesConfirmMessage',
-      'planAnswerMessage',
-      'planApproveDefaultsMessage',
-      'planApproveMessage',
-      'planBuildNewAppMessage',
-      'planExtendExistingMessage',
-    ]);
-    // #3896's headline defect in one line: an outbound message read through
-    // `t()` is read from the UI pack, which is how a zh console sent Chinese
-    // into an English thread. No outbound `*Message` key may go through `t()`.
-    expect(
-      code,
-      'an outbound *Message is being read from the UI pack again (#3896)',
-    ).not.toMatch(/t\('console\.ai\.\w*Message'/);
-    // And zh still spells the badge the way the deleted literal did, so the fix
-    // changed WHICH source answers a zh-UI reader, not what they read.
-    expect(at(builtInLocales['zh-Hans'], 'console.ai.planBuilding')).toBe('正在搭建…');
-  });
-
   it('the ratchet actually shrank — no console key is still baselined', () => {
     // `scripts/i18n-call-site-key-baseline.json` fails the build both ways: an
     // unfixed key missing from it, AND a fixed key still listed. Pinning the
@@ -417,7 +336,6 @@ describe('objectui#3546 slice four — the console namespace', () => {
     /** One key per component that owns a group of these keys. */
     const SAMPLE: Array<[key: string, owner: string]> = [
       ['console.ai.collapseToDock', 'AiChatPage'],
-      ['console.ai.designingPlanHint.objects', 'AiChatPage (propose_blueprint wait)'],
       ['console.ai.unavailableTitle', 'AiChatPage (AiUnavailable)'],
       ['console.ai.dock.maximize', 'ChatDock'],
       ['console.notFound.title', 'AppContent RouteNotFound'],
@@ -446,13 +364,13 @@ describe('objectui#3546 slice four — the console namespace', () => {
 
     it.each([
       ['fr', 'console.ai.unavailableRetry', 'Réessayer'],
-      ['de', 'console.ai.planDeferred', 'Noch nicht erstellt'],
+      ['de', 'console.ai.unavailableHome', 'Zurück zur Startseite'],
       ['es', 'console.notFound.description', 'La URL que siguió no coincide con ninguna vista de esta aplicación.'],
       ['pt', 'console.ai.dock.collapse', 'Recolher a conversa'],
       ['ru', 'console.ai.connectionStalled', 'Всё ещё выполняется…'],
-      ['ja', 'console.ai.designingPlanHint.finalize', 'プランをまとめています…'],
+      ['ja', 'console.ai.connectionWaiting', 'サーバーを待っています…'],
       ['ko', 'console.shortcuts.groups.aiChat', 'AI 어시스턴트'],
-      ['ar', 'console.ai.published', 'تم النشر'],
+      ['ar', 'console.ai.unavailableRetry', 'إعادة المحاولة'],
     ])('%s renders a user-visible console string from the pack', (lang, key, expected) => {
       // One pinned surface per remaining pack, across four writing systems, so a
       // pack that silently reverts to English is caught by name and not only by
@@ -466,7 +384,7 @@ describe('objectui#3546 slice four — the console namespace', () => {
       // spells ё rather than collapsing it to е, and these two strings are where
       // a backfill would most easily have dropped it.
       const { result } = renderHook(() => useObjectTranslation(), { wrapper: wrapperFor('ru') });
-      expect(result.current.t('console.ai.planDeferred')).toContain('Ещё');
+      expect(result.current.t('console.ai.connectionStalled')).toContain('Всё ещё');
       expect(result.current.t('console.ai.unavailableDescription')).toContain('включён');
     });
 
