@@ -4303,6 +4303,8 @@ const ar = {
     bulkDeleteSuccess_many: "تم حذف {{count}} من سجلات {{label}}",
     bulkDeleteSuccess_other: "تم حذف {{count}} من سجلات {{label}}",
     bulkDeletePartial: "تم حذف {{succeeded}}، فشل {{failed}}",
+    bulkDeleteRefusedNamed: "{{names}}: {{reason}}",
+    bulkDeleteMoreReasons: "و{{more}} أخرى",
   },
   objectViewActions: {
     renameFailed: "تعذر إعادة تسمية العرض",

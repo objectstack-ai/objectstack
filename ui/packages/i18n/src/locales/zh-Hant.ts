@@ -4291,6 +4291,8 @@ const zhHant = {
     bulkDeleteSuccess_one: '已刪除 {{count}} 條 {{label}} 記錄',
     bulkDeleteSuccess_other: '已刪除 {{count}} 條 {{label}} 記錄',
     bulkDeletePartial: '成功 {{succeeded}} 條，失敗 {{failed}} 條',
+    bulkDeleteRefusedNamed: '{{names}}：{{reason}}',
+    bulkDeleteMoreReasons: '另有 {{more}} 個原因',
   },
   objectViewActions: {
     renameFailed: '重新命名檢視失敗',

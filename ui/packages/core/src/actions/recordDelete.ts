@@ -184,6 +184,80 @@ function nameOf(objectDef: unknown, record: Row | null | undefined): string {
 }
 
 /**
+ * The text a refused delete gives the user: the external-datasource refusal
+ * reads as the read-only sentence (as the one-record toast reads it), any
+ * other error as its message.
+ */
+function refusalText(deps: Pick<RecordDeleteDeps, 't'>, err: unknown): string {
+  if (isExternalWriteRefusal(err)) {
+    return deps.t('form.readOnlyExternalSource', { defaultValue: READ_ONLY_EXTERNAL_SOURCE_EN });
+  }
+  const message = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  return message.trim();
+}
+
+/** At most this many reasons are listed under a batch summary; the rest are counted. */
+const MAX_REFUSAL_LINES = 3;
+/** At most this many record names lead one reason's line; the rest are counted. */
+const MAX_REFUSAL_NAMES = 3;
+
+/**
+ * The description under a batch summary that had refusals
+ * (objectstack-ai/objectstack#37758): one line per distinct reason, in the
+ * order the records were handed in, led by the names of the records it
+ * refused (up to {@link MAX_REFUSAL_NAMES}, then `+N`). A reason whose records
+ * have no name reads alone; the summary title already counts them. A refusal
+ * with no message adds no line, so a batch that carries no reason at all keeps
+ * the bare count, as before. No line carries a counted noun, so no locale needs
+ * a plural family for it.
+ */
+function refusalSummary(
+  deps: Pick<RecordDeleteDeps, 't' | 'objectDef'>,
+  refused: Array<{ record: Row; err: unknown }>,
+): string | undefined {
+  const groups = new Map<string, Row[]>();
+  for (const { record, err } of refused) {
+    const reason = refusalText(deps, err);
+    if (!reason) continue;
+    const rows = groups.get(reason);
+    if (rows) rows.push(record);
+    else groups.set(reason, [record]);
+  }
+  if (groups.size === 0) return undefined;
+  const lines: string[] = [];
+  for (const [reason, rows] of groups) {
+    if (lines.length === MAX_REFUSAL_LINES) break;
+    const names = rows.map((row) => nameOf(deps.objectDef, row)).filter(Boolean);
+    if (names.length === 0) {
+      lines.push(reason);
+      continue;
+    }
+    const shown = names.slice(0, MAX_REFUSAL_NAMES).join(', ');
+    const unnamed = rows.length - Math.min(names.length, MAX_REFUSAL_NAMES);
+    const who = unnamed > 0 ? `${shown} +${unnamed}` : shown;
+    lines.push(
+      deps.t('objectActions.bulkDeleteRefusedNamed', {
+        names: who,
+        reason,
+        defaultValue: `${who}: ${reason}`,
+      }),
+    );
+  }
+  const rest = groups.size - lines.length;
+  if (rest > 0) {
+    lines.push(
+      // `more`, not `count`: a `count` option sends i18next looking for a
+      // plural family this noun-free sentence does not have.
+      deps.t('objectActions.bulkDeleteMoreReasons', {
+        more: rest,
+        defaultValue: `And ${rest} more`,
+      }),
+    );
+  }
+  return lines.join('\n');
+}
+
+/**
  * The record-delete core: `confirmText` is the question to ask before deleting
  * one record, `run` performs the delete (one record, or several settled
  * together) and reports it. See the module docblock for objectui#10383.
@@ -355,7 +429,10 @@ export const recordDelete = Object.freeze({
       const results = await Promise.allSettled(
         records.map((r) => dataSource.delete(objectName, r.id as string)),
       );
-      const failed = results.filter((r) => r.status === 'rejected').length;
+      const refused = results.flatMap((r, i) =>
+        r.status === 'rejected' ? [{ record: records[i], err: r.reason as unknown }] : [],
+      );
+      const failed = refused.length;
       const succeeded = results.length - failed;
       onRefresh?.();
       if (failed === 0) {
@@ -370,13 +447,18 @@ export const recordDelete = Object.freeze({
         // post-execution hook adds a second, generic success toast.
         return { success: true, reload: true, silent: true };
       }
-      toast.error(
-        t('objectActions.bulkDeletePartial', {
-          succeeded,
-          failed,
-          defaultValue: `${succeeded} deleted, ${failed} failed`,
-        }),
-      );
+      // objectstack-ai/objectstack#37758 — the counts alone told the user
+      // nothing to act on; each refusal's own reason (the server's localized
+      // sentence, e.g. a restrict delete's "referenced by N records") goes in
+      // the description, grouped. A batch with no reason keeps the bare count.
+      const description = refusalSummary(deps, refused);
+      const summary = t('objectActions.bulkDeletePartial', {
+        succeeded,
+        failed,
+        defaultValue: `${succeeded} deleted, ${failed} failed`,
+      });
+      if (description) toast.error(summary, { description });
+      else toast.error(summary);
       // The summary above is authoritative; returning WITHOUT `error` keeps the
       // runner from toasting the failure a second time.
       return { success: false };

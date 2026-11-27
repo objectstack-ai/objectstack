@@ -4138,6 +4138,8 @@ const ru = {
     bulkDeleteSuccess_many: "Удалено {{count}} записей {{label}}",
     bulkDeleteSuccess_other: "Удалено {{count}} записи {{label}}",
     bulkDeletePartial: "{{succeeded}} удалено, {{failed}} не удалось",
+    bulkDeleteRefusedNamed: "{{names}}: {{reason}}",
+    bulkDeleteMoreReasons: "И ещё {{more}}",
   },
   objectViewActions: {
     renameFailed: "Не удалось переименовать представление",
