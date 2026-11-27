@@ -89,7 +89,7 @@
     "check:pm-fleet-token": "node scripts/pm/fleet-token.mjs --self-test",
     "check:pm-issue-create": "node scripts/pm/issue-create.mjs --self-test",
     "check:pm-issue-transfer": "node scripts/pm/issue-transfer.mjs --self-test",
-    "check:pm-with-fleet": "bash scripts/pm/with-fleet.sh --self-test",
+    "check:pm-with-fleet": "bash scripts/pm/with-fleet.sh --self-test && bash scripts/pm/dev-worktree.sh --self-test",
     "check:pm-post-stamped": "node scripts/pm/post-stamped.mjs --self-test",
     "check:pm-label-write": "node scripts/pm/label-write.mjs --self-test",
     "check:pm-close-cards": "node scripts/pm/close-cards.mjs --self-test",
