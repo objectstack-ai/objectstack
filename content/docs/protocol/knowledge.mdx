@@ -197,11 +197,13 @@ and the MCP draft door:
    agent's. The package doors ask it too: every write to an existing package
    that holds a knowledge source (enable, disable, publish, publish-drafts,
    discard-drafts, the commit revert, rollback, revert, adopt-orphans,
-   duplicate, ensure-customization, the manifest update and delete) needs the
-   capability, and is refused `403` naming it otherwise. A package that holds
-   none is written as before. Installing a package is not asked: a packaged
-   source arrives by the install door's own admission. A duplicate also
-   admits each knowledge source it copies for the caller, by guard two below.
+   duplicate, the manifest update and delete) needs the capability, and is
+   refused `403` naming it otherwise. A package that holds none is written as
+   before. Two doors are not asked. Installing a package is one: a packaged
+   source arrives by the install door's own admission. Creating a package's
+   customization pair (ensure-customization) is the other: it writes nothing
+   of the base, and the pair it creates is empty. A duplicate also admits
+   each knowledge source it copies for the caller, by guard two below.
 2. **Source admission at save.** A source is saved only when its author may
    themselves search what it would index. The save asks the same gates a
    search asks ([Source admission](#source-admission-exposure-and-field-level-rules))

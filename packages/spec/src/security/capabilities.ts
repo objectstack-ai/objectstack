@@ -119,7 +119,9 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
   // `/meta`, the dispatcher, the MCP draft door), and every write door of an
   // existing package that holds one (`/packages/:id/…`), asks this capability
   // BESIDE `manage_metadata`, never instead of it. The install door is not
-  // asked: a packaged source arrives by that door's own admission. Held by default by platform
+  // asked: a packaged source arrives by that door's own admission. Nor is the
+  // ensure-customization door, which writes nothing of the package it names
+  // and creates an empty pair. Held by default by platform
   // administrators only (`ADMIN_FULL_ACCESS_CAPABILITIES`); every other
   // position, organization administrators included, only by explicit grant.
   // A grant on the indexed object's records does not imply it. `platform`:

@@ -106,7 +106,11 @@ interface Door {
     target: (s: Stack) => any;
 }
 
-/** Every write door of an existing package, each with the writer it must not reach when refused. */
+/**
+ * Every door that writes an existing package, each with the writer it must not
+ * reach when refused. The install door and the ensure-customization door are
+ * not here: neither is asked (pinned under "what the gate leaves alone").
+ */
 const DOORS: Door[] = [
     { name: 'PATCH /:id/enable', path: '/pkg-a/enable', method: 'PATCH', target: (s) => s.registry.enablePackage },
     { name: 'PATCH /:id/disable', path: '/pkg-a/disable', method: 'PATCH', target: (s) => s.registry.disablePackage },
@@ -118,7 +122,6 @@ const DOORS: Door[] = [
     { name: 'POST /:id/revert', path: '/pkg-a/revert', method: 'POST', target: (s) => s.protocol.revertStoredPackage },
     { name: 'POST /:id/adopt-orphans', path: '/pkg-a/adopt-orphans', method: 'POST', target: (s) => s.protocol.reassignOrphanedMetadata },
     { name: 'POST /:id/duplicate', path: '/pkg-a/duplicate', method: 'POST', body: { targetPackageId: 'pkg-b' }, target: (s) => s.protocol.duplicatePackage },
-    { name: 'POST /:id/ensure-customization', path: '/pkg-a/ensure-customization', method: 'POST', target: (s) => s.protocol.ensureCustomizationPackage },
     { name: 'PATCH /:id (manifest)', path: '/pkg-a', method: 'PATCH', body: { name: 'renamed' }, target: (s) => s.protocol.updatePackage },
     { name: 'DELETE /:id', path: '/pkg-a', method: 'DELETE', tenantId: 'org_a', target: (s) => s.protocol.deletePackage },
 ];
@@ -303,6 +306,40 @@ describe('/packages — what the gate leaves alone', () => {
         const r = await call(s, door, authed(METADATA_ONLY));
         expect(r.response?.status).not.toBe(503);
         expect(s.protocol.discardPackageDrafts).toHaveBeenCalled();
+    });
+
+    it('a host with no metadata store holds no knowledge source: a missing table, and a store object the engine does not hold, are not faults', async () => {
+        const absent: Array<() => Error> = [
+            () => new Error('no such table: sys_metadata'),
+            () => Object.assign(new Error("Object 'sys_metadata' not found"), { code: 'OBJECT_NOT_FOUND', status: 404, object: 'sys_metadata' }),
+        ];
+        const door = DOORS.find((d) => d.name === 'PATCH /:id/disable')!;
+        for (const error of absent) {
+            const s = make();
+            s.protocol.listDrafts.mockImplementation(async () => { throw error(); });
+            s.protocol.getMetaItemsPerPackage.mockImplementation(async () => { throw error(); });
+            const r = await call(s, door, authed(METADATA_ONLY));
+            expect(r.response?.status, error().message).toBe(200);
+            expect(s.registry.disablePackage).toHaveBeenCalled();
+        }
+        // CONTROL: the same envelope naming another object is a listing that
+        // could not be read, and refuses.
+        const s = make();
+        s.protocol.listDrafts.mockImplementation(async () => {
+            throw Object.assign(new Error("Object 'ghost' not found"), { code: 'OBJECT_NOT_FOUND', status: 404, object: 'ghost' });
+        });
+        const r = await call(s, door, authed(METADATA_ONLY));
+        expect(r.response?.status).toBe(503);
+        expect(s.registry.disablePackage).not.toHaveBeenCalled();
+    });
+
+    it('the ensure-customization door is not asked: it writes nothing of the base, and the pair it creates is empty', async () => {
+        const s = make({ items: [SOURCE_ITEM], drafts: [SOURCE_DRAFT] });
+        const r = await s.dispatcher.handlePackages('/pkg-a/ensure-customization', 'POST', {}, {}, authed(METADATA_ONLY));
+        expect(r.response?.status).toBe(201);
+        expect(s.protocol.ensureCustomizationPackage).toHaveBeenCalledWith({ basePackageId: 'pkg-a' });
+        expect(s.protocol.getMetaItemsPerPackage).not.toHaveBeenCalled();
+        expect(s.protocol.listDrafts).not.toHaveBeenCalled();
     });
 
     it('the install door is not asked: a packaged source arrives by that door\'s own admission (ADR-0161 K4)', async () => {

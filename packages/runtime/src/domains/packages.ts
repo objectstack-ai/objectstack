@@ -445,10 +445,10 @@ type KnowledgeSourcePackageReach = 'drafts' | 'items' | 'history';
  * package's items into a new one, adopt-orphans binds items to it, and enable,
  * disable and delete decide whether its items are served at all. Where one of
  * those items is a knowledge source the verb does to it what a `/meta` write
- * would. So the rule is stated on the package and is the same at every write
- * door of an existing package: one that holds a knowledge source is written by
- * a holder of the capability that write asks (`metaTypeWriteRefusal`, the one
- * decision).
+ * would. So the rule is stated on the package and is the same at every door
+ * that writes an existing package: one that holds a knowledge source is
+ * written by a holder of the capability that write asks
+ * (`metaTypeWriteRefusal`, the one decision).
  *
  * Asked right after {@link requireManageMetadata} and the wall, and before
  * anything is written. A holder of the capability, and the engine's own call
@@ -462,7 +462,9 @@ type KnowledgeSourcePackageReach = 'drafts' | 'items' | 'history';
  * capability probe every door of this file already asks.
  *
  * Not asked by the install door (`POST /packages`): a packaged source arrives
- * by that door's own admission, as ADR-0161 K4 leaves it.
+ * by that door's own admission, as ADR-0161 K4 leaves it. Not asked by the
+ * ensure-customization door either: it writes nothing of the package its path
+ * names, and the pair it creates is empty.
  */
 async function refuseKnowledgeSourcePackageWrite(
     deps: DomainHandlerDeps,
@@ -4138,12 +4140,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Ensuring the customization package of "${id}"`);
             if (walled) return walled;
-            // [ADR-0161 K4, guard one] A package that holds a knowledge source
-            // asks `manage_knowledge_sources` too.
-            const sourceGate = await refuseKnowledgeSourcePackageWrite(deps, _context, {
-                packageId: id, action: `Ensuring the customization package of "${id}"`, reach: ['drafts', 'items'],
-            });
-            if (sourceGate) return sourceGate;
+            // [ADR-0161 K4] Not asked `manage_knowledge_sources`, as the install
+            // door is not: this door writes nothing of the base and creates an
+            // empty pair, so no knowledge source is created, changed or removed
+            // by it (pinned in `packages-ensure-customization.test.ts`).
             // [cloud#3814 D1] Declared replicas on the Redis driver: this change
             // would reach the serving replica only. Refused before anything is written.
             const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Ensuring the customization package of "${id}"`);
