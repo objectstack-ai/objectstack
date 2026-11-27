@@ -1149,8 +1149,12 @@ const DISPATCHER_DOMAINS = {
   // `/attachments` and `/print` call. The member's own JSON `Response` is handed back as
   // `result`, and every answer the bridge makes itself — the ordinary miss,
   // the two 501s, the sanitised 500s — goes through `deps.routeNotFound` /
-  // `deps.error`.
-  'own-door-bridge.ts': { handBuilt: 0 },
+  // `deps.error`. [#37737] The 501s, and the other doors' localized 501s,
+  // gain one header on top of `deps.error`'s envelope, the one hand-built site.
+  'own-door-bridge.ts': {
+    handBuilt: 1,
+    note: 'the localized 501 (`localizedNotImplemented`, #37737), which must carry `Vary: Accept-Language` (`deps.error` takes no headers); the body is `deps.error`\'s declared envelope spread, and every door that answers a 501 in the request\'s language answers through it',
+  },
   'packages.ts': { handBuilt: 0 },
   // The `/security` domain's permission-set clone door (ADR-0126 §7.1), beside
   // the activation door. Every answer goes through `deps.success` /
