@@ -101,8 +101,12 @@ export const AIModelConfigSchema = lazySchema(() => acceptRetiredDefaultResidue(
  * path never read the agent record, so the whole block was a grounding claim
  * nothing enforced. The key's tombstone aged out at protocol 18, so the
  * strict `AgentSchema` refuses it as an unknown key naming the upgrade guide.
- * The protocol-17 `agent-knowledge-topics-to-sources` conversion remains in
- * the chain (it rewrites historical SOURCES and imports nothing from here).
+ * No conversion for the block's old `topics` spelling is in the chain: the
+ * protocol-17 `agent-knowledge-topics-to-sources` rename was absorbed before
+ * release into the removal of the whole block (the ABSORBED note in
+ * `conversions/entries/17/sharing-rule-access-level-full-to-edit.ts`), so no
+ * registry or entry module carries that id and `retired-after.census.json`
+ * has no row for it.
  */
 
 // ── Retired structured-output members (ADR-0049 enforce-or-remove) ──────────
