@@ -55,7 +55,7 @@ import {
   ReferenceChipContext,
 } from '@object-ui/fields';
 import type { DetailViewSection as DetailViewSectionType, DetailViewField, FieldMetadata } from '@object-ui/types';
-import { applyDetailAutoLayout } from './autoLayout';
+import { applyDetailAutoLayout, isWideDetailField } from './autoLayout';
 import { useDetailTranslation } from './useDetailTranslation';
 import { useSafeFieldLabel } from '@object-ui/react';
 import { NON_EDITABLE_SYSTEM_FIELDS } from './systemFields';
@@ -971,11 +971,23 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     // The frameless face (the default record page) draws a dense row: the
     // label left in a fixed-width 12 px muted column, the value right at
     // 13 px, one 32 px line for a one-line value.
+    // objectstack#37801 — a WIDE field (long text, markdown, html, rich text,
+    // a multi-file list: the one `isWideDetailField` predicate the auto layout
+    // spans by, never a second type list) draws its label ABOVE the value
+    // instead, and the value takes the column's whole width. Beside a 112 px
+    // label a long body was set in what was left of a one-column list. The
+    // row keeps its attributes and its click target; only its direction moves.
+    const labelOnTop =
+      frameless && isWideDetailField(enrichedField as DetailViewField, objectSchema?.fields);
     return (
       <div
         key={field.name}
         className={cn(
-          frameless ? 'group flex min-w-0 items-start gap-3' : 'space-y-1.5 group min-w-0',
+          frameless
+            ? labelOnTop
+              ? 'group flex min-w-0 flex-col'
+              : 'group flex min-w-0 items-start gap-3'
+            : 'space-y-1.5 group min-w-0',
           frameless ? framelessSpanClass(field.span, framelessColumns) : spanClass,
           // The field list (objectstack#36147): one row under the other, a
           // hairline between them.
@@ -992,7 +1004,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
         <div
           className={
             frameless
-              ? 'w-28 shrink-0 truncate py-1 text-xs leading-6 text-muted-foreground'
+              ? labelOnTop
+                ? 'truncate pt-1 text-xs leading-6 text-muted-foreground'
+                : 'w-28 shrink-0 truncate py-1 text-xs leading-6 text-muted-foreground'
               : 'text-xs font-medium text-muted-foreground'
           }
           title={frameless ? fieldLabelText : undefined}
