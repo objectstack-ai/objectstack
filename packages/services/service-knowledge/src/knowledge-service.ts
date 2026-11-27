@@ -2368,15 +2368,10 @@ export class KnowledgeService implements IKnowledgeService {
       );
       return 'not-synced';
     }
-    const adapter = this.adapters.get(source.adapter);
-    if (!adapter) {
-      this.options.logger?.warn?.(
-        `[knowledge] record sync of '${message.recordId}' for source '${this.label(source)}' skipped: its adapter ` +
-          `'${source.adapter}' is not registered. The record's document is written by the source's next build once ` +
-          'the adapter is mounted.',
-      );
-      return 'adapter-unmounted';
-    }
+    // An adapter not registered (yet) throws its refusal, so the message is
+    // retried: a store that registers late is met by a later attempt, and one
+    // that never does leaves a dead letter naming the source and the record.
+    const adapter = this.getAdapter(source.adapter);
     await chainAfter(this.recordSyncTails, documentIdFor(source.name, message.recordId), () =>
       this.syncRow(source, adapter, message.object, message.recordId, engine),
     );

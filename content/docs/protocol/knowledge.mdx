@@ -986,9 +986,10 @@ queue (ADR-0161 K1). The standard runtime always mounts `queue`.
   repairs what a dead letter names.
 - **Not retried**, because a retry cannot change them, and completed with no
   write: a source no longer registered, or no longer indexing the object on
-  record change; a source whose adapter is not mounted (logged at `warn`). A
-  `whole` document over the embedder's budget is removed from the index and
-  reported at `error`, as on every path.
+  record change. A `whole` document over the embedder's budget is removed from
+  the index and reported at `error`, as on every path. A source whose adapter
+  is not mounted is retried like a failure, so a store that registers late is
+  met by a later attempt, and one that never does leaves a dead letter.
 - **A burst of saves.** Every save publishes its own message — one queue row
   per source per save; completed rows are kept for `sys_job_queue`'s declared
   retention (7 days). No message is keyed by its document: the queue

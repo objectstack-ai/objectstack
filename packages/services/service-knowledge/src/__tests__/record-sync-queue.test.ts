@@ -151,8 +151,11 @@ function makeRealtime() {
   return service as unknown as IRealtimeService & typeof service;
 }
 
-/** Registers the SQL driver, the test object and, when asked, a realtime service, in init(). */
-function hostPlugin(file: string, realtime: IRealtimeService | undefined): Plugin {
+/**
+ * Registers the SQL driver, the test object and, when asked, a realtime
+ * service, in init(); the knowledge adapter in start(), as a store plugin does.
+ */
+function hostPlugin(file: string, realtime: IRealtimeService | undefined, adapter: IKnowledgeAdapter): Plugin {
   return {
     name: 'test.knowledge-queue-host',
     version: '1.0.0',
@@ -165,7 +168,9 @@ function hostPlugin(file: string, realtime: IRealtimeService | undefined): Plugi
       ctx.getService<ObjectQL>('objectql').registry.registerObject(KB_ARTICLE as never, 'test.knowledge-queue-host');
       if (realtime) ctx.registerService('realtime', realtime);
     },
-    async start() {},
+    async start(ctx: PluginContext) {
+      ctx.getService<KnowledgeService>('knowledge').registerAdapter('memory', adapter);
+    },
   } as unknown as Plugin;
 }
 
@@ -215,11 +220,12 @@ interface BootOptions {
 async function boot(opts: BootOptions = {}) {
   const file = opts.file ?? freshFile();
   const realtime = opts.realtime ? makeRealtime() : undefined;
+  const memory = makeAdapter();
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), child() { return logger; } };
   const kernel = new ObjectKernel({ logger: { level: 'fatal' }, gracefulShutdown: false } as never);
   kernels.push(kernel);
   await kernel.use(new ObjectQLPlugin());
-  await kernel.use(hostPlugin(file, realtime));
+  await kernel.use(hostPlugin(file, realtime, memory.adapter));
   if (opts.queue !== false) {
     await kernel.use(new QueueServicePlugin({ adapter: 'db', db: { pollIntervalMs: 10, maxIdleIntervalMs: 20 } }));
   }
@@ -244,17 +250,21 @@ async function boot(opts: BootOptions = {}) {
   const ql = kernel.getService<ObjectQL>('objectql');
   await installDefaultOrganization(ql);
   const service = kernel.getService<KnowledgeService>('knowledge');
-  const memory = makeAdapter();
-  service.registerAdapter('memory', memory.adapter);
   const queue = kernel.getService<DbQueueAdapter>('queue');
 
   /** The stored rows of the record-sync queue. */
   const queueRows = async (): Promise<Row[]> =>
     (await ql.find('sys_job_queue', { where: { queue: KNOWLEDGE_RECORD_SYNC_QUEUE }, context: SYSTEM } as never)) as Row[];
-  /** Resolves once every record-sync message is completed or a dead letter. */
-  const drained = async (): Promise<void> => {
+  /**
+   * Resolves once the record-sync queue holds at least `rows` messages (a
+   * message is published after its write commits, so a beat after the write
+   * resolves) and every one is completed or a dead letter.
+   */
+  const drained = async (rows = 1): Promise<void> => {
     await vi.waitFor(async () => {
-      const open = (await queueRows()).filter((r) => r.status === 'pending' || r.status === 'running');
+      const stored = await queueRows();
+      if (stored.length < rows) throw new Error(`${stored.length} of ${rows} record-sync message(s) published`);
+      const open = stored.filter((r) => r.status === 'pending' || r.status === 'running');
       if (open.length > 0) throw new Error(`${open.length} record-sync message(s) still open`);
     }, { timeout: 5000, interval: 10 });
   };
@@ -383,7 +393,7 @@ describe.each(TRIGGERS)('record sync through the queue — %s', (_label, realtim
     const row = await t.insert({ title: 'Leave policy', body: 'Twenty days of paid leave', status: 'published' });
     await t.update(row.id, { body: 'Thirty days of annual leave' });
     await t.update(row.id, { body: 'Forty days of sabbatical leave' });
-    await t.drained();
+    await t.drained(3);
     expect(await t.queueRows()).toHaveLength(3);
     expect(await t.found('sabbatical')).toEqual([String(row.id)]);
     expect(await t.found('paid leave')).toEqual([]);
@@ -396,7 +406,7 @@ describe.each(TRIGGERS)('record sync through the queue — %s', (_label, realtim
     await t.drained();
     expect((await t.queueRows()).map((r) => r.status)).toEqual(['completed']);
     await t.update(row.id, { body: 'Thirty days of annual leave' });
-    await t.drained();
+    await t.drained(2);
     expect(await t.found('annual leave')).toEqual([String(row.id)]);
     expect((await t.queueRows()).map((r) => r.status)).toEqual(['completed', 'completed']);
   });
@@ -415,7 +425,7 @@ describe.each(TRIGGERS)('record sync through the queue — %s', (_label, realtim
     expect(await t.found('paid leave')).toEqual([]);
 
     t.queue.start();
-    await t.drained();
+    await t.drained(2);
     expect(t.docs.size).toBe(0);
   });
 
@@ -453,12 +463,18 @@ describe('record sync through the queue — the write, the restart and the fresh
       reached = true;
       await held;
     });
+    const publish = vi.spyOn(t.queue, 'publish');
     const write = t.insert({ title: 'Leave policy', body: 'Twenty days of paid leave', status: 'published' });
-    await vi.waitFor(() => expect(reached).toBe(true), { timeout: 3000, interval: 5 });
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(t.embedCalls).toEqual([]);
-    expect(await t.queueRows()).toEqual([]);
-    release();
+    try {
+      await vi.waitFor(() => expect(reached).toBe(true), { timeout: 3000, interval: 5 });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Read nothing from the database here: on SQLite the open unit holds
+      // the only connection until the write returns.
+      expect(publish).not.toHaveBeenCalled();
+      expect(t.embedCalls).toEqual([]);
+    } finally {
+      release();
+    }
     await write;
     await vi.waitFor(async () => expect(await t.queueRows()).toHaveLength(1), { timeout: 3000, interval: 10 });
     await t.drained();
@@ -505,10 +521,9 @@ describe('record sync through the queue — the write, the restart and the fresh
     const driver = t.ql.getDriverForObject('kb_article') as unknown as { update(o: string, id: unknown, d: Row): Promise<unknown> };
     await driver.update('kb_article', row.id, { body: 'Twenty days of unpaid leave' });
     expect(await t.found('paid leave')).toEqual([]);
-    await vi.waitFor(async () => expect(await t.queueRows()).toHaveLength(2), { timeout: 3000, interval: 10 });
+    await t.drained(2);
     const freshness = (await t.queueRows()).map((r) => JSON.parse(String(r.payload_json)).reason);
     expect(freshness.sort()).toEqual(['event', 'freshness']);
-    await t.drained();
     expect(await t.found('unpaid leave')).toEqual([String(row.id)]);
   });
 });

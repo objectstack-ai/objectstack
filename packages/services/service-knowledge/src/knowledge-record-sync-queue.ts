@@ -137,9 +137,6 @@ export function resolveRecordSyncQueue(getService: (name: string) => unknown): I
  * - `not-synced` — the source no longer indexes the message's object on
  *   record change (`refresh.onRecordChange: false`, or another object), or
  *   no data engine is bound to re-read the row;
- * - `adapter-unmounted` — the source's adapter is not registered (adapters
- *   register in their own `start()`, so no retry within minutes changes it;
- *   the boot reports the source once);
  * - `malformed` — the message is not a record-sync message.
  */
-export type KnowledgeRecordSyncOutcome = 'synced' | 'source-gone' | 'not-synced' | 'adapter-unmounted' | 'malformed';
+export type KnowledgeRecordSyncOutcome = 'synced' | 'source-gone' | 'not-synced' | 'malformed';
