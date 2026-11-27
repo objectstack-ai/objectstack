@@ -67,9 +67,11 @@ export const AUDIT_LOG_SETTINGS_STORE_OBJECTS: readonly string[] = Object.freeze
  *
  * Audit trail for all significant platform events: who did what, when, and
  * the before/after state. The platform writes these rows, and they are
- * read-only through the data API and in Setup. Platform code running in a
- * system context (retention archive-then-delete, redaction migrations) can
- * still change or delete them, and nothing records that it did.
+ * read-only through the data API and in Setup. The rows are sealed
+ * (ADR-0154): each hour's rows are signed into a per-organization checkpoint,
+ * a redaction leaves a signed redaction amendment, and rows past `archive.keep`
+ * leave only by whole checkpoints after a signed expiry amendment, so a change
+ * or delete made outside the platform shows in `os audit verify`.
  *
  * Every field is `readonly: true` — audit logs are written only by
  * internal system hooks, never via UI forms. API exposes only `get` + `list`.
@@ -101,6 +103,11 @@ export const SysAuditLog = ObjectSchema.create({
     class: 'audit',
     retention: { maxAge: '90d' },
     archive: { after: '90d', to: 'archive', keep: '7y' },
+    // [ADR-0154 D10] Tamper evidence. The before/after state and metadata
+    // enter each checkpoint as salted commitments, so a checkpoint never
+    // carries them; every other column enters in clear. The chain column is
+    // the default `tenant_id` (a lookup, so one text value on every store).
+    seal: { valueFields: ['old_value', 'new_value', 'metadata'] },
   },
   description: 'Audit trail of platform events. Rows are written only by the platform and are read-only through the data API and in Setup.',
   displayNameField: 'action',

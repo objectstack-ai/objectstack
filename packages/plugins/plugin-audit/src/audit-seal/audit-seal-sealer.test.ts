@@ -325,6 +325,17 @@ describe('per-chain isolation: only a chain-local fault skips a chain, and only 
     expect(report.totals).toMatchObject({ unmodified: 2, late: 2, unsealed: 2 });
     expect(report.chains.find((c) => c.chain === 'org:org_b')?.counts).toMatchObject({ late: 2, unsealed: 2 });
   });
+
+  it('keeps verify loud where the skipped chain is alone in its window: a window before the newest sealed one is sealed (seat ruling 6885452378)', async () => {
+    const s = setup();
+    // 08:00 holds only org_b's refused row, so no window checkpoint names it and sealed_through is held there.
+    s.hot.table('ledger_probe').push(refused('b1', at(8, 20), 'org_b'), row('a2', at(9, 10)));
+    await s.sealer.runPass();
+    expect(s.checkpoints().map((c) => [c.tenant_id, c.window_start])).toEqual([['org_a', at(9, 0)]]);
+    const report = await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now });
+    expect(report.rows.map((r) => [r.chain, r.row, r.verdict, r.sealed])).toEqual([['org:org_b', 'b1', 'late', false]]);
+    expect(report.ok).toBe(false);
+  });
 });
 
 describe('bounded checkpoints: a window seals into consecutive parts of at most N leaves (S7, ADR-0154 D4 amended)', () => {

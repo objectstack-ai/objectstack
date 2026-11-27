@@ -52,8 +52,9 @@ const SECRET_OBJECT = 'sys_secret';
  *    checkpoint lists, or that only a checkpoint holding nothing lists, is
  *    `late` and unsealed: on the host it cannot be told from a forged insert.
  *    A window is sealed once a trusted `window` checkpoint of the object names
- *    it, or it ends at or before the object's highest trusted
- *    `sealed_through`.
+ *    it, it starts at or before the newest window such a checkpoint names
+ *    (so a chain a fault left behind reads unsealed), or it ends at or before
+ *    the object's highest trusted `sealed_through`.
  *
  * The report passes ({@link AuditVerifyReport.ok}) when no chain fault was
  * found and no row is `modified`, `missing` or `late` unsealed. Nothing here
@@ -87,7 +88,11 @@ export type AuditChainFaultKind =
   | 'gap'
   /** A `previous_digest` that is not the digest of what precedes it. */
   | 'link'
-  /** An expiry amendment that is not honoured (D8). */
+  /**
+   * An expiry amendment that is not honoured (D8), or a checkpoint inside an
+   * honoured range whose own window ends after the range's `covered_to`
+   * (its rows are then judged, not read `expired`).
+   */
   | 'expiry'
   /** Stored leaf hashes that do not rebuild the signed root. */
   | 'leaf_hashes'
@@ -643,6 +648,12 @@ export abstract class ChainCheck<C extends VerdictLedger = VerdictLedger> {
         continue;
       }
       const chain = chainKeyOf(body.tenant_id);
+      if (row.chain_key !== chain) {
+        this.check.fault({
+          object: this.name, chain, kind: 'chain_key', amendment: String(row.id),
+          message: `${body.kind} amendment ${String(row.id)}: stored under chain '${String(row.chain_key)}', but its signed organization is chain '${chain}'`,
+        });
+      }
       const signed = await this.check.signature(body.signing_key_id, signedBodyBytes(body), row.signature);
       if (signed !== 'ok') {
         // An amendment nothing vouches for is ignored: the row it would explain reads as what it is.
@@ -749,7 +760,16 @@ export abstract class ChainCheck<C extends VerdictLedger = VerdictLedger> {
   ): Promise<void> {
     const body = checkpointBodyFromRow(row);
     const at = { object: this.name, chain: head.chain };
-    if (this.expiryCovering(head.chain, head.sequence)) {
+    const covering = this.expiryCovering(head.chain, head.sequence);
+    if (covering && Date.parse(body.window_end) > Date.parse(covering.covered_to)) {
+      // D8: an honoured range expires only the windows it covers. A checkpoint in it whose own window ends later
+      // was never expired by it, so its rows are judged as what they are.
+      this.check.fault({
+        ...at, kind: 'expiry', sequence: body.sequence,
+        message: `checkpoint ${body.sequence}: its window ends ${body.window_end}, later than the honoured expiry of sequences ` +
+          `${covering.first_sequence}–${covering.last_sequence} covers (${covering.covered_to}) — its rows are judged, not expired`,
+      });
+    } else if (covering) {
       // D8: a row a checkpoint inside an honoured range lists is expired, gone or not yet gone.
       for (const id of body.row_ids) {
         this.held.add(id);
@@ -1074,12 +1094,27 @@ class ObjectCheck extends ChainCheck<LedgerCheck> {
       .filter((c): c is { row: Row; head: CheckpointHead } => c.head !== undefined && this.check.inScope(c.head.chain))
       .sort((a, b) => judgingOrder(a.head, b.head));
     for (const { row, head } of ordered) await this.judgeCheckpoint(row, head, (body) => this.readLeaves(body, head, rows));
-    const sealedWindow = start + AUDIT_SEAL_WINDOW_MS <= this.watermark || this.sealedWindows.has(start);
+    const sealedWindow = start + AUDIT_SEAL_WINDOW_MS <= this.watermark
+      || this.sealedWindows.has(start)
+      || start <= this.newestSealedWindow();
     for (const [id, row] of rows) {
       const chain = chainKeyOf(chainValueOf(row, this.chainField));
       if (!this.check.inScope(chain) || this.held.has(id)) continue;
       if (sealedWindow || this.listedByFaulted.has(id)) this.unheld.set(id, { chain, windowStart: start });
     }
+  }
+
+  /**
+   * The highest `window_start` among the object's trusted `window` checkpoints
+   * (seat ruling 6885452378; ADR-0154 D3 as amended). The sealer pass is
+   * window-major, so a chain trails it only through a fault: a row of a window
+   * at or before it that no trusted checkpoint holds reads `late` and unsealed
+   * instead of going unjudged.
+   */
+  private newestSealedWindow(): number {
+    let newest = Number.NEGATIVE_INFINITY;
+    for (const start of this.sealedWindows) newest = Math.max(newest, start);
+    return newest;
   }
 
   /** The leaf input of each row `body` lists, as the stores hold it now, under the checkpoint's own seed. */

@@ -105,6 +105,9 @@ async function boot(register: (kernel: ObjectKernel) => void = () => {}): Promis
 
   const sealer = (plugin as unknown as { sealer: AuditSealer }).sealer;
   await sealer.stop(); // drive the pass here, not on the loop's clock
+  // `sys_audit_log` is sealed by default (ADR-0154 D10), so the loop's own first pass, which ran at start, may
+  // already have reported a seam: forget it, so each pin counts what its own passes say.
+  (sealer as unknown as { reported: Map<string, number> }).reported.clear();
   const errors: string[] = [];
   const logger = (sealer as unknown as { options: { logger: { error(m: string): void } } }).options.logger;
   const error = logger.error.bind(logger);

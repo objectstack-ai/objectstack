@@ -255,10 +255,12 @@ beforeAll(async () => {
   runs.scoped = await runCommand(dir, mainDb, ['--object', 'sys_activity', '--apply', '--yes', '--json']);
   archivedAfterScoped = auditRows(archiveDb);
   hotAfterScoped = auditRows(mainDb);
-  runs.apply = await runCommand(dir, mainDb, ['--apply', '--yes', '--json']);
+  // [#31908] sys_audit_log declares lifecycle.seal, and SQLite offers no session lock: an --apply run
+  // needs --sealer-stopped (ADR-0154 D3 amended, B). No server seals this fixture while the command runs.
+  runs.apply = await runCommand(dir, mainDb, ['--apply', '--yes', '--sealer-stopped', '--json']);
   archivedAfterApply = auditRows(archiveDb);
   hotAfterApply = auditRows(mainDb);
-  runs.again = await runCommand(dir, mainDb, ['--apply', '--yes', '--json']);
+  runs.again = await runCommand(dir, mainDb, ['--apply', '--yes', '--sealer-stopped', '--json']);
   archivedAfterAgain = auditRows(archiveDb);
 
   ageDetail = sweep('age');
