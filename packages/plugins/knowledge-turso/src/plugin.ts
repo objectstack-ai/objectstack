@@ -64,7 +64,7 @@ export interface KnowledgeTursoPluginOptions {
    * makes one. @default 20000
    */
   vectorIndexThreshold?: number;
-  /** How many approximate-index candidates the vector leg reads per hit (see the adapter's option). @default 40 */
+  /** How many approximate-index candidates the vector leg reads per hit, 4 or more (see the adapter's option). @default 40 */
   vectorIndexOverfetch?: number;
   /** The embedder to call. Absent: the kernel's `embedder` service, read at each call. */
   embedder?: IEmbedder;

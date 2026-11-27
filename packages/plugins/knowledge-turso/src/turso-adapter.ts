@@ -96,8 +96,9 @@ export interface TursoKnowledgeAdapterOptions {
    * How many candidates per hit the vector leg reads from the approximate
    * index before the organization, record-scope and metadata filter run: the
    * index ranks before the filter, so a filter that removes candidates is
-   * answered from what is left, and a leg left with fewer than `topK` is run
-   * again as the exact scan. A whole number, 1 or more. @default 40
+   * answered from what is left, and a leg left with fewer than
+   * {@link VECTOR_MIN_POOL} × `topK` candidates in scope is run again as the
+   * exact scan. A whole number, {@link VECTOR_MIN_POOL} or more. @default 40
    */
   vectorIndexOverfetch?: number;
 }
@@ -113,6 +114,19 @@ export const VECTOR_INDEX_THRESHOLD = 20_000;
  * reads every row either way.
  */
 export const VECTOR_INDEX_OVERFETCH = 40;
+
+/**
+ * How many in-scope candidates per hit the approximate vector leg must keep
+ * after the filter for its answer to stand; below it the leg runs again as
+ * the exact scan. The candidates are ranked before the filter, so a filter
+ * that keeps a few percent of the passages leaves a pool from which the
+ * float32 re-rank picks the wrong neighbours. Simulated at 200,000 passages
+ * of 1,536 dimensions (clustered, topK 10, 40 candidates a hit), a pool of
+ * at least topK gave a recall@10 of 0.95 with 10% of the passages in scope,
+ * 0.90 at 5% and 0.88 at 3%; a pool of at least 4 × topK gave 0.98 or more
+ * at every share.
+ */
+const VECTOR_MIN_POOL = 4;
 
 /** How many passages one batch of a vector index's copy writes: each batch is a transaction of its own, so a search waits at most one batch. */
 const VECTOR_BACKFILL_BATCH = 2048;
@@ -249,8 +263,9 @@ function withTimeout<T>(work: Promise<T>, ms: number, commit = false): Promise<T
  *   approximate index ({@link buildVectorIndex}) and passages of one
  *   organization at most, the `topK × vectorIndexOverfetch` candidates
  *   nearest by their one-bit vector, of which those in scope are ranked by
- *   their float32 vector; a leg the filter leaves short of `topK` is run
- *   again exactly.
+ *   their float32 vector; a leg the filter leaves with fewer than
+ *   {@link VECTOR_MIN_POOL} × `topK` candidates in scope, or short of
+ *   `topK` hits, is run again exactly.
  * - The keyword leg: the query's terms ({@link keywordTerms}). A term of three
  *   characters or more is matched as one FTS5 phrase in the passage table's
  *   trigram index (so `X-200` is a phrase, never FTS5 syntax); a shorter one
@@ -345,8 +360,10 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     }
     this.vectorIndexThreshold = threshold;
     const overfetch = opts.vectorIndexOverfetch ?? VECTOR_INDEX_OVERFETCH;
-    if (!Number.isInteger(overfetch) || overfetch < 1) {
-      throw new RangeError(`knowledge-turso: vectorIndexOverfetch must be a whole number, 1 or more, got ${String(overfetch)}`);
+    if (!Number.isInteger(overfetch) || overfetch < VECTOR_MIN_POOL) {
+      throw new RangeError(
+        `knowledge-turso: vectorIndexOverfetch must be a whole number, ${VECTOR_MIN_POOL} or more, got ${String(overfetch)}`,
+      );
     }
     this.vectorIndexOverfetch = overfetch;
     this.client =
@@ -659,23 +676,21 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     // The vector leg, exact or approximate: the same in-scope WHERE and the
     // same order by the stored vector's cosine distance, over every row in
     // scope, or over those of the approximate index's `candidates` nearest
-    // that are in scope — that index ranks before the filter, so its
-    // candidates are filtered after. Either way the leg's ranks 1…topK feed
-    // the fusion below as they are.
-    const vectorCte = (approximate: boolean): string => {
-      const near = approximate
-        ? ` AND chunk_id IN (SELECT chunk_id FROM ${quoted(vectorIndex.side)}
-                ORDER BY vector_distance_cos(embedding, vector1bit(?1)) LIMIT ${candidates})`
-        : '';
-      return `vec AS (
-        SELECT chunk_id, row_number() OVER (ORDER BY distance, chunk_id) AS pos FROM (
-          SELECT chunk_id, vector_distance_cos(embedding, vector32(?1)) AS distance FROM ${table} WHERE ${inScope}${near}
-        ) WHERE distance < 1 ORDER BY distance, chunk_id LIMIT ${limit})`;
+    // that are in scope (`pool`) — that index ranks before the filter, so its
+    // candidates are filtered after, and the statement answers how many were
+    // left. Either way the leg's ranks 1…topK feed the fusion below as they are.
+    const vectorCtes = (approximate: boolean): string[] => {
+      const pool = approximate
+        ? `SELECT chunk_id, vector_distance_cos(embedding, vector32(?1)) AS distance FROM ${table} WHERE ${inScope}
+             AND chunk_id IN (SELECT chunk_id FROM ${quoted(vectorIndex.side)}
+               ORDER BY vector_distance_cos(embedding, vector1bit(?1)) LIMIT ${candidates})`
+        : `SELECT chunk_id, vector_distance_cos(embedding, vector32(?1)) AS distance FROM ${table} WHERE ${inScope}`;
+      const ranked = (from: string) => `vec AS (
+        SELECT chunk_id, row_number() OVER (ORDER BY distance, chunk_id) AS pos FROM ${from}
+         WHERE distance < 1 ORDER BY distance, chunk_id LIMIT ${limit})`;
+      return approximate ? [`pool AS (${pool})`, ranked('pool')] : [ranked(`(${pool})`)];
     };
-    if (vectorLeg) {
-      ctes.push(vectorCte(false));
-      legs.push('SELECT chunk_id, pos AS vpos, NULL AS kpos FROM vec');
-    }
+    if (vectorLeg) legs.push('SELECT chunk_id, pos AS vpos, NULL AS kpos FROM vec');
     if (terms.length > 0) {
       // A term's match: the trigram index for three characters or more, LIKE
       // over the rows in scope below that.
@@ -708,9 +723,9 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       legs.push('SELECT chunk_id, NULL AS vpos, pos AS kpos FROM kw');
     }
     const statement = (approximate: boolean): InStatement => ({
-      sql: `WITH ${(approximate ? [vectorCte(true), ...ctes.slice(1)] : ctes).join(',\n')}
+      sql: `WITH ${[...(vectorLeg ? vectorCtes(approximate) : []), ...ctes].join(',\n')}
               SELECT p.chunk_id, p.document_id, p.source_record_id, p.content, p.title, p.metadata, p.doc_hash,
-                     p.heading_path, u.vpos, u.kpos
+                     p.heading_path, u.vpos, u.kpos${approximate ? ', (SELECT count(*) FROM pool) AS pool' : ''}
                 FROM (SELECT chunk_id, min(vpos) AS vpos, min(kpos) AS kpos FROM (${legs.join(' UNION ALL ')})
                        GROUP BY chunk_id) u
                 JOIN ${table} p ON p.chunk_id = u.chunk_id`,
@@ -723,10 +738,13 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       if (terms.length > 0) await this.ensureKeywordIndex(tableName);
       if (vectorLeg && (await this.approximateSearchable(tableName))) {
         const near = await client.execute(statement(true));
-        // A vector leg the filter left with fewer than topK candidates is
-        // run again as the exact scan: an answer of fewer than topK says the
-        // source holds no more, which the candidates cannot say.
-        if (near.rows.filter((r) => r.vpos !== null).length >= topK) return near;
+        // A vector leg the filter left with fewer than VECTOR_MIN_POOL × topK
+        // candidates in scope is run again as the exact scan: the float32
+        // re-rank of a thin pool misses neighbours the one-bit ranking put
+        // past the cut, and an answer of fewer than topK says the source
+        // holds no more, which the candidates cannot say.
+        const pool = Number(near.rows[0]?.pool ?? 0);
+        if (pool >= VECTOR_MIN_POOL * topK && near.rows.filter((r) => r.vpos !== null).length >= topK) return near;
       }
       return client.execute(statement(false));
     });
@@ -1124,13 +1142,23 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       if (shape !== 'complete') {
         const count = await client.execute(`SELECT count(*) AS n FROM ${quoted(table)}`);
         if (Number(count.rows[0].n) < this.vectorIndexThreshold) return undefined;
-        await this.transaction(async (tx) => {
-          await tx.execute(organizationIndexDdl(table));
-          // One organization at most, or no index: it ranks before the organization filter.
-          if ((await this.organizationsIn(tx, table)) > 1) return { commit: true, value: undefined };
-          for (const statement of vectorIndexDdl(table, target.dim)) await tx.execute(statement);
-          return { commit: true, value: undefined };
-        });
+        // A database that refuses the one-bit vectors (a host whose libSQL
+        // lacks them) or the index's DDL keeps the exact scan, and the build
+        // completes: the index is a speed-up, never a condition of the build.
+        // The probe comes first because a trigger naming an unknown function
+        // is created without complaint and then fails every write of a passage.
+        if (!(await oneBitVectorsWork(client))) return undefined;
+        try {
+          await this.transaction(async (tx) => {
+            await tx.execute(organizationIndexDdl(table));
+            // One organization at most, or no index: it ranks before the organization filter.
+            if ((await this.organizationsIn(tx, table)) > 1) return { commit: true, value: undefined };
+            for (const statement of vectorIndexDdl(table, target.dim)) await tx.execute(statement);
+            return { commit: true, value: undefined };
+          });
+        } catch {
+          return undefined;
+        }
         if ((await this.vectorShapeOf(client, table)) !== 'complete') return undefined;
       }
       return { target, table };
@@ -1139,6 +1167,10 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     const { target, table } = planned;
     const { last, copy } = vectorBackfillSql(table);
     for (let cursor = ''; ; ) {
+      // A batch the database refuses ends the copy, and the build completes:
+      // a side table short of its passage table is never searched (its count
+      // differs), the triggers keep the rows they hold in step, and the next
+      // complete build resumes the copy.
       const step = await this.queued(client, () =>
         this.transaction(async (tx) => {
           const still = await tx.execute({
@@ -1151,7 +1183,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
           await tx.execute({ sql: copy, args: [cursor, String(upTo)] });
           return { commit: true, value: String(upTo) };
         }),
-      );
+      ).catch(() => undefined);
       if (step === undefined) return;
       cursor = step;
     }
@@ -1312,6 +1344,22 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     } finally {
       tx.close();
     }
+  }
+}
+
+/**
+ * Whether the database computes one-bit vectors and their distance, as the
+ * approximate vector index needs (libSQL's `vector1bit`); a database that
+ * refuses the probe gets no index.
+ */
+async function oneBitVectorsWork(db: Pick<Client, 'execute'>): Promise<boolean> {
+  try {
+    const probe = await db.execute(
+      "SELECT vector_distance_cos(vector1bit(vector32('[1,-1,1,-1]')), vector1bit(vector32('[1,-1,1,-1]'))) AS d",
+    );
+    return Number(probe.rows[0]?.d) === 0;
+  } catch {
+    return false;
   }
 }
 

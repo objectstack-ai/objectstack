@@ -211,7 +211,7 @@ describe('KnowledgeTursoPlugin', () => {
   it('hands vectorIndexThreshold to its adapter: a complete build at the threshold makes the approximate index', async () => {
     const root = tempDir();
     const { ctx, adapters } = contextOf();
-    const plugin = new KnowledgeTursoPlugin({ projectRoot: root, env: {}, vectorIndexThreshold: 3, vectorIndexOverfetch: 2 });
+    const plugin = new KnowledgeTursoPlugin({ projectRoot: root, env: {}, vectorIndexThreshold: 3, vectorIndexOverfetch: 5 });
     await plugin.start(ctx);
     const adapter = adapters.get('turso')!;
     const source = { name: 'notes', label: 'n', adapter: 'turso', source: { kind: 'object', object: 'o', content: ['b'] } } as never;
