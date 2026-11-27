@@ -36,15 +36,6 @@ export const BusinessUnitViews = defineView({
       },
     },
   },
-  // The default form. Since #36425 the Console's create and edit surfaces lay
-  // the record out by the object's fieldGroups and no longer load it, so it is
-  // inert there (lint: form-view-internal-not-loaded, allow-listed with its
-  // reason in test/author-time-advisories.test.ts).
-  form: {
-    type: 'simple',
-    data,
-    sections: [
-      { name: 'unit', label: 'Unit', columns: 2, fields: ['name', 'parent', 'kind', 'manager', 'headcount'] },
-    ],
-  },
+  // No form here: the create and edit forms lay a unit out by the object's
+  // `fieldGroups` (data/objects/business-unit.object.ts).
 });

@@ -1,5 +1,534 @@
 # @object-ui/app-shell — Changelog
 
+## 18.6.0-next.1
+
+### Minor Changes
+
+- 81c68b3: feat(spec): a book audience can name a capability, so the Setup and Studio docs open only for callers who can open those apps
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: none — no `skills/` page teaches the book audience forms; `content/docs/ui/doc-pages.mdx` documents the new form in this change
+  
+  A book's `audience` (ADR-0046 §6.7) takes a fourth form, `{ systemPermission: 'TOKEN' }`: the book's pages are read by a signed-in caller who holds that capability through any permission set, the same caller an app with `requiredPermissions: ['TOKEN']` opens for. `{ permissionSet }` names one set, so it could not gate a manual on a capability several sets grant (`setup.access` comes with `organization_admin`, `admin_full_access` and any delegated-admin set an application authors).
+  
+  - **`@objectstack/spec`.** `BookAudienceSchema` and `BookAudience` gain the arm. It is strict, so `{ systemPermission, label }` is refused at parse, and an object that also carries `permissionSet` is refused too: an audience names one gate. `BookAudience` is a wider union now: TypeScript code that reads `.permissionSet` after a bare `typeof audience === 'object'` check narrows by key instead (`'permissionSet' in audience`). `AudienceCaller` gains `systemPermissions`, and `audienceAllows` admits the arm only when that list holds the token; an absent list denies (fail closed). Every other form answers as before.
+  - **`@objectstack/rest`.** The docs audience reads the caller's own `systemPermissions` (the list every `requiredPermissions` arm of the `/meta` read gate reads) when some book carries the new form, on `GET /meta/doc` (with and without `?include=content`), `GET /meta/doc/:name`, `GET /meta/book`, `GET /meta/book/:name/tree` and the app-nav `doc` entries. New: `anySystemPermissionAudience`, and the optional `resolveAudienceSystemPermissions` port on `MetaReadGateAudienceSources` for a transport whose audience reads someone else's holdings.
+  - **`@objectstack/runtime`.** The MCP docs tools (`search_package_docs`, `read_package_doc`) gate on the same form; on an OAuth grant they read the delegating person's own capabilities, never the token's ceiling.
+  - **`@objectstack/setup`, `@objectstack/studio`.** Each package now ships a manual (`setup_manual`, `studio_manual`) claiming its package's doc namespace (`setup_*`, `studio_*`), gated on `setup.access` / `studio.access`. Before, those docs were claimed by no book, so they fell back to `org`: listed to administrators only by the Console's docs index, but readable at their address, and through `?include=content`, by every signed-in member. Now a member who cannot open Setup gets `setup_overview` in neither list and a `403 PERMISSION_DENIED` on its read; an administrator reads it as before. The docs' Console address now names the manual (`/apps/com.objectstack.setup/docs/setup/setup_overview`) in place of the package's implicit one; the flat `/docs/setup_overview` permalink still finds it.
+  - **`@objectstack/lint`.** `capability-reference-unknown` also resolves a book's `audience.systemPermission`, so a misspelled capability (which hides the manual from everyone) warns.
+  - **`@object-ui/app-shell`, `@object-ui/i18n`.** Studio's book preview shows a capability-gated book as "Capability: TOKEN" instead of "Org", and the book form round-trips the new form.
+  
+  Nothing to migrate: the manuals claim by name, so a stored doc bound to no package (which a package-scoped `include: '*'` would also have claimed) keeps the audience it had. Only docs named under those prefixes change audience: on `main` that is `setup_overview` and `studio_overview`.
+- f722411: feat(kanban): a card footer with each record's open comment threads and attachments (`kanban.cardFooter`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `KanbanConfigSchema` gains one optional key with no default; a view that does not declare it renders as before, and reads nothing more:
+  
+  - `cardFooter: { comments?: boolean, attachments?: boolean }` — the counts each card shows at its foot. `comments: true` shows how many of the record's comment threads are open (top-level and not resolved), the number the record page's comments icon shows with two exceptions: a reply whose parent was deleted is not counted (the record page shows it as a thread of its own), and a comment written before the record pair (`object_name` + `record_id`) existed is not counted until `os migrate comment-parent-pair --apply` has stamped it (the record page reads by `thread_id`). `attachments: true` shows how many files are attached to the record. A count of zero draws nothing. An unknown member is refused by name, so a later foot item is one more member.
+  
+  Each count is read once for the whole board, in one grouped read per counted object over the cards the board has loaded, never one read per card, and under the reader's permissions: `sys_comment` grouped by `record_id`, asked only on an object whose discussion is on (`enable.feeds`), and `sys_attachment` grouped by `parent_id`, asked only on an object that takes files (`enable.files`). A refused read draws no count. A cut answer (the door's default page size, `OS_DATA_DEFAULT_PAGE_SIZE`) is never read as the whole set: the reader asks again, still grouped, over the cards the answer did not name, up to `MAX_COUNT_ROUNDS` (20) reads in all; a card still unnamed after that draws no count. The counts are asked again when the board reloads and when a comment or an attachment is written (the data-invalidation bus), and a card already counted keeps its count while a new set of cards is asked. The record Attachments panel now announces an upload and the uploader's own delete on that bus, since both go through the storage route rather than the data source; the record page announces a thread resolved or reopened (the resolution door) and a member's delete of their own comment (the own-comment door) the same way. The reader is shared in `@object-ui/plugin-detail` (`useRecordCounts`, with `askRecordCounts` and its bound `MAX_COUNT_ROUNDS`, `compileCommentCountQuery`, `compileAttachmentCountQuery` and `readRecordCounts`), so a list row can use it next.
+  
+  On a board, 视图设置 offers 「显示评论数」 and 「显示附件数」 beside the two card toggles, each only where the object has that count; both start off. Both producers of the board node (`ListView` and `ObjectView#generateViewSchema`) and the Console relay the key.
+- d58bf7a: feat(spec)!: a knowledge source is a governed metadata type, `knowledge_source`, loaded by the knowledge service
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37310. Here only the enumeration row: `skills/objectstack-platform/SKILL.md` lists the new top-level key `knowledgeSources`, and `skills/objectstack-ai/SKILL.md`'s compiled `supportKb` example writes `name` and `content`, because the 18 spelling no longer parses.
+  
+  <!-- adr-0087: registered knowledge-source-id-to-name, knowledge-source-content-fields-to-content, knowledge-source-inert-keys-removed, knowledge-source-content-lists-fields, knowledge-source-file-http-kinds-retired, knowledge-source-inert-keys-retired, knowledge-source-registration-governed -->
+  
+  ADR-0161 K4, K5, K6 and K8 item 4 (#37304).
+  
+  **BREAKING.** A knowledge source written for 18 is refused at parse until it is moved. `os migrate meta --from 18` lists every edit and `--write` applies the ones it can prove.
+  
+  | Wrote (18) | Write instead (19) |
+  |:--|:--|
+  | `id: 'support_kb'` | `name: 'support_kb'` (the value is unchanged, so the index is found again and nothing is rebuilt) |
+  | `source.contentFields: ['title', 'body']` | `source.content: ['title', 'body']` |
+  | `contentFields: ['*']` | `content` with every field named (a hand edit: only the author knows which fields may leave the row store) |
+  | `embedding`, `vectorStore`, `adapterConfig`, `refresh.cron` | delete the key: nothing read it |
+  | `source.kind: 'file'` or `'http'`, with `prefix`, `mimeTypes`, `urls`, `userAgent` | a source indexes the records of one object (`kind: 'object'`); a file or URL source has no replacement |
+  | `knowledge.indexDocument(…)`, `knowledge.deleteDocument(…)` | no call: the service builds every document from the records a source selects; `reindexSource` rebuilds a source |
+  | `KnowledgeServicePlugin({ sources: [{ id, … }] })`, `registerSource({ id, … })` | the same call with the 19 shape, or the source shipped as metadata in the stack's `knowledgeSources` |
+  
+  What changes:
+  
+  - **The type.** `knowledge_source` is registered in the metadata type registry with the one schema `KnowledgeSourceSchema`; a stack carries its sources in the new top-level collection `knowledgeSources`, in `*.knowledge-source.ts` or `.yml` files. An item can be created and changed at run time (Studio, MCP); it takes no environment overlay. Studio's menu lists the type, and the metadata form bundles carry its label in every locale. Two packages may each ship a source of one name (ADR-0150, addendum of 2026-11-25): each has its own index, and `search_knowledge` lists a package's source as `NAMESPACE-NAME` and takes that spelling in `sourceIds`.
+  - **The schema is strict.** An undeclared key is refused, never dropped. `content` is a non-empty list of field names; an empty-string member is refused, and `'*'` is refused with the instruction to list the fields: embedding is egress, and the wildcard sent every text field of a record to the embedder, including one added to the object later. Credential-class and `internal` fields stay unindexed even when named.
+  - **The loader.** `KnowledgeServicePlugin` reads the published items when it starts and follows the type while it runs: an added source is registered and built when a build is due; a changed one is registered again, and a changed `where` or `metadataFields` rebuilds inside the generation while a changed `content` or `split` builds a new one; a removed one is unregistered and its index dropped. The reap guard now follows the sources, so a retention delete on an object first indexed by a source added after boot de-indexes the row. A deployment that holds an item and mounts no knowledge service says so once at boot, naming the items.
+  - **`IKnowledgeAdapter.dropSource?(ctx)`** removes everything an adapter holds for a source: every generation, the one under construction included, and what it recorded about the index. `knowledge-memory`, `knowledge-pgvector` and `knowledge-turso` implement it, and the contract suite (`@objectstack/service-knowledge/testing`) takes a new `implements.dropSource` declaration. Over an adapter without it, a removed source's index is kept and the service says so once. An adapter is handed the source's index key as `ctx.source.name` (it was `ctx.source.id`): the bare name for a source no package holds, so an existing index is found under the same key.
+  - **A capability of its own.** New platform capability `manage_knowledge_sources`: a write of a `knowledge_source` through `/meta` (REST and the dispatcher: save, publish, rollback, delete) and through the MCP draft door needs it beside `manage_metadata`. Platform administrators hold it by default; a grant on the indexed object's records does not imply it. A caller without it is refused `403 PERMISSION_DENIED`, naming the capability. The package doors ask it too: every write to an existing package that holds a knowledge source (an item, a pending draft, or for the commit revert and the rollback a commit that touched one) needs the capability: enable, disable, publish, publish-drafts, discard-drafts, the commit revert, rollback, revert, adopt-orphans, duplicate, the manifest update and delete. A package that holds none is written as before. The install door is not asked, and neither is ensure-customization, which writes nothing of the base and creates an empty pair. For a caller without the capability the doors read the package's holding before their own request checks, so such a caller hears this `403` ahead of a `400`, `404` or `422` the door would have answered for the same request; a holding that cannot be read refuses `503` and changes nothing (a host with no metadata store holds none). A duplicate also admits each knowledge source it copies for the caller (source admission, below), and refuses the whole copy when one is refused.
+  - **Source admission at save.** Those same doors save a source only when its author may themselves search what it would index: an object of a disabled package, an object the API does not serve for `search`, a system object without `enable.aiReadable`, or a field the author may not query refuses the save `403`, naming the object or the field; a verdict that cannot be reached, or a knowledge service that is registered and cannot be resolved, refuses `503`. The fields judged are the ones the source serves and the ones its `where` reads, at save and at search: a source whose `where` reads a field a caller may not query is not searched for that caller. Over MCP it is the human who is judged. Where no knowledge service is mounted there is nothing to ask, and the save goes on.
+  - **One name, one source.** `KnowledgeServicePlugin({ sources })` and `registerSource` stay a door for the same schema and parse with it: a retired key is refused with its prescription (`400 VALIDATION_ERROR`), not converted. A source registered in code belongs to no package. It shares one slot with an environment-authored item of the same name, and the second of the two to arrive is refused `409 RESOURCE_CONFLICT`, naming both doors; a metadata item reloading its own earlier version is not a second arrival.
+  - **The push door leaves.** `IKnowledgeService.indexDocument` and `deleteDocument` are removed, with the `file` / `http` branches that served them. They are runtime-interface-only members with no metadata form, so the compiler reports each call (`TS2339`).
+  - **Removed exports**, twelve, all from `@objectstack/spec/ai`. The whole `embedding` module leaves with `embedding` and `vectorStore`, because the knowledge source was its only composer: `EmbeddingModelSchema`, `VectorStoreSchema`, `VectorStoreProviderSchema` and the types `EmbeddingModel`, `VectorStore`, `VectorStoreProvider`. The source kinds leave with `file` and `http`: `FileKnowledgeSourceSchema`, `HttpKnowledgeSourceSchema`, `KnowledgeSourceKindSchema` and the types `FileKnowledgeSource`, `HttpKnowledgeSource`, `KnowledgeSourceKind`. None has a replacement; an import of one is a compile error.
+  - **CLI.** `os knowledge status` prints the package that holds a source and no longer prints a source kind.
+- c3da753: feat(ui): the field hand lock (`uiReadonly` / `uiReadonlyWhen`) holds on the Gantt, the timesheet cell, the calendar quick-create and the palette prefill
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  A field a person may not edit by hand (`uiReadonly: true`, or `uiReadonlyWhen` true over the record) now stays locked on the console surfaces that still wrote it:
+  
+  - **Gantt.** A bar's drag and edge resize, the progress handle, the title and dates edited in place, the auto-schedule and the conflict reschedule, undo and redo, and a drawn dependency link all read the one verdict of `@object-ui/core` (`fieldReadOnlyByHand`) over the stored record, with the shell's predicate scope. A write that would change a locked field is refused: nothing is sent, the bar goes back and a toast gives the read-only reason. A locked field the write only echoes back (an in-place title edit carries the dates and progress too) is dropped from the write, so the rest still saves. A field locked on every record also closes the gesture before it starts: a move closes when either date is locked, a resize only when both are (the locked edge is refused on the write), and the progress handle and the link tool close with their own field.
+  - **Timesheet.** A cell whose record's value field is locked by hand is drawn read-only, so it cannot be edited or cleared. A row, date or value field locked on every record closes the create, so the empty cells and **Add row** are not offered.
+  - **Calendar quick-create.** A click on an empty day or a range drag no longer writes a field locked by hand on every record. Where the title or a date field the dialog writes is locked, the gesture opens the full create form instead (a locked date field is not prefilled there). A required locked field is left out of the dialog's write so the server applies its `defaultValue`; one with no default sends the gesture to the full form too.
+  - **Command palette.** The create-as prefill skips a field that is `uiReadonly`, as it already skipped a `readonly` one; a create is judged by the static half only, as the create dialog judges it.
+  - **List view.** A kanban board whose block names no `groupByField` takes the object's lifecycle field as its lanes; the operands of that field's lock predicates are now read with the rows too, so a card drag is judged over the whole record.
+  
+  A kanban drag on the swimlane layout writes only the lane (column) field, never the swimlane field; that is now pinned.
+  
+  Not yet covered: the in-app assistant acting for a person. Its writes run in the AI service, which does not read the hand lock, and the field descriptions now say so. Every other console surface a person edits through honours the hand lock, and the `uiReadonly` / `uiReadonlyWhen` descriptions and the MCP `describe_object` guidance say that. Writes through the API, import, actions and flows are unchanged: only the server lock (`readonly` / `readonlyWhen`) binds them.
+
+### Patch Changes
+
+- 80341f2: fix(app-shell): on a phone, a list authored to open nothing opens nothing
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Console's object list now honours an authored `navigation.mode: 'none'` and `navigation.preventNavigation: true` on a phone as it does on a desktop. Before, the phone rule that opens every record as a page ran before the authored setting was read, so on a phone a tap on such a list's card opened the record page and the card was drawn as tappable. Now the card draws no pointer and no hover wash, a tap on it opens nothing, and a `?recordId=` link to one of its rows opens no record page, as it opens no drawer on a desktop. A list that opens its records still opens them as a page on a phone.
+  
+  On a phone a list shows each row as a card with only some of its columns, so on a `none` list the columns a card does not show cannot be reached there: declare `none` or `preventNavigation` only where the rows need no detail view.
+- bb76b8c: feat(spec): the view and dashboard authoring forms offer the audience gate, `requiredPermissions`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A list view's and a dashboard's `requiredPermissions` (the capabilities a caller must all hold to be served the item) has been enforced by the server's `/meta` read gate since it landed, but no authoring form offered it, so only a source file could set it. Both forms now carry the row; no key, value or gate changes.
+  
+  - **`@objectstack/spec`.** `viewForm`'s "Navigation & sharing" section gains a `requiredPermissions` row (tags), and `dashboardForm` a new "Access" section holding the same row. The hint states the gate's rules in an administrator's words: every capability listed is required, an empty list is no gate, one capability granted to several permission sets is how to serve several groups, a position passes on what its permission sets grant, and the gate applies to the person setting it too (a capability they do not hold, or a misspelt one, locks them out of the item as well).
+  - **`@objectstack/platform-objects`.** The `metadataForms` bundles carry the new rows; zh-CN (「所需权限」), ja-JP (「必要な権限」) and es-ES ("Permisos requeridos") carry translated labels and hints; the other seven locales fall back to the English source until translated.
+  - **`@object-ui/app-shell`.** The console's zh-CN overlay for the two forms carries the same rows, so Studio's view inspector and the dashboard settings panel show them in Chinese.
+  
+  Nothing to migrate.
+- d9bc148: **Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(app-shell): the field designer removes a relationship target from a field whose type reads none, so the object still publishes
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The publish gate now refuses a `reference` on a field type that reads none, anything but `lookup`, `master_detail`, `user`, `tree` and `summary` (`field/reference-on-non-reference-type`). The object designer's field panel kept the key when a field was retyped: a `lookup` retyped to `text` saved as text with the old target still on it, and the Related Object picker, drawn only on `lookup`, `master_detail` and `tree`, offered no way to see or clear it there. A retype to a type that reads none now removes `reference`, as it already removes the picklist binding, option kinds, `referenceNameVisible` and `deleteBehavior` the new type cannot carry. An object saved that way earlier is repaired by its next edit: the designer reads such a field without the key, so the next save writes it without one and the publish goes through. Nothing is lost: on those types the key linked no record.
+- 0196476: fix(studio): a list condition built in Studio is the membership the validator prescribes for its site, so it no longer faults on a sparse action row or on a `previous` that is null on a create
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `@objectstack/formula` exports `listMembershipSource(read, member, contains, filterCompiled?)` and its `ListSubjectRead` type: the list-membership test for one site, unparenthesised. The `list-equality` refusal's rewrite is this text in parentheses. The Studio builders now take their spelling from the same place, for the two sites they write: `has(S) && S != null && V in S` (complement `!has(S) || S == null || !(V in S)`) for a `record.` or `previous.` read, and `S != null && V in S` for a bare name in a flow. The third arm, `S.contains(…)` where the condition compiles to a query filter (a sharing rule's `condition`), is the validator's alone: no Studio host tells the builder that a mount is filter-compiled, so the builders never write it (follow-up: objectstack-ai/objectstack#37847).
+  
+  The Studio condition builder and the flow edge's condition rows (`@object-ui/app-shell`) write membership through it. Before, both wrote `S != null && V in S` for every subject, and on an action's `visible` / `disabled` / `pressed`, whose row carries only the fields the list fetched, `record.labels != null` faults with "No such key" when `labels` is absent; on a create `previous` is null and `previous.labels != null` faults the same way. A bare name in a flow's start condition is written as before.
+  
+  A `record.` or `previous.` condition the builder stored in the old unguarded spelling opens in the raw CEL editor unchanged instead of as a row. Nothing else to migrate: rebuilding the row in the builder writes the guarded form.
+- 37425b3: fix(app-shell): a state machine rule's "Next states" box in Studio takes a typed comma, so a second next state can be typed in
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The box showed the parsed next states again after every key, so a typed `,` and the space after it were dropped and typing `done, closed` gave the single state `doneclosed`. The box now keeps the text being typed and writes the parsed next states on each change; when it loses focus it shows them again. The row's "May be cleared" checkbox still carries the empty-string target, and editing the box keeps it.
+- 2a4ad30: fix(app-shell): the validation preview names a state machine's `''` target as "May be cleared"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A state-machine rule whose transitions list `''` (the state may be cleared) previewed in the metadata admin as a trailing separator (`open | `) or, when `''` was the only target, a blank row. The preview now names that target in words, "May be cleared" (zh-CN "可清空"), the same words the Studio rules panel puts on the row's checkbox. A state with no targets still reads as a dead end. Display only: how the rule saves and enforces is unchanged.
+- a8396da: fix(app-shell): the Lookup's Related object and the roll-up's Child object take objects only
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In Studio's field inspector, the Lookup's *Related object* and the roll-up summary's *Child object* pickers committed whatever text was typed, so a typo saved a field pointing at an object that does not exist. Neither door accepts an expression, so once the picker's object list has loaded, both commit only an object it lists: typed text that names no listed object is refused, the picker says no object is chosen, and the target the field already had stays (clearing the input on purpose still removes it). While the list is not yet read, or its read failed, the typed text is still committed as before. The trigger object in the new-automation dialog, the one other picker that takes objects only, now also keeps its chosen object on a refused typo. Objects that exist only as a pending draft stay choosable, because the picker lists the draft-overlaid catalog. Flow references keep their free text.
+- adb65d1: fix(console): the console reads the new `form` type — Studio's translation preview, the pending-changes count and the served `forms` translation group
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  ADR-0159 card ② (#37086) makes `form` a metadata type of its own with a `forms` translation group. The Studio translation preview now draws a Forms card (en "Forms", zh 表单), the pending-changes summary counts a drafted form as "1 form" / "2 forms" in every bundled locale, and the console's language loader recognises a served document that carries only `forms`. Studio's directory and left menu do not list the `form` type yet: card ③ (#37087) brings its designer and its menu placement.
+- 82e4527: fix(app-shell): the AI chat page finds a record's app under a bearer-only session
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - From the AI chat, opening a record (or the form a record-write card proposes) reads the record's object to learn which app it lives under. That read was the bare global `fetch`, carrying the session cookie and nothing else, so a session held by its bearer token alone (the cookie replaced by a second local runtime on the same host, blocked as a third-party cookie, or cleared) was answered `401` and every hand-off opened the record under the Setup shell instead of its own app. The read now goes through the console's authenticated fetch, which sends the stored bearer beside the cookie; a cookie session is unchanged.
+  - The same-server fetch ratchet loses its AI chat page row, and now also sees a local name bound to the global `fetch` (`const f = fetch`, and in app-shell and the console a `?? fetch` fallback such as `const doFetch = opts.fetchImpl ?? fetch`), so a revert of such a conversion turns it red. A renderer package's `const doFetch = apiFetch ?? fetch` stays its host channel, as the ratchet already documents.
+- 6cb7440: fix(client, app-shell): every draft-then-publish Save publishes only the draft it wrote
+  
+  Clause-②: yes (widening: `@objectstack/client` `meta.publishItem` accepts `draftVersion` and `parentVersion` beside `message` and `packageId`)
+  Metadata-protocol: none
+  
+  `client.meta.publishItem(type, name, opts)` takes two optional pins. `draftVersion` (sent in the publish body beside `message`) names the pending draft the publish means to promote: pass your own draft save's receipt `version`, and a draft another writer changed after it is refused `409 METADATA_CONFLICT` with nothing published. `parentVersion` names the live row the publish means to replace (sent as `If-Match`; `null` asserts that no live row is stored, sent as `If-None-Match: *`). Omitted, the request is byte-identical to before and the publish is unpinned.
+  
+  In the console, every Save that writes a draft and publishes it at once now pins that publish to the draft its own write returned: the Studio top bar's Save (objects, object extensions, flows and their on/off switch, hooks, an installed object's actions, permission sets, a new app, a new object or flow), the item page's Save, each row of the package's sharing-defaults table, 「Configure tabs」, an installed object's field arrangement, the design mode's header pins, menu and menu labels. When someone else's draft write lands on the same item between that draft write and the publish, nothing is published and the draft, which now holds their change, is kept pending instead of discarded; the Save says a draft is pending (the next Studio Save asks to reload or overwrite). The take-back of a refused Save's own draft is pinned to the same version, so it never removes a draft someone else changed. Against a server whose draft save returns no version, all of these publish unpinned, as before.
+- 4e10d4b: **Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  feat(studio): a package's 概览 Overview page, with its Info and Pending tabs, and the package's ⋯ menu in its header
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Studio has a page for the open package itself, 概览 Overview, at `/studio/<package>/overview` (ADR-0084, amended 2026-11-26). It is drawn in the frame an item's page has, a header and a row of tabs:
+  
+  - The header shows the package's name, a chip that reads 系统自带 (Built-in, with a lock) on a read-only package or 可写 (Writable), a chip that reads 使用中 (In use) or 已停用 (Disabled), and the description. The chips come from the package list's own answer (`writable`, `enabled`); a row that does not say draws no chip.
+  - The ⋯ package menu moved here from the top bar's left end. Its six rows are unchanged: edit info, export, duplicate, revert to last publish, adopt loose items, and Manage in Setup…. Disabling, enabling and deleting a package stay in Setup → Packages.
+  - 信息 Info lists the name, description, source, version and the package's app, read-only. The id, namespace and type are folded under 技术信息 (Technical details).
+  - 待发布 Pending (`?tab=pending`) is the pending-changes panel drawn in place, with its Publish all. It publishes through the same request, with the same review, notes, refusals and read-only rule as the top bar's Publish, which stays for now. Its tab shows how many drafts wait.
+  
+  The Studio menu's first row, above its groups, is 概览 Overview. While drafts wait for a publish it carries their count as a badge, and one click on the badge opens the Pending tab. A search lists it when its name matches.
+  
+  `DraftChangesPanel` takes two optional props, `embedded` (draw the panel in place instead of as a sheet) and `reloadKey` (read the drafts again when it changes); without them it behaves as before. New locale keys in the studio catalogue (en, zh): `engine.studio.menu.overview`, `engine.studio.menu.overviewPending` with its singular `engine.studio.menu.overviewPendingOne`, and `engine.studio.overview.*`.
+- 4111380: feat(studio): Studio's left column opens with two rows — App Studio with its collapse control, then the way back and a package switcher that ends with New package; a read-only package shows a lock; collapsed, the column is a rail that keeps the app's logo and the way back. Studio no longer has a top bar: Changes and Publish are on 概览's Pending tab (the package-less scope, now named Organization metadata in the switcher, keeps its Changes in the left column), the "Create app" button is gone, and below 768 px a strip at the top opens the menu
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 90f7555: fix(studio): a metadata page's title row with no buttons of its own draws no hairline before the AI assistant
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Under Studio, the AI assistant (or, with no assistant served, the right panel's show / hide button) ends every page's title row behind a thin divider that separates it from the page's own buttons. On a metadata list or item page with no stats and no buttons, that divider stood alone at the start of the group with nothing before it. It is now drawn only when the row has stats or buttons of its own, or while Save is shown, as the item header and the metadata directory already did. Outside Studio nothing changes.
+- 712df42: fix(automation): a screen flow refuses a required field holding only spaces at the field, and an engine screen refusal reaches the user in their language, at the field it names
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A required text field on a flow screen that held only spaces passed the screen dialog's check. The server trims, so it refused the submission, and the dialog showed the server's sentence as it was: English in every language, listing the screen's API field names (`Invalid screen input: Screen field "resolution" is required — declared fields: 'resolution', 'resolved_by_article'`).
+  
+  Now the dialog counts a value of only spaces as no answer, as the server does, and refuses it under the field with the same message an empty field gets, in the user's language. Nothing is sent.
+  
+  When the server still refuses a screen's values, `400 INVALID_SCREEN_INPUT` now carries its findings in `error.details.fields`: one `{ field, code, message }` entry per violated field, with an ADR-0114 field code, the same entries a `VALIDATION_FAILED` carries. `AutomationResult` gains the optional `fields` the engine fills them from, mirrored on `TriggerFlowResponseSchema`. `error.message` is unchanged. The Console's flow runner marks each field it names, by its label and in the user's language, moves focus to the first, and its banner reads "Some values on this step weren't accepted. Check them and try again." instead of the server's sentence, also against a server that sends no findings. Nothing to migrate: a client that reads only `error.code` and `error.message` sees what it saw before.
+- e2837e7: **Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(app-shell): a full-height console page gives the impersonation banner its height back
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - While an administrator impersonates a user, the console draws its banner above the page. Where it is drawn in place (every page on a phone, and Studio, Home and the organization pages on a desktop) the page below still took the whole viewport, so the document was taller than the window by the banner's height: a list's footer and bulk action bar sat below the fold and the page gained a second scrollbar. The same held for the read-rate and storage banners beside it.
+  - The banners drawn in place now publish their height as the CSS custom property `--os-chrome-banners` on the document root, and the console's full-height shells take the viewport less it: `AppShell` (`@object-ui/layout`, whose sidebar wrapper's own minimum height is overridden to match), Studio and its access-required screen, Home, the AI chat page, the organization layouts and the app-unavailable and no-app screens. While no banner is drawn in place, and anywhere outside the console, the property is unset and every shell keeps its viewport height. Inside an app on a desktop the banners are drawn into the content area, as before, and publish nothing.
+- bdbe01e: fix(app-shell): a pick far down a Setup catalog list no longer leaves its section out of view
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - Setup → Recycle Bin lists the objects on the left and the chosen object's deleted records on the right, in the page's one scroll. With a long list (38 objects, about 2000 px, in the app measured) an administrator scrolled down to an object near the end, chose it, and its records, its Restore buttons and its Empty button were above the visible area: the right side read blank, as if the bin were empty.
+  - On two columns the list now stays in view and scrolls on its own, so the section beside it stays at the top of the visible area whatever is chosen. On one column (a phone), a pick whose section is out of view brings it into view. A link that opens an item by name leaves the scroll where the page starts it.
+  - The layout is the one Setup's catalog pages share, so Position holders and Permission set assignments get the same behaviour.
+- 1afb6d4: **Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(console): on a phone, a page the AI assistant opens closes the assistant sheet so the page shows
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a phone the assistant is a bottom sheet over the page. Clicking a citation chip in an answer opened the cited record section underneath, but the sheet stayed open over it, so the marked heading was hidden and the click looked like it did nothing. Now a navigation the assistant makes on a phone (a citation chip, a record or list link, opening a form) closes the sheet, including a second click on the same chip. The conversation is kept: reopening the assistant shows the same thread. On a desktop the assistant is a panel beside the page and stays open, as before.
+- c2bfa3e: fix(app-shell): a record opened at a cited section no longer marks a same-titled heading the outline does not list, and opens its field at once when no heading can be told apart
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A record opened from a citation chip (`?section=ANCHOR`) finds the cited heading among the field's drawn headings that read the same, by count. When the body draws both a same-titled heading the outline does not list (a setext heading, one in a quote, a list item or a footnote, the footnote section's label) and a listed heading the face does not draw (one inside a raw HTML block), the two counts agreed while the index pointed at the wrong heading. A markdown body's unlisted headings are now counted from the field's own parse (`@object-ui/fields`' `loadDrawnMarkdownHeadings`, loaded on demand), so they are the headings the face draws; an html body's from its heading tags. When the body draws one, the field is opened instead of a heading that may be another section. That field, like the field of a cited heading with no letter or digit, is now scrolled to as soon as it is drawn instead of after the four-second settle; a titled heading that is not drawn yet still waits for it.
+- 579b857: feat(studio): a dataset is a data type — Studio lists it under Data, directly after objects, and always shows datasets and positions
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `DEFAULT_METADATA_TYPE_REGISTRY` registers `dataset` under `domain: 'data'`; it was `'ui'`. A dataset is the semantic layer that charts and an AI's data questions both read, so it is data and not interface (ADR-0084, amended 2026-11-26). Nothing an author writes changes: a `*.dataset.ts` item validates and loads as it did, the `domain` enum keeps its six values, and the registry's declared type is the same. `dashboard` and `report` stay `ui` types.
+  
+  What changes is a served value. `GET /api/v1/meta/types` answers `domain: "data"` for the `dataset` entry, and because that listing is ordered by domain and then by type, the entry now sits among the data types. Code that finds the entry by its `type` sees no difference; code that selected datasets by `domain === 'ui'`, from the listing or from the exported registry, reads `'data'` instead.
+  
+  In Studio the left menu, the type directory and a dataset page's badge follow the registry, so datasets are found under Data. `STUDIO_MENU_PLACEMENT` places `dataset` and `position` in the common tier by name: a package's menu always lists both above the Advanced fold, whether the package holds one or not — dataset directly after object, position directly after permission set.
+- 68aa1be: feat(setup): the environment directory (positions, capabilities, permission sets, sharing rules) moves from Studio's menu to Setup → Access control
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Studio develops one package, and Setup holds what is global (ADR-0084, amended 2026-11-26). The cross-package directory of the environment's access metadata (positions, capabilities, permission sets and sharing rules) is now a Setup page: **Setup → Access control → Positions and Permissions** (`/apps/setup/component/security/access-directory`).
+  
+  - The page shows the same directory and the same per-type lists as before, with the activation switches, Clone and New. Opening an item, creating one, or opening its history still happens in Studio, on the same editor as before.
+  - Studio's left menu no longer has the "Positions and permissions" entry under Access. On the organization-flows scope (`~org`), the menu's access rows open their lists on the Setup page for a user who can open Setup (`setup.access`); for one who cannot, they open the same lists in Studio as before.
+  - Old links keep working and, for a user who can open Setup, land on the Setup page in one hop: `/studio/~all/metadata`, a directory type's list (`/studio/~all/metadata/permission?scope=environment`), a bare `/studio/~all/…` address, and the old Setup metadata URLs that led there. Item links under `/studio/~all/metadata/TYPE/NAME` are unchanged. A user who cannot open Setup keeps these addresses in Studio.
+  - Visibility does not widen. The Setup entry and the page both require `studio.access`, the capability that admitted a user to the directory in Studio, in addition to Setup's own `setup.access`.
+  - A user who can enter Studio but cannot open Setup → Packages, and has no recent package, now lands on Studio's organization-flows scope (`/studio/~org`) instead of the old directory. This is temporary: the scope retires when the door that moves loose items into a package ships, and the landing is decided again then.
+  - One new Setup menu label, "Positions and Permissions", in every Setup locale, and one new message for a user without `studio.access`.
+- 50b4bf8: perf(console): the first load no longer downloads spec schemas the Console never reads, nor the whole form package
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The Console's first load (the chunks every page fetches before it can draw) is 97,612 bytes smaller gzipped: 1,899,348 across 123 chunks, from 1,996,960 across 124 on `main`.
+  
+  - **`@objectstack/spec`.** The build now marks each module-scope initializer it cannot otherwise prove side-effect free (a spread of another schema's shape, an `.extend()` / `.pick()` chain, a table derived from a schema) as droppable, so a bundler that tree-shakes leaves out the ones an application never reads, together with the schema graphs they hold. Initializers that write into an object that already exists (`Object.assign(Existing, …)`, `Object.defineProperty(Existing, …)`) are never marked. Nothing changes for code that reads an export: every export that is used evaluates exactly as before. `TRANSLATABLE_METADATA_TYPES` is now built from a plain list of names instead of from the translator table, so reading it no longer keeps every metadata translator.
+  - **`@object-ui/plugin-form`.** One new export on the published `@object-ui/plugin-form/core` subpath, `createKeepsField` (the same function the package root already exports); nothing is removed or renamed, and the package root exports the same names as before. This is the widening the `Clause-②` line names; `@objectstack/spec`'s public surface does not change.
+  - **`@object-ui/app-shell`.** The record page's related-record actions read `createKeepsField` from `@object-ui/plugin-form/core`, so the form package is no longer part of the first load.
+  - **`@object-ui/console`, `@objectstack/console`.** The Console's `plugin-form-core` chunk group also claims `createKeepsField`, so it lands with the other side-effect-free form helpers; the Console build `@objectstack/console` ships carries the smaller first load.
+  
+  Nothing to migrate.
+- 3eb778d: perf(console): a list page draws its rows once before they paint, and the shell re-renders less during first load
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type or stored row is added, removed or renamed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the value two React hooks of @object-ui/i18n return: `useObjectTranslation()` and `useI18nContext()` no longer carry `appContentLanguages`, which moved to its own hook. Its consumer is code, and the compiler names every reader left behind. `runtime-interface-only` does not fit on a checked fact: the context value's interface is not exported, so it cannot be named by path. -->
+  
+  On a list page's first load the grid drew its whole table several times between the rows' first render and their first paint: once with row-end controls before the list page scope was known, once when the inline-action fold found its host, and once when the record verdicts were republished with nothing new in them. The rows now draw once, without row-end controls, and those passes are gone.
+  
+  The shell does less during first load too. The app's own locale list lands after the console has drawn; it used to re-render every component that reads a translation, about 1,900 of them. It is now read with `useAppContentLanguages()` from `@object-ui/i18n`, and only the language menus re-render for it. `useObjectTranslation()` and `useI18nContext()` no longer carry `appContentLanguages`. A sidebar entry is not redrawn when a new capability checker gives it the same answer.
+  
+  Nothing changes in what the list, the sidebar or the language menus show.
+  
+  **BREAKING** (`@object-ui/i18n`, and `@object-ui/react`, which re-exports the same two hooks: their return values), shipped as `patch`: the change is not to the metadata protocol (`Metadata-protocol: none`).
+  
+  - Removed: the `appContentLanguages` field from what `useObjectTranslation()` and `useI18nContext()` return, whether they are imported from `@object-ui/i18n` or from `@object-ui/react`. It was added there by #36040.
+  - Use instead: `useAppContentLanguages()`, which both entries now export: `@object-ui/i18n`, and `@object-ui/react` beside the two hooks. It returns the same value, the app's declared content languages or `null` while they are unknown, and `null` outside an `I18nProvider`.
+  - Why: the list lands after the console has drawn. While it rode on the translation context, its arrival re-rendered every component that reads a translation, about 1,900 of them on first load. In its own context only the components that read it re-render.
+- ce4d8c7: perf(console): the sidebar no longer redraws every entry each time the console re-renders during first load
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  While a console page first loads, the shell re-renders about ten times as its boot reads land. Each time, the sidebar redrew every navigation entry, and with each entry its ⋯ menu and tooltip: about 2,700 components per pass, several passes before the page could paint.
+  
+  Now an entry is redrawn only when what it shows changes: its label, icon, colour, address, or the gates that decide whether it shows. The ⋯ menu redraws its menu tree only when its own text or entries change. The console's expression evaluator is no longer rebuilt on every render, because that rebuild alone made every entry redraw.
+  
+  On a list page's first load this halves the components drawn before first paint. Nothing changes in what the sidebar shows or does.
+- e491fce: fix(app-shell): the curated page, report and dashboard inspectors name a select's options in Chinese under zh-CN
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Under zh-CN the page Type and Record action selects and the report and dashboard Default Period selects listed English choices beside Chinese labels. The console's `metadataForms` overlay now carries those four rows' option names in the `options` slot `resolveMetadataFormLabels` reads, copied from the platform's zh-CN pack (`zh-CN.metadata-forms.generated.ts`, the one `/api/v1/meta/types` localizes the same forms with) and pinned byte-equal to it. The console-side Default Period renaming (`default-period-labels.ts`) is retired: the overlay names those options now, in the same words the report and dashboard period chip shows. Every other designer locale keeps the spec's English, as before.
+- 94843b8: fix(app-shell): the view settings draft bar publishes the reloaded draft after a conflict is resolved with "reload"
+  
+  When a view settings Save was refused because the draft moved and the author chose "reload" in the conflict dialog, the panel re-read the stored view but the draft bar kept the draft version it had read before the reload. Its Publish was then pinned to a draft that no longer existed and was refused until the panel was reopened. The panel now hands the bar the version its reload read found (`RuntimeDraftBar`'s new `reloadedSignal`, `reloadedDraftVersion` and `reloadedHasDraft`), so the Publish promotes the draft now shown, and a reload that found no pending draft takes the bar's indicator down. A reload whose read fails hands the bar nothing, so its Publish stays pinned and is refused rather than sent unpinned.
+  
+  `client.meta.publishItem`'s `parentVersion` JSDoc now says an empty string pins nothing and is not sent, as `draftVersion`'s does, and the client SDK page shows a publish pinned with `draftVersion` and `parentVersion`.
+- ca4838e: fix(app-shell): a cited section whose heading carries a link or an entity opens at that heading
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The record page finds a cited section (`?section=ANCHOR`) by reading the body outline's heading and the drawn heading the same way. The outline lists a markdown heading as its source line, so a heading with a link (`## [Terms](https://example.com) scope`) or an entity (`&copy;`) read differently from the text the face draws, and the page opened the field instead of the section. The page now reads each listed heading as its face draws it: a markdown heading through the face's own parse, found by where it starts, and an html heading with every entity decoded. Bold, inline code and escaped punctuation already matched and still do. The anchor and the outline are unchanged.
+- f4d6bc5: fix(plugin-form): a `repeater` field on `span: 'auto'` takes the whole row again, on the record form and on `/forms/NAME`
+  
+  Clause-②: no (layout only; an author could already set `span: 'full'`)
+  Metadata-protocol: none
+  
+  The spec's form field `span` docblock lists `repeater` among the types that take the whole row by default. A repeater used to get there through the wide line-items widget it mapped to; since it moved to the JSON editor that `json`, `composite` and `record` also use, both form renderers gave it one cell. The default width now reads the object field's own type, so a repeater is wide and those three types stay one cell. The Studio form designer's canvas asks the same rule, so it lays a repeater out as the form does. An authored `colSpan` still wins. The named-form page passes the object field's type to the shared resolver, as it already passed `multiple`. The spec docblock's stale "through the `field:grid` widget" clause now says how the width is decided.
+- 6e8f663: feat(chatbot)!: the build chat's frontend is retired — the plan, change, build-result and handoff cards, their detectors and the props that fed them are removed
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/plugin-chatbot#detectDraftResult, @object-ui/plugin-chatbot#detectProposedPlan, @object-ui/plugin-chatbot#detectProposedChanges, @object-ui/plugin-chatbot#detectBuilderHandoff, @object-ui/plugin-chatbot#detectBuiltAppPackage, @object-ui/plugin-chatbot#detectAuthoringVerdict, @object-ui/plugin-chatbot#detectReplayOutcome, @object-ui/plugin-chatbot#buildProgressFromDraftReview, @object-ui/plugin-chatbot#DraftReview, @object-ui/plugin-chatbot#ProposedPlan, @object-ui/plugin-chatbot#ProposedChanges, @object-ui/plugin-chatbot#BuilderHandoff, @object-ui/plugin-chatbot#ReplayOutcome, @object-ui/plugin-chatbot#PublishOutcome, @object-ui/plugin-chatbot/core#PublishOutcome, @object-ui/plugin-chatbot#FloatingChatbotProps.autoPublishDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.builderHandoffOpenLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.builderHandoffSupersededTitle, @object-ui/plugin-chatbot#FloatingChatbotProps.builderHandoffTitleLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesAppliedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesApplyingLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmHintLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.changesDraftedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesFailedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesTitleLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changeVerbLabels, @object-ui/plugin-chatbot#FloatingChatbotProps.designBuiltAppLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.fetchPendingDraftCount, @object-ui/plugin-chatbot#FloatingChatbotProps.getArtifactAction, @object-ui/plugin-chatbot#FloatingChatbotProps.nextStepsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.onBuildMaterialized, @object-ui/plugin-chatbot#FloatingChatbotProps.onBuildResult, @object-ui/plugin-chatbot#FloatingChatbotProps.onDesignBuiltApp, @object-ui/plugin-chatbot#FloatingChatbotProps.onDiscardDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.onDraftArtifacts, @object-ui/plugin-chatbot#FloatingChatbotProps.onOpenBuilder, @object-ui/plugin-chatbot#FloatingChatbotProps.onOpenBuiltApp, @object-ui/plugin-chatbot#FloatingChatbotProps.onPlanApprovalPendingChange, @object-ui/plugin-chatbot#FloatingChatbotProps.onPreviewDraft, @object-ui/plugin-chatbot#FloatingChatbotProps.onPreviewDraftApp, @object-ui/plugin-chatbot#FloatingChatbotProps.onPublishDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.onReviewDraft, @object-ui/plugin-chatbot#FloatingChatbotProps.onReviewDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.openBuiltAppLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planAdjustLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planAnswerMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveDefaultsMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveHintLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planAssumptionsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planBuildingLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planBuildNewAppMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planBuiltLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planDeferredLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planExtendExistingMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planExtendLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planQuestionsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planReadyLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planTitleLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.previewDraftLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.publishDraftsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.publishedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.publishFromShellBar, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveAppLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveFieldLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveFieldTypeLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveObjectLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.subscribeMetadataRefresh, @object-ui/plugin-chatbot#FloatingChatbotProps.toolReviewLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.verifiedLabel, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.builderHandoff, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.draftReview, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.proposedChanges, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.proposedPlan, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.replayOutcome, @object-ui/plugin-chatbot#ChatbotEnhancedMessage.blueprintProgress, @object-ui/plugin-chatbot#ChatbotEnhancedMessage.buildProgress, @object-ui/plugin-chatbot#ChatbotLabels.designingPlanHints, @object-ui/plugin-chatbot#ChatbotLabels.designingPlanLabel) the retired operands are functions, types, component props and chat-message fields of the published chat package entries; no packages/spec schema, no registered node type, no ADR-0087 conversion surface and no stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite, and a host still using one is told by its own compiler -->
+  
+  **BREAKING** for a host that imports any export or passes any prop listed below. The console's chat (the dock and the full page `/ai/ask`) and Studio keep working; what goes is the code that drew the build conversation: the "Proposed plan" card, the change card, the build-result checklist and publish line, the builder handoff, the Build Doctor drawer, the pending-drafts bar, the spreadsheet import bar and Studio's copilot panel. An old `/ai/build/…` address still lands on the ask chat.
+  
+  `publishHealthFromResponse` and `PublishHealth` stay at both entry points of `@object-ui/plugin-chatbot`; the preview's Publish all still reads them.
+  
+  In `@object-ui/app-shell`, `ConversationsSidebar` no longer takes `includeAskConversations`: the sidebar lists the active agent's conversations. Delete the prop where a host passes it.
+  
+  `@object-ui/core`, `@object-ui/plugin-grid` and `@object-ui/plugin-form` carry comment and test edits only, which drop references to the deleted build-chat code. They change no behaviour.
+  
+  ## What leaves, and what to write instead
+  
+  Every name below leaves `@object-ui/plugin-chatbot`; `PublishOutcome` also leaves `@object-ui/plugin-chatbot/core`. `ChatbotEnhancedProps` loses the same 59 props as `FloatingChatbotProps`, and the seam types `SeamToolInvocation` and `SeamChatMessage`, with `ObjectChatMessage` built on them, lose the same fields as `ChatbotEnhancedToolInvocation` and `ChatbotEnhancedMessage`; the fix for those is the same deletion.
+  
+  | FROM | TO |
+  |:--|:--|
+  | `detectDraftResult`, `detectProposedPlan`, `detectProposedChanges`, `detectBuilderHandoff`, `detectBuiltAppPackage`, `detectAuthoringVerdict`, `detectReplayOutcome` | delete the import; a tool result is read as plain output, and a pending approval still through `detectPendingApproval` |
+  | `buildProgressFromDraftReview` | delete the call; nothing draws a build panel any more |
+  | `DraftReview`, `ProposedPlan`, `ProposedChanges`, `BuilderHandoff`, `ReplayOutcome`, `PublishOutcome` | delete the type import |
+  | `FloatingChatbotProps.onBuildMaterialized`, `FloatingChatbotProps.onBuildResult`, `FloatingChatbotProps.onDesignBuiltApp`, `FloatingChatbotProps.onDiscardDrafts`, `FloatingChatbotProps.onDraftArtifacts`, `FloatingChatbotProps.onOpenBuilder`, `FloatingChatbotProps.onOpenBuiltApp`, `FloatingChatbotProps.onPlanApprovalPendingChange`, `FloatingChatbotProps.onPreviewDraft`, `FloatingChatbotProps.onPreviewDraftApp`, `FloatingChatbotProps.onPublishDrafts`, `FloatingChatbotProps.onReviewDraft`, `FloatingChatbotProps.onReviewDrafts` | delete the handler; the chat raises no build event any more |
+  | `FloatingChatbotProps.builderHandoffOpenLabel`, `FloatingChatbotProps.builderHandoffSupersededTitle`, `FloatingChatbotProps.builderHandoffTitleLabel`, `FloatingChatbotProps.changesAppliedLabel`, `FloatingChatbotProps.changesApplyingLabel`, `FloatingChatbotProps.changesConfirmedLabel`, `FloatingChatbotProps.changesConfirmHintLabel`, `FloatingChatbotProps.changesConfirmLabel`, `FloatingChatbotProps.changesConfirmMessage`, `FloatingChatbotProps.changesDraftedLabel`, `FloatingChatbotProps.changesFailedLabel`, `FloatingChatbotProps.changesTitleLabel`, `FloatingChatbotProps.changeVerbLabels`, `FloatingChatbotProps.designBuiltAppLabel`, `FloatingChatbotProps.nextStepsLabel`, `FloatingChatbotProps.openBuiltAppLabel`, `FloatingChatbotProps.planAdjustLabel`, `FloatingChatbotProps.planAnswerMessage`, `FloatingChatbotProps.planApproveDefaultsMessage`, `FloatingChatbotProps.planApproveHintLabel`, `FloatingChatbotProps.planApproveLabel`, `FloatingChatbotProps.planApproveMessage`, `FloatingChatbotProps.planAssumptionsLabel`, `FloatingChatbotProps.planBuildingLabel`, `FloatingChatbotProps.planBuildNewAppMessage`, `FloatingChatbotProps.planBuiltLabel`, `FloatingChatbotProps.planDeferredLabel`, `FloatingChatbotProps.planExtendExistingMessage`, `FloatingChatbotProps.planExtendLabel`, `FloatingChatbotProps.planQuestionsLabel`, `FloatingChatbotProps.planReadyLabel`, `FloatingChatbotProps.planTitleLabel`, `FloatingChatbotProps.previewDraftLabel`, `FloatingChatbotProps.publishDraftsLabel`, `FloatingChatbotProps.publishedLabel`, `FloatingChatbotProps.resolveAppLabel`, `FloatingChatbotProps.resolveFieldLabel`, `FloatingChatbotProps.resolveFieldTypeLabel`, `FloatingChatbotProps.resolveObjectLabel`, `FloatingChatbotProps.toolReviewLabel`, `FloatingChatbotProps.verifiedLabel` | delete the label or message; the card that read it is gone |
+  | `FloatingChatbotProps.autoPublishDrafts`, `FloatingChatbotProps.fetchPendingDraftCount`, `FloatingChatbotProps.getArtifactAction`, `FloatingChatbotProps.publishFromShellBar`, `FloatingChatbotProps.subscribeMetadataRefresh` | delete the prop; the build panel that read it is gone |
+  | `ChatbotEnhancedToolInvocation.builderHandoff`, `ChatbotEnhancedToolInvocation.draftReview`, `ChatbotEnhancedToolInvocation.proposedChanges`, `ChatbotEnhancedToolInvocation.proposedPlan`, `ChatbotEnhancedToolInvocation.replayOutcome` | stop reading or setting the field; the mapper no longer lifts it out of a tool result |
+  | `ChatbotEnhancedMessage.blueprintProgress`, `ChatbotEnhancedMessage.buildProgress` | stop reading or setting the field; no message carries build progress any more |
+  | `ChatbotLabels.designingPlanHints`, `ChatbotLabels.designingPlanLabel` | delete the label; the plan-design wait is gone |
+  
+  The one-line fix: delete every import, prop and field named above. Keeping one fails `tsc` after the upgrade, because none of them is declared any more.
+- 3e87d7b: feat(spec): an agent's model name is optional — absent means the host's default model for the environment; `provider` no longer defaults to `openai`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  Skills-docs: follow-up #37711
+  
+  `AIModelConfigSchema.model` (the `model` key inside an agent's `model` block) is now optional. An agent that only tunes sampling can write `model: { temperature: 0.2 }` without naming a model; the host then runs it on its default model for the environment. Before, the block refused a missing `model`, so such an agent had to invent a model name it did not mean.
+  
+  `AIModelConfigSchema.provider` loses its `openai` default. A block that names no model also names no provider, so the parse no longer stamps `provider: 'openai'` onto it — that would assert a provider for a model the host picks. The key itself leaves the spec in the same major (`agent-model-provider-removed`, see that changeset): delete `provider`, the deployment's AI settings choose the provider. No runtime reads an agent's `model.provider`, so no deployed agent changes behaviour; what changes is the parsed value.
+  
+  Unchanged: an explicit `model: { model: 'gpt-4o' }` parses and is carried as written; the block is still strict, so an unknown key is refused; `temperature` still defaults to `0.7`. There is no sentinel value and no tier key.
+  
+  `@object-ui/app-shell`: the agent preview's model pill appears when the block names a model, and reads the model name. Before, it keyed on `provider` alone, so a block that named only a model showed no model at all.
+  
+  What to do: nothing for existing agents. Code that reads `agent.model.model` gets `string | undefined` from the `Agent` type and treats `undefined` as "use the host's default model". Code that read `model.provider` from a parsed agent and relied on `openai` when the author wrote none now reads nothing there: the provider is the deployment's choice.
+- f07d63a: feat(spec)!: retire an agent's `model.provider` — no runtime read it; the deployment's AI settings choose the provider
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37796
+  
+  <!-- adr-0087: registered agent-model-provider-removed, agent-model-provider-retired -->
+  
+  **BREAKING** key removal on `AIModelConfigSchema` (`@objectstack/spec/ai`), an agent's `model` block. The key declared which provider served the agent, from an enum of `openai`, `azure_openai`, `anthropic` and `local`, and no runtime ever read it: the AI runtime that executes agents applies the model name, `temperature` and `maxTokens` from the block and nothing else, so an agent that declared `anthropic` ran on whatever provider the deployment served. The providers a deployment can turn on are its own AI settings, a list the enum neither matched nor could follow.
+  
+  | FROM | TO |
+  |:--|:--|
+  | `model: { provider: 'anthropic', model: 'claude-sonnet-4' }` | `model: { model: 'claude-sonnet-4' }` — the deployment resolves the name among the providers it has turned on |
+  
+  The one-line fix: delete `provider` from every agent's `model` block; `os migrate meta --from 18 --write` deletes it from agent sources. Writing it after upgrade fails `tsc` (the input type is `never`) and fails the parse with that prescription. `provider: 'openai'`, the default every released 18.x toolchain wrote into a parsed agent's `model` block, is accepted as inert residue and stripped, so agents built and stored by 18.x keep loading. The model name, `temperature`, `maxTokens` and `topP` are unchanged.
+  
+  The retirement kit:
+  
+  - **`@objectstack/spec`**: `provider` is a `retiredKey()` tombstone on `AIModelConfigSchema`, and the 18.x emitted default is stripped by `acceptRetiredDefaultResidue`. The D2 conversion `agent-model-provider-removed` (lossless, retired from the load path) deletes the key from `agents[]` on every data-at-rest seam (stored rows, built artifacts, `os migrate meta`); the D3 entry `agent-model-provider-retired` names what the upgrade still owes: whether the model each agent names is one the target deployment offers. The key is registered in `RETIRED_KEYS_BY_MAJOR[19]`. The liveness ledger's `model` row records the removal. The agent form's model help text no longer names a provider, and a `provider` written at the agent's top level is answered with the same fact instead of a pointer to `model.provider`. The `AIModelConfigSchema` export is now the residue stage's preprocess pipe with a read-through `shape` (the `ViewSharingSchema` shape), so `.extend()`, `.pick()`, `.omit()` and `.partial()` are no longer available on it; extend the inner shape instead.
+  - **`@objectstack/platform-objects`**: the agent form's regenerated help-text labels.
+  - **`@object-ui/app-shell`**: the agent metadata preview shows the model name alone and never a provider pill.
+  - **`@object-ui/console`**: the agent preview sample no longer writes `provider`.
+  - **`@objectstack/cli`**: `os explain agent` describes the `model` block without `provider`, and its example drops it.
+- f926dfa: refactor(app-shell): split the AI chat page into modules, with no change in behaviour
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `console/ai/AiChatPage.tsx` keeps the page itself (`AiChatPage`, `AiChatPageProps`); the rest moved, byte for byte, into six modules beside it: `ChatPane.tsx` (the conversation column), `aiChatHydration.ts` (stored history to rendered messages), `aiChatLinks.ts` (the list and record addresses the chat opens), `useDeferredFirstSend.ts` (the held first send and the composer draft hand-off across the pane's remount), `aiChatChrome.ts` (the collapsible conversations list, its shortcuts and the collapse-to-dock landing) and `agentCopy.ts` (agent labels, empty state and starter suggestions). Every name the page exported is still exported from `AiChatPage.js` by name, and the package entry is unchanged, so no import changes.
+- e50ab8f: feat(app-shell): an app's AI inquiry page — the `ai:chat` menu entry opens a home for asking, and the drawer stays closed there
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An app can now put the platform's AI inquiry page on its menu, as ui ADR-0057 Amendment A4 records: a `type: 'component'` navigation entry with `componentRef: 'ai:chat'`. It is the app's home by the app's existing landing rule: a declared `landing` comes first; with none, from 768 px up the first entry shown lands, so an entry placed first is the home; below 768 px the app root is the app's menu, and the page is one row of it. Before, that entry drew "Component not registered".
+  
+  - **Home state.** The entry's `params` (`AiChatNavParamsSchema`, `@objectstack/spec/ui`) give the welcome title and subtitle, the question box's placeholder and up to four suggested questions; a key the entry omits falls back to neutral platform copy, and nothing is read from the URL. A static badge says answers prefer this app's data. Clicking a suggestion asks it.
+  - **Conversation.** The first question turns the same page into the conversation, with the platform `ask` agent (a maker gets `ask` here too), bound to the app's package (`context.activeApp`) under the conversation key `app:PKG:ask`. The conversation create sends `metadata: { activePackageId: PKG }`, and the page's address carries `?c=ID` from then on, so a reload restores it. A `?c=` that names a conversation that is not the caller's, or that this app's page did not create, opens the home state: no error, and nothing of it is shown. "New conversation" returns to the home state.
+  - **No second conversation on the page.** While the page is the active route the assistant drawer is closed, the top-bar robot is not drawn, and Ctrl/Cmd+Shift+I opens nothing; a build hand-off from the page still opens the drawer. On every other page the desktop drawer is as the user left it; a phone's sheet, which already closes when the user moves to another page, stays closed after the page.
+  - **No AI for this person** (no AI on the deployment, or no seat): the page shows the existing "AI assistant unavailable" state.
+  - `useChatConversation` takes an optional `createMetadata`, the `metadata` its first-send create carries; every other caller still sends an empty body.
+  - `@object-ui/i18n`: one new string, `console.ai.askPage.scopeBadge`, in every locale.
+  
+  Nothing to migrate.
+- 21ad7c5: feat(app-shell): an app's AI inquiry page lists its recent conversations on the home state
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Below the question box, the `ai:chat` page's home state lists the newest five conversations the caller started on this page for this app (title and when it was last active), read from the caller's newest 50 conversations and kept by their `metadata.activePackageId`. A conversation started in the assistant drawer, or on another app's page, is not listed; with none, the section says so. Choosing one opens it in the page through its `?c=` address. The conversation-history list row (`ConversationListItem`) now carries the row's `metadata` when it is a record. New strings: `console.ai.askPage.recentTitle` and `console.ai.askPage.recentEmpty`.
+- 544a946: feat(app-shell): the assistant's entry is an outlined 「Ask AI」 button at the end of every page's top-right group, and a route with no page header gets it in its corner
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The assistant's one standing entry was a 32 px transparent robot icon named only by its tooltip. It is now an outlined button with a chat-bubble icon and the words 「Ask AI」 (「问 AI」 in Chinese), read from the string Home's own 「Ask AI」 button already carries in every built-in pack (`home.askAI`), so no language pack changes. The words are the platform's; no app renames them.
+  
+  - **Where it sits.** Last in the page's top-right button group (comments, help, Ask AI), so it ends the page header's row and the record page's navigation row; after help on Home's bar and in the phone's top bar. A route whose page draws no button group (search results, a component page, the app editor) gets the same button over the empty top end corner of its content (top-right; top-left in a right-to-left language), and loses it as soon as its page draws a group. A page that keeps its own controls in that corner draws the group in its own top bar instead, so the button never covers them: the report builder (a new report, and a report's Edit) ends its header with Discard, Save, help, Ask AI, and the inbox ends its header row with its own buttons, help, Ask AI.
+  - **When the header runs out of room.** The console page header now measures whether its title (and, on a page that offers the folded actions, its description) still fits beside the words; when it does not, the words are hidden first and the icon stays, before the page's own actions fold and before the title is cut. They come back once there is room again, after any fold has opened. The decision reads the header's own width, never a breakpoint, so a longer translation hides its words sooner.
+  - **Phone.** The icon alone, a 44 px target.
+  - **Accessibility.** With its words shown the words are the button's accessible name; with the icon alone `aria-label` carries the same words. On a Mac the tooltip shows ⌘⇧I and the button declares `aria-keyshortcuts="Meta+Shift+I"`; on other platforms, where Ctrl+Shift+I opens the browser's developer tools, no shortcut is shown or declared.
+  - **Home.** Home's 「Ask AI」 opens the drawer through the same entry hook as the page's button (`useAskAiEntry`), still on the ask agent.
+  
+  `useShellPageActionsSlot()`'s render function takes one more optional prop, `assistantIconOnly`, which a header that measures its own width passes; a header that passes nothing gets the button with its words, as before. `ReportBuilder` (`@object-ui/plugin-report`) takes an optional `headerEnd`, drawn after Save at the end of its header; without it the header ends with Save, as before. The drawer keeps its title for now.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [0196476]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [0f8e13b]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [302cfda]
+- Updated dependencies [c3da753]
+- Updated dependencies [4e10d4b]
+- Updated dependencies [4111380]
+- Updated dependencies [9a65a48]
+- Updated dependencies [54d6726]
+- Updated dependencies [ddc96d8]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [e2837e7]
+- Updated dependencies [fbcfdfb]
+- Updated dependencies [c2bfa3e]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [3eb778d]
+- Updated dependencies [ce4d8c7]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [5314575]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [6e8f663]
+- Updated dependencies [6e8f663]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [754e216]
+- Updated dependencies [54dc93a]
+- Updated dependencies [4b8aca2]
+- Updated dependencies [56c9cae]
+- Updated dependencies [3ed97b7]
+- Updated dependencies [2980483]
+- Updated dependencies [1028438]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e50ab8f]
+- Updated dependencies [21ad7c5]
+- Updated dependencies [0a3ea67]
+- Updated dependencies [b620c4b]
+- Updated dependencies [1f97fce]
+- Updated dependencies [544a946]
+- Updated dependencies [d1139f9]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/lint@19.0.0-next.1
+  - @object-ui/i18n@19.0.0-next.1
+  - @objectstack/formula@19.0.0-next.1
+  - @object-ui/plugin-detail@19.0.0-next.1
+  - @object-ui/plugin-kanban@19.0.0-next.1
+  - @object-ui/plugin-list@19.0.0-next.1
+  - @object-ui/plugin-view@19.0.0-next.1
+  - @object-ui/plugin-grid@19.0.0-next.1
+  - @object-ui/fields@19.0.0-next.1
+  - @object-ui/plugin-calendar@19.0.0-next.1
+  - @object-ui/core@19.0.0-next.1
+  - @object-ui/layout@19.0.0-next.1
+  - @object-ui/plugin-form@19.0.0-next.1
+  - @object-ui/react@19.0.0-next.1
+  - @object-ui/plugin-chatbot@19.0.0-next.1
+  - @object-ui/components@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+  - @object-ui/plugin-report@19.0.0-next.1
+  - @object-ui/collaboration@19.0.0-next.1
+  - @object-ui/plugin-charts@19.0.0-next.1
+  - @object-ui/plugin-dashboard@19.0.0-next.1
+  - @object-ui/plugin-designer@19.0.0-next.1
+  - @object-ui/data-objectstack@19.0.0-next.1
+  - @object-ui/plugin-editor@19.0.0-next.1
+  - @object-ui/auth@19.0.0-next.1
+  - @object-ui/mobile@19.0.0-next.1
+  - @object-ui/permissions@19.0.0-next.1
+
 ## 18.6.0-next.0
 
 ### Minor Changes

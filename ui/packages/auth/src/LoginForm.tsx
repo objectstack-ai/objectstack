@@ -11,6 +11,7 @@ import { useAuth } from './useAuth.js';
 import { SocialSignInButtons } from './SocialSignInButtons.js';
 import { looksLikePhoneIdentifier, normalizePhoneIdentifier } from './phone-identifier.js';
 import { TwoFactorChallengeForm } from './TwoFactorChallengeForm.js';
+import { refusalText } from './refusal-text.js';
 import type { AuthLinkComponentProps } from './types.js';
 import {
   AUTH_FIELD_LABEL_CLASS,
@@ -169,22 +170,6 @@ export interface LoginFormProps {
    * otherwise carry, renders as one muted line above the federated buttons.
    */
   hideHeader?: boolean;
-}
-
-/**
- * The text a refused sign-in shows: the host's sentence for the refusal's
- * `CODE:cause` (`details.cause`, objectstack#32432), else for its `code`, else
- * the server's message. The server tells a client to branch on `code` and
- * `details.cause`, never on the message, so the message is only the fallback.
- */
-function refusalText(error: Error, errorMessages: Record<string, string> | undefined): string {
-  const { code, details } = error as Error & { code?: string; details?: { cause?: unknown } };
-  const cause = typeof details?.cause === 'string' && details.cause !== '' ? details.cause : undefined;
-  return (
-    (code && cause && errorMessages?.[`${code}:${cause}`]) ||
-    (code && errorMessages?.[code]) ||
-    error.message
-  );
 }
 
 /**

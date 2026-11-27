@@ -802,7 +802,10 @@ and neither does a decision whose flow moves on to another approval step: on
 a two-step flow the first step's decision is silent and the decision that ends
 the run is the one that notifies. Whether a later step opened is read from the
 run, not from the flow's graph, so when a decision node routes around the
-later step, the first decision is the outcome and notifies.
+later step, the first decision is the outcome and notifies. The run here is
+the one that carries the request's record: a step decided inside a `subflow`
+whose parent then opens the next step is silent too, while each record of a
+`map` over records is told its own outcome when its last step is decided.
 
 Two cases tell nobody by design. A submitter who decided their own request
 already knows. An SLA `auto_approve` or `auto_reject` is told by the
@@ -1175,7 +1178,11 @@ no terminal run record exists either, skipping (never condemning) any row whose
 store could not be read. It deliberately **does not rewrite** them — the decision
 really happened, and rolling it back automatically would put the audit trail at
 odds with the facts — so it names the stuck requests, their step, and the stale
-mirrored status for an operator to act on.
+mirrored status for an operator to act on. Each sweep reads the 500 most
+recently decided requests, so a new strand is named on the next sweep, plus
+the next 500 of a walk over every decided request by id that resumes where the
+previous sweep stopped, so an older one is named within one pass of the walk
+however many decided requests a deployment holds.
 </Callout>
 
 ### Progress and notification deep links

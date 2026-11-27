@@ -8,7 +8,9 @@
  * bar lost (reversing objectstack#36501), now in the left column.
  *
  *  - **What it names.** A package is named by its app where it publishes one,
- *    by its own name where it does not (the amendment's item 2), with the
+ *    by its own name where it does not (the amendment's item 2) — that name
+ *    in the reader's language where the package's translation bundle carries
+ *    one (`packages.<id>.name`, objectstack#35513), else `manifest.name` — with the
  *    app's logo, or a neutral tile, before the name. The rows are named the
  *    same way. The package-less scope (`~org`) and the cross-package leg
  *    (`~all`) name the scope; they are not rows of the list (item 3).
@@ -31,6 +33,7 @@
 
 import * as React from 'react';
 import { formatMetadataError } from '@object-ui/data-objectstack';
+import { useObjectLabel } from '@object-ui/i18n';
 import {
   cn,
   Popover,
@@ -64,14 +67,22 @@ export interface StudioSwitcherRow {
   pair: string | null;
 }
 
+/** A package's display name for the reader's language; the default is the manifest's own. */
+export type PackageNamer = (pkg: { id: string; name?: string }) => string;
+
+const manifestName: PackageNamer = (pkg) => pkg.name || pkg.id;
+
 /**
  * The rows the switcher lists: every package but a kernel one, pairs folded
- * under their base, each named by its first served app where it has one.
+ * under their base, each named by its first served app where it has one, else
+ * by `packageName` (objectstack#35513: the translated package name, falling
+ * back to `manifest.name`).
  */
 export function studioSwitcherRows(
   pkgs: readonly PkgEntry[],
   apps: readonly ServedApp[],
   locale: string,
+  packageName: PackageNamer = manifestName,
 ): StudioSwitcherRow[] {
   const folded = foldCustomizationPairs(pkgs.filter((p) => !p.kernel));
   return folded.rows.map((p) => {
@@ -79,7 +90,7 @@ export function studioSwitcherRows(
     const appLabel = app ? navItemLabelText(app.label, locale) || app.name || '' : '';
     return {
       id: p.id,
-      label: appLabel || p.name || p.id,
+      label: appLabel || packageName(p),
       app,
       writable: p.writable,
       pair: folded.pairOf.get(p.id)?.id ?? null,
@@ -160,7 +171,11 @@ export function StudioPackageSwitcher({
     };
   }, [packageId]);
 
-  const rows = React.useMemo(() => studioSwitcherRows(pkgs ?? [], apps, locale), [pkgs, apps, locale]);
+  const { packageName } = useObjectLabel();
+  const rows = React.useMemo(
+    () => studioSwitcherRows(pkgs ?? [], apps, locale, packageName),
+    [pkgs, apps, locale, packageName],
+  );
   const shown = rows.filter((row) => studioSwitcherRowMatches(row, query));
 
   // The trigger names the open package from the list, else from the surface's entry.
@@ -171,7 +186,7 @@ export function StudioPackageSwitcher({
       ? t(scope === 'all' ? 'engine.studio.menu.environment' : 'engine.studio.pkg.orgScope', locale)
       : (listed?.label ??
         (openApp ? navItemLabelText(openApp.label, locale) || openApp.name : null) ??
-        (openEntry?.id === packageId ? openEntry.name : null) ??
+        (openEntry?.id === packageId ? packageName(openEntry) : null) ??
         packageId);
   const ScopeIcon = scope === 'all' ? KeyRound : Building2;
   const readOnlyHint = t('engine.studio.pkg.readonlyHint', locale);

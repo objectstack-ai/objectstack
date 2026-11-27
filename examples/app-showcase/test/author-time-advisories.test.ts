@@ -71,12 +71,6 @@ const CONTRIBUTOR_TOTALS =
   'A contributor sees only its own tasks (task_own_rows), and the project roll-ups count every task: the size '
   + "of the project, not other people's task rows.";
 
-const INERT_INTERNAL_FORM =
-  'Since #36425 the Console create and edit surfaces lay this object out by its fieldGroups and no longer load '
-  + 'this form, so it is inert and the warning is true. It stays as authored because more than the view reads '
-  + "it: the form-view layout coverage (coverage.ts formViewTypes), the section translations under the object's "
-  + '`_sections` in system/translations/index.ts, and for showcase_contact the section pins in test/seed.test.ts. '
-  + 'Moving it into fieldGroups and showOnCreate touches those too, so it is left to a follow-up.';
 const NESTED_FAN_OUT =
   'showcase_nested_fan_out_reminders is the loop { parallel } fixture automation.flow-run-step-nesting scores, '
   + 'pinned by test/nested-fan-out-region-indices.test.ts. Wrapping the notify step in a try_catch puts a region '
@@ -131,14 +125,12 @@ export const ALLOWED_ADVISORIES: readonly Allowed[] = [
   },
 
   // ── Internal create / edit forms the Console no longer loads (warning) ────
-  // Not here: `view "showcase_task" · form`. Three `type: 'form'` actions open it
-  // by its served name `showcase_task.form` (Log Time, New Task, the Overview's
-  // Create Task), so it keeps loading and the rule does not report it (#36545);
-  // the stale-entry direction below fails if it ever fires again.
-  { rule: 'form-view-internal-not-loaded', where: 'view "showcase_project" · form', reason: INERT_INTERNAL_FORM },
-  { rule: 'form-view-internal-not-loaded', where: 'view "showcase_business_unit" · form', reason: INERT_INTERNAL_FORM },
-  { rule: 'form-view-internal-not-loaded', where: 'view "showcase_contact" · form', reason: INERT_INTERNAL_FORM },
-  { rule: 'form-view-internal-not-loaded', where: 'view "showcase_contact" · formViews.create', reason: INERT_INTERNAL_FORM },
+  // None. The showcase lays every object's create and edit forms out by its
+  // fieldGroups and showOnCreate, and declares no internal form it does not
+  // load. `view "showcase_task" · form` is not one: three `type: 'form'`
+  // actions open it by its served name `showcase_task.form` (Log Time, New
+  // Task, the Overview's Create Task), so it keeps loading and the rule does
+  // not report it (#36545). A new internal form fails this test unlisted.
 
   // ── Fixtures ─────────────────────────────────────────────────────────────
   { rule: 'flow-loop-body-uncontained', where: "flow 'showcase_nested_fan_out_reminders' · loop 'each_task' body → parallel 'fan_out_audiences' branch 0 · node 'notify_owner' (notify)", reason: NESTED_FAN_OUT },

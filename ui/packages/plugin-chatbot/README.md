@@ -473,6 +473,76 @@ message rows on refresh, the UI can restore user/assistant text plus grouped
 tool names and states. The cache intentionally omits reasoning, tool
 parameters, and raw tool results.
 
+### Question card
+
+`QuestionCard` is the card an AI's clarifying question is answered on. It is a
+pure component: pass the questions you parsed and handle the two events. It
+does not detect the question or send anything itself.
+
+```tsx
+import { QuestionCard } from '@object-ui/plugin-chatbot';
+
+export function PendingQuestion({ messageId, onSend, onDismiss }: {
+  messageId: string;
+  onSend: (text: string) => void;
+  onDismiss: () => void;
+}) {
+  return (
+<QuestionCard
+  key={messageId}            // a new question is a new card
+  questions={[
+    {
+      header: 'Region',
+      question: 'Which region should the total cover?',
+      options: [
+        { label: 'All regions', description: 'Every region added together', recommended: true },
+        { label: 'East only' },
+      ],
+    },
+  ]}
+  announce                   // "A question is waiting for your answer" in a polite live region
+  onAnswer={onSend}
+  onSkip={onDismiss}
+/>
+  );
+}
+```
+
+- One question: a click on an option calls `onAnswer` with its label at once.
+- Two questions: an option on the first moves to the second; the second waits
+  on Send with a one-line summary, and Back keeps both choices. The answer is
+  one `header: answer` line per question; the question text stands in for a
+  missing `header`.
+- The last row, "Type something else…", takes a one-line answer; typing clears
+  the picked option and Enter moves on or sends.
+- Keys act only while focus is inside the card, which never takes focus on its
+  own: 1–4 pick, ↑/↓ move, Ctrl/⌘+Enter moves on or sends.
+- Choices survive a re-render, so after a failed send the user can press Send
+  again; remount the card with a new `key` for a new question.
+- Strings come from the `chatbot.questionCard.*` keys of `@object-ui/i18n`; the
+  card is right-to-left in Arabic.
+
+`ChatbotEnhanced` draws the card itself. When a turn ends on a question tool's
+result that `parseAskQuestionEnvelope` (`@objectstack/spec/ai`) reads — the
+question envelope, or a legacy `ask_which` result — and the envelope's `reply`
+is the turn's last text, the card takes the composer's place:
+
+- It shows only once the stream has ended, and never while a typed message is
+  queued, while a write approval waits in the same turn, after a skip, or on a
+  `readOnly` transcript.
+- The composer is not unmounted: it is hidden and `inert`, so a draft and its
+  attachments come back after Skip or an answer.
+- An answer is sent through `onSendMessage` as the next user message. If the
+  send fails and the message is rolled back, the card returns with its choice.
+- Skip is remembered on this device, per conversation, when the host passes
+  `conversationId`: the key is `QUESTION_SKIP_STORAGE_PREFIX` followed by
+  `:` and the conversation id. A host's sign-out cleanup should clear that
+  prefix.
+- The conversation draws the question from its envelope: pending, the question
+  alone; answered or skipped, a collapsed "AI asks: …" that expands to its
+  options. Copy still copies the full reply, and a pending question has no
+  Regenerate.
+
 ## Bundle considerations
 
 This package depends on `streamdown`, `shiki`, `mermaid`, and `katex`

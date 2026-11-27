@@ -1376,7 +1376,21 @@ const zhHant = {
       typeLabel: '檢視型別',
       includeCurrent: '包含當前的篩選和排序',
       scopeShared: '共享',
-      scopeHint: '共享檢視對能看到此列表的所有人可見',
+      scopeHint: '共享檢視對能看到此列表的所有人可見，除非限定為持有某項能力的人',
+      // objectstack#34908 — who a shared view reaches: the capability picker and its position preview.
+      audienceLabel: '誰能看此檢視',
+      audienceEveryone: '能看到此列表的所有人',
+      audienceAdd: '限定為持有某項能力的人…',
+      audienceAllAdded: '已新增全部能力',
+      audienceLoading: '正在載入能力…',
+      audienceLoadFailed: '無法載入能力，因此無法新增：{{message}}',
+      audienceNone: '尚未定義任何能力。能力在設定中通過權限集授予。',
+      audienceGrantedBy: '由 {{sets}} 授予',
+      audienceRemove: '移除 {{name}}',
+      audiencePositions: '{{positions}} 會看到此檢視',
+      audienceNoPosition: '沒有哪個崗位單獨持有所選的全部能力：只有直接或通過多個崗位合計持有全部這些能力的人能看到此檢視',
+      audienceSelf: '這對你自己同樣生效：如果你沒有持有所選的全部能力，檢視建立後也會從你自己的列表中消失',
+      audiencePositionsUnread: '無法讀取崗位，因此不顯示誰會看到此檢視',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: '一個尚未釋出的草稿已經用了這個檢視的名稱，所以沒有共享。請換個名稱再試。',
       viewGone: '你開啟的檢視已不存在，列表顯示的是預設檢視。',
@@ -2598,6 +2612,8 @@ const zhHant = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: '本應用優先',
+        recentTitle: '最近的對話',
+        recentEmpty: '在這裡提的問題會顯示在這裡。',
       },
       renameConversation: '重新命名對話',
       deleteConversation: '刪除對話',
@@ -2713,7 +2729,29 @@ const zhHant = {
           availableObjects: '列出可用的資料物件。',
           recentActivity: '總結我的最近動態。',
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: '總結這條記錄',
+            related: '這條記錄關聯了哪些內容？',
+          },
+          list: {
+            summarize: '總結這個列表裡的記錄',
+            recent: '本週新增了哪些記錄？',
+          },
+          dashboard: {
+            explain: '這個儀表盤展示了什麼？',
+            standOut: '這個儀表盤裡有什麼值得注意的？',
+          },
+          report: {
+            summarize: '總結這份報表',
+            takeaways: '這份報表的要點是什麼？',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: '推薦問題',
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
       // connection banner and plan/publish cards, the ChatDock chrome, and the
       // conversation-list date buckets. `group.*` is the template-key family
@@ -2741,7 +2779,7 @@ const zhHant = {
         expand: '展開',
         restore: '還原為側邊欄',
         open: '開啟助手',
-        planAwaitingApproval: '有一個方案等待確認',
+        planAwaitingApproval: '有一項操作等待確認',
         close: '關閉',
         more: '更多操作',
       },
@@ -3156,6 +3194,8 @@ const zhHant = {
         twoFactorTooManyAttempts: '錯誤次數過多，請重新使用密碼登入。',
         twoFactorExpired: '本次登入已過期，請重新使用密碼登入。',
         twoFactorLocked: '失敗次數過多，您的賬戶已被暫時鎖定，請稍後再試。',
+        managedPasswordSignIn: "此部署通過其身份提供方登入，這裡不能使用密碼。請點選上方的身份提供方按鈕登入。",
+        managedPasswordReset: "此部署通過其身份提供方登入，這裡不設定也不重置密碼。請在登入頁點選身份提供方按鈕登入。",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -3615,6 +3655,7 @@ const zhHant = {
     recent: '最近使用',
     starred: '已收藏',
     removeFromFavorites: '從收藏中移除 {{name}}',
+    conversationUnavailable: '該對話已不可用',
     allReports: '全部報表',
     collapse: '收起側邊欄',
     expand: '展開側邊欄',
@@ -3649,6 +3690,7 @@ const zhHant = {
         report: '報表',
         page: '頁面',
         url: '連結',
+        aiChat: 'AI 問詢',
       },
       linkLabel: '名稱',
       linkUrl: '網址',
@@ -3674,6 +3716,17 @@ const zhHant = {
       creating: '正在建立…',
       newItemPendingDraft: '這個名稱下已有一份未釋出的草稿，請再試一次。',
       newItemLeft: '新建的儀表盤「{{name}}」沒能刪除，請在 Studio 裡刪除它。',
+      aiChatName: 'AI 問詢',
+      aiChatDefaults: '留空的項顯示頁面的預設內容。',
+      aiChatTitle: '歡迎標題',
+      aiChatSubtitle: '副標題',
+      aiChatPlaceholder: '輸入框提示',
+      aiChatSuggestions: '推薦問題',
+      aiChatSuggestionsHint: '每行一個，最多 4 個。',
+      aiChatTooLong: '最多 {{max}} 個字元。',
+      aiChatTooMany: '最多 {{max}} 個問題。',
+      aiChatEdit: '編輯問詢頁',
+      setAsHome: '設為首頁',
     },
     pins: {
       button: '頁頭按鈕',
@@ -4805,6 +4858,18 @@ const zhHant = {
     recordCitations: {
       title: '引自記錄',
     },
+    questionCard: {
+      aiAsks: 'AI 問：',
+      progress: '第 {{current}}/{{total}} 題',
+      typeYourOwn: '自己輸入…',
+      recommended: '推薦',
+      skip: '跳過',
+      back: '上一題',
+      next: '下一題',
+      send: '傳送',
+      pending: '有一個問題待回答',
+      answerLine: '{{header}}：{{answer}}',
+    },
     tool: {
       aggregate_data: '彙總相關資料',
       get_record: '讀取這條記錄',
@@ -4820,6 +4885,7 @@ const zhHant = {
       add_field: '給物件新增欄位',
       apply_blueprint: '按方案搭建應用',
       apply_edit: '應用這次修改',
+      ask_which: '確認問題含義',
       create_metadata: '新建一項中繼資料',
       create_object: '新建一個物件',
       create_package: '新建一個應用包',

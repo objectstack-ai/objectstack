@@ -27,14 +27,18 @@
  * row or a lookup opens above it live in memory, so a reload shows the root.
  * Its one `⤢` opens the level shown as the full page (`handleOpenAsPage`).
  *
- * On a phone (objectstack#27058) none of that applies: the record is always a
- * page. The spec's own rule says so (`deriveRecordSurface` with
- * `viewport: 'mobile'` answers `page`), a row tap navigates to the record
+ * On a phone (objectstack#27058) none of that applies: a record that opens
+ * always opens as a page. The spec's own rule says so (`deriveRecordSurface`
+ * with `viewport: 'mobile'` answers `page`), a row tap navigates to the record
  * route with the list as its origin, and the pane is never mounted, so the
  * reader's Open records preference and the drawer's `?recordId=` state do not
  * apply: a `?recordId=` link opened on a phone lands on that record's page,
  * and the record form the link carries (`?form=`, `?formObject=`,
- * `?formLink=`) opens over that page (objectstack#32750).
+ * `?formLink=`) opens over that page (objectstack#32750). That rule decides
+ * how a record opens, never whether: an authored `none` (or
+ * `preventNavigation`) holds on a phone too (objectstack#33719) — a tap opens
+ * nothing, the card is not drawn as tappable, and a `?recordId=` link opens
+ * no page, as it opens no pane on a desktop.
  *
  * An object the server does not read one record of — its served operations
  * leave `get` out (`servesRecordRead`), a list-only object — has no record
@@ -233,19 +237,22 @@ export function useObjectViewRecordNavigation({
         () => {
             // No record surface to open, on any viewport, whatever is authored.
             if (!recordServed) return { mode: 'none' };
-            // objectstack#27058 — on a phone the spec's rule decides, and it
-            // answers `page` whatever the view or the object declares.
-            if (phone) return { mode: deriveRecordSurface(objectDef, { viewport: 'mobile' }) as ViewNavigationConfig['mode'] };
             const authored = activeView?.navigation ?? objectDef.navigation;
             // `preventNavigation: true` ("Disable standard navigation
             // entirely") outranks every mode: the row resolves to `none`, so
             // no click opens it, a modifier click included, and the list
             // draws no link face for it (`rowOpensRecord`, objectstack#33549).
+            // On every viewport: a phone included (objectstack#33719).
             if (authored?.preventNavigation) return { mode: 'none' };
             // An authored `none` is "No navigation (read-only list)": rows
             // open nothing (objectstack#33548). It outlives the deprecation of
-            // `navigation.mode` as an open-mode switch (objectstack#35854).
+            // `navigation.mode` as an open-mode switch (objectstack#35854),
+            // and the phone rule below, which decides HOW a record opens,
+            // never WHETHER it does (objectstack#33719).
             if (authored?.mode === 'none') return { mode: 'none' };
+            // objectstack#27058 — on a phone the spec's rule decides how a
+            // record opens, and it answers `page` whatever else is declared.
+            if (phone) return { mode: deriveRecordSurface(objectDef, { viewport: 'mobile' }) as ViewNavigationConfig['mode'] };
             // objectstack#35854 — `navigation.mode` is deprecated: `drawer`,
             // `page` and `new_window` no longer pick how a record opens, so a
             // view that declares one behaves as one that declares nothing.
@@ -554,10 +561,13 @@ export function useObjectViewRecordNavigation({
     // open: the drawer link is answered by the record's page, in its place in
     // the history (objectstack#27058).
     // A `?recordId=` link to an object with no record surface opens nothing.
+    // Nor does one on a list whose rows open nothing (an authored `none` or
+    // `preventNavigation`): the desktop draws no pane for it, and a phone
+    // opens no page for it (objectstack#33719).
     useEffect(() => {
         const openedId = drawerRootServed ? drawerRecordId : null;
         if (phone) {
-            if (!openedId) return;
+            if (!openedId || detailNavigation.mode === 'none') return;
             if (!drawerForeignObject) {
                 handleNavOverlayNavigate(openedId, undefined, undefined, true);
                 return;
@@ -572,6 +582,6 @@ export function useObjectViewRecordNavigation({
         } else if (!openedId && navOverlay.isOpen) {
             navOverlay.close();
         }
-    }, [drawerRecordId, drawerForeignObject, phone, drawerRootServed]);
+    }, [drawerRecordId, drawerForeignObject, phone, drawerRootServed, detailNavigation.mode]);
     return { listRecordActions, navOverlay, drawerWidthKey, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, handleOpenReferencedRecord, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel };
 }

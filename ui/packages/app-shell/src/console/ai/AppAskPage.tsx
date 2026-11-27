@@ -17,6 +17,17 @@
  * conversation that is not the caller's, or not this app's, opens the home
  * state: no error, and nothing of it is shown.
  *
+ * Below the question box the home state lists this app's recent
+ * conversations: of the caller's newest list page, those this page created
+ * for this package (`metadata.activePackageId`), the newest few
+ * (`recentAskPageConversations`). A drawer thread is never one of them. Opening one
+ * writes its `?c=`, so it is restored the way a reload restores it.
+ *
+ * The home state is the shared empty conversation (`EmptyConversation`,
+ * objectstack#37862), large, with this page's own question box in its
+ * composer slot: the drawer draws the same layout. Its heading is the entry's
+ * declared title, else the time-of-day greeting; the entry's suggestions send.
+ *
  * The page is the one ask conversation on its screen: while it is the active
  * route the console's drawer stays closed and its triggers are hidden or inert
  * (`useConsoleChatDock`'s `askPageActive`). A build hand-off from here still
@@ -30,7 +41,7 @@ import * as React from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowUp, Plus, Sparkles } from 'lucide-react';
 import { useAuth } from '@object-ui/auth';
-import { Badge, Button, Textarea, cn } from '@object-ui/components';
+import { Badge, Button, Textarea } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { resolveNavItemLabel } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
@@ -40,15 +51,20 @@ import { AiUnavailable } from './AiUnavailable.js';
 import { resolveApiBase } from './resolveApiBase.js';
 import {
   ASK_CONVERSATION_PARAM,
+  ASK_RECENT_FETCH_LIMIT,
   askPageConversationScope,
   askPageCreateMetadata,
   conversationBelongsToAskPage,
   findAiChatNavEntry,
   readAiChatPageCopy,
+  recentAskPageConversations,
 } from './appAskPageModel.js';
 import { useChatConversation, type HydratedUIMessage } from '../../hooks/useChatConversation.js';
 import { fetchConversation } from '../../hooks/useChatConversation.js';
 import { useAiSurfaceEnabled } from '../../hooks/useAiSurface.js';
+import { useConversationList } from '../../hooks/useConversationList.js';
+import { EmptyConversation, EmptyConversationGreeting, RecentConversationList } from './EmptyConversation.js';
+import { appHomeSuggestions } from './emptyConversationModel.js';
 import { useHomePath } from '../../hooks/useHomePath.js';
 import { useMetadata } from '../../providers/MetadataProvider.js';
 import { useNavigationContext } from '../../context/NavigationContext.js';
@@ -80,6 +96,8 @@ export function AppAskPage() {
   const entry = React.useMemo(() => findAiChatNavEntry(app), [app]);
   const copy = React.useMemo(() => readAiChatPageCopy(entry), [entry]);
   const pageLabel = entry ? resolveNavItemLabel(entry as unknown as NavigationItem, t, undefined, language) : '';
+  // The page header's name when the entry has no label: the declared title,
+  // else the neutral one. The home state's heading greets instead (below).
   const title = copy.title ?? t('console.ai.empty.ask.title', { defaultValue: 'Ask your data' });
   const subtitle = copy.subtitle ?? t('console.ai.empty.ask.description', {
       defaultValue:
@@ -205,6 +223,18 @@ export function AppAskPage() {
       },
     );
   }, [setSearchParams]);
+  // A recent conversation opens through its `?c=`: the restore path above
+  // judges it like any other address.
+  const openRecent = React.useCallback(
+    (id: string) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set(ASK_CONVERSATION_PARAM, id);
+        return next;
+      });
+    },
+    [setSearchParams],
+  );
 
   // ── What the page draws ─────────────────────────────────────────────────
   const restoring = Boolean(checking) || (Boolean(activeId) && !started && conversationLoading);
@@ -250,13 +280,18 @@ export function AppAskPage() {
   } else {
     body = (
       <AskHome
-        title={title}
+        heading={copy.title ?? <EmptyConversationGreeting />}
         subtitle={subtitle}
         placeholder={placeholder}
         suggestions={copy.suggestions}
         scopeLabel={t('console.ai.askPage.scopeBadge', { defaultValue: 'Answers prefer this app' })}
         sendLabel={t('console.ai.submit', { defaultValue: 'Submit' })}
         onAsk={ask}
+        recent={
+          packageId && userId ? (
+            <RecentAskConversations userId={userId} apiBase={apiBase} packageId={packageId} onOpen={openRecent} />
+          ) : null
+        }
       />
     );
   }
@@ -284,86 +319,105 @@ export function AppAskPage() {
 function noop() {}
 
 interface AskHomeProps {
-  title: string;
+  heading: React.ReactNode;
   subtitle: string;
   placeholder: string;
   suggestions: string[];
   scopeLabel: string;
   sendLabel: string;
   onAsk: (text: string) => void;
+  /** The recent-conversations section, drawn below the suggestions. */
+  recent?: React.ReactNode;
 }
 
-/** The home state: the welcome, the large question box and the suggested questions. */
-function AskHome({ title, subtitle, placeholder, suggestions, scopeLabel, sendLabel, onAsk }: AskHomeProps) {
+/**
+ * The home state: the shared empty conversation, large, with this page's
+ * question box in its composer slot. The entry's suggestions send.
+ */
+function AskHome({ heading, subtitle, placeholder, suggestions, scopeLabel, sendLabel, onAsk, recent }: AskHomeProps) {
   const [text, setText] = React.useState('');
   const submit = () => {
     if (text.trim()) onAsk(text);
   };
+  const homeSuggestions = React.useMemo(() => appHomeSuggestions(suggestions), [suggestions]);
   return (
-    <div className="flex flex-1 flex-col items-center overflow-y-auto px-4 py-10 sm:py-16" data-testid="app-ask-home">
-      <div className="flex w-full max-w-2xl flex-col items-center gap-6">
-        <div className="flex flex-col items-center gap-2 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl" data-testid="app-ask-title">
-            {title}
-          </h1>
-          <p className="max-w-xl text-sm text-muted-foreground sm:text-base" data-testid="app-ask-subtitle">
-            {subtitle}
-          </p>
-        </div>
-        <form
-          className="w-full rounded-2xl border bg-background p-3 shadow-sm focus-within:ring-2 focus-within:ring-ring"
-          onSubmit={(event) => {
-            event.preventDefault();
-            submit();
-          }}
-        >
-          <Textarea
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+    <div className="flex flex-1 flex-col items-center overflow-y-auto" data-testid="app-ask-home">
+      <EmptyConversation
+        size="large"
+        heading={heading}
+        subtitle={subtitle}
+        suggestions={homeSuggestions}
+        onSuggestion={(suggestion) => onAsk(suggestion.text)}
+        recent={recent}
+        composer={
+          <form
+            className="w-full rounded-2xl border bg-background p-3 shadow-sm focus-within:ring-2 focus-within:ring-ring"
+            onSubmit={(event) => {
               event.preventDefault();
               submit();
             }}
-            placeholder={placeholder}
-            aria-label={placeholder}
-            rows={3}
-            className="min-h-24 resize-none border-0 bg-transparent p-1 text-base shadow-none focus-visible:ring-0"
-            data-testid="app-ask-input"
-          />
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <Badge variant="secondary" className="font-normal" data-testid="app-ask-scope">
-              {scopeLabel}
-            </Badge>
-            <Button
-              type="submit"
-              size="icon"
-              className="h-9 w-9 rounded-full"
-              disabled={!text.trim()}
-              aria-label={sendLabel}
-              data-testid="app-ask-send"
-            >
-              <ArrowUp className="h-4 w-4" />
-            </Button>
-          </div>
-        </form>
-        {suggestions.length > 0 ? (
-          <div className={cn('grid w-full gap-2', suggestions.length > 1 && 'sm:grid-cols-2')} data-testid="app-ask-suggestions">
-            {suggestions.map((suggestion) => (
+          >
+            <Textarea
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+                event.preventDefault();
+                submit();
+              }}
+              placeholder={placeholder}
+              aria-label={placeholder}
+              rows={3}
+              className="min-h-24 resize-none border-0 bg-transparent p-1 text-base shadow-none focus-visible:ring-0"
+              data-testid="app-ask-input"
+            />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <Badge variant="secondary" className="font-normal" data-testid="app-ask-scope">
+                {scopeLabel}
+              </Badge>
               <Button
-                key={suggestion}
-                type="button"
-                variant="outline"
-                className="h-auto justify-start whitespace-normal px-3 py-2 text-left text-sm font-normal"
-                onClick={() => onAsk(suggestion)}
+                type="submit"
+                size="icon"
+                className="h-9 w-9 rounded-full"
+                disabled={!text.trim()}
+                aria-label={sendLabel}
+                data-testid="app-ask-send"
               >
-                {suggestion}
+                <ArrowUp className="h-4 w-4" />
               </Button>
-            ))}
-          </div>
-        ) : null}
-      </div>
+            </div>
+          </form>
+        }
+      />
     </div>
+  );
+}
+
+interface RecentAskConversationsProps {
+  userId: string;
+  apiBase: string;
+  packageId: string;
+  onOpen: (id: string) => void;
+}
+
+/**
+ * This app's recent conversations on the home state, newest first, each with
+ * its title and when it was last active; an empty state when there are none.
+ * Mounted with the home state, so each return to it reads the list afresh.
+ */
+function RecentAskConversations({ userId, apiBase, packageId, onOpen }: RecentAskConversationsProps) {
+  const { t } = useObjectTranslation();
+  const { conversations, isLoading, error } = useConversationList({ userId, apiBase, limit: ASK_RECENT_FETCH_LIMIT });
+  const recent = React.useMemo(() => recentAskPageConversations(conversations, packageId), [conversations, packageId]);
+  // A list that has not answered, or failed, draws nothing: never an empty state it cannot vouch for.
+  if (isLoading || error) return null;
+  return (
+    <RecentConversationList
+      size="large"
+      conversations={recent}
+      emptyText={t('console.ai.askPage.recentEmpty', { defaultValue: 'Questions you ask here will appear here.' })}
+      onOpen={(conversation) => onOpen(conversation.id)}
+    />
   );
 }
 

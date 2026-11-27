@@ -97,8 +97,10 @@ export const AIModelConfigSchema = lazySchema(() => acceptRetiredDefaultResidue(
 
 /*
  * REMOVED — `AIKnowledgeSchema` / `AIKnowledge` (#3896 audit close-out). It
- * typed `agent.knowledge`, tombstoned below: the RAG path never read the
- * agent record, so the whole block was a grounding claim nothing enforced.
+ * typed `agent.knowledge`, which no key below declares any more: the RAG
+ * path never read the agent record, so the whole block was a grounding claim
+ * nothing enforced. The key's tombstone aged out at protocol 18, so the
+ * strict `AgentSchema` refuses it as an unknown key naming the upgrade guide.
  * The protocol-17 `agent-knowledge-topics-to-sources` conversion remains in
  * the chain (it rewrites historical SOURCES and imports nothing from here).
  */

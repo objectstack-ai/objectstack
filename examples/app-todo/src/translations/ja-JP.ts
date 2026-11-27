@@ -8,6 +8,10 @@ import type { TranslationData } from '@objectstack/spec/system';
  * Per-locale file: one file per language, following the `per_locale` convention.
  */
 export const jaJP: TranslationData = {
+  // The package's own name, keyed by its manifest id (objectstack#35513).
+  packages: {
+    'com.example.todo': { name: 'ToDo マネージャー', description: '自動化、ダッシュボード、レポートなど ObjectStack プロトコルの機能を紹介する総合的な ToDo アプリ' },
+  },
   objects: {
     todo_task: {
       label: 'タスク',

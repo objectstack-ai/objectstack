@@ -25,6 +25,9 @@ Amendment A4 (2026-11-27) — an app may place one AI inquiry page (`ai:chat`
 menu entry); on that page the drawer is closed and its triggers (the top-bar
 robot, the keyboard toggle) are hidden or inert, and the drawer stays the
 container everywhere else (objectstack#37788).
+Amendment A5 (2026-11-27) — an opening from the assistant's entry shows a
+new conversation, except after a close the console made or with a write
+awaiting approval; the drawer's header row is redrawn (objectstack#37860).
 **Author**: ObjectUI app-shell / Studio team
 **Consumers**: `@object-ui/app-shell`
 (`console/ai/AiChatPage.tsx`, `layout/ConsoleFloatingChatbot.tsx`,
@@ -507,11 +510,15 @@ It accepted the seat's recommendation as presented:
   `?package=` and `?new=`, stay routed so bookmarks, share links (ADR-0013)
   and links from surfaces without a drawer keep working. Each one opens the
   drawer, maximized, on the thread it names, over the declared landing. What
-  the drawer shows is kept per tab, never in the URL. A Builder handoff still
-  travels only as navigation state (objectui#12493).
+  the drawer shows is kept per tab, never in the URL. *(Amendment A5: it is
+  no longer kept across a close the user makes; the next opening from the
+  assistant's entry shows a new conversation, but for A5's exceptions.
+  "Never in the URL" stands.)*
+  A Builder handoff still travels only as navigation state (objectui#12493).
 - **Entries.** "Build with AI" and "Ask AI" on Home and "Edit with AI" in app
   management open the drawer on the agent, package or fresh thread they used
-  to address.
+  to address. *(Amendment A5: Home's "Ask AI" is one of the assistant's
+  entries and opens a new conversation.)*
 - **Builder guidance.** Inside an app, a maker's empty state names both
   halves, data questions and changes, as the composer hint already did.
 - **Building (objectstack#34610, same ruling).** A build runs in the same
@@ -625,6 +632,118 @@ it when the assistant is unavailable to them, are not decided here. A reader
 of A3 finds the exception at its "One container" bullet. The text lands
 before the page (seat repo:objectstack#1's routing call,
 2026-11-27T04:57Z). Implemented under objectstack#37788.
+
+## Amendment A5 (2026-11-27, Accepted) — an opening from the entry starts a new conversation
+
+**What it changes.** The first half of one sentence in A3's "Addresses":
+"What the drawer shows is kept per tab, never in the URL." It is no longer
+kept across a close the user makes: after one, an opening from the
+assistant's entry shows a new conversation (rows 1–4 below). It is still kept
+per tab across moving between pages, a reload, filling the window and
+restoring it, and a close the console makes for the user; the second half
+stands, since A5 puts nothing in an address. A3's "Entries" changes for
+Home's "Ask AI", and the drawer's header row is redrawn. Everything else in
+A3 and A4 stands.
+
+**Why.** Topic objectstack#37853 makes the assistant's one entry the way to
+ask about the page in view; a new conversation from it is about that page's
+record (framework ADR-0160, record-scoped AI inquiry, as amended 2026-11-27).
+Today the entry resumes: the robot and the keyboard toggle reopen what the
+drawer last showed, and Home's "Ask AI" resumes the `ask` agent's cached
+thread, so a question asked from another record lands in a conversation
+that keeps its own record.
+
+**Maintainer ruling** (2026-11-27, objectstack#37853's body, "Filing gate"
+line), verbatim, not translated:
+
+> 同意，立专题卡，非 cloud 的任务，让 objectstack #3 座位接手
+
+(07:12Z, agreeing to file the topic.) The rulings A5 records are in that
+body's "Rulings" list, from screenshots shared 06:33Z–06:42Z; the
+maintainer's words for them are not on GitHub, so they are not quoted:
+opening is a new conversation that carries the current page's record; the
+header has a title, ☆, ＋, a history icon, ⋯ and ×; a favourite conversation
+opens in place. The topic's target experience (items 4, 5) adds: moving
+between pages keeps the open drawer's conversation and ＋ starts a new one;
+after × the next opening is new; after the phone's auto-collapse on a tapped
+answer link it is the same; with a plan waiting for approval it is that
+conversation. On the question-card topic (objectstack#37871's body, "Filing
+gate" line), verbatim:
+
+> 按 v2 立卡，顶替输入框
+
+(08:05Z, the decision card on that topic's design. Its "Relations" carry row
+4 below; these words do not address it.)
+
+**Decision.** The assistant's entry is the top-bar robot (objectstack#37858
+puts a labelled button in its place), the keyboard toggle (Ctrl/Cmd+Shift+I)
+and Home's "Ask AI". What an opening shows:
+
+| How the drawer opens | What it shows |
+|---|---|
+| 1. From the entry, after the user's close (×, the entry or the toggle again, dismissing the phone sheet), or for the first time in the tab | A new conversation; the last one stays in history |
+| 2. From the entry, after the console collapsed the phone sheet because the page under it moved (a tapped link in an answer, Back; objectstack#37556) | The same conversation |
+| 3. From the entry, while an AI-proposed write awaits the user's approval in the conversation the drawer showed at the close | That conversation |
+| 4. From the entry, while a question card (objectstack#37871) waits in that conversation | As row 1; the question stays in history, unanswered |
+| 5. On any other target: `open()` with one, an `/ai…` address (A3), a history row, a favourite once objectstack#37863 adds them | What it names, as before |
+| 6. A reload | Not an opening: what the drawer showed |
+| 7. Through the assistant bus (`requestAssistantOpen`, the object designer's "Ask AI") | What the drawer shows, as before |
+| 8. With a build thread: the agent is `build`, by a target (app management's "Edit with AI" names a package) or by `app.defaultAgent: 'build'` | Not covered: as before |
+| 9. Filling the window, or back to the rail | Not an opening: the same conversation, not remounted (A3) |
+
+- **A new conversation is `forceNew`, never `resumeMode: 'fresh'`.** A fresh
+  target reaches `useChatConversation` as `forceNew`: it settles with no
+  conversation and drops the cached pointer, and the first send creates the
+  row, so an opening that sends nothing leaves no empty row. `'fresh'` reuses
+  the cached conversation whenever the server returns no messages for it,
+  and a turn is stored when it completes (as that hook reads the server; the
+  store is cloud's), so a conversation closed mid-answer would read as empty
+  and be reused.
+- **Not recorded yet.** The auto-collapse and the user's × call the same
+  collapse, and nothing notes which it was. The assistant bus keeps plans
+  awaiting approval per conversation (objectui#11666), in the page's memory
+  only; nothing has published to it since objectstack#37720 retired the
+  build chat, and write approvals do not reach it. Both are
+  objectstack#37860's to add.
+- **The header.** The same row in the rail, the full window and the phone
+  sheet. Left: the conversation's label as the history list shows it, "New
+  conversation" before the first send. Right: ☆ (with objectstack#37863, not
+  drawn before), ＋ (a new conversation on the page in view), history as an
+  icon button where A3 keeps it behind one (rail, sheet), ⋯ as today, and ×
+  (on the sheet, its own close). Today the header reads "AI Assistant", with
+  a labelled "History" button.
+
+**Points beyond the maintainer's words.** This record's settlement, from card
+objectstack#37855, its comment 7213286436 or the tree at `73d5e347`, accepted
+with the maintainer's merge of the PR that carries A5, not ruled by the
+maintainer:
+
+1. **The first opening in a tab is new** (row 1): the card ties a new
+   conversation to the user's last close; with none, the ruling applies.
+2. **The console's close** (row 2): the code collapses the sheet on any move
+   of the page under it (a link or Back, not a replace), wider than the
+   target experience's answer link; dismissing the sheet is the user's close.
+3. **A pending write, in the conversation shown at the close; a pending
+   question is no exception** (rows 3, 4): plans left with the build chat;
+   the comment narrows the exception to a write and adds row 4 from
+   objectstack#37871's "Relations". No other conversation with a write
+   pending is reopened.
+4. **Home's "Ask AI", other targets, history and a reload** (rows 1, 5, 6):
+   the topic's acceptance item 4. The read-only `/s/:token` share page is not
+   the drawer (A3).
+5. **The bus, the build exception and `forceNew`** (rows 7, 8, first bullet)
+   are the card's. It names the Studio canvas; at `73d5e347` the one caller
+   of `requestAssistantOpen` is the object designer, and Studio's copilot
+   left with the build chat (objectstack#37720). The store's side of the `forceNew` reason is
+   cloud's and was not read.
+6. **The title**: the card asks for a first-message summary where the server
+   gives no title; the history list shows the latest user message there, so
+   the header takes the history row's label rather than a second rule.
+
+**Consequences.** A conversation no longer outlives the user's close: history
+finds it again, and ☆ will keep the ones a user returns to. Until
+objectstack#37860 merges, the entry resumes as A3 says. Implemented under
+objectstack#37860.
 
 ## Open design questions
 

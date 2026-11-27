@@ -54,7 +54,9 @@ vi.mock('../../hooks/useAiUsage', () => ({
 // What the default body reports to the chrome (objectstack#35445); `undefined`
 // = a body that reports nothing.
 const bodyState = {
-  actions: undefined as undefined | { conversationId?: string; showDebug: boolean },
+  actions: undefined as
+    | undefined
+    | { conversationId?: string; showDebug: boolean; label?: string; labelPending?: boolean; startNew?: () => void },
 };
 // The default body, as a recorder of the presentation, history and dialog
 // state the chrome hands it (its own behaviour is pinned in the ChatDock.*
@@ -347,5 +349,88 @@ describe('the drawer title bar is one row: History, 「···」, Close (objects
     const menu = openMenu();
     expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Share']);
     expect(screen.queryByTestId('ai-usage-indicator')).toBeNull();
+  });
+});
+
+// ui ADR-0057 Amendment A5 (objectstack#37860) — the header row: the thread's
+// label on the left (as its history row reads it; "New conversation" before
+// the first send), then ＋, the history as an icon (rail and sheet), 「···」
+// and the close.
+describe('the header row: the label, ＋, history, 「···」, × (ui ADR-0057 A5, objectstack#37860)', () => {
+  afterEach(() => {
+    bodyState.actions = undefined;
+  });
+
+  function headerControls(testId = 'chat-dock-header'): string[] {
+    const header = screen.getByTestId(testId);
+    return Array.from(header.querySelectorAll('button')).map(
+      (b) => b.getAttribute('aria-label') ?? b.textContent ?? '',
+    );
+  }
+
+  it('the rail: the label titles it; ＋, History (an icon, pressed while open), 「···」, Close', async () => {
+    const startNew = vi.fn();
+    bodyState.actions = { conversationId: 'c1', showDebug: false, label: 'Quarterly revenue', startNew };
+    render(<ChatDockPanel dock={dockState()} />);
+    await screen.findByTestId('default-dock-body');
+    expect(screen.getByTestId('chat-dock-title')).toHaveTextContent('Quarterly revenue');
+    expect(screen.getByRole('heading', { name: 'Quarterly revenue' })).toBeInTheDocument();
+    expect(headerControls()).toEqual(['New conversation', 'History', 'More actions', 'Close']);
+
+    const history = screen.getByTestId('chat-dock-history-toggle');
+    // An icon button: its name is its label, it draws no words.
+    expect(history).toHaveTextContent('');
+    expect(history.querySelector('svg.lucide-history')).not.toBeNull();
+    fireEvent.click(history);
+    expect(history).toHaveAttribute('aria-pressed', 'true');
+    expect(history).toHaveAccessibleName('Back to chat');
+
+    // ＋ starts the new conversation and puts the chat back in view.
+    fireEvent.click(screen.getByTestId('chat-dock-new'));
+    expect(startNew).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('default-dock-body')).toHaveAttribute('data-history-open', 'false');
+  });
+
+  it('before the first send the title reads "New conversation"; while a label is read it reads nothing', async () => {
+    bodyState.actions = { showDebug: false, startNew: () => {} };
+    const { unmount } = render(<ChatDockPanel dock={dockState()} />);
+    await screen.findByTestId('default-dock-body');
+    expect(screen.getByTestId('chat-dock-title')).toHaveTextContent('New conversation');
+    unmount();
+
+    bodyState.actions = { conversationId: 'c1', showDebug: false, labelPending: true, startNew: () => {} };
+    render(<ChatDockPanel dock={dockState()} />);
+    await screen.findByTestId('default-dock-body');
+    expect(screen.getByTestId('chat-dock-title')).toHaveTextContent('');
+  });
+
+  it('control: the entry\'s old title "AI Assistant" is gone from the header', async () => {
+    bodyState.actions = { conversationId: 'c1', showDebug: false, label: 'Quarterly revenue', startNew: () => {} };
+    render(<ChatDockPanel dock={dockState()} />);
+    await screen.findByTestId('default-dock-body');
+    expect(within(screen.getByTestId('chat-dock-header')).queryByText('AI Assistant')).toBeNull();
+  });
+
+  it('the full window: ＋, 「···」, Close (history sits beside the chat)', async () => {
+    bodyState.actions = { conversationId: 'c1', showDebug: false, label: 'Quarterly revenue', startNew: () => {} };
+    render(<ChatDockPanel dock={dockState({ fullWindow: true })} />);
+    await screen.findByTestId('default-dock-body');
+    expect(headerControls()).toEqual(['New conversation', 'More actions', 'Close']);
+    expect(screen.getByTestId('chat-dock-title')).toHaveTextContent('Quarterly revenue');
+  });
+
+  it('the phone sheet: the same row, finger-sized, its own ✕ last', async () => {
+    const startNew = vi.fn();
+    bodyState.actions = { conversationId: 'c1', showDebug: false, label: 'Quarterly revenue', startNew };
+    render(<ChatDockMobileSheet open onOpenChange={() => {}} />);
+    await screen.findByTestId('default-dock-body');
+    const sheet = screen.getByTestId('chat-dock-mobile-sheet');
+    expect(within(sheet).getByRole('heading', { name: 'Quarterly revenue' })).toBeInTheDocument();
+    const names = Array.from(sheet.querySelectorAll('button')).map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim() ?? '');
+    expect(names.slice(0, 3)).toEqual(['New conversation', 'History', 'More actions']);
+    expect(names[names.length - 1]).toMatch(/close/i);
+    expect(screen.getByTestId('chat-dock-mobile-new')).toHaveClass('h-9', 'w-9');
+    fireEvent.click(screen.getByTestId('chat-dock-mobile-new'));
+    expect(startNew).toHaveBeenCalledTimes(1);
   });
 });
