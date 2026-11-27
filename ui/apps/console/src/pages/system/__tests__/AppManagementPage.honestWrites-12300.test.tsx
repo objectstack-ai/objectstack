@@ -357,7 +357,7 @@ describe('Set default sends each app’s own package (objectui#12300)', () => {
     const realSave = h.saveItem.getMockImplementation()!;
     h.saveItem
       .mockImplementationOnce(realSave)
-      .mockRejectedValueOnce(new Error('forbidden: manage_metadata required'));
+      .mockRejectedValueOnce(Object.assign(new Error('forbidden: manage_metadata required'), { httpStatus: 403 }));
     const user = userEvent.setup();
     renderPage();
 

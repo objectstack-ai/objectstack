@@ -73,12 +73,15 @@
  *
  * ## A refused set-default leaves the default where it was (objectstack#34860)
  *
- * Set default demotes the outgoing default before it promotes the target, so
- * a failure never leaves two defaults. When the promote is then refused (a
- * target in a read-only package answers 403), each demotion that landed is
- * put back in its own package scope before the refusal is shown, so the
- * deployment keeps the default it had. A restore the server refuses too gets
- * its own error toast naming the app that is no longer the default.
+ * Set default demotes the outgoing default before it promotes the target.
+ * When the promote is then refused with a 4xx (a target in a read-only package
+ * answers 403), or fails before it is sent, it wrote nothing, so each demotion
+ * that landed is put back in its own package scope before the refusal is
+ * shown, and the deployment keeps the default it had. A restore that fails too
+ * gets its own error toast naming the app that is no longer the default. A
+ * failure the server did not answer (or a 5xx) may have been written, so it is
+ * not undone: restoring could leave two defaults, and the re-read shows the
+ * result.
  *
  * ## A disabled star says why (ux-conventions.disabled-control-reason)
  *
@@ -165,6 +168,31 @@ function owningPackage(app: { _packageId?: unknown }): string | undefined {
 }
 
 /**
+ * The failures `saveApp` raises BEFORE its write is sent: nothing reached the
+ * server, so nothing was written.
+ */
+const UNWRITTEN = new WeakSet<object>();
+
+function markUnwritten(e: unknown): Error {
+  const error = e instanceof Error ? e : new Error(String(e ?? ''));
+  UNWRITTEN.add(error);
+  return error;
+}
+
+/**
+ * Whether a failed save is KNOWN to have written nothing: it failed before its
+ * write was sent, or the server answered it with a 4xx refusal (the client
+ * puts the status on `httpStatus`). A failure with no answer (a dropped
+ * connection, a timeout) or a 5xx may have been written anyway, so it is not.
+ */
+function wroteNothing(e: unknown): boolean {
+  if (typeof e !== 'object' || e === null) return false;
+  if (UNWRITTEN.has(e)) return true;
+  const status = (e as { httpStatus?: unknown }).httpStatus;
+  return typeof status === 'number' && status >= 400 && status < 500;
+}
+
+/**
  * Save one app in the scope it is served from (objectui#12300), with the keys
  * one control owns changed.
  *
@@ -189,8 +217,13 @@ async function saveApp(
   patch: Record<string, unknown>,
 ) {
   const packageId = owningPackage(app);
-  const stored = await readAuthored('app', app.name, packageId ? { packageId } : {});
-  if (!stored) throw new Error();
+  let stored: Record<string, unknown> | null;
+  try {
+    stored = await readAuthored('app', app.name, packageId ? { packageId } : {});
+  } catch (e: unknown) {
+    throw markUnwritten(e);
+  }
+  if (!stored) throw markUnwritten(new Error());
   const body = { ...stored, ...patch };
   return packageId
     ? meta.saveItem('app', app.name, body, { packageId })
@@ -416,8 +449,8 @@ export function AppManagementPage() {
       // previous holder set would make the landing depend on the order the
       // server happens to list apps in. Demote first, promote second — that
       // ordering is what makes a failure mid-way never leave the deployment
-      // with two defaults. A failure mid-way is then undone below, so it does
-      // not leave it with NONE either.
+      // with two defaults. A refused write mid-way is then undone below, so it
+      // does not leave it with NONE either.
       const outgoing = (apps || []).filter(
         (a: any) => a?.isDefault === true && a.name !== app.name,
       );
@@ -433,19 +466,24 @@ export function AppManagementPage() {
         name: appTitle(app),
       }));
     } catch (e: unknown) {
-      // objectstack#34860 — the promote (or a later demotion) was refused, e.g.
-      // 403 for a target in a read-only package. Every demotion that already
+      // objectstack#34860 — when the failed write is KNOWN to have written
+      // nothing (refused with a 4xx, e.g. 403 for a target in a read-only
+      // package, or failed before it was sent), every demotion that already
       // landed is put back, each in the same package scope it was demoted in,
-      // so a refused set-default leaves the default where it was. The target
-      // was never promoted, so restoring cannot make two.
+      // so a refused set-default leaves the default where it was. The failed
+      // write changed nothing, so restoring cannot make two defaults.
+      // Any other failure (no answer, a 5xx) may have been written, so the
+      // promote may have landed and a restore could make two: nothing is
+      // undone, and the re-read below shows what the server holds.
+      const toRestore = wroteNothing(e) ? demoted : [];
       const unrestored: any[] = [];
-      let restoreError: unknown;
-      for (const prev of demoted) {
+      const restoreErrors: unknown[] = [];
+      for (const prev of toRestore) {
         try {
           await saveApp(meta, readAuthored, prev, { isDefault: true });
         } catch (restoreFailure: unknown) {
           unrestored.push(prev);
-          restoreError ??= restoreFailure;
+          restoreErrors.push(restoreFailure);
         }
       }
       toast.error(t('appManagement.toast.setDefaultFailed', {
@@ -453,12 +491,13 @@ export function AppManagementPage() {
         reason: reason(e, unknownError),
       }));
       if (unrestored.length > 0) {
-        // The restore was refused too: the deployment is left without the
-        // default it had. Said, never hidden: the operator has to set one.
+        // The restore failed too: the deployment is left without the default
+        // it had. Said, never hidden: the operator has to set one. Each app's
+        // reason is listed once; identical reasons are said once.
         toast.error(t('appManagement.toast.restoreDefaultFailed', {
           defaultValue: 'Could not restore {{name}} as the default app, so it is no longer the default: {{reason}}',
           name: unrestored.map((a) => appTitle(a)).join(', '),
-          reason: reason(restoreError, unknownError),
+          reason: [...new Set(restoreErrors.map((r) => reason(r, unknownError)))].join('; '),
         }));
       }
     } finally {

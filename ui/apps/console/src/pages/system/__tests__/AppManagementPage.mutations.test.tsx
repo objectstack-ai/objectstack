@@ -200,6 +200,8 @@ describe('Set as default — a refused promote restores the previous default (ob
   const SHOWCASE = { name: 'showcase_app', label: 'Showcase', _packageId: 'com.example.showcase' };
   const READ_ONLY =
     "Cannot overlay 'app' in package 'com.example.showcase': that package is read-only";
+  /** A refusal the server answered, in the shape the client throws: the status on `httpStatus`. */
+  const refused = (message: string, httpStatus = 403) => Object.assign(new Error(message), { httpStatus });
 
   /** Every write the page sent, with the package scope it named (the 4th argument). */
   const writes = () =>
@@ -235,7 +237,7 @@ describe('Set as default — a refused promote restores the previous default (ob
 
   it('re-promotes the demoted default in its own package, and the final writes leave the same default', async () => {
     saveItem.mockImplementation(async (_type, name, item) => {
-      if (name === 'showcase_app' && item.isDefault === true) throw new Error(READ_ONLY);
+      if (name === 'showcase_app' && item.isDefault === true) throw refused(READ_ONLY);
       return {};
     });
     const user = userEvent.setup();
@@ -258,8 +260,8 @@ describe('Set as default — a refused promote restores the previous default (ob
 
   it('⛔ says so when the restore is refused too — the lost default is never hidden', async () => {
     saveItem.mockImplementation(async (_type, name, item) => {
-      if (name === 'showcase_app' && item.isDefault === true) throw new Error(READ_ONLY);
-      if (name === 'mthree_app' && item.isDefault === true) throw new Error('restore refused');
+      if (name === 'showcase_app' && item.isDefault === true) throw refused(READ_ONLY);
+      if (name === 'mthree_app' && item.isDefault === true) throw refused('restore refused');
       return {};
     });
     const user = userEvent.setup();
@@ -284,7 +286,7 @@ describe('Set as default — a refused promote restores the previous default (ob
 
   it('a refused demotion writes nothing more — there is nothing to restore', async () => {
     saveItem.mockImplementation(async (_type, name) => {
-      if (name === 'mthree_app') throw new Error('forbidden');
+      if (name === 'mthree_app') throw refused('forbidden');
       return {};
     });
     const user = userEvent.setup();
@@ -296,6 +298,31 @@ describe('Set as default — a refused promote restores the previous default (ob
     expect(writes()).toEqual([['mthree_app', false, 'com.objectstack.qa.mthree']]);
     expect(await landedDefaults()).toEqual(['mthree_app']);
     expect(toastError).toHaveBeenCalledTimes(1);
+  });
+
+  // A failure the server did not answer, or a 5xx, may have been written: the
+  // promote may have landed, so a restore could leave TWO defaults. Nothing is
+  // undone; the re-read shows what the server holds.
+  it.each([
+    ['no answer (no httpStatus)', () => new TypeError('Failed to fetch')],
+    ['a 5xx', () => refused('upstream timeout', 504)],
+  ])('⛔ a promote failure with %s sends no restore write', async (_label, failure) => {
+    saveItem.mockImplementation(async (_type, name, item) => {
+      if (name === 'showcase_app' && item.isDefault === true) throw failure();
+      return {};
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByLabelText('Set Showcase as default'));
+
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      ['mthree_app', false, 'com.objectstack.qa.mthree'],
+      ['showcase_app', true, 'com.example.showcase'],
+    ]);
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(toastSuccess).not.toHaveBeenCalled();
   });
 
   it('CONTROL: an accepted promote keeps the order demote → promote, with no restore write', async () => {
