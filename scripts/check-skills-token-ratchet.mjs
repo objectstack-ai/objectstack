@@ -2230,7 +2230,13 @@ export const CEILINGS = new Map([
   //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(7507 / 4)
   // = 1877 (+4), the measured remainder only. Pinned AT the measurement, zero
   // headroom; no other row moves.
-  ['skills/objectstack-ask/SKILL.md', 1875], // -2 to the measurement (was 1877)
+  // 1875 -> 1873 (#34996): the step-1 rewrite (terms copied whole as the user
+  // wrote them, one worked example, the re-send sentence before a question)
+  // paid for itself inside the file and freed 9 bytes; lowered to the new
+  // measurement, shrink-only, no ruling needed. 7516 bytes less the 27-byte
+  // stamp line:
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 27) / 4) == ceil(7489 / 4)
+  ['skills/objectstack-ask/SKILL.md', 1873], // -2 to the measurement (was 1875)
 
   // ── the objectstack-mcp-build skill joins the catalog — ruling #34691 S3 = A ──
   // (decision record: comment 6943107981 on #34691, "one copy of the shape
