@@ -12,8 +12,9 @@
  * without it.
  */
 
-import { isAskAgent } from '@object-ui/plugin-chatbot/core';
+import { agentAliasGroup, isAskAgent } from '@object-ui/plugin-chatbot/core';
 import type { ChatSurfaceContext } from '../../layout/chatSurfaceContext.js';
+import type { ConversationListItem } from '../../hooks/useConversationList.js';
 import { buildAgentSuggestions } from './agentCopy.js';
 
 type TranslationFn = (key: string, options?: Record<string, unknown>) => string;
@@ -139,4 +140,24 @@ export function drawerSuggestions(
 /** An app's own suggestions on its AI home: each sends, in the declared order. */
 export function appHomeSuggestions(texts: readonly string[]): EmptySuggestion[] {
   return texts.map((text) => ({ text, mode: 'send' }));
+}
+
+/** How many recent conversations each size lists in the drawer. */
+export const DRAWER_RECENT_COUNT: Record<EmptyConversationSize, number> = { large: 5, compact: 3 };
+
+/**
+ * The drawer's recent conversations: of the caller's newest list page, those
+ * of the drawer's agent (alias-aware, as its history scopes them) and none the
+ * AI home created for an app (`metadata.activePackageId`: that page's own
+ * threads, which open there), newest first as the list gives them.
+ */
+export function selectDrawerRecent(
+  rows: readonly ConversationListItem[],
+  agentName: string | undefined,
+  count: number,
+): ConversationListItem[] {
+  const group = agentName ? new Set(agentAliasGroup(agentName)) : undefined;
+  return rows
+    .filter((row) => (!group || !row.agentId || group.has(row.agentId)) && row.metadata?.activePackageId === undefined)
+    .slice(0, count);
 }

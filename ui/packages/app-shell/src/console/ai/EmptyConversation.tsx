@@ -24,12 +24,13 @@ import { MessageSquare } from 'lucide-react';
 import { useAuth } from '@object-ui/auth';
 import { Button, cn } from '@object-ui/components';
 import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
-import { agentAliasGroup } from '@object-ui/plugin-chatbot/core';
 import { useConversationList, type ConversationListItem } from '../../hooks/useConversationList.js';
 import { timeAgo } from '../../utils/relativeTime.js';
 import {
+  DRAWER_RECENT_COUNT,
   greetingForHour,
   greetingName,
+  selectDrawerRecent,
   type EmptyConversationSize,
   type EmptySuggestion,
 } from './emptyConversationModel.js';
@@ -213,27 +214,10 @@ export function RecentConversationList({ size, conversations, emptyText, onOpen 
   );
 }
 
-/** How many recent conversations each size lists in the drawer. */
-export const DRAWER_RECENT_COUNT: Record<EmptyConversationSize, number> = { large: 5, compact: 3 };
-
 /**
- * The drawer's recent conversations: of the caller's newest list page, those
- * of the drawer's agent (alias-aware, as its history scopes them) and none the
- * AI home created for an app (`metadata.activePackageId`: that page's own
- * threads, which open there). A list that has not answered, or failed, draws
- * nothing.
+ * The drawer's 「最近会话」: the caller's newest list page, read through
+ * `selectDrawerRecent`. A list that has not answered, or failed, draws nothing.
  */
-export function selectDrawerRecent(
-  rows: readonly ConversationListItem[],
-  agentName: string | undefined,
-  count: number,
-): ConversationListItem[] {
-  const group = agentName ? new Set(agentAliasGroup(agentName)) : undefined;
-  return rows
-    .filter((row) => (!group || !row.agentId || group.has(row.agentId)) && row.metadata?.activePackageId === undefined)
-    .slice(0, count);
-}
-
 export function DrawerRecentConversations({
   size,
   userId,
