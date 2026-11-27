@@ -1426,12 +1426,10 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
     expect(new RegExp(content.schema.items.pattern).test('*')).toBe(false);
     expect(new RegExp(content.schema.items.pattern).test('body')).toBe(true);
 
-    // Each tombstone is served with its prescription, as its describe reads.
-    for (const [path, replacement] of [['/properties/id', '`name`'], ['/properties/source/properties/contentFields', '`content`']] as const) {
-      const tomb = (await call(authoring, 'list_metadata_items', { type: 'knowledge_source', contract: true, contractPath: path })).body.contract;
-      expect(tomb.schema.description, path).toMatch(/^\[REMOVED\] /);
-      expect(tomb.schema.description, path).toContain(`use ${replacement}`);
-    }
+    // A tombstone is not served: the served schema publishes what an author MAY write (`{ not: {} }` is
+    // dropped). Its prescription reaches the author through the save, below.
+    expect(entry.schema.properties.id).toBeUndefined();
+    expect(entry.schema.properties.source.properties.contentFields).toBeUndefined();
 
     // The seed with one object and one content field filled saves as a draft; with a wildcard it is refused and nothing is written.
     const seed = contract.createSeed as { name: string; source: Record<string, unknown> };
@@ -1444,6 +1442,16 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
     const refused = await call(authoring, 'save_metadata_draft', { type: 'knowledge_source', name: wildcard.name, item: wildcard, package: STUDIO_BASE });
     expect(refused.body.error).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
     expect(JSON.stringify(refused.body.error.issues)).toContain('content');
+
+    // A retired key is refused with its tombstone's prescription, as the describe reads.
+    for (const [retired, replacement] of [
+      [{ ...item, name: 'crm_opportunity_id', id: 'crm_opportunity_id' }, '`name`'],
+      [{ ...item, name: 'crm_opportunity_cf', source: { ...item.source, contentFields: ['name'] } }, '`content`'],
+    ] as const) {
+      const tomb = await call(authoring, 'save_metadata_draft', { type: 'knowledge_source', name: retired.name, item: retired, package: STUDIO_BASE });
+      expect(tomb.body.error, replacement).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+      expect(JSON.stringify(tomb.body.error.issues), replacement).toContain(`use ${replacement}`);
+    }
     expect((await call(authoring, 'list_drafts', { package: STUDIO_BASE })).body.drafts.map((d: any) => d.name)).toEqual(['crm_opportunity_notes']);
   });
 
