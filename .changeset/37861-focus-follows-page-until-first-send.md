@@ -9,6 +9,7 @@ feat(console): a new chat conversation is about the record on the page until its
 
 Clause-②: yes (widening) — `@object-ui/plugin-chatbot` `ChatbotEnhanced` gains the optional `promptInputHeaderSlot`; `@object-ui/app-shell` `UseChatConversationReturn` gains `conversationMetadata`
 Metadata-protocol: none
+Removed locale keys (`@object-ui/i18n`, every pack): `console.ai.focus.pin`, `console.ai.focus.switchPrompt`, `console.ai.focus.switchAccept`, `console.ai.focus.switchDecline` — shipped only in 19 prereleases.
 
 Framework ADR-0160 D6, seventh amendment ("The focus of a conversation"). Where the agent the chat runs declares `capabilities.focus: true`:
 
@@ -17,7 +18,7 @@ Framework ADR-0160 D6, seventh amendment ("The focus of a conversation"). Where 
 - **× removes the focus and nothing adds it again** in that conversation, before or after the first send; the composer falls back to the page chip.
 - **The first send fixes the focus**: that turn and every later one send it as `context.focus`, and navigation no longer changes it. A conversation sent without one never takes one.
 - **A conversation opened again restores its own focus**: from this tab, or, in another tab or from history, from the `metadata.focus` its server row stores. The request body stays the authority.
-- **Removed**: the pin on the page chip, the 「改为问《X》？」 offer to ask about another record, and the locale keys `console.ai.focus.pin`, `.switchPrompt`, `.switchAccept` and `.switchDecline` (all shipped only in 19 prereleases). `console.ai.focus.pinned` now names the chip for assistive technology, and `.remove` labels ×.
+- **Removed**: the pin on the page chip and the 「改为问《X》？」 offer to ask about another record, with their four locale keys (listed above). `console.ai.focus.pinned` now names the chip for assistive technology, and `.remove` labels ×.
 
 Where the agent does not declare the flag, nothing changes: no chip, no `focus` key, and the page chip stays where it was.
 
