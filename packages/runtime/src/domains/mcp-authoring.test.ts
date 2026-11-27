@@ -1404,7 +1404,7 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
     expect(missing.body.contract).toBeUndefined();
   });
 
-  it('[ADR-0161 K4, K5] the knowledge_source contract serves the content rule, the tombstones\' prescriptions and the create seed; a draft from the seed saves, a wildcard is refused', async () => {
+  it('[ADR-0161 K4, K5] the knowledge_source contract serves the content rule and no create seed; a source with one object and one content field saves, a wildcard or a retired key is refused', async () => {
     const metadata = new MetadataManager({} as never);
     metadata.setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY);
     const protocol = await realProtocol(new Map([['metadata', metadata]]));
@@ -1413,7 +1413,9 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
 
     const { contract } = (await call(authoring, 'list_metadata_items', { type: 'knowledge_source', contract: true })).body;
     expect(contract.form).toBe('lean');
-    expect(contract.createSeed).toEqual(getMetadataCreateSeed('knowledge_source'));
+    // No seed is served: the type stays unseeded until the Studio form builds `source` (metadata-create-seeds.test.ts).
+    expect(getMetadataCreateSeed('knowledge_source')).toBeUndefined();
+    expect(contract).not.toHaveProperty('createSeed');
     expect(Object.keys(contract.schema.properties)).toEqual(Object.keys(entry.schema.properties));
 
     // The content rule, as the served schema states it: a non-empty list, no empty name, no `'*'` member.
@@ -1431,9 +1433,8 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
     expect(entry.schema.properties.id).toBeUndefined();
     expect(entry.schema.properties.source.properties.contentFields).toBeUndefined();
 
-    // The seed with one object and one content field filled saves as a draft; with a wildcard it is refused and nothing is written.
-    const seed = contract.createSeed as { name: string; source: Record<string, unknown> };
-    const item = { ...seed, name: 'crm_opportunity_notes', source: { ...seed.source, object: 'crm_opportunity', content: ['name'] } };
+    // A source with one object and one content field saves as a draft; with a wildcard it is refused and nothing is written.
+    const item = { name: 'crm_opportunity_notes', label: 'Opportunity notes', source: { kind: 'object', object: 'crm_opportunity', content: ['name'] } };
     const saved = await call(authoring, 'save_metadata_draft', { type: 'knowledge_source', name: item.name, item, package: STUDIO_BASE });
     expect(saved.isError, JSON.stringify(saved.body)).toBe(false);
     expect(saved.body.saved).toMatchObject({ type: 'knowledge_source', name: 'crm_opportunity_notes', package: STUDIO_BASE, state: 'draft' });
