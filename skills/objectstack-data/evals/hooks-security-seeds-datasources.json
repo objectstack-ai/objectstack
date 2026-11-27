@@ -376,6 +376,16 @@
         "must_contain": ["requiredPermissions", "maskingRule", "systemPermissions"],
         "must_not_contain": ["'employee.salary': { readable: false"]
       }
+    },
+    {
+      "id": 38,
+      "prompt": "`crm_contact` is a `private` object. Our `crm_sdr` permission set already reads every contact (`readScope: 'org'`) and grants `allowDelete`, yet an SDR deleting a contact an admin imported gets a 403. SDRs must be able to delete any contact in the organization. Fix the set.",
+      "expected_output": "`allowDelete` alone deletes only rows the caller created: every member carries the platform's `owner_only_deletes` floor (`created_by == current_user.id`), and `readScope: 'org'` widens reads, never deletes. On a `private` object the floor lifts where the sharing service allows the delete: owning the row, a write depth of `org`, or Modify All. So the grant becomes `crm_contact: { allowRead: true, allowDelete: true, readScope: 'org', writeScope: 'org' }` (or `modifyAllRecords: true` when the set should also bypass sharing everywhere on the object). An `edit` share or a sharing rule does not help: sharing widens rows, never the delete verb.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["writeScope: 'org'", "owner_only_deletes", "allowDelete: true"],
+        "must_not_contain": []
+      }
     }
   ]
 }
