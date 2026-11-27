@@ -3827,6 +3827,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-audit/src/audit-seal/audit-seal-retention-floor.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-audit/src/comment-routes.test.ts",
       "verb": "findOne",
       "pinned": 2

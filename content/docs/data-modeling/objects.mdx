@@ -283,15 +283,20 @@ it is sealed on every deployment whose `AuditPlugin` has a crypto provider.
   missing. The window is counted to the start of a UTC day, so a row can stay
   up to a day past it, and at most 10,000 such rows leave per object per sweep,
   so a backlog drains over several sweeps; once it has, a chain gains at most
-  one expiry amendment a day. A tenant-scoped retention window applies to
-  that organization's chain only where it is set on the chain column
-  (`tenant_id`, or `seal.chainField`). Every other chain keeps its rows to the
-  longest window configured: the chain of rows about no organization, and
-  every chain of an object whose windows are set on another column (an
-  `organization_id` beside a declared `tenant_id`), so on such an object a
-  shorter tenant window has no effect on its sealed rows. No row leaves before
-  the window set for it. While no sealer is running (no crypto provider), the
-  sweeper keeps them and says so once.
+  one expiry amendment a day. On a sealed object, a retention override cannot
+  shorten the declared window: an override of `retention.maxAge` or
+  `ttl.expireAfter` in the `lifecycle` settings, global or for one
+  organization, may lengthen it, and one below the declared window is
+  rejected, reported at `error`, and the declared window applies
+  (`archive.keep` takes no override). A tenant-scoped window is set on the
+  object's `organization_id` column, so it applies to that organization's
+  chain only on an object chained by that column
+  (`seal.chainField: 'organization_id'`). Every other chain keeps its rows to
+  the longest window configured: the chain of rows about no organization, and
+  every chain of an object chained by another column (the default
+  `tenant_id`), which may hold rows of several organizations. No row leaves
+  before the window set for it. While no sealer is running (no crypto
+  provider), the sweeper keeps them and says so once.
 - Sealing needs a crypto provider, which the host passes to `AuditPlugin` as
   `cryptoProvider`. `os serve` passes the one it seals every secret with; an
   app that puts its own `AuditPlugin` in `plugins` passes one itself. Without

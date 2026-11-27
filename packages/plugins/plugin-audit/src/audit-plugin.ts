@@ -22,6 +22,7 @@ import type {
 } from '@objectstack/spec/contracts';
 import { AUDIT_CHECKPOINT_SIGNER_SERVICE, AUDIT_CHECKPOINT_SINK_SERVICE } from '@objectstack/spec/contracts';
 import type { AuditExpiryRequest, AuditExpiryRun } from './audit-seal/expiry.js';
+import { registerSealedWindowFloors, type SealedFloorRegistrar } from './audit-seal/retention-floor.js';
 import { AuditSealer, type AuditSealerEngine } from './audit-seal/sealer.js';
 import { LocalCheckpointSigner } from './audit-seal/signer.js';
 import {
@@ -352,6 +353,11 @@ export class AuditPlugin implements Plugin {
   private sealer: AuditSealer | null = null;
   /** [ADR-0154 D8] Takes the sealer's expiry back off the lifecycle service, on `destroy()`. */
   private unregisterExpiryPrefix: (() => void) | null = null;
+  /**
+   * [ADR-0154 D8] Registers each sealed object's retention floors at its declared window
+   * (`audit-seal/retention-floor.ts`); set beside the expiry, run before every sealer pass.
+   */
+  private refreshSealedFloors: (() => void) | null = null;
 
   /**
    * [#31796] The credential-use writer, built in `init()` (the `audit` slot
@@ -921,11 +927,12 @@ export class AuditPlugin implements Plugin {
       sink: () => seam<IAuditCheckpointSink>(AUDIT_CHECKPOINT_SINK_SERVICE),
       cluster: () => seam<IClusterService>('cluster'),
       logger: ctx.logger,
+      beforePass: () => this.refreshSealedFloors?.(),
     });
-    this.sealer.start();
     // With no crypto provider nothing is sealed and no expiry can be signed: the
     // lifecycle service then keeps the sealed rows and says so (ADR-0154 D8).
-    if (crypto) this.registerExpiryPrefix(this.sealer, ctx);
+    if (crypto) this.registerExpiryPrefix(this.sealer, sealEngine, ctx);
+    this.sealer.start();
   }
 
   /**
@@ -935,9 +942,15 @@ export class AuditPlugin implements Plugin {
    * is (`ctx.getService('lifecycle')`). No lifecycle service ⇒ nothing sweeps,
    * so nothing expires. A lifecycle service with no sealed expiry keeps a
    * sealed object's rows past their policy and says so.
+   *
+   * Beside it, a retention floor for each sealed object at its declared window
+   * (`audit-seal/retention-floor.ts`): on a sealed object, a retention override
+   * cannot shorten the declared window. Registered now and again before every
+   * sealer pass, so the floors follow the registry as the pass does. A lifecycle
+   * service without floors gets no expiry either: its sealed rows are kept.
    */
-  private registerExpiryPrefix(sealer: AuditSealer, ctx: PluginContext): void {
-    type LifecycleLike = {
+  private registerExpiryPrefix(sealer: AuditSealer, engine: AuditSealerEngine, ctx: PluginContext): void {
+    type LifecycleLike = SealedFloorRegistrar & {
       registerExpiryPrefix?: (expiry: { plan(request: AuditExpiryRequest): Promise<AuditExpiryRun[]> }) => () => void;
     };
     let lifecycle: LifecycleLike | undefined;
@@ -947,6 +960,31 @@ export class AuditPlugin implements Plugin {
       return;
     }
     if (!lifecycle || typeof lifecycle.registerExpiryPrefix !== 'function') return;
+    if (typeof lifecycle.registerRetentionFloor !== 'function') {
+      ctx.logger.error(
+        'AuditPlugin: the lifecycle service takes a sealed-object expiry but no retention floors, so the sealed ' +
+          "objects' expiry is NOT registered and their rows are kept past their window. Fix: run a lifecycle " +
+          'service that supports retention floors (the one @objectstack/objectql ships).',
+      );
+      return;
+    }
+    const floors = lifecycle as Required<SealedFloorRegistrar>;
+    let failed: string | null = null;
+    this.refreshSealedFloors = () => {
+      try {
+        registerSealedWindowFloors(floors, engine.registry.getAllObjects());
+        failed = null;
+      } catch (err) {
+        const fault = String((err as Error)?.message ?? err);
+        if (failed === fault) return;
+        failed = fault;
+        ctx.logger.error(
+          `AuditPlugin: registering the sealed objects' retention floors FAILED (${fault}); until it succeeds a ` +
+            'retention override may shorten a sealed object\'s declared window. Retried before every sealer pass.',
+        );
+      }
+    };
+    this.refreshSealedFloors();
     // Called as a method: the service's registration reads its own state.
     this.unregisterExpiryPrefix = lifecycle.registerExpiryPrefix({ plan: (request) => sealer.expire(request) });
   }
@@ -1174,6 +1212,7 @@ export class AuditPlugin implements Plugin {
     this.sealer = null;
     this.unregisterExpiryPrefix?.();
     this.unregisterExpiryPrefix = null;
+    this.refreshSealedFloors = null;
     await sealer?.stop();
     const writer = this.readAuditWriter;
     this.readAuditWriter = null;

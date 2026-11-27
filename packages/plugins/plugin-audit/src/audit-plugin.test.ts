@@ -650,6 +650,7 @@ describe('AuditPlugin — hands its sealer\'s expiry to the lifecycle service (A
           registered.push(expiry);
           return () => void (unregistered += 1);
         },
+        registerRetentionFloor() {},
       },
     };
   };

@@ -186,6 +186,12 @@ export interface AuditSealerOptions {
   /** Resolved per pass: the `cluster` service, if any. */
   cluster?: () => IClusterService | undefined | Promise<IClusterService | undefined>;
   logger: AuditSealerLogger;
+  /**
+   * Run at the start of every pass, before the registry is read for the pass's plans. `AuditPlugin` refreshes
+   * the sealed objects' retention floors here (`retention-floor.ts`), so they follow the registry as the pass
+   * does. A throw is reported at `error` and the pass goes on.
+   */
+  beforePass?: () => void;
   now?: () => number;
   /**
    * Test seam, like `now`: a smaller {@link AUDIT_SEAL_MAX_LEAVES}, so a test
@@ -476,6 +482,13 @@ export class AuditSealer {
 
   /** One pass over every sealed object. Resolves to the number of checkpoints written. */
   async runPass(): Promise<number> {
+    try {
+      this.options.beforePass?.();
+    } catch (err) {
+      this.report(`before-pass:${faultOf(err)}`, () =>
+        `AuditSealer: the step run before each pass (beforePass) FAILED (${faultOf(err)}); the pass goes on, and the ` +
+          'step is retried on the next one.');
+    }
     const plans = this.plans();
     if (plans.length === 0) return 0;
     const seams = await this.resolveSeams();
