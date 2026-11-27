@@ -5108,22 +5108,16 @@ export class ObjectStackProtocolImplementation implements
     /**
      * [#22737] A NESTED-RELATION condition is evaluated on its TARGET object
      * (`ObjectQL.lowerRelationConditions` reads it as the caller), so the
-     * target is asked the spec's one exposure decision for
-     * {@link RELATION_CONDITION_TARGET_OPERATION}. A target it does not serve
-     * is REFUSED in the data door's own exposure answer: `404
-     * OBJECT_API_DISABLED` for the off switch, `405
-     * OBJECT_API_METHOD_NOT_ALLOWED` with the effective operation set for a
-     * whitelist. Refused, not withheld as {@link servedExpand} withholds:
-     * dropping a condition would widen the result, and a related object the
-     * caller may not read already answers this position with a refusal. The
-     * decision takes no caller. The target is named, as the `internal: true`
-     * refusal at this hop names it: it is the lookup's declared target.
-     *
-     * [#35427] Asked FIRST, before the exposure decision: a target that
-     * belongs to a disabled package (the registry's `isObjectPackageDisabled`,
-     * the data route's predicate) is refused `404 OBJECT_PACKAGE_DISABLED`,
-     * the answer its own route gives. A target both disabled and unexposed
-     * therefore answers the package refusal, in the direct route's order.
+     * target is asked FIRST [#35427] whether its package is disabled (the data
+     * route's predicate and order: `404 OBJECT_PACKAGE_DISABLED`, unexposed or
+     * not), then the spec's one exposure decision for
+     * {@link RELATION_CONDITION_TARGET_OPERATION}: `404 OBJECT_API_DISABLED` for
+     * the off switch, `405 OBJECT_API_METHOD_NOT_ALLOWED` with the effective
+     * operation set for a whitelist. Refused, not withheld as {@link servedExpand}
+     * withholds: dropping a condition would widen the result, and a related
+     * object the caller may not read already answers this position with a
+     * refusal. The decision takes no caller. The target is named, as the
+     * `internal: true` refusal at this hop names it: the lookup's declared target.
      */
     private refuseUnservedRelationTarget(target: string, param: string): void {
         // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
@@ -5143,13 +5137,11 @@ export class ObjectStackProtocolImplementation implements
      * `enable` block (`apiEnabled: false` answers 404, an `apiMethods` whitelist
      * that does not grant the verb answers 405); the expansion's target was
      * never asked, so `GET /data/{source}?$expand={lookup}` served the row
-     * fields of an object `GET /data/{target}` refuses. Every level is asked the
-     * spec's one decision, `canServeApiOperation(enable, 'get')`
-     * ({@link EXPANSION_TARGET_OPERATION} says why `get`), against that level's
-     * own target, and the decision takes no caller, so an administrator and a
-     * member get the same tree. [#35427] A target of a disabled package is
-     * withheld the same way ({@link servesExpansionTarget} asks both
-     * predicates), as its own route answers `404 OBJECT_PACKAGE_DISABLED`.
+     * fields of an object `GET /data/{target}` refuses. Every level's own target
+     * is asked the spec's one decision, `canServeApiOperation(enable, 'get')`
+     * ({@link EXPANSION_TARGET_OPERATION} says why `get`), and [#35427] whether
+     * its package is disabled (its route's `404 OBJECT_PACKAGE_DISABLED`); both
+     * take no caller, so an administrator and a member get the same tree.
      *
      * Withheld, not refused, and that is the precedent measured on this door: a
      * related record the caller may not READ is answered by the engine's
@@ -5180,10 +5172,7 @@ export class ObjectStackProtocolImplementation implements
         return servedExpand.call(host, source, expand, depth);
     }
 
-    /**
-     * [#22661] Does the target's declared exposure serve an expansion read of
-     * it, and [#35427] does its package serve it (not disabled)? Both must hold.
-     */
+    /** [#22661, #35427] Do the target's declared exposure and its package (not disabled) serve an expansion read of it? */
     private servesExpansionTarget(target: string): boolean {
         // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
         const readEngine = () => this.engine;
