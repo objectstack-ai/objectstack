@@ -1,5 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { readFileSync } from 'node:fs';
+
 import { describe, it, expect } from 'vitest';
 import { faultCauseChain, FAULT_CAUSE_DEPTH_LIMIT } from '@objectstack/types';
 import type { Logger } from '../contracts.js';
@@ -245,6 +247,12 @@ describe.each(LOGGERS)('parity — %s and faultCauseChain render one shape', (_n
         ['a deep chain', deep],
         ['a string cause', () => withCause('w', 'socket hang up')],
         ['an object cause', () => withCause('w', { code: 'ECONNRESET' })],
+        ['an object cause that carries its own cause', () => withCause('w', { code: 'E4', cause: new Error(ROOT) })],
+        ['an Error cause with an empty stack', () => {
+            const stackless = new Error(ROOT);
+            stackless.stack = '';
+            return withCause('w', stackless);
+        }],
         ['an object cause with secret-named fields', () => withCause('w', { code: 'E1', password: 'p', apiKey: 'k' })],
         ['field names under the default redact words, whole-word matched', () => withCause('w', {
             keys: ['a'], tokens: 3, monkey: 'm', keyword: 'k', secretary: 's', tokenizer: 't',
@@ -274,5 +282,28 @@ describe.each(LOGGERS)('parity — %s and faultCauseChain render one shape', (_n
         const error = make();
         // The record omits `causes` when the chain is empty; the fault log's helper answers `[]`.
         expect(recordOf(error).causes ?? []).toEqual(faultCauseChain(error));
+    });
+});
+
+/**
+ * The two redact word lists, read off `loggers.ts` itself. The behavioural
+ * fixtures above red a word dropped from this copy; these red a word added to
+ * it (the `@objectstack/types` and `@objectstack/core` copies carry the same
+ * pin in their own tests).
+ */
+describe('the redact word lists equal the fixture, in both directions', () => {
+    const source = readFileSync(new URL('../loggers.ts', import.meta.url), 'utf8');
+    const declaredWords = (declaration: RegExp): string[] => {
+        const matches = [...source.matchAll(declaration)];
+        expect(matches).toHaveLength(1);
+        return [...matches[0][1].matchAll(/'([^']*)'/g)].map((match) => match[1]).sort();
+    };
+
+    it('DEFAULT_REDACTED_WORDS', () => {
+        expect(declaredWords(/const DEFAULT_REDACTED_WORDS = \[([^\]]*)\]/g)).toEqual(['key', 'password', 'secret', 'token']);
+    });
+
+    it('CONCATENATED_SECRET_QUALIFIERS', () => {
+        expect(declaredWords(/const CONCATENATED_SECRET_QUALIFIERS = new Set\(\[([^\]]*)\]\)/g)).toEqual([...GLUED_QUALIFIERS].sort());
     });
 });
