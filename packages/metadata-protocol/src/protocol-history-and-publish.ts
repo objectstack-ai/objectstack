@@ -45,7 +45,7 @@ import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import { PREFLIGHT_AUDIT_CODE, withPendingAudit } from './protocol-audit-entry.js';
 import type { PublishMetaItemRequest } from './protocol-door-requests.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
-import { environmentActionPublishSlotRefusal, packagelessRowHeldBaseAddress } from './protocol-save.js';
+import { environmentActionPublishSlotRefusal, packagelessHolderRefusal, packagelessRowHeldBaseAddress } from './protocol-save.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { readPublishBackfillRequest } from './protocol-publish-backfill-request.js';
@@ -875,6 +875,23 @@ export class ProtocolHistoryAndPublishFacet {
                 const others = address.drafts.candidates.filter((id) => id !== address.key);
                 if (address.kind === 'none' && address.into !== null && others.length > 0) {
                     addressRefusal = packagelessPublishNoDraftRefusal(request.type, request.name, address.into, others);
+                }
+                // [ADR-0150 D3, the 2026-11-26 note] …and the holders, where a
+                // package-unbound row or draft is stored for the name, as the
+                // draft save naming no package judges them
+                // ({@link packagelessHolderRefusal}, its disabled-holders
+                // judgment only): of a name only disabled packages hold, that
+                // row or draft is their customization, hidden with them, and
+                // the promotion wrote the active row the next enable serves.
+                // Refused with the enable as the remedy, nothing written.
+                if (addressRefusal === undefined) {
+                    const active = await host.packagelessAddress(singularType, request.name, request.member, 'active');
+                    if (active.unbound || address.drafts.unbound) {
+                        addressRefusal = packagelessHolderRefusal(host, 'publish', request.type, singularType, request.name, request.member, {
+                            candidates: [...new Set([...active.candidates, ...address.drafts.candidates])],
+                            unbound: true,
+                        }, 'disabled-holders');
+                    }
                 }
             }
         }
