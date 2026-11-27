@@ -240,6 +240,16 @@
         "must_contain": ["?"],
         "must_not_contain": ["describe_object(", "aggregate_records(", "query_records(", "query_dataset("]
       }
+    },
+    {
+      "id": 25,
+      "prompt": "The user asked: \"What is the number of claims in each status?\" You called `list_datasets({ terms: ['claims', 'status'] })`. The answer lists the dataset `reimbursement` (label Reimbursement) with no `matches`; its `candidates` offer 'claims' the measures `claimed_amount`, labelled Claimed amount, and `claim_count`, labelled Claim count, and offer 'status' the dimension `claim_status`, labelled Claim status, and the dimension `trip_status` of the dataset `trip_plan` (label Trip plan). Its `nextStep` has `decision: 'candidates_only'`, `terms: ['claims', 'status']` and this `note`: \"claims\" matches no member exactly; possible readings: Claimed amount (dataset: Reimbursement); Claim count (dataset: Reimbursement). First check each such word against the question: a word you cut out of a longer phrase the user wrote, or reworded, is not asked about; call list_datasets once more with that phrase exactly as written, never the whole question. For a word that is the user's own, ask the user which one they mean, listing each one's label, dataset label and description (with a single reading, ask whether it is the one meant); do not pick one, never treat a reading as a match, and compute nothing until they answer. \"status\" matches no member exactly; it may name a grouping: Claim status (dataset: Reimbursement); Trip status (dataset: Trip plan). A possible grouping is not a question: do not ask the user about it, and it does not stop a matched measure; group the answer only as the question asks. What do you do next?",
+      "expected_output": "The next step is one more `list_datasets` call with `terms: ['number of claims', 'status']`, and no question to the user yet. \"claims\" is not the user's word for the thing: the user wrote \"number of claims\", and the first call cut that phrase down to its last noun. A question about a word the user did not write would ask them to choose between readings of the caller's own shortening, so the note sends the phrase again as written before anything is asked. The phrase is sent as the user wrote it: not the whole question, and not a synonym of the caller's choosing. What that second answer says is then followed like any other answer. If the phrase equals exactly one measure, that measure is computed with `query_dataset`, grouped by status as the question asks, and the reply cites its source. If the phrase still has only a measure among its candidates, the user is asked which reading they mean, listing each one's label, dataset label and description. If it matches nothing and has no candidate, the object query tools answer and the reply says no governed metric was used. Neither candidate is picked from the first answer, and nothing is computed from it. \"status\" is a possible grouping and is not asked about.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["list_datasets", "number of claims"],
+        "must_not_contain": ["Do you mean", "do you mean", "describe_object(", "aggregate_records(", "query_records("]
+      }
     }
   ]
 }

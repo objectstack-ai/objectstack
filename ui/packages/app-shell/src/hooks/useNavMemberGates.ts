@@ -72,6 +72,24 @@
  * is hidden. An entry without the key is evaluated exactly as before, with no
  * read and no wait.
  *
+ * ## An app's AI inquiry entry (objectstack#37833)
+ *
+ * An `ai:chat` entry (`type: 'component'`, `componentRef` `ai:chat`, ui
+ * ADR-0057 Amendment A4) opens a page that runs the platform `ask` agent. It
+ * is shown only to a member who can get an agent: the access-filtered agent
+ * catalog `useAiSurfaceEnabled` reads, which is empty on a deployment with no
+ * AI and for a member with no AI seat. Every surface whose `visible` evaluator
+ * is built here (the sidebar, so the phone's app menu; the landing; the
+ * palette; the `nav:menu` block) hides it the same way, and the landing falls
+ * to the next entry the member is shown. While the catalog has not answered
+ * the entry is hidden and reads as pending (`readEntry`), as an entry whose
+ * API read has not answered does: the landing holds rather than choosing, so
+ * the root neither opens the page and then leaves it, nor opens the next entry
+ * and then the page. The catalog is asked only while an app in the list, or
+ * the app being gated, carries such an entry; with none, nothing is asked and
+ * nothing changes. A direct link to the page is not gated: the page draws its
+ * own unavailable state.
+ *
  * Internal module: not re-exported by the package entry.
  */
 
@@ -89,6 +107,8 @@ import {
   type ApiFetch,
 } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
+import { AI_CHAT_COMPONENT_REF } from '@objectstack/spec/ui';
+import { useAiSurfaceEnabled } from './useAiSurface.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import {
   useExpressionContext,
@@ -236,6 +256,60 @@ function useNavEntryData(app: unknown): (entry: NavigationItem) => NavEntryDataR
   );
 }
 
+/** Is `entry` an app's AI inquiry page (`ai:chat`, ui ADR-0057 Amendment A4)? */
+function isAiChatNavEntry(entry: NavigationItem | undefined): boolean {
+  return (
+    !!entry &&
+    entry.type === 'component' &&
+    (entry as { componentRef?: unknown }).componentRef === AI_CHAT_COMPONENT_REF
+  );
+}
+
+/** Does `items` hold an `ai:chat` entry, at any group depth? */
+function treeHasAiChatEntry(items: unknown): boolean {
+  if (!Array.isArray(items)) return false;
+  return items.some(
+    (item) =>
+      !!item &&
+      typeof item === 'object' &&
+      (isAiChatNavEntry(item as NavigationItem) || treeHasAiChatEntry((item as { children?: unknown }).children)),
+  );
+}
+
+/** Does any app of `apps`, or `current`, carry an `ai:chat` entry in its `navigation` or an area's? */
+function appsCarryAiChatEntry(apps: unknown, current: unknown): boolean {
+  const list: unknown[] = Array.isArray(apps) ? [...apps, current] : [current];
+  return list.some((app) => {
+    if (!app || typeof app !== 'object') return false;
+    const { navigation, areas } = app as { navigation?: unknown; areas?: unknown };
+    if (treeHasAiChatEntry(navigation)) return true;
+    return (
+      Array.isArray(areas) &&
+      areas.some((area) => treeHasAiChatEntry(area && typeof area === 'object' ? (area as { navigation?: unknown }).navigation : undefined))
+    );
+  });
+}
+
+/** Where the member's agent stands for an `ai:chat` entry (objectstack#37833). */
+type AiChatEntryGate = 'pending' | 'shown' | 'hidden';
+
+const AI_CHAT_PENDING: NavEntryDataRead = { status: 'pending' };
+
+/**
+ * Whether this member is shown an `ai:chat` entry: `shown` when the
+ * access-filtered agent catalog serves them an agent, `hidden` when it has
+ * answered with none (no AI on the deployment, no AI seat, or the catalog
+ * read failed), `pending` until it answers. The catalog is asked only while
+ * `app` or an app of the list carries such an entry.
+ */
+function useAiChatEntryGate(app: unknown): AiChatEntryGate {
+  const { apps } = useMetadata();
+  const wanted = useMemo(() => appsCarryAiChatEntry(apps, app), [apps, app]);
+  const { enabled, isLoading } = useAiSurfaceEnabled({ enabled: wanted });
+  if (enabled) return 'shown';
+  return isLoading ? 'pending' : 'hidden';
+}
+
 /**
  * Should this navigation entry be drawn, as far as its `visible` goes? The one
  * decision every navigation surface of the shell makes (objectui#13029): an
@@ -284,11 +358,20 @@ function useNavVisibilityAndReads(app: unknown): {
 } {
   const { evaluator } = useExpressionContext();
   const scopeBound = useHasExpressionScope();
-  const readEntry = useNavEntryData(app);
+  const readEntryData = useNavEntryData(app);
+  // objectstack#37833 — an `ai:chat` entry is drawn only for a member who can
+  // get an agent, and is pending until the catalog says whether they can.
+  const aiChat = useAiChatEntryGate(app);
   const evaluate = useCallback(
     (expression: NavigationItem['visible'], entry?: NavigationItem) =>
-      navEntryVisible(expression, entry, evaluator, readEntry, scopeBound),
-    [evaluator, readEntry, scopeBound],
+      (aiChat === 'shown' || !isAiChatNavEntry(entry)) &&
+      navEntryVisible(expression, entry, evaluator, readEntryData, scopeBound),
+    [evaluator, readEntryData, scopeBound, aiChat],
+  );
+  const readEntry = useCallback(
+    (entry: NavigationItem): NavEntryDataRead =>
+      aiChat === 'pending' && isAiChatNavEntry(entry) ? AI_CHAT_PENDING : readEntryData(entry),
+    [readEntryData, aiChat],
   );
   return { evaluate, readEntry };
 }
@@ -309,7 +392,8 @@ export interface NavMemberGates {
  * The member's gates, with where each entry's API binding stands
  * (objectui#13097): the read state the `visible` evaluator is built on, so the
  * app root's landing can tell an entry that is hidden from one whose read has
- * not answered yet, without a read of its own.
+ * not answered yet, without a read of its own. An `ai:chat` entry reads as
+ * pending while the agent catalog has not answered (objectstack#37833).
  */
 export interface NavMemberGatesWithReads extends NavMemberGates {
   readEntry: (entry: NavigationItem) => NavEntryDataRead;
