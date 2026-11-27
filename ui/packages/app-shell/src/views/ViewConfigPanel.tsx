@@ -205,6 +205,19 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
         setAuthoredReads((n) => n + 1);
         onAfterChange?.();
     }, [onAfterChange]);
+    // objectstack#37648 — a refused save resolved with "reload" re-reads the
+    // stored view into the buffer (`handleAfterChange`); the draft that read
+    // finds is the one the draft bar now shows, so the read hands the bar its
+    // version (`reloadedDraft`) and the bar's Publish is pinned to it.
+    const conflictReloadRef = useRef(false);
+    const [reloadedDraft, setReloadedDraft] = useState<{ signal: number; version?: string; hasDraft: boolean }>({
+        signal: 0,
+        hasDraft: false,
+    });
+    const handleConflictReload = useCallback(() => {
+        conflictReloadRef.current = true;
+        handleAfterChange();
+    }, [handleAfterChange]);
     // objectstack#36137 — the draft-version guard of this panel's buffer
     // (`useDraftSaveGuard`): the pin of the draft it was loaded from, then of
     // each save it sent, and the conflict dialog a refused save opens.
@@ -214,7 +227,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
         forget: forgetDraftVersion,
         heldDraftVersion,
         dialog: draftConflictDialog,
-    } = useDraftSaveGuard(metadataClient, handleAfterChange);
+    } = useDraftSaveGuard(metadataClient, handleConflictReload);
     useEffect(() => {
         if (!open || !readsAuthored) return;
         const id = activeView.id;
@@ -222,6 +235,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
         setSeed({ for: id, state: 'loading' });
         (async () => {
             let next: AuthoredSeed;
+            let foundDraft = false;
             try {
                 // objectstack#36137 — the served draft read is the envelope, so
                 // its `version` pins this buffer's saves (`draftPinOf`), at the
@@ -231,6 +245,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                     metadataClient.getDraft('view', id),
                 ]);
                 const servedDraft = unwrapDraftBody(draftAnswer);
+                foundDraft = servedDraft !== null;
                 const authored = authoredBuffer('view', layers as AuthoredLayers, servedDraft);
                 if (authored.kind === 'unserved') {
                     next = { for: id, state: 'refused', message: tStudio('engine.studio.refusal.draftUnreadable', locale) };
@@ -266,6 +281,21 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
             // next save sends; a read that installs none leaves nothing held.
             if (next.state === 'ready') recordDraftRead('view', id, null, next.pin);
             else forgetDraftVersion();
+            // objectstack#37648 — this read answers a conflict's "reload": the
+            // draft bar takes the draft it found. A read that could not
+            // install a buffer hands the bar nothing, so its Publish stays
+            // pinned to the draft it showed and is refused, never unpinned.
+            if (conflictReloadRef.current) {
+                conflictReloadRef.current = false;
+                if (next.state === 'ready') {
+                    const pin = next.pin;
+                    setReloadedDraft((prev) => ({
+                        signal: prev.signal + 1,
+                        version: pin && 'ifMatch' in pin ? pin.ifMatch : undefined,
+                        hasDraft: foundDraft,
+                    }));
+                }
+            }
             setSeed(next);
         })();
         return () => { cancelled = true; };
@@ -506,6 +536,9 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                         dirty={isDirty}
                         savedSignal={savedSignal}
                         savedDraftVersion={savedDraftVersion}
+                        reloadedSignal={reloadedDraft.signal}
+                        reloadedDraftVersion={reloadedDraft.version}
+                        reloadedHasDraft={reloadedDraft.hasDraft}
                         onAfterChange={handleAfterChange}
                     />
                 )}
