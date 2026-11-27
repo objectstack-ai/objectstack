@@ -1,9 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { defineForm } from './view.zod';
+import { defineMetadataForm } from './view.zod';
 import { defaultPeriodOptions } from './default-period-options';
 
-export const dashboardForm = defineForm({
+export const dashboardForm = defineMetadataForm({
   schemaId: 'dashboard',
   type: 'simple',
   sections: [
@@ -148,7 +148,7 @@ export const dashboardForm = defineForm({
     {
       // The audience gate (#34908, ruling 7103739693 letter B): the existing,
       // server-enforced `requiredPermissions`, given an authoring row — the
-      // list view's row in `view.form.ts`, worded for a dashboard.
+      // list view's row in `view.metadata-form.ts`, worded for a dashboard.
       label: 'Access',
       description: 'Who can see this dashboard.',
       collapsible: true,

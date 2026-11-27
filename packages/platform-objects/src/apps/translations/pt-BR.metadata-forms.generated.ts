@@ -1668,6 +1668,9 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     }
   },
+  form: {
+    label: "Formulário"
+  },
   page: {
     label: "Página",
     sections: {

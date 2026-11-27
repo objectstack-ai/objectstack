@@ -285,8 +285,8 @@
     "VectorStoreProvider": "src/ai/embedding.zod.ts#VectorStoreProvider (type)",
     "VectorStoreProviderSchema": "src/ai/embedding.zod.ts#VectorStoreProviderSchema (const)",
     "VectorStoreSchema": "src/ai/embedding.zod.ts#VectorStoreSchema (const)",
-    "agentForm": "src/ai/agent.form.ts#agentForm (const)",
-    "aiContextForm": "src/ai/ai-context.form.ts#aiContextForm (const)",
+    "agentForm": "src/ai/agent.metadata-form.ts#agentForm (const)",
+    "aiContextForm": "src/ai/ai-context.metadata-form.ts#aiContextForm (const)",
     "aiContextWhereFields": "src/ai/ai-context.zod.ts#aiContextWhereFields (function)",
     "defineAgent": "src/ai/agent.zod.ts#defineAgent (function)",
     "defineSkill": "src/ai/skill.zod.ts#defineSkill (function)",
@@ -298,8 +298,8 @@
     "headingsOf": "src/ai/record-body-anchor.ts#headingsOf (function)",
     "scopesToAgentPermissionSets": "src/ai/mcp.zod.ts#scopesToAgentPermissionSets (function)",
     "skillBindsRecordContextTool": "src/ai/skill.zod.ts#skillBindsRecordContextTool (function)",
-    "skillForm": "src/ai/skill.form.ts#skillForm (const)",
+    "skillForm": "src/ai/skill.metadata-form.ts#skillForm (const)",
     "stripBodyTags": "src/ai/record-body-anchor.ts#stripBodyTags (function)",
-    "toolForm": "src/ai/tool.form.ts#toolForm (const)"
+    "toolForm": "src/ai/tool.metadata-form.ts#toolForm (const)"
   }
 }

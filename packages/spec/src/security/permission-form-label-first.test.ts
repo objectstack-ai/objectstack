@@ -16,7 +16,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { METADATA_FORM_REGISTRY } from '../system/metadata-form-registry';
-import { permissionForm } from './permission.form';
+import { permissionForm } from './permission.metadata-form';
 import { PermissionSetSchema } from './permission.zod';
 
 type Row = { field: string; required?: boolean; helpText?: string };

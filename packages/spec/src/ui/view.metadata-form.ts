@@ -22,9 +22,9 @@
  * cannot go missing from the panel.
  */
 
-import { defineForm } from './view.zod';
+import { defineMetadataForm } from './view.zod';
 
-export const viewForm = defineForm({
+export const viewForm = defineMetadataForm({
   schemaId: 'view',
   type: 'simple',
   sections: [

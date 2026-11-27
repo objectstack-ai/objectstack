@@ -1,13 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { defineForm } from './view.zod';
+import { defineMetadataForm } from './view.zod';
 
 /**
  * Action Metadata Form
  * 
  * Form layout for creating/editing action metadata definitions.
  */
-export const actionForm = defineForm({
+export const actionForm = defineMetadataForm({
   schemaId: 'action',
   type: 'simple',
   sections: [
@@ -47,7 +47,7 @@ export const actionForm = defineForm({
           type: 'composite',
           visibleWhen: "data.type == 'script'",
           helpText: 'Either an L1 expression or an L2 sandboxed JS body',
-          // Mirrors hook.form.ts: `body` is a discriminated union
+          // Mirrors hook.metadata-form.ts: `body` is a discriminated union
           // (HookBodySchema) on `language`, not a bare string. A flat
           // `widget: 'code'` fed the whole object to the editor and rendered
           // "[object Object]". Render the union as language + source (+ the
@@ -145,7 +145,7 @@ export const actionForm = defineForm({
         ] },
         // #19332 G1b (ruling 5861442317, G1) — `patch` is a string-keyed record of
         // values, so it takes `json`, the hint every structured row carries
-        // (`object.form.ts` `validations`); the renderer opens the raw JSON
+        // (`object.metadata-form.ts` `validations`); the renderer opens the raw JSON
         // editor for a record node. Its gate is `undoable`'s: the parse refuses
         // `patch` on an action without `operation: 'update'`, so the control is
         // shown exactly where the value is accepted.
@@ -157,7 +157,7 @@ export const actionForm = defineForm({
         // served schema and the contract rides the help text.
         { field: 'execution', helpText: "The bulk dispatch contract this action's body is written for: 'perRecord' sends one dispatch per selected row carrying that row's recordId; 'aggregate' sends ONE dispatch for the whole selection, with every id in params._selectedIds. Omitted, the action is dispatched per record." },
         // #19332 G1b — `description` is an I18nLabel (a string, or an inline
-        // locale map), the node `page.form.ts` `description` carries, so it copies
+        // locale map), the node `page.metadata-form.ts` `description` carries, so it copies
         // that row: `widget: 'textarea'`. A passthrough hint, so a stored locale
         // map resolves to its own branch and opens the raw JSON editor rather
         // than being read as text.
@@ -231,7 +231,7 @@ export const actionForm = defineForm({
         // every member IS a row of the reach table the parse step lowers from.
         { field: 'requiresMembershipReach', helpText: 'The organization endpoint this action calls, so it is offered only to members whose grade reaches that endpoint. It is lowered into the `visible` predicate at parse time and stripped from the output, so no downstream consumer ever sees the key.' },
         // #19332 G1b — the RBAC gate, beside the feature gate. `string[]`, so the
-        // `app.form.ts` `requiredPermissions` face (`string-tags`).
+        // `app.metadata-form.ts` `requiredPermissions` face (`string-tags`).
         { field: 'requiredPermissions', widget: 'string-tags', helpText: 'Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to invoke this action (ADR-0066 D4). The platform action door refuses anyone else with 403 on every call it dispatches, the MCP/AI path included, and the button is hidden from them. A type api action\'s endpoint stays directly reachable, so it must still check these capabilities itself; for an api action with an off-origin target the platform checks nothing server-side.' },
         // `shortcut` input removed with the key (#3896 close-out) — a form
         // input for an unenforced capability is the UI half of false compliance.

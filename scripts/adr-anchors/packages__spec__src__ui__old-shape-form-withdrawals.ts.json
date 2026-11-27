@@ -1,0 +1,8 @@
+{
+  "file": "packages/spec/src/ui/old-shape-form-withdrawals.ts",
+  "adrs": [
+    "ADR-0159",
+    "ADR-0087"
+  ],
+  "invariant": "ADR-0159 D6 rule 10, D7 (ruled question 4 = A): THE reader of a withdrawal held in an old-shape `view` body (a container's `form`, a `formViews` entry, a `viewKind: 'form'` item), read through the projection under the name each form is served as. It is exempt from the ADR-0087 age-out and leaves only by a release whose upgrade precheck refuses a deployment still holding an old-shape form row: a permission boundary, since no withdrawn public form may re-open. It is not an ADR-0087 conversion-layer entry, so no retirement clock starts on it; removing or narrowing it re-opens forms an old-shape row withdrew."
+}

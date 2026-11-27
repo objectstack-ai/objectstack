@@ -86,6 +86,7 @@ import { findHierarchyScopeGrants, type TenancyPosture } from '@objectstack/spec
 // location and in the words the admin read uses.
 import {
     anonymousFormIntakeCandidates,
+    anonymousFormIntakeSlug,
     anonymousFormIntakeUnavailability,
     anonymousFormIntakeUnavailableMessage,
     anonymousFormIntakeUnavailableRemedy,
@@ -430,7 +431,31 @@ export function findPublicFormIntakeGaps(args: {
     /** The tenancy posture IN FORCE (`anonymousFormIntakePosture`); absent = no tenancy service. */
     tenancyPostureInForce?: TenancyPosture;
 }): RuntimeAuthoringIssue[] {
-    if (args.type !== 'view' || !isRec(args.body)) return [];
+    if (!isRec(args.body)) return [];
+    // [ADR-0159 D6 rule 9] A `form` write is judged as the same form in a
+    // `view` write is: the form itself is its one candidate, at `forms[0]`.
+    if (args.type === 'form') {
+        const form = args.body;
+        const slug = anonymousFormIntakeSlug(form.sharing);
+        const object = typeof form.object === 'string' && form.object ? form.object : undefined;
+        if (slug === null || object === undefined) return [];
+        const unavailable = anonymousFormIntakeUnavailability(
+            object,
+            args.tenancyPostureInForce,
+            (): unknown => args.objects.find((o) => isRec(o) && o.name === object),
+        );
+        if (!unavailable) return [];
+        const formName = typeof form.name === 'string' && form.name ? form.name : args.name;
+        return [{
+            severity: 'warning',
+            rule: PUBLIC_FORM_INTAKE_UNAVAILABLE,
+            where: `form "${formName}" · public form "/forms/${slug}"`,
+            path: 'forms[0].sharing',
+            message: anonymousFormIntakeUnavailableMessage(slug, unavailable),
+            hint: anonymousFormIntakeUnavailableRemedy(unavailable),
+        }];
+    }
+    if (args.type !== 'view') return [];
     const view = args.body;
     const candidates = anonymousFormIntakeCandidates(view);
     if (candidates.length === 0) return [];
@@ -1642,7 +1667,7 @@ export function evaluateRuntimeAuthoringGate(args: {
     const rulesRun = [
         ...result.rulesRun,
         ...(args.type === 'flow' ? [FLOW_UNDECLARED_CYCLE, PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING] : []),
-        ...(args.type === 'view' ? [PUBLIC_FORM_INTAKE_UNAVAILABLE] : []),
+        ...(args.type === 'view' || args.type === 'form' ? [PUBLIC_FORM_INTAKE_UNAVAILABLE] : []),
         ...(args.type === 'permission' && args.hierarchyResolverMounted !== undefined
             ? [HIERARCHY_SCOPE_CAPABILITY_REQUIRED]
             : []),

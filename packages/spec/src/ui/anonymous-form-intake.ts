@@ -232,3 +232,25 @@ export function anonymousFormIntakeWithdrawnIn(
   }
   return false;
 }
+
+/** One withdrawal a layer holds: the served name it closes, and the slug its body names. */
+export interface FormWithdrawal {
+  name: string;
+  slug: string;
+}
+
+/**
+ * The slug a form body EXPLICITLY withdraws: its `sharing` keeps a non-empty
+ * `publicLink` and sets `enabled === false` or `allowAnonymous === false`.
+ * Absent switches are not a withdrawal; a cleared link withdraws nothing (the
+ * rule `anonymousFormIntakeWithdrawnIn` applies to a `view` body).
+ */
+export function formExplicitlyWithdraws(form: unknown): string | undefined {
+  const sharing = (form as { sharing?: unknown } | null)?.sharing;
+  if (!sharing || typeof sharing !== 'object') return undefined;
+  const s = sharing as Record<string, unknown>;
+  if (typeof s.publicLink !== 'string' || !s.publicLink) return undefined;
+  if (s.enabled !== false && s.allowAnonymous !== false) return undefined;
+  return publicFormSlug(s.publicLink);
+}
+

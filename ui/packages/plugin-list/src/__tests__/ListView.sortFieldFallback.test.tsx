@@ -184,10 +184,10 @@ describe('objectui#4243 part 1 — the sort picker no longer reuses `filterableF
     // deciding this: before the fix the unwhitelisted set already contained
     // every field, and `Total Amount` was offered here.
     //
-    // objectstack `packages/metadata-protocol/src/protocol.ts`
-    // `UNMATERIALIZED_SORT_TYPES` — a formula value is computed on read, no
-    // driver materialises a column for it, and since objectstack#6994 a sort
-    // naming one is a hard 400.
+    // objectstack's sort doors (`assertSortFieldsExist`, judged by
+    // `isVirtualSearchField` from `@objectstack/spec/data`) — a formula value
+    // is computed on read, no driver materialises a column for it, and since
+    // objectstack#6994 a sort naming one is a hard 400.
     await renderList({ sort: [{ field: 'name', order: 'asc' }] });
     await openSortPanel();
 

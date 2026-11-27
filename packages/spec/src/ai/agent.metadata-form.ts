@@ -1,13 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { defineForm } from '../ui/view.zod';
+import { defineMetadataForm } from '../ui/view.zod';
 
 /**
  * Agent Metadata Form
  * 
  * Form layout for creating/editing AI agent metadata definitions.
  */
-export const agentForm = defineForm({
+export const agentForm = defineMetadataForm({
   schemaId: 'agent',
   type: 'simple',
   sections: [

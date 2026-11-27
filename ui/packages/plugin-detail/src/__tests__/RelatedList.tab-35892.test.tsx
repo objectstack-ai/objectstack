@@ -265,7 +265,7 @@ describe('the related tab is the child object\'s full list (objectstack#35892)',
     await waitFor(() => expect(grid()?.schema.data.items).toHaveLength(12));
     act(() => grid().props.onBulkDelete(ROWS.slice(0, 3)));
     fireEvent.click(await screen.findByText('Delete', { selector: '[data-related-bulk-delete-confirm]' }));
-    expect((await screen.findByRole('status')).textContent).toBe('2 deleted, 1 failed');
+    expect((await screen.findByRole('status')).querySelector('p')?.textContent).toBe('2 deleted, 1 failed');
     first.unmount();
     h.byType = {};
 
@@ -276,7 +276,65 @@ describe('the related tab is the child object\'s full list (objectstack#35892)',
     act(() => grid().props.onBulkDelete(ROWS.slice(0, 3)));
     fireEvent.click(await screen.findByText('Delete', { selector: '[data-related-bulk-delete-confirm]' }));
     await waitFor(() => expect(onRowDelete).toHaveBeenCalledTimes(3));
-    expect((await screen.findByRole('status')).textContent).toBe('2 deleted, 1 failed');
+    expect((await screen.findByRole('status')).querySelector('p')?.textContent).toBe('2 deleted, 1 failed');
+  });
+
+  // objectstack#37816 — the outcome says why, by the list page's rule (#37758):
+  // one line per distinct reason, led by the names of the rows it refused.
+  const reasonLines = async () =>
+    Array.from((await screen.findByRole('status')).querySelectorAll('[data-related-bulk-delete-reasons] li')).map((li) => li.textContent);
+  const RESTRICT = 'Cannot delete: referenced by 2 line items';
+
+  it('a refused batch lists each reason under the names of the rows it refused', async () => {
+    const ds = Object.assign(dataSourceFor(), {
+      bulkDelete: vi.fn(async () => ({
+        succeeded: 1,
+        errors: [
+          { id: 'q2', error: RESTRICT },
+          { id: 'q3', error: 'Record is locked' },
+          { id: 'q4', error: RESTRICT },
+        ],
+      })),
+    });
+    render(<Tab dataSource={ds} onRowDelete={vi.fn()} />);
+    await waitFor(() => expect(grid()?.schema.data.items).toHaveLength(12));
+    act(() => grid().props.onBulkDelete(ROWS.slice(0, 4)));
+    fireEvent.click(await screen.findByText('Delete', { selector: '[data-related-bulk-delete-confirm]' }));
+    expect((await screen.findByRole('status')).querySelector('p')?.textContent).toBe('1 deleted, 3 failed');
+    expect(await reasonLines()).toEqual([`Quote 2, Quote 4: ${RESTRICT}`, 'Quote 3: Record is locked']);
+  });
+
+  it('row by row, each rejection is a reason; a batch call that throws gives its error for every row', async () => {
+    const onRowDelete = vi.fn(async (row: any) => { if (row.id !== 'q1') throw new Error(RESTRICT); });
+    const first = render(<Tab dataSource={dataSourceFor()} onRowDelete={onRowDelete} />);
+    await waitFor(() => expect(grid()?.schema.data.items).toHaveLength(12));
+    act(() => grid().props.onBulkDelete(ROWS.slice(0, 3)));
+    fireEvent.click(await screen.findByText('Delete', { selector: '[data-related-bulk-delete-confirm]' }));
+    await waitFor(() => expect(onRowDelete).toHaveBeenCalledTimes(3));
+    expect(await reasonLines()).toEqual([`Quote 2, Quote 3: ${RESTRICT}`]);
+    first.unmount();
+    h.byType = {};
+
+    const thrown = Object.assign(dataSourceFor(), { bulkDelete: vi.fn(async () => { throw new Error('Service unavailable'); }) });
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<Tab dataSource={thrown} onRowDelete={vi.fn()} />);
+    await waitFor(() => expect(grid()?.schema.data.items).toHaveLength(12));
+    act(() => grid().props.onBulkDelete(ROWS.slice(0, 2)));
+    fireEvent.click(await screen.findByText('Delete', { selector: '[data-related-bulk-delete-confirm]' }));
+    expect((await screen.findByRole('status')).querySelector('p')?.textContent).toBe('0 deleted, 2 failed');
+    expect(await reasonLines()).toEqual(['Quote 1, Quote 2: Service unavailable']);
+    spy.mockRestore();
+  });
+
+  it('CONTROL: a batch that names no reason keeps the bare count, with no reason list', async () => {
+    const ds = Object.assign(dataSourceFor(), { bulkDelete: vi.fn(async () => 2) });
+    render(<Tab dataSource={ds} onRowDelete={vi.fn()} />);
+    await waitFor(() => expect(grid()?.schema.data.items).toHaveLength(12));
+    act(() => grid().props.onBulkDelete(ROWS.slice(0, 3)));
+    fireEvent.click(await screen.findByText('Delete', { selector: '[data-related-bulk-delete-confirm]' }));
+    const status = await screen.findByRole('status');
+    expect(status.textContent).toBe('2 deleted, 1 failed');
+    expect(status.querySelector('[data-related-bulk-delete-reasons]')).toBeNull();
   });
 
   it('is held per reader: another account signed in on the same record starts from the default', async () => {

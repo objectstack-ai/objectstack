@@ -50,6 +50,10 @@ const NOT_A_CREDENTIAL: Readonly<Record<string, string>> = {
   'datasource:external.connector':
     'the NAME of a declared connector instance (snake_case, pattern-checked); the credential it lends stays on '
     + 'that instance, referenced by its own `auth.credentialRef` (ADR-0015 amendment D7)',
+  'form:sharing.password':
+    'the form view\'s own `SharingConfigSchema.password`, carried onto the `form` item by reference (ADR-0159 D2) and '
+    + 'served unmarked on every `view` form slot today; marking it changes what both types serve, so it is decided once '
+    + 'for the shared schema (named in the #37086 report), not for one of its two carriers',
 };
 
 const CREDENTIAL_WORDS = new Set([

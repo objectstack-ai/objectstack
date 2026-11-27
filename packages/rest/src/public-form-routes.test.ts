@@ -22,7 +22,12 @@ import { RestServer } from './rest-server';
 // hook -- both of which vitest clocks, while collection is clocked against nothing. See
 // `scripts/check-test-source-alias.mjs` (the clocked-window rule) and #10115 / PR #10120,
 // where the same shape cost 30 ejected merge-queue builds in one night.
-import '@objectstack/spec/ui';
+import { projectedFormsOf } from '@objectstack/spec/ui';
+
+// Pay the first transform of `@objectstack/objectql`, which the route source
+// reaches through a dynamic `import()`, at MODULE LOAD rather than inside a
+// clocked `it()` body (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/objectql';
 
 function mockServer() {
   return {
@@ -93,6 +98,7 @@ function buildServer(sections: any[] | undefined, object: any = ticketObject) {
     getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     getMetaItems: vi.fn(async ({ type }: { type: string }) => {
+      if (type === 'form') return projectedFormsOf([formView(sections)]);
       if (type === 'view') return [formView(sections)];
       if (type === 'object') return [object];
       return [];
@@ -473,6 +479,7 @@ describe('[#21180] GET /forms/:slug/lookup/:field is gone — it answers what an
       getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
       getMetaTypes: vi.fn().mockResolvedValue([]),
       getMetaItems: vi.fn(async ({ type }: { type: string }) => {
+        if (type === 'form') return projectedFormsOf([formView([{ fields: ['subject', 'owner_id'] }])]);
         if (type === 'view') return [formView([{ fields: ['subject', 'owner_id'] }])];
         if (type === 'object') return [ticketObject];
         return [];

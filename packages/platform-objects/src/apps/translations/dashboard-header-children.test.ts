@@ -4,7 +4,7 @@
 // children and the `header.actions[]` ROW properties, in every locale.
 //
 // Before this pin the four generated catalogs carried `header` alone: the
-// extractor walks a form field's DECLARED `fields`, `dashboard.form.ts`
+// extractor walks a form field's DECLARED `fields`, `dashboard.metadata-form.ts`
 // declared none under `header`, so no `header.<child>` key was ever emitted
 // and the only localisation of those three children was a private overlay in
 // objectui. The row properties had no channel at all — a repeater's column
@@ -50,7 +50,7 @@ const HEADER_CHILDREN = ['header.showTitle', 'header.showDescription', 'header.a
 const ROW_PROPERTIES = ['label', 'actionUrl', 'actionType', 'icon'];
 const ROW_KEYS = ROW_PROPERTIES.map((p) => `header.actions.${p}`);
 
-/** The `actions` repeater as `dashboard.form.ts` declares it, children included. */
+/** The `actions` repeater as `dashboard.metadata-form.ts` declares it, children included. */
 function declaredActionsRepeater(): any {
   for (const section of (dashboardForm as any).sections ?? []) {
     for (const field of section.fields ?? []) {
@@ -83,7 +83,7 @@ describe('#16458 — dashboard header children and row properties in every catal
 
   it('en: each row-property leaf is the form\'s declared label, the English name the panel reads', () => {
     const repeater = declaredActionsRepeater();
-    expect(repeater, 'dashboard.form.ts declares header.actions with children').toBeDefined();
+    expect(repeater, 'dashboard.metadata-form.ts declares header.actions with children').toBeDefined();
     const declared = new Map<string, string>(
       (repeater.fields as any[]).map((f) => [String(f.field), String(f.label)]),
     );
@@ -115,7 +115,7 @@ describe('#16458 — dashboard header children and row properties in every catal
 // #14478) and is now a `retiredKey` tombstone — authoring it is a parse error
 // (`packages/spec/src/ui/dashboard.test.ts` pins the refusal). The live
 // authorable key is `refreshIntervalSeconds`, which is what these catalogs and
-// `dashboard.form.ts` already name.
+// `dashboard.metadata-form.ts` already name.
 //
 // The card's reading came from a substring: `refreshInterval` "occurs" in
 // `dashboard.zod.ts` only inside `refreshIntervalSeconds`, in the rename

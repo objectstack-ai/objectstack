@@ -324,9 +324,9 @@ export * from './seed-file.zod';
 export * from './seed.zod';
 
 // Form Layouts
-export { objectForm } from './object.form';
-export { fieldForm } from './field.form';
-export { hookForm } from './hook.form';
+export { objectForm } from './object.metadata-form';
+export { fieldForm } from './field.metadata-form';
+export { hookForm } from './hook.metadata-form';
 
 // Seed Loader Protocol (Relationship Resolution & Dependency Ordering)
 export * from './seed-loader.zod';

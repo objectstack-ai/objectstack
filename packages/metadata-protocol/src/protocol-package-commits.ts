@@ -119,6 +119,49 @@ function storedGrantObjectKeys(stored: unknown): string[] {
     return objects && typeof objects === 'object' && !Array.isArray(objects) ? Object.keys(objects) : [];
 }
 
+/** A plan item's type as the registry keys it: `views` and `view` are one type. */
+const singularPlanType = (item: { type: string }): string => PLURAL_TO_SINGULAR[item.type] ?? item.type;
+
+/** A `view` row the commit edited (it stood before the commit): the revert restores it. */
+const isEditedViewItem = (item: CommitPlanItem): boolean => singularPlanType(item) === 'view' && item.existedBefore;
+
+/**
+ * [ADR-0159 D5, ADR-0067 D3] The order `revertCommit` walks a commit's plan
+ * in: newest first, with every `form` item walked after every `view` row the
+ * commit edited. A `form` publish records each old-shape `view` row it
+ * removed or re-saved as an edited row of the same commit, and the plan does
+ * not say which form a row carried, so a `form` item is taken back only once
+ * all of them have been walked ({@link editedViewsNotPutBack}). Every other
+ * item keeps its place.
+ */
+export function revertWalkOrder(items: readonly CommitPlanItem[]): CommitPlanItem[] {
+    const reversed = [...items].reverse();
+    let lastEditedView = -1;
+    reversed.forEach((item, at) => { if (isEditedViewItem(item)) lastEditedView = at; });
+    if (lastEditedView < 0) return reversed;
+    const head = reversed.slice(0, lastEditedView + 1);
+    return [
+        ...head.filter((item) => singularPlanType(item) !== 'form'),
+        ...head.filter((item) => singularPlanType(item) === 'form'),
+        ...reversed.slice(lastEditedView + 1),
+    ];
+}
+
+/**
+ * [ADR-0159 D5, ADR-0067 D3] The `view` rows of a commit's plan that the
+ * commit edited and that this revert has reported in `failed[]`: rows that do
+ * not stand again as they stood before the commit. While one does, no `form`
+ * item of the commit is taken back: the form stays as published, so an undo
+ * never leaves an address with neither the form nor the row that carried it.
+ */
+export function editedViewsNotPutBack(
+    items: readonly CommitPlanItem[],
+    failed: ReadonlyArray<{ type: string; name: string }>,
+): string[] {
+    const edited = new Set(items.filter(isEditedViewItem).map((item) => item.name));
+    return [...new Set(failed.filter((f) => singularPlanType(f) === 'view' && edited.has(f.name)).map((f) => f.name))];
+}
+
 export class ProtocolPackageCommitsFacet {
     /** The body of `ObjectStackProtocolImplementation#revertStoredPackage`; the method's docblock there is its contract. */
     static async revertStoredPackage(host: Pick<ProtocolHost, 'discardDraftInItsScope' | 'ensureOverlayIndex' | 'findEnvironmentRows' | 'getOverlayRepo' | 'refuseOrganizationScopedWrite' | 'rethrowUnlessMetadataStoreUnprovisioned'>, request: {
@@ -1249,8 +1292,26 @@ export class ProtocolPackageCommitsFacet {
         const advisories: RuntimeAuthoringIssue[] = [];
 
         // Reverse apply order so artifacts that depend on others (e.g. a view on
-        // a new object) are removed before the thing they reference.
-        for (const it of [...items].reverse()) {
+        // a new object) are removed before the thing they reference; every
+        // `form` item after the `view` rows the commit edited (ADR-0159 D5).
+        for (const it of revertWalkOrder(items)) {
+            // [ADR-0159 D5, ADR-0067 D3] A `form` item is taken back only once
+            // every `view` row the commit edited stands again: one that could
+            // not be put back keeps the form as published, reported here with
+            // nothing written for it.
+            const notPutBack = singularPlanType(it) === 'form' ? editedViewsNotPutBack(items, failed) : [];
+            if (notPutBack.length > 0) {
+                failed.push({
+                    type: it.type,
+                    name: it.name,
+                    error: `Commit item '${it.type}/${it.name}' was not reverted: the view row${notPutBack.length > 1 ? 's' : ''} `
+                        + `${notPutBack.map((n) => `'${n}'`).join(', ')} this commit also edited could not be put back, and a `
+                        + 'form is taken back only once every view row its commit edited stands again. Nothing was written '
+                        + 'for it, so the form stays as published. The entry for each such row here says why it was '
+                        + 'not put back.',
+                });
+                continue;
+            }
             // The version this item restores to, or `null` when it does not take
             // the restore limb at all — bound ONCE (#9174), because the pre-flight
             // below and the `else if` further down must never drift apart: a gate
@@ -1735,7 +1796,9 @@ export class ProtocolPackageCommitsFacet {
                         // [#37130] The platform's own record is never restored:
                         // refused into `failed[]` as {@link rollbackMetaItem}
                         // refuses it, nothing written; the commit's other items
-                        // still revert (ADR-0067 D3).
+                        // still revert (ADR-0067 D3), except its `form` items,
+                        // which wait for every `view` row the commit edited and
+                        // stay as published while one is not put back (ADR-0159 D5).
                         refusePlatformRecord: true,
                     });
                     rowWritten = `its row was restored to the body of version ${restoreToVersion}`;

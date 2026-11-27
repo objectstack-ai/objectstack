@@ -1709,6 +1709,38 @@ export interface ApproverExpressionContext {
 }
 
 /**
+ * [ADR-0162 Execution item 7] The root run of a run, as the automation service
+ * hands it to a node (`AutomationEngine.rootRunOf`, its `RootRun`): mirrored
+ * here because this plugin deliberately does not depend on service-automation.
+ * A request records the id and the start ({@link ApprovalService.openNodeRequest}).
+ */
+export interface ApprovalRootRun {
+  /** The root run's id; the request's own `flow_run_id` when its run is the root. */
+  runId: string;
+  /** The key the automation service files the root run's flow under. */
+  flowName: string;
+  /** The object the root run was started on (with or without a record id); `null` for a root run that names none. */
+  object: string | null;
+  /** When the root run started (ISO 8601). */
+  startedAt: string;
+}
+
+/**
+ * [ADR-0162 Execution item 7] The run that carries a run's record, as the
+ * automation service hands it (`AutomationEngine.recordRunOf`, its
+ * `RecordRun`): the root run, or a `map` item run whose item is a record.
+ * Mirrored for the reason {@link ApprovalRootRun} is.
+ */
+export interface ApprovalRecordRun {
+  /** The record run's id. */
+  runId: string;
+  /** The object the record run names (with or without a record id); `null` when it names none. */
+  object: string | null;
+  /** The id of the record it carries; `null` for a run on no record. */
+  recordId: string | null;
+}
+
+/**
  * Non-request outcome of {@link ApprovalService.openNodeRequest}: the node
  * resolved an empty approver slate and its `onEmptyApprovers: 'auto_approve'`
  * policy waved it through (#3447 P2). No `sys_approval_request` row exists —
@@ -5163,6 +5195,22 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
        * to be a root run".
        */
       runRoot?: boolean;
+      /**
+       * [ADR-0162 Execution item 7] The root run of the run that opens this
+       * request: the run its tree was started on, as the automation service
+       * hands it (`rootRunOf`). Its id and its start are recorded in columns
+       * of their own (`root_run_id`, `root_run_started_at`), which the store
+       * can be asked for: they place the request in its approval. `null` or
+       * absent records none (an engine that hands no root run).
+       */
+      rootRun?: ApprovalRootRun | null;
+      /**
+       * [ADR-0162 Execution item 7] The run that carries this request's
+       * record (`recordRunOf`): the root run, or the `map` item run whose
+       * item is the record. Its id is recorded in `record_run_id`, which the
+       * store can be asked for. `null` or absent records none.
+       */
+      recordRun?: ApprovalRecordRun | null;
     },
     context: ExecutionContext,
   ): Promise<ApprovalRequestRow | ApprovalNodeAutoOutcome> {
@@ -5569,6 +5617,10 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       payload_json: input.record != null ? JSON.stringify(this.snapshotRecord(input.object, input.record)) : null,
       flow_run_id: input.runId,
       flow_node_id: input.nodeId,
+      // [ADR-0162 Execution item 7] The request's approval: its root run.
+      root_run_id: input.rootRun?.runId ?? null,
+      root_run_started_at: input.rootRun?.startedAt ?? null,
+      record_run_id: input.recordRun?.runId ?? null,
       node_config_json: JSON.stringify(configSnapshot),
       organization_id: requestOrg,
       created_at: now,

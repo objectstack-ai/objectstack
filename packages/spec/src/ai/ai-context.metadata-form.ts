@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { defineForm } from '../ui/view.zod';
+import { defineMetadataForm } from '../ui/view.zod';
 import { AI_CONTEXT_BODY_FIELD_TYPES, AI_CONTEXT_MAX_FIELDS, AI_CONTEXT_MAX_RELATED, AI_CONTEXT_MAX_RELATED_FIELDS } from './ai-context.zod';
 
 /**
@@ -12,8 +12,8 @@ import { AI_CONTEXT_BODY_FIELD_TYPES, AI_CONTEXT_MAX_FIELDS, AI_CONTEXT_MAX_RELA
  * Every field picker is scoped by the pack's own root:
  *
  * - `fields` is the generic `field-multi` block with `dependsOn: 'object'`
- *   (the `page.form.ts` precedent): it offers the root object's fields.
- * - `related` is the `related-list-entries` block (the `object.form.ts`
+ *   (the `page.metadata-form.ts` precedent): it offers the root object's fields.
+ * - `related` is the `related-list-entries` block (the `object.metadata-form.ts`
  *   precedent). Under a pack its entries are `{ object, field?, fields? }`,
  *   so the block offers the relationships that point at the root and, for
  *   each entry, that child object's fields as its columns.
@@ -24,7 +24,7 @@ import { AI_CONTEXT_BODY_FIELD_TYPES, AI_CONTEXT_MAX_FIELDS, AI_CONTEXT_MAX_RELA
  * the pack is saved (`validateAiContext` on the runtime publish door) and by
  * `os validate`; the bounds are refused by `AiContextSchema` at parse.
  */
-export const aiContextForm = defineForm({
+export const aiContextForm = defineMetadataForm({
   schemaId: 'ai_context',
   type: 'simple',
   sections: [

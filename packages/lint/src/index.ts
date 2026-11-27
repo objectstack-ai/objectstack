@@ -319,6 +319,19 @@ export {
   FORM_VIEW_INTERNAL_NOT_LOADED,
 } from './validate-internal-form-views.js';
 export type { InternalFormViewFinding } from './validate-internal-form-views.js';
+// [ADR-0159 card ②] The `form` type's authoring rules: the public-address
+// refusal (gating), the consumer-less advisory and the object binding.
+export {
+  stackForms,
+  validateFormConsumers,
+  validateFormObjectBindings,
+  validateFormPublicAddresses,
+  FORM_CONSUMER_LESS,
+  FORM_OBJECT_OUTSIDE_CLOSURE,
+  FORM_OBJECT_UNKNOWN,
+  FORM_PUBLIC_ADDRESS_TAKEN,
+} from './validate-form-items.js';
+export type { FormItemFinding, FormObjectBindingOptions, StackForm } from './validate-form-items.js';
 
 // A form open to anonymous intake that declares a file field (ruling C on #25572).
 export { validatePublicFormFileFields, PUBLIC_FORM_FILE_FIELD } from './validate-public-form-file-fields.js';

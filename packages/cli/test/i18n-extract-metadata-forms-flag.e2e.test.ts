@@ -39,7 +39,7 @@
  * invisible to `toContain`, and a duplicate is half of what this closes.
  *
  * ⛔ Not asserted: the exact baseline key count. It is registry-driven and
- * moves with every `*.form.ts` in `packages/spec`; pinning it here would make
+ * moves with every `*.metadata-form.ts` in `packages/spec`; pinning it here would make
  * this file fail for reasons that have nothing to do with the flags. What is
  * pinned is the INVARIANT — the baseline is in the companion or nowhere, and
  * never in two places at once.

@@ -1668,6 +1668,9 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       }
     }
   },
+  form: {
+    label: "Formulaire"
+  },
   page: {
     label: "Page",
     sections: {

@@ -181,6 +181,8 @@ const STORE: Record<string, any[]> = {
     permission: [{ name: 'crm_sales_user', label: 'Sales user', objects: {} }],
     // [#25788] Translated by `translateReport` — a cell of the translatable-type axis.
     report: [{ name: 'opps_by_stage', label: 'Opportunities by Stage', type: 'summary', dataset: 'pipeline', values: ['amount'] }],
+    // [#37086] Translated by the `forms` family (ADR-0159) — a cell of the translatable-type axis.
+    form: [{ name: 'lead.web_intake', label: 'Web intake', object: 'lead', type: 'simple', sections: [{ fields: [{ field: 'company' }] }] }],
 };
 
 /**
@@ -234,6 +236,8 @@ const BUNDLE: Record<string, any> = {
         books: { help_center: { label: '帮助中心', groups: { start: { label: '开始' } } } },
         // A named import mapping's label.
         mappings: { lead_feed: { label: '线索导入' } },
+        // A form's label (ADR-0159).
+        forms: { 'lead.web_intake': { label: '网页登记' } },
     },
 };
 
@@ -572,6 +576,7 @@ const TYPE_CELLS: readonly string[] = [
     'app', 'apps', 'view', 'views', 'doc', 'docs', 'book', 'books', 'api', 'apis',
     'object', 'objects', 'dashboard', 'dashboards', 'page', 'action', 'dataset', 'picklist', 'flow',
     'position', 'positions', 'permission', 'permissions', 'report', 'reports', 'mapping', 'mappings',
+    'form', 'forms',
     // [#20408] A segment that names no metadata type: `RestServer` refuses it
     // (`refuseUnknownMetaListType`) rather than listing an empty collection.
     'totally_invented_type',
@@ -772,6 +777,9 @@ describe('[#20320] row A: the reference moves — each probe changes RestServer\
         expect(zhMappings.items?.find((m: any) => m.name === 'lead_feed')?.label).toBe('线索导入');
         const enMappings = await read('/meta/mapping', {}, { 'accept-language': 'en-US' });
         expect(enMappings.items?.find((m: any) => m.name === 'lead_feed')?.label).toBe('Lead feed');
+        // [#37086] So is a form (ADR-0159).
+        const zhForms = await read('/meta/forms', {}, { 'accept-language': 'zh-CN' });
+        expect(zhForms.items?.find((f: any) => f.name === 'lead.web_intake')?.label).toBe('网页登记');
     });
 });
 
@@ -946,6 +954,7 @@ const ITEM_CELLS: readonly string[] = [
     '/meta/page/home', '/meta/action/close_case', '/meta/dataset/pipeline', '/meta/picklist/industry', '/meta/flow/on_lead', '/meta/api/crm_served',
     '/meta/position/sales_rep', '/meta/permission/crm_sales_user', '/meta/report/opps_by_stage',
     '/meta/mapping/lead_feed', '/meta/mappings/lead_feed',
+    '/meta/form/lead.web_intake', '/meta/forms/lead.web_intake',
 ];
 const ITEM_TYPE_AXIS = new Set(ITEM_CELLS.map((c) => singular(c.split('/')[2])));
 const ITEM_CALLERS = ['holder', 'non-holder', 'builder', 'author'] as const satisfies readonly CallerName[];
@@ -1098,6 +1107,7 @@ describe('[#20408] the item read: the reference moves — each probe changes Res
         expect((await read('/meta/report/opps_by_stage', {}, { 'accept-language': 'zh-CN' })).item?.label).toBe('各阶段商机');
         expect((await read('/meta/book/help_center', {}, { 'accept-language': 'zh-CN' })).item?.groups?.[0]?.label).toBe('开始');
         expect((await read('/meta/mapping/lead_feed', {}, { 'accept-language': 'zh-CN' })).item?.label).toBe('线索导入');
+        expect((await read('/meta/form/lead.web_intake', {}, { 'accept-language': 'zh-CN' })).item?.label).toBe('网页登记');
         const zhDoc = await read('/meta/doc/crm_intro', { locale: 'zh-CN' });
         expect(zhDoc.item?.label).toBe('入门');
         expect(text(zhDoc)).not.toContain('"translations"');

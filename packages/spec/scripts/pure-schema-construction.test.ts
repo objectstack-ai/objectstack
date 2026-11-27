@@ -83,13 +83,13 @@ const FIXTURE = [
   'const strictObject = (shape: object): object => ({ ...shape });',
   'const z = { strictObject };',
   "export const single = 'measured: `z.strictObject(DashboardWidgetSchema.shape)` accepts it';",
-  'export const double = "lazySchema(fn) and defineForm(cfg)";',
+  'export const double = "lazySchema(fn) and defineMetadataForm(cfg)";',
   'export const template = `a strictObject({}) mention in template text`;',
   'export const substituted = `${lazySchema(() => \'x\')} then lazySchema( in text`;',
   'export const regex = /strictObject(\\w+)/.source;',
   '/** JSDoc naming strictObject(shape) and lazySchema(fn) */',
   'export const trailing = 1; /* strictObject(x) */ // lazySchema(y)',
-  'export function defineForm(cfg: object): object { return cfg; }',
+  'export function defineMetadataForm(cfg: object): object { return cfg; }',
   'export const called = strictObject({ a: 1 });',
   'export const member = z.strictObject({ b: 1 });',
   '',
@@ -105,7 +105,7 @@ describe('a fixture quoting every marked name survives the build byte-identical'
 
     const built = (await import(pathToFileURL(file).href)) as Record<string, unknown>;
     expect(built.single).toBe('measured: `z.strictObject(DashboardWidgetSchema.shape)` accepts it');
-    expect(built.double).toBe('lazySchema(fn) and defineForm(cfg)');
+    expect(built.double).toBe('lazySchema(fn) and defineMetadataForm(cfg)');
     expect(built.template).toBe('a strictObject({}) mention in template text');
     expect(built.substituted).toBe('x then lazySchema( in text');
     expect(built.regex).toBe('strictObject(\\w+)');
@@ -157,12 +157,12 @@ describe('annotatePureCalls — where the annotation goes', () => {
   it('touches nothing that is not a call', () => {
     const text = [
       "const a = 'strictObject(';",
-      'const b = `lazySchema(${x}) defineForm(`;',
+      'const b = `lazySchema(${x}) defineMetadataForm(`;',
       '/** @example lazySchema(() => z.object({})) */',
       '// strictObject(shape)',
-      'const c = 1; /* defineForm(cfg) */',
+      'const c = 1; /* defineMetadataForm(cfg) */',
       'const d = /lazySchema(x)/;',
-      'export function defineForm(cfg: object) { return cfg; }',
+      'export function defineMetadataForm(cfg: object) { return cfg; }',
       '',
     ].join('\n');
     expect(annotatePureCalls(text, 'a.ts')).toBe(text);
@@ -172,7 +172,7 @@ describe('annotatePureCalls — where the annotation goes', () => {
     const text = [
       'const A = lazySchema(() => z.object({}));',
       'const B = strictObject({ a: z.string() });',
-      'const C = defineForm({ schemaId: "x" });',
+      'const C = defineMetadataForm({ schemaId: "x" });',
       'const D = z.strictObject({});',
       'const E = `${lazySchema(() => 1)} lazySchema(`;',
       'const F = lazySchema<Shape>(() => shape);',
@@ -183,7 +183,7 @@ describe('annotatePureCalls — where the annotation goes', () => {
       [
         `const A = ${PURE}lazySchema(() => z.object({}));`,
         `const B = ${PURE}strictObject({ a: z.string() });`,
-        `const C = ${PURE}defineForm({ schemaId: "x" });`,
+        `const C = ${PURE}defineMetadataForm({ schemaId: "x" });`,
         `const D = ${PURE}z.strictObject({});`,
         `const E = \`\${${PURE}lazySchema(() => 1)} lazySchema(\`;`,
         `const F = ${PURE}lazySchema<Shape>(() => shape);`,

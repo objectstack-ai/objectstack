@@ -44,12 +44,13 @@
 //
 //   - `assertSortFieldsExist` (`@objectstack/metadata-protocol`, `protocol.ts`,
 //     #6994) — the REST ingress. Precedence `unknown` > `dotted` >
-//     unmaterializable; the third verdict filters `UNMATERIALIZED_SORT_TYPES`,
-//     which is `formula` alone. An injected anchor IS in `gate.known` (the
-//     registry injected it into the served schema) and is undotted.
+//     unmaterializable; the third verdict filters by `isVirtualSearchField`
+//     (`@objectstack/spec/data`, `SEARCH_VIRTUAL_TYPES`), which is `formula`
+//     alone. An injected anchor IS in `gate.known` (the registry injected it
+//     into the served schema) and is undotted.
 //   - `assertOrderByIsMaterializable` (`@objectstack/objectql`, `engine.ts`,
 //     #7095) — the engine's own boundary, for callers that never pass ingress:
-//     `schema.fields[f]?.type === 'formula'`, the same narrowing.
+//     the same `isVirtualSearchField`, the same narrowing.
 //
 // Both live in packages that sit ABOVE this one in the dependency graph
 // (`driver-sql` depends on `spec`/`core`/`types` only), so this file cannot
@@ -255,9 +256,10 @@ describe('SORT over an unprovisioned injected anchor on a federated object (prem
 
   it("ANCHORS ARE NOT 'formula' — the type both SORT doors narrow on", () => {
     // Why both doors let this ORDER BY through, asserted from the spec's own
-    // injected definitions. `UNMATERIALIZED_SORT_TYPES` (metadata-protocol) and
-    // the engine's `=== 'formula'` are unreachable from this package; this is
-    // the same fact from the side this package CAN see. If an anchor ever
+    // injected definitions. The two doors (metadata-protocol's and the
+    // engine's) are unreachable from this package, and both judge by
+    // `isVirtualSearchField`, `formula` alone today; this is the same fact
+    // from the side this package CAN see. If an anchor ever
     // becomes a `formula`, the doors refuse it and this file's premise is gone.
     for (const anchor of ANCHORS) {
       const type = String((ANCHOR_DEFS as any)[anchor]?.type ?? '');

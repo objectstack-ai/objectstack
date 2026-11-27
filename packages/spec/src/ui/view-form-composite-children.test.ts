@@ -35,7 +35,7 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 
-import { viewForm } from './view.form';
+import { viewForm } from './view.metadata-form';
 import { ViewSchema } from './view.zod';
 
 type Node = Record<string, any>;

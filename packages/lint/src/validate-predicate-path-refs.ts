@@ -29,8 +29,8 @@
  * through the one door the family's own gates leave open.
  *
  * The gap is not hypothetical on this exact surface. #6254 measured 16
- * predicates in `packages/spec/src/data/object.form.ts` written as BARE
- * identifiers (`type == 'formula'`) where the sibling `field.form.ts` wrote
+ * predicates in `packages/spec/src/data/object.metadata-form.ts` written as BARE
+ * identifiers (`type == 'formula'`) where the sibling `field.metadata-form.ts` wrote
  * `data.type` — and stated, in as many words, why the #6128 gate structurally
  * could not catch them: `type` is an identifier **CEL itself declares** (it
  * denotes a type value), so the strict-environment checker reports a type
@@ -41,7 +41,7 @@
  * This rule does not have that blind spot, because it never asks CEL what
  * resolves. It asks the **target schema** — a closed, enumerable key set — and
  * CEL's own type-name vocabulary has no bearing on whether `type` is a key of
- * `FieldSchema`. Measured: restoring #6254's pre-fix `object.form.ts` makes this
+ * `FieldSchema`. Measured: restoring #6254's pre-fix `object.metadata-form.ts` makes this
  * rule report exactly those 16 sites (see the reverse-verification test).
  *
  * ## Scope: the `data.*` layer only, and why that is a decision
@@ -50,7 +50,7 @@
  * set the rule can enumerate, where "absent" really means "cannot resolve". That
  * is true for exactly one of the two binding layers ADR-0089 D3 names:
  *
- *  - **metadata-editing forms** (`data`, a `defineForm` whose data source is
+ *  - **metadata-editing forms** (`data`, a `defineMetadataForm` whose data source is
  *    `{ provider: 'schema', schemaId }` — `view.zod.ts:151-161`). The row under
  *    edit is an instance of a metadata type, and its shape is a Zod schema this
  *    package can read key by key through the canonical
@@ -113,7 +113,7 @@
  * A sub-field of a `type: 'record'` / `repeater` / `composite` entry is rendered
  * with its own activation: objectui's metadata SchemaForm evaluates it as
  * `evaluatePredicate(spec.visibleOn, { data: row })` (its own runtime slot,
- * which the form fills from the spec's `visibleWhen`). So inside `object.form.ts`'s
+ * which the form fills from the spec's `visibleWhen`). So inside `object.metadata-form.ts`'s
  * `fields` repeater, `data.type` means *this row's* `type` — `FieldSchema.type`,
  * not `ObjectSchema.type` (which does not exist). `view.zod.ts:1647-1657` states
  * both halves: the root is still spelled `data` at every depth, and the object it
@@ -795,7 +795,7 @@ function walkFields(
  * declare (#7010).
  *
  * Walks `views[]` through the shared {@link formViewSites} ladder — the entry
- * itself (the bare `defineForm` shape every `*.form.ts` uses), the container's
+ * itself (the bare `defineMetadataForm` shape every `*.metadata-form.ts` uses), the container's
  * default `form`, and each `formViews.<key>` — and judges only the sites whose
  * data source is `{ provider: 'schema', schemaId }`, resolving `schemaId`
  * through `opts.resolveSchema` (the canonical metadata-type registry by
@@ -807,7 +807,7 @@ function walkFields(
  * build on them. The corpus measurement behind that severity is on the PR for
  * #7010: over the shipped `METADATA_FORM_REGISTRY` (17 forms, 46 predicates) the
  * count is **0** for both, and 16 for `predicate-path-unrooted` once #6254's
- * pre-fix `object.form.ts` is restored.
+ * pre-fix `object.metadata-form.ts` is restored.
  *
  * The third rule, `predicate-rhs-path-shaped` (#7659), asks a different question
  * about the same predicates — whether a `==` / `!=` RIGHT-hand side is

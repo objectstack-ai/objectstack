@@ -118,6 +118,7 @@ Installed package row whose manifest is the assembled package body
 | **apps** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; icon?: string; … }[]` | optional | Applications |
 | **views** | `{ name?: string; label?: string \| Record<string, string>; object?: string; list?: object; … }[]` | optional | List Views |
 | **viewItems** | `never` | optional | [MACHINE-ASSEMBLED] Non-container view artifacts of a runtime-assembled manifest (standalone ViewItems, flattened overlays) — written by package export and artifact factories, refused in authored stack sources. |
+| **forms** | `{ name: string; object: string; label?: string \| Record<string, string>; type?: Enum<'simple' \| 'tabbed' \| 'wizard'>; … }[]` | optional | Data-entry forms, one object each (ADR-0159): `defineForm` items named `OBJECT.KEY` |
 | **pages** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; icon?: string; … }[]` | optional | Custom Pages |
 | **dashboards** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; header?: object; … }[]` | optional | Dashboards |
 | **reports** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; type?: Enum<'tabular' \| 'summary' \| 'matrix' \| 'joined'>; … }[]` | optional | Analytics Reports |
@@ -369,6 +370,7 @@ This schema accepts one of the following structures:
 | **apps** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; icon?: string; … }[]` | optional | Applications |
 | **views** | `{ name?: string; label?: string \| Record<string, string>; object?: string; list?: object; … }[]` | optional | List Views |
 | **viewItems** | `never` | optional | [MACHINE-ASSEMBLED] Non-container view artifacts of a runtime-assembled manifest (standalone ViewItems, flattened overlays) — written by package export and artifact factories, refused in authored stack sources. |
+| **forms** | `{ name: string; object: string; label?: string \| Record<string, string>; type?: Enum<'simple' \| 'tabbed' \| 'wizard'>; … }[]` | optional | Data-entry forms, one object each (ADR-0159): `defineForm` items named `OBJECT.KEY` |
 | **pages** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; icon?: string; … }[]` | optional | Custom Pages |
 | **dashboards** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; header?: object; … }[]` | optional | Dashboards |
 | **reports** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; type?: Enum<'tabular' \| 'summary' \| 'matrix' \| 'joined'>; … }[]` | optional | Analytics Reports |

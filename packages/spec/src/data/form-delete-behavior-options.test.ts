@@ -14,9 +14,9 @@
  *
  * ## The two forms failed the same way through DIFFERENT option sources
  *
- * - `object.form.ts` declared an inline `options` array carrying all three
+ * - `object.metadata-form.ts` declared an inline `options` array carrying all three
  *   values, gated by one `visibleWhen` naming both types.
- * - `field.form.ts` declared NO `options` at all. That is not a narrower
+ * - `field.metadata-form.ts` declared NO `options` at all. That is not a narrower
  *   offer — it is the renderer's DERIVED source: with no `fieldSpec.options`
  *   the metadata-admin form falls through to the JSON Schema `enum`, which is
  *   `['set_null','cascade','restrict']` and additionally advertises
@@ -64,8 +64,8 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 
-import { objectForm } from './object.form';
-import { fieldForm } from './field.form';
+import { objectForm } from './object.metadata-form';
+import { fieldForm } from './field.metadata-form';
 import { FieldSchema } from './field.zod';
 import { FormViewSchema } from '../ui/view.zod';
 
@@ -254,7 +254,7 @@ describe('`deleteBehavior` is never offered a value the schema refuses', () => {
       });
 
       it('is expressible in the form DSL as it stands — no schema extension', () => {
-        // `defineForm` already parses at module load; re-parsing makes the
+        // `defineMetadataForm` already parses at module load; re-parsing makes the
         // claim an assertion rather than an import side effect. If the fix had
         // needed a key the DSL does not declare, this is where it would fail.
         const parsed = (FormViewSchema as unknown as z.ZodType).safeParse(form);

@@ -50,6 +50,8 @@ import {
 } from './protocol-bundle-members.js';
 import { packagelessContentPackage } from './protocol-environment-rows.js';
 import type { ProtocolHost } from './protocol-host.js';
+import { readEffectiveForms, type FormReadHost } from './protocol-form-reads.js';
+import { PROJECTED_FORM_SOURCE_KEY } from '@objectstack/spec/ui';
 import {
     admitExactQualifier,
     declinedCopyReplaced,
@@ -642,7 +644,7 @@ export async function judgeDroppedServiceRefusal(
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItem`; the method's docblock there is its contract. */
-export async function getMetaItem(host: Pick<ProtocolHost, 'engine' | 'getServicesRegistry' | 'readMetaItemFace' | 'resolveCascadeDeleteObjects' | 'resolveDisabledActionsReader' | 'resolveFlowRegistrationReader'>, request: {
+export async function getMetaItem(host: Pick<ProtocolHost, 'engine' | 'getServicesRegistry' | 'readMetaItemFace' | 'resolveCascadeDeleteObjects' | 'resolveDisabledActionsReader' | 'resolveFlowRegistrationReader'> & FormReadHost, request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string,
@@ -652,6 +654,13 @@ export async function getMetaItem(host: Pick<ProtocolHost, 'engine' | 'getServic
     // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. Folded
     // HERE, at each face's boundary, as {@link getMetaItems} folds.
     const canonical = canonicalizeMetaRequestType(request);
+    // [ADR-0159 D5] The active `form` read is resolved over both types, as
+    // the list resolves it: the item the list serves at the address. It is
+    // never cached (`META_COMPILE_CACHE_TYPES` holds no `form`): its answer
+    // moves with the stored `view` rows too.
+    if (canonical.type === 'form' && canonical.state !== 'draft' && canonical.previewDrafts !== true) {
+        return readEffectiveFormItem(host, canonical);
+    }
     // [#34206, ADR-0156] Through the compiled-answer cache, which answers
     // only a read naming a bundle member type and a name, and only while
     // every source it reads counts its own changes; otherwise, and at
@@ -662,6 +671,48 @@ export async function getMetaItem(host: Pick<ProtocolHost, 'engine' | 'getServic
         liveTrailers: (type, name, item) => liveItemTrailers(host, type, name, item),
         liveTrailerKeys: LIVE_ITEM_TRAILER_KEYS,
     }, canonical, () => host.readMetaItemFace(canonical, 'served'));
+}
+
+/**
+ * [ADR-0159 D5] The active by-name `form` read: the generic read's answer (its
+ * envelope, lock, trailers and the layer it chose), unless the effective
+ * `form` list resolves the address across the types.
+ *
+ * - The list serves the address's form from a stored `view` row (the old shape
+ *   still replacing it, or a base that ships the name only as an old shape):
+ *   that projected item is served.
+ * - The list serves the generic read's own holder, or serves the name at all
+ *   (a copy bound to no package), or serves the holder elsewhere (a pair's
+ *   address the base answers): the
+ *   generic read's item stands, as every type's does.
+ * - The list serves the name nowhere (a `view` row with no form replaced it):
+ *   no `item` is served, which both transports answer `404`.
+ */
+async function readEffectiveFormItem(
+    host: Pick<ProtocolHost, 'readMetaItemFace'> & FormReadHost,
+    request: { type: string; name: string; packageId?: string; member?: string; userTextLocales?: readonly string[] },
+): Promise<any> {
+    const generic: any = await host.readMetaItemFace(request, 'served');
+    // ONE effective read of the name, unscoped: the list scoped to a package
+    // is the same resolution filtered to that address (`readEffectiveFormList`),
+    // so the address's answer and every address's are both read off it.
+    const everywhere = await readEffectiveForms(host, { type: 'form', names: [request.name] }, 'served');
+    const pkgOf = (item: unknown): unknown => (item as { _packageId?: unknown } | null)?._packageId;
+    const listed = request.packageId === undefined
+        ? everywhere
+        : everywhere.filter((item) => pkgOf(item) === request.packageId);
+    const fromView = (item: unknown): boolean => (item as Record<string, unknown> | null)?.[PROJECTED_FORM_SOURCE_KEY] === 'view';
+    const envelope = generic && typeof generic === 'object' ? generic : { type: 'form', name: request.name };
+    const genericItem = generic?.item;
+    if (genericItem === undefined) return listed.length > 0 ? { ...envelope, item: listed[0] } : generic;
+    const matching = listed.find((item) => pkgOf(item) === pkgOf(genericItem));
+    const projected = (matching !== undefined && fromView(matching) ? matching : undefined)
+        ?? (request.packageId !== undefined ? listed.find(fromView) : undefined);
+    if (projected !== undefined) return { ...envelope, item: projected };
+    if (matching !== undefined || listed.length > 0) return generic;
+    if (request.packageId !== undefined && everywhere.some((item) => pkgOf(item) === pkgOf(genericItem))) return generic;
+    const { item: _item, ...rest } = envelope;
+    return rest;
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItemForExecution`; the method's docblock there is its contract. */

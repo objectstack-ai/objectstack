@@ -38,7 +38,7 @@
 // The trace, measured on `origin/main` — all four routes fold at the producer
 // ---------------------------------------------------------------------------
 // `applyObjectRegistryMutation` has exactly ONE caller
-// (`applyRegistryWriteThrough`), which has exactly SEVEN:
+// (`applyRegistryWriteThrough`), which has exactly EIGHT:
 //
 //   1. `saveMetaItem`            passes `singularTypeForRepo`, and the method
 //                                already ran `canonicalizeMetaRequestType`.
@@ -74,6 +74,10 @@
 //                                still stored after a delete (another
 //                                package's, or the package-less one), so the
 //                                registry keeps serving what the store serves.
+//   8. `healOldShapeFormRowRemovals` (ADR-0159 D5) passes the literal
+//                                `'view'`: it heals the old-shape `view` row a
+//                                `form` save, publish or delete re-saved, so no
+//                                stored spelling reaches it.
 //
 // Both fold maps resolve the plural — `PLURAL_TO_SINGULAR.objects === 'object'`
 // and `canonicalMetaUrlType('objects') === 'object'` — so no route can deliver
@@ -606,9 +610,9 @@ describe('[#8862] the `applyRegistryWriteThrough` caller set stays closed', () =
     const sources = [source, ...SPLIT_MODULES.map((file) => readFileSync(fileURLToPath(new URL(`./${file}`, import.meta.url)), 'utf8'))];
     const sitesOf = (pattern: RegExp) => sources.flatMap((text) => text.match(pattern) ?? []);
 
-    it('has exactly seven call sites, all traced in this file’s header', () => {
+    it('has exactly eight call sites, all traced in this file’s header', () => {
         const callSites = sitesOf(/\b(?:this|host)\.applyRegistryWriteThrough\(/g);
-        expect(callSites).toHaveLength(7);
+        expect(callSites).toHaveLength(8);
     });
 
     it('`applyObjectRegistryMutation` is reached only through the write-through', () => {

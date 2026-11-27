@@ -23,6 +23,7 @@
  * not move.
  */
 
+import { applyOldShapeFormRowRemovals, healOldShapeFormRowRemovals, formAddressClashRefusal, packagelessListOverFormRefusal, type OldShapeFormRowRemoval } from './protocol-form-writes.js';
 import { MetadataAuthoringSurfaceSchema } from '@objectstack/spec/api';
 import { stampHtmlPageRequires } from './runtime-authoring-gate.js';
 import { SysMetadataRepository, actionCustomizationHoldersOf, actionHeldOnlyOnOtherObjects, actionRowsBindingObjectOf, isPackageBoundRow, packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
@@ -96,6 +97,7 @@ import { installedManifestsOfEngine } from './installed-manifests.js';
 import { packageScopedRefusalOf } from './protocol-meta-item-reads.js';
 import { pairsOf } from '@objectstack/metadata-core';
 import { BatchRowHealError, canJudgeBatchObjects, isBatchObjectType, readActiveBatchRow, settleBatchObjectRows, undoBatchRowWrite, undoOutcomeForLog, type WrittenBatchRow } from './batch-object-registration.js';
+import { retireOverlayCacheOnRollback } from './meta-overlay-cache.js';
 
 export class ProtocolSaveFacet {
     /**
@@ -340,7 +342,7 @@ export class ProtocolSaveFacet {
     }
 
     /** [#28355] The body of {@link saveMetaItem} before its refusal audit; that method's docblock is the contract. */
-    static async saveMetaItemUnaudited(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'assertRuntimeAuthoringRules' | 'authoredLockFamily' | 'authoringChannel' | 'carryForwardRedactedCredentials' | 'classifyObjectContribution' | 'codeOnlyCreateError' | 'codeOnlyOverrideError' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'emitMetaItemPublished' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'envWritableTypes' | 'externalBindingSaveRefusal' | 'flowCanonicalizeFallbackWarned' | 'flowSaveReplaysRetired' | 'foldObjectExtendersFromRegistry' | 'getMetaItems' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isWritablePackage' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'readMetaItem' | 'receiptVersion' | 'recordMetadataAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseOverride' | 'refuseUngrammaticalMetaItemName' | 'refuseUnmintableMetaType' | 'registryAllowsOverlay' | 'resolveFlowCanonicalizer' | 'resolveSduiManifest' | 'restoreInjectedColumnEchoes' | 'restoreTranslatedObjectEchoes' | 'restoredCredentialPathsFor' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'runAuthoringGate' | 'runMutationProjector' | 'saveConflict' | 'saveWriteBinding' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'storableViewFallbackWarned' | 'storedParentForToken' | 'stripServedObjectColumns' | 'tenantAuthoredWriteRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal' | 'viewContainerNameCollisionRefusal'>, request: SaveMetaItemRequest) {
+    static async saveMetaItemUnaudited(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'assertRuntimeAuthoringRules' | 'authoredLockFamily' | 'authoringChannel' | 'carryForwardRedactedCredentials' | 'classifyObjectContribution' | 'codeOnlyCreateError' | 'codeOnlyOverrideError' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'emitMetaItemPublished' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'envWritableTypes' | 'externalBindingSaveRefusal' | 'flowCanonicalizeFallbackWarned' | 'flowSaveReplaysRetired' | 'foldObjectExtendersFromRegistry' | 'getMetaItems' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isWritablePackage' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'readMetaItem' | 'receiptVersion' | 'recordMetadataAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseOverride' | 'refuseUngrammaticalMetaItemName' | 'refuseUnmintableMetaType' | 'registryAllowsOverlay' | 'resolveFlowCanonicalizer' | 'resolveSduiManifest' | 'restoreInjectedColumnEchoes' | 'restoreTranslatedObjectEchoes' | 'restoredCredentialPathsFor' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'runAuthoringGate' | 'runMutationProjector' | 'saveConflict' | 'saveWriteBinding' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'storableViewFallbackWarned' | 'storedParentForToken' | 'stripServedObjectColumns' | 'tenantAuthoredWriteRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal' | 'viewContainerNameCollisionRefusal' | 'expandRuntimeViewContainer' | 'readFlattenedMetaItems' | 'readActiveOverlayRows' | 'storedOverlayEntries' | 'expandStoredViewContainers' | 'restoreArtifactRegistryView'>, request: SaveMetaItemRequest) {
         // [ADR-0131 D6] FIRST, before every other gate and every read: an
         // organization-scoped write is refused for every type, draft or
         // publish. See {@link organizationScopedWriteRefusal}.
@@ -1502,6 +1504,26 @@ export class ProtocolSaveFacet {
                 );
                 if (containerCollision) throw containerCollision;
             }
+            // [ADR-0159 D5, card ② item 5] …and a package-less `view` write
+            // that would store a LIST at a name a read-only package authors
+            // as a `form` item, with the same envelope. See
+            // {@link packagelessListOverFormRefusal}.
+            {
+                const listOverForm = packagelessListOverFormRefusal(
+                    host, singularType, request.item, request.name, request.packageId,
+                );
+                if (listOverForm) throw listOverForm;
+            }
+            // [ADR-0159 ruled question 3 = A] …and a `form` that would be left
+            // open on a public address another form holds (the effective
+            // `form` read, projected old shapes included), `409`
+            // `FORM_ADDRESS_TAKEN`. See {@link formAddressClashRefusal}.
+            {
+                const clash = await formAddressClashRefusal(
+                    host, singularType, request.item, request.name, request.packageId,
+                );
+                if (clash) throw clash;
+            }
             let baseline: unknown;
             if ((PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view'
                 && typeof host.engine.registry?.getItem === 'function') {
@@ -2319,8 +2341,28 @@ export class ProtocolSaveFacet {
                 });
             }
         }
+        // [ADR-0159 D5, card ② item 5] A published `form` write also removes
+        // the old-shape row that carries the form at its address, in the same
+        // transaction (the repository's `put` joins it): a `form` write that
+        // fails leaves both rows as they were. ⛔ Form content only.
+        const formRowRemoval = mode === 'publish' && singularTypeForRepo === 'form';
+        let removedOldShapeRows: OldShapeFormRowRemoval[] = [];
+        const putFormAware = async (put: () => Promise<any>): Promise<any> => {
+            if (!formRowRemoval) return put();
+            const run = async () => {
+                const written = await put();
+                removedOldShapeRows = await applyOldShapeFormRowRemovals(host, {
+                    name: request.name,
+                    packageId: request.packageId ?? null,
+                    actor: request.actor ?? null,
+                    source: writeSource ?? 'protocol.saveMetaItem',
+                });
+                return written;
+            };
+            return typeof host.engine?.transaction === 'function' ? retireOverlayCacheOnRollback(host.engine, () => host.engine.transaction!(run)) : run();
+        };
         try {
-            const result = await repo.put(ref, request.item, {
+            const result = await putFormAware(() => repo.put(ref, request.item, {
                 parentVersion,
                 // #4556 — `actor` lands in `sys_metadata_history.recorded_by`,
                 // a lookup('sys_user'). No caller actor → NULL, never the
@@ -2341,7 +2383,10 @@ export class ProtocolSaveFacet {
                         ...(request.client !== undefined ? { draftChangesClient: authoringClientOf(request.client) } : {}),
                     }
                     : {}),
-            });
+            }));
+            // [ADR-0159 D5] The registry heal of each old-shape row the write
+            // removed or re-saved, after the commit.
+            await healOldShapeFormRowRemovals(host, removedOldShapeRows);
             // Persistence succeeded — NOW it's safe to mutate the
             // in-memory registry. If put() had thrown, the registry
             // would still reflect the prior state. Drafts are NOT

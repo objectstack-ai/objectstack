@@ -772,7 +772,10 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         // protocol's validator does not hash. Nothing
                         // withheld folds nothing, so the `304` answers as
                         // before.
-                        const audienceFolds = metaType === 'view' || metaType === 'object';
+                        // [ADR-0159, card ② item 2] …and a `form`, whose own
+                        // `requiredPermissions` (a projected item carries its
+                        // view item's) the gate judges as the `view` arm does.
+                        const audienceFolds = metaType === 'view' || metaType === 'object' || metaType === 'form';
                         // [ADR-0106 D1] And for an `action`: it is withheld
                         // from a caller who cannot read a field it binds, and
                         // that caller is answered as for a name with nothing
@@ -873,9 +876,9 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         let cachedDocument: any = result.data;
                         // [#22639] THE per-caller read gate, before the mask —
                         // the item chain's order (`createMetaItemAnswer`: gate,
-                        // then mask). This arm serves `view` and `object`, the
-                        // two types it judges here: a list view the caller
-                        // does not hold is refused whole, a container and an
+                        // then mask). This arm serves `view`, `object` and
+                        // `form`, the types it judges here: a list view (or a
+                        // form) the caller does not hold is refused whole, a container and an
                         // object are served minus the list views withheld.
                         // The same judge every other door asks — ⛔ no
                         // decision of its own here. What it withheld is

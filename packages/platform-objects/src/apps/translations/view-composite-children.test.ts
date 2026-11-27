@@ -3,7 +3,7 @@
 // #30267 — the catalogs name every child the view form declares under its
 // composites, and zh-CN carries its own text for each of them.
 //
-// `view.form.ts` used to declare `selection`, `pagination`, `userFilters`,
+// `view.metadata-form.ts` used to declare `selection`, `pagination`, `userFilters`,
 // `appearance`, `userActions`, `navigation` and `sharing` as composites with
 // no children. `os i18n extract` walks a form field's DECLARED `fields` only,
 // so none of those rows had a `metadataForms.view.fields['<parent>.<child>']`

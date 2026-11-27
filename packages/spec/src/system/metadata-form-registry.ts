@@ -5,8 +5,8 @@
  * metadata configuration UI ("metadata admin" / Studio).
  *
  * Each entry maps a metadata-type machine name (singular, e.g. `'agent'`,
- * `'flow'`) to the {@link FormView} produced by `defineForm({ schemaId })`
- * in the corresponding `*.form.ts`. The registry is consumed by:
+ * `'flow'`) to the {@link FormView} produced by `defineMetadataForm({ schemaId })`
+ * in the corresponding `*.metadata-form.ts`. The registry is consumed by:
  *
  * - `getMetaTypes()` in `@objectstack/objectql` — surfaces `entry.form` so
  *   the generic SchemaForm renderer can lay each metadata editor out as
@@ -46,7 +46,7 @@ import { positionForm } from '../identity';
 import { permissionForm } from '../security';
 import { agentForm, toolForm, skillForm, aiContextForm } from '../ai';
 import { flowForm } from '../automation';
-import { emailTemplateForm } from './email-template.form';
+import { emailTemplateForm } from './email-template.metadata-form';
 
 /**
  * Frozen map of metadata type → canonical {@link FormView} layout.

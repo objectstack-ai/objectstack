@@ -719,7 +719,7 @@ function detectFieldRefWidget(
  * Detect the icon picker by NAME CONVENTION: a string prop named `icon` (or
  * `*Icon`) with no enum. Mirrors {@link detectFieldRefWidget} so every metadata
  * type's icon field renders the searchable Lucide picker instead of a free-text
- * input, without each spec `*.form.ts` having to pin `widget: 'icon'`.
+ * input, without each spec `*.metadata-form.ts` having to pin `widget: 'icon'`.
  */
 function detectIconWidget(name: string, schema: JsonSchema | undefined): string | undefined {
   if (Array.isArray(schema?.enum)) return undefined;

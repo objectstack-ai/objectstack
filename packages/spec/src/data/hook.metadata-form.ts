@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { defineForm } from '../ui/view.zod';
+import { defineMetadataForm } from '../ui/view.zod';
 
 /**
  * Form Layout for Hook Metadata Type
@@ -12,7 +12,7 @@ import { defineForm } from '../ui/view.zod';
  * declared texts (`texts`) sit beside it: a js body or a handler may declare
  * them, an expression body may not.
  */
-export const hookForm = defineForm({
+export const hookForm = defineMetadataForm({
   schemaId: 'hook',
   type: 'simple',
   sections: [
