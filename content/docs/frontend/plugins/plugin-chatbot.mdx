@@ -546,6 +546,47 @@ const toolMessage: ChatMessage = {
 };
 ```
 
+### Question card
+
+`QuestionCard` is the card an AI's clarifying question is answered on. It is a
+pure component: pass the questions you parsed and handle the two events. It
+does not detect the question or send anything itself.
+
+```tsx
+import { QuestionCard } from '@object-ui/plugin-chatbot';
+
+<QuestionCard
+  key={messageId}            // a new question is a new card
+  questions={[
+    {
+      header: 'Region',
+      question: 'Which region should the total cover?',
+      options: [
+        { label: 'All regions', description: 'Every region added together', recommended: true },
+        { label: 'East only' },
+      ],
+    },
+  ]}
+  announce                   // "A question is waiting for your answer" in a polite live region
+  onAnswer={(text) => sendMessage(text)}
+  onSkip={() => dismiss()}
+/>
+```
+
+- One question: a click on an option calls `onAnswer` with its label at once.
+- Two questions: an option on the first moves to the second; the second waits
+  on Send with a one-line summary, and Back keeps both choices. The answer is
+  one `header: answer` line per question; the question text stands in for a
+  missing `header`.
+- The last row, "Type something else…", takes a one-line answer; typing clears
+  the picked option and Enter moves on or sends.
+- Keys act only while focus is inside the card, which never takes focus on its
+  own: 1–4 pick, ↑/↓ move, Ctrl/⌘+Enter moves on or sends.
+- Choices survive a re-render, so after a failed send the user can press Send
+  again; remount the card with a new `key` for a new question.
+- Strings come from the `chatbot.questionCard.*` keys of `@object-ui/i18n`; the
+  card is right-to-left in Arabic.
+
 ## Examples
 
 ### Simple AI Chat
