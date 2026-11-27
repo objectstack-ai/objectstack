@@ -2679,7 +2679,14 @@ export class KnowledgeService implements IKnowledgeService {
    * the protocol's parse refuses it with the schema's own prescription.
    *
    * A refusal is coded (ADR-0112) and names the object, and the field for the
-   * field gate: `403 PERMISSION_DENIED`. Fails closed: with no data engine, a
+   * field gate: `403 PERMISSION_DENIED`. A source whose `adapter` names no
+   * adapter this deployment mounts is refused `400 VALIDATION_ERROR`, naming
+   * the source, the adapter and the mounted ones; an omitted `adapter` is not
+   * (it is placed by {@link adapterIdFor}). That check is this door's only:
+   * a package install (`isSystem`), a source registered in code and
+   * `os validate` are not judged here, and for them the boot's reading
+   * ({@link reportUnmountedAdapters}) and the `503` at index and search stay
+   * the signal. Fails closed: with no data engine, a
    * gate that throws, or a security service that answers neither field
    * question, the save is refused `503 SERVICE_UNAVAILABLE`. The system
    * context is admitted, as it bypasses the gates at search.
@@ -2727,6 +2734,13 @@ export class KnowledgeService implements IKnowledgeService {
     const registeredAdapters = this.listAdapters();
     if (authoredAdapter === undefined && this.options.deploymentAdapter === undefined && registeredAdapters.length > 1) {
       return refuse(400, 'VALIDATION_ERROR', `${named}: it ${unplacedSourceText(registeredAdapters)}`);
+    }
+    // [ADR-0161 K4] A source that names an adapter this deployment does not
+    // mount is refused at its save, so the author hears it there and not from
+    // the boot log or a search's 503. A save is served after every store's
+    // `start()`, so the adapters registered now are the deployment's.
+    if (typeof authoredAdapter === 'string' && !registeredAdapters.includes(authoredAdapter)) {
+      return refuse(400, 'VALIDATION_ERROR', `${named}: ${this.unmountedAdapterSaveText(authoredAdapter, registeredAdapters)}`);
     }
     const engine = this.options.dataEngine;
     if (!engine) return unavailable('the knowledge service has no data engine');
@@ -2793,6 +2807,27 @@ export class KnowledgeService implements IKnowledgeService {
       default:
         return unavailable(`the security service did not answer which fields of '${object}' you may read`);
     }
+  }
+
+  /**
+   * Why a saved source naming `adapter`, which `mounted` does not hold, is
+   * refused, and what to write: the rule, then the remedies this deployment
+   * can take. Leaving `adapter` out is offered only where an omitted adapter
+   * would be placed ({@link adapterIdFor}).
+   */
+  private unmountedAdapterSaveText(adapter: string, mounted: readonly string[]): string {
+    const deployment = this.options.deploymentAdapter;
+    const placeable = (deployment !== undefined && mounted.includes(deployment)) || mounted.length === 1;
+    const remedies = [
+      ...(mounted.length === 0 ? [] : [`name one of ${mounted.map((id) => `'${id}'`).join(', ')} as its \`adapter\``]),
+      ...(placeable ? ["leave `adapter` out, and the deployment's store holds it"] : []),
+      `mount the '${adapter}' store and save it again`,
+    ];
+    return (
+      `it names adapter '${adapter}', which this deployment does not mount ` +
+      `(mounted: ${mounted.length === 0 ? 'none' : mounted.join(', ')}), and a source's \`adapter\` must name a ` +
+      `mounted store. ${remedies.join(', or ').replace(/^./, (c) => c.toUpperCase())}.`
+    );
   }
 
   /** A gate lookup threw: every source over `object` is refused (fail-closed), reported once at `error`, `warn` as the fallback. */

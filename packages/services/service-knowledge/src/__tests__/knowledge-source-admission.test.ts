@@ -530,6 +530,7 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
       .toMatchObject({ admitted: false, code: 'SERVICE_UNAVAILABLE', status: 503 });
 
     const noEngine = new KnowledgeService({});
+    noEngine.registerAdapter('memory', makeAdapter());
     expect(await noEngine.admitAuthoredSource(item('ticket', ['body']), MANAGER))
       .toMatchObject({ admitted: false, code: 'SERVICE_UNAVAILABLE', status: 503 });
   });
@@ -541,6 +542,51 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
     for (const shapeless of [null, {}, { name: 'x' }, { name: 'x', source: { kind: 'object' } }, { name: 'x', source: 'ticket' }]) {
       expect(await svc.admitAuthoredSource(shapeless, MANAGER), JSON.stringify(shapeless)).toEqual({ admitted: true });
     }
+  });
+
+  // [ADR-0161 K4] The store a source names must be one this deployment mounts:
+  // a retired adapter ('ragflow') or a typo is refused at the save, not left to
+  // the boot's error line and a search's 503.
+  it('a source naming an adapter the deployment does not mount is refused VALIDATION_ERROR / 400, naming the source, the adapter and the mounted ones', async () => {
+    const { svc } = setup({ sources: [], security: salaryHiddenFromMembers });
+    for (const adapter of ['ragflow', 'memroy', '']) {
+      const verdict = await svc.admitAuthoredSource({ ...item('ticket', ['body']), adapter }, MANAGER);
+      expect(verdict, adapter).toMatchObject({ admitted: false, code: 'VALIDATION_ERROR', status: 400, object: 'ticket' });
+      const message = (verdict as { message: string }).message;
+      expect(message).toContain('knowledge source "authored" was not saved');
+      expect(message).toContain(`names adapter '${adapter}', which this deployment does not mount (mounted: memory)`);
+    }
+    // Refused before the gates are asked: an author the field gate would refuse hears the adapter first.
+    expect(await svc.admitAuthoredSource({ ...item('ticket', ['body', 'salary_note']), adapter: 'ragflow' }, MEMBER))
+      .toMatchObject({ admitted: false, code: 'VALIDATION_ERROR', status: 400 });
+    // The engine's own write (a package install) is not judged at this door.
+    expect(await svc.admitAuthoredSource({ ...item('ticket', ['body']), adapter: 'ragflow' }, SYSTEM)).toEqual({ admitted: true });
+  });
+
+  it('with no adapter mounted, a named one is refused naming none mounted; with two, both are named', async () => {
+    const bare = new KnowledgeService({ dataEngine: makeEngine([TICKET]) });
+    expect(await bare.admitAuthoredSource(item('ticket', ['body']), MANAGER)).toMatchObject({
+      admitted: false, code: 'VALIDATION_ERROR', status: 400,
+      message: expect.stringContaining("names adapter 'memory', which this deployment does not mount (mounted: none)"),
+    });
+    const { svc } = setup({ sources: [] });
+    svc.registerAdapter('turso', makeAdapter());
+    expect(await svc.admitAuthoredSource({ ...item('ticket', ['body']), adapter: 'pgvector' }, MANAGER)).toMatchObject({
+      admitted: false, code: 'VALIDATION_ERROR', status: 400,
+      message: expect.stringContaining("(mounted: memory, turso)"),
+    });
+  });
+
+  it('CONTROL: a source naming a mounted adapter, and one that leaves `adapter` out, are admitted', async () => {
+    const { svc } = setup({ sources: [] });
+    svc.registerAdapter('turso', makeAdapter());
+    expect(await svc.admitAuthoredSource(item('ticket', ['body']), MANAGER)).toEqual({ admitted: true });
+    expect(await svc.admitAuthoredSource({ ...item('ticket', ['body']), adapter: 'turso' }, MANAGER)).toEqual({ admitted: true });
+    const placed = new KnowledgeService({ dataEngine: makeEngine([TICKET]), deploymentAdapter: 'turso' });
+    placed.registerAdapter('turso', makeAdapter());
+    placed.registerAdapter('memory', makeAdapter());
+    const { adapter: _omitted, ...omitted } = item('ticket', ['body']);
+    expect(await placed.admitAuthoredSource(omitted, MANAGER)).toEqual({ admitted: true });
   });
 
   it('registers nothing and searches nothing: the verdict is a read', async () => {
