@@ -22,6 +22,7 @@ import { ConversationsSidebar } from '../console/ai/ConversationsSidebar.js';
 import { resolvePublicShareBase } from '../console/organizations/resolveHomeUrl.js';
 import { useChatConversation, type HydratedUIMessage } from '../hooks/index.js';
 import { fetchConversation } from '../hooks/useChatConversation.js';
+import { useConversationLabel } from '../hooks/useConversationList.js';
 import { chatConversationScope, chatProductOfAgent } from '../hooks/chatScope.js';
 import { resolveSurfaceAgent } from '../hooks/surfaceAgent.js';
 import { isAiStudioEnabled } from '../runtime-config.js';
@@ -32,6 +33,7 @@ import {
   type ChatDockConversationActions,
   type ChatDockPresentation,
   type ChatDockTarget,
+  type ShownConversation,
 } from './chatDockTarget.js';
 import { ChatDockControlProvider, useChatDockControl, type ChatDockControl } from './chatDockControl.js';
 
@@ -80,6 +82,11 @@ export interface ChatDockConversationProps {
   onActionsChange?: (actions: ChatDockConversationActions | undefined) => void;
   shareOpen?: boolean;
   onShareOpenChange?: (open: boolean) => void;
+  /**
+   * ui ADR-0057 Amendment A5 — told the conversation this body shows, and
+   * again whenever it changes, so the host can record it at a close.
+   */
+  onShownConversationChange?: (shown: ShownConversation) => void;
 }
 
 const EMPTY_INITIAL_MESSAGES: HydratedUIMessage[] = [];
@@ -116,6 +123,7 @@ export function ChatDockConversation({
   onActionsChange,
   shareOpen: shareOpenProp,
   onShareOpenChange,
+  onShownConversationChange,
 }: ChatDockConversationProps) {
   const { agents, isLoading, error } = useAgents({ apiBase });
   const catalogNames = React.useMemo(() => agents.map((a) => a.name), [agents]);
@@ -191,6 +199,11 @@ export function ChatDockConversation({
   const scopeMatched = conversationScope === scope;
   const paneConversationId = scopeMatched ? conversationId : undefined;
   const paneInitialMessages = scopeMatched ? initialMessages : EMPTY_INITIAL_MESSAGES;
+
+  // ui ADR-0057 Amendment A5 — the host records what this body shows at a close.
+  React.useEffect(() => {
+    onShownConversationChange?.({ conversationId: paneConversationId, agent: activeAgentRoute });
+  }, [onShownConversationChange, paneConversationId, activeAgentRoute]);
 
   // ── A fresh target names its thread once the first send mints it ────────
   // Snapshot the id visible when the fresh target appears, and never record
@@ -275,16 +288,30 @@ export function ChatDockConversation({
   // new thread after its first answer, so the list is re-read a little later.
   const [refreshKey, setRefreshKey] = React.useState(0);
   const titledRef = React.useRef<Set<string>>(new Set());
+  // ui ADR-0057 Amendment A5 — until the server answers with the thread's
+  // label, the header reads the user's first message of it, which is what the
+  // history row shows for a thread the server has not titled.
+  const [sentHint, setSentHint] = React.useState<{ id: string; text: string } | undefined>(undefined);
   const handleSent = React.useCallback(
     (firstUserMessage?: string) => {
       setRefreshKey((k) => k + 1);
       if (!firstUserMessage || !conversationId || titledRef.current.has(conversationId)) return;
       titledRef.current.add(conversationId);
+      setSentHint({ id: conversationId, text: firstUserMessage.trim() });
       setTimeout(() => setRefreshKey((k) => k + 1), 2500);
       setTimeout(() => setRefreshKey((k) => k + 1), 6000);
     },
     [conversationId],
   );
+  // The header's ＋ through a ref: the action reaches the chrome through an
+  // effect, which must not re-run on a callback's identity (ui AGENTS.md #10).
+  const startNewRef = React.useRef(startNewConversation);
+  startNewRef.current = startNewConversation;
+  const [startNew] = React.useState(() => () => startNewRef.current());
+  const labelReading = useConversationLabel({ apiBase, conversationId: paneConversationId, refreshKey });
+  const hint = sentHint && sentHint.id === paneConversationId && sentHint.text ? sentHint.text : undefined;
+  const headerLabel = labelReading.label ?? hint;
+  const labelPending = Boolean(paneConversationId) && !labelReading.settled && !hint;
 
   // Share: the drawer's 「···」 menu offers it when its host takes it
   // (objectstack#35445), else the pane's header does.
@@ -299,8 +326,18 @@ export function ChatDockConversation({
   const publicShareBase = React.useMemo(() => resolvePublicShareBase(), []);
   const inert = !isLoading && agents.length === 0;
   React.useEffect(() => {
-    onActionsChange?.(inert ? undefined : { conversationId, showDebug: false });
-  }, [onActionsChange, inert, conversationId]);
+    onActionsChange?.(
+      inert
+        ? undefined
+        : {
+            conversationId,
+            showDebug: false,
+            label: paneConversationId ? headerLabel : undefined,
+            labelPending,
+            startNew,
+          },
+    );
+  }, [onActionsChange, inert, conversationId, paneConversationId, headerLabel, labelPending, startNew]);
 
   // OSS / no AI seat → the whole dock body is inert (the robot is gated too).
   if (inert) return null;

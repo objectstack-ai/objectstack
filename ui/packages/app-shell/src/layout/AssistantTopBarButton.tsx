@@ -56,22 +56,26 @@ function isMacPlatform(): boolean {
 
 /**
  * The Ask AI entry's opening, for a button elsewhere on a page that asks the
- * assistant the way the standing entry does — Home's 「Ask AI」. Absent a
- * target it opens the drawer on whatever it shows now: the drawer's own
- * toggle, which is what the standing button runs (a handoff the drawer still
- * holds is kept); with one, on that target. Under no drawer host it goes to
- * the pre-drawer address. What opening means changes here and in the
- * button's toggle together.
+ * assistant the way the standing entry does — Home's 「Ask AI」, the record
+ * pane's. With the drawer closed it is an opening from the entry (ui ADR-0057
+ * Amendment A5, the host's `openEntry`): a new conversation after the user's
+ * own close, else as A5's table says; a target's `agent` is the agent the
+ * entry asks. With the drawer open, a target opens on it as before and no
+ * target leaves the drawer as it is. Under no drawer host it goes to the
+ * pre-drawer address.
  */
 export function useAskAiEntry(): (target?: ChatDockTarget) => void {
   const control = useChatDockControl();
   const openAssistant = useOpenAssistant();
   return React.useCallback(
     (target?: ChatDockTarget) => {
-      if (control && target === undefined) {
-        if (!control.expanded) control.toggle();
+      if (control && !control.expanded) {
+        if (control.openEntry) control.openEntry(target?.agent);
+        else if (target === undefined) control.toggle();
+        else control.open(target);
         return;
       }
+      if (control && target === undefined) return;
       openAssistant(target);
     },
     [control, openAssistant],
