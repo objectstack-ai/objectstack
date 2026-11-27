@@ -2048,20 +2048,21 @@ export class KnowledgeService implements IKnowledgeService {
   }
 
   /**
-   * Repair the document of a record the freshness check found stale, never
-   * awaited — the search that found it answers without it. Single-flight per
-   * document, and at most once per document until a later search finds its
-   * hash matching. Never throws into the search. The scheduled reconcile does
-   * not take it over: the reconcile walks whole sources, and this repairs one
-   * document now.
+   * Repair the document of a record the freshness check found stale: the
+   * event sync's own path ({@link syncRecord}, serialized per document), run
+   * in system context, in this process and NOT awaited — the search that found
+   * it answers without it. Single-flight per document, and at most once per
+   * document until a later search finds its hash matching. Never throws into
+   * the search. The scheduled reconcile does not take it over: the reconcile
+   * walks whole sources, and this repairs one document now. That is the
+   * inline path.
    *
    * While record syncs run through the queue ({@link routeRecordSyncs}) the
    * repair is a record-sync message with reason `freshness`, for this source
    * alone: it survives a restart of the process that searched and is retried
    * like any other sync. A message that could not be published is reported
    * at `error` and the document is left to the next search that finds it
-   * stale. Otherwise it is the inline sync ({@link syncRecord}, serialized
-   * per document), in system context, in this process.
+   * stale.
    *
    * A source with `refresh.onRecordChange: false` is never repaired: it is
    * asked through {@link objectSourcesFor}, the one predicate that keeps the
@@ -2367,7 +2368,8 @@ export class KnowledgeService implements IKnowledgeService {
       );
       return 'not-synced';
     }
-    if (!this.adapters.has(source.adapter)) {
+    const adapter = this.adapters.get(source.adapter);
+    if (!adapter) {
       this.options.logger?.warn?.(
         `[knowledge] record sync of '${message.recordId}' for source '${this.label(source)}' skipped: its adapter ` +
           `'${source.adapter}' is not registered. The record's document is written by the source's next build once ` +
@@ -2376,7 +2378,7 @@ export class KnowledgeService implements IKnowledgeService {
       return 'adapter-unmounted';
     }
     await chainAfter(this.recordSyncTails, documentIdFor(source.name, message.recordId), () =>
-      this.syncRow(source, message.object, message.recordId, engine),
+      this.syncRow(source, adapter, message.object, message.recordId, engine),
     );
     return 'synced';
   }
@@ -2467,9 +2469,9 @@ export class KnowledgeService implements IKnowledgeService {
   ): Promise<void> {
     const objSource = source.source;
     try {
+      const adapter = this.getAdapter(source.adapter);
       const engine = this.options.dataEngine;
       if (!engine) {
-        const adapter = this.getAdapter(source.adapter);
         if (objSource.where !== undefined) {
           this.reportWhereUnenforceable(source);
           return;
@@ -2485,7 +2487,7 @@ export class KnowledgeService implements IKnowledgeService {
         );
         return;
       }
-      await this.syncRow(source, object, recordId, engine);
+      await this.syncRow(source, adapter, object, recordId, engine);
     } catch (err) {
       this.options.logger?.warn?.(
         `[knowledge] event-sync failed for source '${this.label(source)}': ${(err as Error).message}`,
@@ -2500,8 +2502,13 @@ export class KnowledgeService implements IKnowledgeService {
    * document, or delete the document when no row matches. Throws what the
    * re-read, the split, the embedding call or the store throws.
    */
-  private async syncRow(source: KnowledgeSource, object: string, recordId: string | number, engine: IDataEngine): Promise<void> {
-    const adapter = this.getAdapter(source.adapter);
+  private async syncRow(
+    source: KnowledgeSource,
+    adapter: IKnowledgeAdapter,
+    object: string,
+    recordId: string | number,
+    engine: IDataEngine,
+  ): Promise<void> {
     const objSource = source.source;
     const row = await rereadRow(engine, objSource, recordId);
     if (row) {
