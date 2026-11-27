@@ -441,7 +441,7 @@ export function stayBehindText(reported) {
 export const EXIT_SURFACE_UNREAD = 5;
 
 /** How many `inflight: ` self-test cases must register — the mode's battery floor (AGENTS.md, writing a `--self-test`). */
-const INFLIGHT_CASE_FLOOR = 22;
+const INFLIGHT_CASE_FLOOR = 24;
 
 /** The claim template's `File surface:` key line (SKILL.md 〈模板与表〉), read one line at a time. */
 export const FILE_SURFACE_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*+][ \t]+)?(?:\*\*)?`?File surface`?(?:\*\*)?[ \t]*[:：](?:\*\*)?(.*)$/u;
@@ -543,12 +543,14 @@ const globRegex = (p) =>
  *   name    a claimed BARE file name (`own-door-bridge.ts`, no slash) is prose shorthand for that name anywhere: it
  *           meets a path or glob whose last segment is or matches it;
  *   suffix  a claimed path FRAGMENT (`lanes/director.md`, `references/contract-review.md`, the fleet's way of naming
- *           a skill file) meets a dispatch path ending in it on whole segments, a dispatch directory the fragment
- *           starts inside, and a glob whose trailing segments match it.
+ *           a skill file) meets a dispatch path ending in it on whole segments, a dispatch directory — bare or
+ *           spelled `DIR/**`, one directory — that the fragment STARTS inside (its leading segments end the
+ *           directory), and a glob whose trailing segments match it.
  *
- * Where it cannot tell it does NOT report: a name or a fragment against a `DIR/**` or a bare directory (whose
- * contents this reader cannot list — it would meet every claim that names a `package.json`) is no meeting, and
- * `inflightVerdict` lists such a claimed name as NOT COMPARED, so a clear run says what it did not judge.
+ * Where it cannot tell it does NOT report: a name against a `DIR/**` or a bare directory (whose contents this reader
+ * cannot list — it would meet every claim that names a `package.json`) is no meeting, and `inflightVerdict` lists such
+ * a claimed name as NOT COMPARED; a fragment that would sit DEEPER inside the directory, and a claimed fragment that is
+ * itself a glob, are not judged either, and the clear line says so on every run.
  */
 export function meetKind(dispatch, claimed) {
   const norm = (p) => String(p ?? '').replace(/^\.\//u, '').replace(/\/+$/u, '');
@@ -563,6 +565,12 @@ export function meetKind(dispatch, claimed) {
   if (rootMeets(a, b)) return 'path';
   if (!b.includes('/') || GLOB_CHAR.test(b)) return null;
   const segs = b.split('/');
+  // A trailing `/**` is its directory here: `DIR` and `DIR/**` name one directory and answer alike.
+  const dir = /\/\*\*$/u.test(a) && !GLOB_CHAR.test(a.slice(0, -3)) ? a.slice(0, -3) : null;
+  if (dir !== null) {
+    for (let k = 1; k < segs.length; k++) if (dir.endsWith(`/${segs.slice(0, k).join('/')}`)) return 'suffix';
+    return null;
+  }
   if (!GLOB_CHAR.test(a)) {
     if (a.endsWith(`/${b}`)) return 'suffix';
     if (hasExtension(a)) return null;
@@ -596,7 +604,7 @@ export const surfacesMeet = (dispatch, claimed) => meetKind(dispatch, claimed) !
 /** A claimed bare name against a dispatch entry `meetKind` cannot judge it against: a `DIR/**` glob or a bare directory. */
 const notComparable = (dispatch, claimed) => {
   const d = String(dispatch).replace(/\/+$/u, '');
-  return !String(claimed).includes('/') && d.includes('/') && (/(?:^|\/)\*\*$/u.test(d) || (!GLOB_CHAR.test(d) && !hasExtension(d)));
+  return !String(claimed).includes('/') && String(dispatch).includes('/') && (/(?:^|\/)\*\*$/u.test(d) || (!GLOB_CHAR.test(d) && !hasExtension(d)));
 };
 
 /** The session a claim names: its `Session:` line, else its signature's, else the first session id in it. */
@@ -696,7 +704,7 @@ export function inflightText(verdict, { repo, paths, read }) {
       ? `check-handover --inflight: OVERLAP — ${verdict.overlaps.length} in-flight claim(s) on ${repo} meet the surface about to be dispatched.`
       : verdict.exit === EXIT_SURFACE_UNREAD
         ? `check-handover --inflight: NO OVERLAP READ, ${verdict.unread.length} SURFACE(S) UNREAD — no readable in-flight surface on ${repo} meets this one; the cards below name no path, so read their claims by hand.`
-        : `check-handover --inflight: clear — no in-flight claim on ${repo} declares a surface that meets this one${verdict.notCompared?.length > 0 ? `; ${verdict.notCompared.length} claimed bare name(s) NOT COMPARED, listed below` : ''}.`;
+        : `check-handover --inflight: clear — no in-flight claim on ${repo} declares a surface that meets this one${verdict.notCompared?.length > 0 ? `; ${verdict.notCompared.length} claimed bare name(s) NOT COMPARED, listed below` : ''}. A claimed path fragment deeper inside a dispatched directory, and a claimed glob fragment, are never judged.`;
   const lines = [head, `  Dispatch surface: ${paths.map((p) => `\`${p}\``).join(', ')}.`];
   verdict.overlaps.forEach((h, i) => {
     const how = { path: '', name: ' (a bare file name on the claim, read anywhere)', suffix: ' (a path fragment on the claim, read as a suffix)' };
@@ -1244,6 +1252,9 @@ export function selfTest() {
   t('inflight: …so the card is an OVERLAP, its pair printed as a fragment read as a suffix; a root-relative match still prints as a path', s3.exit === EXIT_REFUSED && inflightText(s3, { repo: 'o/r', paths: ['x'], read: 'x' }).includes('meets `lanes/director.md` (a path fragment on the claim, read as a suffix)') && meetKind('scripts/pm/x.mjs', 'scripts/pm/**') === 'path' && meetKind('.claude/agents/os-dev.md', 'os-dev.md') === 'name');
   const n4 = inflightVerdict({ paths: ['scripts/pm/**'], held: [{ issue: IF_CARD(), ...inflightSurface(IF_CARD(), [IF_CLAIM('File surface: `docs/adr/0162-x.md`, `package.json`.')]) }] });
   t('inflight: N4 — a clear run NAMES the claimed bare names it could not judge against a directory or `DIR/**`; a `No changes outside …` clause is surface, not a fence', n4.exit === EXIT_OK && n4.notCompared.map((x) => x.claimed).join() === 'package.json' && inflightText(n4, { repo: 'o/r', paths: ['scripts/pm/**'], read: 'x' }).includes('1 claimed bare name(s) NOT COMPARED') && surfaceTokens('No changes outside `packages/lint/**`.').paths.join() === 'packages/lint/**');
+
+  t('inflight: ⭐ S5 — ONE directory, two spellings, one answer: a fragment that starts inside `DIR` meets `DIR` and `DIR/**` alike; a deeper fragment meets neither, and the clear line says so', meetKind('.claude/skills/pm-dispatch/references', 'references/contract-review.md') === 'suffix' && meetKind('.claude/skills/pm-dispatch/references/**', 'references/contract-review.md') === 'suffix' && meetKind('.claude/skills/pm-dispatch/references/**', 'lanes/director.md') === null && meetKind('.claude/skills/pm-dispatch/references', 'lanes/director.md') === null && inflightText(inflightVerdict({ paths: ['x/y.md'], held: [] }), { repo: 'o/r', paths: ['x/y.md'], read: 'x' }).includes('deeper inside a dispatched directory'));
+  t('inflight: N8 — a single-segment dispatch directory (`scripts/`) lists a claimed bare name NOT COMPARED, like `scripts/pm/` and `scripts/**`', ['scripts/', 'scripts/pm/', 'scripts/**'].map((d) => inflightVerdict({ paths: [d], held: [{ issue: IF_CARD(), ...inflightSurface(IF_CARD(), [IF_CLAIM('File surface: `card-pick.mjs`.')]) }] }).notCompared.length).join() === '1,1,1');
 
   // The floor for this mode's cases: a deleted block must not pass as a shorter green run.
   const inflightCases = cases.filter((c) => c.name.startsWith('inflight: ')).length;

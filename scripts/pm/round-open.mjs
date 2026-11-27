@@ -30,7 +30,8 @@
  *      card is taken from any area): the newest `Claim:` of THIS seat (its `Seat:` line, else its signature) written
  *      by another session — and a push to a card's `claude/issue-N` branch (one `git ls-remote` for the whole board,
  *      intersected locally; the head commit's committer date and `Claude-Session:` trailer), which counts as a claim
- *      when the card's newest claim is this seat's, or, on the seat's intake (`seatIntakeKeys`: the post title's
+ *      when the card's newest claim is this seat's (every open `pm:dispatched` card's head is read: a push does not
+ *      move `updated_at`), or, on the seat's intake (`seatIntakeKeys`: the post title's
  *      `area:*` and `epic #N`, or `--intake`), when there is none (推即认领);
  *   4. every closed card updated inside the window, newest-updated first: the first with a claim of this seat — its
  *      session, timed by that session's newest comment on the card (a merge closes a card, so `closed_at` is no act
@@ -325,23 +326,22 @@ export function readMutex({ repo, seat, session, own: ownList = [], post = null,
     }
     for (const i of r.value) if (!i.pull_request && !open.some((x) => x.number === i.number)) open.push(i);
   }
-  const seatCards = new Set();
   for (const issue of open) {
     if ((Date.parse(issue.updated_at ?? '') || Infinity) < since) continue;
     const rows = readThread(issue.number);
     if (!rows) continue;
-    const { newest, foreign } = claimReadings(rows, seat.name, own);
-    if (newest && claimSeat(newest.body) === seat.name) seatCards.add(issue.number);
+    const { foreign } = claimReadings(rows, seat.name, own);
     if (foreign && (stampOf(foreign) ?? Infinity) >= since) {
       activities.push({ reading: '3', at: stampOf(foreign), session: commentSession(foreign.body), where: `#${issue.number} comment ${foreign.id}${onIntake(issue) ? '' : ' (off the intake)'}`, what: 'a claim of this seat' });
       if (readings.claim === null || (stampOf(foreign) ?? 0) > (stampOf(readings.claim.row) ?? 0)) readings.claim = { number: issue.number, row: foreign };
     }
   }
-  // 3, the push half: one ls-remote, intersected locally with the intake's cards and the cards this seat claims.
+  // 3, the push half: one ls-remote, intersected locally with the intake's cards and EVERY open `pm:dispatched` card —
+  // a push does not move `updated_at`, so the window cannot pick these; the holder check below keeps this seat's.
   const heads = lsRemote(repo);
   if (!heads.ok) gaps.push(`\`git ls-remote --heads\` could not be read (${heads.error}), so no push was checked`);
   else {
-    const pushCards = new Set([...open.filter(onIntake).map((i) => i.number), ...seatCards]);
+    const pushCards = new Set(open.filter((i) => onIntake(i) || labelNames(i).includes('pm:dispatched')).map((i) => i.number));
     for (const h of heads.value) {
       const n = headCard(h.ref);
       if (n === null || !pushCards.has(n)) continue;
@@ -357,7 +357,7 @@ export function readMutex({ repo, seat, session, own: ownList = [], post = null,
       if (!rows) continue;
       const { newest } = claimReadings(rows, seat.name, own);
       const holder = newest ? claimSeat(newest.body) : null;
-      if (newest && holder !== seat.name) continue;
+      if (newest ? holder !== seat.name : !onIntake(open.find((i) => i.number === n))) continue;
       const pushSession = commitSession(c.value?.commit?.message);
       activities.push({ reading: '3 push', at, session: pushSession, where: `\`${h.ref.replace('refs/heads/', '')}\` @ ${String(h.sha).slice(0, 10)} (#${n})`, what: newest ? 'a push on a card this seat claims' : 'a push on an unclaimed lane card (推即认领, its `Claim:` owed)' });
       if (readings.push === null || at > readings.push.at) readings.push = { number: n, at, session: pushSession };
@@ -578,7 +578,7 @@ export function main(argv, deps = {}) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'the rule text: every phrase this file is built from is in the file that writes it': 2,
   'readings 1 and 2: the newest stand-down brief, the newest seat-signed comment after it': 7,
-  'reading 3: the newest claim of this seat by another session, and a push on a lane branch': 9,
+  'reading 3: the newest claim of this seat by another session, and a push on a lane branch': 10,
   'reading 4: the first closed lane card with a claim of this seat, timed by its session': 4,
   'the verdict: foreign, un-clocked-out and under a round yields; own, clocked-out or older does not; a gap is never clear': 7,
   'the CLI: usage, exits and the footer': 7,
@@ -688,7 +688,12 @@ export function selfTest() {
     t('…but a push on a card ANOTHER seat claims is that seat\'s, never this one\'s', run(fxq).activities.length, 0);
     const offPushed = card(['pm:dispatched', 'area:ux'], 20);
     const fxo = { issues: [POST, offPushed], comments: { 37865: [], [offPushed.number]: [claim(ME, 20)] }, heads: [{ ref: `refs/heads/claude/issue-${offPushed.number}-x`, sha: 'abc999' }], commits: { abc999: { commit: { committer: { date: ago(5) }, message: `wip\n\nClaude-Session: https://claude.ai/code/${OTHER}` } } } };
-    t('a push on an OFF-intake card this seat claims is read too — an unclaimed off-intake card\'s head is not (no claim says whose seat it is)', [run(fxo).activities.map((a) => [a.reading, a.session]), run({ ...fxo, comments: { 37865: [], [offPushed.number]: [] } }).reads.commits], [[['3 push', OTHER]], 0]);
+    t('a push on an OFF-intake card this seat claims is read too — an unclaimed off-intake card\'s head is not (no claim says whose seat it is)', [run(fxo).activities.map((a) => [a.reading, a.session]), run({ ...fxo, comments: { 37865: [], [offPushed.number]: [] } }).activities.length], [[['3 push', OTHER]], 0]);
+    // S4 (the delta review's probe): a push does not move `updated_at`, so a card claimed long ago is outside the window.
+    const oldOff = card(['pm:dispatched', 'area:ux'], 300);
+    const oldOn = card(['pm:dispatched', 'area:fleet'], 300);
+    const s4 = (k) => ({ issues: [POST, k], comments: { 37865: [], [k.number]: [claim(ME, 300)] }, heads: [{ ref: `refs/heads/claude/issue-${k.number}-x`, sha: 'abc777' }], commits: { abc777: { commit: { committer: { date: ago(10) }, message: `wip\n\nClaude-Session: https://claude.ai/code/${OTHER}` } } } });
+    t('⭐ S4 — a fresh push by another session on a card this seat claimed more than a round ago YIELDs, on the intake AND off it (the card\'s updated_at never moved)', [run(s4(oldOn)).v.exit, run(s4(oldOff)).v.exit], [EXIT_YIELD, EXIT_YIELD]);
     t('a head no card on the intake owns, and `headCard` itself: `claude/issue-N` and `claude/issue-N-…` only', [headCard('refs/heads/claude/issue-35237-slice4'), headCard('refs/heads/claude/issue-35237'), headCard('refs/heads/claude/issue-35237x'), headCard('refs/heads/claude/project-thread-x')], [35237, 35237, null, null]);
   }
 
