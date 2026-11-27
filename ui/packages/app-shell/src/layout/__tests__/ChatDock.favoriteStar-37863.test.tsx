@@ -55,7 +55,9 @@ vi.mock('../../hooks/useAiUsage', () => ({
   useAiUsage: () => ({ usage: null, isLoading: false, error: undefined, refetch: () => {} }),
 }));
 
-// What the default body reports to the chrome; `report` re-reports it.
+// What the default body reports to the chrome; `report` re-reports it. The
+// report lands in an effect after the body mounts, so a case waits for the
+// header's ＋ (drawn from the report), never for the body alone.
 const bodyState: { actions: ChatDockConversationActions | undefined; report?: (a: ChatDockConversationActions | undefined) => void } = {
   actions: undefined,
 };
@@ -126,7 +128,7 @@ describe('the drawer header ☆ (objectstack#37863)', () => {
   it('the rail: ☆ leads the buttons once the thread exists', async () => {
     bodyState.actions = SENT;
     renderRail();
-    await screen.findByTestId('default-dock-body');
+    await screen.findByTestId('chat-dock-new');
     expect(headerControls()).toEqual(['Add to favorites', 'New conversation', 'History', 'More actions', 'Close']);
     const star = screen.getByTestId('chat-dock-favorite');
     expect(star).toHaveAttribute('aria-pressed', 'false');
@@ -136,7 +138,7 @@ describe('the drawer header ☆ (objectstack#37863)', () => {
   it('before the first send there is no ☆', async () => {
     bodyState.actions = { showDebug: false, startNew: () => {}, agent: 'ask' };
     renderRail();
-    await screen.findByTestId('default-dock-body');
+    await screen.findByTestId('chat-dock-new');
     expect(screen.queryByTestId('chat-dock-favorite')).toBeNull();
     expect(headerControls()).toEqual(['New conversation', 'History', 'More actions', 'Close']);
   });
@@ -144,7 +146,7 @@ describe('the drawer header ☆ (objectstack#37863)', () => {
   it('☆ stores the thread as a conversation favourite, pressed while it is one; pressed again, removes it', async () => {
     bodyState.actions = { ...SENT, agent: 'data_chat' };
     renderRail();
-    await screen.findByTestId('default-dock-body');
+    await screen.findByTestId('chat-dock-new');
     fireEvent.click(screen.getByTestId('chat-dock-favorite'));
     expect(stored()).toEqual([
       expect.objectContaining({
@@ -168,7 +170,7 @@ describe('the drawer header ☆ (objectstack#37863)', () => {
   it('starred while the label is still read, it is stored as "New conversation" and then takes the label', async () => {
     bodyState.actions = { ...SENT, label: undefined, labelPending: true };
     renderRail();
-    await screen.findByTestId('default-dock-body');
+    await screen.findByTestId('chat-dock-new');
     fireEvent.click(screen.getByTestId('chat-dock-favorite'));
     expect(stored()[0].label).toBe('New conversation');
     act(() => bodyState.report?.({ ...SENT, label: 'Quarterly revenue' }));
@@ -184,7 +186,7 @@ describe('the drawer header ☆ (objectstack#37863)', () => {
     );
     bodyState.actions = { ...SENT, label: undefined, labelPending: true };
     renderRail();
-    await screen.findByTestId('default-dock-body');
+    await screen.findByTestId('chat-dock-new');
     expect(screen.getByTestId('chat-dock-favorite')).toHaveAttribute('aria-pressed', 'true');
     expect(stored()[0].label).toBe('old words');
     act(() => bodyState.report?.(SENT));
@@ -194,7 +196,7 @@ describe('the drawer header ☆ (objectstack#37863)', () => {
   it('control: a thread that is not a favourite is written nowhere', async () => {
     bodyState.actions = SENT;
     renderRail();
-    await screen.findByTestId('default-dock-body');
+    await screen.findByTestId('chat-dock-new');
     act(() => bodyState.report?.({ ...SENT, label: 'Renamed' }));
     expect(stored()).toEqual([]);
   });
@@ -202,7 +204,7 @@ describe('the drawer header ☆ (objectstack#37863)', () => {
   it('the full window draws ☆ too', async () => {
     bodyState.actions = SENT;
     renderRail({ fullWindow: true });
-    await screen.findByTestId('default-dock-body');
+    await screen.findByTestId('chat-dock-new');
     expect(headerControls()).toEqual(['Add to favorites', 'New conversation', 'More actions', 'Close']);
   });
 
@@ -213,7 +215,7 @@ describe('the drawer header ☆ (objectstack#37863)', () => {
         <ChatDockMobileSheet open onOpenChange={() => {}} />
       </FavoritesProvider>,
     );
-    await screen.findByTestId('default-dock-body');
+    await screen.findByTestId('chat-dock-mobile-new');
     const sheet = screen.getByTestId('chat-dock-mobile-sheet');
     const names = Array.from(sheet.querySelectorAll('button')).map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim() ?? '');
     expect(names.slice(0, 4)).toEqual(['Add to favorites', 'New conversation', 'History', 'More actions']);
