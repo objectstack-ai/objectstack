@@ -4768,7 +4768,11 @@ const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
       'against the referenced object ' +
       '(the picker scopes its candidates by that key). The referenced object is judged only on ' +
       '`lookup`, `master_detail` and `user` fields, the types that render the picker, and a bare ' +
-      '`dependsOn` name that misses on the owning object is reported once, there.',
+      '`dependsOn` name that misses on the owning object is reported once, there. The `dependsOn` ' +
+      'filter key is refused too when it names a field of the referenced object computed on read, ' +
+      'such as a `formula`: the engine cannot filter on it, so every picker query the entry scopes is ' +
+      'refused and an import of the column fails every lookup (point it at a stored field holding ' +
+      'the same value).',
     'On those picker fields a `lookupFilters[].value.$record` path is judged too, against the record ' +
       'being edited: a field of the object that owns the picker field, or at most one relationship hop ' +
       'from it (a ' +

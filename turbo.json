@@ -721,6 +721,7 @@
         "!.turbo/**",
         "!**/node_modules/**",
         "$TURBO_ROOT$/docs/qa/scenarios/*.json",
+        "$TURBO_ROOT$/docs/qa/scenarios/builds/*.json",
         "$TURBO_ROOT$/docs/qa/platform-checklist/areas/*.json",
         "$TURBO_ROOT$/packages/cli/src/lint/corpus.ts",
         "$TURBO_ROOT$/docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md"

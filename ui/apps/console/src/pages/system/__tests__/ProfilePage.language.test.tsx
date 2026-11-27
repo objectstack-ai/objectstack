@@ -102,8 +102,8 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
         String(options?.[name] ?? ''),
       ),
     offerableLanguages: offerable.value,
-    appContentLanguages: appContent.value,
   }),
+  useAppContentLanguages: () => appContent.value,
 }));
 
 /**

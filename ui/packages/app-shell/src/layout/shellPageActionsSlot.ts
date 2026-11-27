@@ -27,6 +27,12 @@ export interface ShellPageActionsSlotProps {
    * pages only, nothing until the comments work puts its icon here.
    */
   comments?: React.ReactNode;
+  /**
+   * objectstack#37858 — the header measured that its own content no longer
+   * fits beside the Ask AI button's words: the button draws its icon
+   * alone. The words yield first, before the page's own actions fold.
+   */
+  assistantIconOnly?: boolean;
 }
 
 /** Draws the group with the header's comments entry. */

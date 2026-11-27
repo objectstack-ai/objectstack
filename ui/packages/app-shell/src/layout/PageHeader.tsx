@@ -50,9 +50,14 @@
  *   [icon] Title [kind]                            [refresh] [primary] [⋯]
  *
  * The shell's group — where the shell turns it on (objectstack#36111), the
- * top-right button group (`ShellPageActions`: comments, Edit app, AI, help)
- * ends the action cluster in every posture, behind a hairline:
+ * top-right button group (`ShellPageActions`: comments, help, Ask AI) ends
+ * the action cluster in every posture, behind a hairline:
  *   [icon] Title [kind] | crumb › subtitle…   [actions...] | [group]
+ *
+ * The assistant's words yield first (objectstack#37858) — when the header
+ * runs out of room, the group's Ask AI button draws its icon alone before
+ * the page's own actions fold and before the title is cut. The description
+ * of a page that offers no fold is cut first, as it always was.
  */
 
 import * as React from 'react';
@@ -245,10 +250,15 @@ export function PageHeader({
 
   // objectui#12705 — the actions fold before the text is cut.
   const canFold = foldedActions != null && foldedActions !== false;
-  const { rootRef, textRef, descriptionRef, clusterRef, folded, compact } = useActionsFold(
+  // objectstack#36111 — the shell's top-right button group, after the page's
+  // own actions, where the shell turned it on (`ShellPageActions`); a hairline
+  // sets it apart from them.
+  const renderShellGroup = useShellPageActionsSlot();
+  const { rootRef, textRef, descriptionRef, clusterRef, folded, compact, assistantIconOnly } = useActionsFold(
     canFold,
     setup,
     setup ? undefined : compactBelow,
+    renderShellGroup !== null,
   );
   const drawnActions = canFold && (folded || compact) ? foldedActions : actions;
 
@@ -268,10 +278,6 @@ export function PageHeader({
     </Button>
   ) : null;
 
-  // objectstack#36111 — the shell's top-right button group, after the page's
-  // own actions, where the shell turned it on (`ShellPageActions`); a hairline
-  // sets it apart from them.
-  const renderShellGroup = useShellPageActionsSlot();
   // objectstack#36112 — the sidebar's expand button, at the left edge while
   // the sidebar is collapsed (it draws nothing otherwise).
   const renderSidebarExpand = useShellSidebarExpandSlot();
@@ -289,7 +295,7 @@ export function PageHeader({
       {renderShellGroup && pageActions && (
         <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" data-testid="page-header-shell-divider" />
       )}
-      {renderShellGroup?.({})}
+      {renderShellGroup?.({ assistantIconOnly })}
     </div>
   );
 
@@ -418,7 +424,7 @@ export function PageHeader({
  * Without layout (no `ResizeObserver`, every width 0) nothing ever overflows
  * and the header stays unfolded.
  */
-function useActionsFold(canFold: boolean, setup: boolean, compactBelow: number | undefined) {
+function useActionsFold(canFold: boolean, setup: boolean, compactBelow: number | undefined, shellGroup: boolean) {
   const rootRef = React.useRef<HTMLDivElement>(null);
   // objectstack#35446 — the opt-in compact form, read from the header's own
   // width. Without layout (width 0) the header is never compact.
@@ -430,6 +436,11 @@ function useActionsFold(canFold: boolean, setup: boolean, compactBelow: number |
   const [folded, setFolded] = React.useState(false);
   const foldedRef = React.useRef(false);
   const unfoldedWidthRef = React.useRef(0);
+  // objectstack#37858 — the group's Ask AI button drawn as its icon alone,
+  // and how wide the cluster was while it still drew its words.
+  const [assistantIconOnly, setAssistantIconOnly] = React.useState(false);
+  const assistantIconOnlyRef = React.useRef(false);
+  const withWordsWidthRef = React.useRef(0);
 
   // Re-assigned after every render and called through the ref, so the
   // observer below never keys on a callback's identity (AGENTS.md #10).
@@ -445,6 +456,38 @@ function useActionsFold(canFold: boolean, setup: boolean, compactBelow: number |
       compactRef.current = nextCompact;
       setCompact(nextCompact);
       return;
+    }
+    // objectstack#37858 — the assistant's words yield first: before the
+    // actions fold (only an unfolded header hides them, and a header folds
+    // only once they are hidden), and before the title is cut. They come back
+    // once the cluster's lost width would fit again, after any fold has opened.
+    const groupCluster = clusterRef.current;
+    const groupText = textRef.current;
+    if (shellGroup && groupCluster && groupText) {
+      const titleOver = titleOverflow(groupText, descriptionRef.current, setup);
+      // The description counts only where the page offers the fold — the
+      // fold is what protects it; a page without one cuts it, as before.
+      const contentOver =
+        canFold && !nextCompact ? textOverflow(groupText, descriptionRef.current, setup) : Number.NEGATIVE_INFINITY;
+      const clusterWidth = groupCluster.getBoundingClientRect().width;
+      if (!assistantIconOnlyRef.current) {
+        withWordsWidthRef.current = clusterWidth;
+        if (!foldedRef.current && (titleOver > 0.5 || contentOver > 0.5)) {
+          assistantIconOnlyRef.current = true;
+          setAssistantIconOnly(true);
+          return;
+        }
+      } else if (!foldedRef.current) {
+        const regained = withWordsWidthRef.current - clusterWidth;
+        if (titleOver + regained <= 0.5 && contentOver + regained <= 0.5) {
+          assistantIconOnlyRef.current = false;
+          setAssistantIconOnly(false);
+          return;
+        }
+      }
+    } else if (assistantIconOnlyRef.current) {
+      assistantIconOnlyRef.current = false;
+      setAssistantIconOnly(false);
     }
     if (nextCompact) return;
     if (!canFold) {
@@ -479,7 +522,7 @@ function useActionsFold(canFold: boolean, setup: boolean, compactBelow: number |
     measure();
   });
 
-  const observes = canFold || compactBelow !== undefined;
+  const observes = canFold || compactBelow !== undefined || shellGroup;
   React.useEffect(() => {
     const root = rootRef.current;
     if (!observes || !root || typeof ResizeObserver === 'undefined') return;
@@ -489,7 +532,15 @@ function useActionsFold(canFold: boolean, setup: boolean, compactBelow: number |
     return () => observer.disconnect();
   }, [observes]);
 
-  return { rootRef, textRef, descriptionRef, clusterRef, folded: canFold && folded, compact };
+  return {
+    rootRef,
+    textRef,
+    descriptionRef,
+    clusterRef,
+    folded: canFold && folded,
+    compact,
+    assistantIconOnly: shellGroup && assistantIconOnly,
+  };
 }
 
 /**
@@ -519,11 +570,38 @@ function textOverflow(text: HTMLElement, description: HTMLElement | null, setup:
   return needs - text.clientWidth;
 }
 
-/** The children's widths plus the flex gaps between them, skipping hidden ones. */
-function childrenWidth(parent: HTMLElement, widthOf: (child: HTMLElement) => number | undefined): number {
+/**
+ * objectstack#37858 — how many pixels the header's title needs beyond the
+ * room it has, the description left out: the icon, the whole title (its
+ * content width, whatever it is cut to) and the kind chip. In Setup's posture
+ * the title line shares the column with the description, so the title line
+ * alone is measured.
+ */
+function titleOverflow(text: HTMLElement, description: HTMLElement | null, setup: boolean): number {
+  const titleWidth = (child: HTMLElement) => (child.tagName === 'H1' ? child.scrollWidth : undefined);
+  if (setup) {
+    const titleLine = text.firstElementChild as HTMLElement | null;
+    return (titleLine ? childrenWidth(titleLine, titleWidth) : 0) - text.clientWidth;
+  }
+  const needs = childrenWidth(
+    text,
+    titleWidth,
+    // The description and the hairline before it.
+    (child) => !!description && (child === description || child.nextElementSibling === description),
+  );
+  return needs - text.clientWidth;
+}
+
+/** The children's widths plus the flex gaps between them, skipping hidden ones (and any `skip` names). */
+function childrenWidth(
+  parent: HTMLElement,
+  widthOf: (child: HTMLElement) => number | undefined,
+  skip?: (child: HTMLElement) => boolean,
+): number {
   const view = parent.ownerDocument.defaultView;
   const children = Array.from(parent.children).filter(
-    (child): child is HTMLElement => !!view && view.getComputedStyle(child).display !== 'none',
+    (child): child is HTMLElement =>
+      !!view && view.getComputedStyle(child).display !== 'none' && !skip?.(child as HTMLElement),
   );
   const gap = Number.parseFloat(view?.getComputedStyle(parent).columnGap ?? '') || 0;
   const widths = children.map((child) => widthOf(child) ?? child.getBoundingClientRect().width);

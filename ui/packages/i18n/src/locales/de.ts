@@ -1349,7 +1349,21 @@ const de = {
       typeLabel: 'Ansichtstyp',
       includeCurrent: 'Aktuelle Filter und Sortierung übernehmen',
       scopeShared: 'Geteilt',
-      scopeHint: 'Geteilte Ansichten sieht jeder, der diese Liste sehen kann',
+      scopeHint: 'Geteilte Ansichten sieht jeder, der diese Liste sehen kann, außer die Ansicht ist auf die Inhaber einer Berechtigung beschränkt',
+      // objectstack#34908 — who a shared view reaches: the capability picker and its position preview.
+      audienceLabel: 'Wer diese Ansicht sieht',
+      audienceEveryone: 'Jeder, der diese Liste sehen kann',
+      audienceAdd: 'Auf eine Berechtigung beschränken…',
+      audienceAllAdded: 'Alle Berechtigungen hinzugefügt',
+      audienceLoading: 'Berechtigungen werden geladen…',
+      audienceLoadFailed: 'Die Berechtigungen konnten nicht geladen werden, daher kann keine hinzugefügt werden: {{message}}',
+      audienceNone: 'Noch keine Berechtigung definiert. Berechtigungen werden im Setup über Berechtigungssätze vergeben.',
+      audienceGrantedBy: 'Vergeben durch {{sets}}',
+      audienceRemove: '{{name}} entfernen',
+      audiencePositions: '{{positions}} sehen diese Ansicht',
+      audienceNoPosition: 'Keine einzelne Position hat alle gewählten Berechtigungen: Nur wer alle hat, direkt oder über mehrere Positionen, sieht diese Ansicht',
+      audienceSelf: 'Das gilt auch für Sie: Haben Sie nicht alle gewählten Berechtigungen, verschwindet die Ansicht nach dem Erstellen auch aus Ihrer eigenen Liste',
+      audiencePositionsUnread: 'Die Positionen konnten nicht gelesen werden, daher wird nicht angezeigt, wer diese Ansicht sieht',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: 'Ein unveröffentlichter Entwurf verwendet bereits den Namen dieser Ansicht, daher wurde nichts geteilt. Geben Sie der Ansicht einen anderen Namen und versuchen Sie es erneut.',
       viewGone: 'Die geöffnete Ansicht ist nicht mehr verfügbar, daher zeigt die Liste ihre Standardansicht.',
@@ -2253,6 +2267,8 @@ const de = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: "Diese App zuerst",
+        recentTitle: "Letzte Unterhaltungen",
+        recentEmpty: "Fragen, die Sie hier stellen, erscheinen hier.",
       },
       renameConversation: "Unterhaltung umbenennen",
       deleteConversation: "Unterhaltung löschen",
@@ -4550,6 +4566,18 @@ const de = {
     },
     recordCitations: {
       title: 'Zitiert aus Datensätzen',
+    },
+    questionCard: {
+      aiAsks: 'KI fragt:',
+      progress: 'Frage {{current}} von {{total}}',
+      typeYourOwn: 'Etwas anderes eingeben…',
+      recommended: 'Empfohlen',
+      skip: 'Überspringen',
+      back: 'Zurück',
+      next: 'Weiter',
+      send: 'Senden',
+      pending: 'Eine Frage wartet auf Ihre Antwort',
+      answerLine: '{{header}}: {{answer}}',
     },
     tool: {
       aggregate_data: "Die Daten zusammenfassen",

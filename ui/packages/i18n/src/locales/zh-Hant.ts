@@ -1376,7 +1376,21 @@ const zhHant = {
       typeLabel: '檢視型別',
       includeCurrent: '包含當前的篩選和排序',
       scopeShared: '共享',
-      scopeHint: '共享檢視對能看到此列表的所有人可見',
+      scopeHint: '共享檢視對能看到此列表的所有人可見，除非限定為持有某項能力的人',
+      // objectstack#34908 — who a shared view reaches: the capability picker and its position preview.
+      audienceLabel: '誰能看此檢視',
+      audienceEveryone: '能看到此列表的所有人',
+      audienceAdd: '限定為持有某項能力的人…',
+      audienceAllAdded: '已新增全部能力',
+      audienceLoading: '正在載入能力…',
+      audienceLoadFailed: '無法載入能力，因此無法新增：{{message}}',
+      audienceNone: '尚未定義任何能力。能力在設定中通過權限集授予。',
+      audienceGrantedBy: '由 {{sets}} 授予',
+      audienceRemove: '移除 {{name}}',
+      audiencePositions: '{{positions}} 會看到此檢視',
+      audienceNoPosition: '沒有哪個崗位單獨持有所選的全部能力：只有直接或通過多個崗位合計持有全部這些能力的人能看到此檢視',
+      audienceSelf: '這對你自己同樣生效：如果你沒有持有所選的全部能力，檢視建立後也會從你自己的列表中消失',
+      audiencePositionsUnread: '無法讀取崗位，因此不顯示誰會看到此檢視',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: '一個尚未釋出的草稿已經用了這個檢視的名稱，所以沒有共享。請換個名稱再試。',
       viewGone: '你開啟的檢視已不存在，列表顯示的是預設檢視。',
@@ -2598,6 +2612,8 @@ const zhHant = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: '本應用優先',
+        recentTitle: '最近的對話',
+        recentEmpty: '在這裡提的問題會顯示在這裡。',
       },
       renameConversation: '重新命名對話',
       deleteConversation: '刪除對話',
@@ -4804,6 +4820,18 @@ const zhHant = {
     },
     recordCitations: {
       title: '引自記錄',
+    },
+    questionCard: {
+      aiAsks: 'AI 問：',
+      progress: '第 {{current}}/{{total}} 題',
+      typeYourOwn: '自己輸入…',
+      recommended: '推薦',
+      skip: '跳過',
+      back: '上一題',
+      next: '下一題',
+      send: '傳送',
+      pending: '有一個問題待回答',
+      answerLine: '{{header}}：{{answer}}',
     },
     tool: {
       aggregate_data: '彙總相關資料',

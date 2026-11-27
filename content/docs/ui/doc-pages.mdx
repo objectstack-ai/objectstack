@@ -252,12 +252,16 @@ capability through any permission set — the same caller an app with
 `requiredPermissions: ['crm.read_runbook']` opens for. Use the capability form for the
 manual of an app gated on a capability several sets grant: naming one of those sets would
 shut out the holders of every other one. A caller whose holdings cannot be resolved is
-denied — the gate fails closed.
+denied — the gate fails closed. An audience names one gate: an object carrying both
+`permissionSet` and `systemPermission` is refused when the book is parsed, and the message
+says which key to keep.
 
 Claim a gated book's pages by name (a namespace glob such as `include: 'crm_runbook_*'`, or
 pinned `pages`), not with `include: '*'`. A package scope leaves out only a doc stamped with
 *another* package, so a stored doc bound to no package is in every scope: a catch-all gated
 book would claim it as well and take it away from every reader outside the audience.
+`os validate`, `os build` and `os lint` refuse such a group (`book-gated-catch-all-include`),
+and so does saving the book through Studio, REST `/meta` or MCP.
 
 <Callout type="info">
 The gate is a **capability** reference, never a distribution one: packages own permission

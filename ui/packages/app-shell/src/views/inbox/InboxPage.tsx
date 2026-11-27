@@ -43,6 +43,7 @@ import { groupNotifications, type InboxNotification } from '../../layout/inboxGr
 import { approvalRequestTitle } from '../../layout/InboxApprovalItem.js';
 import { ActivityObjectLabel } from '../../layout/ActivityObjectLabel.js';
 import { confirmUnsavedLeave } from '../../chrome/unsavedEdits.js';
+import { useShellPageActionsSlot } from '../../layout/shellPageActionsSlot.js';
 import {
   INBOX_ITEM_PARAM,
   INBOX_PAGE_TABS,
@@ -93,6 +94,10 @@ export function InboxPage({ dataSource, objects }: InboxPageProps) {
   const activity = useSharedActivityFeed({ enabled: true });
   const approvals = useInboxPageApprovals(bell.pendingApprovalsCount);
   const [unreadOnly, setUnreadOnly] = useState(true);
+  // objectstack#37858 — this page's header is its top bar and keeps its own
+  // buttons at the end: the shell's group (help, Ask AI) ends that row, so the
+  // shell's corner fallback, which counts the group, never covers them.
+  const renderShellGroup = useShellPageActionsSlot();
 
   // ── Notifications: the shared window, then older pages beneath it ──────
   const [earlier, setEarlier] = useState<{ rows: InboxNotification[]; loading: boolean; done: boolean; failed: boolean }>(
@@ -591,6 +596,12 @@ export function InboxPage({ dataSource, objects }: InboxPageProps) {
             <Button size="sm" variant="outline" onClick={() => leaveTo(approvalsCenterPath)} data-testid="inbox-page-approvals-center">
               {t('inboxPage.allApprovals', { defaultValue: 'All approvals' })}
             </Button>
+          )}
+          {renderShellGroup && (
+            <>
+              <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" data-testid="inbox-page-shell-divider" />
+              {renderShellGroup({})}
+            </>
           )}
         </div>
       </header>
