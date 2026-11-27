@@ -679,18 +679,12 @@ export const ar: PlatformTranslationData = {
       title: 'المعرفة',
       description: 'الواجهة الخلفية لمخزن المتجهات لـ RAG ومصادر المعرفة.',
       groups: {
-        turso: { title: 'Turso / libSQL', description: 'يُستخدم فقط عندما لا تكون قاعدة بيانات المنصة PostgreSQL؛ مع PostgreSQL يكون مخزن المعرفة داخل قاعدة بيانات المنصة ولا تُقرأ هذه الحقول. يعمل مع Turso المُدار أو ملف محلي أو في الذاكرة.' },
         indexing: {
           title: 'افتراضيات الفهرسة',
           description: 'القيمة المضبوطة على مصدر المعرفة نفسه تتقدّم على هذه الافتراضيات.',
         },
       },
       keys: {
-        turso_url: {
-          label: 'عنوان URL للاتصال',
-          help: 'أمثلة: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
-        },
-        turso_auth_token: { label: 'رمز المصادقة', help: 'مطلوب فقط لعناوين Turso المُدارة.' },
         chunk_target: {
           label: 'الحجم المستهدف للمقطع (أحرف)',
           help: 'أقصى طول للمقطع بالأحرف عند تقسيم خدمة المعرفة لمستند. تكون الأولوية للحجم المحدد في مصدر المعرفة نفسه، وقد يخفضه حد الإدخال الخاص بنموذج التضمين.',

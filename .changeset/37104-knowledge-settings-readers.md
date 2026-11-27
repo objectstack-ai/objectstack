@@ -4,17 +4,17 @@
 
 fix(settings)!: the Knowledge settings page keeps only keys something reads — `adapter`, `over_fetch` and `enforce_rls` are retired
 
-Clause-②: no (narrowing) — narrowed: `PUT /api/settings/knowledge` refuses `adapter`, `over_fetch` and `enforce_rls` (`400 UNKNOWN_KEY`), where it stored them; `GET /api/settings/knowledge` no longer serves them; `POST /api/settings/knowledge/test` no longer answers from `adapter` (a stored or sent `ragflow` was "Unknown adapter", `memory` an in-memory warning) and answers every call from `turso_url` and `turso_auth_token` alone
+Clause-②: no (narrowing) — narrowed: `PUT /api/settings/knowledge` refuses a body naming `adapter`, `over_fetch` or `enforce_rls` (`400 UNKNOWN_KEY`) whole, where it stored them: no other key in that body is saved; `GET /api/settings/knowledge` no longer serves them; `POST /api/settings/knowledge/test` no longer answers from `adapter` (a stored or sent `ragflow` was "Unknown adapter", `memory` an in-memory warning) and answers every call from `turso_url` and `turso_auth_token` alone
 Metadata-protocol: none
 Skills-docs: none — no skill under `skills/**` teaches the three retired keys; `skills/objectstack-ai/SKILL.md` teaches `knowledge.chunk_target`, which stays. `content/docs/ai/knowledge-rag.mdx` says what the page holds.
 
 <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: a settings manifest is a runtime registration, not authorable metadata. The narrowed answers are doors of one settings namespace, nothing that `objectstack migrate meta` reads names these keys, and stored rows are untouched. -->
 
-**BREAKING** for a script or client that writes `adapter`, `over_fetch` or `enforce_rls` to the `knowledge` settings namespace: the write is now refused as an undeclared key. Nothing in this repository ever read any of the three, so no deployment behaves differently.
+**BREAKING** for a script or client that writes `adapter`, `over_fetch` or `enforce_rls` to the `knowledge` settings namespace: the write is now refused as an undeclared key, and refused whole — no other key in that body is saved, so a body that also changes `chunk_target` saves nothing. Drop the retired key from the body. Nothing in this repository ever read any of the three, so no deployment behaves differently.
 
 On the Knowledge settings page (`knowledge` namespace, manifest `version` 4), every key left has a reader:
 
-- `turso_url` and `turso_auth_token` are read by `@objectstack/knowledge-turso` at startup, where the knowledge store is libSQL — a platform database other than PostgreSQL. On PostgreSQL the store is pgvector, in the platform database, and neither is read; the Turso group now says so and always shows, since the page no longer has an adapter select to gate it on.
+- `turso_url` and `turso_auth_token` are read by `@objectstack/knowledge-turso` at startup, where the knowledge store is libSQL — a platform database other than PostgreSQL. On PostgreSQL the store is pgvector, in the platform database, and neither is read.
 - `chunk_target` is read by the knowledge service's splitter.
 
 What leaves, and why:

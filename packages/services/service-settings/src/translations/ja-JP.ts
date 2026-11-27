@@ -583,16 +583,10 @@ export const jaJP: PlatformTranslationData = {
       title: 'ナレッジ',
       description: 'RAG / ナレッジソース用のベクトルストアバックエンド。',
       groups: {
-        turso: { title: 'Turso / libSQL',
-          description: 'プラットフォームのデータベースが PostgreSQL でない場合にのみ使用されます。PostgreSQL の場合、ナレッジストアはプラットフォームのデータベース内にあり、これらの項目は読み取られません。マネージド Turso、ローカルファイル、インメモリのいずれでも動作します。' },
         indexing: { title: 'インデックスのデフォルト値',
           description: 'ナレッジソース自体に設定した値が、これらの既定値より優先されます。' },
       },
       keys: {
-        turso_url: { label: '接続 URL',
-          help: '例: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:' },
-        turso_auth_token: { label: '認証トークン',
-          help: 'マネージド Turso URL の場合のみ必要です。' },
         chunk_target: { label: '目標チャンクサイズ（文字数）',
           help: 'ナレッジサービスがドキュメントを分割するときの、パッセージ 1 件あたりの最大文字数。ナレッジソース自身に設定したサイズが優先され、埋め込みモデルの入力上限によって小さくなることがあります。' },
       },

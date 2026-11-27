@@ -418,16 +418,10 @@ export const en: PlatformTranslationData = {
       title: 'Knowledge',
       description: 'Vector-store backend for RAG / knowledge sources.',
       groups: {
-        turso: { title: 'Turso / libSQL',
-          description: 'Used only when the platform database is not PostgreSQL; on PostgreSQL the knowledge store lives in the platform database and these fields are not read. Works against managed Turso, local file, or in-memory.' },
         indexing: { title: 'Indexing defaults',
           description: 'A value set on a knowledge source itself wins over these defaults.' },
       },
       keys: {
-        turso_url: { label: 'Connection URL',
-          help: 'Examples: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:' },
-        turso_auth_token: { label: 'Auth token',
-          help: 'Only required for managed Turso URLs.' },
         chunk_target: { label: 'Target chunk size (chars)',
           help: 'Longest passage, in characters, when the knowledge service splits a document. A size set on a knowledge source itself wins; the embedding model\'s input limit can lower it.' },
       },

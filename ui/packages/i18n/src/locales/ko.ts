@@ -2250,6 +2250,10 @@ const ko = {
       noChatsDescription: "새 대화를 시작하면 여기에 표시됩니다.",
       noMatchingChats: "일치하는 채팅이 없습니다.",
       newConversation: "새 대화",
+      // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
+      askPage: {
+        scopeBadge: "이 앱 우선",
+      },
       renameConversation: "대화 이름 변경",
       deleteConversation: "대화 삭제",
       saveRename: "이름 저장",

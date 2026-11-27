@@ -8,6 +8,7 @@ import type { Client } from '@libsql/client';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { IEmbedder, IKnowledgeService } from '@objectstack/spec/contracts';
 import { EMBEDDER_SERVICE, KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
+import { contributeKnowledgeTursoSettings } from './settings-contribution.js';
 import { TursoKnowledgeAdapter } from './turso-adapter.js';
 
 /** The store's file name when no `url` is given, beside the platform's own database. */
@@ -64,7 +65,9 @@ export interface KnowledgeTursoPluginOptions {
    * (`turso_url`, `turso_auth_token`) when neither `url` nor `client` is
    * given. A URL read from there is held to the data directory
    * ({@link resolveSettingsStoreUrl}). They are read when the boot completes
-   * (`kernel:bootstrapped`), and the store opens then. The runtime's
+   * (`kernel:bootstrapped`), and the store opens then. Under it, and only
+   * under it, the plugin also adds the two fields to the Knowledge settings
+   * page in init() ({@link contributeKnowledgeTursoSettings}). The runtime's
    * `knowledge` capability mount sets it. @default false
    */
   urlFromSettings?: boolean;
@@ -422,6 +425,10 @@ export class KnowledgeTursoPlugin implements Plugin {
     // knowledge service's own (its embedder, its reading of unmounted
     // adapters, a first build) then find the store open.
     if (!this.opensFromSettings()) return;
+    // The two settings this store reads join the Knowledge page here, and only
+    // here: a deployment that does not mount this store, or mounts it with a
+    // `url` or `client` of its own, reads neither, so its page offers neither.
+    contributeKnowledgeTursoSettings(ctx);
     ctx.hook('kernel:bootstrapped', async () => {
       await this.openFromSettings(ctx);
     });

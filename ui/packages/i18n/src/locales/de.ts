@@ -2250,6 +2250,10 @@ const de = {
       noChatsDescription: "Starten Sie eine neue Unterhaltung, um sie hier zu sehen.",
       noMatchingChats: "Keine passenden Chats.",
       newConversation: "Neue Unterhaltung",
+      // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
+      askPage: {
+        scopeBadge: "Diese App zuerst",
+      },
       renameConversation: "Unterhaltung umbenennen",
       deleteConversation: "Unterhaltung löschen",
       saveRename: "Umbenennung speichern",

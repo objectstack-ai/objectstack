@@ -724,21 +724,12 @@ export const fr: PlatformTranslationData = {
       title: 'Connaissances',
       description: 'Backend de stockage vectoriel pour le RAG et les sources de connaissances.',
       groups: {
-        turso: { title: 'Turso / libSQL', description: 'Utilisé uniquement lorsque la base de données de la plateforme n’est pas PostgreSQL ; sous PostgreSQL, le magasin de connaissances se trouve dans la base de données de la plateforme et ces champs ne sont pas lus. Fonctionne avec Turso géré, un fichier local ou en mémoire.' },
         indexing: {
           title: 'Valeurs d’indexation par défaut',
           description: 'Une valeur définie sur la source de connaissances elle-même l’emporte sur ces valeurs par défaut.',
         },
       },
       keys: {
-        turso_url: {
-          label: 'URL de connexion',
-          help: 'Exemples : libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
-        },
-        turso_auth_token: {
-          label: 'Jeton d’authentification',
-          help: 'Nécessaire uniquement pour les URL Turso gérées.',
-        },
         chunk_target: {
           label: 'Taille cible des morceaux (caractères)',
           help: 'Longueur maximale d’un passage, en caractères, lorsque le service de connaissances découpe un document. Une taille fixée sur la source elle-même l’emporte ; la limite d’entrée du modèle d’embedding peut l’abaisser.',
