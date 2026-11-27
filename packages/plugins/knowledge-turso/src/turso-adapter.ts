@@ -88,6 +88,9 @@ const SEARCH_ATTEMPTS = 3;
 /** The standard ADR-0112 code of a search whose source's index was switched under it on every attempt. */
 const CONCURRENT_MODIFICATION = 'CONCURRENT_MODIFICATION';
 
+/** The standard ADR-0112 code of a build's call refused because the generation it began is gone, as pgvector answers. */
+const LOCK_CONFLICT = 'LOCK_CONFLICT';
+
 /** The `k` of reciprocal rank fusion: a passage at rank `r` of a leg adds `1 / (k + r)` to its score. */
 export const RRF_K = 60;
 
@@ -98,6 +101,24 @@ interface GenerationRow {
   recipeHash: string | null;
   dim: number;
   state: 'active' | 'building';
+  /** When the row was made (`created_at`): with the number, what tells a generation from a later one of that number. */
+  createdAt: string;
+}
+
+/**
+ * The generation a build began, as `beginBuild` read it. Generation numbers
+ * are reused — the next one is the source's highest plus one, so after a drop
+ * or a replaced build a new generation can take the number again — so the
+ * build knows its generation by the number, the time its row was made and its
+ * fingerprint.
+ */
+type BuildMark = Pick<GenerationRow, 'generation' | 'createdAt' | 'fingerprint'>;
+
+/** Whether `g` is the generation `mark` names: the one the build began, not a later one under its number. */
+function isBuildGeneration(g: GenerationRow | undefined, mark: BuildMark): g is GenerationRow {
+  return (
+    g !== undefined && g.generation === mark.generation && g.createdAt === mark.createdAt && g.fingerprint === mark.fingerprint
+  );
 }
 
 /** A source's generations: the active one, and the one under construction. */
@@ -229,7 +250,12 @@ function withTimeout<T>(work: Promise<T>, ms: number, commit = false): Promise<T
  * source, by a unique index on the generation table. That index does not
  * refuse a second builder: a second build under the same fingerprint joins
  * the one under way, and one under another fingerprint replaces it (the first
- * builder's writes are then refused). A write
+ * builder's writes are then refused). A build's writes, listing and
+ * completion go to the generation that build began and to no other: when it
+ * is gone — the source was dropped, in this process or another, or another
+ * build replaced it — the build ends and the call is refused `LOCK_CONFLICT`
+ * (409), so a build never opens a generation and never brings a dropped
+ * source back. A write
  * carrying `ctx.index` goes to the generation of that fingerprint and is
  * refused `KNOWLEDGE_REBUILD_REQUIRED` when neither holds it; a search
  * carrying another fingerprint than the active one's is refused the same way
@@ -272,6 +298,12 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
   private readonly resolveEmbedder: () => IEmbedder | undefined;
   private readonly queryPrefix: string;
   private isReady = false;
+  /**
+   * The builds this adapter began and has not ended, by source id: the
+   * generation each one builds into, as begun. A build's writes, listing and
+   * completion go to that generation and to no other (`writeTarget`).
+   */
+  private readonly builds = new Map<string, BuildMark>();
   /** Sources whose legacy table is known to be absent. */
   private readonly noLegacy = new Set<string>();
   /** Passage tables whose keyword index is known to be complete. */
@@ -382,11 +414,12 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
 
     return this.queued(client, () =>
       this.transaction(async (tx) => {
-        // The generation may have been switched or abandoned while the embedder
-        // answered: write only into the one that was planned.
+        // The generation may have been switched, abandoned or dropped while the
+        // embedder answered: write only into the one that was planned, never a
+        // later one under its number (its row made at another time).
         const still = await tx.execute({
-          sql: `SELECT 1 FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ? AND generation = ? AND fingerprint IS ? AND dim = ?`,
-          args: [sourceId, target.generation, target.fingerprint, target.dim],
+          sql: `SELECT 1 FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ? AND generation = ? AND fingerprint IS ? AND dim = ? AND created_at = ?`,
+          args: [sourceId, target.generation, target.fingerprint, target.dim, target.createdAt],
         });
         if (still.rows.length === 0) return { commit: false, value: `${sourceId}#generation-${target.generation}` };
         // One request per document (its DELETE and its passages, as one batch
@@ -692,29 +725,41 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     assertSourceId(ctx.source.name);
     const embedder = this.requireEmbedder();
     await this.ready();
-    await this.queued(client, async () => {
-      const legacy = await this.hasLegacy(ctx.source.name);
-      await this.transaction(async (tx) => {
-        const { active, building } = await this.generations(ctx.source.name, tx);
-        const fits = (g: GenerationRow | undefined) =>
-          g !== undefined && g.fingerprint === index.fingerprint && g.dim === embedder.dimensions;
-        // Rebuilt inside the active generation, or the build under way taken up.
-        if (fits(active) || fits(building)) return { commit: true, value: undefined };
-        if (building) {
-          // A build of another fingerprint left unfinished: replaced, one per source.
-          await this.dropGenerationTable(tx, ctx.source.name, building.generation);
-          await tx.execute({
-            sql: `DELETE FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ? AND generation = ?`,
-            args: [ctx.source.name, building.generation],
-          });
-        }
-        // A source that holds nothing takes the fingerprint as its active one;
-        // beside an active generation, or a legacy table, it is built aside.
-        const state = active === undefined && !legacy ? 'active' : 'building';
-        await this.openGeneration(tx, ctx.source.name, index.fingerprint, embedder, state);
-        return { commit: true, value: undefined };
+    // The generation taken is the one this build writes into, lists and
+    // completes; a build that does not begin ends any this adapter had.
+    try {
+      await this.queued(client, async () => {
+        const legacy = await this.hasLegacy(ctx.source.name);
+        const begun = await this.transaction(async (tx) => {
+          const { active, building } = await this.generations(ctx.source.name, tx);
+          const fits = (g: GenerationRow | undefined): g is GenerationRow =>
+            g !== undefined && g.fingerprint === index.fingerprint && g.dim === embedder.dimensions;
+          // The build under way taken up, or rebuilt inside the active generation.
+          if (fits(building)) return { commit: true, value: building };
+          if (fits(active)) return { commit: true, value: active };
+          if (building) {
+            // A build of another fingerprint left unfinished: replaced, one per source.
+            await this.dropGenerationTable(tx, ctx.source.name, building.generation);
+            await tx.execute({
+              sql: `DELETE FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ? AND generation = ?`,
+              args: [ctx.source.name, building.generation],
+            });
+          }
+          // A source that holds nothing takes the fingerprint as its active one;
+          // beside an active generation, or a legacy table, it is built aside.
+          const state = active === undefined && !legacy ? 'active' : 'building';
+          return { commit: true, value: await this.openGeneration(tx, ctx.source.name, index.fingerprint, embedder, state) };
+        });
+        this.builds.set(ctx.source.name, {
+          generation: begun.generation,
+          createdAt: begun.createdAt,
+          fingerprint: begun.fingerprint,
+        });
       });
-    });
+    } catch (err) {
+      this.builds.delete(ctx.source.name);
+      throw err;
+    }
   }
 
   async completeBuild(ctx: AdapterContext): Promise<void> {
@@ -727,6 +772,13 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       await this.transaction(async (tx) => {
         const { active, building } = await this.generations(ctx.source.name, tx);
         const t = quoted(GENERATION_TABLE);
+        // A build this adapter began completes the generation it began and no
+        // other: gone (the source was dropped, in any process) or replaced by
+        // another build, it switches, records and drops nothing.
+        const mine = this.builds.get(ctx.source.name);
+        const target =
+          building?.fingerprint === index.fingerprint ? building : active?.fingerprint === index.fingerprint ? active : undefined;
+        if (mine !== undefined && !isBuildGeneration(target, mine)) throw buildEnded(ctx.source.name);
         if (building?.fingerprint === index.fingerprint) {
           if (active) {
             await this.dropGenerationTable(tx, ctx.source.name, active.generation);
@@ -751,7 +803,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         return { commit: true, value: undefined };
       });
       if (legacy) this.noLegacy.add(ctx.source.name);
-    });
+    }).finally(() => this.builds.delete(ctx.source.name));
   }
 
   /**
@@ -761,6 +813,12 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
    * releases, when the source still has one. A source it holds nothing for is
    * no error. A table the store did not make under a generation's name is
    * refused and nothing is removed (`dropGenerationTable`).
+   *
+   * A build of the source under way, in this process or another, does not
+   * hold the drop back: its generation is dropped with the rest, and its next
+   * write, listing or completion is refused `LOCK_CONFLICT` and ends it (see
+   * `writeTarget`), so it never brings the source back. A build that begins
+   * after the drop builds the source from nothing.
    */
   async dropSource(ctx: AdapterContext): Promise<void> {
     const client = this.requireClient();
@@ -879,7 +937,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
   /** The active generation of a source and the one under construction. */
   private async generations(sourceId: string, tx?: Transaction): Promise<SourceGenerations> {
     const found = await (tx ?? this.requireClient()).execute({
-      sql: `SELECT generation, fingerprint, recipe_hash, dim, state FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ?`,
+      sql: `SELECT generation, fingerprint, recipe_hash, dim, state, created_at FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ?`,
       args: [sourceId],
     });
     const out: SourceGenerations = {};
@@ -890,6 +948,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         recipeHash: r.recipe_hash === null ? null : String(r.recipe_hash),
         dim: Number(r.dim),
         state: r.state === 'building' ? 'building' : 'active',
+        createdAt: String(r.created_at),
       };
       out[row.state === 'active' ? 'active' : 'building'] = row;
     }
@@ -1033,7 +1092,9 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       sql: `INSERT INTO ${quoted(GENERATION_TABLE)} (source_id, generation, fingerprint, dim, model, state) VALUES (?, ?, ?, ?, ?, ?)`,
       args: [sourceId, generation, fingerprint ?? null, embedder.dimensions, embedder.model ?? null, state],
     });
-    return { generation, fingerprint: fingerprint ?? null, recipeHash: null, dim: embedder.dimensions, state };
+    // Read back, so the row carries the time it was made (`created_at`): the
+    // unique indexes hold one row of each state per source, this one.
+    return (await this.generations(sourceId, tx))[state]!;
   }
 
   /**
@@ -1043,6 +1104,13 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
    * embedder's width is not the generation's, or — outside a build — when the
    * source still has a legacy table. A source that holds nothing gets its first
    * generation (`create`), or none. Runs inside the client's queue.
+   *
+   * A call of a build this adapter began (`ctx.reason === 'reindex'`) goes to
+   * the generation that build began and to no other: when it is no longer
+   * active or under construction — the source was dropped, by this process or
+   * another, or another build replaced it — the build is ended and the call
+   * refused `LOCK_CONFLICT`, so a build never opens a generation and never
+   * brings a dropped source back.
    */
   private async writeTarget(
     ctx: AdapterContext,
@@ -1056,6 +1124,16 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       if (embedder.dimensions !== g.dim) throw rebuildRequired(sourceId, false);
       return g;
     };
+    const build = ctx.reason === 'reindex' ? this.builds.get(sourceId) : undefined;
+    if (build !== undefined) {
+      const mine = [building, active].find((g) => isBuildGeneration(g, build));
+      if (mine === undefined) {
+        this.builds.delete(sourceId);
+        throw buildEnded(sourceId);
+      }
+      if (fingerprint !== undefined && mine.fingerprint !== fingerprint) throw rebuildRequired(sourceId, false);
+      return checked(mine);
+    }
     if (building !== undefined && fingerprint !== undefined && building.fingerprint === fingerprint) return checked(building);
     if (active === undefined) {
       if (await this.hasLegacy(sourceId)) throw rebuildRequired(sourceId, building !== undefined);
@@ -1158,6 +1236,26 @@ function rebuildRequired(sourceId: string, building: boolean): Error {
       'Run a complete reindex of the source. The store builds the new index beside the old one and switches to it ' +
       'when the reindex completes; the old index is then dropped.',
   });
+}
+
+/**
+ * A build's write, listing or completion refused because the generation the
+ * build began is gone: the source was dropped, or another build replaced it.
+ * The same code and status as the pgvector store's.
+ */
+function buildEnded(sourceId: string): Error {
+  return Object.assign(
+    new Error(
+      `The index this build of knowledge source '${sourceId}' began was dropped or replaced while it ran; this build writes and completes nothing more.`,
+    ),
+    {
+      code: LOCK_CONFLICT,
+      status: 409,
+      remedy:
+        'The source was removed (its index dropped), or another build of it under another fingerprint replaced this ' +
+        'one. Start a reindex again if the source is still served and no build of it is running.',
+    },
+  );
 }
 
 /**
