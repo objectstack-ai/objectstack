@@ -64,16 +64,25 @@ async function makeHarness(opts: { withProtocol: boolean; principal: ExecutionCo
   engine.registry.registerObject(ALPHA as any, PKG_A, undefined, 'own');
   engine.registry.registerObject(BETA as any, PKG_B, undefined, 'own');
   engine.registry.registerObject(GAMMA as any, PKG_C, undefined, 'own');
+  // The one organization the rows land in, as the runtime's default-organization testkit installs it.
+  engine.registry.registerObject(
+    { name: 'sys_organization', label: 'Organization', managedBy: 'better-auth', fields: { name: { type: 'text', label: 'Name' } } } as any,
+    '@objectstack/runtime',
+  );
   await engine.syncSchemas();
+  await engine.getDriverForObject('sys_organization')!.create('sys_organization', { id: 'org_default', name: 'Default' });
   const beta: any = await engine.insert('dq_beta', { name: 'beta', secret_note: SECRET });
   const gamma: any = await engine.insert('dq_gamma', { name: 'gamma', b2_ref: beta.id });
   await engine.insert('dq_alpha', { name: 'alpha', b_ref: beta.id, c_ref: gamma.id });
   const protocol = opts.withProtocol
     ? (new ObjectStackProtocolImplementation(engine as any) as unknown as StdioProtocolObjectReads)
     : undefined;
-  // A metadata service with no copy of any package object: on a host with no
-  // protocol service, the gate's definition read finds nothing to refuse with.
-  const metadataService = { getObject: async () => undefined } as unknown as IMetadataService;
+  // A metadata service holding a copy of each object: the read the gate and
+  // the relation walk fall back to (a host with no protocol service, or a
+  // protocol whose metadata store is not wired here). A copy cannot say its
+  // package is disabled, so it never refuses by itself.
+  const copies: Record<string, unknown> = { dq_alpha: ALPHA, dq_beta: BETA, dq_gamma: GAMMA };
+  const metadataService = { getObject: async (name: string) => copies[name] } as unknown as IMetadataService;
   const bridge = createStdioDataBridge({
     engine: engine as unknown as IDataEngine,
     metadataService,
