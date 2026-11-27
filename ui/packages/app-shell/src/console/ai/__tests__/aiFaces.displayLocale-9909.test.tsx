@@ -9,8 +9,7 @@
 /**
  * The AI console's date, time and number faces read the DECLARED session
  * locale, never the machine's (objectui#9909): a conversation row's
- * older-than-a-week date and its absolute-time tooltip, and the build-debug
- * drawer's token count.
+ * older-than-a-week date and its absolute-time tooltip.
  *
  * The row's date tail is objectui#3441's shape one directory over: the recent
  * buckets go through `t('console.ai.daysAgo')`, and the 7-days-and-older bucket
@@ -46,7 +45,6 @@ vi.mock('../../../hooks/useConversationList', () => {
 });
 
 import { ConversationsSidebar } from '../ConversationsSidebar';
-import { BuildDebugDrawer } from '../BuildDebugDrawer';
 
 afterEach(() => {
   cleanup();
@@ -60,16 +58,6 @@ function session(locale: string, node: React.ReactNode): React.ReactElement {
     </I18nProvider>
   );
 }
-
-const REPORT = {
-  conversationId: 'conv_x',
-  title: 'Build',
-  summary: { models: ['m'], userTurns: 3, messages: 36, totalTokens: 242495, llmMs: 82900 },
-  reconciliation: { orphaned: [], missing: [], errors: [], liveCount: 0, ok: true },
-  verify: { status: 'passed', errors: 0, warnings: 0, userIssues: [], platformNoise: 0 },
-  timeline: [],
-  pendingActions: [],
-};
 
 interface Surface {
   name: string;
@@ -118,20 +106,6 @@ const SURFACES: Surface[] = [
     },
     de: /4\.3\.2020, 15:30:00/,
     en: /3\/4\/2020, 3:30:00\sPM/,
-  },
-  {
-    name: 'BuildDebugDrawer — token count',
-    read: async (locale) => {
-      vi.stubGlobal('fetch', vi.fn(async () => ({ headers: new Headers(), ok: true, status: 200, json: async () => REPORT })));
-      render(session(locale, <BuildDebugDrawer apiBase="/api/v1/ai" conversationId="conv_x" open onOpenChange={() => {}} />));
-      const line = await screen.findByText(/tok/);
-      const text = line.textContent ?? '';
-      cleanup();
-      vi.unstubAllGlobals();
-      return text;
-    },
-    de: /242\.495 tok/,
-    en: /242,495 tok/,
   },
 ];
 

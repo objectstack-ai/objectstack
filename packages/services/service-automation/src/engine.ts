@@ -241,6 +241,7 @@ import { FlowActivationProjection } from './flow-activation-projection.js';
 import { packageScopedRefusalMessage, PackageScopedNameRefusedError } from '@objectstack/core';
 import { ENVIRONMENT_ADDRESS_SEGMENT } from '@objectstack/spec/kernel';
 import { FlowSlotTable, flowRunKey, flowRunPackage, isSlotKeySpelling, qualifiedFlowKey, unfiledFlowKey, stampFlowRunSlot, type FlowKeyMove, type FlowSlot } from './flow-slots.js';
+import { readRecordRun, readRootRun, stampRootRun, type RecordRun, type RootRun } from './root-run.js';
 import { flowSlotRunStore } from './flow-slot-run-store.js';
 import { ConnectorInstances } from './connector-instances.js';
 import type { ConnectorInstanceOptions } from './plugin-extension-api.js';
@@ -6128,6 +6129,30 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [ADR-0162 Execution item 7] The root run of the run `context` belongs
+     * to: the run its tree was started on, at any depth, as the engine
+     * stamped it (`root-run.ts`). `undefined` where the run carries none: a
+     * run parked before root runs were stamped whose chain of parents the
+     * resume could not read whole, a child of such a run, or a context that is
+     * no run's. A node
+     * executor reads it here, as it reads {@link flowKeyOfRun}. Engine-local.
+     */
+    rootRunOf(context: AutomationContext | undefined): RootRun | undefined {
+        return readRootRun(context);
+    }
+
+    /**
+     * [ADR-0162 Execution item 7] The record run of the run `context` belongs
+     * to: the highest run, from that run up, over which the record does not
+     * change (the root run, or a `map` item run whose item is a record), as
+     * the engine stamped it (`root-run.ts`). `undefined` exactly where
+     * {@link rootRunOf} is. Engine-local.
+     */
+    recordRunOf(context: AutomationContext | undefined): RecordRun | undefined {
+        return readRecordRun(context);
+    }
+
+    /**
      * [ADR-0150 D4, #31696] The key the run `context`'s flow is filed under
      * NOW: its start key, or where that moved in flight, the key its
      * package's slot moved to. `undefined` for no run. Engine-local.
@@ -8265,6 +8290,8 @@ export class AutomationEngine implements IAutomationService {
         // (#3456).
         const runContext = await this.resolveRunContext(flow, context, runId);
         stampFlowRunSlot(runContext, flowName, runPackage);
+        // [ADR-0162 item 7] The run's root run: itself, or its parent's.
+        stampRootRun(runContext, { runId, flowName, startedAt });
 
         try {
             // Find the start node

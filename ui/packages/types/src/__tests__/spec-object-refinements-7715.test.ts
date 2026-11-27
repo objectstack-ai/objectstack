@@ -376,7 +376,8 @@ const SITES = [
     // `checkAppLandingItems` joined the spec object with `landing` (objectstack#28022, spec half)
     // and was attached by objectstack#28450 with the console's landing redirect: a landing `item`
     // must name an openable entry of the app's own navigation, and its `visible` reads no `data`.
-    attached: ['checkAppLandingItems'],
+    // `checkAppSingleAiChatEntry` joined with the `ai:chat` navigation entry: at most one per app.
+    attached: ['checkAppLandingItems', 'checkAppSingleAiChatEntry'],
     notAttachable: [],
   },
   {
@@ -476,9 +477,23 @@ const SITES = [
  * Exported checks that belong to NO `specFieldsExcept` site. `GlobalFilterSchema`
  * is mirrored by a `.shape` spread in `complex.zod.ts` whose own `superRefine`
  * re-parses the spec-owned keys through the spec schema, so its check already
- * runs there — measured below rather than assumed.
+ * runs there — measured below rather than assumed. `checkAiChatNavParams` is a
+ * navigation ITEM check (the spec mounts it on its whole navigation union), so it
+ * is chained on the hand-written `NavigationItemSchema` flat arm in `app.zod.ts`,
+ * not on a derivation site.
  */
-const CARRIED_ELSEWHERE = ['checkGlobalFilterDateDefaultValue'] as const;
+const CARRIED_ELSEWHERE = ['checkGlobalFilterDateDefaultValue', 'checkAiChatNavParams'] as const;
+
+/**
+ * Exported checks of a spec schema objectui has NO mirror of, so no site can
+ * attach them. `checkFormItemNamePrefix` judges the `form` METADATA ITEM
+ * (ADR-0159 card ②, objectstack#37086): the name `OBJECT.KEY` against its
+ * `object`. A renderer meets a form only as the body `@objectstack/rest`'s form
+ * doors serve, already parsed server-side, never as an authored node. Counted
+ * only where the installed spec exports it, as the census reads a spec built
+ * from either tree.
+ */
+const NOT_MIRRORED = ['checkFormItemNamePrefix'] as const;
 
 /**
  * Every `check*` FUNCTION `@objectstack/spec/ui` exports, name → binding, read
@@ -535,7 +550,7 @@ const PAGE_SITE = 'SpecPageFields → PageNodeSchema (layout.zod.ts)';
  * Any OTHER unnamed check still reddens the census below, by name.
  */
 async function specChecksRemovedOnMain(): Promise<string[]> {
-  const named = new Set<string>([...SITES.flatMap((s) => [...s.attached, ...s.notAttachable]), ...CARRIED_ELSEWHERE]);
+  const named = new Set<string>([...SITES.flatMap((s) => [...s.attached, ...s.notAttachable]), ...CARRIED_ELSEWHERE, ...NOT_MIRRORED]);
   const page = { kind: 'slotted', slots: { details: [{ type: 'object-grid', properties: { data: { provider: 'api', read: { url: '/api/rows' } } } }] } };
   const removed: string[] = [];
   for (const [name, binding] of await specUiChecks()) {
@@ -559,12 +574,12 @@ describe('objectui#7715 — census: the spec\'s object-level checks at the six d
     });
   });
 
-  it('every `check*` the spec exports is named by exactly one site, carried elsewhere, or removed on objectstack `main`', async () => {
+  it('every `check*` the spec exports is named by exactly one site, carried elsewhere, of a schema objectui does not mirror, or removed on objectstack `main`', async () => {
     const checks = await specUiChecks();
     const removedOnMain = await specChecksRemovedOnMain();
     // At most the one judge objectstack#23784 removed; zero once objectui installs a spec without it.
     expect(removedOnMain.length).toBeLessThanOrEqual(1);
-    const named = [...SITES.flatMap((s) => [...s.attached, ...s.notAttachable]), ...CARRIED_ELSEWHERE, ...removedOnMain].sort();
+    const named = [...SITES.flatMap((s) => [...s.attached, ...s.notAttachable]), ...CARRIED_ELSEWHERE, ...NOT_MIRRORED.filter((name) => checks.has(name)), ...removedOnMain].sort();
     expect([...checks.keys()].sort()).toEqual(named);
     for (const [name, binding] of checks) expect(typeof binding, name).toBe('function');
   });

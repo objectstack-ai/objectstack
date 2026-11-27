@@ -39,7 +39,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { viewForm } from './view.form';
+import { viewForm } from './view.metadata-form';
 import { ListViewSchema } from './view.zod';
 
 type Predicate = string | { dialect?: string; source?: string } | undefined;

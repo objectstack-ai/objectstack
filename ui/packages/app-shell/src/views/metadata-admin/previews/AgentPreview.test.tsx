@@ -36,7 +36,7 @@ const VALID_DRAFT = {
   label: 'Sales Copilot',
   role: 'Assistant for sales reps',
   active: true,
-  model: { provider: 'openai', model: 'gpt-4o', temperature: 0.4, maxTokens: 2048 },
+  model: { model: 'gpt-4o', temperature: 0.4, maxTokens: 2048 },
   instructions: 'You are a helpful sales assistant.',
   skills: ['summarize_account', 'draft_email'],
 } satisfies Record<string, unknown>;
@@ -71,8 +71,20 @@ describe('AgentPreview renders what a spec-valid agent declares', () => {
     expect(screen.getByText('Sales Copilot')).toBeTruthy();
     expect(screen.getByText('sales_copilot')).toBeTruthy();
     expect(screen.getByText('Assistant for sales reps')).toBeTruthy();
-    expect(screen.getByText('openai · gpt-4o')).toBeTruthy();
+    expect(screen.getByText('gpt-4o')).toBeTruthy();
     expect(screen.getByText('You are a helpful sales assistant.')).toBeTruthy();
+  });
+
+  it('never shows a provider, even for a stale draft that still carries one (#37712: the key was retired)', () => {
+    renderPreview({ ...VALID_DRAFT, model: { provider: 'anthropic', model: 'gpt-4o' } });
+    expect(screen.getByText('gpt-4o')).toBeTruthy();
+    expect(screen.queryByText(/anthropic/)).toBeNull();
+  });
+
+  it('shows no model pill for a block that names neither, so the environment default is not given a name', () => {
+    renderPreview({ ...VALID_DRAFT, model: { temperature: 0.2 } });
+    expect(screen.queryByText('gpt-4o')).toBeNull();
+    expect(screen.queryByText(/openai/)).toBeNull();
   });
 
   it('says where tools come from, so the missing TOOLS block is not read as a gap', () => {

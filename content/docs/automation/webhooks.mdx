@@ -495,7 +495,9 @@ delay to the next, from `intervalMs` (default 500 ms) up to `maxIdleIntervalMs`
 (default 30 s; `dispatchMaxIdleIntervalMs` on `MessagingServicePlugin`), and a
 tick that claims work snaps it back. `messaging.enqueueHttp()` and
 `messaging.redeliverHttp()` wake the dispatcher running in the same process, so
-a delivery written there goes out at once.
+a delivery written there goes out at once. Written inside a transaction, it goes
+out when that transaction commits, and not at all when it rolls back: until the
+commit the dispatcher could not see the row.
 
 The loop also **wakes at the next due time**. After the first empty tick of an
 idle stretch it reads, once, the earliest instant a row becomes claimable

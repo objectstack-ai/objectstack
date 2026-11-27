@@ -201,9 +201,8 @@ describe('the live mapper lifts the card beside the approval it rides on', () =>
     expect(tool?.state).toBe('approval-requested');
     expect(tool?.pendingActionId).toBe('pa_7');
     expect(tool?.recordWrite?.fields.map((f) => f.name)).toEqual(['name', 'company', 'source']);
-    // Not the sibling cards: a write proposal is neither a hand-off nor a draft.
+    // Not the sibling card: a write proposal is not a hand-off.
     expect(tool?.recordHandoff).toBeUndefined();
-    expect(tool?.draftReview).toBeUndefined();
   });
 });
 

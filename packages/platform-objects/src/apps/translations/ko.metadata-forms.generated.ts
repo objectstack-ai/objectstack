@@ -1664,6 +1664,9 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       }
     }
   },
+  form: {
+    label: "양식"
+  },
   page: {
     label: "페이지",
     sections: {
@@ -3288,7 +3291,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       model: {
         label: "모델",
-        helpText: "AI 모델 구성(공급자, 모델 이름, 온도 등)"
+        helpText: "AI 모델 구성(모델 이름, 온도 등)"
       },
       planning: {
         label: "계획",

@@ -198,7 +198,7 @@ describe('the Debug section takes the Configuration aside’s place (#34818 item
     function SlotHost({ children }: { children: React.ReactNode }) {
       const [target, setTarget] = React.useState<HTMLElement | null>(null);
       const handle = React.useMemo(
-        () => ({ propsTarget: target, mode: 'props' as const, claimProps: () => () => {}, showProps }),
+        () => ({ propsTarget: target, claimProps: () => () => {}, showProps }),
         [target],
       );
       return (

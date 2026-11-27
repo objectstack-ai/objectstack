@@ -156,6 +156,7 @@ describe('activity milestone summary — rendered in the reader\'s language (#37
       field: 'stage',
       value: 'won',
       tokens: { name: { text: 'Acme' }, stage: { text: 'Won', option: 'won' } },
+      names: ['name', 'stage'],
     });
     const served = await rowOf('won', reader('zh-CN'));
     expect(JSON.parse(served!.metadata)).not.toHaveProperty('summary_message');
@@ -166,5 +167,17 @@ describe('activity milestone summary — rendered in the reader\'s language (#37
     const hidden = await rowOf('lost', reader('zh-CN', NOTE_HIDDEN));
     expect(hidden).toBeDefined();
     expect(hidden).not.toHaveProperty('summary');
+  });
+
+  // Last: it changes the app's pack for the rest of the file.
+  it('[#37635] a row written before its template gained a token reads its stored sentence, not a hole', async () => {
+    // The app adds `{note}` to the won milestone, with its translation. The
+    // won row was written before: it holds no value for `note`.
+    kernel.getService<II18nService>('i18n').loadTranslations('zh-CN', {
+      objects: { [DEAL]: { _milestones: { stage: { won: { summary: '商机赢单：{name}（{stage}），备注：{note}' } } } } },
+    });
+    expect((await rowOf('won', reader('zh-CN')))?.summary).toBe('Deal won: Acme (Won)');
+    // CONTROL: the lost row's template held `{note}` when it was written, so it still composes.
+    expect((await rowOf('lost', reader('zh-CN')))?.summary).toBe('商机输单：Acme，budget cut');
   });
 });

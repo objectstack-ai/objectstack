@@ -3,7 +3,7 @@
 export * from './identity.zod';
 export * from './protocol';
 export * from './position.zod';
-export { positionForm } from './position.form';
+export { positionForm } from './position.metadata-form';
 export * from './organization.zod';
 export * from './scim.zod';
 export * from './eval-user.zod';

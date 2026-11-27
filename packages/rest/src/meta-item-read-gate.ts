@@ -1861,6 +1861,23 @@ export function createMetaItemReadGate(
         };
     }
 
+    if (metaType === 'form') {
+        // [ADR-0159, card ② item 2] A `form` item's audience: the form's own
+        // `requiredPermissions` (a projected item carries its view item's gate
+        // too, `projectViewForms`). A caller refused a form's document at
+        // `/meta/view/NAME` is refused it at `/meta/form/NAME`, whole.
+        return async (document) => {
+            if (document == null) return serve(document);
+            const ctx = await resolveCallerOnce();
+            const sysPerms = callerSystemPermissions(ctx);
+            if (!sysPerms) return serve(document);
+            if (!holdsRequiredPermissions((document as any).requiredPermissions, sysPerms)) {
+                return refuse(await audienceRefusal(sources, ctx));
+            }
+            return serve(document);
+        };
+    }
+
     if (metaType === 'object') {
         // [#22639] An object's own `listViews` — see {@link filterObjectListViewsForUser}.
         return async (document) => {
@@ -2038,6 +2055,19 @@ export function createMetaListReadGate(
                 if (gated != null) out.push(gated);
             }
             return changed ? out : items;
+        };
+    }
+
+    if (metaType === 'form') {
+        // [ADR-0159] The list face of the `form` arm above: a form the caller
+        // does not hold is left out.
+        return async (items) => {
+            if (items.length === 0) return items;
+            const sysPerms = callerSystemPermissions(await sources.resolveCaller());
+            if (!sysPerms) return items;
+            const kept = items.filter((it: any) => !it || typeof it !== 'object'
+                || holdsRequiredPermissions(it.requiredPermissions, sysPerms));
+            return kept.length === items.length ? items : kept;
         };
     }
 
@@ -3458,6 +3488,9 @@ const PACKAGED_BASE_ACCESSORS: ReadonlyMap<string, string> = new Map<string, str
     ['app', 'getPackagedAppBase'],
     ['book', 'getPackagedBookBase'],
     ['mapping', 'getPackagedMappingBase'],
+    // [ADR-0159, ADR-0029 D9.2a] A `form` override's own changed text outranks
+    // its base's catalog, the base an authored `form` item or an old shape's projection.
+    ['form', 'getPackagedFormBase'],
 ]);
 
 /**

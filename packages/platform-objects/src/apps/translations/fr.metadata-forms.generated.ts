@@ -1664,6 +1664,9 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       }
     }
   },
+  form: {
+    label: "Formulaire"
+  },
   page: {
     label: "Page",
     sections: {
@@ -3288,7 +3291,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       model: {
         label: "Modèle",
-        helpText: "Configuration du modèle d’IA (fournisseur, nom du modèle, température, etc.)"
+        helpText: "Configuration du modèle d’IA (nom du modèle, température, etc.)"
       },
       planning: {
         label: "Planification",

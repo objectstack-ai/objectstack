@@ -116,6 +116,8 @@ import {
   ACTIVITY_SUMMARY_MESSAGE_KEY,
   composeStoredSummary,
   englishBooleanWord,
+  milestoneTokenNames,
+  milestoneTokenRe,
   withEnglishMessages,
   type ActivitySummaryFieldChange,
   type ActivitySummaryLocale,
@@ -1240,17 +1242,6 @@ function renderChangedFieldsSummary(
     if (maxLength === undefined || text.length <= maxLength) return { text, fields: ordered, message };
   }
   return null;
-}
-
-/**
- * [#7290] The `{token}` pattern of an `activityMilestones` summary template.
- *
- * A FRESH instance per call, deliberately: a module-level `/g` regex carries
- * `lastIndex` between callers, and this one is read twice per fired milestone
- * (once to plan the reads, once to render). One definition, no shared cursor.
- */
-function milestoneTokenRe(): RegExp {
-  return /\{(\w+)\}/g;
 }
 
 /**
@@ -2705,6 +2696,9 @@ export function installAuditWriters(
           field: milestone.field,
           value: milestone.value,
           tokens: rendered.tokens,
+          // [#37635] Every token the fired template held, so a reader can tell
+          // an empty one from one the template gains later.
+          names: milestoneTokenNames(milestone.template),
         };
         if (milestone.type) activityType = milestone.type;
         // [#22771] `type` stays what the declaration names; the row says it is

@@ -8,10 +8,10 @@
  *  - `/ai/build/ID` lands on the default surface WITH the conversation:
  *    `/ai/ask/ID`, and that conversation is the one read, so an old build
  *    thread still opens. It used to land on `/ai/ask` and drop the id.
- *  - the cloud#1674 maker convergence (a maker's bare `/ai/ask` → `/ai/build`)
- *    does not fire: there is no build to converge on.
- *  - regression: where `build` is served, `/ai/build/ID` stays where it is and
- *    a maker's bare `/ai/ask` still converges on `/ai/build`.
+ *  - a maker's bare `/ai/ask` stays where it is: the cloud#1674 maker
+ *    convergence left with the in-app build entry (objectstack#37682).
+ *  - regression: where `build` is served, `/ai/build/ID` stays where it is,
+ *    and a maker's bare `/ai/ask` still stays on ask.
  *
  * Real subjects: `AiChatPage` under a real router, its route canonicalization
  * and `useChatConversation`. Stand-ins: the agent catalog, the authoring
@@ -19,6 +19,9 @@
  * empty) and the side panels; `fetch` answers the conversation API from memory.
  */
 
+// AiChatPage reads a dropped spreadsheet through `import('@object-ui/plugin-grid')`; load it
+// here so collection pays that transform, not a clocked case (check-test-source-alias).
+import '@object-ui/plugin-grid';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
@@ -169,10 +172,9 @@ describe('in-app building closed: the catalog serves `ask`, not `build` (objects
     expect(visited.some((p) => p === '/ai/build' || p === '/ai/ask')).toBe(false);
   });
 
-  it('the maker convergence (cloud#1674) never sends a maker\'s bare /ai/ask to /ai/build', async () => {
+  it('a maker\'s bare /ai/ask is never sent to /ai/build', async () => {
     state.canAuthor = true;
     visit('/ai/ask');
-    // The same window in which the served-build leg below is redirected.
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 500));
     });
@@ -193,9 +195,13 @@ describe('regression: where the catalog serves `build`, the addresses are unchan
     expect(visited.every((p) => p === '/ai/build/c-42')).toBe(true);
   });
 
-  it('a maker\'s bare /ai/ask still converges on /ai/build (cloud#1674)', async () => {
+  it('a maker\'s bare /ai/ask stays on ask (objectstack#37682)', async () => {
     state.canAuthor = true;
     visit('/ai/ask');
-    await waitFor(() => expect(visited.some((p) => p.startsWith('/ai/build'))).toBe(true));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/ai\/ask/);
+    expect(visited.some((p) => p.startsWith('/ai/build'))).toBe(false);
   });
 });

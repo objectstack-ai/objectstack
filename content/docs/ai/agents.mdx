@@ -306,7 +306,7 @@ own `ask` / `build` records use exactly these fields):
 | `surface` | `'ask'` \| `'build'` — the product surface this agent binds (ADR-0063 §1) |
 | `role` | Free-text **persona** string (e.g. `"Senior Support Engineer"`) — not an enum |
 | `instructions` | System prompt / prime directives |
-| `model` | Provider + model config (`provider`: `openai` \| `azure_openai` \| `anthropic` \| `local`) |
+| `model` | Model config: `model` (the model name, optional — absent means the deployment's default model), `temperature`, `maxTokens`, `topP`. There is no `provider`: it was **removed in protocol 19 (#37712)** because no runtime read it — the deployment's AI settings choose the provider, and resolve the model name among the providers they turn on |
 | `skills` | Skill names to attach (the primary Agent → Skill → Tool capability model) |
 | `tools` | **Removed in protocol 17 (#3894)** — typed `never`, so writing it fails `tsc`, and a value that reaches the runtime is rejected at parse. This is **not** a rename: there is no key the value moves to. Declare each tool on a **skill** instead — a platform tool by its registered name, or `action_<name>` for one of your own AI-exposed Actions — and attach that skill through `skills` (ADR-0064) |
 | `knowledge` | **Removed in protocol 17 (#3896)** — typed `never`, so writing it fails `tsc`, and a value that reaches the runtime is rejected at parse. Declaring `sources` / `indexes` here never scoped retrieval: `search_knowledge` takes `sourceIds` from the LLM's own tool-call arguments, not from the agent record, so an author who “scoped” access here scoped nothing. This is **not** a rename: there is no key the value moves to — delete the block. Restrict retrieval at the knowledge-service / source level (per-source permissions), and describe intended grounding in `instructions` so the model asks for the right sources |
@@ -365,7 +365,6 @@ Your responsibilities:
 Always be professional and data-driven.`,
 
   model: {
-    provider: 'openai',
     model: 'gpt-4',
     temperature: 0.7,
     maxTokens: 2000,
@@ -401,7 +400,6 @@ Your responsibilities:
 Always be empathetic and solution-focused.`,
 
   model: {
-    provider: 'openai',
     model: 'gpt-4',
     temperature: 0.5,
     maxTokens: 1500,
@@ -434,7 +432,6 @@ Tasks:
 Use reputable data sources.`,
 
   model: {
-    provider: 'openai',
     model: 'gpt-3.5-turbo',
     temperature: 0.3,
     maxTokens: 1000,
@@ -470,7 +467,6 @@ Responsibilities:
 Use the data tools to query records and aggregate metrics.`,
 
   model: {
-    provider: 'openai',
     model: 'gpt-4',
     temperature: 0.2,
     maxTokens: 3000,

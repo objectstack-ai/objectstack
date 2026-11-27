@@ -157,8 +157,6 @@ describe("the barrel's ChatbotEnhancedMessage IS the enhanced shape", () => {
     type _HasReasoning = Assert<Has<BarrelChatMessage, 'reasoning'>>;
     type _HasSources = Assert<Has<BarrelChatMessage, 'sources'>>;
     type _HasTraceId = Assert<Has<BarrelChatMessage, 'traceId'>>;
-    type _HasBuildProgress = Assert<Has<BarrelChatMessage, 'buildProgress'>>;
-    type _HasBlueprintProgress = Assert<Has<BarrelChatMessage, 'blueprintProgress'>>;
     type _HasCharts = Assert<Has<BarrelChatMessage, 'charts'>>;
 
     // The retirement is a WIDENING, which is what makes it safe for existing
@@ -259,8 +257,8 @@ describe("useObjectChat's declared message type is honest about both modes", () 
     // objectui#4424. The hook declared `messages: OuiChatMessage[]` (the
     // AUTHORING contract) and produced it honestly in local mode only — API
     // mode built RUNTIME messages and cast them with `as OuiChatMessage[]`,
-    // erasing `buildProgress`, `blueprintProgress`, `charts` and every HITL /
-    // draft-review extension on the tool invocations. The values survived
+    // erasing `charts`, `recordCitations` and the HITL approval id on the
+    // tool invocations. The values survived
     // because nothing on the path rebuilt a message; the declaration was the
     // trap, and these pins are what keeps it closed.
 
@@ -312,18 +310,11 @@ describe("useObjectChat's declared message type is honest about both modes", () 
 
     // 4. …plus the render-only keys API mode really carries. Named one by one
     //    so a future narrowing says WHICH capability it dropped — each of these
-    //    is a rendered affordance: the build panel, the design panel, inline
-    //    charts, the approval card, the "Review N changes" entry point, the
-    //    proposed-plan card, the confirm-changes card, "Open in Builder".
-    type _HasBuildProgress = Assert<Has<ObjectChatMessage, 'buildProgress'>>;
-    type _HasBlueprintProgress = Assert<Has<ObjectChatMessage, 'blueprintProgress'>>;
+    //    is a rendered affordance: inline charts, record citations, the
+    //    approval card.
     type _HasCharts = Assert<Has<ObjectChatMessage, 'charts'>>;
     type HookToolInvocation = NonNullable<ObjectChatMessage['toolInvocations']>[number];
     type _HasPendingActionId = Assert<Has<HookToolInvocation, 'pendingActionId'>>;
-    type _HasDraftReview = Assert<Has<HookToolInvocation, 'draftReview'>>;
-    type _HasProposedPlan = Assert<Has<HookToolInvocation, 'proposedPlan'>>;
-    type _HasProposedChanges = Assert<Has<HookToolInvocation, 'proposedChanges'>>;
-    type _HasBuilderHandoff = Assert<Has<HookToolInvocation, 'builderHandoff'>>;
 
     // 5. The compatibility statement, re-derived (objectui#10018). The honest
     //    type WAS a subtype of the authoring one until the authoring `state`
@@ -416,12 +407,9 @@ describe("the seam's input contract names the keys it passes through", () => {
     // preserved by faith: `tsc` could not see one of them, and the pass-through
     // test had to cast its fixture into place. `SeamChatMessage` names them.
     type _SeamNotAny = Assert<Equal<IsAny<SeamChatMessage>, false>>;
-    type _SeamHasBuildProgress = Assert<Has<SeamChatMessage, 'buildProgress'>>;
-    type _SeamHasBlueprintProgress = Assert<Has<SeamChatMessage, 'blueprintProgress'>>;
     type _SeamHasCharts = Assert<Has<SeamChatMessage, 'charts'>>;
     type SeamTool = NonNullable<SeamChatMessage['toolInvocations']>[number];
     type _SeamToolHasPendingActionId = Assert<Has<SeamTool, 'pendingActionId'>>;
-    type _SeamToolHasDraftReview = Assert<Has<SeamTool, 'draftReview'>>;
 
     // It is the seam's INPUT, so it stays wide enough for both callers: a host
     // holding plain authored messages (the reason the adapter is exported from
@@ -528,8 +516,8 @@ describe('the Date → ISO absorption is expressed once', () => {
     expect(
       /as\s+OuiChatMessage\[\]/.test(codeOnly),
       'useObjectChat.ts casts its API-mode messages into the @object-ui/types ' +
-        'authoring contract again. That cast erases `buildProgress`, ' +
-        '`blueprintProgress`, `charts` and the HITL / draft-review extensions on ' +
+        'authoring contract again. That cast erases `charts`, ' +
+        '`recordCitations` and the HITL approval id on ' +
         'every tool invocation (objectui#4424). The hook declares ' +
         '`ObjectChatMessage`, which those values satisfy — assign, do not assert.',
     ).toBe(false);

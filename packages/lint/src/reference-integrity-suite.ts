@@ -101,6 +101,7 @@
  * so the gap stays visible instead of being rediscovered.
  */
 
+import { validateFormObjectBindings } from './validate-form-items.js';
 import { validateObjectReferences } from './validate-object-references.js';
 import { validateSearchableFields } from './validate-searchable-fields.js';
 import { validateSortableFields } from './validate-sortable-fields.js';
@@ -435,6 +436,21 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
     runtimeTypes: ['flow', 'view', 'object'],
     run: (stack, ctx) =>
       validateListViewFieldRefs(
+        stack,
+        ctx?.packageScope
+          ? { packageScope: ctx.packageScope }
+          : ctx?.runtimeWriteType !== undefined
+            ? { wholeCollection: true }
+            : undefined,
+      ),
+  },
+  // [ADR-0159 D2] A `form`'s `object`, judged where a list view's is: under
+  // the stated closure, or against the whole collection of a runtime write.
+  {
+    name: 'validateFormObjectBindings',
+    runtimeTypes: ['flow', 'form'],
+    run: (stack, ctx) =>
+      validateFormObjectBindings(
         stack,
         ctx?.packageScope
           ? { packageScope: ctx.packageScope }

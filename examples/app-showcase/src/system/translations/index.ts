@@ -914,6 +914,8 @@ export const ShowcaseTranslationBundle = {
         // (#8231).
         _sections: {
           tell_us_about_yourself: { label: '介绍一下您自己' },
+          // The authored `form` item's section (`ui/forms/feedback.form.ts`).
+          feedback: { label: '您的反馈' },
         },
       },
       // Object, fields and `kind` options as well as the views below: the
@@ -1381,6 +1383,17 @@ export const ShowcaseTranslationBundle = {
     // page heading: each reads the word its sidebar entry already uses
     // (`apps.showcase_app.navigation`), so the heading matches the link that
     // opened it.
+    // [ADR-0159 D8] The showcase's authored `form` item (`forms.<name>`),
+    // src/ui/forms/feedback.form.ts — read before any `_views` tail.
+    forms: {
+      'showcase_inquiry.feedback': {
+        label: '提交反馈',
+        submitBehavior: {
+          title: '感谢您',
+          message: '您的反馈已送达展示团队。',
+        },
+      },
+    },
     pages: {
       showcase_capability_map: { label: '能力地图' },
       showcase_my_work: { label: '我的工作', subtitle: '你的待办队列、团队产出，以及需要关注的事项。' },

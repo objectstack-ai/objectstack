@@ -19,7 +19,11 @@
  *
  * The heading element is then found in that field's drawn face: among the
  * field's heading elements, the ones whose letters and digits read the same as
- * the outline's heading, counted in document order. Counting by reading rather
+ * the outline's heading, counted in document order. The outline's heading is
+ * read as the face draws it, not as its source spells it: a markdown heading's
+ * text is the face's own parse of it (found by where it starts), so a link,
+ * an entity or inline markup reads as drawn, and an html heading's text has
+ * every entity decoded, as the browser draws it. Counting by reading rather
  * than by bare position keeps a heading of another title that the outline does
  * not list (a setext heading, an empty one, one inside a quote) from shifting
  * every later one onto the wrong section. The count is trusted only when the
@@ -85,7 +89,7 @@ type SectionFace = 'markdown' | 'html' | 'text';
 export interface SectionCandidate {
   field: string;
   face: SectionFace;
-  /** The heading's letters and digits, lowercased: how a drawn heading is matched. */
+  /** The heading's letters and digits as its face draws them, lowercased: how a drawn heading is matched. */
   reading: string;
   /** How many of the field's earlier headings read the same. */
   ordinal: number;
@@ -124,18 +128,27 @@ function isHeadingOpener(lower: string, at: number): boolean {
   return lower.startsWith('<h', at) && level >= 1 && level <= 6 && !/^[a-z0-9_]$/.test(lower[at + 3] ?? '');
 }
 
-/** The entities the spec's outline decodes, each one a character no reading keeps. */
-function blankEntities(text: string): string {
-  return text.replace(/&(?:nbsp|lt|gt|quot|amp|#39);/g, ' ');
+/**
+ * `text` with its character references decoded as the browser decodes them
+ * where it draws html text. Without a document (no DOM), the text is answered
+ * as it is.
+ */
+function decodeDrawnEntities(text: string): string {
+  if (!text.includes('&') || typeof document === 'undefined') return text;
+  // A textarea's content is parsed as text with references: no element is made and nothing runs.
+  const area = document.createElement('textarea');
+  area.innerHTML = text;
+  return area.value;
 }
 
 /**
- * The texts of every heading tag in an html `value` that the outline
- * (`headings`) does not list: one left unclosed, or opened inside another.
+ * Every heading tag of an html `value` with its drawn text and where it
+ * starts: the outline's headings among them, and those it does not list (one
+ * left unclosed, or opened inside another). A heading ends at the first
+ * heading closer or opener after it, as the browser ends it.
  */
-function unlistedHtmlHeadingTexts(value: string, headings: readonly BodyHeading[]): string[] {
-  const listed = new Set(headings.map((h) => h.start));
-  const out: string[] = [];
+function drawnHtmlHeadings(value: string): DrawnMarkdownHeading[] {
+  const out: DrawnMarkdownHeading[] = [];
   {
     // Every search remembers where it landed and starts no earlier than an
     // earlier one, so the scan stays linear however many openers are unclosed.
@@ -143,7 +156,7 @@ function unlistedHtmlHeadingTexts(value: string, headings: readonly BodyHeading[
     let gt = -2;
     let closer = -2;
     for (let at = lower.indexOf('<h'); at >= 0; at = lower.indexOf('<h', at + 1)) {
-      if (listed.has(at) || !isHeadingOpener(lower, at)) continue;
+      if (!isHeadingOpener(lower, at)) continue;
       if (gt !== -1 && gt < at) gt = lower.indexOf('>', at);
       if (gt < 0) break;
       if (closer !== -1 && closer < gt) closer = lower.indexOf('</h', gt);
@@ -154,7 +167,7 @@ function unlistedHtmlHeadingTexts(value: string, headings: readonly BodyHeading[
           break;
         }
       }
-      out.push(blankEntities(stripBodyTags(value.slice(gt + 1, end))));
+      out.push({ text: decodeDrawnEntities(stripBodyTags(value.slice(gt + 1, end))), start: at });
     }
     return out;
   }
@@ -184,26 +197,44 @@ export function loadSectionHeadingReader(): Promise<void> {
 }
 
 /**
- * How many headings reading `reading` the markdown `value` draws that are not
- * the outline's headings of that reading (`listedAt`, their starts), or
- * `undefined` while the reader is not loaded.
+ * The candidate `field` is, for its heading `at` of `headings`: each heading
+ * read as `face` draws it, matched to the drawn heading that starts where it
+ * does (the source's reading when none does: a heading the face does not draw).
+ * A markdown body is read only once the reader is loaded; until then the
+ * source is read and the unlisted count is `undefined`.
  */
-function unlistedMarkdownCount(value: string, reading: string, listedAt: ReadonlySet<number>): number | undefined {
-  if (!readDrawnMarkdown) return undefined;
-  return readDrawnMarkdown(value).filter(
-    (h) => headingReading(h.text) === reading && (h.start === undefined || !listedAt.has(h.start)),
-  ).length;
+function candidateOf(
+  field: string,
+  face: SectionFace,
+  value: string,
+  headings: readonly BodyHeading[],
+  at: number,
+): SectionCandidate {
+  const drawn = face === 'html' ? drawnHtmlHeadings(value) : face === 'markdown' ? readDrawnMarkdown?.(value) : [];
+  const drawnAt = new Map<number, string>();
+  for (const h of drawn ?? []) if (h.start !== undefined && !drawnAt.has(h.start)) drawnAt.set(h.start, h.text);
+  const readings = headings.map((h) => headingReading(drawnAt.get(h.start) ?? h.heading));
+  const reading = readings[at];
+  const ordinal = readings.slice(0, at).filter((r) => r === reading).length;
+  const count = readings.filter((r) => r === reading).length;
+  const listed = new Set(headings.map((h) => h.start));
+  const unlisted =
+    face === 'text' || reading === ''
+      ? 0
+      : drawn?.filter((h) => headingReading(h.text) === reading && (h.start === undefined || !listed.has(h.start)))
+          .length;
+  return { field, face, reading, ordinal, count, unlisted };
 }
 
 /** A markdown candidate counted before the reader loaded: how to count it once it has. */
-const pendingUnlisted = new WeakMap<SectionCandidate, () => number | undefined>();
+const pendingUnlisted = new WeakMap<SectionCandidate, () => SectionCandidate>();
 
-/** `candidate`, with its unlisted count read now when it was pending. */
+/** `candidate`, counted again now when it was pending. */
 function withUnlistedCount(candidate: SectionCandidate): SectionCandidate {
   if (candidate.unlisted !== undefined) return candidate;
-  const unlisted = pendingUnlisted.get(candidate)?.();
+  const counted = pendingUnlisted.get(candidate)?.();
   // Still unread (the reader did not load): the same candidate, so a later read finds its count.
-  return unlisted === undefined ? candidate : { ...candidate, unlisted };
+  return counted === undefined || counted.unlisted === undefined ? candidate : counted;
 }
 
 /**
@@ -224,20 +255,8 @@ export function sectionCandidates(
     const headings = headingsOf(value, face === 'html');
     const at = headings.findIndex((h) => h.anchor === anchor);
     if (at < 0) continue;
-    const reading = headingReading(headings[at].heading);
-    const readings = headings.map((h) => headingReading(h.heading));
-    const ordinal = readings.slice(0, at).filter((r) => r === reading).length;
-    const count = readings.filter((r) => r === reading).length;
-    const listedAt = new Set(headings.filter((_, i) => readings[i] === reading).map((h) => h.start));
-    const countMarkdown = (): number | undefined => unlistedMarkdownCount(value, reading, listedAt);
-    const unlisted =
-      face === 'text' || reading === ''
-        ? 0
-        : face === 'html'
-          ? unlistedHtmlHeadingTexts(value, headings).filter((t) => headingReading(t) === reading).length
-          : countMarkdown();
-    const candidate: SectionCandidate = { field, face, reading, ordinal, count, unlisted };
-    if (unlisted === undefined) pendingUnlisted.set(candidate, countMarkdown);
+    const candidate = candidateOf(field, face, value, headings, at);
+    if (candidate.unlisted === undefined) pendingUnlisted.set(candidate, () => candidateOf(field, face, value, headings, at));
     out.push(candidate);
   }
   return out;

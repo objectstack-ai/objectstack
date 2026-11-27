@@ -44,6 +44,10 @@ import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { PERSONAL_VIEWS_BRIDGE } from './personal-views.js';
 import { ATTACHMENTS_BRIDGE } from './attachments.js';
 import { PRINT_BRIDGE } from './print.js';
+import type { OwnDoorBridge } from './own-door-bridge.js';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const ORIGIN = 'http://tenant.example';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -402,6 +406,8 @@ describe('[#37273] the print door\'s 501 follows the request\'s language', () =>
         const { dispatcher } = makeDispatcher(site.services);
         const result = await dispatcher.dispatch(method, path, {}, {}, withHeaders({ 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8' }));
         expect(envelope(result)).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
+        // [#37737] The body is in the request's language, so the answer says it varies by it.
+        expect(result.response?.headers?.Vary, 'Vary').toBe('Accept-Language');
         expect(result.response?.body?.error?.message).toBe(site.zh);
         expect(result.response?.body?.error?.userMessage).toBeUndefined();
     });
@@ -411,6 +417,8 @@ describe('[#37273] the print door\'s 501 follows the request\'s language', () =>
             const { dispatcher } = makeDispatcher(site.services);
             const result = await dispatcher.dispatch(method, path, {}, {}, withHeaders(headers));
             expect(envelope(result), JSON.stringify(headers)).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
+            // [#37737] The body is in the request's language, so the answer says it varies by it.
+            expect(result.response?.headers?.Vary, JSON.stringify(headers)).toBe('Accept-Language');
             expect(result.response?.body?.error?.message, JSON.stringify(headers)).toBe(site.en);
         }
     });
@@ -491,6 +499,8 @@ describe('[#37352] the personal-view and attachment doors\' 501s follow the requ
                             const label = `${request[0]} ${request[1]} ${JSON.stringify(headers)}`;
                             const result = await answer(site.services, request, headers);
                             expect(envelope(result), label).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
+                            // [#37737] The body is in the request's language, so the answer says it varies by it.
+                            expect(result.response?.headers?.Vary, label).toBe('Accept-Language');
                             expect(result.response?.body?.error?.message, label).toBe(site.sentences[locale]);
                             expect(result.response?.body?.error?.userMessage, label).toBeUndefined();
                         }
@@ -504,5 +514,62 @@ describe('[#37352] the personal-view and attachment doors\' 501s follow the requ
         expect(BUILTIN_OPERATION_MESSAGES.en[PERSONAL_VIEWS_BRIDGE.nounKey]).toBe(PERSONAL_VIEWS_BRIDGE.noun);
         expect(BUILTIN_OPERATION_MESSAGES.en[ATTACHMENTS_BRIDGE.nounKey]).toBe(ATTACHMENTS_BRIDGE.noun);
         expect(BUILTIN_OPERATION_MESSAGES.en[PRINT_BRIDGE.nounKey]).toBe(PRINT_BRIDGE.noun);
+    });
+});
+
+/**
+ * [#37662] Every bridge's flags against the catalog, found rather than listed:
+ * each module of this directory that builds a bridge domain
+ * (`createOwnDoorBridgeDomain(`) or answers through the bridge's handler
+ * directly (`handleOwnDoorBridgeRequest(`, #37737) is imported and its
+ * exported bridges walked, so a fourth bridge is held to the same rules the
+ * day it lands, whichever way it is mounted.
+ */
+describe('[#37662] every own-door bridge is tied to the catalog', () => {
+    const isBridge = (value: unknown): value is OwnDoorBridge =>
+        !!value && typeof value === 'object'
+        && typeof (value as OwnDoorBridge).nounKey === 'string'
+        && typeof (value as OwnDoorBridge).slot === 'string'
+        && Array.isArray((value as OwnDoorBridge).doors);
+    const here = dirname(fileURLToPath(import.meta.url));
+    const builders = readdirSync(here)
+        .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts') && name !== 'own-door-bridge.ts')
+        .filter((name) => {
+            const source = readFileSync(join(here, name), 'utf8');
+            return source.includes('createOwnDoorBridgeDomain(') || source.includes('handleOwnDoorBridgeRequest(');
+        });
+
+    it('finds the shipped bridges, each module exporting the bridge it builds', async () => {
+        const found: Array<[string, OwnDoorBridge]> = [];
+        for (const name of builders) {
+            const mod = await import(/* @vite-ignore */ `./${name.replace(/\.ts$/, '.js')}`) as Record<string, unknown>;
+            const bridges = Object.entries(mod).filter(([, value]) => isBridge(value)) as Array<[string, OwnDoorBridge]>;
+            expect(bridges.length, `${name} builds a bridge domain but exports no bridge`).toBeGreaterThan(0);
+            found.push(...bridges);
+        }
+        expect(found.map(([exported]) => exported).sort())
+            .toEqual(expect.arrayContaining(['ATTACHMENTS_BRIDGE', 'PERSONAL_VIEWS_BRIDGE', 'PRINT_BRIDGE']));
+
+        const locales = Object.keys(BUILTIN_OPERATION_MESSAGES);
+        for (const [exported, bridge] of found) {
+            // The noun key is in every locale, and its English is the noun.
+            for (const locale of locales) {
+                expect(BUILTIN_OPERATION_MESSAGES[locale][bridge.nounKey], `${exported} ${locale}`).toBeTruthy();
+            }
+            expect(BUILTIN_OPERATION_MESSAGES.en[bridge.nounKey], exported).toBe(bridge.noun);
+            // [#37737] The English noun names its door(s) last, so whether it is
+            // plural is read off the word and never guessed (`the … endpoints`
+            // would read as plural with no flag to say so).
+            expect(bridge.noun, exported).toMatch(/\bdoors?$/);
+            // `nounPlural` is set exactly when the English noun is plural (`the … doors`).
+            expect(bridge.nounPlural === true, `${exported}: '${bridge.noun}'`).toBe(/\bdoors$/.test(bridge.noun));
+            // The pair of sentences the bridge reads is in every locale.
+            const suffix = bridge.nounPlural ? '_plural' : '';
+            for (const key of ['own_door_service_unregistered', 'own_door_member_missing']) {
+                for (const locale of locales) {
+                    expect(BUILTIN_OPERATION_MESSAGES[locale][key + suffix], `${exported} ${locale} ${key}${suffix}`).toBeTruthy();
+                }
+            }
+        }
     });
 });

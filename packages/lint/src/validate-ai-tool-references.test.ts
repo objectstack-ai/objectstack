@@ -664,6 +664,101 @@ describe('[ADR-0160 D8] a skill\'s context pack reference', () => {
     expect(contextFindings({ aiContexts: [policyPack, reviewPack], skills: [skill({ tools: ['get_record'] })] })).toEqual([]);
   });
 
+  describe('[ADR-0150 D3] a pack another package of the artifact ships, judged in the per-package pass', () => {
+    // The stack the CLI's per-package pass hands a package (`packageBodyAsStack`):
+    // the package's own body, its manifest, and the artifact's `packages[]`.
+    const shipper = { id: 'com.acme.shipper', name: 'shipper', version: '1.0.0', aiContexts: [policyPack] };
+    const reader = (extra: Record<string, unknown>) => ({
+      id: 'com.acme.reader',
+      name: 'reader',
+      version: '1.0.0',
+      skills: [skill({ context: 'policy_document' })],
+      ...extra,
+    });
+    const asPackageStack = (body: Record<string, unknown>, others: Record<string, unknown>[] = [shipper]) => ({
+      ...body,
+      manifest: body,
+      packages: [...others, body].map((manifest) => ({ manifest })),
+    });
+    const dependsOnShipper = { dependencies: { 'com.acme.shipper': '^1.0.0' } };
+
+    it('a pack a declared dependency ships resolves: no warning', () => {
+      expect(contextFindings(asPackageStack(reader(dependsOnShipper)))).toEqual([]);
+    });
+
+    it('CONTROL — the own-stack pack resolves: no warning', () => {
+      expect(contextFindings(asPackageStack(reader({ aiContexts: [policyPack] }), []))).toEqual([]);
+    });
+
+    it('CONTROL — a pack no holder ships still warns, beside a declared dependency', () => {
+      const body = reader({ ...dependsOnShipper, skills: [skill({ context: 'no_such_pack' })] });
+      const findings = contextFindings(asPackageStack(body));
+      expect(findings.map((f) => [f.rule, f.path])).toEqual([[AI_SKILL_CONTEXT_UNKNOWN, 'skills[0].context']]);
+      expect(findings[0].message).toContain('"no_such_pack"');
+    });
+
+    it('CONTROL — a sibling package\'s pack outside the closure still warns, naming the holder and the remedy', () => {
+      const findings = contextFindings(asPackageStack(reader({})));
+      expect(findings.map((f) => [f.rule, f.path])).toEqual([[AI_SKILL_CONTEXT_UNKNOWN, 'skills[0].context']]);
+      expect(findings[0].message).toContain('"com.acme.shipper"');
+      expect(findings[0].hint).toContain('Declare a dependency');
+    });
+
+    it('two packages in the closure shipping the pack: warns, nothing picked', () => {
+      const twin = { ...shipper, id: 'com.acme.twin', name: 'twin' };
+      const body = reader({ dependencies: { 'com.acme.shipper': '^1.0.0', 'com.acme.twin': '^1.0.0' } });
+      const findings = contextFindings(asPackageStack(body, [shipper, twin]));
+      expect(findings.map((f) => f.rule)).toEqual([AI_SKILL_CONTEXT_UNKNOWN]);
+      expect(findings[0].message).toContain('"com.acme.shipper"');
+      expect(findings[0].message).toContain('"com.acme.twin"');
+      // The `ambiguous-in-closure` arm itself: with neither package in the
+      // closure the rule answers `outside-closure`, which names both holders too.
+      expect(findings[0].message).toContain('more than one holder in reach');
+      expect(findings[0].message).not.toContain('outside this package');
+      expect(findings[0].hint).not.toContain('Declare a dependency');
+    });
+
+    it('a stack that names no package, two packages shipping the pack: the fix names no package of its own', () => {
+      const twin = { ...shipper, id: 'com.acme.twin', name: 'twin' };
+      const findings = contextFindings({
+        skills: [skill({ context: 'policy_document' })],
+        packages: [shipper, twin].map((manifest) => ({ manifest })),
+      });
+      expect(findings.map((f) => [f.rule, f.path])).toEqual([[AI_SKILL_CONTEXT_UNKNOWN, 'skills[0].context']]);
+      expect(findings[0].message).toContain('"com.acme.shipper"');
+      expect(findings[0].message).toContain('"com.acme.twin"');
+      expect(findings[0].message).toContain('more than one holder in reach');
+      for (const line of [findings[0].message, findings[0].hint]) {
+        expect(line).not.toContain('this package');
+        expect(line).not.toContain('\n');
+        expect(line.length, line).toBeLessThanOrEqual(200);
+      }
+    });
+
+    it('CONTROL — a stack with a package, two holders in its closure: the fix names that package', () => {
+      const twin = { ...shipper, id: 'com.acme.twin', name: 'twin' };
+      const body = reader({ dependencies: { 'com.acme.shipper': '^1.0.0', 'com.acme.twin': '^1.0.0' } });
+      const findings = contextFindings(asPackageStack(body, [shipper, twin]));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].hint).toContain('this package');
+    });
+
+    it('each refusal verdict and fix is one line of at most 200 characters', () => {
+      const twin = { ...shipper, id: 'com.acme.twin', name: 'twin' };
+      const findings = [
+        ...contextFindings(asPackageStack(reader({}))),
+        ...contextFindings(asPackageStack(reader({ dependencies: { 'com.acme.shipper': '^1.0.0', 'com.acme.twin': '^1.0.0' } }), [shipper, twin])),
+      ];
+      expect(findings).toHaveLength(2);
+      for (const f of findings) {
+        for (const line of [f.message, f.hint]) {
+          expect(line).not.toContain('\n');
+          expect(line.length, line).toBeLessThanOrEqual(200);
+        }
+      }
+    });
+  });
+
   it('each verdict and fix is one line of at most 200 characters', () => {
     const findings = contextFindings({
       aiContexts: [policyPack, reviewPack],

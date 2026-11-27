@@ -67,7 +67,6 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 // Rail siblings / docks irrelevant to the top bar — keep the render light.
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({
   DraftChangesPanel: ({ onPublish }: { onPublish?: () => void | Promise<void> }) =>
     onPublish ? (

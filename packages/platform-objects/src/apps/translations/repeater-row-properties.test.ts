@@ -29,9 +29,9 @@
 // The population is DERIVED from the forms, not listed here, so a repeater
 // enumerated tomorrow is red on the day it lands rather than a month later.
 // `view.columns` / `view.sort` / `view.tabs` joined it with #19955: #17507
-// titled their item schemas, and `view.form.ts` now enumerates their children.
+// titled their item schemas, and `view.metadata-form.ts` now enumerates their children.
 // `view.tabs` left it again with #20301: the list view's own `tabs` is a
-// retired key, and its repeater left `view.form.ts` with it.
+// retired key, and its repeater left `view.metadata-form.ts` with it.
 
 import { describe, it, expect } from 'vitest';
 
@@ -75,7 +75,7 @@ const LOCALES = [
   { name: 'ko', forms: koMetadataForms as Record<string, any> },
 ];
 
-/** Every `*.form.ts` the spec package exports, by its export name. */
+/** Every `*.metadata-form.ts` the spec package exports, by its export name. */
 const FORMS: ReadonlyArray<readonly [string, unknown]> = [
   ['actionForm', actionForm],
   ['agentForm', agentForm],

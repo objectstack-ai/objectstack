@@ -153,7 +153,7 @@
           "evidence": "screenshot + input value read"
         },
         {
-          "clause": "an empty picklist option row does not trip spec validation (no developer-facing 'System identifier must be at least 2 characters' banner) — judged with the 3 real options already present, because a picklist holding only empty rows legitimately raises the select-needs-options banner — while the PUBLISHED picklist carries exactly the 3 authored options",
+          "clause": "an empty picklist option row does not trip spec validation (no developer-facing 'Option value must not be empty' banner) — judged with the 3 real options already present, because a picklist holding only empty rows legitimately raises the select-needs-options banner — while the PUBLISHED picklist carries exactly the 3 authored options",
           "oracle": "api",
           "verify": "with the 3 real options present, no metadata-validation-banner after the debounce once the empty row is added (F4's negative assertion corroborates the banner half under a different fixture: it seeds ONE real option, not the three this clause judges with, and never publishes, so it does not score this clause), and the meta read shows 3 options — the empty row was dropped, not persisted. A select-needs-options banner shown BEFORE any real option exists is correct and is not this clause's FAIL",
           "evidence": "banner-absence screenshot + the meta read"
@@ -5659,7 +5659,7 @@
         {
           "clause": "Studio's dataset form offers Synonyms and Description on the measure row, with the help text that states the limits",
           "oracle": "dom",
-          "verify": "the measure row shows Synonyms holding 'bill count' and '账单数', and Description holding the sentence; the Synonyms help text says 'At most 20, each at most 60 characters'. Studio draws them in DatasetDefaultInspector's row Advanced fold through DatasetMemberVocabulary (ui/packages/app-shell/src/views/metadata-admin/inspectors/DatasetMemberVocabulary.tsx, data-testid dataset-measures-synonyms / dataset-measures-description), which takes its label and help copy from the spec form (packages/spec/src/ui/dataset.form.ts#datasetForm)",
+          "verify": "the measure row shows Synonyms holding 'bill count' and '账单数', and Description holding the sentence; the Synonyms help text says 'At most 20, each at most 60 characters'. Studio draws them in DatasetDefaultInspector's row Advanced fold through DatasetMemberVocabulary (ui/packages/app-shell/src/views/metadata-admin/inspectors/DatasetMemberVocabulary.tsx, data-testid dataset-measures-synonyms / dataset-measures-description), which takes its label and help copy from the spec form (packages/spec/src/ui/dataset.metadata-form.ts#datasetForm)",
           "evidence": "a screenshot of the measure row"
         }
       ],
@@ -5679,7 +5679,7 @@
         "packages/spec/src/ui/dataset.zod.ts#normalizeDatasetTerm",
         "packages/spec/src/ui/dataset.zod.ts#DatasetMemberSynonymsSchema",
         "packages/spec/src/ui/dataset.zod.ts#checkDatasetVocabulary",
-        "packages/spec/src/ui/dataset.form.ts#datasetForm"
+        "packages/spec/src/ui/dataset.metadata-form.ts#datasetForm"
       ],
       "history": [
         {

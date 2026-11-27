@@ -1,5 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { formTypeWriteRefusal } from './protocol-form-writes.js';
+import { readUnreadableFormBodies } from './protocol-form-reads.js';
 import type {
     DataProtocol,
     FlowRegistration,
@@ -81,7 +83,6 @@ import { PLURAL_TO_SINGULAR, unrecognisedMetaTypeRefusal } from '@objectstack/sp
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IPubSub } from '@objectstack/spec/contracts';
 import type { ConversionNotice, ConversionTodoNotice } from '@objectstack/spec';
-import { type I18nLabel } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
 // this file imports BOTH `@objectstack/spec` (root, for
@@ -97,7 +98,7 @@ import { type I18nLabel } from '@objectstack/spec/ui';
 // reference on the narrow `/ui` entry; the export statement is what keeps
 // no-unused-locals green. index.ts deliberately does not re-export it
 // (curated entry, unchanged).
-import { type FormFieldInput } from '@objectstack/spec/ui';
+import { type FormFieldInput, type I18nLabel, type UnreadableFormBody } from '@objectstack/spec/ui';
 export type { FormFieldInput };
 import { type TranslationBundle } from '@objectstack/spec/system';
 import {
@@ -1588,6 +1589,11 @@ export class ObjectStackProtocolImplementation implements
         return restoredBodyDerivation.call(host, type);
     }
 
+    /** [ADR-0159 card ② items 5 and 7] {@link formTypeWriteRefusal}, asked of a restored body against its binding. */
+    private formRestoreRefusal(type: string, item: unknown, name: string, binding: string | null): Promise<Error | undefined> {
+        return formTypeWriteRefusal(protocolHost(this), type, item, name, binding);
+    }
+
     /**
      * [#21470] What a restore passes to `repo.restoreVersion` as
      * `deriveRestoredBody`: the divergent `name` refusal FIRST, then
@@ -1623,6 +1629,7 @@ export class ObjectStackProtocolImplementation implements
     private restoredBodyWriter(type: string, name: string, binding: string | null, source: string): (historyBody: unknown) => Promise<unknown> {
         // [#25467 cut 8] The body moved to `protocol-authoring-gate.ts` (see `AuthoringGateHost`).
         const host: ThisParameterType<typeof restoredBodyWriter> = {
+            formRestoreRefusal: (...a) => this.formRestoreRefusal(...a),
             objectExtensionItemRefusal: (...a) => this.objectExtensionItemRefusal(...a),
             refuseRestoredBodyTheSaveDoorRefuses: (...a) => this.refuseRestoredBodyTheSaveDoorRefuses(...a),
             restoredBodyDerivation: (...a) => this.restoredBodyDerivation(...a),
@@ -3046,6 +3053,11 @@ export class ObjectStackProtocolImplementation implements
         return ProtocolDiscoveryAndBasesFacet.getPackagedMappingBase(protocolHost(this), name);
     }
 
+    /** Contract: the shared docblock on {@link getPackagedPageBase}; [ADR-0159 D5] an old-shape base's form is its projection. */
+    getPackagedFormBase(name: string): unknown {
+        return ProtocolDiscoveryAndBasesFacet.getPackagedFormBase(protocolHost(this), name);
+    }
+
     /**
      * [#30062, ADR-0146 D2] The base package a SERVED metadata document is the
      * declared override of, or `undefined` when it is none — read off the
@@ -3521,6 +3533,11 @@ export class ObjectStackProtocolImplementation implements
     async getMetaItemsPerPackage(request: { type: string; packageId?: string; previewDrafts?: boolean }) {
         // [#25467 E1] The body moved to `protocol-meta-list-reads.ts`; it reaches this class through `protocol-host.ts`.
         return getMetaItemsPerPackage(protocolHost(this), request);
+    }
+
+    /** Contract: {@link readUnreadableFormBodies} [ADR-0159 D6 rule 7]; a server-only extension the anonymous form doors feature-detect. */
+    async getUnreadableFormBodies(): Promise<UnreadableFormBody[]> {
+        return readUnreadableFormBodies(protocolHost(this));
     }
 
     /**
@@ -9800,8 +9817,8 @@ export class ObjectStackProtocolImplementation implements
          * discipline — per the maintainer's ruling, no parallel top-level map.
          */
         advisories: RuntimeAuthoringIssue[];
-        /** What the promotion wrote. Absent exactly when `judgeOnly` was stated. */
-        result?: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+        /** What the promotion wrote (with a `form`'s removed old-shape rows). Absent exactly when `judgeOnly` was stated. */
+        result?: { version: string; seq: number; item: MetadataItem; packageId: string | null; removedOldShapeRows?: readonly import('./protocol-form-writes.js').AppliedOldShapeFormRowRemoval[] };
         /** [#32396] The draft row the promotion consumed. Absent when nothing was written. */
         promotedDraft?: { body: unknown; hash: string };
         /** [#32369] What a judge-only call judged: the draft body and the package it would go live in. */

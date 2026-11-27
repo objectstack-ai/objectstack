@@ -161,6 +161,7 @@
     "defineHook (function)",
     "defineJob (function)",
     "defineMapping (function)",
+    "defineMetadataForm (function)",
     "defineObjectExtension (function)",
     "definePage (function)",
     "definePermissionSet (function)",

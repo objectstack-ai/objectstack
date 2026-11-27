@@ -16,7 +16,7 @@
  * with the values flowing through it, so proving either one alone reproduces
  * exactly the blindness that shipped.
  *
- * Read the ASSERTIONS as type assertions too. Every `messages[0].buildProgress`
+ * Read the ASSERTIONS as type assertions too. Every `messages[0].charts`
  * / `.toolInvocations?.[0]?.pendingActionId` below is written WITHOUT a cast —
  * under the old declaration (`messages: OuiChatMessage[]`, the authoring
  * contract) not one of them would compile, which is precisely why nothing was
@@ -28,38 +28,26 @@ import { renderHook, act } from '@testing-library/react';
 import { vi, describe, it, expect } from 'vitest';
 import { useObjectChat, type UseObjectChatOptions } from '../useObjectChat';
 
-const API = 'https://example.test/api/v1/ai/agents/build/chat';
+const API = 'https://example.test/api/v1/ai/agents/ask/chat';
 
 /**
  * One assistant turn as the AI SDK holds it: text, a tool call whose result is
- * an ADR-0033 pending-approval envelope, the reconciled build-progress part and
- * an inline chart. Every runtime-only key the card names is reachable from it.
+ * an ADR-0033 pending-approval envelope and an inline chart. Every runtime-only key the card names is reachable from it.
  */
 const { AI_MESSAGES } = vi.hoisted(() => ({
   AI_MESSAGES: [
     {
-      id: 'm-built',
+      id: 'm-answer',
       role: 'assistant',
       metadata: { conversationId: 'conv-1' },
       parts: [
-        { type: 'text', text: 'Built your app.' },
+        { type: 'text', text: 'Here are your loans.' },
         {
-          type: 'tool-apply_blueprint',
-          toolCallId: 'call_build_1',
+          type: 'tool-run_action',
+          toolCallId: 'call_action_1',
           state: 'output-available',
-          input: { appLabel: 'Loans' },
+          input: { action: 'close_loan' },
           output: { status: 'pending_approval', pendingActionId: 'pa_42' },
-        },
-        {
-          type: 'data-build-progress',
-          id: 'bp-1',
-          data: {
-            phase: 'done',
-            appLabel: 'Loans',
-            items: [{ type: 'app', name: 'loans' }],
-            done: 1,
-            total: 1,
-          },
         },
         {
           type: 'data-chart',
@@ -90,14 +78,12 @@ vi.mock('@ai-sdk/react', () => ({
 }));
 
 describe('API mode: the runtime-only keys are on the hook, not just under it', () => {
-  it('exposes buildProgress, charts and metadata on the returned messages', () => {
+  it('exposes charts and metadata on the returned messages', () => {
     const { result } = renderHook(() => useObjectChat({ api: API, conversationId: 'c1' }));
 
     const [message] = result.current.messages;
-    expect(message.content).toBe('Built your app.');
-    // The build panel. Erased by the old `as OuiChatMessage[]`.
-    expect(message.buildProgress).toMatchObject({ phase: 'done', appLabel: 'Loans', total: 1 });
-    // Inline charts — same erasure.
+    expect(message.content).toBe('Here are your loans.');
+    // Inline charts. Erased by the old `as OuiChatMessage[]`.
     expect(message.charts).toHaveLength(1);
     expect(message.charts?.[0]).toMatchObject({ chartType: 'bar', title: 'Loans by status' });
     // `metadata` is the key the hook splices back in; the authoring contract
@@ -109,7 +95,7 @@ describe('API mode: the runtime-only keys are on the hook, not just under it', (
     const { result } = renderHook(() => useObjectChat({ api: API, conversationId: 'c1' }));
 
     const tool = result.current.messages[0]?.toolInvocations?.[0];
-    expect(tool?.toolName).toBe('apply_blueprint');
+    expect(tool?.toolName).toBe('run_action');
     // The approve/reject card's entire wiring: without `pendingActionId` there
     // is no id to POST a decision for, and `useHitlInChat` indexes nothing.
     expect(tool?.pendingActionId).toBe('pa_42');
@@ -137,9 +123,9 @@ describe('API mode: the runtime-only keys are on the hook, not just under it', (
     >;
     expect(content).toBe('and now a chart');
     // …the thread as it will be after this send: the built turn, then the new
-    // user message. The built turn still carries its render-only keys.
+    // user message. The answered turn still carries its render-only keys.
     expect(messages).toHaveLength(2);
-    expect(messages[0]?.buildProgress?.phase).toBe('done');
+    expect(messages[0]?.charts).toHaveLength(1);
     expect(messages[0]?.toolInvocations?.[0]?.pendingActionId).toBe('pa_42');
     expect(messages[1]).toMatchObject({ role: 'user', content: 'and now a chart' });
   });

@@ -67,6 +67,7 @@ import type { ExprValidationCode } from '@objectstack/formula';
 import { readPartialSteps } from './partial-steps.js';
 import { isRegionSuspensionRefusal, refuseRegionSuspension } from './region-suspension-refusal.js';
 import { stampFlowRunSlot } from './flow-slots.js';
+import { stampRootRun } from './root-run.js';
 import { isSkippedScopeKey, scopeContainer } from './scope-key-segments.js';
 
 /**
@@ -1387,6 +1388,9 @@ export async function executeWithoutRetry(
     // `execute()` stamps it.
     const runContext = await this.resolveRunContext(flow, context, runId);
     stampFlowRunSlot(runContext, flowName, runPackage);
+    // [ADR-0162 item 7] Each attempt is a run of its own, and its own root
+    // when it has no parent, as `execute()` stamps it.
+    stampRootRun(runContext, { runId, flowName, startedAt });
 
     try {
         const startNode = flow.nodes.find(n => n.type === 'start');

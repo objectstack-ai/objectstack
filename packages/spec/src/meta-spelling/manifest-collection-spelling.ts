@@ -59,6 +59,7 @@
 export const PLURAL_TO_SINGULAR: Record<string, string> = {
   objects: 'object',
   apps: 'app',
+  forms: 'form',
   pages: 'page',
   dashboards: 'dashboard',
   reports: 'report',

@@ -147,8 +147,6 @@ export const CORPUS_FLOOR = 1000;
 export const DEBT = Object.freeze({
   'packages/components/src/__tests__/empty-base-classes-override-friendly-8525.test.tsx':
     'Subject is CSS, not JavaScript. `js-comment-mask.mjs` is graded against a JavaScript parser and its narrowness is a decision, not a gap, so conversion is the WRONG remedy here; paying this off means a CSS-aware reader, or a ruling that the shape is fine where it stands.',
-  'packages/i18n/src/__tests__/console-namespace-3546.test.tsx':
-    'In class: strips whole-line comments out of a TSX source before a census counts identifier reads. Convertible as-is; outside the file surface objectui#9751 was claimed on.',
   'scripts/check-doc-example-shared-reader.mjs':
     'In class, and the only carrier here that is a LIVE GATE rather than a test: `canonical()` deletes block comments from expression text before comparing two expressions, so a phantom comment makes two different expressions read as equal -- the fabricating direction. Convertible as-is.',
   'scripts/__tests__/console-vite-alias-closure-4925.test.ts':

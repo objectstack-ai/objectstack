@@ -1507,11 +1507,19 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // scanned them in this package (`rest-server-canonical-query-ast.test.ts`;
     // the three `error-response-*` arm-derivation tests) now read them there,
     // each bound to one relative literal.
+    //
+    // The two `examples/app-crm` files are ADR-0159 card ②'s byte-equal pin
+    // (`public-form-app-crm-byte-equal.test.ts`): it boots the CRM's lead
+    // object and its lead views, the container whose `formViews` entry is the
+    // first-party public form, and holds `GET /forms/contact-us` to the answer
+    // taken before the `form` type. An edit to either file can move that answer.
     globs: [
       'content/docs/protocol/objectql/state-machine.mdx',
       'skills/objectstack-automation/SKILL.md',
       'packages/types/src/data-error-classification.ts',
       'packages/core/src/utils/import-runner.ts',
+      'examples/app-crm/src/objects/index.ts',
+      'examples/app-crm/src/views/lead.view.ts',
       'content/**',
       'docs/**',
       'skills/**',

@@ -24,8 +24,7 @@ import type { SeamChatMessage, SeamToolInvocation } from './chatMessageAdapter';
  * In local mode that was true; in API mode it was a cast over values produced
  * by the RUNTIME mapper, so the declared type was narrower than the values in
  * exactly the direction that hides capability: anyone rebuilding a message
- * field-by-field from its declared type deleted the HITL approval card, the
- * "Review N changes" affordance, the proposed-plan card, the build panel and
+ * field-by-field from its declared type deleted the HITL approval card and
  * the inline charts, with the compiler agreeing.
  *
  * This type is what the survey found to be true of BOTH modes — neither the
@@ -46,8 +45,7 @@ import type { SeamChatMessage, SeamToolInvocation } from './chatMessageAdapter';
  *     `normalizeMessages` before it is ever handed out. Declaring `Date` here
  *     asks every consumer to handle a value that cannot arrive.
  *   - **plus the render-only keys API mode really carries** —
- *     `buildProgress`, `blueprintProgress`, `charts`, and the HITL /
- *     draft-review / proposed-plan / builder-handoff extensions on each tool
+ *     `charts`, `recordCitations`, and the HITL approval id on each tool
  *     invocation.
  *
  * ⚠️ It is NOT a subtype of `@object-ui/types`' `ChatMessage` (objectui#10018).
@@ -1034,8 +1032,8 @@ export function useObjectChat(options: UseObjectChatOptions = {}): UseObjectChat
   // but the authoring contract does.
   //
   // objectui#4424: this used to end in `as OuiChatMessage[]`, and that cast was
-  // the card. It erased `buildProgress`, `blueprintProgress`, `charts` and
-  // every HITL / draft-review extension on the tool invocations, because the
+  // the card. It erased `charts`, `recordCitations` and
+  // the HITL approval id on the tool invocations, because the
   // authoring type declares none of them — the values survived only because
   // nothing downstream rebuilt a message. There is no assertion here now: the
   // mapper's output IS an `ObjectChatMessage`, so the compiler checks the

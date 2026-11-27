@@ -33,7 +33,7 @@ question's computed truth; a card that does not load is red in CI.
 | Layer | Key | What it states |
 |:---|:---|:---|
 | 1 | `prompt` | `{ short, detailed }`, each `{ zh?, en? }` with at least one language. |
-| 2 | `expect` | The structural expectation the deterministic scorer reads, field for field: `objects`, `minFieldsPerObject?`, `selectFields?` (`{ object, field, minOptions }`), `lookups?` (`{ object, field, to }`), `dashboards?`, `appNavTargets?`, `datasets?` (`{ name, label, description, object, measures, dimensions? }`, each member `{ name, label, synonyms?, description? }`; see [Dataset questions](#dataset-questions)). The runner's build prompt states every row by name ([Build checks trace to the prompt](#build-checks-trace-to-the-prompt)). |
+| 2 | `expect` | The structural expectation the deterministic scorer reads, field for field: `objects`, `minFieldsPerObject?`, `selectFields?` (`{ object, field, minOptions }`), `lookups?` (`{ object, field, to, masterDetail? }`; `masterDetail: true` marks a master-detail, and a card carrying `records-forms.master-detail-inline-edit` marks at least one), `dashboards?`, `appNavTargets?`, `datasets?` (`{ name, label, description, object, measures, dimensions? }`, each member `{ name, label, synonyms?, description? }`; see [Dataset questions](#dataset-questions)). The runner's build prompt states every row by name ([Build checks trace to the prompt](#build-checks-trace-to-the-prompt)). |
 | 3 | `capabilities`, `businessFunctions` | Tags `<area>.<name>`, where `<area>` is a closed set: the basenames of `docs/qa/platform-checklist/areas/*.json`, read from the tree. `businessFunctions` is the marketplace taxonomy's business-function facet, read from `@objectstack/spec/marketplace` (`MarketplaceBusinessFunctionsSchema`, defined once in `packages/spec/src/marketplace/taxonomy.zod.ts`): 1-3 distinct values, the primary one first — the card is classified the way the template it graduates into will be listed. |
 | 4 | `run.seed`, `run.userHandleFields?`, `run.questions`, `run.personas` | Seed rows per object, and which seed fields hold a user handle; at least five read-only questions, each with a **declarative** truth spec and optionally its [ask kind](#ask-kinds) (`askKind`: a card that names one names it on every question and dataset question); at least two personas, each a role, the objects or fields it must NOT see, and optionally a row `scope` and the person `record` it is. |
 | 5 | `run.operations`, `run.guardrails`, `run.agentActions?`, `run.datasetQuestions?` | At least two writes, each acting as a persona and declaring its `outcome`; the five guardrail checks; optionally the agent-callable business actions and the dataset questions. |
@@ -315,7 +315,7 @@ The library holds nine scenarios. The three **simple controls**, tier `control`,
 cases of `packages/cli/src/lint/corpus.ts`. Their `expect` is derived mechanically from each
 fixture: every object; `minFieldsPerObject` = the smallest object's field count; one
 `selectFields` row per select field with `minOptions` = its option count; one `lookups` row
-per lookup or master_detail field.
+per lookup or master_detail field, a master_detail one marked `masterDetail: true`.
 
 The six **mid-tier** scenarios — travel expense, order-to-cash, service desk, leave and
 balances, requisition-to-receipt, asset lifecycle — each land as a card of their own, tier
@@ -445,7 +445,8 @@ Every Build check must trace to text the build prompt carries; otherwise a faith
 for not guessing a name.
 
 - **Names.** The runner's data contract states the seed (objects and fields), each persona's
-  permission set and every `expect` row by name: lookup targets, option fields with their
+  permission set and every `expect` row by name: lookup targets (a row marked `masterDetail` on its own
+  master-detail line, never among the lookups), option fields with their
   minimum option counts, dashboards and app navigation targets. The iterate prompt does the
   same for `iterate.expectDelta`. A card therefore picks its dashboard names knowing the build
   is told them.

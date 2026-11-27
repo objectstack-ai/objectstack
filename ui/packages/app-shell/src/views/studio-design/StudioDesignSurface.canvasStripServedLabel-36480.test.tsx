@@ -107,16 +107,6 @@ vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPan
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
-// A copilot is served, so the surface keeps its one right slot, where the strip draws.
-vi.mock('./StudioAiCopilot', () => ({
-  StudioChatDock: ({ onStatusChange }: { onStatusChange?: (s: { available: boolean; planPendingCount: number }) => void }) => {
-    React.useEffect(() => {
-      onStatusChange?.({ available: true, planPendingCount: 0 });
-    }, [onStatusChange]);
-    return <div data-testid="copilot-body">conversation</div>;
-  },
-}));
-
 // Pay the dynamic `@objectstack/lint` load at collection, never inside a case's
 // clocked window (`check:test-source-alias`).
 import '@objectstack/lint';

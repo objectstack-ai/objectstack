@@ -104,6 +104,10 @@
  *     bumped this cache, so a read landing inside the residue window fed the
  *     untimed registry a row this cache should already have retired — see
  *     `protocol.datasource-delete-prolongation.test.ts` for the measurement.
+ *  4. **A transaction that does not commit** ({@link retireOverlayCacheOnRollback}):
+ *     every transaction this package opens retires the cache when it fails
+ *     after moving the generation, so the reads after it answer only
+ *     committed rows.
  *
  * ⚠️ **`metadata.changed` is NOT a trigger here, and #11633 §4's expectation
  * that it would be does not survive measurement.** That channel is published by
@@ -403,6 +407,37 @@ export function retireMetaOverlayCache(engine: unknown): number | undefined {
   const state = overlayWriteStates.get(engine);
   if (!state) return undefined;
   return advance(state);
+}
+
+/**
+ * [ADR-0067 D2] Open a transaction — `open` is the call to
+ * `engine.transaction(...)` — and, when it does not commit, retire every row
+ * set this engine holds if the generation moved while it was open.
+ *
+ * The rule: after a transaction this package opened fails, every read answers
+ * only committed rows — the list and by-name reads and the registry hydration
+ * of `getMetaItems` alike — from the moment the rejection reaches the
+ * protocol, before the caller that opened the transaction reads or answers
+ * anything.
+ *
+ * Every transaction this package opens is opened through here; one that
+ * JOINED an outer transaction (ADR-0067 D2) retires on its own failure, and
+ * again when the outer one fails, where that one is this package's too.
+ *
+ * Retires only when the generation moved, so a failed transaction that wrote
+ * no `sys_metadata` row costs the cache nothing. A commit retires nothing. The
+ * error is rethrown as it came.
+ */
+export async function retireOverlayCacheOnRollback<T>(engine: unknown, open: () => Promise<T>): Promise<T> {
+  const covered = engine !== null && typeof engine === 'object';
+  const opened = covered ? overlayWriteStates.get(engine)?.gen : undefined;
+  try {
+    return await open();
+  } catch (e) {
+    const state = covered ? overlayWriteStates.get(engine) : undefined;
+    if (state && state.gen !== opened) advance(state);
+    throw e;
+  }
 }
 
 /**

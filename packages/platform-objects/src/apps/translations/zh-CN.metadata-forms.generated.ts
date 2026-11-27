@@ -1664,6 +1664,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     }
   },
+  form: {
+    label: "表单"
+  },
   page: {
     label: "页面",
     sections: {
@@ -3288,7 +3291,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       model: {
         label: "模型",
-        helpText: "AI 模型配置（提供方、模型名、温度等）"
+        helpText: "AI 模型配置（模型名、温度等）"
       },
       planning: {
         label: "规划",

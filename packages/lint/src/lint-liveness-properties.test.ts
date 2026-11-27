@@ -283,7 +283,7 @@ describe('lintLivenessProperties', () => {
   // sweep (tombstones refuse them at parse); their rows stay `dead`, so handed
   // an unparsed stack the rule grades them dead (#16094 — see the flow pin
   // above). form.data is the sweep's one CORRECTION: the removal attempt broke
-  // the build — defineForm writes data.provider='schema' on every metadata
+  // the build — defineMetadataForm writes data.provider='schema' on every metadata
   // form — so its ledger entry flipped to live and it must stay silent.
   //
   // #25767: `list.responsive` / `form.defaultSort` were ≤16.x retirements, so

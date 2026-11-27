@@ -21,6 +21,10 @@ the drawer (objectstack#34608). It supersedes §3's focus mode, A2's maximize
 clause and open questions 2 and 5, and, for building, ADR-0037's split-view
 presentation and its `LiveCanvas` host: the app shows in the main area
 (objectstack#34610).
+Amendment A4 (2026-11-27) — an app may place one AI inquiry page (`ai:chat`
+menu entry); on that page the drawer is closed and its triggers (the top-bar
+robot, the keyboard toggle) are hidden or inert, and the drawer stays the
+container everywhere else (objectstack#37788).
 **Author**: ObjectUI app-shell / Studio team
 **Consumers**: `@object-ui/app-shell`
 (`console/ai/AiChatPage.tsx`, `layout/ConsoleFloatingChatbot.tsx`,
@@ -479,6 +483,10 @@ It accepted the seat's recommendation as presented:
 - **One container.** In the console shell, Home and every app page, the
   right-side drawer is the one place the assistant's conversation is drawn:
   the rail on a desktop, a bottom sheet on a phone. There is no `/ai` page.
+  *(Amendment A4: an app may place one AI inquiry page, `ai:chat`, in its
+  navigation; that page draws its own `ask` conversation, and while it is
+  the active route the drawer is closed and its triggers, the top-bar robot
+  and the keyboard toggle, are hidden or inert.)*
   Three surfaces keep their own chrome, as before: Studio's copilot in its
   right slot (objectui#12725), the public `/s/:token` share page (read-only,
   ADR-0013) and the runtime bubble (§4). Studio's maximize, which navigated to
@@ -535,6 +543,88 @@ reach the drawer. A surface whose state matters for deep-linking (ui ADR-0054
 C3) reaches the drawer through those addresses, not through a query
 parameter on every page. Implemented under objectstack#34608 (the drawer)
 and objectstack#34610 (building with the app draft in the main area).
+
+## Amendment A4 (2026-11-27, Accepted) — an app's AI inquiry page
+
+**What it changes.** One exception to A3's "One container" ("In the console
+shell, Home and every app page, the right-side drawer is the one place the
+assistant's conversation is drawn … There is no `/ai` page."): an app may draw
+one `ask` conversation in a page of its own, and on that page the drawer is
+closed and A3's "Entry", the top-bar robot and the keyboard toggle, is
+hidden or inert. Everything else in A3 stands, and so does A2's key
+decision: the drawer's `ask` scope is still the product alone.
+
+**Why.** A3 left an app no place of its own for questions: the top-bar robot
+was its only AI entry. An app whose users come mainly to ask (a
+policy-inquiry app was the trigger) needs the question to be the first thing
+on its screen, as its home. Drawn beside the drawer, such a page would put
+two `ask` conversations on one screen, which is what A3 removed.
+
+**Maintainer ruling** (2026-11-27, recorded in objectstack#37788's body, on
+its "Filing gate" line), verbatim, not translated:
+
+> 先内置页面，再做页面积木
+
+(02:41Z, the route ruling)
+
+> 我们是一个开发平台，你搭的入口页面必须是通用的
+
+(02:51Z)
+
+> 做首页，本页隐藏机器人
+
+(03:16Z, the ruling on this ADR's conflict)
+
+**Decision.**
+
+- **One page per app.** An app may place one AI inquiry page in its
+  navigation: a `type: 'component'` entry whose `componentRef` is `ai:chat`.
+  Its copy (welcome title and subtitle, composer placeholder, suggested
+  questions) comes from that entry's declared `params`
+  (`AiChatNavParamsSchema` in `@objectstack/spec/ui`, objectstack#37787),
+  never from the URL. The page is platform-generic: it carries no business
+  wording of its own, and a key the entry omits falls back to neutral
+  platform copy.
+- **Home.** The page is the app's home by the app's existing landing rule,
+  not by position alone. A declared `AppSchema.landing` outranks position
+  (`resolveLandingRoute`). With none declared, from 768 px up the first entry
+  the member is shown lands, and a `component` entry qualifies, so the page
+  placed first is the home. Below 768 px the app root is the app's menu
+  (`PhoneAppHome`), and the page is one row of it.
+- **No drawer on the page.** objectstack#37788 item 7 hides the drawer's
+  trigger on this page "so one screen never holds two ask conversations";
+  read with the 03:16Z ruling, A4 states that as the rule. While the page
+  is the active route the drawer is closed and its triggers are hidden or
+  inert: the top-bar robot is hidden, and the keyboard toggle
+  (Ctrl/Cmd+Shift+I) does not open the drawer. No address, the `/ai…`
+  addresses included, stacks a second `ask` conversation on the page. A
+  build hand-off from the page still opens the drawer, as today (next
+  bullet). On every other page the robot, the toggle and the drawer are as
+  A3 says.
+- **Agent.** The page runs `ask`; a maker gets `ask` there too. A hand-off
+  to build from the page opens the drawer, as a hand-off does today.
+- **Thread.** The page's conversation key is `app:PKG:ask`, bound to that
+  app's package. Once the conversation exists the page's address carries
+  `?c=ID`, and a reload restores it. A `?c=` naming a conversation that is
+  not the caller's, or that belongs to another app, opens the home state:
+  no error, and nothing of that conversation is shown. This is the page's
+  own address; A3's rule that what the drawer shows is never in the URL is
+  unchanged.
+- **A3 everywhere else.** The drawer is still the one container on Home, in
+  every app without such an entry, and on an app's other pages. The `/ai…`
+  addresses still open the drawer, and the floating button stays retired.
+
+**Open, outside A4 and objectstack#37788.** Whether a phone's app root
+should open the page.
+
+**Consequences.** The `ai:chat` page is the one app page in the console
+shell that draws an assistant conversation outside the drawer. This
+amendment records the page and its relation to the drawer only: how an
+author adds the entry, and who sees
+it when the assistant is unavailable to them, are not decided here. A reader
+of A3 finds the exception at its "One container" bullet. The text lands
+before the page (seat repo:objectstack#1's routing call,
+2026-11-27T04:57Z). Implemented under objectstack#37788.
 
 ## Open design questions
 

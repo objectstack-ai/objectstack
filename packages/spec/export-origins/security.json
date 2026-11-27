@@ -111,7 +111,7 @@
     "judgePermissionSetOwnerBinding": "src/security/permission-set-owner-binding.ts#judgePermissionSetOwnerBinding (function)",
     "normalizeTenancyPosture": "src/security/tenancy-posture.ts#normalizeTenancyPosture (function)",
     "objectPermissionGrants": "src/security/permission.zod.ts#objectPermissionGrants (function)",
-    "permissionForm": "src/security/permission.form.ts#permissionForm (const)",
+    "permissionForm": "src/security/permission.metadata-form.ts#permissionForm (const)",
     "postureEnforcesWall": "src/security/tenancy-posture.ts#postureEnforcesWall (function)",
     "postureStampsOrganization": "src/security/tenancy-posture.ts#postureStampsOrganization (function)",
     "postureUsesUnionScope": "src/security/tenancy-posture.ts#postureUsesUnionScope (function)",

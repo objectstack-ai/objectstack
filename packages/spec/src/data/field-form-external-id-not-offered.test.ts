@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect } from 'vitest';
 
-import { fieldForm } from './field.form';
+import { fieldForm } from './field.metadata-form';
 import { FieldSchema } from './field.zod';
 
 const HERE = dirname(fileURLToPath(import.meta.url));

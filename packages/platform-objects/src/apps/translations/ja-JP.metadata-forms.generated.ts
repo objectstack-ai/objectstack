@@ -1664,6 +1664,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     }
   },
+  form: {
+    label: "フォーム"
+  },
   page: {
     label: "ページ",
     sections: {
@@ -3288,7 +3291,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       model: {
         label: "モデル",
-        helpText: "AI モデル設定（provider, model name, temperature など）"
+        helpText: "AI モデル設定（model name, temperature など）"
       },
       planning: {
         label: "計画",

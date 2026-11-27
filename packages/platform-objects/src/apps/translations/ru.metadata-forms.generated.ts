@@ -1664,6 +1664,9 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       }
     }
   },
+  form: {
+    label: "Форма"
+  },
   page: {
     label: "Страница",
     sections: {
@@ -3288,7 +3291,7 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       model: {
         label: "Модель",
-        helpText: "Настройка модели ИИ (поставщик, имя модели, температура и т. д.)"
+        helpText: "Настройка модели ИИ (имя модели, температура и т. д.)"
       },
       planning: {
         label: "Планирование",

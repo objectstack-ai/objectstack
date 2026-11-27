@@ -75,7 +75,7 @@ export * from './doc.zod';
 export * from './book.zod';
 export * from './email-config.zod';
 export * from './email-template.zod';
-export * from './email-template.form';
+export * from './email-template.metadata-form';
 export * from './sms-config.zod';
 export * from './push-config.zod';
 export * from './push-device.zod';

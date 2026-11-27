@@ -873,7 +873,7 @@ describe('[#34040] the exact read never serves the service\'s copy of another pa
     expect([...COVERED].sort()).toEqual([...UNWIRED_COVERED_TYPES].sort());
     expect([...OUTSIDE].sort()).toEqual(
       // [ADR-0150 addendum 2026-11-25] `ai_context` left this list: the registry reads it by `(package, name)`.
-      ['capability', 'datasource', 'doc', 'external_catalog', 'field', 'object', 'object_extension', 'position', 'seed', 'translation', 'view'],
+      ['capability', 'datasource', 'doc', 'external_catalog', 'field', 'form', 'object', 'object_extension', 'position', 'seed', 'translation', 'view'],
     );
   });
 
@@ -964,8 +964,8 @@ describe('[#34247] the exact read of a name the package holds no item of is refu
   const itemAt = async (served: ObjectStackProtocolImplementation, type: string, packageId: string) =>
     (await served.getMetaItem({ type, name: 'shared', packageId }))?.item as { label?: string } | undefined;
 
-  it('the family: the eight types the #34040 pin fixes (`ai_context` is read by package since ADR-0150\'s 2026-11-25 addendum)', () => {
-    expect([...OUTSIDE_PINNED].sort()).toEqual(['datasource', 'doc', 'external_catalog', 'field', 'object_extension', 'seed', 'translation', 'view']);
+  it('the family: the nine types the #34040 pin fixes (`form` joins with ADR-0159) (`ai_context` is read by package since ADR-0150\'s 2026-11-25 addendum)', () => {
+    expect([...OUTSIDE_PINNED].sort()).toEqual(['datasource', 'doc', 'external_catalog', 'field', 'form', 'object_extension', 'seed', 'translation', 'view']);
   });
 
   it.each(OUTSIDE_PINNED.flatMap((type) => [[type, [A, B]], [type, [B, A]]] as const))(
@@ -1101,7 +1101,7 @@ describe('[#34041] the read naming no package serves the one enabled holder besi
   it('the enumeration: every type the registry does not read by package is pinned below, one-holder, or judged elsewhere', () => {
     expect([...TWO_HOLDER].sort()).toEqual(
       // [ADR-0150 addendum 2026-11-25] `ai_context` left this list: the registry reads it by `(package, name)`.
-      ['assignment_rule', 'datasource', 'doc', 'external_catalog', 'field', 'hook', 'job', 'object_extension', 'queue', 'seed', 'sharing_rule', 'translation', 'view'],
+      ['assignment_rule', 'datasource', 'doc', 'external_catalog', 'field', 'form', 'hook', 'job', 'object_extension', 'queue', 'seed', 'sharing_rule', 'translation', 'view'],
     );
   });
 

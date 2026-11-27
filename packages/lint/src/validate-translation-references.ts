@@ -611,6 +611,12 @@ interface Universe {
    */
   contributedOnlyApps: Set<string>;
   dashboards: Map<string, { widgets: Set<string>; actions: Set<string> }>;
+  /**
+   * [ADR-0159 D8] Authored `form` item name → its named sections → the `field`
+   * of each entry object the section declares: what a
+   * `forms.<name>.sections.<section>[.fields.<field>]` key may name.
+   */
+  forms: Map<string, Map<string, Set<string>>>;
   /** Flow name (`Flow.name`) → its screen nodes and their declared fields. */
   flows: Map<string, FlowFacts>;
   /**
@@ -731,6 +737,35 @@ function emptyFacts(): ObjectFacts {
  * of anchors is now a list of call sites, not four copies of a loop that can
  * drift apart one at a time.
  */
+/**
+ * Register the `_sections` names one form-ish container declares, under the
+ * object it binds to.
+ *
+ * Form sections carry an OPTIONAL `name` that exists purely for the
+ * `_sections` lookup (`ui/view.zod.ts`: "Stable section identifier for i18n
+ * lookup"). A section without one cannot be translated at all, so it
+ * contributes nothing here. A form view's container and a `form` item
+ * (ADR-0159) both feed it: `translateForm` reads a form item's section
+ * headings at `objects.<object>._sections.<name>`, as a form view's are read.
+ */
+function addFormSections(container: AnyRec, binding: string | undefined, factsFor: (objectName: string) => ObjectFacts): void {
+  if (!binding) return;
+  for (const section of recordsOf(container.sections)) {
+    const sectionName = strName(section.name);
+    if (!sectionName) continue;
+    const facts = factsFor(binding);
+    facts.sections.add(sectionName);
+    // A section's entry objects are the `_sections.<name>.fields` keys; a
+    // bare field-name entry authors no copy, so it addresses nothing.
+    let entries = facts.sectionEntries.get(sectionName);
+    if (!entries) facts.sectionEntries.set(sectionName, (entries = new Set()));
+    for (const entry of recordsOf(section.fields)) {
+      const field = strName(entry.field);
+      if (field) entries.add(field);
+    }
+  }
+}
+
 function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => ObjectFacts): void {
   const recordObject = viewObjectName(view);
   const bindingOf = (container: AnyRec): string | undefined =>
@@ -743,31 +778,8 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
     if (objectName && name) factsFor(objectName).forms.add(name);
   };
 
-  /**
-   * Register the `_sections` names one form-ish container declares.
-   *
-   * Form sections carry an OPTIONAL `name` that exists purely for the
-   * `_sections` lookup (`ui/view.zod.ts`: "Stable section identifier for i18n
-   * lookup"). A section without one cannot be translated at all, so it
-   * contributes nothing here.
-   */
-  const addSections = (container: AnyRec, binding: string | undefined) => {
-    if (!binding) return;
-    for (const section of recordsOf(container.sections)) {
-      const sectionName = strName(section.name);
-      if (!sectionName) continue;
-      const facts = factsFor(binding);
-      facts.sections.add(sectionName);
-      // A section's entry objects are the `_sections.<name>.fields` keys; a
-      // bare field-name entry authors no copy, so it addresses nothing.
-      let entries = facts.sectionEntries.get(sectionName);
-      if (!entries) facts.sectionEntries.set(sectionName, (entries = new Set()));
-      for (const entry of recordsOf(section.fields)) {
-        const field = strName(entry.field);
-        if (field) entries.add(field);
-      }
-    }
-  };
+  const addSections = (container: AnyRec, binding: string | undefined) =>
+    addFormSections(container, binding, factsFor);
 
   const listBinding = isRec(view.list) ? bindingOf(view.list) : undefined;
   if (isRec(view.list)) addView(listBinding, defaultListViewKey(listBinding, view));
@@ -1520,6 +1532,30 @@ function buildUniverse(stack: AnyRec): Universe {
   for (const view of [...recordsOf(stack.views), ...artifactProvidedRecords(stack, 'views')]) {
     collectViewRecord(view, factsFor);
   }
+  // [ADR-0159 card ②] A `form` item's named sections are `_sections` facts of
+  // the object it binds to (its one `object`), the same anchor a form view's
+  // sections are. Its own label, title and panel live in the `forms` family,
+  // keyed by its name, so it contributes no `_views` fact.
+  // [ADR-0159 D8] …and the form's own `forms.<name>.sections` node, read
+  // before that default: the same sections and entries, keyed by the form.
+  const forms = new Map<string, Map<string, Set<string>>>();
+  for (const form of [...recordsOf(stack.forms), ...artifactProvidedRecords(stack, 'forms')]) {
+    addFormSections(form, strName(form.object), factsFor);
+    const formName = strName(form.name);
+    if (!formName) continue;
+    let sections = forms.get(formName);
+    if (!sections) forms.set(formName, (sections = new Map()));
+    for (const section of recordsOf(form.sections)) {
+      const sectionName = strName(section.name);
+      if (!sectionName) continue;
+      let entries = sections.get(sectionName);
+      if (!entries) sections.set(sectionName, (entries = new Set()));
+      for (const entry of recordsOf(section.fields)) {
+        const field = strName(entry.field);
+        if (field) entries.add(field);
+      }
+    }
+  }
 
   // ── Pages: `record:details` sections are the other `_sections` anchor, and
   //    `interfaceConfig.userFilters.tabs` is the ONE `_tabs` anchor ──
@@ -1966,6 +2002,7 @@ function buildUniverse(stack: AnyRec): Universe {
     apps,
     contributedOnlyApps,
     dashboards,
+    forms,
     flows,
     hooks,
     hookTexts,
@@ -2428,6 +2465,44 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
               suggest(actionKey, dash.actions),
             `Header-action translations are keyed by the action's \`actionUrl\`, not its label.`,
           );
+        }
+      }
+
+      // ── [ADR-0159 D8] forms.<name>.sections.<section>[.fields.<field>] ──
+      //
+      // Only the `sections` branch is judged: a section the form names and an
+      // entry `field` that section declares are the targets `translateForm`
+      // reads there. A form this stack does not author is skipped, as a page
+      // is (no rung judges `forms.<name>` itself yet).
+      for (const [formName, rawForm] of Object.entries(asRecord(rawData.forms))) {
+        const form = universe.forms.get(formName);
+        if (!form || !isRec(rawForm)) continue;
+        const formPath = `${base}.forms${memberPath(formName)}`;
+        for (const [sectionName, rawSection] of Object.entries(asRecord(rawForm.sections))) {
+          const entries = form.get(sectionName);
+          if (!entries) {
+            orphan(
+              `${inLocale} · form "${formName}" · section "${sectionName}"`,
+              `${formPath}.sections.${sectionName}`,
+              `Translations are keyed to section "${sectionName}", which form "${formName}" does not ` +
+                `declare, so nothing reads them.` +
+                suggest(sectionName, form.keys()),
+              `Key the section by its \`name\` in the form's \`sections\`, or drop the translation.`,
+            );
+            continue;
+          }
+          for (const fieldName of Object.keys(asRecord(asRecord(rawSection).fields))) {
+            if (entries.has(fieldName)) continue;
+            orphan(
+              `${inLocale} · form "${formName}" · section "${sectionName}" · entry "${fieldName}"`,
+              `${formPath}.sections.${sectionName}.fields.${fieldName}`,
+              `Translations are keyed to entry "${fieldName}" of section "${sectionName}", which form ` +
+                `"${formName}" does not declare in that section, so nothing reads them.` +
+                suggest(fieldName, entries),
+              `Key the entry by its \`field\` under the section's \`name\`, or drop the translation. A ` +
+                `bare field name authors no copy: translate the field itself at \`objects.OBJECT.fields.FIELD\`.`,
+            );
+          }
         }
       }
 

@@ -32,6 +32,28 @@
  *    request, then waits out the running tick; a `wake()` after it is a no-op.
  *    The timer is `unref()`ed, so the loop never keeps a process alive by
  *    itself.
+ *  - **Every tick runs in the loop's own async context** (#37705), the one it
+ *    was constructed in, never the context of whoever called `start()`,
+ *    `wake()` or `wakeAt()`. A wake is a request, not a hand-over: the caller
+ *    is typically a write that just enqueued work, often inside a unit of work
+ *    (the triggering write's, or a flow's), and a tick started in its context
+ *    carried that unit's ambient handle into the store it drains. The unit
+ *    then committed under the tick, which failed with "Transaction query
+ *    already complete", and so did the audit writes the tick's updates fired;
+ *    the timer a tick sets inherited the same context, so every later tick did
+ *    too. The same holds for any other ambient store (a request's identity, a
+ *    grants memo): a tick is the loop's work, not the waker's. ⛔ So construct
+ *    a loop at boot (a plugin's `start()` or `kernel:ready`, a service
+ *    constructor), never lazily inside a request or a unit: the context it is
+ *    constructed in is the one every tick runs in for good. `DbQueueAdapter`
+ *    builds its loop in `start()`, which `subscribe()` also reaches under
+ *    `autoStart`, so a first `subscribe()` belongs at boot too.
+ *  - **A wake for a row a unit of work just wrote goes at that unit's
+ *    commit** (#37705, {@link wakeAfterOpenUnitsCommit}). The tick runs outside
+ *    the unit, so on a pooled driver it cannot see the uncommitted row: woken
+ *    inside the unit, it finds nothing and the row waits for a backed-off
+ *    tick (up to `maxIdleIntervalMs` under `soleWriter`). A unit that rolls
+ *    back sends no wake, and has no row to wake for.
  *
  * The price of the backoff is paid in latency by work nobody wakes the loop
  * for — a deferred row coming due, a row another process wrote, a crashed
@@ -59,6 +81,8 @@
  * `intervalMs` ramp. Before #29919 every boot re-ran that ramp against empty
  * stores: five ticks in the first minute per loop, every one of them idle.
  */
+
+import { AsyncResource } from 'node:async_hooks';
 
 /** Default ceiling of the idle backoff, in ms — see {@link DispatchLoopOptions.maxIdleIntervalMs}. */
 export const DEFAULT_MAX_IDLE_INTERVAL_MS = 30_000;
@@ -102,6 +126,8 @@ export interface DispatchLoopOptions {
 }
 
 export class DispatchLoop {
+    /** The async context every tick runs in: the one this loop was constructed in. */
+    private readonly home = new AsyncResource('DispatchLoop');
     private readonly intervalMs: number;
     private readonly maxIdleIntervalMs: number;
     private readonly runTick: () => Promise<number>;
@@ -144,7 +170,7 @@ export class DispatchLoop {
         this.idleTicks = 0;
         this.knownDueAt = null;
         this.dueReadOwed = true;
-        this.loopTick();
+        this.loopTickAtHome();
     }
 
     /** Stop the loop and drain the in-flight tick. */
@@ -166,7 +192,7 @@ export class DispatchLoop {
         if (!this.running) return;
         this.idleTicks = 0;
         this.dueReadOwed = true;
-        this.loopTick();
+        this.loopTickAtHome();
     }
 
     /**
@@ -186,10 +212,21 @@ export class DispatchLoop {
         const delayMs = dueAtMs - Date.now();
         if (delayMs <= 0) {
             this.dueReadOwed = true;
-            this.loopTick();
+            this.loopTickAtHome();
             return;
         }
-        this.schedule(delayMs, true);
+        // Set from the loop's own context, so the timer's tick runs there.
+        this.home.runInAsyncScope(() => this.schedule(delayMs, true));
+    }
+
+    /**
+     * [#37705] {@link loopTick}, entered from the loop's own async context
+     * ({@link home}) rather than the caller's: the tick, the due-time read and
+     * the timer for the next tick are all set up there, so none of them carries
+     * a store the caller had entered (a unit of work's handle, above all).
+     */
+    private loopTickAtHome(): void {
+        this.home.runInAsyncScope(() => this.loopTick());
     }
 
     /**
@@ -303,6 +340,19 @@ export class DispatchLoop {
         clearTimeout(this.timer);
         this.timer = undefined;
     }
+}
+
+/**
+ * [#37705] Send `wake` (a {@link DispatchLoop.wake} after an outbox or queue
+ * insert) once the unit of work open at the call commits, through the
+ * engine's `runAfterOpenUnitsCommit` (`@objectstack/objectql`): at once when no
+ * unit is open, never when it rolls back. An engine without that member (a
+ * double, a driver-level store) sends it at once, as before.
+ */
+export function wakeAfterOpenUnitsCommit(engine: unknown, wake: () => void): void {
+    const defer = (engine as { runAfterOpenUnitsCommit?: (body: () => void) => void } | null | undefined)?.runAfterOpenUnitsCommit;
+    if (typeof defer === 'function') defer.call(engine, wake);
+    else wake();
 }
 
 /** The earlier of two optional instants. */

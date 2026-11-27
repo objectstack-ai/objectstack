@@ -332,7 +332,10 @@ export function operationMessageTranslationKey(messageKey: string): string {
  *     catalog is the only source of their text.
  *   - `Accept-Language` is read by its top tag only
  *     (`preferredLocaleFromHeader`, no q-value negotiation), the platform's
- *     existing reading; a top tag the catalog lacks answers English.
+ *     existing reading. The tag is matched to a catalog locale by language
+ *     (`resolveBundleLocale`): `es-MX` reads `es-ES`, `zh` and `zh-TW` read
+ *     `zh-CN`, `ja` reads `ja-JP`. Only a language the catalog holds no
+ *     locale of (`fr`, `de`, …) answers English.
  *   - The server fault log records the thrown error's own message. Only a
  *     throw with an EMPTY message puts the localized sentence into the log line
  *     in its place (`serverFaultLogMessage`'s fallback); every other throw logs
@@ -370,10 +373,20 @@ export function operationMessageTranslationKey(messageKey: string): string {
  * is plural (`own_door_attachment_mutate`) reads the `_plural` pair, so the
  * English verb agrees.
  *
- * The `comment_doors_*` and `webhook_redeliver_*` keys are the same `501` on
- * the comment doors (`comments.ts`) and the webhook redelivery door
- * (`webhooks.ts`), which are not own-door bridges: each sentence is whole,
- * with its slot, member and package names written in, never translated.
+ * The `comment_doors_*`, `webhook_redeliver_*`, `approvals_act_*` and
+ * `automation_hooks_*` keys are the same `501` on the comment doors
+ * (`comments.ts`), the webhook redelivery door (`webhooks.ts`), the approval
+ * action-page door (`approvals.ts`) and the inbound automation hooks
+ * (`automation-hooks.ts`), which are not own-door bridges: each sentence is
+ * whole, with its slot, member and package names written in, never
+ * translated. Each door reads them as the bridge does: by the request's top
+ * `Accept-Language` tag (`requestLocaleOf`, `own-door-bridge.ts`), matched to
+ * a catalog locale by language as the print door's is (a language the catalog
+ * holds no locale of answering English), and with no `i18n` service, so no
+ * `errors.comment_doors_*`, `errors.webhook_redeliver_*`,
+ * `errors.approvals_act_*` or `errors.automation_hooks_*` override is
+ * consulted. Their English is byte-identical to the fixed sentences the doors
+ * answered before they were localized.
  */
 export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> = {
   en: {
@@ -462,6 +475,14 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'Webhook redelivery is not available: no webhooks service is registered. @objectstack/plugin-webhooks registers it once its redelivery veto is installed, which needs the data engine and @objectstack/service-messaging; the boot log names the one that is missing.',
     webhook_redeliver_member_missing:
       'Webhook redelivery is not available: the registered webhooks service does not implement handleRedeliver.',
+    approvals_act_service_unregistered:
+      'Approval action pages are not available: no approvals service is registered. Register @objectstack/plugin-approvals to serve them.',
+    approvals_act_member_missing:
+      'Approval action pages are not available: the registered approvals service does not implement handleActionPage.',
+    automation_hooks_service_unregistered:
+      'Inbound automation hooks are not available: no trigger-api service is registered. The inbound-hook trigger (@objectstack/trigger-api) serves this route through that service; compose it on the environment that owns the flow.',
+    automation_hooks_member_missing:
+      'Inbound automation hooks are not available: the registered trigger-api service does not implement handleInboundHook.',
   },
   'zh-CN': {
     permission_denied: '您没有执行此操作的权限，如需访问请联系管理员。',
@@ -522,6 +543,12 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     webhook_redeliver_service_unregistered:
       'Webhook 重新投递不可用：未注册 webhooks 服务。@objectstack/plugin-webhooks 在安装其重新投递否决器后注册该服务，这需要数据引擎和 @objectstack/service-messaging；启动日志会指出缺少的是哪一个。',
     webhook_redeliver_member_missing: 'Webhook 重新投递不可用：已注册的 webhooks 服务未实现 handleRedeliver。',
+    approvals_act_service_unregistered:
+      '审批操作页不可用：未注册 approvals 服务。请注册 @objectstack/plugin-approvals 来提供这些页面。',
+    approvals_act_member_missing: '审批操作页不可用：已注册的 approvals 服务未实现 handleActionPage。',
+    automation_hooks_service_unregistered:
+      '入站自动化钩子不可用：未注册 trigger-api 服务。入站钩子触发器（@objectstack/trigger-api）通过该服务提供此路由；请在拥有该流程的环境上组合它。',
+    automation_hooks_member_missing: '入站自动化钩子不可用：已注册的 trigger-api 服务未实现 handleInboundHook。',
   },
   'ja-JP': {
     permission_denied: 'この操作を実行する権限がありません。アクセスが必要な場合は管理者にお問い合わせください。',
@@ -604,6 +631,14 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'Webhook の再配信は利用できません。webhooks サービスが登録されていません。@objectstack/plugin-webhooks は再配信の拒否フックがインストールされると登録します。それにはデータエンジンと @objectstack/service-messaging が必要です。不足しているものは起動ログに示されます。',
     webhook_redeliver_member_missing:
       'Webhook の再配信は利用できません。登録されている webhooks サービスは handleRedeliver を実装していません。',
+    approvals_act_service_unregistered:
+      '承認アクションページは利用できません。approvals サービスが登録されていません。これらのページを提供するには @objectstack/plugin-approvals を登録してください。',
+    approvals_act_member_missing:
+      '承認アクションページは利用できません。登録されている approvals サービスは handleActionPage を実装していません。',
+    automation_hooks_service_unregistered:
+      '受信自動化フックは利用できません。trigger-api サービスが登録されていません。受信フックトリガー（@objectstack/trigger-api）がこのサービスを通じてこのルートを提供します。フローを所有する環境に組み込んでください。',
+    automation_hooks_member_missing:
+      '受信自動化フックは利用できません。登録されている trigger-api サービスは handleInboundHook を実装していません。',
   },
   'es-ES': {
     permission_denied:
@@ -691,6 +726,14 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'El reenvío de webhooks no está disponible: no hay ningún servicio webhooks registrado. @objectstack/plugin-webhooks lo registra una vez instalado su veto de reenvío, que necesita el motor de datos y @objectstack/service-messaging; el registro de arranque indica cuál falta.',
     webhook_redeliver_member_missing:
       'El reenvío de webhooks no está disponible: el servicio webhooks registrado no implementa handleRedeliver.',
+    approvals_act_service_unregistered:
+      'Las páginas de acción de aprobación no están disponibles: no hay ningún servicio approvals registrado. Registre @objectstack/plugin-approvals para servirlas.',
+    approvals_act_member_missing:
+      'Las páginas de acción de aprobación no están disponibles: el servicio approvals registrado no implementa handleActionPage.',
+    automation_hooks_service_unregistered:
+      'Los ganchos de automatización entrantes no están disponibles: no hay ningún servicio trigger-api registrado. El disparador de ganchos entrantes (@objectstack/trigger-api) sirve esta ruta a través de ese servicio; compóngalo en el entorno al que pertenece el flujo.',
+    automation_hooks_member_missing:
+      'Los ganchos de automatización entrantes no están disponibles: el servicio trigger-api registrado no implementa handleInboundHook.',
   },
 };
 

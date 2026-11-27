@@ -138,6 +138,7 @@ import { permissionRlsTagsRemoved } from './entries/18/permission-rls-tags-remov
 import { flowDecisionModeInclusiveExplicit } from './entries/18/flow-decision-mode-inclusive-explicit.js';
 // Major 19: imported after every major-18 conversion, in `MAJOR_19_CONVERSIONS`'s
 // identifier order.
+import { agentModelProviderRemoved } from './entries/19/agent-model-provider-removed.js';
 import { permissionViewAllFieldsBesideRecordBypass } from './entries/19/permission-view-all-fields-beside-record-bypass.js';
 
 /**
@@ -314,6 +315,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
  * `CONVERSIONS_BY_MAJOR[19]`, which is this list in `order`.
  */
 const MAJOR_19_CONVERSIONS: readonly OrderedConversion[] = [
+  { conversion: agentModelProviderRemoved, order: 2 },
   { conversion: permissionViewAllFieldsBesideRecordBypass, order: 1 },
 ];
 

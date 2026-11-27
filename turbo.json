@@ -878,6 +878,8 @@
         "$TURBO_ROOT$/skills/objectstack-automation/SKILL.md",
         "$TURBO_ROOT$/packages/types/src/data-error-classification.ts",
         "$TURBO_ROOT$/packages/core/src/utils/import-runner.ts",
+        "$TURBO_ROOT$/examples/app-crm/src/objects/index.ts",
+        "$TURBO_ROOT$/examples/app-crm/src/views/lead.view.ts",
         "$TURBO_ROOT$/content/**",
         "$TURBO_ROOT$/docs/**",
         "$TURBO_ROOT$/skills/**"

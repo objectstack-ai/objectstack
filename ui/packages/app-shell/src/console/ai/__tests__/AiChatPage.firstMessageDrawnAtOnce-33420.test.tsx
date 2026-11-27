@@ -52,6 +52,9 @@
  * once. CONTROLS: a load that answers sends once; a 404 creates a new one.
  */
 
+// AiChatPage reads a dropped spreadsheet through `import('@object-ui/plugin-grid')`; load it
+// here so collection pays that transform, not a clocked case (check-test-source-alias).
+import '@object-ui/plugin-grid';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -92,7 +95,6 @@ vi.mock('../../../hooks/useCanAuthorMetadata', () => ({ useCanAuthorMetadata: ()
 vi.mock('../../../layout/AiUsageIndicator', () => ({ AiUsageIndicator: () => null }));
 vi.mock('../ConversationsSidebar', () => ({ ConversationsSidebar: () => null }));
 
-vi.mock('../PendingDraftsBar', () => ({ PendingDraftsBar: () => null }));
 
 import { I18nProvider } from '@object-ui/i18n';
 import { AiChatPage, useComposerDraftHandoff } from '../AiChatPage';

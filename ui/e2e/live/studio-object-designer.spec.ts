@@ -99,11 +99,11 @@ test('F4: adding a picklist + an empty option row does not trip spec validation,
     await page.getByRole('button', { name: /Add value/i }).click();
     // Live spec validation is debounced, so settle before a NEGATIVE assertion:
     // the empty option row must NOT surface the developer-oriented
-    // "System identifier must be at least 2 characters" spec error. (With the
+    // "Option value must not be empty" spec error. (With the
     // bug the row persists to def.options and this banner appears.)
     await page.waitForTimeout(1200);
     await expect(page.getByTestId('metadata-validation-banner')).toHaveCount(0);
-    await expect(page.getByText(/System identifier must be/i)).toHaveCount(0);
+    await expect(page.getByText(/Option value must/i)).toHaveCount(0);
 
     // The save round trip, not only the UI state: Save stores a draft, and the
     // draft read back through /meta carries the one authored option and not

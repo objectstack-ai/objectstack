@@ -405,7 +405,7 @@ function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<stri
  * cannot be safely converted via `z.toJSONSchema()` (e.g. due to recursive
  * references or non-representable constructs like `z.lazy()` chains).
  *
- * These mirror the shape consumed by the corresponding `*.form.ts` layouts,
+ * These mirror the shape consumed by the corresponding `*.metadata-form.ts` layouts,
  * so the SchemaForm renderer can still produce a real form (instead of
  * falling back to the raw JSON editor). All fields use lenient types
  * (`string | object | array`) because the widget hint in the form layout
@@ -429,7 +429,7 @@ const HAND_CRAFTED_SCHEMAS: Record<string, Record<string, unknown>> = {
                 // display order. The SchemaForm engine recognises
                 // `additionalProperties` as a Record and dispatches to
                 // the `record` form-field renderer (ADR-0007). The form
-                // layout in `object.form.ts` declares `type: 'record'`
+                // layout in `object.metadata-form.ts` declares `type: 'record'`
                 // so the inner `additionalProperties` schema is used to
                 // shape each value.
                 type: 'object',

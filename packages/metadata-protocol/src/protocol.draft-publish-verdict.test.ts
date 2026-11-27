@@ -34,6 +34,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, hashSpec } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
+import { runAuthoringRules } from '@objectstack/lint';
 
 /** The LIVE object universe: a deal with a formula field, and its account. */
 const liveDealObject = {
@@ -1675,5 +1676,78 @@ describe('[#35256] a flow draft whose connector step cannot dispatch reads the p
         const probe = report.issues.find((i) => i.code === RULE); // adr0112-ok: D6c build-probe diagnostics code
         expect(probe, JSON.stringify(report.issues)).toBeDefined();
         expect([advisory!.message, advisory!.hint, advisory!.userMessage]).toEqual([probe!.message, probe!.fix, probe!.userMessage]);
+    });
+});
+
+/**
+ * A permission set's draft verdict carries `security-rollup-source-unreadable`
+ * when the set reads a roll-up over child data it cannot read — the verdict the
+ * open MCP door's `save_metadata_draft` answers with, so an AI author that
+ * stages the objects and then the set in one package is told at the save, with
+ * the words `os lint` prints. Advisory only: it never refuses.
+ */
+describe('a permission draft over a roll-up whose child it withholds', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    const RULE = 'security-rollup-source-unreadable';
+    const project = {
+        name: 'project',
+        label: 'Project',
+        sharingModel: 'public_read',
+        fields: {
+            name: { type: 'text', label: 'Name' },
+            task_count: { type: 'summary', label: 'Task Count', summaryOperations: { object: 'task', function: 'count' } },
+        },
+    };
+    const task = {
+        name: 'task',
+        label: 'Task',
+        sharingModel: 'public_read',
+        fields: {
+            name: { type: 'text', label: 'Name' },
+            project: { type: 'master_detail', label: 'Project', reference: 'project', required: true, deleteBehavior: 'cascade' },
+        },
+    };
+    const READ = { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false };
+    const client = (objects: Record<string, unknown>, fields?: Record<string, unknown>) => ({
+        name: 'client',
+        label: 'Client',
+        objects,
+        ...(fields ? { fields } : {}),
+    });
+
+    async function judged(set: { name: string }) {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageDraft(protocol, 'object', project);
+        await stageDraft(protocol, 'object', task);
+        expect(await stageDraft(protocol, 'permission', set)).toMatchObject({ success: true, state: 'draft' });
+        return { protocol, judgement: await protocol.draftPublishJudgement({ type: 'permission', name: set.name, packageId: PKG }) };
+    }
+
+    it('a set reading the count but not the task is advised, in the words `os lint` prints, and not refused', async () => {
+        const set = client({ project: READ });
+        const { judgement } = await judged(set);
+
+        expect(judgement.refusals).toEqual([]);
+        const advised = judgement.advisories.filter((a) => a.rule === RULE);
+        expect(advised.map((a) => [a.severity, a.path])).toEqual([['warning', 'permissions.client.fields["project.task_count"]']]);
+
+        const [cli] = runAuthoringRules('lint', { normalized: { objects: [project, task], permissions: [set] } })
+            .filter((f) => f.rule === RULE);
+        expect([advised[0]!.message, advised[0]!.hint]).toEqual([cli!.message, cli!.hint]);
+    });
+
+    it('a set withholding both the count and the task is advised nothing', async () => {
+        const { judgement } = await judged(client({ project: READ }, { 'project.task_count': { readable: false } }));
+        expect(judgement.refusals).toEqual([]);
+        expect(judgement.advisories.filter((a) => a.rule === RULE)).toEqual([]);
     });
 });

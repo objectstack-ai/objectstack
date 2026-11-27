@@ -25,6 +25,8 @@ describe('reference-integrity suite — membership', () => {
       // field-naming position the two members above do not own. Placed beside
       // them because the three walk the identical rungs.
       'validateListViewFieldRefs',
+      // [ADR-0159 D2] A `form` item's `object`, judged where a list view's is.
+      'validateFormObjectBindings',
       // [#15254] The object-level half of the same sweep: the field-name lists
       // an object writes about its OWN fields. Placed beside the list-view
       // members because it completes the object's field surface — and because

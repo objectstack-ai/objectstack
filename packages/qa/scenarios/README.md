@@ -750,7 +750,12 @@ npx @objectstack/scenarios help                                      # the comma
   names in the persona's `allowedRollups` (`[{ "object": "invoice", "field": "amount_paid" }]`, bare card names): an
   acknowledged finding on it is not charged, an unacknowledged one is. The remedy is the rule's own: mask the
   parent summary on the set (`fields["<parent>.<summary>"]: { readable: false }`). Ask mode authors nothing and is never
-  charged.
+  charged. So the build is not left to guess, a card names in a persona's `withheldRollups` (`[{ "object": "project",
+  "field": "task_count" }]`, bare card names) the roll-ups on objects it reads that summarise what its `hidden` withholds,
+  and the build prompt's line for that persona says they are withheld too. That key is prompt text only: the charge is
+  the same whether a roll-up is named there or not, and the leak grader does not read it. The schema refuses a withheld
+  roll-up the persona's `hidden` already names or its `allowedRollups` allows; the loader, one on a field no seed row
+  of its object carries.
 - **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner
   grants it to that persona's user, and loads a seed row as owned (`owner_id`) by a persona's user only when the row
   names that person (`rowOwner` in `prompts.ts`): it IS the persona's `record`, a declared direct lookup on it holds
@@ -767,7 +772,8 @@ npx @objectstack/scenarios help                                      # the comma
   parent-controlled child, a field naming them).
 - **Structure contract** (`prompts.ts`): every Build check traces to text the build prompt carries, so a faithful build
   never fails for not guessing a name. Besides the seed (objects and fields) and the persona sets, the contract states
-  each `expect` row the exact-name scorer checks by name: every lookup's target, every single-choice field with its
+  each `expect` row the exact-name scorer checks by name: every lookup's target (a row marked `masterDetail` named as a
+  master-detail on its own line, since the inline-edit tag credits only a `master_detail` field), every single-choice field with its
   minimum option count, every dashboard and every app navigation target, and, on a card carrying
   `records-forms.select-options`, that every other single-choice field offers two options or more. An iterate prompt
   states its change's rows the same way: the new objects (with the card's field minimum), lookups, option fields,

@@ -18,7 +18,7 @@
 // over a spec-side source that MANUFACTURES the leaves". This round keeps it
 // there, with the source that actually manufactures these eleven:
 //
-//   `objectForm` (`packages/spec/src/data/object.form.ts`), crossed with ONE
+//   `objectForm` (`packages/spec/src/data/object.metadata-form.ts`), crossed with ONE
 //   predicate read off the form's own shape: a section is IN when it ships
 //   `collapsed: true`. Two of the four qualify — `capabilities` and `advanced`
 //   — and the walk takes every field they declare, recursively through the
@@ -83,7 +83,7 @@
 //   three renderings is either of them.
 //
 // ⛔ And the English is NOT fixed here. It would be an edit to
-// `packages/spec/src/data/object.form.ts`, outside this round's file surface,
+// `packages/spec/src/data/object.metadata-form.ts`, outside this round's file surface,
 // and it is a SEPARATE act with its own reason that does ⛔ not discharge the
 // translation. It is reported as a finding, not folded in.
 //

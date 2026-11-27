@@ -578,6 +578,17 @@ const ALLOW = {
       "in its error output instead of suggesting a lossy rename.",
     issue: 4115,
   },
+  "@object-ui/types:FormSchema": {
+    reason:
+      "Different concepts under one name (objectstack#37086): this is the `form` COMPONENT " +
+      "node (`type: 'form'`, a field list a page renders), and the spec's FormSchema, added by " +
+      "ADR-0159 card ②, is the `form` METADATA ITEM (`name` `OBJECT.KEY`, one `object`) that " +
+      "a renderer meets only as the body `@objectstack/rest`'s form doors serve. Not derivable: " +
+      "the item carries no node `type` and the node no item `name`. The mirror census skips the " +
+      "same-name pair by the same reasoning (`SPEC_NAME_COLLISIONS` in zod-mirror-parity.test.ts), " +
+      "and the node keeps its `ComponentPropsMap['form']` pairing there.",
+    issue: 37086,
+  },
   "@object-ui/types:SelectOptionSchema": {
     reason:
       "Spec-derived dialect (objectui#3090): spec keys flow in by reference via " +

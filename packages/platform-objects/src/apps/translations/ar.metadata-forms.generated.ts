@@ -1664,6 +1664,9 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       }
     }
   },
+  form: {
+    label: "نموذج"
+  },
   page: {
     label: "الصفحة",
     sections: {
@@ -3288,7 +3291,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       model: {
         label: "النموذج",
-        helpText: "تهيئة نموذج الذكاء الاصطناعي (المزوّد، واسم النموذج، ودرجة الحرارة، إلخ)"
+        helpText: "تهيئة نموذج الذكاء الاصطناعي (اسم النموذج، ودرجة الحرارة، إلخ)"
       },
       planning: {
         label: "التخطيط",

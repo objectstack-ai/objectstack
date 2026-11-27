@@ -1,0 +1,7 @@
+{
+  "file": "packages/metadata-protocol/src/protocol-form-reads.ts",
+  "adrs": [
+    "ADR-0159"
+  ],
+  "invariant": "ADR-0159 D5, D6 rule 11: THE cross-type resolution of the effective `form` read. A package's form is resolved over both types in the one served-row order (`servedOverlayRowCandidates`): the stored `view` row that order picks at the package's address is served, as the `form` item it projects, over the package's source `form` item of that name, and a stored `form` row at the same place wins over it; a stored `view` row that carries no form at a form's name serves none (the closed reading), and only a row the order serves is projected, never every stored `view` row. Reading the `form` type alone re-opens a form a stored old-shape row withdrew or replaced; reading every stored row serves a form no layer serves. The public doors, `GET /api/v1/meta/form` and the by-name read all answer from this one resolution."
+}

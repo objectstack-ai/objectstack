@@ -14,7 +14,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 // the author-time finding and the parse refusal. No cycle: that module
 // imports nothing at runtime.
 import { checkFieldCompleteness, FIELD_CHOICE_WITHOUT_OPTIONS } from '../kernel/functional-completeness';
-import { SnakeCaseIdentifierSchema, SystemIdentifierSchema } from '../shared/identifiers.zod';
+import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { ConditionalFormattingRuleSchema } from '../shared/conditional-formatting.zod';
 import { FilterConditionSchema } from './filter.zod';
@@ -309,6 +309,29 @@ const DEADLINE_FIELD_TYPES: ReadonlySet<string> = new Set([
 export const RUNTIME_OWNED_FIELD_TYPES: ReadonlySet<string> = new Set<string>(['autonumber']);
 
 /**
+ * The stored value of a select option: the system-identifier character rule
+ * (lowercase, starts with a letter, then letters, digits, `_` or `.`) with a
+ * floor of ONE character instead of two.
+ *
+ * An option value is a data value, not a machine name: grades `a` / `b` / `c`,
+ * sizes `s` / `m` / `l` are the natural spelling of a one-letter choice, and
+ * the two-character floor of `SystemIdentifierSchema` refused them at publish
+ * while the author's labels stayed `A` / `B` / `C`. Only this one surface is
+ * widened; object, field and every other machine name keep
+ * `SystemIdentifierSchema` / `SnakeCaseIdentifierSchema` and their floor.
+ * Every face that reuses `SelectOptionSchema.shape` (the form-view option, the
+ * picklist item and its extension, the field-level picklist override) takes
+ * this rule with it.
+ */
+const SelectOptionValueSchema = lazySchema(() => z
+  .string()
+  .min(1, { message: 'Option value must not be empty' })
+  .regex(/^[a-z][a-z0-9_.]*$/, {
+    message:
+      'Option value must be lowercase, starting with a letter, and may contain letters, numbers, underscores, or dots (e.g., "a", "in_progress")',
+  }));
+
+/**
  * Select Option Schema
  * 
  * Defines option values for select/picklist fields.
@@ -379,7 +402,7 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
   guidanceSets: [SELECT_OPTION_EDITABILITY_GUIDANCE],
 }, {
   label: z.string().describe('Display label (human-readable, any case allowed)').meta({ title: 'Label' }),
-  value: SystemIdentifierSchema.describe('Stored value (lowercase machine identifier)').meta({ title: 'Value' }),
+  value: SelectOptionValueSchema.describe('Stored value (lowercase machine identifier, one character or more)').meta({ title: 'Value' }),
   /**
    * Optional secondary text for the option (objectui#6153, inheriting the
    * objectui#6140 ruling frame — maintainer 2026-08-25: a key that is
@@ -390,7 +413,7 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * produces the same key for fetched options — while this strict shape
    * refused it at publish, so the search behaviour was real for a key no
    * author could legally write. The object-definition authoring form
-   * (`object.form.ts` options repeater) has offered a `description` input all
+   * (`object.metadata-form.ts` options repeater) has offered a `description` input all
    * along; this declaration is what makes that offer honest. Per the same
    * inherited ruling this option shape declares `description` and no cascade
    * key of its own — `field-rows-option-description.test.ts` pins that

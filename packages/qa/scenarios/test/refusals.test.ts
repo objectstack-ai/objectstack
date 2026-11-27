@@ -79,6 +79,8 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   ['a title in a third language', (c) => (c.title.ja = '顧客管理'), 'title.ja', /unknown key `ja`/],
   // ── expect consistency ──
   ['a lookup to an object the card does not expect', (c) => c.expect.lookups.push({ object: 'contact', field: 'email', to: 'customer' }), 'expect.lookups[1].to', /lookup target `customer` is not in expect.objects/],
+  ['the inline-edit tag with no lookup row marked master-detail', (c) => c.capabilities.push('records-forms.master-detail-inline-edit'), 'expect.lookups', /credits only a `master_detail` field.*marked `"masterDetail": true`/],
+  ['a lookup row marked `masterDetail: false` (the marker is `true` or absent)', (c) => (c.expect.lookups[0].masterDetail = false), 'expect.lookups[0].masterDetail', /expected true/],
   ['a dangling app nav target', (c) => (c.expect.appNavTargets = ['account', 'overview']), 'expect.appNavTargets[1]', /dangling nav/],
   ['a seed thinner than minFieldsPerObject', (c) => { c.expect.minFieldsPerObject = 5; Object.assign(c.run.seed.contact[0], { phone: '555', title: 'CTO' }); }, 'run.seed.account', /4 field\(s\), fewer than expect.minFieldsPerObject = 5/],
   // ── questions ──
@@ -219,6 +221,14 @@ describe('scenario card refusals', () => {
     const r = load((c) => {
       c.capabilities = c.capabilities.filter((t: string) => t !== 'access-security.row-scope');
       delete c.run.personas[0].scope;
+    });
+    expect(r.refusals.map(formatRefusal)).toEqual([]);
+  });
+
+  it('the inline-edit tag loads once a lookup row is marked master-detail (control for the tag rule)', () => {
+    const r = load((c) => {
+      c.capabilities.push('records-forms.master-detail-inline-edit');
+      c.expect.lookups[0].masterDetail = true;
     });
     expect(r.refusals.map(formatRefusal)).toEqual([]);
   });

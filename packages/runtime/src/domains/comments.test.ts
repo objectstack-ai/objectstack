@@ -320,6 +320,8 @@ describe('[#37610] the comment doors\' 501 follows the request\'s language', () 
                         const label = `${method} ${path} ${JSON.stringify(headers)}`;
                         const result = await dispatcher.dispatch(method, path, {}, {}, ctx(request));
                         expect(envelope(result), label).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
+                        // [#37737] The body is in the request's language, so the answer says it varies by it.
+                        expect(result.response?.headers?.Vary, label).toBe('Accept-Language');
                         expect(result.response?.body?.error?.message, label).toBe(site.sentences[locale]);
                         expect(result.response?.body?.error?.userMessage, label).toBeUndefined();
                     }
