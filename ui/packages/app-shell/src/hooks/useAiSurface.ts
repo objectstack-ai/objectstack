@@ -75,8 +75,11 @@ export interface AiSurfaceState {
  * should be shown FOR THE CURRENT USER, driven off the access-filtered agent
  * catalog (empty for seat-less users -> AI hidden; ADR-0068).
  */
-export function useAiSurfaceEnabled(): AiSurfaceState {
-  const { agents, isLoading } = useAgents({ apiBase: resolveAiApiBase() });
+export function useAiSurfaceEnabled(options: { enabled?: boolean } = {}): AiSurfaceState {
+  // `enabled: false` asks nothing (objectstack#37833: the navigation gate asks
+  // only while an app carries an `ai:chat` entry); the answer then reads as
+  // loading, and the caller that turned the read off does not consult it.
+  const { agents, isLoading } = useAgents({ apiBase: resolveAiApiBase(), enabled: options.enabled ?? true });
 
   // useAgents starts `isLoading=false` and only kicks off the fetch in an effect
   // a tick later, so the first render's empty list means "not fetched yet", not
