@@ -688,7 +688,8 @@ an exact scan.
 libSQL's native vectors (`F32_BLOB`, `vector32`, `vector_distance_cos`): the
 store for local development and for a deployment not on PostgreSQL. It takes
 the service's passages, embeds them with the kernel's `embedder` service (or
-the `embedder` it is given), and answers a search by an exact scan.
+the `embedder` it is given), and answers a search by an exact scan, or, for a
+large source of one organization, through an approximate index.
 
 - **Which database.** The `url` option (`file:`, `:memory:` or a
   `libsql://` Turso URL), else `knowledge.db` under the project's
@@ -712,11 +713,21 @@ the `embedder` it is given), and answers a search by an exact scan.
   passage table (kept in step by triggers), a term of three characters or
   more as a quoted phrase, a shorter one by `LIKE`. The organization filter,
   the [record scope](#record-scope) and the metadata `filter` (JSON equality
-  per key) are one `WHERE`, run in both legs before either ranks. The store creates no DiskANN index: `vector_top_k` ranks
-  before it filters, and with one, 1,000 vectors of 1,536 dimensions grew a
-  file from 8.2 MB to 329 MB and took 21.8 s to index. Without it the same
-  1,000 passages take 8.3 MB and a search about 5 ms; 10,000 take 82 MB and
-  about 50 ms. A larger source belongs on `knowledge-pgvector`.
+  per key) are one `WHERE`, run in both legs. The exact scan reads every row
+  in scope: 1,000 passages of 1,536 dimensions take 8.3 MB and a search about
+  5 ms; 10,000 take 82 MB and about 50 ms.
+- **Approximate index.** A complete build that completes on a generation of
+  `vectorIndexThreshold` passages or more (default 20,000), all of one
+  organization, makes its DiskANN index (`vector_top_k`), copied in 128 rows to
+  a transaction before the switch, never on a search. The vector leg then
+  reads `topK × vectorIndexOverfetch` candidates (default 4, at most 200),
+  runs the same `WHERE` over them, ranks those in scope by their stored
+  vector, and feeds the fusion as the exact leg does; a leg the filter leaves
+  short of `topK` runs again as the exact scan, so a search never answers
+  fewer hits than the exact scan. The index ranks before it filters, so it is
+  never made, or used, over the passages of two organizations (passages of
+  none count as one): each search reads the organization index and takes the
+  exact scan once a second organization's passage is written. TBD_DOCS
 - **Rebuilds.** A changed fingerprint is refused (§3.6). A complete reindex
   under a new fingerprint builds a new generation table beside the active
   one, which keeps answering its own fingerprint, and switches at the end of

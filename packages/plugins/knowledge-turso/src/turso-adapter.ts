@@ -243,8 +243,13 @@ function withTimeout<T>(work: Promise<T>, ms: number, commit = false): Promise<T
  * legs that rank it, divided by the score of a passage first in both, so it
  * lies in `(0, 1]`.
  *
- * - The vector leg: an exact scan by cosine distance, no approximate index. A
- *   passage whose cosine similarity is not positive is not ranked by it.
+ * - The vector leg: by cosine distance to the stored float32 vector. A
+ *   passage whose cosine similarity is not positive is not ranked by it. An
+ *   exact scan of the rows in scope — or, for a generation with an
+ *   approximate index ({@link buildVectorIndex}) and passages of one
+ *   organization at most, the `topK × vectorIndexOverfetch` nearest
+ *   candidates `vector_top_k` answers, of which those in scope are ranked;
+ *   a leg the filter leaves short of `topK` is run again exactly.
  * - The keyword leg: the query's terms ({@link keywordTerms}). A term of three
  *   characters or more is matched as one FTS5 phrase in the passage table's
  *   trigram index (so `X-200` is a phrase, never FTS5 syntax); a shorter one
@@ -254,9 +259,10 @@ function withTimeout<T>(work: Promise<T>, ms: number, commit = false): Promise<T
  *   term most passages hold weighs little.
  *
  * The organization filter (ADR-0161 K8, item 9), the record scope (item 17)
- * and the metadata-equality `filter` are one `WHERE`, run in both legs before
- * either ranks — which libSQL's DiskANN index (`vector_top_k`) cannot do: it
- * ranks first.
+ * and the metadata-equality `filter` are one `WHERE`, run in both legs: before
+ * the exact scan and the keyword leg rank, after libSQL's DiskANN index
+ * (`vector_top_k`), which ranks first — so the index is never used over the
+ * passages of two organizations, and its candidates are over-fetched.
  *
  * The keyword index of a passage table is made with the table, and for a
  * table made before it existed, by the first search of that table, from the

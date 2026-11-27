@@ -3,6 +3,8 @@
 export {
   KNOWLEDGE_REBUILD_REQUIRED,
   TursoKnowledgeAdapter,
+  VECTOR_INDEX_OVERFETCH,
+  VECTOR_INDEX_THRESHOLD,
   type TursoKnowledgeAdapterOptions,
 } from './turso-adapter.js';
 export {
