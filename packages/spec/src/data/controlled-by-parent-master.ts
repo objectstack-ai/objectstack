@@ -120,8 +120,10 @@ export type ControlledByParentMasterShape =
  * `STACK_SCHEMA_INVALID` refusal, whose `issues` are the raw zod issues, and on
  * the metadata save door's `422 INVALID_METADATA`, whose `issues[]` entries
  * (`zodIssuesToMetadataIssues`, `@objectstack/metadata-protocol`) carry the
- * issue's `params` beside `path`, `message` and zod's own issue `code`
- * (`'custom'`): read the code there from `params.code`.
+ * registered refusal on `params` beside `path`, `message` and zod's own issue
+ * `code` (`'custom'`): read the code there from `params.code`. Where it is not:
+ * the read path's `_diagnostics.errors[]`, whose entries are exactly `path`,
+ * `message` and `code`.
  */
 export const CONTROLLED_BY_PARENT_MASTER_INVALID = 'CONTROLLED_BY_PARENT_MASTER_INVALID' as const;
 

@@ -1953,7 +1953,8 @@ export const ERROR_CODE_LEDGER = {
     // tree answers with it, the thrown value is the boundary.
     'CONNECTOR_UPSTREAM_CHANGED',
     'CONNECTOR_UPSTREAM_UNAVAILABLE',
-    // `door: 'none'` on the `PLUGIN_UI_REQUIRED_KEY_MISSING` reading below: the
+    // `door: 'none'` on the `PLUGIN_UI_REQUIRED_KEY_MISSING` reading below, read
+    // as: no door answers with this code as its `error.code`. The
     // `controlled_by_parent` master refusal's code (`data/controlled-by-parent-master.ts`),
     // stamped on the zod ISSUE as `params.code` beside `params.shape` by
     // `ObjectSchema`'s refinement and `defineStack`'s extension-merge gate, never
@@ -1961,10 +1962,11 @@ export const ERROR_CODE_LEDGER = {
     // Visible on the zod issue itself (any `safeParse`, the Studio settings
     // tab's path, which keys its localized wording on it), on `defineStack`'s
     // `STACK_SCHEMA_INVALID` refusal, whose `issues` are the raw zod issues, and
-    // on the metadata save door's `422 INVALID_METADATA`: `zodIssuesToMetadataIssues`
-    // copies the issue's `params` onto its entry, where this code is
-    // `params.code` beside `params.shape`; the entry's own `code` stays zod's
-    // issue code ('custom').
+    // inside the metadata save door's `422 INVALID_METADATA` body, on an
+    // `issues[]` entry: `zodIssuesToMetadataIssues` carries the registered
+    // refusal there as `params.code` beside `params.shape`, while the body's
+    // `code` is `INVALID_METADATA` and the entry's own `code` stays zod's issue
+    // code ('custom'). The read path's `_diagnostics.errors[]` does not carry it.
     'CONTROLLED_BY_PARENT_MASTER_INVALID',
     'EXTERNAL_SCHEMA_MISMATCH',
     'EXTERNAL_SCHEMA_MODE_VIOLATION',
