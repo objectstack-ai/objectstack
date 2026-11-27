@@ -1,0 +1,34 @@
+{
+  "number": 37712,
+  "kind": "issue",
+  "title": "spec: an agent's model.provider is declared but read by no runtime (enforce-or-remove)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:spec",
+    "finding",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T22:25:43Z",
+  "updated_at": "2026-11-27T02:08:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37712",
+  "body": "epic:#5055#1 · hotlong · session_01Q4EjjMmczBEaeiAQ48oDtz\n\nFiling gate: ① declared ≠ enforced (ADR-0049 enforce-or-remove) · Source: contract review of objectstack-ai/objectstack#37697 (comment 7204641048, S1) and the dev's acceptance note on objectstack-ai/objectstack#37686.\nGrade: to be graded · area:ai · finding · evidence: read (objectstack main; objectstack-ai/cloud main `packages/service-ai/src/agent-runtime.ts`)\nReader: triage / spec lane.\nDedupe: open issues naming `model.provider` on agents → none found.\n\n## 维护者速读\n- 是什么：agent 元数据里的 `model.provider`（openai / azure_openai / anthropic / local）没有任何运行时读取，写了也不起作用，只在预览里显示一个标签。按“执行或移除”规则该退役或接上。\n- 影响：AI 写 agent 时可能以为能指定供应商；实际由部署配置决定。\n- 要你做什么：无（分诊定级）。\n\n## Evidence\n- `packages/spec/src/ai/agent.zod.ts` `AIModelConfigSchema.provider` (enum, default `'openai'` on main).\n- No reader of an agent's `model.provider` in objectstack runtime code; in objectstack-ai/cloud `agent-runtime.ts` reads only `model`, `temperature`, `maxTokens` from the agent block.\n- `ui/packages/app-shell/src/views/metadata-admin/previews/AgentPreview.tsx` shows it as a pill.\n\n## Direction (for triage)\nRetire per ADR-0049 (the provider is the deployment's choice; phase 1 of objectstack-ai/cloud#5055 resolves models by id across configured providers), using the `spec-property-retirement` playbook — or enforce it if a consumer needs it. Not part of #37697 (which only drops its default)."
+}

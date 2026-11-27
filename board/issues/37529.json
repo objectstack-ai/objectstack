@@ -2,8 +2,8 @@
   "number": 37529,
   "kind": "issue",
   "title": "skills: teach the three data-model publish checks from #35143's Data model family (PR #37513)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T11:02:37Z",
-  "updated_at": "2026-11-26T11:26:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T23:57:44Z",
+  "closed_at": "2026-11-26T23:56:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37529",
   "body": "repo:objectstack#6 · hotlong · session_01Q4EjjQkY5yXZrN9BEA3rEK\n\nFiling gate: ③ follow-up of an accepted delivery. PR #37513 (`Part of #35143`, Data model family) narrows publish and declares `Skills-docs: follow-up owed`; this card carries it.\n\n## What the skills must teach\n\n- `skills/objectstack-data/rules/relationships.md`: a roll-up (summary) field's child object must point back to the parent (a lookup or master_detail to it, or `relationshipField`), or publish refuses it (`rollup/child-without-parent-reference`).\n- `skills/objectstack-data/rules/field-types.md`: `reference` is read only on lookup, master_detail, user, tree and summary; on any other type publish refuses it (`field/reference-on-non-reference-type`).\n- `skills/objectstack-automation/references/state-machines-and-approvals.md`: `lockRecord` locks `master_detail` children only; a lookup child drawn as a body table stays editable while pending (advisory `approval-detail-editable-while-pending`).\n\n## Done when\n\nThe three files teach the rules above, and the skill evals exercise them. Lands after PR #37513 merges.\n\nSuggested-grade: p2 · published skills would teach authors to write metadata that publish now refuses.\nDedupe: `child-without-parent-reference skills` and `reference-on-non-reference-type` found only #35143 and PR #37513."

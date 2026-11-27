@@ -2,9 +2,9 @@
   "number": 37671,
   "kind": "pull_request",
   "title": "fix(console): a named or public form lays its sections out by the form view's own columns",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-26T19:31:16Z",
-  "updated_at": "2026-11-26T19:35:16Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 1,
+  "updated_at": "2026-11-26T21:11:30Z",
+  "closed_at": "2026-11-26T21:11:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T21:11:27Z",
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37671",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"hotlong\"} -->\n_Requested by **Jack** · [project thread](https://claude.ai/code/project/chan_01EF41AQooqveF2DGD8nqPzS?thread=cmsg_01EF41AQooqveF2DGD8nqPzSGAavi44RLUA9FQNt9pTqUc)_\n\nFixes #37665\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到的变化：表单视图写了整体列数的命名表单和公开表单，发布后按这个列数排版，和 Setup 里的预览一致；没写整体列数的表单排版不变。\n- 属于「让云端内置智能体达到 Claude Code 经轻门效果」专题，执行你对表单整体列数去留的裁决（让表单页照列数显示）。\n- 出错的话，写了整体列数的表单列数会显示得不对，不影响填写和提交；改动只在界面，可直接撤回。\n- 无。\n\n## What changes\n\n- `ui/apps/console/src/components/FormPage.tsx`: `buildSections` resolves each section's fields per row through `@object-ui/plugin-form`'s `sectionedGridLayout`, the rule the Setup canvas, the record dialog, the record form and the tabbed / wizard layouts share. Under the ruling (#37638, letter A, ruling comment 7200681767) the form view's `columns` is the grid width and caps a section's count, and a section that declares none takes the form's count. The hand-rolled `normalizeColumns` (default 2) is gone; `declaredSectionColumns` reads only the spec's `'1'`–`'4'` string arm as the number its parse gives, and defaults nothing.\n- `ui/packages/plugin-form/src/autoLayout.ts`: `SectionedGridLayout` gains `sectionColumns(declared)`, the count one section draws (the clamp `layOut` already used, now exposed). `FormPage` draws each section on a grid of its own, so it reads this count rather than the shared field grid.\n- `ui/packages/plugin-form/src/core.ts` and `index.tsx`: export `sectionedGridLayout` and its type. The console imports plugin-form through `/core`, which did not export it. (File surface widened from the order's `autoLayout.ts`; accepted by the seat on the card.)\n- `packages/spec/liveness/view.json`: the `form.columns` row re-cited to `FormPage#buildSections` and the Setup preview (`ViewPreview.tsx#buildFormPreviewSchema` into `ObjectForm`), both through `sectionedGridLayout`. The `ModalForm` / `DrawerForm` citation was stale.\n- Changeset `.changeset/37665-form-page-form-columns.md` (`@object-ui/plugin-form`, `@object-ui/console`: patch).\n\nNo spec or contract change: the spec still accepts any integer from 1 for the form's `columns` and the renderer clamps at 4, left as found.\n\n## Tests\n\n- `FormPage.formViewChrome-26843.test.tsx` (the page's form-view-key harness, both routes): new top-level `describe` on a named form (`/forms/:name`) and a public form (`/f/:slug`): form `columns: 1` + section `columns: 2` draws one column; form `columns: 3` + undeclared sections draws three; CONTROL, no form `columns`: a `columns: 1` section draws one, an undeclared one two.\n- `FormPage.test.ts`: `buildSections` counts for the same cases plus a declared section narrower than the form; `declaredSectionColumns` replaces the `normalizeColumns` block.\n\n## Acceptance notes\n\n- The page keeps its own per-section grid classes (viewport `sm:` tiers) and its row spans. Moving it onto the container-query twelve-track field renderer the dialog uses would also change forms without a form-level `columns` (breakpoints, wide fields taking the row), which this card keeps as they are. Only the count per section comes from the shared rule.\n- Off-spec section counts change with the shared rule: a section `columns` of 5 or more drew 2 and now draws 4 (the clamp every other host applies); a non-numeric string other than `'1'`–`'4'` still reads as undeclared. The spec refuses both at parse.\n\n## Verification\n\n<details><summary>Local runs, worktree on `origin/main` 05563a57, head 4077b920</summary>\n\n- `pnpm --dir ui exec vitest run apps/console/src/components/FormPage.test.ts apps/console/src/components/FormPage.formViewChrome-26843.test.tsx` → 2 files, 95 passed (79 + 16).\n- Same plus `packages/plugin-form/src/__tests__/mixedSectionColumns-12548.test.tsx` and `undeclaredSectionDensity-12592.test.tsx` → 4 files, 133 passed.\n- Ablation (on-disk edit of the committed fix, `buildSections` fed the form's `columns` as undeclared, i.e. section-only): 7 failed / 88 passed, exactly the three `buildSections` count cases and the four named/public route cases; the CONTROL cases stayed green. Restored with `git restore --source=HEAD --staged --worktree`, tree clean, re-run green.\n- `pnpm exec turbo run type-check --filter=@object-ui/plugin-form --filter=@object-ui/console` → 81/81 tasks, exit 0.\n- `eslint` on the six changed ui files → 0 errors (warnings are pre-existing in those files).\n- `pnpm --filter @objectstack/spec check:liveness` → exit 0; `pnpm --dir ui run check:new-line-citations` → 0 new; `node scripts/check-nul-bytes.mjs` → OK.\n\n</details>\n\nRead first: `FormPage.tsx` `buildSections` (the `sectionedGridLayout` call), `autoLayout.ts` `sectionedGridLayout` (`sectionColumns: density`).\n\nTwo minutes: `pnpm --dir ui exec vitest run apps/console/src/components/FormPage.formViewChrome-26843.test.tsx` → 16 passed; the six `#37665` cases cover both routes.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Q4EjjQ8nXPvFqzfN7vdwxR\n\n<!-- signed: epic:#5027#1 · hotlong · session_01Q4EjjQ8nXPvFqzfN7vdwxR -->\n"

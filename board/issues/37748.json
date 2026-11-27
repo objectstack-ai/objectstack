@@ -1,0 +1,33 @@
+{
+  "number": 37748,
+  "kind": "pull_request",
+  "title": "fix(knowledge-turso): search exhausted by generation switches answers CONCURRENT_MODIFICATION 409",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T01:21:29Z",
+  "updated_at": "2026-11-27T01:54:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37748",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DG44bgtJm8kWx4oK68re6GX)_\nFixes #37597\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:知识库用 turso 存储时,重建期间一次检索连续三次撞上索引切换,调用方收到的错误从\"服务不可用 503\"改为\"并发修改 409\",与 pgvector 存储一致。\n- 为什么做:让两种知识库存储对同一情况给出同一种可重试的错误(知识检索后续收口专题)。\n- 出错会怎样:只影响这一种罕见的检索失败的错误码,正常检索结果不变;可直接撤回。\n- 要你做什么:无。\n\n## What changes\n\n- `packages/plugins/knowledge-turso/src/turso-adapter.ts`: the search-exhaustion branch of `searchAttempt` (the active generation switched on each of `SEARCH_ATTEMPTS` = 3 attempts) now throws `{ code: 'CONCURRENT_MODIFICATION', status: 409 }` through a module-private `switchedDuringSearch` helper, instead of `notReady(...)` (`SERVICE_UNAVAILABLE` 503). This is the envelope pgvector answers for the same condition (`pgvector-adapter.ts`, the `SEARCH_ATTEMPTS` exhaustion in `search`): no `remedy`, no retryable flag, the code constant declared beside `SEARCH_ATTEMPTS` with pgvector's doc line. The message keeps the source name and the \"retry it\" instruction: `The knowledge search was not answered: its source's index was switched while it searched. The active generation of source 'X' changed 3 times during one search; retry it.`\n- Retry count, the happy path and every other answer are unchanged. No new export, no adapter-contract member (epic #37000 ruling). `CONCURRENT_MODIFICATION` is already a standard code (`packages/spec/src/api/errors.zod.ts`), so no new code.\n- Changeset: `@objectstack/knowledge-turso` patch.\n\n## Tests\n\n- `acceptance.test.ts`: the existing case \"a search whose generation keeps being switched under it stops after three attempts\" now pins `{ code: 'CONCURRENT_MODIFICATION', status: 409 }` and still pins `n === 3` (the retry count). It runs under both the `:memory:` and the `file:` URL suites.\n- Ablation: with the origin/main adapter restored on disk, the case is red in both suites (`- \"code\": \"CONCURRENT_MODIFICATION\"` / `+ \"code\": \"SERVICE_UNAVAILABLE\"`); restored from HEAD afterwards, tree clean.\n\n## Acceptance notes\n\n- The two message lines of the exhaustion branch are left byte-identical on purpose: open PR #37676 rewrites the next line (`opts.source.id` to `opts.source.name`), and touching only the `throw` line keeps the two branches textually mergeable (`overlap-check` exit 0 against #37676).\n- turso's `upsert` exhaustion (`UPSERT_ATTEMPTS`) does not share this helper: it throws a bare `Error` with no `code`/`status`, exactly as pgvector's `upsert` exhaustion does. The two stores agree there, so there is no mismatch to note; left unchanged (out of the card).\n\n## Verification\n\n- Two-minute check: `pnpm --filter @objectstack/knowledge-turso exec vitest run src/__tests__/acceptance.test.ts -t 'keeps being switched'` shows 2 passed (both suites).\n- Read first: the `searchAttempt` exhaustion branch and `switchedDuringSearch` in `turso-adapter.ts`.\n\n<details><summary>Local gate readings at f256b9b3b8</summary>\n\n- Package: `pnpm --filter @objectstack/knowledge-turso test` (Test Files 3 passed, Tests 156 passed) and `typecheck` (tsc + check:test-typecheck OK), under the verify lock, VERDICT command-exit 0.\n- Derived families (`dispatch-gates --commands`, 66): 65 exit 0, including `check:error-status-conformance` (\"every derivable runtime status is documented, and every documented status is reachable\", no baseline rows needed). `check:dual-build-cjs-loads` exit 3 PREREQUISITE NOT MET (needs a full build): NOT MEASURED locally, CI runs it. `--ran` reconciliation: 66 accounted, 65 run, 1 NOT-MEASURED.\n- `overlap-check`: clean against origin/main and #37676.\n- `check-nul-bytes`: OK.\n\n</details>\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cwPhGV4g9p1BGQaZbP\n"
+}

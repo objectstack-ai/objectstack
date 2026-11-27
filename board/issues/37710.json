@@ -1,0 +1,36 @@
+{
+  "number": 37710,
+  "kind": "issue",
+  "title": "verify: re-measure harness.required-providers.test.ts's test-budget header on the 10 s grid",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T22:21:52Z",
+  "updated_at": "2026-11-27T01:40:53Z",
+  "closed_at": "2026-11-27T01:39:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37710",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb4BAjgQ43tqy1DvVJ\n\nFiling gate: ② follow-up out of #37700 (PR #37708, seat record 7204570619, ACCEPT 7204584166; os-dev report 7204490728 out-of-scope finding), filed by the owning zone ai-37000 under #37700 at the seat's direction, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · domain:server · Task · p3 (seat-directed) · reach: packages/verify test budget · evidence: CI run 45888214247 job 140145134703.\n\n## 维护者速读\n\n- 做什么：验证测试文件头上记的耗时预算（28 秒）过期了，也不在规定的 10 秒刻度上；按实测改正。\n- 谁受益：测试耗时预算检查能正确提醒慢测试。\n- 不做会怎样：预算数字失真，慢测试可能漏报；功能不受影响。\n- 需要你做的：无。\n\n## What\n\n`packages/verify/src/harness.required-providers.test.ts` carries `test-budget: 28`, set by PR #37442. `readTestBudget` requires a value on the 10 s grid, and the full run 45888214247 took the file at 57.8 s (about 70 on the grid). The header's own text says the first CI reading after the knowledge boots re-measures it.\n\n## Acceptance\n\n- After PR #37708 lands, the header is re-set from a CI reading of the file, on the 10 s grid, with the reading named in the commit or PR.\n- The test-budget gate reads the new value without complaint."
+}

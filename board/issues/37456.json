@@ -2,8 +2,8 @@
   "number": 37456,
   "kind": "issue",
   "title": "App Studio 改版（1-5）：去掉 Studio 顶栏改左右两栏——左上角两行（标志加折叠；返回加软件包切换器和「新建软件包」）、只读小锁、折叠窄栏",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-26T06:05:21Z",
-  "updated_at": "2026-11-26T14:03:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T21:48:16Z",
+  "closed_at": "2026-11-26T21:48:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

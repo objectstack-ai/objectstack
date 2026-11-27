@@ -1,0 +1,34 @@
+{
+  "number": 37757,
+  "kind": "issue",
+  "title": "保存草稿时也报汇总字段越权告警：智能体现在只在 CLI 校验里看得到",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T01:39:48Z",
+  "updated_at": "2026-11-27T02:22:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37757",
+  "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ② seat-found, from the objectstack-ai/cloud#5080 itemisation (comment https://github.com/objectstack-ai/cloud/issues/5080#issuecomment-7207375342, recordings `/mnt/project-files/trials/cloud-5031/runs.tgz`, the nine `g1d-afterbb-*` door builds). Premises re-checked by that thread on objectstack `origin/main` ce4d8c7d.\nParent: objectstack-ai/cloud#5027 (M2 Build line: median 101/112 = 90.2%, the line is 107/112).\nGrading: area:ai · domain:server · Task · p2 · size S · reach: every agent or admin saving a permission set over an object with roll-ups through the MCP door.\nDedupe: searched `validateRollupSourceVisibility`, `rollup CLI_ONLY`: none open.\n\n## 维护者速读\n- 是什么：权限集让某个角色看得到汇总字段、却看不到被汇总的明细时，平台有一条校验会提示，但它只在命令行校验里跑，保存草稿时不报。智能体只按保存结果改错，永远看不到这条。\n- 影响：评测里 project 三次、invoice 两次因此丢分，共 8 分，中位数 +3。\n- 要你做什么：无。\n\n## Evidence\n- The rule `validateRollupSourceVisibility` is declared `surfaces: CLI_ONLY`, with the stated reason that \"the crossing it would take is unmeasured\".\n- project ×3 and invoice r1 r2: the agent granted a persona the roll-up (`task_count`, `total_estimate`; `total`) over withheld children; no save verdict said so; the scorer charged it.\n\n## What to do\n1. Carry `validateRollupSourceVisibility` on the `permission` item's save verdict in the MCP authoring door (as an advisory, same wording as the CLI); add `object` too only if the door's volume fence allows, and say in the PR which.\n2. Measure the crossing the CLI_ONLY note calls unmeasured (time per save on the showcase app before/after) and put the numbers in the PR body.\n3. Test: saving a permission set that grants a roll-up over a withheld child returns the advisory; one that withholds both returns none."
+}

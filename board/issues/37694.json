@@ -1,0 +1,38 @@
+{
+  "number": 37694,
+  "kind": "pull_request",
+  "title": "fix(mcp): the MCP doors write their 5xx fault lines through the host logger",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "security",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T20:51:35Z",
+  "updated_at": "2026-11-26T23:03:13Z",
+  "closed_at": "2026-11-26T23:03:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T23:03:10Z",
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37694",
+  "body": "Fixes #37666\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化：AI 助手通过 MCP 接入（网页接口与本地命令行两种）时，服务端出错的那一行运维日志，改走主机自己配置的日志器；助手收到的回答前后完全一样。\n- 为什么做：MCP 服务端故障日志跟进项，接上一张卡（故障日志带上根因）之后，让主机配置的脱敏词和日志输出对这些行同样生效。\n- 出错会怎样：只影响运维日志写到哪里、怎么脱敏，不改任何回答；没配日志器的主机照旧写到控制台，可直接撤回。\n- 要你做什么：无。\n\n## What changes\n\nThe `/mcp` and stdio doors log a server fault once for the operator through `logServerFault` (`@objectstack/types`), and they called it with no logger. So the line took the console fallback, with only the default redact words, outside the host's sink.\n\n- `MCPServerRuntime` hands its configured logger to every such line. That covers the data tools (`dataDoorErrorResult` / `recordReadErrorResult`), the metadata tools and `list_actions` (`metaDoorErrorResult`), the stdio record resource (`resources/read`), and `run_action` / `resume_run`, whose actions-door operator lines (`errorResultFromThrown`) now go to the same logger. `MCPServerPlugin` already builds the runtime with `ctx.logger`, the kernel's logger. So both doors now reach it without a new dependency edge, and `packages/runtime/src/domains/mcp.ts` is unchanged: it calls the plugin's runtime (`mcp.handleHttpRequest`). The stale roll-up lines for a write that landed (`landedWriteResultOrError` / `deleteEach`) stay on the console.\n- The threading: `RegisterObjectToolsOptions.logger` and `RegisterActionToolsOptions.logger`, both new and optional. `withFaultLogger` in `mcp-server-runtime.ts` fills them from `this.config.logger` in `bridgeDataTools` (stdio) and `handleHttpRequest` (`/mcp`), unless the caller handed its own. If no logger is handed, the line falls back to the console as before.\n- The helpers take `logger: Logger | undefined` as a required positional argument. Because of that, the compiler rejects a call site that leaves it out.\n- What a client reads is unchanged, byte for byte.\n\nRead first, by risk:\n1. `packages/mcp/src/mcp-server-runtime.ts`: the `withFaultLogger` helper and its two call sites, plus the `}, logger);` on the record resource's `logServerFault`.\n2. `packages/mcp/src/mcp-http-tools.ts`: the three helpers' signatures and the 12 call sites passing `faultLogger`.\n3. `packages/runtime/src/mcp-record-context-tools-bridge.test.ts`: the stdio door's lines are now read off the plugin-context logger, not the console.\n\n## Tests\n\n- New file `packages/mcp/src/mcp-fault-log-host-logger.test.ts` covers both doors: `/mcp` through `handleHttpRequest`, and stdio through `bridgeDataTools` plus `bridgeResources` over an in-process transport. It tests `get_record`, `create_record`, `list_objects`, `list_actions` and the record resource. On each:\n  - the `[5xx]` line reaches a real `ObjectLogger` (`createLogger({ format: 'json', redact: ['dsn'] })`), and `console.error` is not called;\n  - the host word `dsn`, which is not among the default four, is applied to the cause: `{\"dsn\":\"***REDACTED***\",\"pool\":\"primary\"}`, and the DSN never appears in the line;\n  - the answer equals `{ error: { code: 'INTERNAL_ERROR', message: 'Internal server error', status: 500 } }` and carries no cause text;\n  - the answer is byte-identical to what a runtime with no logger answers.\n  - CONTROL rows: with no logger, the line falls back to the console and the cause keeps the DSN.\n- `packages/runtime/src/mcp-record-context-tools-bridge.test.ts` drives the real `MCPServerPlugin` stdio session. Its two fault-count tests now read the stdio door's lines off the plugin-context logger: `error(message, err, meta)`, with the outage on `err.cause`. Before this change they turned red at exactly that point (`expected [...] to have a length of 4 but got 2`).\n\n<details><summary>Ablation: the /mcp door's handoff removed (head 952a61b9b5)</summary>\n\nThe mutation was made through `scripts/ablation-replace.mjs`. In `handleHttpRequest`, `withFaultLogger(opts.toolOptions, this.config.logger)` was replaced with `opts.toolOptions`. The anchor went x1 to x0, and the blob went 490ae0f61d5b to 650f9e3ad8c4. The test imports `./mcp-server-runtime.js` from `src`, so no build was needed.\n\n```text\n× get_record / create_record / list_objects / list_actions: the line reaches the host logger ...   (the 4 /mcp rows)\nAssertionError: expected \"error\" to not be called at all, but actually been called 1 times\nTests  4 failed | 8 passed (12)\nablation-replace: ok restored: blob == HEAD (490ae0f61d5b) and `git diff HEAD` is empty\n```\n\nThe stdio rows and the CONTROL rows stayed green, as expected: the mutation removes only the `/mcp` handoff.\n</details>\n\n<details><summary>Package suites (head 952a61b9b5)</summary>\n\n```text\n@objectstack/mcp test        Test Files  87 passed (87) · Tests  1587 passed (1587)\n@objectstack/mcp typecheck   check:test-typecheck: OK (6 file(s) / 53 error(s) held, unchanged)\n@objectstack/runtime typecheck  check:test-typecheck: OK (27 file(s) / 183 error(s) held)\n@objectstack/runtime test    Test Files  651 passed (651) · Tests  12110 passed | 25 skipped (12135)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n- One `run_action` row per door: the operator line lands on the injected logger, `console.error` is not called, and the answer is byte-identical to a runtime with no logger. Ablation on `efd4c102bc`: disabling the logger branch in `errorResultFromThrown` turned both rows red (2 failed / 12 passed), restore proven by blob.\n\n## Acceptance notes\n\n- The card's \"a test per door\" is met for both the `/mcp` door and the stdio door. On stdio, the plugin's own wiring (`ctx.logger` reaching the runtime) is exercised by the runtime suite's real `MCPServerPlugin` session.\n- No answer body changed. No new dependency edge.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/mcp exec vitest run --maxWorkers=2 src/mcp-fault-log-host-logger.test.ts` should show `Tests 14 passed (14)`.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CbeF2saT6wUBV4E9uc)_\n\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc -->\n\n\n\n"
+}

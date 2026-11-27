@@ -1,0 +1,36 @@
+{
+  "number": 37738,
+  "kind": "pull_request",
+  "title": "test(verify): re-set harness.required-providers's test-budget to 70 s on the 10 s grid",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T00:49:49Z",
+  "updated_at": "2026-11-27T01:39:59Z",
+  "closed_at": "2026-11-27T01:39:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T01:39:56Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37738",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DG44bgtJm8kWx4oK68re6GX)_\n\nFixes #37710\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感：只改一个测试文件头上记的耗时预算数字，不影响任何功能。\n- 属于测试耗时预算治理，替预算检查把一个过期数字改成实测值。\n- 数字不准只会让慢测试预警失真；可直接撤回这一行。\n- 无。\n\n## What changes\n\nLine 2 of `packages/verify/src/harness.required-providers.test.ts`: `test-budget: 28` becomes `test-budget: 70`, and the stale measurement narrative is replaced by the post-#37708 CI reading.\n\n- Reading: scheduled CI run 45914939800, job Test Core (10/10) 140232535871, head 80519b5991 (a descendant of the #37708 merge 6b60f8860a); this file took 53747 ms.\n- Rule used (the gate's own text in `readTestBudget`): measured CI reading x 1.25 (`CEILING_HEADROOM`), rounded up to the next 10 s: 53.7 x 1.25 = 67.1, so 70.\n- The old line also lacked the `: ` after the CLASS; the gate's grammar is `SECONDS — CLASS: REASON`, which the new line satisfies (it already had the colon after the class text).\n- It is the only post-#37708 reading of this file on main (the push run 45915335818 did not run it).\n\n## Tests\n\n- `readTestBudget` on the edited file: `{ seconds: 70, cls: 'spawns the real producer once per single-cause fixture', line: 2 }`, no refusal (before: refused \"28 s is not on the 10 s grid\").\n- `check-nul-bytes` exit 0; `check-issue-citations` exit 0; `overlap-check` VERDICT clean (#37676 shares the file, merges cleanly).\n\n## Acceptance notes\n\n- Test-only comment-line change, nothing published: `skip-changeset`.\n- The file's own vitest was not rerun locally: no code changed, and the reading comes from CI.\n\n## Verification\n\nRun `node -e \"import('./scripts/measure-test-shard-timings.mjs').then(m=>console.log(m.readTestBudget(require('fs').readFileSync('packages/verify/src/harness.required-providers.test.ts','utf8'),'f').seconds))\"`; expect `70`.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cwPhGV4g9p1BGQaZbP\n\n<!-- signed: repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP -->\n"
+}

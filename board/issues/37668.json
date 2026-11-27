@@ -4,7 +4,7 @@
   "title": "fix(settings)!: the Knowledge settings page keeps only keys something reads (adapter, over_fetch, enforce_rls retired)",
   "state": "open",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -24,7 +24,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-26T19:22:54Z",
-  "updated_at": "2026-11-26T19:59:43Z",
+  "updated_at": "2026-11-27T02:13:27Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

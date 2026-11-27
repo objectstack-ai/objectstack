@@ -1,0 +1,38 @@
+{
+  "number": 37721,
+  "kind": "pull_request",
+  "title": "fix(runtime): the approval action-page door and the inbound automation hooks answer their 501 in the request's language",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T23:55:46Z",
+  "updated_at": "2026-11-27T01:36:44Z",
+  "closed_at": "2026-11-27T01:36:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T01:36:42Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37721",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuQVQdf3PvoJbKFFCUA4gwJB)_\n\nFixes #37662\n\nClause-②: yes (widening)\nMetadata-protocol: none\nSkills-docs: none (no page under `skills/**` names these doors' `501` sentences)\n\n## 维护者速读\n\n- 用户能看到什么变化：内核缺少审批服务或入站钩子服务（trigger-api）时，审批操作页 `/approvals/act` 和入站自动化钩子返回的 501 提示，现在按请求的语言显示中文、日文或西班牙文。评论、webhook 重新投递、打印等接口已经这样做了。英文请求看到的英文和以前一字不差。\n- 为什么做：#37639 的审核发现这两个接口还只说英文，另外留了三处措辞和测试上的小问题，这次一起补上。\n- 出错会怎样：只影响服务没装时的 501 提示文字，状态码和错误码都不变。\n- 要你做什么：无。`packages/spec` 的消息目录有改动，席位会安排契约审核。\n\n## What changes\n\n- **Catalog** (`packages/spec/src/system/operation-message.ts`, `BUILTIN_OPERATION_MESSAGES`).\n  - Four new keys, each in `en`, `zh-CN`, `ja-JP` and `es-ES`: `approvals_act_service_unregistered`, `approvals_act_member_missing`, `automation_hooks_service_unregistered` and `automation_hooks_member_missing`.\n  - The English of each key is the sentence its door answered before, byte for byte. Slot, member and package names are written in and never translated.\n  - **N2.** The jsdoc paragraph on these whole-sentence keys, which covers `comment_doors_*`, `webhook_redeliver_*` and the two new families, now states what the `print_*` and `own_door_*` paragraphs state. The locale is the request's top `Accept-Language` tag, and a top tag the catalog lacks answers English. No `errors.` override is consulted.\n- **`packages/runtime/src/domains/approvals.ts` and `automation-hooks.ts`.** Each of the two `501`s answers `operationUserMessage(key, { locale: requestLocaleOf(context) })`, which is #37639's shape for the comment and redelivery doors. Code, status and the absence of `userMessage` are unchanged.\n- **N1, `own-door-bridge.ts`.** The section title \"The `501` is in the request's language when the bridge names its noun\" loses its now-always-true clause.\n- **N3, `own-door-bridge.test.ts`.** A new pin walks every module in `domains/` that builds a bridge domain (`createOwnDoorBridgeDomain(`), imports it, and checks each exported bridge:\n  - its `nounKey` holds text in every catalog locale;\n  - the English of `nounKey` is the bridge's `noun`;\n  - `nounPlural` is set exactly when the English noun is plural (`/\\bdoors\\b/`);\n  - the sentence pair the bridge reads (singular or `_plural`) exists in every locale.\n  \n  A module that builds a bridge domain but exports no bridge fails the pin.\n- **Changeset.** `@objectstack/spec` and `@objectstack/runtime`, both patch.\n\n## Why\n\nPR #37639's review (record 7200392904, adopted at ACCEPT) left these four items, which the card lists.\n\n## Verification\n\n- **New tests.** `approvals-act.test.ts` and `automation-hooks.test.ts` each add a describe that pins both `501`s in four locales: `en` (with and without a header), `zh-CN`, `ja-JP` and `es-ES`. Each pin checks the exact sentence, `501 NOT_IMPLEMENTED`, and no `userMessage`.\n- **Ablation.** With `approvals.ts` and `automation-hooks.ts` reverted to `main`, the 4 new cases fail at `zh-CN`. They pass `en` first, which shows the English is unchanged.\n- **N3 pin.** With `nounPlural: true` removed from `ATTACHMENTS_BRIDGE`, the walk fails: `'the attachment removal and rename doors': expected false to be true`.\n- `vitest run` on `approvals-act`, `automation-hooks`, `own-door-bridge`, `comments` and `webhooks-redeliver`: 5 files, 129 passed.\n- `packages/spec`: `operation-message.test.ts` 60/60.\n- `tsc --noEmit -p packages/runtime` passes. `eslint` on the 7 touched files passes, and `check-test-source-alias` is OK. `approvals-act.test.ts` gains the module-top `@objectstack/metadata` import.\n- `overlap-check` is clean against `origin/main`.\n\n## Small decisions\n\n- The new keys are whole sentences, not the bridge's `{{door}}` template. Neither door is an own-door bridge, and #37639 made the same call for the comment and redelivery doors.\n- The N3 walk finds bridges by scanning the source for `createOwnDoorBridgeDomain(` and then reading exports. There is no registry to read, and adding one only for the test would be new runtime surface.\n- The plural test is the English noun's `doors`. All three shipped nouns end in `door` or `doors`, so it holds for every bridge today. A noun that breaks the pattern fails the pin loudly rather than passing silently.\n\n## Owed\n\n- L1 (seat). The catalog in `packages/spec` widens, so the seat rules whether a contract review is owed.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes on the changed files.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed (none depend on this catalog).\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgU7eeqHgQrtv5CeJK6\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgU7eeqHgQrtv5CeJK6)_\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgU7eeqHgQrtv5CeJK6 -->\n"
+}

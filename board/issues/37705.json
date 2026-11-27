@@ -1,0 +1,34 @@
+{
+  "number": 37705,
+  "kind": "issue",
+  "title": "19.0.0-next.0: a record-change flow's run-history and audit writes throw knex \"Transaction query already complete\" after the flow finishes (hotcrm lead_assignment)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T21:37:40Z",
+  "updated_at": "2026-11-27T00:54:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37705",
+  "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ① a regression with a reproduction. Source: the cloud#5053 pin round (protocol 19 move, ruled by the maintainer on 2026-11-26). The hotcrm `^19` port on `@objectstack/*` `19.0.0-next.0` (hotcrm#2820, head `9e7bc7f`) reproduced it.\nReader: the framework's automation/data lane (triage to confirm the domain). The seat `epic:#5027#1` does not take it; it only reports it.\nDedupe: the same class as #22855, #33651 and #33760 (all closed). No open card matches \"Transaction query already complete\" on the 19 line.\n\n## 维护者速读\n- 是什么：hotcrm 升到框架 19 预发布版（19.0.0-next.0）后，记录变更触发的流程（线索分配）本身能跑完，但随后写运行历史和审计日志时报「Transaction query already complete」，6 个测试失败。和以前修过的 #22855、#33651、#33760 是同一类：在已经提交的事务上继续写。\n- 影响：hotcrm 重发 ^19 版本前要么等框架修好，要么带着这个已知问题；任何在记录变更流程后写审计的应用都会碰到。\n- 要你做什么：无（框架车道接）。\n\n## Reproduction\n- hotcrm `test/flow-record-change.test.ts` (lead_assignment): 6 tests on `19.0.0-next.0`. The flow run completes. The run-history persist and the audit writes then fail with knex \"Transaction query already complete\".\n- Not yet checked on objectstack `main` (`1dbf19a1`, which carries more than next.0). The first step is to reproduce on main.\n\n## What to do\n1. Reproduce on main with a record-change flow whose run writes run history and an audit row after the triggering write's transaction has committed.\n2. Find the write that reuses the closed transaction handle. Earlier fixes of this class are #22855, #33651 and #33760. Make the post-run writes open their own unit of work, or run inside the still-open one.\n3. Add a regression test that runs in the framework, not only in hotcrm.\n\n## Acceptance\n- The framework test is red before the fix and green after, and hotcrm's 6 lead_assignment tests are green on the release that carries it.\n\nClause-②: no\nSuggested-grade: p1 · it blocks a clean hotcrm `^19` republish, which the protocol 19 move needs."
+}

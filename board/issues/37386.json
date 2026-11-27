@@ -13,18 +13,20 @@
   "labels": [
     "area:ai",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T00:50:23Z",
-  "updated_at": "2026-11-26T15:15:05Z",
+  "updated_at": "2026-11-27T00:33:35Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37386",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37203. The source is seat 5's delta contract review on PR #37354, record 7179109796. The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p3 · reach: authors of `ai_context` packs (N6), and every caller of an orderBy that names a computed field (N7) · evidence: read.\n\n## 维护者速读\n- 做什么：两处收尾。一是把“排序字段不可排序”写进 ADR-0160 D1 的作者错误清单，和 #37203 已上线的行为对齐。二是把“哪些字段类型算计算字段、不能排序”收成一个出处，免得两处各写一份、以后对不上。\n- 谁受益：写资料包的作者，以及维护这块代码的开发者。\n- 不做会怎样：ADR 文字与实际行为不一致；以后新增一种计算字段类型时，两处判断可能一边认、一边不认。\n- 需要你做的：第 1 项改的是受管的 ADR 文件，需要 os-zhuang 批准。\n\n## What\n1. **N6, ADR-0160 D1.** D1 lists the related-entry author defects that the answer leaves out silently and the author surfaces report. #37203 (PR #37354) added a new one: an `orderBy` field the child's sortability projection calls unsortable, meaning `sortable: false` or a formula/virtual type. It is reported as `ai-context-sort-field-unsortable`, and the section is left out with nothing stated. Add it to D1's list and record it in the amendment log. This is a Tier H text change.\n2. **N7, one computed-type set.** The HTTP door's sort check and the sortability projection each hold their own one-member set of \"computed, so not sortable\" types:\n   - the door's set is in `packages/metadata-protocol/src/protocol-data-crud.ts`, near the `(def as any).type === 'formula'` check;\n   - the projection is `resolveObjectSortability`, in `packages/spec/src/api/sortability.zod.ts`.\n\n   Make the door read the projection's predicate, or one exported constant, so that adding a computed type changes one place. Pin it with a test that fails if the two disagree.\n\n3. **ADR-0160 D4 aliases and the fourth amendment's nits** (added 2026-11-26 by area ai-36996, at seat 5's ask on PR #37573; note 7194545072, contract record 7194836142). Ride the same ADR-0160 edit as item 1, after PR #37573 lands:\n   - D4's input row says \"with the record tools' aliases for the first two\". It leaves out the schema's aliases for the other inputs: `pack` / `contextName` → `context`, and `section` → `anchor`. State what `packages/spec/src/ai/record-context-tools.zod.ts` admits on `main`.\n   - N1: the D4 input row says `outlineFrom` is an integer, 0 or more.\n   - N2: point 24 names the one exception to \"every heading is reachable\": a heading whose entry alone passes the body bound gets no anchor.\n   - N3: the 404 reason list in D3 \"Outline pages\" includes a `body` field named with a non-body type.\n\n## Acceptance\n- D1 names the unsortable-orderBy defect and its rule id. The amendment log cites this card.\n- Exactly one source answers whether a field type is computed for sorting. The door and the projection both read it, and a test pins that they agree.\n- D4's alias sentence matches the schema's aliases on `main` (`objectName`/`recordId` aliases, `pack`/`contextName` → `context`, `section` → `anchor`). N1–N3 of record 7194836142 are closed in the same ADR-0160 text. `Clause-②: no`, `Metadata-protocol: none`.\n- N6: `Clause-②: no`, `Metadata-protocol: none`. N7: no change to behaviour today, since both sets hold `formula` only.\n\nNotes: N6 is governed (`docs/adr/**`) and N7 is code. They can go as two PRs under this one card if the lanes require it.\n\nBlocked-by: #37490 (PR #37573, same ADR file)\nGoverning text: ADR-0160 D1 and D4; PR #37354 (rule `ai-context-sort-field-unsortable`); seat review 7179109796.\nParent: #37203\nSize: S\nDedupe (objectstack, is:issue): `ai-context-sort-field-unsortable` 0 · `resolveObjectSortability formula` 0 new. #37361 holds N1, N2 and N5 from the same review and is a different scope.\n\n"

@@ -1,0 +1,36 @@
+{
+  "number": 37714,
+  "kind": "pull_request",
+  "title": "fix(plugin-kanban): a kanban drawn in swimlanes shows the lane statistic the view settings offer",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T22:53:23Z",
+  "updated_at": "2026-11-26T23:53:27Z",
+  "closed_at": "2026-11-26T23:53:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T23:53:25Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37714",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuQVQdf3PvoJbKFFCUA4gwJB)_\n\nFixes #37326\n\n## What changes\n\n- **`KanbanImpl.tsx`, the swimlane layout.**\n  - It now draws the view's lane statistic (`kanban.summary`) once per column, in a foot row (`data-kanban-swimlane-foot`) under every swimlane. The figure comes from the same `LaneFootStatistic` the flat board uses, read for the column's whole lane.\n  - The foot row joins the board's one horizontal axis (`adoptSwimlaneScroll`, `data-swimlane-scroll-row`). It takes each cell's width from `laneBox`, so a figure sits under its column. A collapsed column draws an empty cell.\n  - The column-title row writes `swimlaneColumnCount`. That is the whole-lane count from `laneCounts` where the host hands it (`wholeLaneCount`), else the cards drawn, marked over a windowed fetch as before.\n  - Its `LaneTotal` now gets the `laneId`, so a header total reads the whole lane's figure where one exists.\n  - A swimlane row's own count is marked `+` unless `swimlaneCountIsWhole` holds.\n- **`ObjectKanban.tsx`.**\n  - The one grouped lane read is asked on a swimlane board too, grouped by the lane field alone. The `flatLanes` gate moves off the question and off `hostLaneRead`.\n  - The lanes past the page (`extraLaneIds`) stay flat-only.\n- A new test file and a changeset (`@object-ui/plugin-kanban` patch).\n\n## Why\n\nThe view settings offer count, sum, avg, min and max on every kanban. A board drawn in swimlanes rendered no lane foot, and it asked no lane read, so a picked statistic was blank there with no explanation.\n\nThe card's scope widening (7188972467) adds the rows-handed board: its swimlane column counts read the page, unmarked.\n\n## Verification\n\n- `ObjectKanban.swimlaneStatistic-37326.test.tsx` has 6 tests on a swimlane board, with `swimlaneField: 'region'` over 24 deals:\n  - (a) A self-querying board draws `190` and `6` in one foot row, with no per-cell figure. It makes one read, `{ groupBy: ['stage'], aggregations: [sum] }`.\n  - (b) A `count` statistic draws `20` and `4`.\n  - (c) This is the #36871 rig: a page of 3 + 1 handed in with its query. The column counts read `20` and `4` from the read, the foot reads `190` and `6`, and the swimlane rows read `3+` and `1+`. The board reads nothing else.\n  - (d) CONTROL: handed every record, every count is bare.\n  - (e) The read is refused (403). The column and swimlane counts read the page marked `+`, and no figure is drawn.\n  - (f) CONTROL: with no statistic, there is no foot row.\n- **Ablation.** With `KanbanImpl.tsx` and `ObjectKanban.tsx` reverted to `main`, (a), (b), (c) and (e) fail, and the controls (d) and (f) pass.\n- `vitest run` on `ui/packages/plugin-kanban`, plus `ListView.kanbanOwnsLanes-12619` and `app-shell` `listKanbanEveryRecord-12619`: 92 files, 633 passed.\n- `tsc --noEmit -p packages/plugin-kanban/tsconfig.json` passes. `eslint` on the changed files reports 0 errors; the warnings are the files' existing `any`.\n- `overlap-check` is clean against `origin/main`. #37667 shares both files and merges cleanly.\n\n## Small decisions\n\n- **The product fork the card leaves to the claimant: draw the statistic, do not hide the option.** The setting then works on every kanban it is offered on, and the picker is unchanged.\n- **The shape is one figure per column, across every swimlane, at the board's foot.** It is the same figure the flat board draws for that lane. No cell (column × swimlane) draws its own figure, because the grouped read has no second grouping, and a per-cell figure would need one read per swimlane or a two-key group.\n- The foot row is not sticky. It sits after the last swimlane, as a foot does. The title row's sticky pinning stays the only pinned row.\n- A swimlane row's count is bare only when the board holds every record of its query. That means no windowed fetch and, on a rows-handed board, every lane the read counted drawn with all of its records. Otherwise it is a floor and is marked `+`.\n- A swimlane board does not add the lanes that exist only past the page (`extraLaneIds`). Such a lane would be an empty column in every swimlane. The flat board keeps them.\n\nClause-②: no\nMetadata-protocol: none\n\n## Owed\n\n- L1 (seat).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes on the changed files.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgU7eeqHgQrtv5CeJK6\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgU7eeqHgQrtv5CeJK6)_\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgU7eeqHgQrtv5CeJK6 -->\n"
+}

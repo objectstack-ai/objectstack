@@ -1,0 +1,31 @@
+{
+  "number": 37733,
+  "kind": "issue",
+  "title": "docs/adr: adr:index is stale for ADR-0160 on main",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T00:25:31Z",
+  "updated_at": "2026-11-27T00:52:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37733",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb4BAjgQ43tqy1DvVJ\n\nFiling gate: ② follow-up found while reviewing #37304 (PR #37676, contract record 7206413701 note \"adr:index stale for ADR-0160 on main, carrier: none\", seat REWORK 7206423476), filed by zone ai-37000 at the seat's direction, per the maintainer's standing permission for areas to file follow-up cards.\nGrading: area:ai · domain:skills · Task · p3 · reach: the generated ADR index · evidence: read.\n\n## 维护者速读\n\n- 做什么：ADR 目录索引没跟上 ADR-0160 的最新修订，重新生成即可。\n- 谁受益：查 ADR 的人和读索引的工具看到的是最新内容。\n- 不做会怎样：索引与正文不一致；功能不受影响。\n- 需要你做的：无（docs/adr 是受治理面，按惯例合入）。\n\n## What\n\nThe generated ADR index (`adr:index`) on `main` does not match ADR-0160 after its amendments (see #37490 / PR #37573). Not caused by #37304; found by its reviewer.\n\n## Acceptance\n\n- `adr:index` regenerated on main; its check passes with no other index change."
+}

@@ -2,8 +2,8 @@
   "number": 37432,
   "kind": "issue",
   "title": "37415 跟进：资料包校验对外部对象的注入字段给出「无存储」提醒，并合并测试文件",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:ai",
     "domain:devx",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T04:29:45Z",
-  "updated_at": "2026-11-26T05:39:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T23:01:03Z",
+  "closed_at": "2026-11-26T22:59:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37432",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37415. The source is seat 5's contract review on PR #37426 (record 7182623911, S2) and the seat's REWORK 7182630712. The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p3 · reach: authors whose `ai_context` pack is rooted on, or lists, an ADR-0015 `external` object and names an injected column · evidence: read.\n\n## 维护者速读\n- 做什么：外部数据源的对象，平台会在定义里加上负责人、创建时间等字段，但外部库里其实没有这些列。资料包写了这类字段时，校验应当提醒「这一列外部没有存储，读取时会落空」，和其他规则已有的提醒一致。\n- 谁受益：给外部对象写资料包的作者。\n- 不做会怎样：校验通过，但 AI 实际读不到这些字段，作者不知道原因。\n- 需要你做的：无。\n\n## What\n1. After PR #37426, `validateAiContext` (`packages/lint/src/validate-ai-context.ts`) judges a pack's names against the object with injected system columns merged, so an `external` object's injected `owner_id` / `created_at` / … pass. Those columns have no storage behind an external object, and the read degrades at query time. Wire the provenance check other rules already use (`unprovisionedInjectedColumnsFor`, as in `authored-site-expression.ts`) into every place the rule reads a field map. Use its own rule id (for example `ai-context-field-unprovisioned`, a `warning`), plus an `os explain` entry in `rule-explanations.ts`.\n2. Also update the `os explain` text of `ai-context-field-unknown` in `rule-explanations.ts`. It still says \"a name the object does not define\", and should say that injected columns count.\n3. Carried from the same review: once #37361 (PR #37412) has landed, fold `packages/services/service-record-context/src/__tests__/injected-system-columns.test.ts` (added by PR #37426) into `record-context-tools.test.ts` as a top-level describe. That follows AGENTS.md's one-harness rule. The new file existed only because #37361 held the shared file.\n\n## Acceptance\n- A pack naming an injected column on an `external` object gets the new warning, and the same pack on a non-external object gets none. Both are pinned.\n- The new rule id has an `os explain` entry, and the `ai-context-field-unknown` explanation matches the rule.\n- The injected-column executor pins live in the shared harness file, and the separate file is gone.\n- `Clause-②: no`, `Metadata-protocol: none`.\n\nBlocked by: PR #37426 and PR #37412 on `main`.\nParent: #37415\nSize: S\nDedupe (objectstack, is:issue): `ai-context-field-unprovisioned` 0 · `validate-ai-context external unprovisioned` 0.\n"

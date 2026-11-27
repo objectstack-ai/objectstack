@@ -1,0 +1,31 @@
+{
+  "number": 37727,
+  "kind": "issue",
+  "title": "App Studio 改版（1-6 跟进）：拆分后两处跨模块的注释和测试清单里的旧文件路径",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T00:16:09Z",
+  "updated_at": "2026-11-27T01:35:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37727",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbL6Nn3scsU8yvLyU4\n\nFiling gate: ③ · Source: contract record 7206275783 on PR #37719, nits N2 and N3; the seat's ACCEPT 7206286955 asks for one follow-up card under #37553.\nGrade: area:ux · Task · p3 · evidence: PR #37719 head `fd1a2e0900`.\nReader: area `ux-37424`, or the next holder of area:ux.\n\n## 维护者速读\n\n- 改什么：拆分 Studio 主框架之后，有两句代码注释说的“上面 / 下面”现在指到了另一个文件里；测试清单里有一步还写着旧文件名。只改注释和清单里的路径，用户看不到变化。\n- 需要你做的：无。\n\n## What\n\n- **N2:** two moved comments point \"above\" or \"below\" across what is now a module boundary.\n  - `ui/packages/app-shell/src/views/studio-design/studioSurfacePublish.ts`: `openAccessRef` is \"set once the router's navigate is in hand below\", but it is set in `StudioDesignSurface.tsx`.\n  - `StudioDesignSurface.tsx`: \"the nonce's effect above\" now lives in `studioSurfaceDrafts.tsx`.\n  - Name the module in each comment.\n- **N3:** `docs/qa/platform-checklist/areas/studio-authoring.json`, steps[3], still cites `StudioDesignSurface.tsx` for the Open Access action on the publish toast. That action is now in `studioSurfacePublish.ts`. It is a plain path, not a `#symbol` anchor, so `check-platform-checklist` does not judge it. Re-point it the way revision 12 did for #29988, with the file's revision bump if the checklist requires one.\n\n## Acceptance\n\n- Comments and the checklist path only. No code or behaviour change.\n- `node scripts/check-platform-checklist.mjs --changed-from origin/main` is green.\n\nBlocked-by: #37553 (PR #37719 must merge first)."
+}

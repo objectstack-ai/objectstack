@@ -1,0 +1,37 @@
+{
+  "number": 37698,
+  "kind": "pull_request",
+  "title": "fix(app-shell): the curated page, report and dashboard inspectors name a select's options in Chinese under zh-CN",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T21:02:00Z",
+  "updated_at": "2026-11-26T21:50:37Z",
+  "closed_at": "2026-11-26T21:50:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T21:50:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37698",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuPE7uyDAJyqjwwMzomWv5ff)_\n\nFixes #37607\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none (no page under `skills/**` names the console's curated inspector overlay)\n\n## 维护者速读\n\n- 用户能看到什么变化：中文界面下，Studio 里页面检查器的「类型」「记录操作」下拉，和报表、仪表盘检查器的「默认时间段」下拉，选项现在显示中文（例如「记录页」「抽屉（右侧预览）」「本季度」），不再是英文选项配中文标签。用词和平台中文翻译包、服务器下发的表单完全一致，也和报表/仪表盘页面上时间段筛选按钮的用词一致。英文界面不变。\n- 为什么做：#37569 给平台翻译包加了选项名的位置，但这几个检查器读的是控制台自己的翻译表，没读到。\n- 出错会怎样：只影响下拉选项的显示文字，存进去的值不变，不影响数据。\n- 要你做什么：无。\n\n## What changes\n\n- **`ui/packages/app-shell/src/views/metadata-admin/metadata-form-zh-cn.ts`**: the `page` rows `type` and `interfaceConfig.recordAction` and the `report` row `dateRange.defaultRange` gain `options: { <value>: … }`, the slot `resolveMetadataFormLabels` reads since #37569. Each map is the platform pack's map (`packages/platform-objects/src/apps/translations/zh-CN.metadata-forms.generated.ts`), copied as is. The header now lists option names among the strings the table carries.\n- **`metadata-form-i18n.ts`**: the `dashboard` row `dateRange.defaultRange` gains the same map.\n- **`default-period-labels.ts` retired**, with its calls in `ReportDefaultInspector.tsx` and `DashboardDefaultInspector.tsx` (and their now-unused `useObjectTranslation`). It renamed the Default Period options from the console's `dashboard.filters.range.*` rows for zh only; the overlay names them now, and the platform words equal those rows (pinned below).\n- **New pin `metadata-form-option-names.test.ts`**:\n  - each option map in `ZH_CN_SPEC_FORMS` equals the platform pack's map, byte for byte (`JSON.stringify`), and the table names exactly the three expected rows;\n  - the platform pack names options on no other row of the `page` / `report` / `dashboard` / `view` forms, so a new one is copied rather than missed;\n  - for each of the four selects, every option `getPageForm` / `getReportForm` / `getDashboardForm` renders under `zh-CN` reads the pack's name (this is what pins the dashboard map, which lives in `metadata-form-i18n.ts`);\n  - one named zh option per form (记录页, 抽屉（右侧预览）, 本季度, 近 30 天), and an `en-US` control keeping the spec's English.\n  The pack is read from the checkout's source with a run-time `import()` (a data-only module whose one import is type-only).\n- **`ReportDefaultInspector.defaultPeriodLabels-36835.test.tsx`**: no longer imports the retired helper. A new case pins the zh names `getReportForm('zh-CN')` gives to the zh pack's `dashboard.filters.range.*` / `dashboard.filters.custom` rows the period chip reads, beside the existing en case; the rendered zh case is unchanged and passes through the new route.\n- **Changeset**: `@object-ui/app-shell` patch.\n\nSmall calls made here (no card):\n- The card prefers reading the names from a served or bundled form's slot. The curated inspectors render the console's own copy of the spec form, and this table's documented posture is data-only with no runtime import (it sits on the Pending changes sheet's eager graph), so the route is the card's second one: copy, plus a byte-equality pin against the pack.\n- `default-period-labels.ts` is retired in full rather than reduced: the slot now covers everything it did (it was zh-only), and the period-chip parity it guarded is kept by the #36835 test.\n\n## Why\n\nOut-of-diff note 1 of the Contract review record 7195508409 on PR #37569: under zh-CN the curated page, report and dashboard inspectors showed English select options beside Chinese labels, and #36950's slot did not reach them.\n\n## Verification\n\nHead `8df05bb67`:\n- `pnpm --dir ui exec vitest run` on `metadata-form-option-names.test.ts`, `metadata-form-i18n.test.ts`, `page-schema.test.ts`, `report-schema.test.ts`, `dashboard-schema.test.ts`, `ReportDefaultInspector.test.tsx`, `ReportDefaultInspector.i18nTitle.test.tsx`, `ReportDefaultInspector.defaultPeriodLabels-36835.test.tsx`, `DashboardDefaultInspector.test.tsx`, `DashboardDefaultInspector.layoutColumns-11796.test.tsx`: 10 files, 96 tests passed.\n- `eslint` on the 6 touched source and test files: 0 errors.\n- `check:test-source-alias`, `check:changeset-fixed`, `ui` `check:changeset-claims`: exit 0.\n- `node scripts/pm/overlap-check.mjs`: clean (shares `metadata-form-zh-cn.ts` with #37366, merges cleanly).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic (not touched).\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; lint passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUpnvPnJ1hR74pUrVj\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUpnvPnJ1hR74pUrVj)_\n\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgUpnvPnJ1hR74pUrVj -->\n"
+}

@@ -2,8 +2,8 @@
   "number": 37553,
   "kind": "issue",
   "title": "App Studio 改版（1-6）：拆分 StudioDesignSurface.tsx——外框、发布/草稿、保存、右侧栏各成模块，纯重构不改行为",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T12:53:08Z",
-  "updated_at": "2026-11-26T13:16:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T01:34:34Z",
+  "closed_at": "2026-11-27T01:33:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37553",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbL6Nn3scsU8yvLyU4\n\nFiling gate: ③ · Source: the maintainer in the area thread, 2026-11-26 12:52Z: 「StudioDesignSurface 这个文件是不是应该分拆」. The area answered yes, after #37456. Sub-issue of #37424 (phase 1 tail, before phase 2).\nGrade: area:ux · Task · p2 (takes the parent's grade) · evidence: origin/main `818615b9`. The file is 1,745 lines. `StudioDesignSurfaceBody` alone runs from line 249 to the end (~1,500 lines) and holds the top bar, publish and drafts, save, the menu mount and the right slot. 71 test files are named after the surface. Phase 1 cards #37454, #37455 and #37456 all had to serialise on this one file.\nReader: area `ux-37424` (seat `repo:objectstack#5`), an `os-dev` subagent after #37456 merges.\n\nBlocked-by: #37456 (it deletes the top bar from this file; splitting first would collide with #37454 and #37456, both in flight).\n\n## 维护者速读\n\n- 改什么：把 Studio 主框架这个 1700 多行的大文件按职责拆开，用户看不到任何变化。\n- 为什么：第一阶段几张卡都卡在这个文件上，第二阶段（列表页、完整概览）还要再改它，先拆开以后改界面就不用排队。\n- 什么时候：删除顶栏（#37456）合并以后马上做，第二阶段开工前。\n- 需要你做的：无。\n\n## What\n\n- Pure refactor of `ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx` after #37456. Split by responsibility into modules, each with one owner:\n  - the frame (the two columns, the menu mount and the slot host);\n  - publish and drafts state (the Pending tab and badge wiring);\n  - save-entry plumbing;\n  - the right slot / assistant;\n  - the scope resolution (package, `~org` / `~all`, missing package).\n  Hooks and components move. No behaviour, prop, address or copy changes. `StudioDesignSurface` keeps its export and props for its callers.\n- The tests move with the code they pin, or keep importing the surface. ⛔ No test is deleted, skipped or loosened. Re-pointing an import is fine.\n- Decide the cut points from the file as #37456 leaves it, not from this list. List them in the PR body with line counts before and after.\n\n## Acceptance\n\n- No behaviour change: the full app-shell suite and the console E2E are green with no assertion edited except imports.\n- No module over ~400 lines, unless the PR body says why.\n- `git log --follow` friendly: move code in its own commits, separate from any renames."

@@ -2,8 +2,8 @@
   "number": 37662,
   "kind": "issue",
   "title": "review follow-ups of PR #37639: missing-service 501 still English on approvals act and inbound hooks; own-door bridge wording nits",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T18:23:42Z",
-  "updated_at": "2026-11-26T19:16:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T01:37:35Z",
+  "closed_at": "2026-11-27T01:36:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37662",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (Contract review record 7200392904 on PR #37639, nits N1–N3 and its out-of-diff note, adopted at ACCEPT)\n\n## What happens\n\nPR #37639 (Fixes #37610) localizes the comments and webhook-redelivery doors' missing-service `501` through the operation-message catalog and makes the own-door bridge's `nounKey` required. Its review left these items open:\n\n- [ ] **Two more doors answer the same missing-service `501` in fixed English** (out-of-diff note). `/approvals/act` (`packages/runtime/src/domains/approvals.ts`) and the inbound automation hooks (`packages/runtime/src/domains/automation-hooks.ts`) still answer the two-sentence missing-service `501` as English literals. Expected: route both through the catalog as #37639 did, with keys in all four locales. Measure first: each door with its service absent, `Accept-Language: zh-CN`.\n- [ ] **Stale section title** (N1). The header section of `own-door-bridge.ts` still says \"when the bridge names its noun\", always true now that `nounKey` is required. Reword.\n- [ ] **Catalog jsdoc incomplete** (N2). In `packages/spec/src/system/operation-message.ts` the `comment_doors_*` and `webhook_redeliver_*` jsdoc omits what the `print_*` and `own_door_*` paragraphs state: the locale is the top `Accept-Language` tag and no `errors.` override is consulted.\n- [ ] **Nothing ties a future bridge's flags to the catalog** (N3). `nounPlural` is not tied to the noun's number, nor `nounKey` to a key the catalog holds; the pins name the three shipped bridges by hand. Expected: one pin that walks every bridge.\n\nCategory ①: user-visible text on a shipped refusal that ignores the caller's language (first item); wording on the rest.\nPriority: p3 (the 501 answers only where an optional service is not installed).\nBusiness reason: a Chinese-language admin acting on an approval or an inbound hook on a deployment without that service reads an English-only error, as the comments doors did before #37639.\nReader: the ux-lane dev who next edits the own-door bridge or the operation-message catalog.\nDedupe: searched open issues for `\"PR #37639\"`: 0 hits.\nRelated: #37610, PR #37639, PR #37594.\n\n## Grade\n\narea:ux · Bug · minor · reach: read (the head against `main`) · evidence: read → p3"

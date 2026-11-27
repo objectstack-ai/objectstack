@@ -1,0 +1,37 @@
+{
+  "number": 37701,
+  "kind": "pull_request",
+  "title": "feat(service-messaging): a keyed notification param can be a list, read in the recipient's language",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T21:13:30Z",
+  "updated_at": "2026-11-26T22:50:28Z",
+  "closed_at": "2026-11-26T22:50:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T22:50:26Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37701",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuQVQdf3PvoJbKFFCUA4gwJB)_\n\nFixes #36853\n\n## What changes\n\n- **`@objectstack/service-messaging`, `notification-text.ts`.** `EmitInput.keyedText.params` accepts a list-shaped value, `{ list, separator }` (`NotificationListParam`).\n  - Each `list` item is `{ key, params?, fallback }`: a catalog sentence with its own `{{hole}}` params, which are scalar only (`NotificationScalarParam`: text, `{ key, fallback }` or `{ object, fallback }`).\n  - The renderer fills each item per recipient through the same scalar resolution a top-level hole uses. An item with no entry falls back to its `fallback`.\n  - The items are joined by the `separator` entry, else its `fallback`. `lookupSeparator` keeps a whitespace or punctuation answer such as `、`, which `lookup` would treat as a blank sentence.\n  - `problemOf` is split into `scalarParamProblem`, `keyedParamProblem` and `listParamProblem`. `emit()` refuses an empty list, a list over `NOTIFICATION_LIST_PARAM_MAX_ITEMS` (100), an undeclared member, a malformed separator or item, and a list nested in an item. A stored malformed row reads back as `undefined` and is delivered as its literal, as any malformed row is.\n  - New exports: `NotificationListParam`, `NotificationListItem`, `NotificationScalarParam` and `NOTIFICATION_LIST_PARAM_MAX_ITEMS`. Every existing param shape renders byte for byte as before.\n- **`@objectstack/plugin-approvals`.**\n  - `noApproverNotice` spells a slate of two or more slots as `approvalNoApproverHolding` with `who` the list param: one `approvalNoApproverSlot` per slot with its `type` / `value` params, joined by `approvalNoApproverSlotSeparator`. Each item falls back to the English clause the row stores.\n  - `approval-notification-text.ts` mirrors the new shapes structurally (`ApprovalListParam`, `ApprovalScalarParam`), because the plugin keeps no runtime dependency on the messaging package. `interpolate` renders a list's literal from its items' fallbacks.\n  - A one-slot slate keeps `approvalNoApproverHoldingSlot`.\n- Tests and a changeset (both packages `patch`).\n\n## Why\n\nA `{ key }` param resolves through `t(key, locale)` with no params, so a hole held one text or one hole-free key. #36463 (PR #36846) spelled slates of 2 to 8 slots with one derived sentence per size. A slate of more than 8 slots still named its slots in English inside a zh-CN, ja-JP or other non-English submitter's sentence.\n\n## Verification\n\n- `admin-rescue-named-slate.integration.test.ts` adds a 9-slot slate opened by the real service. It is rendered through the real `NotificationTextRenderer` in zh-CN, and the body is entirely Chinese, with `not.toMatch(/[A-Za-z]/)`. The `en` render equals the literal the row stores. This is the card's acceptance test.\n- `notification-text-list-param-36853.test.ts` drives the real renderer over the kernel's in-memory `i18n`, with 9 tests:\n  - nine items in zh-CN, joined by `、`, and the same list in `en`\n  - per-item and separator fallback\n  - an object-label param and a plain-text param inside an item\n  - every refusal `emit()` makes, and a stored row read back\n- `no-approver-note.test.ts`:\n  - the two-slot notice shape is now the list\n  - \"every slate size reads the timeline's sentence in every pack\" now runs from 2 to 12 slots, past the 8 #36463 spelled\n  - the old \"more than 8 keeps English\" pin is replaced by \"nine slots name no English approver type in any pack but `en`\"\n- `vitest run`: `service-messaging` 82 files, 1107 passed; `plugin-approvals` 130 files, 1965 passed.\n- `pnpm typecheck` passes in both packages. `plugin-approvals` `check:test-typecheck` is OK, with no change to its ledger.\n- `eslint` is clean on every changed file. `check-test-source-alias` is OK, and `overlap-check` is clean against `origin/main`.\n\n## Small decisions\n\n- The `approvalNoApproverHoldingSlots2` to `…Slots8` sentences are **not** retired. Notices already delivered carry those keys in their stored `keyedText`, and the inbox renders them again at every read (`renderForReader`). Retiring them would turn those rows back into English. New notices no longer emit them.\n- A list item's params are scalar only, never another list. One level covers the card. A nested list would need a second separator and a depth bound for no current producer.\n- An item or separator that misses falls back alone, the way every other keyed param falls back. The rest of the list stays in the reader's language.\n- The list is capped at 100 items, because it is rendered item by item at every delivery and every inbox read. An approval slate is a handful of slots.\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\nThe widening is the published `keyedText.params` value shape of `@objectstack/service-messaging`: a new accepted shape, with every existing shape unchanged. No metadata author writes it.\n\n## Owed\n\n- L1 (seat). Clause-② widening of a service package's exported emit contract, so the seat rules whether a contract review is owed.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgU7eeqHgQrtv5CeJK6\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgU7eeqHgQrtv5CeJK6)_\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgU7eeqHgQrtv5CeJK6 -->"
+}

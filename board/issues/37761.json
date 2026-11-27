@@ -1,0 +1,32 @@
+{
+  "number": 37761,
+  "kind": "issue",
+  "title": "Delete confirm dialog: a record title with a long unbroken token stretches the dialog past the viewport, and Cancel / Delete end up off-screen",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T01:41:09Z",
+  "updated_at": "2026-11-27T02:17:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37761",
+  "body": "repo:hotcrm#2 · sunhaolin · session_local1adc6fb3954245ba8940a3719cdaea98\n\nFiling gate: ① product defect with a reproduction and a named location. Source: fleet (found in a maintainer-ordered local UI test pass of the HotCRM app, 2026-11-27; filed through the pm-dispatch relay on the maintainer's instruction).\nGrading: area:ux · Bug · p3 (triage grades) · severity: Impeded, with a keyboard way out · reach: records whose title holds a token wider than the dialog (a pasted URL, a file name, a hash, an imported value with no spaces) · evidence: measured on the released 18.6.0 packages, zh-CN console, 1440 px wide viewport, with an extreme value; the classes were read on main on 2026-11-27 and are unchanged\n\n## 维护者速读\n- 做什么：删除确认弹窗的标题要能在长串（无空格的网址、文件名、编号）中间换行，弹窗宽度不能被标题撑开。\n- 谁受益：记录名里带长网址或长编号的用户，以及导入了无空格长文本的组织。\n- 不做会怎样：弹窗被撑到屏幕外，「取消」「删除」两个按钮跑到看不见的地方，鼠标点不到，只能用键盘。\n- 需要你做的：无，分诊定级即可。\n\n## What\n\nThe record delete confirm puts the record title into the dialog title (「删除线索“{title}”？」). The alert dialog is a CSS grid with `w-full max-w-lg`, and the title has no wrapping rule for an unbroken token, so the token's width becomes the grid track's minimum width. The dialog grows to the width of the token, and the footer, which is right-aligned inside that track, moves with it.\n\nMeasured with a lead whose name is a single 5,000-character token (the lead form accepted it), viewport 1440 px:\n\n| what | value |\n|---|---|\n| title element | `h2.text-lg.font-semibold`, computed `overflow-wrap: normal`, `word-break: normal` |\n| title scroll width | 49,437 px |\n| dialog client width / scroll width | 510 px / 49,461 px, `overflow-x: visible` |\n| Cancel button x position | 49,797 px |\n| Delete button x position | 49,867 px |\n\nBoth buttons are far outside the viewport and cannot be reached with the mouse; the page does not scroll to them. Tab then Enter still reaches Delete, and Escape closes the dialog, so a keyboard user is not stuck.\n\nThe same mechanism applies to any token wider than the dialog's content box, which is about 460 px, near 45 Latin characters at this font size: the buttons shift right by the excess. Only the extreme value was measured; a value of URL length was not.\n\n## Where\n\n`ui/packages/components/src/ui/alert-dialog.tsx` on main: the content is `grid w-full max-w-lg … p-6` (line 49) and `AlertDialogTitle` is `text-lg font-semibold` (line 93), `AlertDialogDescription` is `text-sm text-muted-foreground` (line 105). None of them sets `break-words` or `min-w-0`. Every caller that interpolates user text into an alert dialog title or description inherits this, the record delete confirm being the one measured.\n\n## Reproduction\n\n1. Create a record whose title field holds one long token with no spaces or hyphens (for a visible effect at 1440 px, 200 characters or more).\n2. Open the record, More actions → Delete.\n3. Result: the dialog extends past the right edge of the viewport and its buttons are not visible.\n\n## Acceptance\n\n- A title or description of any length keeps the alert dialog within `max-w-lg` and inside the viewport; a long token wraps or is truncated with the full text still available.\n- Cancel and the confirm button stay visible and clickable.\n- Fixed in the shared component, so every alert dialog is covered, with a test or story for a long unbroken title.\n\nDedupe (open and closed): `confirm dialog` 12 hits, nearest #27823 and #26580 (closed, the confirm's wording and title), neither about layout; `long title overflow` 0 hits; `unbroken` and `break-words` no related hit (nearest #34609, closed, the AI assistant panel clipping a table).\nBatch-of: cleanup of the local UI deep test pass 2026-11-26/27, 2 cards (both in objectstack), after the 14 cards of the pass itself.\nBlocked-by: none."
+}

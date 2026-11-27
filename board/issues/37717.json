@@ -1,0 +1,32 @@
+{
+  "number": 37717,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37706: lint a lookup dependsOn param that names a field its target cannot filter on; skip the unscoped probe when no scoped read answered",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T23:22:31Z",
+  "updated_at": "2026-11-27T00:14:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37717",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (Contract review records 7204641031 and 7205472092 on PR #37706, nits N2 and N4, adopted at ACCEPT; PR-1 #37567's nit 2)\n\n## What happens\n\nPR #37706 (Fixes #36794, PR-2) makes an import of a lookup value outside the row's scope answer in the reader's language, and answers a scope that cannot be queried with its own sentence at run time. Two items stay open:\n\n- [ ] **Nothing tells the author before import that a scope cannot work** (N2; the lint half of PR-1 #37567's nit 2). A lookup whose `dependsOn` entry points its `param` at a field the target cannot be filtered on (a formula or other non-stored field) publishes clean, and every import then fails that column with \"no matching record\". Expected: a producer-side lint on the lookup's `dependsOn.param` naming the target field and why. This refuses metadata that publishes today, so it is a narrowing: grade it and declare it as one.\n- [ ] **The unscoped probe can still run when no scoped read answered** (N4). When every scoped read was refused for the scope cell's value (`INVALID_FILTER`), `referenceNotFound` still probes unscoped and can answer `reference_out_of_scope`. Same as `main`. Expected: skip the probe whenever no scoped read answered, and align the `validation-message.ts` jsdoc, changeset wording and docs line (\"any other refusal keeps the plain sentence\").\n\nCategory ①: an import refusal that names the wrong cause, and an authoring mistake found only at import.\nPriority: p2.\nBusiness reason: an admin importing records sees every row of a column refused without being told the lookup's setup is the cause, and an app author is not warned when they set it up.\nReader: the data-lane dev who next edits the import runner or the lookup lint rules.\nDedupe: searched open issues for `\"PR #37706\"`: 0 hits.\nRelated: #36794, PR #37567, PR #37706.\n\n## Grade\n\narea:data · Bug · minor · reach: read (the head against `main`) · evidence: read → p2"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 37731,
+  "kind": "pull_request",
+  "title": "fix(plugin-audit): a milestone row written before its template gained a token reads its stored sentence",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T00:22:52Z",
+  "updated_at": "2026-11-27T00:24:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37731",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuPE7uyDAJyqjwwMzomWv5ff)_\n\nFixes #37635\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none (no page under `skills/**` describes the stored milestone summary code)\n\n## 维护者速读\n\n- 用户能看到什么变化：应用作者给里程碑摘要模板新加了一个 `{token}` 之后，之前写下的动态记录在中文等翻译语言下不再显示“带空洞”的翻译句，而是显示当时存下的完整英文句。新写的记录不受影响，照常显示翻译。\n- 为什么做：#37582 的审核发现，旧行没有新 token 的值，翻译句里那个位置会变成空白，而存下的英文句是完整的。\n- 出错会怎样：最坏是某行显示英文原句而不是翻译，不会丢数据，也不会出现空白。\n- 要你做什么：无。\n\n## What changes\n\n- **Fallback (item 1)**, `activity-summary-message.ts` + `audit-writers.ts`:\n  - The writer adds `names` to a fired milestone's summary code: every distinct `{token}` name the fired template held, interpolated or not (`milestoneTokenNames`).\n  - The composer renders a translated template only when each token it names either has a stored value or is listed in `names` (it was in the template and its value was empty, so it renders empty as in the stored sentence). Any other token makes `composeActivitySummary` answer `undefined`, so the row keeps its stored sentence, as it already does for a locale with no entry.\n  - `readActivitySummaryMessage` accepts `names` only as a string list, and still reads a code without it.\n- **One token grammar (item 2, N3)**: `milestoneTokenRe()` moves to `activity-summary-message.ts` and is exported; the writer imports it, and the composer's literal `/\\{(\\w+)\\}/g` is gone.\n- **Per-read caching (item 3, N4)**, `readerSummaryLocale`: each `(object, field, value)` milestone's answer is computed once per read, and each object's packaged base is read once per read, shared by the translated definition and every milestone answer.\n- **Stale comments (item 4, N6)**: the `scalarOverridesPackagedBase` jsdoc and the `valueOverridesPackagedBase` jsdoc in `packages/spec/src/system/i18n-resolver.ts` name the five scalars (an object's three, a rule's `message`, a milestone's `summary`) instead of \"three scalars\" / \"its two callers\"; the header of `audit-option-label-summary.test.ts` says a reader may now read the milestone composed in its language (#37524), while the stored sentence stays untranslated.\n- **Changeset**: `@objectstack/plugin-audit` and `@objectstack/spec` patch.\n\nSmall calls made here (no card):\n- **How a row tells \"empty\" from \"added later\"**: store the template's token names on the row (the card's example). The alternative, a hash or the whole template, carries more and still needs the names to judge a translation.\n- **A token only the translation names** (not in the authored template) now also keeps the stored sentence. #37582 rendered it empty; a translation with a token the row never had cannot be composed whole either, so one rule covers both.\n- **Rows written before this change** carry no `names`: they compose only when every token of the translation has a stored value. Such a row with an empty value shows its stored sentence instead of the translation; it never shows a hole.\n- The cache key is `(object, field, value)`, one level finer than the card's `(object, field)`, because the answer depends on the value; the packaged base is cached per object.\n\n## Why\n\nContract review records 7196337094 and 7197635792 on PR #37582 (accepted deviations and nits, adopted at ACCEPT), carried here per the one-card-per-PR rule.\n\n## Verification\n\nHead `48cd3c9dd`:\n- `packages/plugins/plugin-audit`: `vitest run src/`: 110 files, 1846 tests passed. New cases in `activity-summary-message.test.ts`: red-first for a token added after the row (keeps the stored sentence), an empty listed token renders empty, a translation-only token, a code without `names` (composes when every token has a value, else keeps the stored sentence), one packaged-base read for many rows and two milestones, and `names` validation. `activity-milestone-summary-locale.integration.test.ts` pins the stored `names` and, through the real writer, SQLite driver and read middleware, that a zh-CN reader reads the stored English for a row written before the template gained `{note}`, with the lost row (whose template held `{note}`) still composed as a control.\n- `tsc --noEmit -p packages/plugins/plugin-audit` and `eslint` on the 5 touched plugin-audit files: exit 0.\n- `check:changeset-fixed`, `check:test-source-alias`: exit 0.\n- `node scripts/pm/overlap-check.mjs`: clean (shares `i18n-resolver.ts` with #37422 and #37366, both merge cleanly).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic (doc comments only).\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; lint passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched (comments only): no generated artifact depends on them.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUpnvPnJ1hR74pUrVj\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUpnvPnJ1hR74pUrVj)_\n\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgUpnvPnJ1hR74pUrVj -->\n"
+}

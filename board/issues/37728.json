@@ -1,0 +1,33 @@
+{
+  "number": 37728,
+  "kind": "issue",
+  "title": "对话组件拆分 A：把 ChatbotEnhanced.tsx 的类型、子组件和工具函数搬到独立文件（不改行为）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T00:20:04Z",
+  "updated_at": "2026-11-27T01:18:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37728",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjMouQg4opwRbvXunTA\n\nFiling gate: ③ maintainer-directed task · Source: topic #37690 — Jack 2026-11-27T00:09Z：「对话界面改进 ，用fable评估，开始分拆」；方案已经 Fable 对照代码评审，要点已全部写进本卡。\nGrade: area:ai · Task · p2 · reach: 无行为变化的重构 · evidence: read（基线 objectstack main 80519b59 + PR #37720 head c2b7b6a6）\nReader: 专题 objectstack#37690 的拆分卡线程（os-dev）。\nDedupe: `org:objectstack-ai is:issue ChatbotEnhanced split` 47 条，均为已关 build 期卡，无重叠；除 #37720 外 44 个 open PR 无一碰本文件（2026-11-27 00:15Z 核）。\nBlocked-by: #37682（PR #37720 删 build 对话前端，本文件被它删 4465 行，合并后才能开工）\n\n## 为什么\n\n`ui/packages/plugin-chatbot/src/ChatbotEnhanced.tsx` 删完 build 后仍有 3335 行，其中主组件 1372 行、Props 接口 272 行，其余是可独立的类型、子组件和工具函数。后续体验改进（反馈、审批卡、思考时间线等）都要改这个文件，先拆开降低冲突和审阅成本。\n\n## 做什么\n\n主文件只留主组件 `ChatbotEnhanced`、只被主组件用的 `formatMessageProps` 和两个 `PLAIN_SURFACE_*` 常量，以及对搬走符号的具名 re-export。预计约 3335 → 1700 行。新文件放 `ui/packages/plugin-chatbot/src/chat/`（plugin-chatbot 内相对 import 不带 `.js` 后缀，跟现有写法一致）：\n\n- `types.ts`：`ChatbotEnhancedMessage`、`ChatbotEnhancedToolInvocation`、`ChatChart`、`ChatSource`、`ChatbotLabels`、`ChatbotEnhancedProps`、`ChatbotProcessVisibility`、`ChatbotSurface`、`ChatbotModelOption`、`ToolDecisionState`、`TurnLiveness`。对 `../mapMessages` 只能 `import type`（`mapMessages.ts:28` 反向引用这些类型）。\n- `ModelPicker.tsx`：`ModelPicker`、`drawnMultiplierOf`、`EXPENSIVE_MODEL_MULTIPLIER`、`OUTSIDE_MODELS`。\n- `liveness.tsx`：`useTurnLiveness`、`LivenessIndicator`、`LIVENESS_QUIET_AFTER_SECONDS`、`useIsOffline`、`formatElapsed`、`ThinkingDots`、`AssistantThinkingMessage`、`MessageAvatar`。\n- `toolSummary.tsx`：`getToolState`、`getToolStateRank`、`ToolSummaryState`、`ToolSummaryGroup`、`shouldRenderDetailedTool`、`summarizeTools`、`ToolPhaseSummary`、`ToolPhaseStep`、`foldToolPhaseSteps`、`isPlumbingTool`、`PLUMBING_TOOL_NAMES`、`ToolActivitySummary`、`ToolActivitySummaryLabels`、`ToolSummaryIcon`、`getToolSummaryStatus`、`ToolRunningTimer`、`usePhaseElapsed`、**`phaseClock`**、`SmartToolOutput`、`looksLikeJson`。依赖方向只能 `toolSummary → liveness`（`ToolRunningTimer` 用 `useIsOffline`、`formatElapsed`）。\n- `answerLayout.tsx`：`layoutAnswer`、`AnswerBlock`、`AnswerCharts`、`isToolCallPlaceholder`。\n- `toolRecordWrite.ts`：`writtenRecordOf`、`formatRecordWriteValue`（只被工具卡用，卡 B 会接着用）。\n- `composerNotices.tsx`：`ErrorBanner`、`ComposerNotice`、`SendErrorNotice`、`formatSizeLimit`、`useAiQuotaCopy`。\n\n⛔ **模块级单例只能有一份**：`phaseClock`（模块级 Map，注释写明“pane 重挂载时保留计时”）必须和 `usePhaseElapsed` 一起搬进 `toolSummary.tsx`，不得留副本。\n\n上面没点名的私有辅助跟它唯一的使用者走；有疑问时留在原文件，在 PR 描述里列出。行号会因 #37720 合并后的 main 变化，以符号名为准。\n\n内部消费方（`FloatingChatbot`、`chatMessageAdapter`、`mapMessages`、`renderer`、`toolResultParsers`、`useAiModels`、`useHitlInChat`）不用改，经 re-export 照常工作。\n\n## 不做\n\n主组件内部的拆分（卡 B）；`mapMessages.ts`、`useObjectChat.ts`；任何体验改动。\n\n## 通用约束（本专题三张拆分卡共用）\n\n1. **只搬代码，不改行为**：不改 JSX 结构、className、文案键、hook 调用顺序、memo 依赖、条件分支。\n2. **原文件保留具名 re-export**（`export { a, b } from './x'`，类型用 `export type { … }`），⛔ 不用 `export *`：`docs/qa/platform-checklist/` 的符号锚点（`scripts/symbol-anchors.mjs`）只认具名导出。所有现有 import 路径保持不变。\n3. **测试文件不改**，本卡另列的例外除外。\n4. **新文件不得 import 原大文件**（避免环）。对 `../mapMessages` 等反向依赖方只能 `import type`。\n5. **公开入口冻结**：`ui/packages/plugin-chatbot/src/index.tsx`、`ui/packages/plugin-chatbot/src/core.ts`、`ui/packages/app-shell/src/index.ts` 三个文件 diff 为空。\n6. **验收**：现有测试全绿；type-check、lint、build 通过；PR 描述贴 `git diff --color-moved=zebra --stat` 和一句说明“删除行与新增行之差只有 import/export 行”。\n7. **changeset**：放仓根 `.changeset/`（`ui/AGENTS.md`），级别 `patch`；changeset 正文和 PR 描述都写 `Clause-②: no` 与 `Metadata-protocol: none` 两行（AGENTS.md「Post-Task Checklist」第 3 步）。不碰 CHANGELOG。\n8. 推送前跑 overlap-check。cloud#5027 agent 效果专题优先：它若有在飞 PR 碰同一文件，本卡让路。"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 37758,
+  "kind": "issue",
+  "title": "List bulk Delete: when records are refused the toast says only \"0 deleted, 4 failed\"; the server's reason for each record, which a single delete shows, is dropped",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T01:39:53Z",
+  "updated_at": "2026-11-27T02:16:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37758",
+  "body": "repo:hotcrm#2 · sunhaolin · session_local1adc6fb3954245ba8940a3719cdaea98\n\nFiling gate: ① product defect with a reproduction and a named location. Source: fleet (found in a maintainer-ordered local UI test pass of the HotCRM app, 2026-11-27; filed through the pm-dispatch relay on the maintainer's instruction).\nGrading: area:ux · Bug · p2 (triage grades) · severity: Impeded · reach: every list with the built-in bulk Delete, whenever a selected record is refused (restrict, lock, permission) · evidence: measured on the released 18.6.0 packages, zh-CN console; the code path was read on main on 2026-11-27 and is unchanged\n\n## 维护者速读\n- 做什么：列表批量删除有记录被拒绝时，提示里要说明原因（服务端已经给了可读的中文原因）。\n- 谁受益：所有用列表批量删除的用户。\n- 不做会怎样：只看到「成功 0 条，失败 4 条」，不知道为什么失败、该先做什么；同一条记录单独删除时却能看到完整原因。\n- 需要你做的：无，分诊定级即可。\n\n## What\n\nThe built-in bulk Delete on a list deletes the selected records one call each and reports one summary toast. When some or all calls are refused, the toast carries only the two counts. The reason each refusal carries is discarded, although it is localized and tells the user what to do next.\n\nMeasured (HotCRM, events list, 4 events that each still have attendee rows; the attendee's master-detail to the event declares `deleteBehavior: 'restrict'`):\n\n| path | what the user sees |\n|---|---|\n| select 4 → Delete → confirm | toast 「成功 0 条，失败 4 条」, nothing else |\n| row menu → Delete on one of the same records | toast 「删除 活动 失败」 with the description 「该活动正被 1 条活动参与者记录通过「活动」引用，请先删除或改派这些记录。」 |\n\nNetwork for the bulk path: four `DELETE /api/v1/data/crm_event/{id}` calls, each `409` with a body of the shape\n\n```json\n{\"error\":\"该活动正被 3 条活动参与者记录通过「活动」引用，请先删除或改派这些记录。\",\"code\":\"DELETE_RESTRICTED\",\"dependentObject\":\"crm_event_attendee\",\"dependentCount\":3,\"object\":\"crm_event\"}\n```\n\nSo the server answers every record with a clear reason and the bulk summary throws it away.\n\n## Where\n\n`ui/packages/core/src/actions/recordDelete.ts`, the bulk branch of `run` (main, about lines 354 to 383): `Promise.allSettled` over the deletes, then `failed = results.filter(r => r.status === 'rejected').length` and `toast.error(t('objectActions.bulkDeletePartial', { succeeded, failed }))`. The rejected results' `reason` is never read. The single-record branch below it passes `(err as Error).message` as the toast description.\n\n## Reproduction\n\n1. Take an object whose child declares `deleteBehavior: 'restrict'` on its lookup, with two or more parent records that have children.\n2. On the parent's list select them, choose Delete in the bulk bar and confirm.\n3. Result: 「成功 0 条，失败 N 条」 with no reason. Delete one of them from its row menu: the reason is shown.\n\n## Acceptance\n\n- When a bulk delete has refusals, the result names the reason. Refusals that share a reason are grouped (reason, then how many records or which), the way #30891 groups refusals for the MCP door and #36855 asked for in the approvals inbox.\n- A batch whose records are all refused for one reason reads as that reason, not as a bare count.\n- The single-record toast is unchanged.\n- A unit test in `recordDelete.test.ts` covers an all-refused batch and a mixed batch.\n\n## Also seen, not investigated (triage may split it)\n\nA list whose view declares its own bulk action with `operation: 'delete'` (HotCRM accounts and opportunities, `bulkActionDefs`) deleted 4 and 6 records with no success toast at all within 3 seconds; the rows left the list and that was the only feedback. The built-in bulk Delete says 「已删除 N 条 … 记录」 in the same situation. What that declared path shows when a record is refused was not measured.\n\nDedupe (open and closed): `bulk delete` 12 hits, nearest #36855 (closed, approvals inbox bulk approve lists failed rows without a reason) and #36851 (closed, a refused delete from a related list was silent), neither covers the list bulk Delete summary; `DELETE_RESTRICTED` 12 closed hits, nearest #32648 (organization delete), unrelated; `bulk delete toast failure`, `failed toast reason` 0 hits.\nBatch-of: cleanup of the local UI deep test pass 2026-11-26/27, 2 cards (both in objectstack), after the 14 cards of the pass itself.\nBlocked-by: none."
+}

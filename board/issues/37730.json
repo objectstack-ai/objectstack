@@ -1,0 +1,33 @@
+{
+  "number": 37730,
+  "kind": "issue",
+  "title": "对话组件拆分 C：把 AiChatPage.tsx 的 ChatPane 和辅助函数搬到独立文件（不改行为）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T00:20:58Z",
+  "updated_at": "2026-11-27T00:25:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37730",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjMouQg4opwRbvXunTA\n\nFiling gate: ③ maintainer-directed task · Source: topic #37690 — Jack 2026-11-27T00:09Z：「对话界面改进 ，用fable评估，开始分拆」；方案已经 Fable 对照代码评审，要点已全部写进本卡。\nGrade: area:ai · Task · p2 · reach: 无行为变化的重构 · evidence: read（基线 objectstack main 80519b59 + PR #37720 head c2b7b6a6）\nReader: 专题 objectstack#37690 的拆分卡线程（os-dev）。可与卡 A 并行（不同包）。\nDedupe: 除 #37720 外 44 个 open PR 无一碰 `AiChatPage.tsx` 或 `ChatDockConversation.tsx`（2026-11-27 00:15Z 核）。\nBlocked-by: #37682（PR #37720 删 build 对话前端，本文件被它删 1462 行，合并后才能开工）\n\n## 为什么\n\n`ui/packages/app-shell/src/console/ai/AiChatPage.tsx` 删完 build 后仍有 2152 行：`ChatPane` 706 行、`AiChatPage` 489 行、`useDeferredFirstSend` 177 行，加上一批辅助函数。拆开后续改动才不互相冲突。\n\n## 做什么\n\nAiChatPage.tsx 约 2152 → 550 行。新文件放同目录 `ui/packages/app-shell/src/console/ai/`，**app-shell 内相对 import 带 `.js` 后缀**（如 `./ChatPane.js`，跟现有写法一致）：\n\n- `ChatPane.tsx`：`ChatPane`、`ChatPaneProps`。\n- `aiChatHydration.ts`：`hydratedMessagesToChatMessages`、`partToolState`、`partApproval`、`partString`、`firstUserMessageText`。\n- `aiChatLinks.ts`：`listLinkTarget`、`recordOpenTarget`、`nextSectionOpening` 和模块级计数 `sectionOpenings`。\n- `useDeferredFirstSend.ts`：`PendingFirstMessage`、`useDeferredFirstSend`、`isSameFile`、`isSameFirstSend`、`useComposerDraftHandoff`、`ComposerDraftHandoff`、模块级 `composerDraftHandoffs`（WeakMap）。\n- `aiChatChrome.ts`：`matchAiChatShortcut`、`AiChatShortcut`、`TOGGLE_CHATS_LIST_SHORTCUT`、`NEW_CHAT_SHORTCUT`、`useCollapsibleChatsList`、`CollapsibleChatsList`、`CHATS_COLLAPSED_STORAGE_KEY`、`resolveCollapseToDockTarget`。\n- `agentCopy.ts`：`agentEmptyState`、`localizeAgentLabel`、`PLATFORM_AGENT_LABEL_KEYS`、`buildAgentSuggestions`、`genericSuggestions`、`dataChatSuggestions`、`TranslationFn`。\n- 留在原文件：`AiChatPage`、`AiChatPageProps`、`EMPTY_INITIAL_MESSAGES`。\n\n⛔ **不得搬出 `AiChatPage` 函数体的**：`useHomePath()` 调用和顶栏 `<header>`（被 `__tests__/homeRecoveryRedirectsFollowDeclaration-7373.test.ts` 和 `consoleTopBar.height-12639.test.ts` 按源码检查）。\n\n⛔ **模块级单例只能有一份**：`sectionOpenings`、`composerDraftHandoffs` 搬走后原文件不得留副本。\n\n⛔ **`ChatDockConversation.tsx` 的 `import { ChatPane, … } from '../console/ai/AiChatPage.js'` 保持不动**：4 个测试 mock 的是 `AiChatPage` 这个路径（`layout/__tests__/` 下的 `ChatDock.test.tsx`、`ChatDock.partialRuntimeConfig.test.tsx`、`ChatDock.titleMatchesTopBar-34827.test.tsx`、`launcherPlanApprovalMarker-11666.test.tsx`），改指向会让 mock 失效。ChatDock 的 `React.lazy` 懒加载边界因此不变。\n\n## 测试文件的两个例外（只改读取范围，断言不动）\n\n1. `console/ai/__tests__/AiChatPage.runtimeMessageSeam.test.tsx` 的 “#4437 source net” 读 `AiChatPage.tsx` 原文，要求 `toRuntimeMessages(` 恰好 1 次、并含 `const runtimeMessages = useMemo(() => toRuntimeMessages(messages), [messages]);`。这一行在 ChatPane 里，搬走后把读取范围改为 `AiChatPage.tsx` + `ChatPane.tsx` 拼起来，断言一字不改。\n2. `__tests__/homeRecoveryRedirectsFollowDeclaration-7373.test.ts` 已有 `alsoReads` 字段（为 move-only 拆分准备，objectstack#29988），给 AiChatPage 那一项补上新文件。\n\n除此之外测试文件一律不改。\n\n## 额外验收\n\nconsole build 后跑 `pnpm check:eager-closure`（`ui/package.json`），确认 `@object-ui/plugin-chatbot` 没进首屏 chunk。\n\n## 不做\n\n`useChatConversation.ts`、`ConversationsSidebar.tsx`、`ChatDock*.tsx` 的内容；任何体验改动。\n\n## 通用约束（本专题三张拆分卡共用）\n\n1. **只搬代码，不改行为**：不改 JSX 结构、className、文案键、hook 调用顺序、memo 依赖、条件分支。\n2. **原文件保留具名 re-export**（`export { a, b } from './x'`，类型用 `export type { … }`），⛔ 不用 `export *`：`docs/qa/platform-checklist/` 的符号锚点（`scripts/symbol-anchors.mjs`）只认具名导出。所有现有 import 路径保持不变。\n3. **测试文件不改**，本卡另列的例外除外。\n4. **新文件不得 import 原大文件**（避免环）。对 `../mapMessages` 等反向依赖方只能 `import type`。\n5. **公开入口冻结**：`ui/packages/plugin-chatbot/src/index.tsx`、`ui/packages/plugin-chatbot/src/core.ts`、`ui/packages/app-shell/src/index.ts` 三个文件 diff 为空。\n6. **验收**：现有测试全绿；type-check、lint、build 通过；PR 描述贴 `git diff --color-moved=zebra --stat` 和一句说明“删除行与新增行之差只有 import/export 行”。\n7. **changeset**：放仓根 `.changeset/`（`ui/AGENTS.md`），级别 `patch`；changeset 正文和 PR 描述都写 `Clause-②: no` 与 `Metadata-protocol: none` 两行（AGENTS.md「Post-Task Checklist」第 3 步）。不碰 CHANGELOG。\n8. 推送前跑 overlap-check。cloud#5027 agent 效果专题优先：它若有在飞 PR 碰同一文件，本卡让路。"
+}

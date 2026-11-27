@@ -2,8 +2,8 @@
   "number": 37601,
   "kind": "issue",
   "title": "cli test: the #30120 start-refusal cases spawn `os start` synchronously with a 120 s spawn timeout but run under vitest's 5 s case default, so a loaded Test Core shard reds unrelated PRs",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:fleet",
     "bug",
     "domain:devx",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T14:48:09Z",
-  "updated_at": "2026-11-26T20:11:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T21:16:29Z",
+  "closed_at": "2026-11-26T21:15:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37601",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① · Source: fleet (two unrelated PRs went red on the same shard within the hour; seat re-run records on PR #37569 and PR #37582)\n\n## What happens\n\n`packages/cli/test/start-deployment-durability.integration.test.ts` (origin/main 0f6a1e518f), in the describe `#30120 — with the image switch on, a start missing its settings refuses`:\n- The `refuse()` helper (:269–279) runs `spawnSync(process.execPath, [CLI, 'start', …], { timeout: 120_000 })`. That is a synchronous child `os start` with a two-minute allowance.\n- The `it(...)` cases that call it (:281, :291, :298, …) pass no timeout, so they run under vitest's 5 s default.\n\nOn a loaded CI runner, one child start takes more than 5 s, and the case fails with `Error: Test timed out in 5000ms` on a PR that touches nothing in `packages/cli`. The whole file took 67 s on the runner.\n\nreach: measured twice on Test Core (5/10):\n- PR #37569, run 45830682855, job 139947827254: case \"only the database missing: names only OS_DATABASE_URL\" (:291). The re-run went green.\n- PR #37582, run 45837008571, job 139970139703: case \"a switch value that is not a switch is refused too, rather than read as off\" (:298).\n\nNeither PR changes a file under `packages/cli`.\n\n## Expected\n\n- The `#30120` cases carry a case timeout that matches the spawn allowance (or the describe sets one), as the file's other spawning describe does with `SPAWN_TIMEOUT_MS` (:325). Otherwise the case keeps a vitest timeout shorter than the work it waits on.\n- No assertion changes, and no case is skipped or retried.\n- Each PR that hits this today spends a re-run, and the second hit is read as a real red. This card is the place to cite.\n\nCategory ①: a named test defect that turns unrelated PRs red on a required check.\nPriority: p2 — it costs every PR on that shard a re-run and makes a real red harder to see; no product behaviour is wrong.\nBusiness reason: required CI that reds at random slows every seat's landing and trains reviewers to dismiss Test Core reds.\nReader: the lane that owns `packages/cli` tests (area:build); seat 2 closed its build intake on 11-26, so triage routes it.\nDedupe: searched `start-deployment-durability` (open issues), 0 matching cards.\nRelated: #30120, PR #37569, PR #37582."

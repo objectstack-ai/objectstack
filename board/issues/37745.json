@@ -1,0 +1,31 @@
+{
+  "number": 37745,
+  "kind": "issue",
+  "title": "37609 跟进：lint 上下文规则的四处小修（文档链接、两持有者断言、无包提示语、过期注释）与 ADR-0150 测试路径",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T01:04:57Z",
+  "updated_at": "2026-11-27T01:22:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37745",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37609. The source is seat 5's contract record 7206942612 on PR #37723: nits N1–N4, accepted as deviations in ACCEPT 7206948596, which sends them to one follow-up card together with the ADR-0150 pin-path residue. The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p3 · reach: `packages/lint/src/validate-ai-tool-references.ts` and its test, one comment in `packages/metadata-core/src/package-closure.ts`, one ADR-0150 pin line · evidence: read.\n\n## 维护者速读\n- 做什么：#37609 的规则搬到 metadata-core 后留下四处小问题：一处文档链接写错函数名、一个测试断言太弱、一句提示语在没有包时措辞不对、一处注释还说规则在 core；另外 ADR-0150 有一行测试路径要跟着搬家更新。\n- 谁受益：读 lint 提示的作者和维护这条规则的人。\n- 不做会怎样：提示语偶尔说\"本包范围内\"但其实没有包；一个测试在规则坏掉时仍可能通过；注释和 ADR 指向旧位置。\n- 需要你做的：无。\n\n## What\n1. **N1** `packages/lint/src/validate-ai-tool-references.ts` (docblock near line 351): `{@link skillContextResolution}` names no symbol; the function is `skillContextResolver`.\n2. **N2** `packages/lint/src/validate-ai-tool-references.test.ts`, \"two packages in the closure shipping the pack\": the pin asserts only the rule id and both holder ids, so an empty closure (`outside-closure`) passes it too. Assert the \"more than one holder in reach\" wording so it pins the `ambiguous-in-closure` arm itself.\n3. **N3** `contextRefusalFinding`: for a stack with no `manifest.id` and two package holders (`ambiguous-in-environment`), the hint says \"in reach of this package\", but there is no package. Word that arm without a package.\n4. **N4** `packages/metadata-core/src/package-closure.ts:16`: the comment still places `resolvePackageScopedHolders` in `@objectstack/core`; it now sits beside that file in metadata-core.\n5. **ADR-0150 pin-path residue** (governed `docs/adr/**`): the #32412 amendment note's Pins line names `packages/core/src/package-scoped-resolution.test.ts`, which PR #37723 moved to `packages/metadata-core/src/package-scoped-resolution.test.ts`. Update that one path; re-read the other `packages/core/src/package-scoped-resolution.ts#…` anchors (they still resolve through core's re-export) and decide whether to point them at metadata-core in the same edit.\n\n## Acceptance\n- The `{@link}` resolves (typedoc or `tsc` with the doc check, if the package runs one).\n- The two-holders pin reds when the closure is emptied (show the ablation in the PR body).\n- The no-package ambiguous hint names no package, pinned by a test.\n- The `package-closure.ts` comment and the ADR-0150 pin line name the metadata-core path; the ADR anchor gate stays green.\n- `Clause-②: no`, `Metadata-protocol: none`. Items 1–4 are text and test only; item 3 changes a lint hint string only.\n\nBlocked-by: #37609 (PR #37723)\nParent: #37609\nSize: XS\nDedupe (objectstack, is:issue is:open): `\"skillContextResolution\"` 0 · `\"package-closure.ts\"` → only #37609 (source). No duplicate.\n"
+}

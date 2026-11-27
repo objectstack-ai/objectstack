@@ -1,0 +1,37 @@
+{
+  "number": 37699,
+  "kind": "pull_request",
+  "title": "fix(lint): warn when a context pack reads an injected column with no storage on an external object",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T21:08:00Z",
+  "updated_at": "2026-11-26T22:59:54Z",
+  "closed_at": "2026-11-26T22:59:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T22:59:51Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37699",
+  "body": "Fixes #37432\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化：给外部数据源对象写资料包的作者，在校验和保存时会多看到一条提醒，指出某个平台自动添加的字段（负责人、创建时间等）在外部库里没有存储；解释文本也说明了平台自动添加的字段算作已定义。\n- 为什么做：属于资料包（让助手读懂一条记录）专题的收尾，替给外部对象写资料包的作者解决「校验通过但助手读不到」的问题。\n- 出错会怎样：最坏是作者多看到一条只提醒、不拦截的警告，保存照常成功，可以直接撤回。\n- 要你做什么：无。\n\n## What changes\n\n- `validateAiContext` (`packages/lint/src/validate-ai-context.ts`) gains `ai-context-field-unprovisioned`, a `warning`. It fires where a pack names an injected system column of an ADR-0015 `external` object. It covers every place the rule reads a field map: the root's `fields`, `body.field`, and each `related` entry's `fields`, `where`, `orderBy` and link field (named or implied). Each object is judged by its own provenance, through `unprovisionedInjectedColumnsFor` (`system-fields.ts`), the spec derivation every other unprovisioned-anchor rule reads. No second copy of the predicate exists. The message is the shared short clause (`unprovisionedAnchorVerdict`) plus a consequence for the position, and the fix is the shared `unprovisionedAnchorFix`. A column the author declares on the external object is never judged.\n- `body.field` on an injected column keeps its `ai-context-body-not-long-text` finding, and the new warning is added beside it. No injected column is long text, so both findings always appear together, and each one states an independent fact.\n- `os explain`: a new `ai-context-field-unprovisioned` entry (shared cause paragraph, cost by position, shared remedy). The `ai-context-field-unknown` entry is rewritten to say that injected columns count as defined, that a column the platform does not inject is still unknown, and that the external case belongs to the new id. The new id is exported from `@objectstack/lint` and joins the two anchor-id lists in the `UNPROVISIONED_ANCHOR_*` doc comments.\n- `service-record-context`: `injected-system-columns.test.ts` is folded into `record-context-tools.test.ts` as a top-level describe. All three cases are kept, and the separate file is deleted. Per the card's scope note (comment 7182743879), one nested describe pins link resolution on a `sys_*` root, where the child carries injected `sys_user` references: a named `owner_id` or `created_by` is the link and reads its own rows; with no name, the three injected references leave the list out silently; a door serving declared fields alone has no link.\n\n## Tests\n\n- `packages/lint/src/validate-ai-context.test.ts`: a new describe with 7 cases. The warning appears at all five paths on an external root and child. The same pack on non-external objects is clean. An external child under a local root is judged per object. An author-declared column is not judged. `body.field` gets both findings. A related list linked through an external child's injected `owner_id` is reported. The explain entry is checked for its named facts. There is also an explain check for `ai-context-field-unknown`, and the new id joins the \"every emitted id has an explain entry\" list.\n- `packages/services/service-record-context/src/__tests__/record-context-tools.test.ts`: the folded describe (3 original cases plus 4 link cases).\n\n## Acceptance notes\n\n- First read, by risk: (1) `validate-ai-context.ts`, the link hunk (the `link` resolution rewritten from an early `return` into a value, the only reshaped control flow); (2) the same file, the body hunk (two findings on one path); (3) `rule-explanations.ts`, the two ai-context entries.\n- Not changed, fenced out of this card: `skills/objectstack-ai/references/context-packs.md` has a table of the ai-context rule ids. No gate reads that table, and it does not list the new id. Carrier: the area seat.\n- The `where` / `orderBy` / link consequences in the messages (\"no rows\", \"an arbitrary order\") repeat the siblings' measured readings (`page-field-unprovisioned`, `sort-field-unprovisioned`). They were not measured again for `get_record_context` over a remote table.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/lint exec vitest run src/validate-ai-context.test.ts`. Expected: 30 tests pass, including the describe \"an injected column with no storage on an external object (ADR-0015)\".\n\n<details><summary>Local runs at 30b09f6711</summary>\n\n- `pnpm --filter @objectstack/lint typecheck` and `vitest run --maxWorkers=2`: Test Files 239 passed (239), Tests 9707 passed | 5 skipped (9712); lock VERDICT command-exit 0.\n- `pnpm --filter @objectstack/service-record-context test` and `typecheck`: Test Files 3 passed (3), Tests 178 passed (178); lock VERDICT command-exit 0.\n\n</details>\n\n<details><summary>Ablation (one, on the provenance call)</summary>\n\n`node scripts/ablation-replace.mjs` replaced `(anchors = unprovisionedInjectedColumnsFor(objects.get(object)))` with `(anchors = new Set...)`. The anchor count went from 1 to 0 and the blob from 67957ee3b5f5 to 7fa2a74d5075. Then `vitest run src/validate-ai-context.test.ts` gave Tests 4 failed | 26 passed (30). The four red cases were the external-root warning, the per-object case, the body case and the link case, and the non-external clean case stayed green. After restore the blob equals HEAD (67957ee3b5f5) and `git diff HEAD` is empty. The test imports the source by a relative path, so no dist rebuild was needed.\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CbeF2saT6wUBV4E9uc)_\n\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc -->\n\n"
+}

@@ -2,8 +2,8 @@
   "number": 37666,
   "kind": "issue",
   "title": "37598 跟进：MCP 入口的故障日志改用内核日志器，主机的脱敏设置才生效",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T18:48:46Z",
-  "updated_at": "2026-11-26T19:56:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T23:04:09Z",
+  "closed_at": "2026-11-26T23:03:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37666",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37598. The source is seat 5's REWORK 7200856706 on PR #37652, which marks this out of scope and offers a p3 card under #37598. The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p3 · reach: every 5xx fault line the MCP doors write (`/mcp` and stdio) · evidence: read.\n\n## 维护者速读\n- 做什么：MCP 入口记录 5xx 故障时用的是内置的控制台兜底，而不是主机配置的日志器，所以主机自己的脱敏词和日志输出设置不生效。让 MCP 入口拿到内核的日志器。\n- 谁受益：运维；配置了自己脱敏规则的主机。\n- 不做会怎样：MCP 的故障日志只按默认脱敏词处理，且不进主机的日志管道。\n- 需要你做的：无。\n\n## What\nAfter PR #37652, `logServerFault` falls back to the console sink, with only the default redact words, when no logger is handed to it. The MCP doors (`packages/runtime/src/domains/mcp.ts`, the stdio bridge in `packages/mcp`) call it without the kernel's `ObjectLogger`. Hand them the kernel logger so their fault lines go through the host's sink and its configured redact list.\n\n## Acceptance\n- A test per door: a 5xx fault line goes to the kernel logger, and a host redact word is applied to a cause.\n- No response body change.\n- `Clause-②: no`, `Metadata-protocol: none`.\n\nBlocked-by: #37598 (PR #37652)\nParent: #37598\nSize: XS\nDedupe (objectstack, is:issue): `mcp door kernel logger fault` 0 · `logServerFault logger mcp` 0.\n"

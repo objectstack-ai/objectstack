@@ -1,0 +1,36 @@
+{
+  "number": 37692,
+  "kind": "pull_request",
+  "title": "test(cli): the #30120 start-refusal cases carry the spawn's own timeout",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T20:23:13Z",
+  "updated_at": "2026-11-26T21:15:38Z",
+  "closed_at": "2026-11-26T21:15:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T21:15:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37692",
+  "body": "Fixes #37601\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感:只改了命令行工具的一个集成测试,产品行为前后不变。\n- 为什么做:这组「镜像开关打开、缺设置就拒绝启动」的测试在繁忙的 CI 机器上偶发超时,已把两个无关的合并请求踢出合并队列。\n- 出错会怎样:最坏只是这几条测试的超时上限变长,真正失败仍会报红;可直接撤回。\n- 要你做什么:无。\n\n## What changes\n\n`packages/cli/test/start-deployment-durability.integration.test.ts` only.\n\n- The three cases of `#30120 — with the image switch on, a start missing its settings refuses` each wait on one synchronous `os start` (`spawnSync`, 120 s allowance) but ran under vitest's 5 s case default. Each now carries `SPAWN_CASE_TIMEOUT_MS` as its case timeout.\n- The spawn allowance and the case timeout are one file-level pair, `SPAWN_TIMEOUT_MS = 120_000` and `SPAWN_CASE_TIMEOUT_MS = SPAWN_TIMEOUT_MS + 10_000`, hoisted from the `#31600` describe (where they were `SPAWN_TIMEOUT_MS` / `LEG_TIMEOUT_MS`) so both spawning describes read the same values and cannot drift. The literal `timeout: 120_000` in the `refuse()` helper now reads `SPAWN_TIMEOUT_MS`.\n- No assertion changes; nothing skipped, retried or quarantined; the global vitest timeout is untouched.\n\nShape search: every `spawnSync` in the file (two: the `#30120` refusal helper and the `#31600` leg helper) and every `it(` was listed. The `#31600` cases already carried the spawn bound. The two boot describes (`explicit file:` and `without the switch`) spawn only in `beforeAll`, which already carries `BOOT_TIMEOUT_MS + 30_000` / `+ 60_000`, and their cases only read the recorded result. No other describe has the shape.\n\n## Tests\n\nRun on head `ca1c021a`, after the `@objectstack/cli...` build closure (70/70 turbo tasks, lock VERDICT command-exit 0).\n\n<details><summary>vitest --project integration on this file: 11/11 pass</summary>\n\n```\n✓ #30120 refusal > none set: exit 1, naming all three, before anything is written 1567ms\n✓ #30120 refusal > only the database missing: names only OS_DATABASE_URL 1606ms\n✓ #30120 refusal > a switch value that is not a switch is refused too, rather than read as off 1588ms\n✓ #31600 > OS_AUTH_SECRET unset 1704ms / set 3003ms / CONTROL 3667ms\nTest Files  1 passed (1)\n     Tests  11 passed (11)\nos-verify-lock: VERDICT command-exit 0\n```\n\nEach refusal case reads about 1.6 s on a shared local box; the card's runner readings went past 5 s under load.\n</details>\n\n## Acceptance notes\n\n- Test-only diff: `packages/cli` ships `dist`, `README.md`, `CHANGELOG.md`; the edited file is under `test/`, so nothing publishes and the PR carries `skip-changeset`.\n\n## Verification\n\nRead first: the `#30120` refusal describe (the three new case timeouts) and the hoisted constants beside `BOOT_TIMEOUT_MS`.\n\nTwo-minute check: `pnpm --filter @objectstack/cli exec vitest run --project integration test/start-deployment-durability.integration.test.ts` after building the CLI; expect 11 passed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Q4EjjQkY5yXZrN9BEA3rEK\n<!-- signed: repo:objectstack#6 · hotlong · session_01Q4EjjQkY5yXZrN9BEA3rEK -->\n"
+}

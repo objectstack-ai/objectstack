@@ -1,0 +1,32 @@
+{
+  "number": 37756,
+  "kind": "pull_request",
+  "title": "fix(app-shell): a cited heading is read as its face draws it, so links and entities open their section",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T01:30:21Z",
+  "updated_at": "2026-11-27T02:00:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37756",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DLCo5F2y7fgbM8tstGoyyUn)_\nFixes #37664\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化：在记录页点开 AI 引用时，标题里带链接或特殊符号（如版权符号）的段落，现在能直接定位到那一段，而不是只停在整个字段上。\n- 为什么做：属于 AI 引用出处定位的后续收尾，替点引用查看出处的用户解决少数标题定位不准的问题。\n- 出错会怎样：最坏情况是又退回到只定位到字段，不会打开错误的段落；可直接撤回本次改动。\n- 要你做什么：无。\n\n## What changes\n`ui/packages/app-shell/src/views/recordSectionAnchor.ts` (page side only; the anchor and the outline wire shape are untouched, `packages/spec` is not in the diff).\n\nThe card's comparison-form choice: derive the page's reading of each listed heading from the same parse the field draws with, rather than normalising the source text.\n- **markdown**: each outline heading is matched to the drawn heading of the face's own parse (`drawnMarkdownHeadings`, loaded through `loadSectionHeadingReader`) that starts at the same offset, and its drawn text is read. So `[Data](url) scope` reads `datascope` (was `datahttps...scope`) and `Data &copy; 2026` reads as drawn. A listed heading with no drawn counterpart keeps its source reading (the existing \"listed but not drawn\" rule then opens the field, as before).\n- **html**: the heading scan the page already ran for unlisted headings now reads every heading tag, ends a heading where the browser does (the next heading closer or opener), and decodes every character reference (a textarea's RCDATA parse, no element made), so `Caf&eacute; &copy;` matches its drawn text; the outline decodes only six entities.\n- `reading`, `ordinal`, `count` and `unlisted` are all computed from those drawn readings in one place (`candidateOf`); a markdown candidate counted before the parse loads is recounted in full once it has (it was only its unlisted count before). Before the load, a source reading of nothing still means a drawn reading of nothing (the parse adds no letter or digit), so the early field-only answer is unchanged.\n- One more case the drawn reading fixes: a listed `# [Scope](url)` beside a cited `## Scope` was counted as an *unlisted* same-titled heading (field opened); it now counts as listed and the cited heading opens.\n\n## Tests\nNew top-level `describe` in `recordSectionAnchor.test.tsx` (the existing harness file for this module): bold, inline code, a link, an entity, an escape and a plain-text CONTROL each open their section on a markdown body; an html entity the outline leaves encoded opens its section, with a CONTROL on one it decodes; the link-titled listed heading counts as listed, with a setext CONTROL that still counts unlisted.\n\nRed-first on the base implementation (`579b8577`'s file restored, same tests): 4 failed / 43 passed: link, entity (markdown), html entity, link-counted-as-listed. Bold, inline code and escape already passed on main (the letters-and-digits reading neutralises them), so they stand as controls.\n\n<details><summary>Readings (head 93394e36)</summary>\n\n- `vitest run recordSectionAnchor.test.tsx RecordDetailView.citedSection-37365.test.tsx`: Test Files 2 passed (2), Tests 55 passed (55), lock VERDICT command-exit 0.\n- `pnpm --filter @object-ui/app-shell type-check` (both tsc programs, the test one included): VERDICT command-exit 0.\n- Full app-shell suite: not run locally (stopped at the PM's request to free the shared lock); CI's Test UI carries it.\n</details>\n\n## Acceptance notes\n- Inline html in a markdown heading is not pinned: what the face draws for it is whatever its parse answers, and the page now reads that by construction.\n- The page's html heading end (first heading closer or opener) can differ from the outline's (the matching-level closer) only for nested or mismatched heading tags, where the browser's drawing follows the page's reading.\n\n## Verification\n`cd ui && npx vitest run packages/app-shell/src/views/recordSectionAnchor.test.tsx` - expect 47 passed, including the six `objectstack#37664` markdown cases.\n\nRead first: `candidateOf` in `recordSectionAnchor.ts` (the reading/count change), then `drawnHtmlHeadings`, then the new describe.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cxBECSPtHxQMZDHSie)_\n"
+}

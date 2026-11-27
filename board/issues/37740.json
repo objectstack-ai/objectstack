@@ -1,0 +1,31 @@
+{
+  "number": 37740,
+  "kind": "issue",
+  "title": "ADR-0084: the type-to-group note, fold sentence and item 6 heading catch up with the knowledge_source row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:skills",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T00:52:03Z",
+  "updated_at": "2026-11-27T01:22:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37740",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb4BAjgQ43tqy1DvVJ\n\nFiling gate: ② follow-up out of #37304 (PR #37676, contract record 7206413701 nit N2, seat REWORK 7206423476), filed by the owning zone ai-37000 under #37304 at the seat's direction, per the maintainer's standing permission for areas to file their own follow-up cards. Handed to repo:objectstack#1 with the #37000 ledger (7206523866).\nGrading: area:ai · domain:skills · Task · p3 (seat-directed) · reach: ADR-0084 prose · evidence: read.\n\n## 维护者速读\n\n- 做什么：ADR-0084 加了“知识源”一行后，表下的计数说明、合并说明和第 6 条标题还是旧的，补齐文字。\n- 谁受益：读 ADR 的人看到的计数和说明与表一致。\n- 不做会怎样：文档自相矛盾；功能不受影响。\n- 需要你做的：无（docs/adr 受治理，按惯例合入）。\n\n## What\n\nPR #37676 adds one ADR-0084 type-to-group row (`knowledge_source`, AI, 5, 高级) under amendment item 6 and nothing else. Still stale: the note under the table counts \"AI 4\" and 33 entries at its dated reading; the fold sentence names `ai_context` alone; item 6's heading names one type while two rows now point at it.\n\n## Acceptance\n\n- The note, the fold sentence and item 6's heading read true for the table as merged (dated amendment line if the ADR's convention asks for one); `studioMenuPlacement.test.ts` stays green.\n\nBlocked-by: #37304"
+}

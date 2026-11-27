@@ -1,0 +1,32 @@
+{
+  "number": 37703,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37698: dashboard Default Period zh names not pinned to the period chip words",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T21:28:14Z",
+  "updated_at": "2026-11-26T22:15:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37703",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (Contract review record 7203741536 on PR #37698, nit N1, adopted at ACCEPT)\n\n## What happens\n\nPR #37698 (Fixes #37607) shows Chinese option names on the page inspector's type and record-action pickers and on the report and dashboard \"Default Period\" pickers, by copying the platform zh-CN pack's option names into the console's override table. Its review left one item open:\n\n- [ ] **The dashboard picker is not pinned to the period chip's words** (N1). `ReportDefaultInspector.defaultPeriodLabels-36835.test.tsx` pins only the report picker's Chinese names to the console rows the period filter chip reads (`dashboard.filters.range.*`). The dashboard picker is pinned only to the platform pack's own dashboard row. The two pack maps are identical today, so a platform edit to the dashboard row alone would make the dashboard picker and the chip disagree with no test failing. Expected: the same loop over `getDashboardForm('zh-CN')` in that test.\n\nCategory ①: a missing pin on a shipped label pairing.\nPriority: p3 (no wrong text ships today).\nBusiness reason: a Chinese-language admin setting a dashboard's default period would read one word in the picker and another on the filter chip after an unrelated platform translation edit.\nReader: the ux-lane dev who next edits the dashboard inspector or the zh-CN metadata-form pack.\nDedupe: searched open issues for `\"PR #37698\"`: 0 hits.\nRelated: #37607, #36835, PR #37698.\n\n## Grade\n\narea:ux · Bug · minor · reach: read (the head against `main`) · evidence: read → p3"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 37746,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37725: first-screen LCP protocol clause — non-network scripts and per-report counts",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T01:06:42Z",
+  "updated_at": "2026-11-27T01:22:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37746",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (Contract review record 7207007610 on PR #37725, nits N5 and N6, adopted at ACCEPT)\n\n## What happens\n\nPR #37725 (Part of #37444) wrote the maintainer's HTTPS + HTTP/2 condition (ruling 7205984444) into checklist item `ux-conventions.first-screen-lcp` as a scored clause, \"every scored run was served over HTTP/2\". Its review left two items open:\n\n- [ ] **Non-network scripts** (N5). The clause requires every `audits['network-requests']` entry with resourceType `Script` to read protocol `h2`. A `data:` or `blob:` script reads something else, which would turn every run into a control. Expected: narrow it to every network (`https:`) Script request.\n- [ ] **Counts from every scored report** (N6). The clause checks every scored report, but its evidence line asks for per-protocol counts \"from one report\" per page. Expected: record the counts for all 15 reports, or say why one per page is enough.\n\nCategory ①: wording of a checklist clause, so that the clause and its evidence match.\nPriority: p3. Today's Console loads no `data:`/`blob:` scripts on the three pages, so nothing misscores now.\nBusiness reason: if a future build inlines one script, every first-screen reading could silently become a control, and the gate would stop scoring.\nReader: the ux lane thread that next edits `docs/qa/platform-checklist/areas/ux-conventions.json` (the #37572 slice of #37444 is next).\nDedupe: searched open issues for `\"PR #37725\"`: 0 hits.\nRelated: #37444, PR #37725.\n\n## Grade\n\narea:ux · Bug · minor · reach: read · evidence: read → p3"
+}

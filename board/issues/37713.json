@@ -1,0 +1,37 @@
+{
+  "number": 37713,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37707: automation skill never says a pending record can be deleted; lockRecord row lost its \"from edits\" bound; stale changeset wording",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T22:39:59Z",
+  "updated_at": "2026-11-27T02:06:49Z",
+  "closed_at": "2026-11-27T02:05:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37713",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (Contract review records 7204561928 and 7204862503 on PR #37707, nits N4, N5 and the round-2 notes, adopted at ACCEPT)\n\n## What happens\n\nPR #37707 (Fixes #37529) teaches the three data-model publish checks of #35143's Data model family in the `objectstack-data` and `objectstack-automation` skills. Its review left these items open; none can be fixed on that head without moving it.\n\n- [ ] **A pending record can be deleted, and the skill never says so** (round-2 note). `skills/objectstack-automation/references/state-machines-and-approvals.md` teaches the approval lock as refusing edits, but deleting a pending record is not refused: the delete lands, cancels the request and cascades its `master_detail` lines (`bindRecordDeleteCancelHook`). This is by design and untaught on `main` as well. Expected: one sentence beside best practice 2 or \"Reading the lock\".\n- [ ] **The `lockRecord` row no longer states the lock's bound** (N5). \"from edits\" was cut to pay back tokens; it was the exact reach of the record's own lock (a `beforeUpdate` hook). Expected: restore the bound when the file has headroom.\n- [ ] **Redundant arm in best practice 2** (N4). \"or a parent field group\" never applies on its own to a `lookup` child: a group places a lookup only when it is already `relatedList: 'primary'`. Expected: drop or qualify the arm.\n- [ ] **The changeset still carries round-1 wording** (round-2 note). `.changeset/37529-skills-data-model-publish-checks.md` still says \"drawn as a body table\" and states the roll-up refusal unconditionally. Expected: reword before the changeset is consumed at release.\n\nCategory ①: skill text that leaves out or over-states shipped approval-lock behaviour.\nPriority: p2 (security-touching text: it teaches what the approval lock refuses).\nBusiness reason: an app author reading the skill believes a pending record is fully frozen, when it can be deleted and its approval cancelled.\nReader: the dev who next edits the automation skill's approvals reference.\nDedupe: searched open issues for `\"PR #37707\"`: only #37529 itself.\nRelated: #37529, PR #37707, #35143.\n\n## Grade\n\narea:ai · Bug · minor · reach: read (the head against `main`) · evidence: read → p2"
+}

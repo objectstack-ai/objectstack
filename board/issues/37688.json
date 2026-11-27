@@ -13,19 +13,21 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Task",
   "created_at": "2026-11-26T20:14:32Z",
-  "updated_at": "2026-11-26T20:14:32Z",
+  "updated_at": "2026-11-27T02:05:45Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37688",
-  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37611. The source is seat 5's contract record 7202388684 on PR #37674: nit N1, plus an out-of-scope note on a line citation. The seat asked the area to file one card for both (handoff 7202422701). The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p3 · reach: `objectstack-ai` skill eval case 12 and one source citation in its SKILL.md · evidence: read.\n\n## 维护者速读\n- 做什么：评测第 12 题有两个必含词比标准答案还严，会把正确答案判错，改成与答案一致；顺手修正 SKILL.md 里一处差一行的源码行号引用。\n- 谁受益：技能评测结果的可信度；读文档追源码的人。\n- 不做会怎样：用通配符绑定工具、或不提 MCP 参数的正确答案会被判失败；引用指偏一行。\n- 需要你做的：无。\n\n## What\n1. Eval case 12 in `skills/objectstack-ai/evals/skills-tools-knowledge.json` (added by PR #37674) has two `must_contain` tokens stricter than its own `expected_output`:\n   - the literal `get_record_context`, while the expected answer admits a wildcard binding that matches it;\n   - `recordId`, a client-side MCP argument the skill file never spells, so a correct `defineSkill` with no prose about the MCP argument fails.\n   Relax both so every answer the `expected_output` admits passes. Keep the tokens that pin the teaching: `defineSkill`, `context:`, `policy_document`.\n2. `skills/objectstack-ai/SKILL.md` line 108 cites `skill.zod.ts:37-51, 139-202`. The cited blocks sit at 38-52 and 140-203 on PR #37674's head, so the citation is one line low. Re-read the lines on `main` when you fix it.\n\n## Acceptance\n- Case 12's assertions accept a wildcard binding and an answer with no MCP-argument prose, and the grader (`packages/qa/scenarios/src/skill-evals/grade.ts`) still passes the expected answer.\n- The SKILL.md citation matches the blocks on `main`.\n- The skills token ratchet holds, with no row edited.\n- `Clause-②: no`, `Metadata-protocol: none`.\n\nBlocked-by: #37611 (PR #37674)\nParent: #37611\nSize: XS\nDedupe (objectstack, is:issue is:open): `\"must_contain\" recordId` → only #37611 (source) · `\"skill.zod.ts\" SKILL.md citation` → only #37611 and seat ledgers. No duplicate.\n"
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37611. The source is seat 5's contract record 7202388684 on PR #37674: nit N1, plus an out-of-scope note on a line citation. The seat asked the area to file one card for both (handoff 7202422701). The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p3 · reach: `objectstack-ai` skill eval case 12 and one source citation in its SKILL.md · evidence: read.\n\n## 维护者速读\n- 做什么：评测第 12 题有两个必含词比标准答案还严，会把正确答案判错，改成与答案一致；顺手修正 SKILL.md 里一处差一行的源码行号引用。\n- 谁受益：技能评测结果的可信度；读文档追源码的人。\n- 不做会怎样：用通配符绑定工具、或不提 MCP 参数的正确答案会被判失败；引用指偏一行。\n- 需要你做的：无。\n\n## What\n1. Eval case 12 in `skills/objectstack-ai/evals/skills-tools-knowledge.json` (added by PR #37674) has two `must_contain` tokens stricter than its own `expected_output`:\n   - the literal `get_record_context`, while the expected answer admits a wildcard binding that matches it;\n   - `recordId`, a client-side MCP argument the skill file never spells, so a correct `defineSkill` with no prose about the MCP argument fails.\n   Relax both so every answer the `expected_output` admits passes. Keep the tokens that pin the teaching: `defineSkill`, `context:`, `policy_document`.\n2. `skills/objectstack-ai/SKILL.md` line 108 cites `skill.zod.ts:37-51, 139-202`. The cited blocks sit at 38-52 and 140-203 on PR #37674's head, so the citation is one line low. Re-read the lines on `main` when you fix it.\n3. `skills/objectstack-ai/references/context-packs.md` lists the `ai-context-*` rule ids in a table (lines 108-113). It lacks `ai-context-field-unprovisioned`, the warning PR #37699 (#37432) adds for an injected column with no storage on an `external` object. Add its row. This came from the os-dev report 7203921910 on #37432.\n\n## Acceptance\n- Case 12's assertions accept a wildcard binding and an answer with no MCP-argument prose, and the grader (`packages/qa/scenarios/src/skill-evals/grade.ts`) still passes the expected answer.\n- The SKILL.md citation matches the blocks on `main`.\n- The context-packs rule table lists `ai-context-field-unprovisioned` with its severity.\n- The skills token ratchet holds, with no row edited.\n- `Clause-②: no`, `Metadata-protocol: none`.\n\nBlocked-by: #37611 (PR #37674), #37432 (PR #37699)\nParent: #37611\nSize: XS\nDedupe (objectstack, is:issue is:open): `\"must_contain\" recordId` → only #37611 (source) · `\"skill.zod.ts\" SKILL.md citation` → only #37611 and seat ledgers. No duplicate.\n\n"
 }

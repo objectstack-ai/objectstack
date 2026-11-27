@@ -14,18 +14,20 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T13:48:26Z",
-  "updated_at": "2026-11-26T14:20:24Z",
+  "updated_at": "2026-11-27T01:09:48Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37572",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: maintainer ruling on #37444 at 2026-11-26 13:43Z (「先做最小一刀,其余立卡排队」: slice C rides #37444, the other seams queue as their own cards) · Source: fleet (production re-measure on #37444, comment 7193730951)\n\n## What happens\n\nReading on a production build (objectstack `021524cd`, brotli on, Lighthouse 13.6.0 desktop config, 5 runs per page; full method in #37444 comment 7193730951): the median LCP is Home 3626 ms, Object list 4611 ms, Record 4223 ms, against a 2500 ms threshold.\n\nBytes are about 2 s of every page. 2.2–2.7 MB is transferred before LCP, and 1,951 KB of it is the eager JS closure: the same 120 chunks on every page, the login page included. The largest eager chunks (gzip) are vendor-objectstack 684 KB (`@objectstack/spec` zod modules for view/dashboard/object/flow/action, plus formula and client), ui-components 351 KB, index 131 KB, framework 89 KB, vendor-react 80 KB, i18n-locale-en 71 KB and vendor-radix 58 KB. With bandwidth unlimited (RTT 40) the pages drop to 1.7 / 2.4 / 2.1 s.\n\nA probe build that marked zod builder calls pure (`treeshake.manualPureFunctions: ['z']`) saved only 13 KB. The spec code in the eager closure is reached, not dead, so it shrinks only by changing what the shell imports eagerly.\n\n## Expected\n\n- The console shell's eager closure no longer pulls the spec schema modules (and other route-only code) that the first screen doesn't need; they load with the route or feature that uses them.\n- Lower the console eager-closure budget the build already checks (see #34927, #26131) to the new size, so the closure can't grow back unseen.\n- Re-measure the three pages with the #37444 method and record the new medians on that card.\n\nNot this card: route-level lazy chunks before LCP (slice C, in progress as Part of #37444), the serial boot API rounds, render CPU (sibling cards).\n\nRelated: #37444, #37398.\n\nCategory ①: a user-visible experience defect with a named place and a repeatable reading (every console user waits 3.6–4.6 s on the first screen).\nPriority: p2 — the grade of parent #37444; slow but working, on every first screen, not a wrong-data or security case.\nBusiness reason: everyone who opens the console waits on the first screen every session; without this seam the pages can't reach the 2.5 s threshold #37444 sets.\nReader: seat 2 area s2-ux (repo:objectstack#2) picks it from the queue after slice C lands on #37444.\nDedupe: `console eager chunk first screen` 22 hits, `vendor-objectstack chunk` 41 hits; open overlap only #37444 (the parent; this card is its queued seam). Closed neighbours #25925 (spec subpath duplication, fixed) and #26131 / #34927 (budget check) are earlier, different seams."

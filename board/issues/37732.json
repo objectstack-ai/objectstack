@@ -1,0 +1,31 @@
+{
+  "number": 37732,
+  "kind": "issue",
+  "title": "knowledge-pgvector: dropSource while a build of the same source runs in another process (live cells first)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T00:25:06Z",
+  "updated_at": "2026-11-27T01:21:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37732",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb4BAjgQ43tqy1DvVJ\n\nFiling gate: ② follow-up out of #37304 (PR #37676, contract record 7206413701, escalated note \"pgvector dropSource against a build running in another process\", seat REWORK 7206423476), filed by the owning zone ai-37000 under #37304 at the seat's direction, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · domain:server · Task · p2 (seat-escalated: new contract member, no live run yet) · reach: pgvector deployments that remove a knowledge source · evidence: read, not run.\n\n## 维护者速读\n\n- 做什么：删除一个知识源时，若另一个节点正在重建同一个源，pgvector 要能正确清掉，包括正在构建的那一代；并先在真实 PostgreSQL 上跑一遍。\n- 谁受益：多节点 pgvector 部署删知识源后不残留数据。\n- 不做会怎样：极端并发下可能留下一代残余索引；单节点不受影响。\n- 需要你做的：无。\n\n## What\n\nPR #37676 adds the optional `IKnowledgeAdapter.dropSource`, whose contract sentence says it drops every generation of the source, \"the one under construction included\". pgvector's implementation has not been read against a build holding the source's builder lock in another process, and none of its live cells (74 skipped on the PR) has run on any head, because the PostgreSQL job runs only in the merge queue.\n\n## Acceptance\n\n- The first merge-queue (or local PG16 + pgvector) live run of the `dropSource` cells is read and recorded on this card.\n- A live case drops a source while another session holds its builder lock and a building generation: afterwards no row or generation of the source remains, and the other build's later writes or `completeBuild` are refused (`LOCK_CONFLICT` or equivalent), never resurrecting the source.\n- turso parity is stated (it has no builder lock).\n\nBlocked-by: #37304"
+}

@@ -14,18 +14,20 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-26T20:00:20Z",
-  "updated_at": "2026-11-26T20:13:15Z",
+  "updated_at": "2026-11-27T00:55:32Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37677",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (a declared contract not honoured, found by a review) · Source: fleet (Contract review record 7202175363 on PR #37672, escalated out-of-diff; read from the tree on `main`, not yet run)\n\n## What happens\n\nThe form field `span` docblock in the spec says a wide field type on `span: 'auto'` reaches the full row. A `repeater` field is one of those wide types, but both form renderers give it one cell: `field-type-alias.ts` maps `repeater` to `field:object`, and `field:object` is not on the wide list the auto-span resolver reads (`resolveColSpan` / `applyAutoColSpan` in `@object-ui/plugin-form`). This predates #37672, which made the named-form page use the same resolver as the record form, so both surfaces agree on the wrong answer.\n\nreach: not yet measured. First step: render a two-column form with a `repeater` field and no `span` on the record form and on `/forms/NAME`.\n\n## Expected\n\nA `repeater` on `span: 'auto'` takes the full row on both renderers, as the docblock says, with a pin per renderer. If the docblock is the wrong side instead, the fix is to correct the docblock and say which wide types reach the full row.\n\nCategory ①: a declared layout contract that a renderer does not honour.\nPriority: p3 (layout only; an author can set `span: 'full'` by hand).\nReader: the ux-lane dev who next edits the form auto-span resolver.\nDedupe: searched open issues for `repeater span`: see the search above this filing; no card names this.\nRelated: #37559, PR #37672.\n\n## Grade\n\narea:ux · Bug · minor · reach: read · evidence: read → p3"

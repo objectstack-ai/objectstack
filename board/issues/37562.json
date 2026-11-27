@@ -2,8 +2,8 @@
   "number": 37562,
   "kind": "issue",
   "title": "37487 跟进：引用定位在同名标题与空段落两个边角的处理",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T13:22:46Z",
-  "updated_at": "2026-11-26T20:06:23Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T20:28:54Z",
+  "closed_at": "2026-11-26T20:27:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37562",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37487. The source is seat 5's REWORK 7193228908 on PR #37539, which asks for a card carrying N6 and N7 of scope note 7190147175 before `Fixes #37487` closes the only card that holds them. The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p3 · reach: a chip whose cited heading shares its title with an unlisted heading, and an empty-reading section · evidence: read.\n\n## 维护者速读\n- 做什么：点引用打开记录时，有两个小边角：同名标题的计数检查可能挑错段落；内容为空时要等 4 秒才定位。补上这两处。\n- 谁受益：使用 AI 引用的用户。\n- 不做会怎样：极少数情况下定位到同名的另一段，或空段落定位慢。\n- 需要你做的：无。\n\n## What\nFrom scope note 7190147175 on the record-section locator (`ui/packages/app-shell/src/views/recordSectionAnchor.ts`, PR #37485):\n- N6: the count check does not exclude the case of one unlisted same-titled heading plus one listed-but-undrawn heading, so the locator can pick the wrong one. Make the check tell them apart.\n- N7: when the reading is empty, the field opens only after the 4 s settle. Open it as soon as the empty reading is known.\n\n## Acceptance\n- A test per case, each with a control.\n- `Clause-②: no`, `Metadata-protocol: none`.\n\nParent: #37487\nSize: XS\nDedupe (objectstack, is:issue): `locateSection same-titled heading` 0 · `record section empty reading settle` 0.\n"

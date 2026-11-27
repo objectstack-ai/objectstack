@@ -1,0 +1,33 @@
+{
+  "number": 37777,
+  "kind": "pull_request",
+  "title": "feat(scenarios): name the roll-ups a persona is denied in the build prompt",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T02:03:19Z",
+  "updated_at": "2026-11-27T02:05:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37777",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"hotlong\"} -->\n_Requested by **Jack** · [project thread](https://claude.ai/code/project/chan_01EF41AQooqveF2DGD8nqPzS?thread=cmsg_01EF41AQooqveF2DGD8nqPzSW81HPmThVY9cna5EoPq7Fe)_\n\nFixes #37764\n\n## What changes\n\n- `PersonaSchema` gains an optional `withheldRollups` (a list of field refs, bare card names): the roll-ups on objects the persona reads that summarise rows or fields its `hidden` withholds. The schema refuses one the persona's `hidden` already names or its `allowedRollups` allows; the loader refuses one on a field no seed row of its object carries; `namespacedScenario` prefixes its objects like every other persona ref.\n- `personaLine()` (build, door and every other prompt that carries the data contract) appends one clause when the key is present: `; the roll-up fields X and Y summarise what it must not read, so they are withheld too: its set must not read them either` (singular form for one field).\n- `project_with_tasks`: `client_viewer` withholds `project.task_count` and `project.total_estimate`. `invoice_with_line_items`: `warehouse_staff` withholds `invoice.total`. The contractor already carries `project.total_estimate` in its `hidden`, so its line does not change.\n- The scorer is untouched: `rollupSourceCharges` already charges a granted roll-up over withheld children, and the leak grader does not read the new key. No `allowedRollups` is added.\n- README (roll-ups over withheld data) and a `patch` changeset.\n\n## Why\n\nMaintainer ruling 2026-11-27 01:42Z, quoted as given: 「客户角色能不能看到项目的任务数和总工时这类汇总数？」→「不能看，按明细权限屏蔽」. The scorer already charges these roll-ups, but the build prompt never said so, so the agent had to guess.\n\n## Prompt diff\n\nEvery prompt (build short/detailed in en and zh, door build, iterate, every question and operation prompt) of all 9 open cards was rendered from `origin/main` 8b9b9d23 and from this branch and diffed. 7 cards are byte-identical (asset_lifecycle, crm_account_with_contacts, leave_balances, order_to_cash, requisition_to_receipt, service_desk, travel_expense). The two changed cards differ in exactly one line, the persona line, in each of the 5 build-style prompts:\n\n```diff\n- - `demoproject_client_viewer` for `client_viewer` (Client stakeholder who may not change tasks): must not read the object `demoproject_task`.\n+ - `demoproject_client_viewer` for `client_viewer` (Client stakeholder who may not change tasks): must not read the object `demoproject_task`; the roll-up fields `demoproject_project.task_count` and `demoproject_project.total_estimate` summarise what it must not read, so they are withheld too: its set must not read them either.\n\n- - `demoinvoice_warehouse_staff` for `warehouse_staff` (Warehouse staff who may read invoices but not change them): must not read the object `demoinvoice_account` or the field `demoinvoice_invoice_line.amount` or the field `demoinvoice_invoice_line.unit_price`.\n+ - `demoinvoice_warehouse_staff` for `warehouse_staff` (Warehouse staff who may read invoices but not change them): must not read the object `demoinvoice_account` or the field `demoinvoice_invoice_line.amount` or the field `demoinvoice_invoice_line.unit_price`; the roll-up field `demoinvoice_invoice.total` summarises what it must not read, so it is withheld too: its set must not read it either.\n```\n\n## Verification\n\n- `pnpm --filter @objectstack/scenarios exec vitest run test/runner/units.test.ts`: three new tests (the two cards' persona lines carry the sentence and the contractor's and an unrelated card's lines are as before; the schema refusals; the loader refusal).\n- `pnpm --filter @objectstack/scenarios test` (after `pnpm build` of the package): 44 files, 1364 passed, 14 skipped, 1 failed. The failure is `test/runner/packages.test.ts` › \"every install ran the workspace's pinned pnpm\", and it fails the same way with this branch's `src` and cards swapped back to `origin/main` in this container, so it is environmental here.\n- `pnpm --filter @objectstack/scenarios typecheck`: clean. `eslint` on the changed sources: clean.\n- `pnpm check:doc-authoring`, `check:empty-changeset`, `check:changeset-fixed`, `check:adr-0087-registration`: pass.\n\n## Acceptance notes\n\n- The card offered `personaLine()` or the two cards' persona text. The persona `role` string also feeds every operation prompt (\"You act for ...\"), so editing it would have changed those turns too, and the roll-up names are not derivable from the card otherwise. Hence a card-level key read only by `personaLine()`, the counterpart of `allowedRollups`.\n- Sequenced with #37760 (same file, `prompts.ts`): whichever lands second rebases.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Q4EjjNemG5vEaykmqisBUx\n"
+}

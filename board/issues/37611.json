@@ -2,8 +2,8 @@
   "number": 37611,
   "kind": "issue",
   "title": "37141 跟进：AI 技能文档教会技能的 context 键与 MCP 记录参数",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T15:22:47Z",
-  "updated_at": "2026-11-26T20:03:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T00:13:15Z",
+  "closed_at": "2026-11-27T00:12:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37611",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37141. The source is seat 5's REWORK 7196154770 on PR #37552, which asks for the skills-docs card that PR's `Skills-docs: follow-up owed` line names. The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p2 · reach: every assistant that learns skill authoring and context packs from the published `objectstack-ai` skill · evidence: read.\n\n## 维护者速读\n- 做什么：技能新增了 `context` 键（指定用哪个资料包；外部 AI 经 MCP 调用时可带记录编号）。把这个写进对外发布的 AI 技能文档，教 AI 和作者怎么用。\n- 谁受益：写记录问询类技能的作者，以及靠技能文档学习的 AI 助手。\n- 不做会怎样：新能力已上线但文档里没有，作者不知道可以这样用。\n- 需要你做的：无（受管文件，按 Tier H 流程走）。\n\n## What\nAfter PR #37552 lands (ADR-0160 D8, row 8), teach in `skills/objectstack-ai`:\n- `SKILL.md`: a skill may declare `context` (a pack's bare name); it must bind `get_record_context` in `tools` (by name or wildcard) or parse refuses it; the pack resolves by package then closure (ADR-0150 D3).\n- `references/context-packs.md`: how a skill with `context` is offered over MCP — one optional `recordId` argument when the pack resolves, the message carries a fixed line and a JSON object, never the record inlined; without the argument the prompt is unchanged; the two lint warnings (`ai-skill-context-unknown`, `ai-skill-context-omitted`).\n- Teach only what `main` does. Pay for growth within each file's ratchet row; raise no ceiling.\n\n## Acceptance\n- Both files teach the key and the MCP argument as `main` has them; `node scripts/check-skills-token-ratchet.mjs` exits 0; skills gates and `check:generated` green.\n- `Clause-②: no`, `Metadata-protocol: none`.\n\nBlocked-by: #37141 (PR #37552)\nParent: #37141\nSize: XS\nDedupe (objectstack, is:issue): `skill context key skills docs` 0 · `context-packs.md recordId argument` 0.\n"

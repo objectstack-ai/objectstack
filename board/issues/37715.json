@@ -1,0 +1,36 @@
+{
+  "number": 37715,
+  "kind": "pull_request",
+  "title": "fix(app-shell): the draft bar publishes the reloaded draft after a conflict \"reload\" (#37648)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T23:17:51Z",
+  "updated_at": "2026-11-27T00:33:53Z",
+  "closed_at": "2026-11-27T00:33:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T00:33:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37715",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuDJAbBe3iTrFcF7GZrucZ32)_\n\nFixes #37648\n\nThe three review follow-ups PR #37637 left on card #37440: N6 of #37387's review (the runtime draft bar keeps a stale token after \"reload\") and N1, N2 of contract review 7198547999 (the `publishItem` pin docs).\n\n## What changes\n\n- **Draft bar after a conflict \"reload\" (`@object-ui/app-shell`).** A view settings Save refused because the draft moved opens the draft-conflict dialog. On \"reload\", `ViewConfigPanel` re-read the stored view into its buffer, but `handleViewConfigSave` answers `false` on `'reloaded'`, so no `savedSignal` reached `RuntimeDraftBar`, which kept the draft version it read on open. Its Publish was then pinned to a draft that had moved, refused `409 METADATA_CONFLICT`, until the panel was reopened.\n  - The guard's reload callback is now `handleConflictReload`, which marks the next stored-view read as the reload's. That read, once it installs a buffer, hands the bar the version it found: `reloadedSignal` (bumped), `reloadedDraftVersion` (the `If-Match` of the read's pin; absent when the read named none) and `reloadedHasDraft` (whether a pending draft was served).\n  - `RuntimeDraftBar` takes them as it takes `savedSignal`: the Publish is pinned to `reloadedDraftVersion`, and the indicator follows `reloadedHasDraft`. The bar never re-reads for it (#36350: a re-read would pin whatever draft is pending by then, which the panel never showed).\n  - A reload whose read fails installs no buffer and hands the bar nothing, so its Publish stays pinned to the draft it showed and is refused, never sent unpinned.\n- **`client.meta.publishItem` (`@objectstack/client`).** The `parentVersion` JSDoc now says an empty string pins nothing and is not sent, as `draftVersion`'s does (N1). JSDoc only; `metaPublishHeaders` already treated `''` so.\n- **Client SDK page (`content/docs/api/client-sdk.mdx`).** The `publishItem` example now shows a publish pinned with `draftVersion` (a draft save's receipt `version`) and `parentVersion` (the version the earlier publish returned), with the refusal and the empty-string rule (N2).\n\n## Decisions made here\n\n- **Only `ViewConfigPanel` is changed.** It is the one host of `RuntimeDraftBar` with a draft-conflict guard (`useDraftSaveGuard`); `ReportConfigPanel` and `ReportView` host the bar without one, so no \"reload\" reaches them.\n- **The bar takes the panel's read, not a read of its own,** for the #36350 reason above; and only the read that answers a \"reload\" is handed over, so an ordinary open, publish or discard behaves as before.\n\n## Verification\n\n- New tests, red on `main` and green here (4 red with the two source files reverted):\n  - `ViewConfigPanel.pinnedDraftSave-36137.test.tsx` (2): another writer's draft moves past the panel's receipt, the next Save is refused, \"reload\" hands the bar that writer's draft version with `reloadedHasDraft: true` (the landed-save signal unmoved); a reload that finds no pending draft hands `reloadedHasDraft: false` and no version.\n  - `RuntimeDraftBar.test.tsx` (3): the Publish after `reloadedSignal` sends `draftVersion` = the reloaded version with no second draft read; a reload with no draft takes the indicator down; the mount's own signal changes nothing (control).\n- `vitest` over every `ViewConfigPanel*`, `RuntimeDraftBar*`, `ObjectView*`, `DraftConflictDialog*` and `viewCacheInvalidation*` test: 1,059 green. `tsc` for `app-shell` (`tsconfig.json` and `tsconfig.test.json`) on the changed files: clean; `eslint`: 0 errors. `check-doc-anchors`: pass.\n- `overlap-check`: exit 0 (no open PR touches these files).\n- Premise: static read on `main` (`handleViewConfigSave`'s `'reloaded'` → `false`; the bar sets its pin only on open and on `savedSignal`), and the red tests above.\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (No spec change.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `eslint` on the changed files passes (the full `pnpm lint` runs in CI).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUuauSMJu1nVSQRQri)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUuauSMJu1nVSQRQri\n"
+}

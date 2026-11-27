@@ -13,18 +13,20 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T16:06:53Z",
-  "updated_at": "2026-11-26T16:24:43Z",
+  "updated_at": "2026-11-27T01:53:19Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37630",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb4BAjgQ43tqy1DvVJ\n\nFiling gate: ② follow-up out of #37102 (PR #37442, os-dev report 7197069277 note 2, seat delta record 7197140233), filed by the owning zone ai-37000 under #37102 at the seat's direction (skills lane), per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · domain:skills · Task · p3 (seat-directed) · reach: skills token ratchet gate · evidence: observed on PR #37442 head 664bd7025.\n\n## 维护者速读\n\n- 做什么：技能文件的 token 上限检查，目前只查“实测 ≤ 上限”；上限被抬高后若 main 上文件又变短，上限就悬在实测之上，没人发现。让检查报出这种情况。\n- 谁受益：上限始终等于实测，不会悄悄留出余量被后来的改动吃掉。\n- 不做会怎样：只能靠评审人手算发现，偶尔漏掉。\n- 需要你做的：无。\n\n## What\n\n`scripts/check-skills-token-ratchet.mjs` passes whenever measured ≤ ceiling. Rulings 6819475461 / 6840575378 pin each ceiling AT the measurement when it is raised. On PR #37442 head 664bd7025, the row stayed 1 token above the merged measurement after #37568 shrank the file on main, and the gate stayed green. Only the reviewer's arithmetic caught it (REWORK 7196055460 S5).\n\n## Acceptance\n\n- The gate reports a row whose ceiling exceeds its measured tokens, naming the row, the measurement and the ceiling. Whether that is a failure or a warning, and how it treats unchanged rows on main, is decided in the PR with the skills-lane reviewer.\n- A test pins the new reading. Existing measured > ceiling refusals are unchanged."

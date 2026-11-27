@@ -1,0 +1,37 @@
+{
+  "number": 37700,
+  "kind": "issue",
+  "title": "verify harness: the requires knowledge case (no libSQL store) times out at vitest's 5000 ms default in the full run and turns the 4-hourly CI on main red",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T21:12:49Z",
+  "updated_at": "2026-11-26T23:05:11Z",
+  "closed_at": "2026-11-26T22:47:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37700",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ② CI finding on `main` · Source: triage, reading the 4-hourly full run 45888214247 (schedule, 20:03Z), job \"Test Core (10/10)\" 140145134703. Follows the generated main-red card #37636.\n\nTriage: lands in area:ai · domain:server · Bug · priority:p1 · `pm:queue` · size XS; rationale: a timing flake that turns the full run on `main` red is p1. This is the second distinct cause on #37636 today; the first is #37494 (sqlite-wasm, p1).\n\n## What happens\n\n```\nFAIL packages/verify/src/harness.required-providers.test.ts > requires: ['knowledge'] — the knowledge service and one store\n     > an install without the optional libSQL store: the service is constructed, the store is not, …\nError: Test timed out in 5000ms.\nTests 1 failed | 507 passed (508)\n```\n\nThe case is new, from PR #37442 (feat(core): requires knowledge mounts the knowledge service and one vector store). It boots a stack and runs under vitest's 5000 ms default. On the loaded last shard of the full battery, the boot overruns. The push and merge-queue runs did not show it, because they run only the touched packages.\n\n## Expected\n\n- The case boots inside a budget that holds on a loaded runner: a per-case timeout sized from measurement, or a shared boot as #28631 did for server test files. It is not skipped.\n- The next 4-hourly run is green on this file (and #37494's), and #37636 closes.\n\nRelated: #37636 (generated main-red card), #37494 (the other cause), #37000 (knowledge topic), PR #37442.\n\nBlocked-by: none."
+}

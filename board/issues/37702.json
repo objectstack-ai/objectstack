@@ -1,0 +1,32 @@
+{
+  "number": 37702,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37655: scaffold-e2e tarball job coverage and stale wording",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T21:17:40Z",
+  "updated_at": "2026-11-26T22:12:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37702",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4czzx9dtSEm3jWWL9c3\n\nFiling gate: owed follow-ups of review work (L1/L2 exception: one `review follow-ups of PR #N` card per PR, items ticked). Source: fleet. Found in the contract review of PR #37655 (card #37441), record 7203561225.\n\nGrading: area:fleet · Task · CI-gate coverage and comment accuracy, no product behaviour → suggested p3 · evidence: read on the PR head `3ded0a66` and its job log 140079805119.\n\n## Items\n\n- [ ] **The tarball job runs too rarely for what it now tests.** After #37655, `Scaffold with repo dist` installs the whole framework closure of the checkout, but `on.pull_request.paths` names only `packages/create-objectstack/**`, `docker/**` and the workflow, and the job has `if: github.event_name != 'schedule'`. A framework PR that breaks the scaffolded project is first seen on the next unrelated template or Docker PR, which is the stall #37441 was filed to end. `os-create-smoke.yml` covers the same gap with a nightly run. Options: a nightly run of this job, or `paths:` naming the packer `scripts/publish-smoke-pack.mjs`. This changes an existing gate's trigger (governed `.github/workflows/**`, Tier H), so whoever picks it up checks the gate rule first. Re-check: `sed -n '27,36p;50,52p' .github/workflows/scaffold-e2e.yml`.\n- [ ] **The pinned-shape step's warning string is stale.** It still says \"the unpublished-version window the install step's fallback exists for (that fallback lives in this workflow…)\", and its comment heading reads \"WHY IT STILL LIVES HERE\". No install-step fallback exists after #37655, and the warning printed in that head's run. #37441 Scope 3 froze the step's commands, so it was left as is. Re-check: `grep -n \"install step's fallback\" .github/workflows/scaffold-e2e.yml`.\n- [ ] **The project install uses whatever pnpm Corepack finds.** A bare `pnpm install` in a directory with no `packageManager` field fetched pnpm 12.x in the job, while the scaffolded Dockerfile reads that lockfile with `pnpm@10` and the template's CI pins 10. It follows the `scripts/create-scaffold-smoke.sh` precedent and works today. A cross-major lockfile hand-off can still red the job for a reason unrelated to the PR. Either name the choice in a comment or pin the major. Re-check: `grep -n \"pnpm install --no-frozen-lockfile\" .github/workflows/scaffold-e2e.yml`.\n\n## Business reason\n\nThe job is the first-run gate for `npm create objectstack`: it should catch a framework change that breaks a new user's project on the PR that makes it, and its comments and warnings should describe what it actually does.\n\n## Who acts\n\nThe seat that owns `.github/workflows/scaffold-e2e.yml` changes (Tier H; today seat repo:objectstack#1, area o1-A, after triage's first touch).\n\nDedupe: `review follow-ups of PR #37655` → 0 open; `scaffold-e2e paths schedule` → 3 open hits: #37441 (the parent, closing with #37655) and two seat posts; no open card on this trigger.\n\nParent: objectstack-ai/objectstack#37441.\n"
+}

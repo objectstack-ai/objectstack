@@ -1,0 +1,32 @@
+{
+  "number": 37769,
+  "kind": "pull_request",
+  "title": "docs(skills): actions teach ai.requiresConfirmation beside confirmText; permission sets teach the owner-only delete floor",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T01:49:06Z",
+  "updated_at": "2026-11-27T02:15:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37769",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"hotlong\"} -->\n_Requested by **Jack** · [project thread](https://claude.ai/code/project/chan_01EF41AQooqveF2DGD8nqPzS?thread=cmsg_01EF41AQooqveF2DGD8nqPzSUuFiSNNxgHbrBe6r4uDVrg)_\n\nFixes #37762\n\nClause-②: no (published prose only; teaches the confirmation flag and the delete floor already on main)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：智能体照技能搭建时，AI 可调用的删除类动作会打开 `ai.requiresConfirmation`（以前只写 `confirmText`，那只是点击弹窗文案，不拦 AI 调用）；给私有对象授删除权时会知道默认只能删自己创建的记录，要删全组织的记录需加 `writeScope: 'org'` 或 Modify All。\n- 为什么做：objectstack-ai/cloud#5080 逐项拆分里，这两条技能缺口在 9 次 door 搭建中丢了 5 分（中位数各 1 分）。\n- 出错会怎样：只改技能文字和两条 eval，不动产品。两个文件原本 token 余量为 0，各删了一处重复说法，剩余按实测抬高天花板（+10、+48）。\n- 要你做什么：这是受管的技能文件，需要按受管路径审批后合并。\n\n## What changes\n\n- `skills/objectstack-ui/rules/actions.md`, `confirmText` bullet (card step 1, line 49 on `8b9b9d23` as the card says): `confirmText` gates no AI call; an `ai.exposed` action also sets `ai.requiresConfirmation: true`.\n- `skills/objectstack-data/rules/security.md`, Three axes (card step 2; `allowDelete` is taught here, not in a SKILL.md): `allowDelete` removes only rows the caller created (`owner_only_deletes`). On a `private` object owning the row, `writeScope: 'org'` or `modifyAllRecords` widens it, an `edit` share never; elsewhere only an authored `delete` row policy does.\n- Evals: `objectstack-ui` views-apps-actions-pages #26 (AI-exposed delete action), `objectstack-data` hooks-security-seeds-datasources #38 (SDR with `readScope: 'org'` + `allowDelete` gets 403 on an admin-imported contact). The ui evals README line names the new case.\n- `scripts/check-skills-token-ratchet.mjs`: two rows raised by the measured remainder, each with its arithmetic comment.\n- `.changeset/37762-…md`: `@objectstack/skills` patch.\n\n## Premise check and deviations\n\n- Card premises re-measured on `origin/main` `8b9b9d23`: the `confirmText` sentence and the absence of any `requiresConfirmation` / owner-only delete line in both skills still hold.\n- Deviation from the card's wording of rule 2, read off the code: the floor is `created_by == current_user.id` (`plugin-security/src/platform-ownership-policies.ts`), not \"rows the user owns\", and it lifts where `SharingService.checkDelete` answers `allow` (owning the row, write depth `org`, or `modifyAllRecords`, on an owner-scoped object). So `writeScope: 'org'` alone widens it; no extra row policy is needed. On a public object the sharing verdict abstains and only an authored `delete` row policy widens it, Modify All included. This matches the scorer's reading in `packages/qa/scenarios/src/score/scenario-tags.ts` (`deleteFloorReading`).\n- Line budget: `skills/**` prose +2 lines net (card cap +4); eval JSON +24 lines.\n\n## Token ratchet raise\n\nStanding maintainer ruling 2026-10-27, verbatim and untranslated: 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B). Paid down first in the same file:\n\n| file | added | cut (restatement) | bytes | tokens | ceiling |\n|---|---|---|---|---|---|\n| `skills/objectstack-ui/rules/actions.md` | 84 B | 43 B: intro's \"A parameterized bulk mutation is `script`.\" (the bulk bullet and `crm_create_campaign` show it) | 15518 → 15559 | 3890 | 3880 → 3890 (+10) |\n| `skills/objectstack-data/rules/security.md` | 248 B | 59 B: the \"Prefer `member_default`\" bullet's `owner_only_deletes` (now taught above), \"the built-in\", \"for the common cases\" | 17168 → 17357 | 4340 | 4292 → 4340 (+48) |\n\n## Local checks (on `b613af38`)\n\n- `node scripts/check-skills-token-ratchet.mjs --self-test` :: 104 cases pass; gate :: exit 0 (61 authored files within ceilings)\n- `pnpm check:skill-identifier-liveness` :: exit 0 (565 citations)\n- `pnpm check:skill-links` :: exit 0 (272 links, 140 fragments)\n- `pnpm check:skill-frame-sync`, `check:skill-frame-freshness`, `check:skill-top-level-keys` :: exit 0\n- `pnpm check:empty-changeset`, `check:changeset-fixed` :: exit 0\n- NOT-MEASURED `pnpm check:adr-0087-registration` :: exit 3, no `node_modules` in this checkout (patch changeset, no ADR-0087 marker needed)\n- Both eval JSON files parse; no SKILL.md or code block changed, so `check:skill-docs` / `check:skill-examples` are untouched.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Q4EjjNM2fYmcPyh5YXpnjJ\n"
+}

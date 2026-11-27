@@ -1,0 +1,31 @@
+{
+  "number": 37753,
+  "kind": "issue",
+  "title": "Retire the build-progress frame from the spec now that no consumer reads it (build retirement, cloud#5024)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T01:27:43Z",
+  "updated_at": "2026-11-27T02:14:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37753",
+  "body": "epic:#5024#1 · hotlong · session_01Q4EjjPTfYJJKJmzZ3By7a7\n\nFiling gate: ③ maintainer-directed task (build retirement epic objectstack-ai/cloud#5024) · Source: contract review S3 on objectstack-ai/objectstack#37720 (comment 7206932534).\nGrade: p2 · area:ai · domain:spec · Task · evidence: read (PR #37720 head 18cec5f4)\n\n## 维护者速读\n- 是什么：spec 里的 build 进度帧（`build-progress.zod.ts`）原来的唯一消费方是刚删掉的 build 对话前端，现在没有任何代码读它，按 enforce-or-remove 退役。\n- 要你做什么：无。\n\n## Current state\n- `packages/spec/src/ai/build-progress.zod.ts` names `ui/packages/plugin-chatbot` `mapMessages.ts` / `ChatbotEnhanced.tsx` as its consumer; objectstack-ai/objectstack#37720 deleted that code, and nothing in the repo reads `BUILD_PROGRESS_FRAME_TYPE` any more. The cloud producer is deleted by objectstack-ai/cloud#5046.\n\n## Do\n1. Premise: exact-name grep for every export of the file over this repo and the pinned cloud tree; confirm zero readers.\n2. Retire it per the `spec-property-retirement` playbook (ADR-0049 enforce-or-remove; liveness ledger, generated baselines, ADR-0087 conversion, changeset).\n3. ⛔ Order after objectstack-ai/cloud#5046 if cloud still produces the frame at that time.\n\n## Acceptance\n- No export of `build-progress.zod.ts` remains or is referenced; the spec gates and baselines green."
+}

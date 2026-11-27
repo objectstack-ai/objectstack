@@ -1,0 +1,36 @@
+{
+  "number": 37693,
+  "kind": "pull_request",
+  "title": "test(plugin-security): warm the sqlite-wasm module once before the insert-check cells",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T20:51:26Z",
+  "updated_at": "2026-11-26T21:40:40Z",
+  "closed_at": "2026-11-26T21:40:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T21:40:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37693",
+  "body": "Fixes #37494\nRefs #37636\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感：只改了一份安全插件的自动化测试，产品行为前后不变。\n- 为什么做：浏览器端数据库那一组用例在繁忙的持续集成机器上首次启动超时，已把主干的定时全量运行染红，也让无关的合并请求要手动重跑。\n- 出错会怎样：最坏是这组用例照旧偶发超时，不影响任何用户，直接撤回这一个提交即可。\n- 要你做什么：无。\n\n## What changes\n\n`packages/plugins/plugin-security/src/insert-check-post-image.test.ts` only. A file-level `beforeAll`, with its own explicit 60 s hook budget, connects and closes one `SqliteWasmDriver({ filename: ':memory:' })` before any case runs. `loadSqlJs` caches the sql.js load and WASM compile per module instance (`packages/drivers/driver-sqlite-wasm/src/wasm-connection.ts`, `cachedSqlJs`), so the driver-sqlite-wasm arm's first case no longer pays that one-time cold boot inside vitest's 5000 ms per-test budget, which is what ran to 5021 ms on a saturated shard (#37636).\n\n- Global `testTimeout` / `hookTimeout` untouched; no assertion changed; nothing skipped, retried or quarantined.\n- The warm-up driver is its own `:memory:` database, closed before the cells start, so no case shares state with it.\n- The cold boot lives in the driver's module-level cache, not in a shared test helper; nothing outside this file changes.\n\n## Tests\n\nLocal, shared box (absolutes are shared-box readings; the ratio is the portable number). Same file, same command, before vs after at `3c37d38b`:\n\n| | first wasm case | second wasm case | ratio first/second | warm hook |\n|---|---|---|---|---|\n| before (origin/main `6d106a1a`) | 178 ms | 67 ms | 2.66 | none |\n| after | 74 ms | 72 ms | 1.03 | 63.7 ms (instrumented run, instrumentation not committed) |\n\n<details><summary>File and package runs</summary>\n\n- `pnpm exec vitest run --maxWorkers=2 src/insert-check-post-image.test.ts` (plugin-security, under the verify lock): Test Files 1 passed (1), Tests 25 passed (25), VERDICT command-exit 0, before and after.\n- `pnpm --filter @objectstack/plugin-security typecheck` (includes `check:test-typecheck` over the test layer): VERDICT command-exit 0.\n- `pnpm exec vitest run --maxWorkers=2` in plugin-security: Test Files 290 passed (290), Tests 7313 passed, 45 skipped (7358), VERDICT command-exit 0.\n\n</details>\n\n## Acceptance notes\n\n- No ablation: the diff changes test timing, not a behaviour a test pins; the before row above is the measurement without the hook.\n- Test-only change; nothing in the package `files[]` (`dist` from `src/index.ts`) moves, so `skip-changeset`.\n\n## Verification\n\nRead first: the new `beforeAll` block above `afterEach` in the test file (the only hunk).\n\nTwo-minute check: `cd packages/plugins/plugin-security && pnpm exec vitest run --reporter=verbose src/insert-check-post-image.test.ts` — expect 25 passed, and the first `insert on driver-sqlite-wasm` case within a few ms of its neighbours rather than about 2.5x them.\n\n<details><summary>Derived gates (dispatch-gates --commands, head 3c37d38b)</summary>\n\n54 derived, 51 run with exit 0, 3 NOT MEASURED (exit 3, prerequisite not met locally: `check-plugin-teardown-shape --self-test` needs a commit absent from this shallow checkout; `check:dual-build-cjs-loads` and `check:i18n` need the full workspace build). `dispatch-gates --ran` reconciliation: 54 accounted for, 0 unrun. CI runs the farm.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Q4EjjQkY5yXZrN9BEA3rEK\n<!-- signed: repo:objectstack#6 · hotlong · session_01Q4EjjQkY5yXZrN9BEA3rEK -->\n"
+}
