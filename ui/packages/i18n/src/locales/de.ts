@@ -2411,7 +2411,7 @@ const de = {
         expand: "Erweitern",
         restore: "Seitenleiste wiederherstellen",
         open: "Assistent öffnen",
-        planAwaitingApproval: "Ein vorgeschlagener Plan wartet auf Ihre Freigabe",
+        planAwaitingApproval: "Eine Aktion wartet auf Ihre Freigabe",
         close: "Schließen",
         more: "Weitere Aktionen",
       },

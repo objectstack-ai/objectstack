@@ -2683,7 +2683,7 @@ const ar = {
         expand: "توسيع",
         restore: "استعادة اللوحة الجانبية",
         open: "فتح المساعد",
-        planAwaitingApproval: "خطة مقترحة بانتظار موافقتك",
+        planAwaitingApproval: "إجراء بانتظار موافقتك",
         close: "إغلاق",
         more: "إجراءات أخرى",
       },

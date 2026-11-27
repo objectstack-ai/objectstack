@@ -2477,7 +2477,7 @@ const fr = {
         expand: "Agrandir",
         restore: "Restaurer le panneau latéral",
         open: "Ouvrir l'assistant",
-        planAwaitingApproval: "Un plan proposé attend votre approbation",
+        planAwaitingApproval: "Une action attend votre approbation",
         close: "Fermer",
         more: "Plus d'actions",
       },

@@ -2481,7 +2481,7 @@ const es = {
         expand: "Expandir",
         restore: "Restaurar panel lateral",
         open: "Abrir el asistente",
-        planAwaitingApproval: "Un plan propuesto espera su aprobación",
+        planAwaitingApproval: "Una acción espera su aprobación",
         close: "Cerrar",
         more: "Más acciones",
       },
