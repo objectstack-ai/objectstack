@@ -1319,6 +1319,21 @@ export async function dispatchActionRequest(
 const hostDispatchers = new WeakMap<object, HttpDispatcher>();
 
 /**
+ * The one dispatcher a host's in-process doors run on for `kernel`, from the
+ * map {@link dispatchAction} and {@link dispatchActionResume} fill: the
+ * in-process authoring entry (`./domains/in-process-authoring.ts`) runs on the
+ * same dispatcher, and so on the same placement, as a host's action call.
+ */
+export function hostDispatcherFor(kernel: ObjectKernel): HttpDispatcher {
+    let dispatcher = hostDispatchers.get(kernel);
+    if (!dispatcher) {
+        dispatcher = new HttpDispatcher(kernel);
+        hostDispatchers.set(kernel, dispatcher);
+    }
+    return dispatcher;
+}
+
+/**
  * Run one business action from a host's own door — the REST `/actions`
  * door's admission and dispatch, as a function. A host that runs actions
  * outside REST and MCP (an in-product AI tool, a job runner) calls this
