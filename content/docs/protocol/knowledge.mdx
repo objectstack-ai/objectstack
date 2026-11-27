@@ -166,8 +166,12 @@ A source binds to an **adapter id** (e.g. `'pgvector'`, `'turso'`,
 `'memory'`), resolved at run time to the plugin that registered itself under
 that name (ADR-0161 K4):
 
-- **Named** — that adapter. One that is not mounted is refused at index and
-  search, `SERVICE_UNAVAILABLE` (503), naming the adapters that are.
+- **Named** — that adapter. One that is not mounted is refused at its save
+  (the `/meta` and MCP save doors), `VALIDATION_ERROR` (400), naming the
+  source, the adapter and the adapters that are. A package install, a source
+  registered in code and `os validate` are not judged there; such a source is
+  named at boot at `error` and refused at index and search,
+  `SERVICE_UNAVAILABLE` (503), naming the adapters that are.
 - **Omitted** — the deployment's adapter: the store the runtime mounted beside
   the service (`pgvector` on PostgreSQL, `turso` otherwise; the runtime passes
   `KnowledgeServicePlugin` its `deploymentAdapter` option when it mounts both),
@@ -231,7 +235,8 @@ and the MCP draft door:
    as the author: an object of a disabled package, an object the API does not
    serve for `search`, a system object without `enable.aiReadable`, or a field
    the author may not query refuses the save `403`, naming the object or the
-   field. The fields judged are the ones the source serves (`content`,
+   field; an `adapter` naming no mounted store refuses it `400`, naming the
+   source, the adapter and the mounted ones. The fields judged are the ones the source serves (`content`,
    `metadataFields`, the title field) and the ones its `where` reads. A
    verdict that cannot be reached, or a knowledge service that is registered
    and cannot be resolved, refuses `503`; nothing is written.
