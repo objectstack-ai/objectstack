@@ -40,7 +40,10 @@ export function recordHookEngineOf(engine: unknown): KnowledgeRecordHookEngine |
 }
 
 /** The slice of `KnowledgeService` the record sync drives. */
-type RecordSyncService = Pick<KnowledgeService, 'indexedSources' | 'handleRecordUpsert' | 'handleRecordDelete'>;
+type RecordSyncService = Pick<
+  KnowledgeService,
+  'indexedSources' | 'handleRecordUpsert' | 'handleRecordDelete' | 'recordSyncQueued' | 'enqueueRecordSync'
+>;
 
 /** The after-write hook context fields the sync reads (`HookContext`, single-record shape). */
 interface AfterWriteContext {
@@ -92,6 +95,11 @@ function rowOf(value: unknown): Record<string, unknown> | undefined {
  * unit open at the hook commits — so the re-read sees the committed row — and
  * never when it rolls back, so a rolled-back write leaves the index as it
  * was. With no unit open the sync starts at once, outside every unit.
+ *
+ * Where record syncs run through the queue (`KnowledgeService.routeRecordSyncs`)
+ * the hook asks for the sync instead (`KnowledgeService.enqueueRecordSync`),
+ * which publishes the message on the same commit, and never on a rollback;
+ * the worker then syncs, retrying a failure.
  *
  * ## The objects follow the sources
  *
@@ -160,12 +168,17 @@ export class KnowledgeRecordHooks {
     if (event === 'afterDelete') {
       const id = idOf(context?.input?.id) ?? idOf(rowOf(context?.previous)?.id);
       if (id === undefined) return;
-      this.deferRecordSync(() => this.service.handleRecordDelete(object, id));
+      if (this.service.recordSyncQueued) this.service.enqueueRecordSync(object, id);
+      else this.deferRecordSync(() => this.service.handleRecordDelete(object, id));
       return;
     }
     const result = rowOf(context?.result);
     const id = idOf(context?.input?.id) ?? idOf(result?.id);
     if (id === undefined) return;
+    if (this.service.recordSyncQueued) {
+      this.service.enqueueRecordSync(object, id);
+      return;
+    }
     // A copy, taken now: the engine strips the row it hands the caller after
     // this hook. The service re-reads the row by its id under the source's
     // `where` anyway; the copy is what a source with no engine would index.
@@ -174,11 +187,9 @@ export class KnowledgeRecordHooks {
   }
 
   /**
-   * The one seam the hook path's sync leaves through: start `run` once the
-   * unit of work open at the write commits, never when it rolls back, and
-   * never on the write's response path. A queue that takes the sync work
-   * over replaces this body and nothing else — the hooks hand it the same
-   * `handleRecordUpsert` / `handleRecordDelete` call.
+   * The inline sync's seam: start `run` once the unit of work open at the
+   * write commits, never when it rolls back, and never on the write's
+   * response path.
    */
   private deferRecordSync(run: () => Promise<void>): void {
     const start = (): void => {

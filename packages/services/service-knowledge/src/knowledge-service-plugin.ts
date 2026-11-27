@@ -6,8 +6,10 @@ import type {
   IDataEngine,
   IEmbedder,
   IJobService,
+  IQueueService,
   IRealtimeService,
   JobRunOutcome,
+  QueueMessage,
 } from '@objectstack/spec/contracts';
 import type { KnowledgeSource } from '@objectstack/spec/ai';
 import { EMBEDDER_SERVICE, KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
@@ -33,6 +35,14 @@ import {
 import type { KnowledgeFieldSecurity } from './knowledge-source-admission.js';
 import { createKnowledgeReapGuard, guardedObjectsFor } from './knowledge-reap-guard.js';
 import { KnowledgeRecordHooks, recordHookEngineOf } from './knowledge-record-hooks.js';
+import {
+  KNOWLEDGE_RECORD_SYNC_QUEUE,
+  readRecordSyncMessage,
+  recordSyncPublishOptions,
+  resolveDurableQueue,
+  resolveRecordSyncRetry,
+  type KnowledgeRecordSyncRetry,
+} from './knowledge-record-sync-queue.js';
 import { KnowledgeSourceLoader } from './knowledge-source-loader.js';
 import { KNOWLEDGE_SOURCE_TYPE } from './knowledge-source-registry.js';
 import { contributeKnowledgeSettings } from './knowledge-settings-contribution.js';
@@ -342,6 +352,16 @@ export interface KnowledgeServicePluginOptions {
    * commits, off the write's response (`KnowledgeRecordHooks`). One of the
    * two, never both: each write is synced once.
    *
+   * Where the kernel composes a durable `queue` service (the platform's
+   * `QueueServicePlugin` over a data engine) and a data engine is bound, the
+   * sync runs through that queue (`KNOWLEDGE_RECORD_SYNC_QUEUE`): either
+   * trigger publishes one message per source — identifiers only — once the
+   * write's unit of work commits, and nothing for a write that rolls back; the
+   * save does not wait for the embedder, and a failed sync is retried
+   * ({@link recordSyncRetry}) and then kept as a dead letter the reconcile
+   * repairs. Without a durable queue the sync runs inline, as the boot says
+   * once at `warn`.
+   *
    * A created, updated or restored row is re-read against each source's
    * `where` (with a data engine bound): a matching row is indexed from the
    * re-read row, and a row that does not match has its document removed —
@@ -356,6 +376,16 @@ export interface KnowledgeServicePluginOptions {
    * @default true
    */
   enableEventSync?: boolean;
+  /**
+   * The retry budget of a queued record sync ({@link enableEventSync}): a
+   * failed attempt is retried after `backoffMs`, doubled each attempt up to
+   * `maxBackoffMs`; after `maxAttempts` the message is a dead letter the
+   * queue lists (`IQueueService.listFailed`), naming the source and the
+   * record in its metadata. A member left out takes its default.
+   * @default { maxAttempts: 8, backoffMs: 5000, maxBackoffMs: 120000 } — the
+   * seven waits sum to 395 s, so a provider outage of six minutes is ridden out
+   */
+  recordSyncRetry?: Partial<KnowledgeRecordSyncRetry>;
   /** Default top-K when callers omit it. @default 10 */
   defaultTopK?: number;
   /**
@@ -465,6 +495,14 @@ export class KnowledgeServicePlugin implements Plugin {
   private readonly guardedObjects = new Set<string>();
   /** The job service the reconcile is scheduled on, kept to cancel it at destroy ({@link scheduleReconcile}). */
   private jobs: IJobService | undefined;
+  /**
+   * The durable queue the record sync runs through, captured where the worker
+   * subscribes ({@link startRecordSyncQueue}) for the same reason as
+   * {@link realtime}; `undefined` while the sync runs inline.
+   */
+  private syncQueue: IQueueService | undefined;
+  /** Whether init() bound a data engine to the service: the queued sync's worker re-reads through it. */
+  private dataEngineBound = false;
 
   constructor(private readonly options: KnowledgeServicePluginOptions = {}) {}
 
@@ -494,6 +532,7 @@ export class KnowledgeServicePlugin implements Plugin {
     };
 
     this.logger = logger;
+    this.dataEngineBound = engine !== undefined;
     this.service = new KnowledgeService({
       dataEngine: engine,
       logger,
@@ -651,6 +690,10 @@ export class KnowledgeServicePlugin implements Plugin {
       // Reap-path de-indexing first: it is independent of the realtime service,
       // and the branch below returns early when that one is absent.
       this.syncReapGuards(ctx, service);
+      // The queue the record sync runs through, before either trigger starts:
+      // the queue plugin swapped its database adapter in during its own
+      // `kernel:ready` handler, registered in its init(), so before this one.
+      await this.startRecordSyncQueue(ctx, service);
 
       let realtime: IRealtimeService | null = null;
       try {
@@ -693,8 +736,18 @@ export class KnowledgeServicePlugin implements Plugin {
         // plus a `payload.record ?? payload` fallback for a shape nobody sends.
         // An event type this handler does not name — those, and `metadata.*`
         // too — falls through without a sync.
+        //
+        // Through the queue ({@link startRecordSyncQueue}) the four ask for the
+        // same thing — the sync of the row's document, published once the
+        // write's unit commits — because the worker re-reads the row: its id is
+        // all a message carries.
         if (type === 'data.record.created' || type === 'data.record.updated' || type === RECORD_RESTORED_EVENT) {
           const record = payload.after as Record<string, unknown> | undefined;
+          if (service.recordSyncQueued) {
+            const recordId = payload.recordId ?? record?.id;
+            if (typeof recordId === 'string' || typeof recordId === 'number') service.enqueueRecordSync(object, recordId);
+            return;
+          }
           if (record && typeof record === 'object') {
             await service.handleRecordUpsert(object, record);
           }
@@ -703,7 +756,8 @@ export class KnowledgeServicePlugin implements Plugin {
         if (type === 'data.record.deleted') {
           const recordId = payload.recordId;
           if (typeof recordId === 'string' && recordId !== '') {
-            await service.handleRecordDelete(object, recordId);
+            if (service.recordSyncQueued) service.enqueueRecordSync(object, recordId);
+            else await service.handleRecordDelete(object, recordId);
           }
           return;
         }
@@ -731,6 +785,62 @@ export class KnowledgeServicePlugin implements Plugin {
       });
       ctx.logger.info?.('KnowledgeServicePlugin: event sync subscription active.');
     });
+  }
+
+  /**
+   * Run the record sync through the composed `queue` service when it is
+   * durable ({@link resolveDurableQueue}) and the service has a data engine
+   * (the worker re-reads the row): subscribe the worker on
+   * {@link KNOWLEDGE_RECORD_SYNC_QUEUE} and route the service's syncs there
+   * (`KnowledgeService.routeRecordSyncs`). Otherwise the sync stays inline,
+   * said once at `warn`: the save waits for the embedder, a failed sync is
+   * logged and not retried, and on the realtime trigger a sync runs inside
+   * the write's unit of work, before it commits.
+   *
+   * The worker throws what a retry can change, so the queue retries it on the
+   * {@link KnowledgeServicePluginOptions.recordSyncRetry} budget; on the last
+   * attempt it also says, at `error`, that the message is now a dead letter.
+   */
+  private async startRecordSyncQueue(ctx: PluginContext, service: KnowledgeService): Promise<void> {
+    const hasEngine = this.dataEngineBound;
+    const queue = resolveDurableQueue((name) => ctx.getService<unknown>(name));
+    if (!queue || !hasEngine) {
+      ctx.logger.warn?.(
+        `KnowledgeServicePlugin: ${!hasEngine ? 'no data engine is bound to re-read a row' : 'no durable queue service is composed'}, ` +
+          'so record changes are synced inline: a save of an indexed record waits for the embedder, a failed sync is ' +
+          "logged and not retried, and with a realtime service the sync runs inside the write's unit of work, so a " +
+          'write that rolls back can leave its document in the index until the reconcile. Compose the queue ' +
+          'capability over a data engine (QueueServicePlugin) to sync through the queue.',
+      );
+      return;
+    }
+    const retry = resolveRecordSyncRetry(this.options.recordSyncRetry);
+    await queue.subscribe(KNOWLEDGE_RECORD_SYNC_QUEUE, async (message: QueueMessage) => {
+      try {
+        await service.processRecordSync(message.data);
+      } catch (err) {
+        if (message.attempts >= retry.maxAttempts) {
+          const named = readRecordSyncMessage(message.data);
+          const report =
+            `KnowledgeServicePlugin: the sync of record '${named?.recordId ?? '?'}' of source '${named?.source ?? '?'}' ` +
+            `failed its last attempt (${message.attempts} of ${retry.maxAttempts}: ${err instanceof Error ? err.message : String(err)}) ` +
+            `and is now a dead letter on queue '${KNOWLEDGE_RECORD_SYNC_QUEUE}'. The record's document stays as it was ` +
+            'until the record\'s next save or the reconcile; replay the message, or rebuild the source with os knowledge rebuild.';
+          if (ctx.logger.error) ctx.logger.error(report);
+          else ctx.logger.warn?.(report);
+        }
+        throw err;
+      }
+    });
+    this.syncQueue = queue;
+    service.routeRecordSyncs((message) =>
+      queue.publish(KNOWLEDGE_RECORD_SYNC_QUEUE, message, recordSyncPublishOptions(message, retry)),
+    );
+    ctx.logger.info?.(
+      `KnowledgeServicePlugin: record sync runs through queue '${KNOWLEDGE_RECORD_SYNC_QUEUE}' (up to ` +
+        `${retry.maxAttempts} attempts, backoff ${retry.backoffMs} ms doubling to ${retry.maxBackoffMs} ms): a save ` +
+        "publishes once its unit of work commits and does not wait for the embedder.",
+    );
   }
 
   /**
@@ -1112,6 +1222,16 @@ export class KnowledgeServicePlugin implements Plugin {
     for (const unsubscribe of this.unsubscribes.splice(0)) {
       try {
         unsubscribe();
+      } catch {
+        // best-effort
+      }
+    }
+    const syncQueue = this.syncQueue;
+    this.syncQueue = undefined;
+    if (syncQueue) {
+      // Messages already published stay in the queue, for the next start.
+      try {
+        await syncQueue.unsubscribe(KNOWLEDGE_RECORD_SYNC_QUEUE);
       } catch {
         // best-effort
       }

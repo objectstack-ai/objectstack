@@ -73,6 +73,12 @@ import {
   type KnowledgeReconcileReport,
   type KnowledgeReconcileRequest,
 } from './knowledge-build.js';
+import {
+  readRecordSyncMessage,
+  type KnowledgeRecordSyncMessage,
+  type KnowledgeRecordSyncOutcome,
+  type KnowledgeRecordSyncReason,
+} from './knowledge-record-sync-queue.js';
 
 /**
  * Minimal logger shape; falls back to no-op when none is provided.
@@ -208,6 +214,11 @@ export class KnowledgeService implements IKnowledgeService {
   private reconcileTail: Promise<void> = Promise.resolve();
   /** Told after the set of registered sources changed ({@link onSourcesChanged}). */
   private readonly sourceListeners = new Set<() => void>();
+  /**
+   * Where record syncs are published while they run through the queue
+   * ({@link routeRecordSyncs}); `undefined` while they run inline.
+   */
+  private recordSyncPublisher: ((message: KnowledgeRecordSyncMessage) => Promise<unknown>) | undefined;
 
   constructor(private readonly options: KnowledgeServiceOptions = {}) {
     this.defaultTopK = options.defaultTopK ?? 10;
@@ -2037,14 +2048,20 @@ export class KnowledgeService implements IKnowledgeService {
   }
 
   /**
-   * Repair the document of a record the freshness check found stale: the
-   * event sync's own path ({@link syncRecord}, serialized per document), run
-   * in system context, in this process and NOT awaited — the search that found
-   * it answers without it. Single-flight per document, and at most once per
-   * document until a later search finds its hash matching. Never throws into
-   * the search. The scheduled reconcile does not take it over: the reconcile
-   * walks whole sources, and this repairs one document now. It moves onto the
-   * queue with the record-change sync, whose path it is.
+   * Repair the document of a record the freshness check found stale, never
+   * awaited — the search that found it answers without it. Single-flight per
+   * document, and at most once per document until a later search finds its
+   * hash matching. Never throws into the search. The scheduled reconcile does
+   * not take it over: the reconcile walks whole sources, and this repairs one
+   * document now.
+   *
+   * While record syncs run through the queue ({@link routeRecordSyncs}) the
+   * repair is a record-sync message with reason `freshness`, for this source
+   * alone: it survives a restart of the process that searched and is retried
+   * like any other sync. A message that could not be published is reported
+   * at `error` and the document is left to the next search that finds it
+   * stale. Otherwise it is the inline sync ({@link syncRecord}, serialized
+   * per document), in system context, in this process.
    *
    * A source with `refresh.onRecordChange: false` is never repaired: it is
    * asked through {@link objectSourcesFor}, the one predicate that keeps the
@@ -2056,6 +2073,10 @@ export class KnowledgeService implements IKnowledgeService {
     const docId = documentIdFor(source.name, recordId);
     if (this.freshnessRepairs.has(docId)) return;
     this.freshnessRepairs.add(docId);
+    if (this.recordSyncPublisher) {
+      this.publishRecordSyncs([source], objSource.object, recordId, 'freshness', () => this.freshnessRepairs.delete(docId));
+      return;
+    }
     void this.serializeRecordSync(docId, () => this.syncRecord(source, objSource.object, recordId, { id: recordId }));
   }
 
@@ -2223,13 +2244,150 @@ export class KnowledgeService implements IKnowledgeService {
     return kept;
   }
 
-  // ── Sync entrypoints (called by the host plugin's event bridge) ───
+  // ── Sync entrypoints (called by the host plugin's triggers and worker) ───
+
+  /**
+   * Run record syncs through a queue (ADR-0161 K1): from now on
+   * {@link enqueueRecordSync} and the freshness repair publish one
+   * {@link KnowledgeRecordSyncMessage} per source through `publish`, and the
+   * host's worker hands each message to {@link processRecordSync}.
+   * `undefined` returns to the inline sync. `KnowledgeServicePlugin` calls it
+   * in `kernel:ready`, when the composed `queue` service is durable and a
+   * data engine is bound (the worker re-reads the row, so it needs one).
+   */
+  routeRecordSyncs(publish: ((message: KnowledgeRecordSyncMessage) => Promise<unknown>) | undefined): void {
+    this.recordSyncPublisher = publish;
+  }
+
+  /** Whether record syncs run through the queue ({@link routeRecordSyncs}). */
+  get recordSyncQueued(): boolean {
+    return this.recordSyncPublisher !== undefined;
+  }
+
+  /**
+   * A record of `object` was created, updated, restored or deleted: ask for
+   * the sync of its document in every source that indexes `object` on record
+   * change ({@link objectSourcesFor}) — one message per source, carrying the
+   * source's index key, the object, the record id and the reason, never a
+   * field value. Nothing is synced here: the worker re-reads the row when it
+   * processes the message, so a create, an update and a delete ask for the
+   * same thing (the document follows the row as it is then, or leaves the
+   * index when no row matches).
+   *
+   * The messages are published once the unit of work open here commits, and
+   * never when it rolls back (`runAfterOpenUnitsCommit` of the ObjectQL
+   * engine): a trigger runs inside the write, before the write's own unit or
+   * a caller's `transaction()` commits, so a message published at once could
+   * be processed before the commit, and one for a write that rolls back would
+   * be processed at all. With no unit open they are published at once,
+   * outside every unit. Never awaited and never throws: a publish that fails
+   * is reported at `error` (the save stands, its document is stale until the
+   * record's next save, a search that finds it stale, or the reconcile).
+   *
+   * Requires {@link routeRecordSyncs}; inline, the triggers call
+   * {@link handleRecordUpsert} / {@link handleRecordDelete} instead.
+   */
+  enqueueRecordSync(object: string, recordId: string | number, reason: KnowledgeRecordSyncReason = 'event'): void {
+    if (!isRecordId(recordId)) return;
+    const sources = this.sourcesForObject(object);
+    if (sources.length === 0) return;
+    this.publishRecordSyncs(sources, object, String(recordId), reason);
+  }
+
+  /**
+   * Publish one record-sync message per source in `sources`, once the unit
+   * open here commits ({@link enqueueRecordSync}). `onFailed` runs for each
+   * message that could not be published.
+   */
+  private publishRecordSyncs(
+    sources: KnowledgeSource[],
+    object: string,
+    recordId: string,
+    reason: KnowledgeRecordSyncReason,
+    onFailed?: () => void,
+  ): void {
+    const publish = this.recordSyncPublisher;
+    if (!publish) return;
+    const send = (): void => {
+      for (const source of sources) {
+        const message: KnowledgeRecordSyncMessage = { source: source.name, object, recordId, reason };
+        void Promise.resolve()
+          .then(() => publish(message))
+          .catch((err: unknown) => {
+            onFailed?.();
+            const report =
+              `[knowledge] the sync of record '${recordId}' of source '${this.label(source)}' could not be queued ` +
+              `(${errorText(err)}): the write stands, and the record's document stays as it was until the record's ` +
+              'next save, a search that finds it stale, or the reconcile.';
+            if (this.options.logger?.error) this.options.logger.error(report);
+            else this.options.logger?.warn?.(report);
+          });
+      }
+    };
+    const engine = this.options.dataEngine as { runAfterOpenUnitsCommit?(body: () => void): void } | undefined;
+    if (typeof engine?.runAfterOpenUnitsCommit === 'function') engine.runAfterOpenUnitsCommit(send);
+    else send();
+  }
+
+  /**
+   * The worker's body: sync the document one {@link KnowledgeRecordSyncMessage}
+   * names. The source is resolved by its index key now, at processing time,
+   * and the row re-read under the source's `where` as the system identity
+   * ({@link handleRecordUpsert}, "What decides a document"): a row comes back →
+   * its document is written; none → its document is deleted. Serialized with
+   * every other sync of the same document in this process.
+   *
+   * A failure that a retry can change — the re-read, the split, the
+   * embedding call, the store write — is THROWN, so the queue retries the
+   * message on its backoff and, once its attempts are spent, keeps it as a
+   * dead letter. Every other outcome completes the message and is answered
+   * ({@link KnowledgeRecordSyncOutcome}).
+   */
+  async processRecordSync(data: unknown): Promise<KnowledgeRecordSyncOutcome> {
+    const message = readRecordSyncMessage(data);
+    if (!message) {
+      this.options.logger?.warn?.(
+        `[knowledge] a message on the record-sync queue is not a record-sync message (${describeValue(data)}); completed without a sync.`,
+      );
+      return 'malformed';
+    }
+    const source = this.handed(message.source);
+    if (!source) {
+      this.options.logger?.debug?.(
+        `[knowledge] record sync of '${message.recordId}' skipped: source '${message.source}' is no longer registered.`,
+      );
+      return 'source-gone';
+    }
+    if (objectSourcesFor([source], message.object).length === 0) return 'not-synced';
+    const engine = this.options.dataEngine;
+    if (!engine) {
+      this.options.logger?.warn?.(
+        `[knowledge] record sync of '${message.recordId}' for source '${this.label(source)}' skipped: no data engine is ` +
+          'bound to re-read the row.',
+      );
+      return 'not-synced';
+    }
+    if (!this.adapters.has(source.adapter)) {
+      this.options.logger?.warn?.(
+        `[knowledge] record sync of '${message.recordId}' for source '${this.label(source)}' skipped: its adapter ` +
+          `'${source.adapter}' is not registered. The record's document is written by the source's next build once ` +
+          'the adapter is mounted.',
+      );
+      return 'adapter-unmounted';
+    }
+    await chainAfter(this.recordSyncTails, documentIdFor(source.name, message.recordId), () =>
+      this.syncRow(source, message.object, message.recordId, engine),
+    );
+    return 'synced';
+  }
 
   /**
    * Apply an ObjectQL `data.record.created`, `data.record.updated` or
    * `data.record.restored` event to every source bound to the
-   * matching object. `record` is the event payload's `after`; its `id` names
+   * matching object, inline. `record` is the event payload's `after`; its `id` names
    * the row. Failures are logged but never thrown — sync must not block writes.
+   * The plugin calls this only where record syncs do not run through the
+   * queue ({@link routeRecordSyncs}).
    *
    * ## What decides a document (ADR-0049: a declared key holds on every path)
    *
@@ -2254,32 +2412,38 @@ export class KnowledgeService implements IKnowledgeService {
    *
    * ## When this runs, measured against the engine
    *
-   * The engine publishes `data.record.created` / `data.record.updated` from
-   * inside the write's engine body (`insert` / `update`), after its `after*`
-   * hooks, and so BEFORE any unit of work around the write commits — the
-   * write's own unit (opened when a metadata hook can abort it) or a caller's
-   * `engine.transaction(…)`. The in-process realtime service awaits each
-   * subscriber in turn, so this handler runs inside the write's async context,
-   * and its system-context re-read rides the same open transaction through the
-   * engine's ambient transaction store: it sees the row the write just made.
+   * Only on the inline path: a kernel whose `queue` service is not durable
+   * (the kernel's own fallback queue), or a service with no data engine.
+   * There the realtime subscription calls this from inside the write: the
+   * engine publishes `data.record.created` / `data.record.updated` from the
+   * write's engine body, after its `after*` hooks and BEFORE any unit of work
+   * around the write commits — the write's own unit (opened when a metadata
+   * hook can abort it) or a caller's `engine.transaction(…)` — and the
+   * in-process realtime service awaits each subscriber, so the save waits for
+   * the re-read, the split, the embedding call and the store write, and the
+   * re-read rides the open transaction through the engine's ambient store.
    * If that unit then rolls back, the index is wrong in one of two ways: on a
    * match, the document stays built from a row that never committed; on a
-   * miss, the uncommitted row did not match and the document was deleted, so
-   * the committed row — which may still match — is missing from the index.
-   * The row's next event or a `reindexSource` repairs a row that still exists;
-   * a document built from an INSERT that rolled back has no row left to
-   * repair it from — it stays until a complete `reindexSource` purges it.
+   * miss, the document was deleted although the committed row may still
+   * match. The reconcile, a later event of the row or a `reindexSource`
+   * repairs it. The after-write hooks (the trigger on a kernel with no
+   * `realtime` service) start this once the unit commits and never on a
+   * rollback, off the write's response (`knowledge-record-hooks.ts`).
    * `data.record.restored` is published after the restore's own unit has
    * committed. Bulk events (`data.records.*`) carry a count, not records, and
    * are not synced here — see the plugin's event bridge.
    *
+   * Through the queue none of this holds: the triggers publish a message once
+   * the write's unit commits and nothing for one that rolls back, the save
+   * does not wait for the sync, and a failed sync is retried
+   * ({@link enqueueRecordSync}, {@link processRecordSync}).
+   *
    * Syncs of one document are serialized in this process
    * ({@link serializeRecordSync}), so two opposite events for one row cannot
    * interleave: each sync re-reads after the previous one finished, and the
-   * last one leaves the index agreeing with the database. The chain is awaited
-   * inline, so a write's sync can wait behind an earlier in-flight sync of the
-   * same document (on a single-connection pool, up to the pool's acquire
-   * timeout); the index still ends consistent.
+   * last one leaves the index agreeing with the database. Inline, the chain
+   * is awaited, so a write's sync can wait behind an earlier in-flight sync
+   * of the same document; the index still ends consistent.
    */
   async handleRecordUpsert(object: string, record: Record<string, unknown>): Promise<void> {
     const recordId = record.id;
@@ -2292,7 +2456,8 @@ export class KnowledgeService implements IKnowledgeService {
   }
 
   /**
-   * One source's sync of one row — see {@link handleRecordUpsert}. Never throws.
+   * One source's inline sync of one row — see {@link handleRecordUpsert}.
+   * Never throws: a failure is one `warn` line.
    */
   private async syncRecord(
     source: KnowledgeSource,
@@ -2302,9 +2467,9 @@ export class KnowledgeService implements IKnowledgeService {
   ): Promise<void> {
     const objSource = source.source;
     try {
-      const adapter = this.getAdapter(source.adapter);
       const engine = this.options.dataEngine;
       if (!engine) {
+        const adapter = this.getAdapter(source.adapter);
         if (objSource.where !== undefined) {
           this.reportWhereUnenforceable(source);
           return;
@@ -2320,18 +2485,31 @@ export class KnowledgeService implements IKnowledgeService {
         );
         return;
       }
-      const row = await rereadRow(engine, objSource, recordId);
-      if (row) {
-        const doc = recordToDocument(source, objSource, row, this.schemaFor(object), await this.readTenancyPosture());
-        await this.writeSynced(source, adapter, doc, recordId);
-      } else {
-        const plan = await this.planIndex(source, adapter);
-        await adapter.delete([documentIdFor(source.name, String(recordId))], plan.context('event-sync'));
-      }
+      await this.syncRow(source, object, recordId, engine);
     } catch (err) {
       this.options.logger?.warn?.(
         `[knowledge] event-sync failed for source '${this.label(source)}': ${(err as Error).message}`,
       );
+    }
+  }
+
+  /**
+   * THE sync of one row's document, both paths' ({@link syncRecord} inline,
+   * {@link processRecordSync} from the queue): re-read the row under the
+   * source's `where` as the system identity ({@link rereadRow}) and write its
+   * document, or delete the document when no row matches. Throws what the
+   * re-read, the split, the embedding call or the store throws.
+   */
+  private async syncRow(source: KnowledgeSource, object: string, recordId: string | number, engine: IDataEngine): Promise<void> {
+    const adapter = this.getAdapter(source.adapter);
+    const objSource = source.source;
+    const row = await rereadRow(engine, objSource, recordId);
+    if (row) {
+      const doc = recordToDocument(source, objSource, row, this.schemaFor(object), await this.readTenancyPosture());
+      await this.writeSynced(source, adapter, doc, recordId);
+    } else {
+      const plan = await this.planIndex(source, adapter);
+      await adapter.delete([documentIdFor(source.name, String(recordId))], plan.context('event-sync'));
     }
   }
 
