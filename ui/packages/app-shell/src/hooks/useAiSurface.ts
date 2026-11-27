@@ -40,7 +40,6 @@
  * @module
  */
 
-import { useRef } from 'react';
 import { useAgents } from '@object-ui/plugin-chatbot/core';
 import { catalogServesBuild, catalogServesFocus } from './surfaceAgent.js';
 import { resolveAiApiBase } from './aiApiBase.js';
@@ -75,23 +74,21 @@ export interface AiSurfaceState {
  * should be shown FOR THE CURRENT USER, driven off the access-filtered agent
  * catalog (empty for seat-less users -> AI hidden; ADR-0068).
  */
-export function useAiSurfaceEnabled(): AiSurfaceState {
-  const { agents, isLoading } = useAgents({ apiBase: resolveAiApiBase() });
-
-  // useAgents starts `isLoading=false` and only kicks off the fetch in an effect
-  // a tick later, so the first render's empty list means "not fetched yet", not
-  // "no agents". Latch whether a fetch has actually been in flight so the route
-  // guard treats that initial frame as loading (not a definitive empty → redirect).
-  const fetchStartedRef = useRef(false);
-  if (isLoading) fetchStartedRef.current = true;
+export function useAiSurfaceEnabled(options: { enabled?: boolean } = {}): AiSurfaceState {
+  // `enabled: false` asks nothing (objectstack#37833: the navigation gate asks
+  // only while an app carries an `ai:chat` entry); the answer then reads as
+  // loading, and the caller that turned the read off does not consult it.
+  const { agents, settled } = useAgents({ apiBase: resolveAiApiBase(), enabled: options.enabled ?? true });
 
   const enabled = agents.length > 0;
   return {
     enabled,
     buildServed: catalogServesBuild(agents),
     focusServed: catalogServesFocus(agents),
-    // Agents present → resolved/available. Otherwise we're loading until a fetch
-    // has both started and finished with an empty result.
-    isLoading: enabled ? false : isLoading || !fetchStartedRef.current,
+    // Agents present → resolved/available. Otherwise loading until a read has
+    // answered (`settled`): the first render's empty list means "not fetched
+    // yet", and a read the cache answers is never seen loading
+    // (objectstack#37833).
+    isLoading: enabled ? false : !settled,
   };
 }
