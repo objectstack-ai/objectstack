@@ -420,7 +420,8 @@ export const BODY_PIN_REPIN = Object.freeze({
 // the whole change, and no file's text moved. One more row followed on the
 // merge of `origin/main` 077831538: `state-machines-and-approvals.md` had
 // shrunk 9 tokens there with its row left standing — the red this re-lock
-// exists to raise, raised by the merge queue on its first run.
+// exists to raise, raised by the merge queue on its first run. The next
+// merge (`origin/main` 247382446) did the same to `context-packs.md`, -1.
 
 /**
  * Measured counts, in the convention above. SHRINK-ONLY: lower freely, and see
@@ -2036,7 +2037,7 @@ export const CEILINGS = new Map([
   // deleting restatement in the same file (neither SKILL.md row moves). The row is
   // the seat's claim amendment 7179788843 on that card: one new row for this file.
   // 5813 bytes -> ceil(5813 / 4) = 1454; zero headroom.
-  ['skills/objectstack-ai/references/context-packs.md', 1454],
+  ['skills/objectstack-ai/references/context-packs.md', 1453], // -1 to the measurement (was 1454)
 
   // ── 2026-10-26 the objectui bundle joins the catalog — decision C, #25832 ──
   // The maintainer ruled (decision C, 2026-10-25, recorded as item 17d of the
