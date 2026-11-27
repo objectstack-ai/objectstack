@@ -351,6 +351,8 @@ export function listBundles(root) {
  * A `must_contain_any` member names its group too (`group` is the group's index),
  * so a key cannot be mistaken for a `must_contain` token of the same eval; a
  * `must_contain` token's key is unchanged.
+ *
+ * @param {number | null} [group]
  */
 export function rowKey(evalPath, evalId, token, group = null) {
   return group === null ? `${evalPath} eval ${evalId} ${token}` : `${evalPath} eval ${evalId} must_contain_any[${group}] ${token}`;
