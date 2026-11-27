@@ -56,6 +56,22 @@ describe('extractHookBody', () => {
     expect(extractHookBody(fn, 'hook c').capabilities).toContain('api.write');
   });
 
+  // [#35143] `updateMany` and `deleteMany` are two of the sandbox's six
+  // `api.write` leaves. The write pattern's `\b` after `update` / `delete` did
+  // not match inside either name, so a handler whose only write was one of them
+  // was lowered with no grant and refused at every call.
+  it.each(['updateMany', 'deleteMany'])('infers api.write from a lone %s', (method) => {
+    const fn =
+      method === 'updateMany'
+        ? async (ctx: any) => {
+            await ctx.api.object('foo').updateMany({ status: 'x' }, { done: true });
+          }
+        : async (ctx: any) => {
+            await ctx.api.object('foo').deleteMany({ status: 'x' });
+          };
+    expect(extractHookBody(fn, 'hook c2').capabilities).toEqual(['api.write']);
+  });
+
   it('infers log', () => {
     const fn = (ctx: any) => {
       ctx.log.info('hi');

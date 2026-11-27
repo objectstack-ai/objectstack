@@ -514,7 +514,9 @@ const CAPABILITY_PATTERNS: Array<{ rx: RegExp; cap: 'api.read' | 'api.write' | '
   // checks a grant only at a call. One token is the exception, see the door
   // patterns at the end of this list.
   { rx: /\.object\s*\([^)]+\)\s*\.\s*(?:find|findOne|count|aggregate|get|list)\b/, cap: 'api.read' },
-  { rx: /\.object\s*\([^)]+\)\s*\.\s*(?:insert|update|upsert|delete|patch|remove|create)\b/, cap: 'api.write' },
+  // [#35143] `updateMany` / `deleteMany` spelled out: `update\b` does not match
+  // inside either name, and both are sandbox `api.write` leaves.
+  { rx: /\.object\s*\([^)]+\)\s*\.\s*(?:insert|updateMany|update|upsert|deleteMany|delete|patch|remove|create)\b/, cap: 'api.write' },
   { rx: /ctx\.crypto\.randomUUID\b/, cap: 'crypto.uuid' },
   // NO `ctx.crypto.hash` pattern: the `crypto.hash` token was removed in spec 17
   // (#4391) because the sandbox never installed the function. Inferring a
