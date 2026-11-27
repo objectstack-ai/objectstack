@@ -1,5 +1,151 @@
 # @objectstack/skills
 
+## 19.0.0-next.1
+
+### Patch Changes
+
+- 2eadf56: docs(skills): the i18n skill says what `GET /api/v1/i18n/locales` answers about the default and source locale
+  
+  Clause-②: no (published prose only; names a member the locales read already returns on main)
+  Metadata-protocol: none
+  
+  The Registration section of `skills/objectstack-i18n/SKILL.md` now says the locales answer marks the default locale (`isDefault`) and names `sourceLocale` (the declared one, else the default), so a client that writes translations can tell which language inline `label:` text is in without reading the stack config. The words are paid for in the same file, with no fact removed: the note that the contract's `.ts` source does not ship becomes one line, and the optional-methods sentence drops "Treat them as".
+- 1b57f36: docs(skills): objectstack-ui gains an eval case for a board's lane statistic and card settings, and the list-views note says the three keys are optional and that lanes over a lookup field get the whole-lane statistic
+  
+  Clause-②: no (published prose and an eval case; teaches behaviour already on main)
+  Metadata-protocol: none
+  
+  `skills/objectstack-ui/evals/views-apps-actions-pages.json` gains case 27: a board grouped by status whose lanes show `summary: { type: 'avg', field: 'estimate_hours' }`, with `showFieldLabels: false` and `hideEmptyFields: false`.
+  
+  `skills/objectstack-ui/rules/list-views.md`: the example's two card settings say they are optional with default true; the note says `summary`, `showFieldLabels` and `hideEmptyFields` are optional, that the statistic covers every record of the lane, lanes over a lookup field included, and that omitting `summary` keeps the older `summarizeField` sum (or no statistic without it). The "Known gap" sentence is gone: since #36871 and #37327 a board with lanes over a lookup field reads the whole lane for all five statistics. The file sits at its token ceiling, unchanged.
+- 6e2b7aa: docs(skills): the ai and data skills stop teaching that View All or Modify All opens a field
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  From 19, View All (`viewAllRecords`) and Modify All (`modifyAllRecords`) widen records only and cast no field vote; `viewAllFields` is the one "every field" bit. Four published texts still taught the meaning before 19 and now teach this one:
+  
+  - `skills/objectstack-ai/SKILL.md` (pitfall 2): a field permission without `editable` binds every caller none of whose sets grants the field with an `editable: true` row. It no longer says Modify All grants that edit.
+  - `skills/objectstack-data/rules/relationships.md` (roll-up visibility): masking a summary on a permission set no longer asks to remove the set's Modify All on the parent first. The mask binds beside it.
+  - `skills/objectstack-data/rules/security.md` (high-sensitivity fields): `requiredPermissions` is strictest-wins over every field row and `viewAllFields`. View All and Modify All leave the list, since they are no field vote.
+  - `skills/objectstack-data/evals/hooks-security-seeds-datasources.json`: the expected outputs of cases 20 and 37 match the three sentences above.
+- 6592546: docs(skills): data hooks and actions teach the multi-reason refusal throw
+  
+  Clause-②: no (published prose only; teaches the list throw already on main)
+  Metadata-protocol: none
+  
+  `skills/objectstack-data/references/data-hooks.md` (Declared refusals) now teaches the list form beside the single `reason`: throw `reasons: [{ reason, params? }, …]`; each line is translated and filled from its own `params`; `userMessage` joins the lines and closes with the entry's `message`, filled from the throw's top-level `params` (else its holes render empty); the HTTP doors answer `details.refusals`. It says how an entry declares `reasons` (a snake_case reason to `{ message }` only; another status needs another code), that every listed reason must be declared (refused at save when literal, a `500` at run), and that a `reasons` that is not a non-empty list of `{ reason, params? }`, or one beside `reason`, is a `500`. `skills/objectstack-ui/rules/actions.md` (Refusing by code) shows an action's body the same list shape, `reasons: [{ reason, params? }, …]` instead of `reason`, closed by the code's `message`, and points at the hook section for the rules. Both files sat at zero token headroom, so the words are paid for by tightening prose in the same file; no fact is removed (one redundant `condition` example and a sample field go).
+- 3247e87: docs(skills): the `objectstack-ai` skill names what replaces the two retired agent keys
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-ai/SKILL.md`: the `agent.tools` tombstone row now says where the tools go (a `defineSkill` under the stack's `skills`), and the `agent.knowledge` row names the two keys that restrict retrieval on the knowledge source (`aiExposed`, `source.where`). The words are paid for in the same file: the skill example loses one sample instruction line. No fact is removed.
+- 80519b5: docs(skills): the data and automation skills teach three data-model checks publish now runs
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Published prose and evals only; the checks already run.
+  
+  - `objectstack-data` `rules/relationships.md`: a roll-up is refused at publish (`rollup/child-without-parent-reference`) when it omits `relationshipField` and the child object has no `lookup` or `master_detail` field referencing the parent, or when its `relationshipField` names no field of the child.
+  - `objectstack-data` `rules/field-types.md`: only `lookup`, `master_detail`, `user` and `tree` read `reference`; on any other type but `summary`, publish refuses it (`field/reference-on-non-reference-type`).
+  - `objectstack-automation` `references/state-machines-and-approvals.md`: `lockRecord` locks the record and its `master_detail` child rows only; a `lookup` child shown in the record's details (`relatedList: 'primary'`) stays editable while pending, reported as the warning `approval-detail-editable-while-pending`.
+  
+  No file grew past its ceiling: each addition is paid for by shorter wording in the same file.
+- 1e721fd: docs(skills): the relationships rule names `reference_out_of_scope` for a scoped import miss, and both pages say when a `_relatedLists` key is refused under a `.custom` arrangement
+  
+  Clause-②: no (published prose only; teaches two behaviours already on main)
+  Metadata-protocol: none
+  
+  `skills/objectstack-data/rules/relationships.md` (Optional master, the import clause) no longer says another master's detail fails an import with `reference_not_found`. It is `reference_out_of_scope`, whose `scope` (`[{ field, value }]`) names the scoping columns; `reference_not_found` stays for a name no record carries and for a scoping field the caller cannot read.
+  
+  The same file (Detail-page related lists) and `skills/objectstack-i18n/SKILL.md` (the `_relatedLists.{list}` row) now say that the translation key follows the label the served tab list carries: where the paired `.custom` package's `relatedLists` re-states the entry without a `label`, or hides it, `os validate` refuses the key. The remedy is the one the refusal prescribes: drop the key, or re-state the entry with the owner's own `label`.
+  
+  Both files sat at their token ceiling, so the words are paid for in the same file and no ceiling moves. `relationships.md` drops a third copy of the `summary` shape (the parent's `total` field in the master-detail pattern; the JSON form under Roll-up Summaries and the TypeScript form in the grid example stay), the sentence that restated what a form without the field group looks like, and the intro sentence over the grid modeling bullets. `objectstack-i18n/SKILL.md` drops three history notes that teach nothing an author can write today: that `messageFormat` was removed (the schema's own refusal says so), that `getAppBundle` / `loadAppBundle` are gone, and that nothing converts between formats, together with "one locale per item", which the sentence before it already states.
+- 61a6544: docs(skills): the AI skill teaches a skill's `context` key and its MCP record argument
+  
+  Clause-②: no (published prose only; teaches the key and the argument already on main)
+  Metadata-protocol: none
+  
+  `skills/objectstack-ai/SKILL.md` (Skill Configuration) lists `context` among a skill's optional keys: the bare name of the context pack the skill works from, resolved in the skill's package and then its dependency closure, and refused at parse unless `tools` binds `get_record_context`, by name or wildcard. `skills/objectstack-ai/references/context-packs.md` (Serving and calling it) says how such a skill is offered over MCP: where the name resolves to a pack and the server serves `get_record_context`, the prompt takes an optional `recordId`; with it the message is the instructions, a fixed line asking for that call and its arguments as JSON, never the record itself; without it the prompt is unchanged. The `os validate` table gains the two warnings for a skill: `ai-skill-context-unknown` (a `context` no pack of the stack's own has; a dependency's pack is not read) and `ai-skill-context-omitted` (the tool bound with no `context` while an object has several packs).
+  
+  `evals/skills-tools-knowledge.json`: a new case 12 asks for a skill that answers questions about one policy from a shipped context pack and that an external agent can start from a record over MCP; the expected answer is a `defineSkill` with `context` naming the pack by its bare name and `get_record_context` bound in `tools`, and says the prompt then takes an optional `recordId`.
+  
+  Both prose files sat at their token ceiling, so the words are paid for in the same file and no ceiling moves. `SKILL.md` no longer calls `instructions` "the one field the open edition serves" (`tools`, `mcpPrompt` and now `context` are read there too), and drops a sentence that restated the binding rule from the author's side. `context-packs.md` drops lines its own tables and bullets already carry: the opening list of a pack's three parts, what `name` and `label` are used for at the call, and that the tool is absent without the service.
+- b1490f2: docs(skills,spec): the i18n skill and two spec comments name the dispatcher as the owner of the `/api/v1/i18n/*` routes
+  
+  Clause-②: no (published prose and comments only; no behaviour changes)
+  Metadata-protocol: none
+  
+  `skills/objectstack-i18n/SKILL.md` (Registration) said the i18n service "self-registers" `GET /api/v1/i18n/locales`, `/translations/:locale` and `/labels/:object/:locale`. On `main` `I18nServicePlugin` mounts no HTTP route (retired by #23347); the runtime's HTTP dispatcher, which `os serve` composes, mounts the three paths and serves them from the i18n service. The sentence now says so, and the methods list gains `getSourceLocale()` / `setSourceLocale()`, which both shipped implementations provide (`getFallbackLocale()` is left out: the in-memory fallback deliberately has none). The words are paid for by tightening four phrasings in the same file; no fact is removed. The `GetLocalesResponseSchema` docblock (`packages/spec/src/api/protocol.zod.ts`) and the `toLocaleDescriptors` comment (`packages/spec/src/system/i18n-resolver.ts`) make the same correction.
+- 41babf7: docs(skills): the UI skill says where a form's column count is authored and where it is derived
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-ui `rules/navigation.md` "Record Presentation" said a form's column count is never authored. That holds for an object's own New, Edit and detail, which are built from the object's `fieldGroups` and never from a form view, and the section now says so. On a named or public form the count is authored per section, `{ group: 'contact_info', columns: 2 }` (1 to 4; one column on a phone), and the section now says that too, so an assistant asked for "two columns per group" no longer answers that it cannot be done. It also says a form view's own `columns` is not read by the form page today. The passage's rationale clauses are shortened to pay for the new words: the file stays under its token ceiling.
+- 2d149e1: docs(skills): three `objectstack-ui` record-page eval cases grade what the record-page rule teaches
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Three cases of `skills/objectstack-ui/evals/record-page.json` failed an answer that follows `rules/record-page.md`. Case 4 (drop the Attachments tab) no longer requires `'sys_activity'`: with a declared `relatedLists`, unlisted approvals and the activity stream still follow, so `relatedLists: ['quote', 'opportunity_contact_role']` is the reference answer and the case requires `'opportunity_contact_role'` in its place. Case 1 (Tasks tab first) now asks in its prompt for only the open tasks (`status` is not `done`), which is what its required `relatedListFilter` grades; its reference answer lists `['task', 'event', 'sys_attachment']`. Case 3 (`placedActions: true` on `page:header`) forbids `actions: ['open` in place of `actions: ['`, so an answer that quotes the old id list in a comment is not failed. Each of the three has a new case hash, so `skill-evals --regrade` sets it apart from a round recorded before this change: compare it across rounds only after a re-run. No skill text changes.
+- 6f5c1cf: docs(skills): the context-pack rule table lists `ai-context-field-unprovisioned`; one source citation and one eval case corrected
+  
+  Clause-②: no (published prose and an eval fixture only)
+  Metadata-protocol: none
+  
+  `skills/objectstack-ai/references/context-packs.md` lists the `os validate` warning `ai-context-field-unprovisioned` (an injected column with no storage on an `external` object) in its rule table. The file sat at zero token headroom, so the row is paid for in the same file: two sample fields leave each `fields` list of the example, and three sentences are tightened with no fact removed. `skills/objectstack-ai/SKILL.md` cites the trigger-condition blocks of `packages/spec/src/ai/skill.zod.ts` at the lines they sit on (`38-52, 140-203`). Eval case 12 of `skills-tools-knowledge.json` no longer requires the literals `get_record_context` and `recordId`: its reference answer admits a wildcard tool binding and a skill file with no prose on the MCP argument, and both were graded as failures.
+- 9862d63: docs(skills): an agent's model name is optional
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-ai/SKILL.md` (Model Configuration) now teaches that `model.model` is optional, and that an agent without one runs on the host's default model for the environment. It no longer says `model.provider` defaults to `openai`; the key itself leaves the page in the same release (see the changeset on the skill no longer teaching `model.provider`). The `objectstack-ai` eval case on sampling settings accepts an omitted `model`. Published prose only: it teaches the optional `model` already on main since #37697. The file sat at zero token headroom, so the words are paid for by tightening the same section; no fact is removed.
+- 0778315: docs(skills): the automation skill says a record under approval can still be deleted
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Published prose only; no behaviour changes.
+  
+  `objectstack-automation` `references/state-machines-and-approvals.md`:
+  
+  - Best practice 2 now says that deleting a record whose approval is pending is not refused: the delete lands, cancels the request and cascades the record's `master_detail` child rows. It is refused with `409 RECORD_LOCKED` only where that cascade has no single transaction to run in, or the child object declares a second cascading relation (another `master_detail`, or any field declaring `deleteBehavior: 'cascade'`).
+  - The `lockRecord` config row states its bound again: it locks the record from edits.
+  - Best practice 2 no longer names a parent field group as a way a `lookup` child is shown in the record's details: a group places a `lookup` child only when it already declares `relatedList: 'primary'`.
+  
+  The file did not grow past its ceiling: each addition is paid for by deletion in the same file.
+- 468672a: docs(skills): actions teach `ai.requiresConfirmation` beside `confirmText`, and permission sets teach the owner-only delete floor
+  
+  Clause-②: no (published prose only; teaches the confirmation flag and the delete floor already on main)
+  Metadata-protocol: none
+  
+  `skills/objectstack-ui/rules/actions.md` (`confirmText` bullet) says `confirmText` gates no AI call: an `ai.exposed` action that is destructive or irreversible also sets `ai.requiresConfirmation: true`. `skills/objectstack-data/rules/security.md` (Three axes) says `allowDelete` removes only rows the caller created (the platform's `owner_only_deletes` floor); on a `private` object owning the row, `writeScope: 'org'` or `modifyAllRecords` widens it, an `edit` share never does, and elsewhere only an authored `delete` row policy does. One eval case per rule (`objectstack-ui` views-apps-actions-pages #26, `objectstack-data` hooks-security-seeds-datasources #38). Both files sat at zero token headroom: one restatement per file is cut and the ceilings move by the measured remainder (+10, +48).
+- 69c8588: docs(skills): the AI skill stops teaching an agent's `model.provider`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-ai/SKILL.md` (Model Configuration) drops the `provider` row from the agent model table. The section now says the `model` block names a model and never a provider: the deployment's AI settings choose the provider and resolve the model name among the providers turned on, and a written `provider` is a parse error whose fix is to delete the key (retired in protocol 19, conversion `agent-model-provider-removed`). The schema citation moves to `packages/spec/src/ai/agent.zod.ts:87-95`, the key list after the retirement.
+  
+  The `objectstack-ai` eval case on sampling settings keeps its prompt (a copilot that should use Anthropic at temperature 0.3 with a 2000-token cap) and now expects the answer to write no provider key: sampling goes under `model`, the model is named in the free-string `model` or left to the host's default, and turning a provider on is the deployment's AI settings. Its assertions no longer require `provider` and `anthropic`; they require `deployment` and refuse the written line `provider: 'anthropic',`. An answer that quotes the retired spelling to warn against it still passes.
+  
+  Published prose only: it teaches the retirement already on main. The file sat at zero token headroom, so the new sentences are paid for by the deleted row and no ceiling moves.
+- 43ce731: docs(skills): the lifecycle rule teaches which sealed objects take signed expiry, and that a retention override cannot shorten a packaged sealed object's declared window
+  
+  Clause-②: no (published prose only; teaches behaviour already on main)
+  Metadata-protocol: none
+  
+  `skills/objectstack-data/rules/lifecycle.md` (Sealing) no longer says expiry is not built and that the sweeper deletes every sealed object's rows. It now says: signed expiry covers objects whose lifecycle is declared in packaged metadata, whose sealed rows leave only by whole checkpoints and read as `expired`; on such an object with no `archive`, a retention override below the declared window is rejected and the declared window applies, and to keep rows for less time the declared window is what to shorten; on any other sealed object (one created at runtime) the sweeper still deletes sealed rows, which then read as missing. The `retention_overrides` row of the Operations table points at that paragraph.
+  
+  The same sentence said no verifier is built. `os audit verify` reads the checkpoints back, so that clause is removed.
+  
+  The file sat at its token ceiling, so the words are paid for in the same file and no ceiling moves: the page drops the rationale sentence after "the file never shrinks" and its echo in the first validation example, the example list in the rule sentence (the Lifecycle Classes table carries a typical use per class), the hook names in the intro, the rationale clause of the Separation bullet, and three filler words in Safety Semantics.
+  
+  Eval case 16 of `skills/objectstack-data/evals/objects-fields-relationships.json` graded the two withdrawn statements (`not reported`, and `read as missing` for an object an author declares). It now expects the page as it stands: `must_contain` carries `expired` in their place, and `expected_output` ends with the three sentences of the new paragraph.
+
 ## 19.0.0-next.0
 
 ### Patch Changes

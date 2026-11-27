@@ -1,5 +1,130 @@
 # @objectstack/plugin-mcp-server
 
+## 19.0.0-next.1
+
+### Minor Changes
+
+- ddd5941: feat(ai): a skill names the context pack it works from (`context`), and its MCP prompt takes a record id
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  ADR-0160 D8. A skill can now name a context pack (`ai_context`) by its bare name:
+  
+  ```ts
+  defineSkill({
+    name: 'policy_inquiry',
+    label: 'Policy inquiry',
+    instructions: 'Answer the question about this policy, citing its sections.',
+    tools: ['get_record_context'],
+    context: 'policy_document',
+  });
+  ```
+  
+  - **`@objectstack/spec`.** `SkillSchema.context?: string` (snake_case, the pack's machine name; a face such as `NS-NAME` is refused). A skill that declares it must bind `get_record_context` in `tools`, by name or by a wildcard that matches it (`get_record*`, `get_*`); without the binding it is refused at parse, located on `tools`. `skillBindsRecordContextTool(tools)` answers that binding. The skill form gains a `context` control.
+  - **`@objectstack/mcp`.** When a skill's `context` resolves to a pack, its prompt lists one optional argument, `recordId`. The name resolves by ADR-0150 D3 from the skill's own package (its own pack, else the one holder in its dependency closure), or as for a caller with no package for an environment skill; a name that resolves to no pack adds no argument. Given a record id, the prompt's one message is the skill's instructions, one fixed line telling the model to call `get_record_context` with the arguments that follow, and those arguments as one JSON object: `objectName` (the pack's root), `recordId`, and `context` (the pack's face). The record id only ever appears as that JSON string value, and the pack is never inlined. Without the argument the prompt is byte-identical to the same skill's prompt without `context`. A blank record id is refused (`-32602`). Both the per-request HTTP prompt surface and the long-lived stdio server serve it; the stdio server, which applies no tool-binding filter, offers the argument only where it registers `get_record_context` (its data tools are now bridged before its prompts). `McpSkillBridge` gains two optional members, `listContextPacks` and `packageResolutionClosure`; `MCPServerRuntime.bridgePrompts` takes the closure as an optional fourth argument.
+  - **`@objectstack/lint`.** Two warnings where skills are validated (`os validate`): `ai-skill-context-unknown`, for a `context` that names no pack the stack's own `aiContexts` define (a pack a dependency package ships resolves at run time and is not read here), and `ai-skill-context-omitted`, for a skill that binds `get_record_context` without `context` while an object has more than one pack (its call there without a pack name is refused).
+  - **`@objectstack/runtime`.** The `/mcp` route's bridge hands the skill prompt surface the same pack listing `get_record_context` selects from, and the skill's package closure.
+  - **`@objectstack/platform-objects`.** The generated metadata-form translation bundles carry the skill form's new `context` control (label and help text, translated in every shipped locale).
+- c3da753: feat(ui): the field hand lock (`uiReadonly` / `uiReadonlyWhen`) holds on the Gantt, the timesheet cell, the calendar quick-create and the palette prefill
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  A field a person may not edit by hand (`uiReadonly: true`, or `uiReadonlyWhen` true over the record) now stays locked on the console surfaces that still wrote it:
+  
+  - **Gantt.** A bar's drag and edge resize, the progress handle, the title and dates edited in place, the auto-schedule and the conflict reschedule, undo and redo, and a drawn dependency link all read the one verdict of `@object-ui/core` (`fieldReadOnlyByHand`) over the stored record, with the shell's predicate scope. A write that would change a locked field is refused: nothing is sent, the bar goes back and a toast gives the read-only reason. A locked field the write only echoes back (an in-place title edit carries the dates and progress too) is dropped from the write, so the rest still saves. A field locked on every record also closes the gesture before it starts: a move closes when either date is locked, a resize only when both are (the locked edge is refused on the write), and the progress handle and the link tool close with their own field.
+  - **Timesheet.** A cell whose record's value field is locked by hand is drawn read-only, so it cannot be edited or cleared. A row, date or value field locked on every record closes the create, so the empty cells and **Add row** are not offered.
+  - **Calendar quick-create.** A click on an empty day or a range drag no longer writes a field locked by hand on every record. Where the title or a date field the dialog writes is locked, the gesture opens the full create form instead (a locked date field is not prefilled there). A required locked field is left out of the dialog's write so the server applies its `defaultValue`; one with no default sends the gesture to the full form too.
+  - **Command palette.** The create-as prefill skips a field that is `uiReadonly`, as it already skipped a `readonly` one; a create is judged by the static half only, as the create dialog judges it.
+  - **List view.** A kanban board whose block names no `groupByField` takes the object's lifecycle field as its lanes; the operands of that field's lock predicates are now read with the rows too, so a card drag is judged over the whole record.
+  
+  A kanban drag on the swimlane layout writes only the lane (column) field, never the swimlane field; that is now pinned.
+  
+  Not yet covered: the in-app assistant acting for a person. Its writes run in the AI service, which does not read the hand lock, and the field descriptions now say so. Every other console surface a person edits through honours the hand lock, and the `uiReadonly` / `uiReadonlyWhen` descriptions and the MCP `describe_object` guidance say that. Writes through the API, import, actions and flows are unchanged: only the server lock (`readonly` / `readonlyWhen`) binds them.
+
+### Patch Changes
+
+- 73d5e34: fix(mcp)!: the stdio data bridge refuses a disabled package's data to every caller — a system context, and any caller on a host with no `protocol` service, included
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` says the stdio bridge serves a disabled package's data, to a system context or on any host; `content/docs/permissions/system-context.mdx` row 15 now says the bypass covers API exposure only
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: the change is which callers one runtime data door of the MCP stdio transport serves. Nothing `objectstack migrate meta` reads names it, and stored rows are untouched. -->
+  
+  **BREAKING** for a host that hands the stdio data bridge a system context, or that registers no `protocol` service, and reads a disabled package's objects through it: those reads and writes are now refused `404 OBJECT_PACKAGE_DISABLED`, as `callData` (the HTTP `/mcp` bridge and every action door) already refuses them.
+  
+  The bridge asks the disabled-package question first, of every caller, before its API-exposure gate: of the addressed object on every verb (`query`, `get`, `create`, `update`, `remove`, `aggregate`) and of every nested-relation condition's target, at every hop, with the condition's position as `param`. The relation conditions are found on the engine registry's own field map, as `callData` finds them, so a condition the engine lowers is asked even where neither the protocol nor the metadata service holds the object's definition. A `query_records` `expand` into such an object is withheld: the row is served, the related record is not. The question is the engine registry's `isObjectPackageDisabled`, the predicate `callData` asks, so a host with no `protocol` service refuses too. The `objectstack://` record resource asks the same question. A system context still skips the exposure question (`apiEnabled` / `apiMethods`), as before.
+  
+  The fix: re-enable the package to read its data again. Nothing else changes for an enabled package.
+- aca4960: fix(mcp): the MCP doors write their 5xx fault lines through the host's logger
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The `/mcp` and stdio doors log a tool's or the record resource's server fault once, for the operator: through `logServerFault` (`@objectstack/types`) for the data and metadata tools, `list_actions` and the record resource, and as the actions door's operator lines for `run_action` and `resume_run`. They wrote those lines to the console, outside the host's log sink. `MCPServerRuntime` now hands its configured logger to them, and `MCPServerPlugin` builds the runtime with the kernel's logger. So the host's logger handles the line, with its configured `redact` list, which replaces the default words (`password`, `token`, `secret`, `key`) rather than adding to them. Object members of a cause are redacted by field name.
+  
+  `RegisterObjectToolsOptions` and `RegisterActionToolsOptions` gain an optional `logger`. A runtime or a direct `registerObjectTools` / `registerActionTools` caller with no logger keeps the console fallback. The answer a client reads is unchanged byte for byte.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [0196476]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [302cfda]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [54d6726]
+- Updated dependencies [ddc96d8]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [4b8aca2]
+- Updated dependencies [56c9cae]
+- Updated dependencies [3ed97b7]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/lint@19.0.0-next.1
+  - @objectstack/rest@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+  - @objectstack/formula@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

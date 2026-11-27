@@ -1,5 +1,78 @@
 # @object-ui/components
 
+## 19.0.0-next.1
+
+### Patch Changes
+
+- 1028438: fix(components): a long unbroken token in an alert dialog's title or description no longer stretches the dialog past the viewport
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The record delete confirm puts the record's title in the alert dialog's title. A title holding one long token with no spaces (a pasted URL, a file name, a hash) set the width of the dialog's grid track, so the dialog grew past `max-w-lg` and the right-aligned Cancel and Delete buttons moved off-screen, reachable only from the keyboard. The shared `AlertDialogContent` now lets its grid items shrink below their min-content width, and `AlertDialogTitle` and `AlertDialogDescription` break such a token (`overflow-wrap: anywhere`). Every alert dialog is covered; a caller's own classes still merge as before.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [4e10d4b]
+- Updated dependencies [4111380]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [3eb778d]
+- Updated dependencies [91875c7]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [6e8f663]
+- Updated dependencies [6e8f663]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [2980483]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e50ab8f]
+- Updated dependencies [21ad7c5]
+- Updated dependencies [b620c4b]
+- Updated dependencies [1f97fce]
+- Updated dependencies [d1139f9]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @object-ui/i18n@19.0.0-next.1
+  - @object-ui/core@19.0.0-next.1
+  - @object-ui/react@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+  - @objectstack/sdui-parser@19.0.0-next.1
+  - @object-ui/react-runtime@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

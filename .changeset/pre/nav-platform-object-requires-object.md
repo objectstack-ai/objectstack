@@ -3,6 +3,8 @@
 "@objectstack/platform-objects": patch
 ---
 
+**Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+
 Clause-②: no
 Metadata-protocol: none
 

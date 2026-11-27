@@ -3,6 +3,8 @@
 '@objectstack/spec': patch
 ---
 
+**Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+
 fix(lint)!: four publish-time checks for data-model metadata that saves and does not work — two refuse the publish, two warn
 
 Clause-②: no (narrowing)
