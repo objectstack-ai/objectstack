@@ -5679,6 +5679,9 @@ export function selfTest({ tier = 'full' } = {}) {
   t('the member reader reads names, quoted keys, methods, shorthands and spreads at its own depth',
     JSON.stringify(olm("{ a: 1, 'b-c': 2, d() {}, get e() { return 1; }, f, ...G.shape, h?: 3 }")) === JSON.stringify(['a', 'b-c', 'd', 'e', 'f', '...G.shape', 'h']));
   t('…and a computed key as its bracketed text', JSON.stringify(olm('{ [KEY]: 1, z: 2 }')) === JSON.stringify(['[KEY]', 'z']));
+  t('…and a spread whose operand is not a bare name path as its own source text, one member each (a cast, a conditional, an inline literal, a call)',
+    JSON.stringify(olm('{ ...G, ...(X as unknown as Y).shape, ...(cond ? A : {}), ...{ k: v },\n  ...make(), z: 1 }'))
+      === JSON.stringify(['...G', '...(X as unknown as Y).shape', '...(cond ? A : {})', '...{ k: v }', '...make()', 'z']));
   t('…and nothing nested, commented or quoted',
     JSON.stringify(olm("{ a: z.object({ inner: 1 }), // gone: 1,\n /* x: 2, */ b: 'c: { d: 1 }', e: [{ f: 1 }], g: (h) => { const i = { j: 1 }; return i; } }")) === JSON.stringify(['a', 'b', 'e', 'g']));
   t('…and null for a literal that does not close, never a short list', olm('{ a: 1, b: { c: 2 }') === null);
@@ -5706,6 +5709,7 @@ export function selfTest({ tier = 'full' } = {}) {
     'a key removed': [FK_BASE.replace("    name: z.string().describe('Machine name'),\n", ''), true],
     'a key renamed': [FK_BASE.replace('    type: FieldTypeSchema,', '    kind: FieldTypeSchema,'), true],
     'a spread added to the shape': [FK_BASE.replace('    ...MetadataProtectionFields,', '    ...MetadataProtectionFields,\n    ...AuditFields,'), true],
+    'a parenthesised spread added to the shape': [FK_BASE.replace('    ...MetadataProtectionFields,', '    ...MetadataProtectionFields,\n    ...(AuditSchema as unknown as { shape: object }).shape,'), true],
     'the declaration moved out of the reader\'s reach': [FK_BASE.replace('strictObject(', 'z.object('), true],
     'the file deleted': [null, true],
     'a describe() reworded': [FK_BASE.replace("'Machine name'", "'Machine name (snake_case)'"), false],
@@ -5834,7 +5838,8 @@ export function selfTest({ tier = 'full' } = {}) {
     .flatMap((d) => (liveKs.get(d) ?? []).filter((k) => (k.startsWith('...') && !liveSpreadRows.has(k)) || k.startsWith('[')).map((k) => `${d.type}: ${k}`));
   t(`⭐ LIVE: every spread a type declares has a row of its own, and no type declares a computed key (unwatched: ${unwatched.join(', ') || 'none'})`, unwatched.length === 0);
   // The served pin's own numbers: the counts its test spells, read from the test file.
-  const PROTOCOL_PIN = readFileSync(nodePath.join(ROOT, 'packages/metadata-protocol/src/protocol.meta-types-degenerate-derivation.test.ts'), 'utf8');
+  // Comments masked (strings kept): a bracket, brace or quote in a comment inside the pinned literal is no structure.
+  const PROTOCOL_PIN = maskComments(readFileSync(nodePath.join(ROOT, 'packages/metadata-protocol/src/protocol.meta-types-degenerate-derivation.test.ts'), 'utf8'));
   const pinCounts = (() => {
     const block = /CARD_PROPERTY_COUNTS[^=]*=\s*\{([^}]*)\}/.exec(PROTOCOL_PIN)?.[1] ?? '';
     const counts = Object.fromEntries([...block.matchAll(/([a-z_]+):\s*(\d+)/g)].map((m) => [m[1], Number(m[2])]));
@@ -5862,7 +5867,7 @@ export function selfTest({ tier = 'full' } = {}) {
     .flatMap((k) => (k === '...PROTECTION_ENVELOPE' ? liveEnvelope : [k])).sort();
   t(`⭐ LIVE census: the reader's ObjectSchema key set less \`fields\` (${liveObjectKeys.length}) equals metadata-core's reference table, its envelope spread expanded (${liveObjectTable.length}), which its own test holds equal to the schema`,
     liveObjectKeys.length > 30 && JSON.stringify(liveObjectKeys) === JSON.stringify(liveObjectTable));
-  const REPORT_PIN = readFileSync(nodePath.join(ROOT, 'ui/packages/app-shell/src/views/metadata-admin/inspectors/ReportDefaultInspector.joinedClearsRefused-29195.test.tsx'), 'utf8');
+  const REPORT_PIN = maskComments(readFileSync(nodePath.join(ROOT, 'ui/packages/app-shell/src/views/metadata-admin/inspectors/ReportDefaultInspector.joinedClearsRefused-29195.test.tsx'), 'utf8'));
   const liveMaximal = declaredKeySet(REPORT_PIN, { declares: 'MAXIMAL', call: null, argument: 0 }) ?? [];
   const liveExcludedNamed = [...(/const EXCLUDED = new Set\(\[([^\]]*)\]/.exec(REPORT_PIN)?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
   const liveReportOwn = (liveKs.get(REPORT) ?? []).filter((k) => !k.startsWith('...'));

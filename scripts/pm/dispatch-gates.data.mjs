@@ -1452,9 +1452,10 @@ export const SPEC_MIGRATION_ENTRY_ROOTS = Object.freeze([
  * from their own members, live, so it is never a second list to keep. Most types are the second argument of the
  * `strictObject` call their lazy body makes (the first is the strictness options); `object` is `ObjectSchemaBase`,
  * the strict object `ObjectSchema` assigns its methods onto; `action` is the body of the `actionObject` factory the
- * schema refines. A spread reads as one member (`...` and its name), so a new spread in a shape is a change, and the
- * spread object's own members are judged on its own row; the self-test holds every spread a type declares to a row
- * here, so a member object nobody watches cannot join a shape quietly.
+ * schema refines. A spread reads as one member (`...` and its name, or its source text when the operand is not a bare
+ * name: a cast, a conditional, an inline literal), so a new spread in a shape is a change, and the spread object's own
+ * members are judged on its own row; the self-test holds every spread a type declares to a row here, so a member
+ * object nobody watches cannot join a shape quietly.
  *
  * Fourteen types, the thirteen `CARD_PROPERTY_COUNTS` counts in the metadata-protocol test plus `action`, whose count
  * the same file pins in a case of its own; the self-test holds each type's expanded key count equal to the number its

@@ -12163,7 +12163,10 @@ export function readBySpecMigrationEntryConsumers(path, roots = SPEC_MIGRATION_E
 
 /**
  * The members an object literal declares at its own depth, in source order: a key by its name (a quoted key by
- * its content), a spread as `...` and the name path it spreads, a computed key as its bracketed source text.
+ * its content), a spread of a bare name path as `...` and that path, any other spread (a parenthesised cast, a
+ * conditional, an inline literal, a call) as its own source text with whitespace collapsed, and a computed key as
+ * its bracketed source text. So every spread is one member: the arrival of one the reader cannot resolve is still a
+ * change to the set, and a census over the members can name it.
  * `open` is the offset of the literal's opening brace in `source`. Returns null when the literal does not close
  * where the brackets say it does, so a reader that lost its place says so instead of answering a short list.
  *
@@ -12180,14 +12183,22 @@ export function objectLiteralMembers(source, open, masked = maskCommentsAndLiter
   let depth = 0;
   let atMember = true;
   let computedAt = -1;
+  let spreadAt = -1;
+  // A spread whose operand is not a bare name path ends at the comma or the brace that ends its member.
+  const closeSpread = (end) => {
+    if (spreadAt >= 0) members.push(source.slice(spreadAt, end).replace(/\s+/g, ' ').trim());
+    spreadAt = -1;
+  };
   for (let k = open + 1; k < masked.length; k++) {
     const c = masked[k];
     if (depth === 0 && atMember && !/\s/.test(c)) {
       atMember = false;
       const rest = masked.slice(k, k + 200);
-      const spread = /^\.\.\.\s*([A-Za-z_$][\w$.]*)/.exec(rest);
+      // A bare name path is the whole operand only when the member ends right after it (the mask blanks comments).
+      const spread = /^\.\.\.\s*([A-Za-z_$][\w$.]*)\s*(?=[,}])/.exec(rest);
       const named = /^(?:(?:get|set|async)\s+)?\*?\s*([A-Za-z_$][\w$]*)\s*\??\s*[:(,}<]/.exec(rest);
       if (spread) members.push(`...${spread[1]}`);
+      else if (rest.startsWith('...')) spreadAt = k;
       else if (c === "'" || c === '"') {
         const end = masked.indexOf(c, k + 1);
         if (end < 0) return null;
@@ -12199,13 +12210,20 @@ export function objectLiteralMembers(source, open, masked = maskCommentsAndLiter
     }
     if (c === '{' || c === '[' || c === '(') depth++;
     else if (c === '}' || c === ']' || c === ')') {
-      if (depth === 0) return c === '}' ? members : null;
+      if (depth === 0) {
+        if (c !== '}') return null;
+        closeSpread(k);
+        return members;
+      }
       depth--;
       if (depth === 0 && c === ']' && computedAt >= 0) {
         members.push(source.slice(computedAt, k + 1));
         computedAt = -1;
       }
-    } else if (c === ',' && depth === 0) atMember = true;
+    } else if (c === ',' && depth === 0) {
+      closeSpread(k);
+      atMember = true;
+    }
   }
   return null;
 }
