@@ -137,7 +137,8 @@ describe('recentAskPageConversations (objectstack#37790)', () => {
   });
 
   it('is empty when no row is this app\'s', () => {
-    expect(recentAskPageConversations([{ id: 'drawer' }], PKG)).toEqual([]);
+    const drawerOnly: Array<{ id: string; metadata?: Record<string, unknown> }> = [{ id: 'drawer' }];
+    expect(recentAskPageConversations(drawerOnly, PKG)).toEqual([]);
     expect(recentAskPageConversations([], PKG)).toEqual([]);
   });
 });
