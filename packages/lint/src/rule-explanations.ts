@@ -6743,17 +6743,31 @@ const FLOW_TRIGGER_OBJECT_MISSING_EXPLANATION: RuleExplanation = {
 
 const FLOW_CONDITION_OPTION_LABEL_EXPLANATION: RuleExplanation = {
   rule: 'flow-condition-option-label',
-  covers: 'why a start condition compares option values',
+  covers: 'why flow conditions and filters use option values',
   paragraphs: [
-    'A select field stores the option\'s `value`, never its `label`. A record-change start condition that ' +
-      'reads the field and compares it with a quoted label (`record.stage == \'Closed Lost\'` where the option ' +
-      'is `{ value: \'closed_lost\', label: \'Closed Lost\' }`) is false on every record, or true on every ' +
-      'record for `!=`, so the condition never tells one record from another.',
-    'Reported only when the label is the comparand of that field: `F == \'L\'`, `F != \'L\'`, `\'L\' == F`, or ' +
-      'a member of `F in [...]`, with `F` read bare or as `record.F` / `previous.F`. A label quoted elsewhere ' +
-      'in the condition, such as the comparand of another field, is not. A label that is also some option\'s ' +
-      'value is never reported. Fields whose options come from a shared picklist are not judged: the stack ' +
-      'does not hold that list.',
+    'A select field stores the option\'s `value`, never its `label`. A flow that compares the field with a ' +
+      'quoted label (`record.stage == \'Closed Lost\'` where the option is ' +
+      '`{ value: \'closed_lost\', label: \'Closed Lost\' }`) never matches a record, or matches every record ' +
+      'for `!=`, and the run still reports success.',
+    'The rule reads every place a flow compares the field: a record-change start condition, an edge ' +
+      '`condition`, a `decision` branch\'s `expression`, and the `filter` of a `get_record`, `update_record` or ' +
+      '`delete_record` step or of a time-relative sweep. A flow filter reaches the data engine as written and ' +
+      'is never translated from label to value, so the read finds nothing, the update or delete changes ' +
+      'nothing, and the branch is never taken.',
+    'In a condition, reported only when the label is the comparand of that field: `F == \'L\'`, ' +
+      '`F != \'L\'`, `\'L\' == F`, or a member of `F in [...]`. `F` is the trigger record\'s field, read bare or ' +
+      'as `record.F` / `previous.F`, or a field of the row a single-row `get_record` step bound to its ' +
+      '`outputVariable` (`deal.F`). A variable that something else in the flow also binds is not judged: ' +
+      'which row it holds is decided by the run.',
+    'In a filter, reported when the label is the field\'s plain equality, its `$eq` / `$ne` operand or a ' +
+      'member of its `$in` / `$nin` list, at the top level or under `$and` / `$or` / `$not`. A related ' +
+      'object\'s field, an ordering or text operator, and a string carrying a brace (a template such as ' +
+      '`{current_user_id}`) are not judged. To find rows that still hold a label on purpose, for a clean-up ' +
+      'after the options changed, write the operand as a CEL value envelope (`{ dialect: \'cel\', source }`): ' +
+      'it is not judged.',
+    'Everywhere, a label quoted elsewhere, such as the comparand of another field, is not reported, and a ' +
+      'label that is also some option\'s value never is. Fields whose options come from a shared picklist are ' +
+      'not judged: the stack does not hold that list.',
   ],
 };
 
