@@ -6,8 +6,9 @@
  * comments slot, help and the assistant's 「Ask AI」 button (objectstack#37858:
  * last, so it ends the row), at the same place on every in-app page — a list,
  * a record, a dashboard, a report, a custom page. A route whose page draws no
- * group gets the assistant's button at its top-right corner
- * (`ShellAssistantFallback`).
+ * group gets the assistant's button at its top end corner
+ * (`ShellAssistantFallback`); a page whose own top bar holds controls at that
+ * corner draws the group in that bar through the slot instead.
  *
  * The group carries nothing that edits the app (objectstack#36485): the
  * design mode is entered from the app-name menu's 「Edit app」
@@ -203,12 +204,15 @@ export function ShellSidebarExpandFallback() {
 
 /**
  * objectstack#37858 — the assistant's entry for a route whose page draws no
- * group (search results, a component page, the app editor, a page that draws
- * its own header): the same button, pinned at the content's top-right corner,
- * the corner every other page has it in. Like the expand button's fallback it
- * takes no room of its own; drawn only inside a scope that turned the group
- * on, never on a phone (its top bar carries the entry) and only where the
- * runtime serves AI.
+ * group (search results, a component page, the app editor): the same button,
+ * pinned at the content's top end corner (top-right; top-left in a
+ * right-to-left language), the corner every other page has it in. Like the
+ * expand button's fallback it takes no room of its own, so it may only sit
+ * over an empty corner: a page that keeps its own controls in its top end
+ * corner (the report builder's Save, the inbox's buttons) draws the group in
+ * its own header through the slot instead, which also counts it here. Drawn
+ * only inside a scope that turned the group on, never on a phone (its top bar
+ * carries the entry) and only where the runtime serves AI.
  */
 export function ShellAssistantFallback() {
   const registry = React.useContext(ShellGroupRegistryContext);
@@ -222,7 +226,7 @@ export function ShellAssistantFallback() {
   if (!registry || groups > 0 || phone || !aiEnabled) return null;
   return (
     <div className="sticky top-0 z-20 h-0" data-testid="shell-assistant-fallback">
-      <AssistantTopBarButton className="absolute right-2 top-2 bg-background/80 backdrop-blur" />
+      <AssistantTopBarButton className="absolute end-2 top-2 bg-background/80 backdrop-blur" />
     </div>
   );
 }

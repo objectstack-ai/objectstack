@@ -4,9 +4,10 @@
  * objectstack#37858 — where the Ask AI entry sits, and how a header makes room.
  *
  * - The page's button group ends with it: comments, help, then Ask AI.
- * - A route whose page draws no group gets it at the content's top-right
- *   corner (`ShellAssistantFallback`), never beside a group, never on a phone
- *   (its top bar carries the entry), never where the runtime serves no AI.
+ * - A route whose page draws no group gets it at the content's top end
+ *   corner (`ShellAssistantFallback`; top-right, top-left right to left),
+ *   never beside a group, never on a phone (its top bar carries the entry),
+ *   never where the runtime serves no AI.
  * - The console `PageHeader` hides the entry's words first: before the title
  *   is cut, and before the page's own actions fold; once there is room again
  *   the fold opens first and the words come back last. A page that offers no
@@ -102,12 +103,12 @@ function ShellPageActionsAsHeader() {
 }
 
 describe('a route with no group gets the entry at its corner (objectstack#37858)', () => {
-  it('drawn where no page draws the group, at the top-right corner', () => {
+  it('drawn where no page draws the group, at the top end corner', () => {
     render(inShell(<div data-testid="search-results" />));
     const fallback = screen.getByTestId('shell-assistant-fallback');
     const button = within(fallback).getByTestId('topbar-ai-assistant');
     expect(button).toHaveAccessibleName('Ask AI');
-    expect(button.className.split(/\s+/)).toEqual(expect.arrayContaining(['absolute', 'right-2', 'top-2']));
+    expect(button.className.split(/\s+/)).toEqual(expect.arrayContaining(['absolute', 'end-2', 'top-2']));
     expect(screen.getAllByTestId('topbar-ai-assistant')).toHaveLength(1);
   });
 
