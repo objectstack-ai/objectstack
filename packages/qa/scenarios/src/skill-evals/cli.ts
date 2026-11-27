@@ -4,7 +4,8 @@
  * `pnpm --filter @objectstack/scenarios skill-evals` — run the published
  * skills' existing eval cases (`skills/BUNDLE/evals/*.json`) through the local
  * Claude Code login, each case on a with-skill and a no-skill arm, graded by
- * the case's own `must_contain` / `must_not_contain`; a trigger case
+ * the case's own `must_contain` / `must_contain_any` / `must_not_contain` (an
+ * any-of group is met by any one of its tokens); a trigger case
  * (`should_trigger`) runs on the with-skill arm only, graded on whether the
  * turn loaded the bundle, and is reported beside them. A devx instrument run
  * from this checkout: not a CI job, not a merge gate, not in the package's
@@ -17,6 +18,13 @@
  *                         cases and bundles both come from SOURCE
  *   --triggers-only       only the selected bundles' trigger cases (`should_trigger`), on
  *                         the with-skill arm; refused beside --regrade or --self-test
+ *   --case KEY[,KEY]      only these cases, by the key the summary and each record print
+ *                         (`BUNDLE/FILE_STEM#ID`; ids repeat across a bundle's eval files):
+ *                         a behaviour case on both arms, a trigger case on the with-skill arm;
+ *                         repeatable. Beside --skills, every named case must be of a --skills
+ *                         bundle, and --skills still sets the competing set; refused beside
+ *                         --triggers-only (the keys already say which cases), --regrade or
+ *                         --self-test; `round.json` records the keys as `scope.selectedCases`
  *   --trigger-field F     what a trigger turn's project holds beside its bundle: `selection`
  *                         (default: every --skills bundle, or every bundle) or `own` (it alone,
  *                         as rounds recorded before); refused beside --regrade or --self-test
@@ -49,7 +57,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { armArgs, ARMS } from './arms.js';
-import { loadSkillEvalCatalog, selectBundles, type SkillEvalCatalog } from './cases.js';
+import { CASE_KEY_SHAPE, loadSkillEvalCatalog, selectBundles, selectCases, type SkillEvalCatalog, type SkillEvalCase } from './cases.js';
 import { executeRound, planRound, preflight, regradeRecords, type RoundStop, runRecordFile, type SkillEvalRunRecord } from './run.js';
 import { runSelfTest, selfTestReached } from './self-test.js';
 import { renderSummaryMarkdown, type RoundSummary, summariseRound } from './summary.js';
@@ -73,6 +81,8 @@ export interface SkillEvalArgs {
   out?: string;
   regrade?: string;
   triggersOnly: boolean;
+  /** `--case`: the case keys (`BUNDLE/FILE_STEM#ID`) the round plans alone; absent ⇒ every case of the selected bundles. */
+  cases?: string[];
   /** `--trigger-field`; absent ⇒ `selection`. */
   triggerField?: TriggerField;
   dryRun: boolean;
@@ -117,6 +127,12 @@ export function parseSkillEvalArgs(argv: readonly string[]): SkillEvalArgs {
     else if (flag === '--out') a.out = val();
     else if (flag === '--regrade') a.regrade = val();
     else if (flag === '--triggers-only') a.triggersOnly = true;
+    else if (flag === '--case') {
+      const keys = val().split(',').map((s) => s.trim()).filter(Boolean);
+      const bad = keys.find((k) => !CASE_KEY_SHAPE.test(k));
+      if (keys.length === 0 || bad !== undefined) throw new Error(`--case takes case keys \`BUNDLE/FILE_STEM#ID\`, comma-separated, as the summary and each record print them (\`objectstack-query/filters-pagination-search#3\`), not \`${bad ?? ''}\``);
+      a.cases = [...new Set([...(a.cases ?? []), ...keys])];
+    }
     else if (flag === '--trigger-field') {
       const v = val();
       if (!(TRIGGER_FIELDS as readonly string[]).includes(v)) throw new Error(`--trigger-field takes ${TRIGGER_FIELDS.join(' or ')}, not \`${v}\``);
@@ -130,6 +146,9 @@ export function parseSkillEvalArgs(argv: readonly string[]): SkillEvalArgs {
   // Refused, never ignored: neither of these reads a selection the flag could narrow.
   if (a.triggersOnly && a.regrade !== undefined) throw new Error('--triggers-only cannot narrow --regrade: a regrade re-draws the recorded round at the scope it ran, so a --triggers-only round regrades as one without the flag');
   if (a.triggersOnly && a.selfTest) throw new Error('--triggers-only cannot narrow --self-test: the self-test runs its own fixtures, never a selection of cases');
+  if (a.cases && a.regrade !== undefined) throw new Error('--case cannot narrow --regrade: a regrade re-draws the recorded round at the scope it ran, and a round run with --case keeps its named cases');
+  if (a.cases && a.selfTest) throw new Error('--case cannot narrow --self-test: the self-test runs its own fixtures, never a selection of cases');
+  if (a.cases && a.triggersOnly) throw new Error('--case cannot be narrowed by --triggers-only: the keys already say which cases run, and a named trigger case runs on the with-skill arm alone');
   if (a.triggerField && (a.regrade !== undefined || a.selfTest)) throw new Error(`--trigger-field cannot apply to ${a.selfTest ? '--self-test: the self-test runs its own fixtures' : '--regrade: a regrade runs no turn, and keeps the installed set its round recorded'}`);
   return a;
 }
@@ -193,8 +212,11 @@ export interface RoundRecord {
     concurrency: number;
     maxUtilization: number;
   };
-  /** `triggersOnly`: the round ran `--triggers-only` (its trigger cases alone, on the with-skill arm), and `--regrade` keeps that scope. */
-  scope: { cases: number; arms: string[]; repeats: number; plannedTurns: number; ranTurns: number; notRunTurns: number; triggersOnly?: true };
+  /**
+   * `triggersOnly`: the round ran `--triggers-only` (its trigger cases alone, on the with-skill arm), and `--regrade` keeps that scope.
+   * `selectedCases`: the round ran `--case`, and planned these case keys alone (catalog order); `--regrade` keeps them. Absent ⇒ every case of the bundles.
+   */
+  scope: { cases: number; arms: string[]; repeats: number; plannedTurns: number; ranTurns: number; notRunTurns: number; triggersOnly?: true; selectedCases?: string[] };
   /** What every trigger turn installed beside its bundle (`--trigger-field`); absent on a round recorded before ⇒ `own`. */
   triggerField?: { mode: TriggerField; bundles?: string[] };
   stopped?: RoundStop;
@@ -240,10 +262,11 @@ export function writeRoundOutputs(outDir: string, round: RoundRecord): void {
   const { driver: d, scope } = round;
   const wallMin = Math.round(round.wallMs / 6000) / 10;
   const head = {
-    title: `Skill evals · ${round.skills.allBundles ? 'all bundles' : round.skills.bundles.join(', ')} × ${scope.triggersOnly ? 'trigger cases × the with-skill arm' : '2 arms'} × ${scope.repeats} rep${scope.repeats === 1 ? '' : 's'}`,
+    title: `Skill evals · ${scope.selectedCases ? `${scope.selectedCases.length} named case(s) of ${round.skills.bundles.join(', ')}` : round.skills.allBundles ? 'all bundles' : round.skills.bundles.join(', ')} × ${scope.triggersOnly ? 'trigger cases × the with-skill arm' : scope.arms.length === 1 ? 'the with-skill arm' : '2 arms'} × ${scope.repeats} rep${scope.repeats === 1 ? '' : 's'}`,
     lines: [
       `runner: ${round.runner.repo} ${round.runner.sha}`,
       `skills: ${round.skills.source}`,
+      ...(scope.selectedCases ? [`cases: the ${scope.selectedCases.length} named by --case, alone: ${scope.selectedCases.map((k) => `\`${k}\``).join(', ')}`] : []),
       `driver: ${d.driver} ${d.version}, login \`${d.authMethod}\`, no API key; served ${d.servedModels.join(', ') || 'none'}; effort ${d.requestedEffort ?? 'CLI default'}`,
       `turns: ${scope.ranTurns} of ${scope.plannedTurns} ran (${turnsLine(round.summary.cases.length, round.summary.triggers?.cases.length ?? 0, scope.repeats)}), ${d.concurrency} at once, --max-turns ${d.maxTurns}`,
       `wall time: ${wallMin} min; notional cost the CLI reported: $${round.summary.reportedCostUsd} (subscription login, nothing billed)`,
@@ -258,6 +281,19 @@ export function writeRoundOutputs(outDir: string, round: RoundRecord): void {
   const triggerTable = md.includes('\n## Trigger cases') ? md.slice(md.indexOf('\n## Trigger cases')).split('\n| trigger case |')[0] : '';
   console.log(`\n${md.split(/## (?:Per case|Trigger cases)/)[0]}${triggerTable}`);
   console.log(`round: ${join(outDir, 'round.json')} · summary: ${join(outDir, 'summary.md')}`);
+}
+
+/**
+ * The catalog's cases at the scope a recorded round planned: its bundles that
+ * are still in the catalog, narrowed as its `scope` says. A `--triggers-only`
+ * round planned its trigger cases alone and a `--case` round its named cases
+ * alone, so the rest of their bundles are not `added` since. Pure.
+ */
+export function roundCatalogCases(round: Pick<RoundRecord, 'skills' | 'scope'>, catalog: Pick<SkillEvalCatalog, 'bundles' | 'cases'>): SkillEvalCase[] {
+  // The bundles may have left the catalog too; their cases are then set apart as removed.
+  const present = round.skills.bundles.filter((b) => catalog.bundles.includes(b));
+  const named = round.scope.selectedCases ? new Set(round.scope.selectedCases) : undefined;
+  return catalog.cases.filter((c) => present.includes(c.bundle) && (!round.scope.triggersOnly || c.shouldTrigger !== undefined) && (!named || named.has(c.key)));
 }
 
 /**
@@ -278,10 +314,7 @@ export function regradeRound(dir: string, catalog: SkillEvalCatalog, sourceLabel
   const round = JSON.parse(readFileSync(roundFile, 'utf8')) as RoundRecord;
   if (round.schema !== ROUND_RECORD_SCHEMA) throw new Error(`--regrade: ${roundFile} is not a \`${ROUND_RECORD_SCHEMA}\` record`);
   if (round.skills.source !== sourceLabel) throw new Error(`--regrade: the round ran on ${round.skills.source}, not ${sourceLabel}; pass the same --skills-from`);
-  // The bundles may have left the catalog too; their cases are then set apart as removed.
-  const present = round.skills.bundles.filter((b) => catalog.bundles.includes(b));
-  // A `--triggers-only` round planned its trigger cases alone: its behaviour cases are not `added` since.
-  const catalogCases = present.length ? catalog.cases.filter((c) => present.includes(c.bundle) && (!round.scope.triggersOnly || c.shouldTrigger !== undefined)) : [];
+  const catalogCases = roundCatalogCases(round, catalog);
   const view = { bundles: catalog.bundles, unlisted: catalog.unlistedBundles };
   const runsDir = join(dir, 'runs');
   const files = readdirSync(runsDir).filter((n) => n.endsWith('.json')).sort();
@@ -309,7 +342,8 @@ export function regradeRound(dir: string, catalog: SkillEvalCatalog, sourceLabel
 const HELP = `skill-evals — run the published skills' eval cases on a with-skill and a no-skill arm
   pnpm --filter @objectstack/scenarios skill-evals [--skills a,b] [--skills-from workspace|VERSION] [--repeats N]
        [--concurrency N] [--max-turns N] [--case-timeout MIN] [--max-utilization F] [--model M] [--effort L]
-       [--bin PATH] [--out DIR] [--triggers-only] [--trigger-field selection|own] [--dry-run] [--regrade DIR] [--self-test]
+       [--bin PATH] [--out DIR] [--triggers-only | --case BUNDLE/FILE_STEM#ID[,…]] [--trigger-field selection|own] [--dry-run]
+       [--regrade DIR] [--self-test]
 See packages/qa/scenarios/README.md, "Running the published skills' eval cases".`;
 
 export async function main(argv: readonly string[]): Promise<number> {
@@ -342,7 +376,9 @@ export async function main(argv: readonly string[]): Promise<number> {
     if (args.regrade) return regradeRound(resolve(args.regrade), catalog, source.label);
     // The competing set every trigger turn installs: the --skills bundles, or every bundle; `own` installs none beside.
     const triggerField = args.triggerField === 'own' ? undefined : [...new Set(args.skills?.length ? args.skills : catalog.bundles)];
-    const cases = selectBundles(catalog, args.skills, args.triggersOnly, triggerField !== undefined);
+    const inBundles = selectBundles(catalog, args.skills, args.triggersOnly, triggerField !== undefined);
+    // `--case`: the named cases alone, each on the arms its kind takes (`planRound`).
+    const cases = args.cases ? selectCases(catalog, inBundles, args.cases, args.skills) : inBundles;
     const jobs = planRound(cases, args.repeats);
     const bundles = [...new Set(cases.map((c) => c.bundle))];
     const turnOpts = { maxTurns: args.maxTurns, ...(args.model ? { model: args.model } : {}), ...(args.effort ? { effort: args.effort } : {}) };
@@ -353,9 +389,10 @@ export async function main(argv: readonly string[]): Promise<number> {
       const triggers = cases.filter((c) => c.shouldTrigger !== undefined);
       for (const b of triggers.length ? (triggerField ?? []).filter((n) => !bundles.includes(n)) : []) console.log(`  ${b}: no case selected; a competitor in every trigger turn`);
       console.log(`${turnsLine(cases.length - triggers.length, triggers.length, args.repeats)} = ${jobs.length} turn(s), ${args.concurrency} at once`);
+      if (args.cases) console.log(`--case: ${cases.length} named case(s) alone, of the ${inBundles.length} these bundles hold: ${cases.map((c) => c.key).join(', ')}`);
       if (args.triggersOnly) console.log(`--triggers-only: ${selectBundles(catalog, args.skills, false, triggerField !== undefined).length - cases.length} behaviour case(s) of these bundles left out`);
       if (triggers.length) console.log(`trigger cases: ${triggers.filter((c) => c.shouldTrigger).length} should load the bundle, ${triggers.filter((c) => !c.shouldTrigger).length} should not`);
-      console.log(`each turn: a fresh directory holding the case's files; with-skill also holds .claude/skills/BUNDLE/ (no evals/)${args.triggersOnly ? '' : ', no-skill no skill'}`);
+      console.log(`each turn: a fresh directory holding the case's files; with-skill also holds .claude/skills/BUNDLE/ (no evals/)${triggers.length === cases.length ? '' : ', no-skill no skill'}`);
       if (triggers.length) console.log(triggerField ? `each trigger turn installs ${triggerField.length} bundle(s) (--trigger-field selection): ${triggerField.join(', ')}` : 'each trigger turn installs its own bundle alone (--trigger-field own)');
       console.log(`argv (prompt on stdin): ${args.bin} ${armArgs('TURN_DIR/mcp.json', turnOpts).join(' ')}`);
       console.log('dry run: no login read, no model called, nothing written');
@@ -396,7 +433,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
       wallMs: finishedAt.getTime() - startedAt.getTime(),
-      skills: { source: source.label, bundles, allBundles: bundles.length === catalog.bundles.length },
+      skills: { source: source.label, bundles, allBundles: !args.cases && bundles.length === catalog.bundles.length },
       driver: {
         driver: 'claude-code-cli',
         version: pf.version,
@@ -410,7 +447,17 @@ export async function main(argv: readonly string[]): Promise<number> {
         concurrency: args.concurrency,
         maxUtilization: args.maxUtilization,
       },
-      scope: { cases: cases.length, arms: args.triggersOnly ? ['with-skill'] : [...ARMS], repeats: args.repeats, plannedTurns: jobs.length, ranTurns: exec.records.length, notRunTurns: exec.notRun.length, ...(args.triggersOnly ? { triggersOnly: true as const } : {}) },
+      scope: {
+        cases: cases.length,
+        // A `--case` round of trigger cases alone runs the with-skill arm alone.
+        arms: args.triggersOnly ? ['with-skill'] : args.cases ? ARMS.filter((arm) => jobs.some((j) => j.arm === arm)) : [...ARMS],
+        repeats: args.repeats,
+        plannedTurns: jobs.length,
+        ranTurns: exec.records.length,
+        notRunTurns: exec.notRun.length,
+        ...(args.triggersOnly ? { triggersOnly: true as const } : {}),
+        ...(args.cases ? { selectedCases: cases.map((c) => c.key) } : {}),
+      },
       ...(triggerCount ? { triggerField: triggerField ? { mode: 'selection' as const, bundles: triggerField } : { mode: 'own' as const } } : {}),
       ...(exec.stopped ? { stopped: exec.stopped } : {}),
       summary: summariseRound(cases, exec.records, exec.notRun),
