@@ -22,9 +22,11 @@
  *
  * {@link ROSTER} names the command modules outside `src/commands/migrate` that
  * declare a boolean `yes` flag, whatever the mode flag it confirms is called
- * (`--delete`, `--apply`). The first case holds the roster to the modules, read
- * off the command classes' flags, so the next such command fails here until it
- * has a row that names how its confirmation gate is reached.
+ * (`--delete`, `--apply`). The walk reads every module under `src/commands`, at
+ * any depth and top-level commands included, and only `migrate` is left to its
+ * own pin. The first case holds the roster to the modules, read off the loaded
+ * command classes' flags, so the next such command fails here until it has a
+ * row that names how its confirmation gate is reached.
  *
  * ## What runs for real, and what is replaced
  *
@@ -44,7 +46,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { createCipheriv, randomBytes } from 'node:crypto';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -123,28 +125,34 @@ const COMMANDS_DIR = resolve(HERE, '../src/commands');
 
 type Runnable = { flags?: Record<string, { type?: unknown }>; run(argv: string[], opts?: Config): Promise<unknown> };
 
-/** Every non-migrate command module declaring a boolean `--yes`, keyed `topic name`. */
+/** Every non-migrate command module declaring a boolean `--yes`, keyed by its command id (`topic name`). */
 const POPULATION: string[] = [];
 const COMMANDS = new Map<string, Runnable>();
-for (const topic of readdirSync(COMMANDS_DIR, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-  if (!topic.isDirectory() || topic.name === 'migrate') continue;
-  for (const name of readdirSync(join(COMMANDS_DIR, topic.name)).sort()) {
+// Every command module is read, at any depth: a top-level command (`deploy.ts`
+// is `os deploy`) and a topic's subcommand one or more directories down
+// (`plugin/trust/add.ts` is `os plugin trust add`; a topic's `index.ts` is the
+// topic's own command). Only `src/commands/migrate` is left out: the migrate
+// pin owns it. Membership is read off the loaded class's flags, never off its
+// source text, so a quoted key or a flag taken from a shared flag set counts.
+async function collect(dir: string, prefix: string[]): Promise<void> {
+  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.isDirectory()) {
+      if (prefix.length === 0 && entry.name === 'migrate') continue;
+      await collect(join(dir, entry.name), [...prefix, entry.name]);
+      continue;
+    }
+    const name = entry.name;
     if (!name.endsWith('.ts') || /\.(test|spec)\.ts$/.test(name) || name.endsWith('.d.ts')) continue;
-    // Membership is decided by flags, never source text, but only modules that
-    // mention the flag are imported: oclif loads lazily and so does this.
-    const file = join(COMMANDS_DIR, topic.name, name);
-    const src = readFileSync(file, 'utf8');
-    if (!/\byes:\s*Flags\.boolean/.test(src)) continue;
-    const mod = (await import(file)) as { default?: unknown };
+    const mod = (await import(join(dir, name))) as { default?: unknown };
     if (typeof mod.default !== 'function') continue;
     const cls = mod.default as unknown as Runnable;
-    if (cls.flags?.yes?.type === 'boolean') {
-      const id = `${topic.name} ${basename(name, '.ts')}`;
-      POPULATION.push(id);
-      COMMANDS.set(id, cls);
-    }
+    if (cls.flags?.yes?.type !== 'boolean') continue;
+    const id = [...prefix, ...(name === 'index.ts' && prefix.length > 0 ? [] : [basename(name, '.ts')])].join(' ');
+    POPULATION.push(id);
+    COMMANDS.set(id, cls);
   }
 }
+await collect(COMMANDS_DIR, []);
 POPULATION.sort();
 
 const config = await Config.load({ root: PKG_ROOT });
