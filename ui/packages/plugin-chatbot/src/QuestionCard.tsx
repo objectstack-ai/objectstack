@@ -275,12 +275,11 @@ export function QuestionCard({ questions, onAnswer, onSkip, announce = false, cl
           })}
         </div>
 
-        <div
+        <label
           className={cn(
-            'mt-2 flex min-h-11 items-center gap-3 rounded-lg border px-3 py-2 text-sm',
+            'mt-2 flex min-h-11 cursor-text items-center gap-3 rounded-lg border px-3 py-2 text-sm',
             choice === 'text' && 'border-primary bg-primary/5',
           )}
-          onClick={() => inputRef.current?.focus()}
         >
           <span aria-hidden="true" className="size-5 shrink-0" />
           <input
@@ -292,7 +291,7 @@ export function QuestionCard({ questions, onAnswer, onSkip, announce = false, cl
             placeholder={t('chatbot.questionCard.typeYourOwn')}
             className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
           />
-        </div>
+        </label>
       </div>
 
       {summary !== null && (
