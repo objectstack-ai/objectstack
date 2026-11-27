@@ -694,13 +694,13 @@ describe('#37705 — work started inside a unit and not awaited runs outside it 
     const gate = new Promise<void>((r) => { open = r; });
     const seen: unknown[] = [];
     const realFind = driver.find.bind(driver);
-    driver.find = async (o: string, ast: any, options: any) => {
+    driver.find = async (o: string, ast: unknown, options: { transaction?: unknown } | undefined) => {
       if (o === 'note') { seen.push(options?.transaction); await gate; }
       return realFind(o, ast, options);
     };
     return { engine, driver, open, seen };
   }
-  const read = (engine: ObjectQL) => engine.find('note', { context: { isSystem: true } } as any);
+  const read = (engine: ObjectQL) => engine.find('note', { context: { isSystem: true } });
   /**
    * The unit's body stays open until the read has reached the driver, as the
    * after-hooks that follow a finished flow keep the door's unit open: the
@@ -735,15 +735,15 @@ describe('#37705 — work started inside a unit and not awaited runs outside it 
     const { engine, driver, open } = await heldReads();
     open();
     let inner!: Promise<unknown>;
-    await engine.transaction(async (trx: any) => {
-      await engine.insert('rec', { name: 'r1' }, { context: trx } as any);
-      inner = engine.runOutsideOpenUnits(() => engine.transaction(async (own: any) => {
-        await engine.insert('note', { name: 'n1' }, { context: own } as any);
+    await engine.transaction(async (trx) => {
+      await engine.insert('rec', { name: 'r1' }, { context: trx });
+      inner = engine.runOutsideOpenUnits(() => engine.transaction(async (own) => {
+        await engine.insert('note', { name: 'n1' }, { context: own });
       }));
     });
     await inner;
     expect(driver.begun, 'the detached body opened a unit of its own').toHaveLength(2);
     const [outer, own] = driver.begun;
-    expect(driver.creates.map((c: any) => [c.object, c.transaction])).toEqual([['rec', outer], ['note', own]]);
+    expect(driver.creates.map((c: { object: string; transaction: unknown }) => [c.object, c.transaction])).toEqual([['rec', outer], ['note', own]]);
   });
 });

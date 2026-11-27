@@ -5442,32 +5442,7 @@ export class ObjectQL implements IObjectQLEngine {
     return (TransactionsSectionFacet.transaction<T>).call(transactionsSectionHost.of(this), callback, baseContext, opts);
   }
 
-  /**
-   * [#37705] Run `body` outside every unit of work open now, for work its
-   * caller starts and does not await.
-   *
-   * A unit's ambient entry (ADR-0034) reaches every engine call made in its
-   * async context, so work started inside a unit enrolls in it, whether the
-   * unit's body awaits that work or not. Work the body does not await outlives
-   * the body: the unit commits under it, and its next statement on the
-   * enrolled handle fails with "Transaction query already complete". A read
-   * enrolls as surely as a write: its handle is taken when the call starts and
-   * used when the statement runs, which on a single-connection pool is after
-   * the commit.
-   *
-   * The engine cannot tell awaited work from work that is not, so the caller
-   * that starts it says so here. `body` runs out of the engine's ambient entry,
-   * with that entry's handle recorded as detached
-   * (`runOutsideOpenUnits`, `unit-detach.ts`, the same exit an `async: true`
-   * hook's run takes): its calls run on their own connection, as outside any
-   * unit, and a unit it opens itself is its own. A rollback of the unit open
-   * now does not undo them. ⛔ Never route work here that must commit or roll
-   * back with the caller's unit: that work belongs inside it, awaited.
-   */
-  runOutsideOpenUnits<T>(body: () => T): T {
-    return runOutsideOpenUnits(this.txStore, undefined, body);
-  }
-
+  /** [#37705] Run work the caller does not await outside every open unit; contract: `runOutsideOpenUnits`, `unit-detach.ts`. */ runOutsideOpenUnits<T>(body: () => T): T { return runOutsideOpenUnits(this.txStore, undefined, body); }
   private runOpenedUnit<T>(trx: unknown, owner: IDataDriver, body: () => Promise<T>, commitQueue?: UnitCommitQueue): Promise<T> {
     // [#29986 codemod] The body moved to `engine-transactions-section.ts`, its docblock with it (see `TransactionsSectionHost`).
     return (TransactionsSectionFacet.runOpenedUnit<T>).call(transactionsSectionHost.of(this), trx, owner, body, commitQueue);

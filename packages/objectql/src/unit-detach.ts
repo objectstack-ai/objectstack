@@ -82,6 +82,21 @@ export function isDetachedUnitHandle(handle: unknown): boolean {
  * with that entry's handle and `threaded` (the handle an api carries
  * explicitly) recorded as detached. `txStore` absent (an engine double) leaves
  * only the explicit half.
+ *
+ * [#37705] Also the body of the public `ObjectQL.runOutsideOpenUnits(body)`
+ * (no threaded handle), for work its caller starts and does not await. A
+ * unit's ambient entry reaches every engine call made in its async context,
+ * so such work enrolls in the unit whether the unit's body awaits it or not,
+ * and outlives the body: the unit commits under it, and its next statement on
+ * the enrolled handle fails with "Transaction query already complete". A read
+ * enrolls as surely as a write: its handle is taken when the call starts and
+ * used when the statement runs, which on a single-connection pool is after the
+ * commit. The engine cannot tell awaited work from work that is not, so the
+ * caller that starts it says so there (the run-history terminal write is the
+ * first). Its calls run on their own connection, as outside any unit; a unit
+ * it opens itself is its own; a rollback of the unit open at the call does not
+ * undo them. ⛔ Never route work there that must commit or roll back with the
+ * caller's unit: that work belongs inside it, awaited.
  */
 export function runOutsideOpenUnits<T>(
   txStore: Pick<AsyncLocalStorage<{ transaction?: unknown } | undefined>, 'getStore' | 'exit'> | undefined,
