@@ -120,7 +120,7 @@ describe('the Rules tab types the condition builder (objectui#11894)', () => {
     const onPatch = vi.fn();
     // A list is offered membership, not `==` (objectstack#36167): a stored
     // `record.watchers == 'x'` would open in the raw editor.
-    render(<ObjectValidationsPanel draft={draftWith("record.status == 'done' && (record.watchers != null && 'x' in record.watchers)")} onPatch={onPatch} />);
+    render(<ObjectValidationsPanel draft={draftWith("record.status == 'done' && (has(record.watchers) && record.watchers != null && 'x' in record.watchers)")} onPatch={onPatch} />);
     await pickOp('record.watchers', 'is empty');
     const cel = writtenCondition(onPatch) as string;
     expect(cel).toBe("record.status == 'done' && (record.watchers == null || size(record.watchers) == 0)");

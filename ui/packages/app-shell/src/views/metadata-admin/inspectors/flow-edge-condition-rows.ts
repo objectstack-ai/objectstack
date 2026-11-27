@@ -37,11 +37,13 @@
  *   `S == null || !S.contains(V)`.
  * - On a multi-value column (a list: `multiselect` / `checkboxes` / `tags`, or
  *   a `select` / `lookup` / `user` declared `multiple: true`) `contains` is
- *   list membership, `S != null && V in S`, and `not_contains` its complement,
- *   `S == null || !(V in S)`. CEL has no `contains` method on a list (it
- *   faults with "no matching overload"), and `S == V` compares the whole list
- *   with one value, so it is false for every record. The spelling is the one
- *   `ConditionBuilder` writes too (`cel-list-membership.ts`).
+ *   list membership and `not_contains` its complement, null-safe and spelled
+ *   per site: `has(S) && S != null && V in S` for a `record.` read,
+ *   `S != null && V in S` for a bare name (`cel-list-membership.ts`, which
+ *   takes it from the validator's own prescription). CEL has no `contains`
+ *   method on a list (it faults with "no matching overload"), and `S == V`
+ *   compares the whole list with one value, so it is false for every record.
+ *   The spelling is the one `ConditionBuilder` writes too.
  * - `in` / `not_in` → `S in [A, B]` / `!(S in [A, B])`.
  * - `is_empty` / `is_not_empty` → the spec's ruled 「is empty」 table
  *   (`expandEmptyOperator`), in the clauses `ConditionBuilder` writes:
@@ -72,7 +74,7 @@
 import { operatorsForField, isFilterValueComplete } from '@object-ui/components';
 import { expandEmptyOperator, type EmptyOperatorArm } from '@objectstack/spec/data';
 import { FILTER_DATE_LIKE_TYPES, FILTER_LOOKUP_LIKE_TYPES, FILTER_NUMBER_LIKE_TYPES, FILTER_SELECT_LIKE_TYPES } from '@object-ui/types';
-import { listMembershipCel, listSubjectOperators } from './cel-list-membership.js';
+import { listMembershipCel, listSubjectOperators, readListMembership } from './cel-list-membership.js';
 
 /** One column the rows may name: `value` is its CEL subject (`record.meeting_date`). */
 export interface EdgeConditionField {
@@ -326,8 +328,6 @@ const TERM_PATTERNS: ReadonlyArray<{
   },
   { re: re(`(${SUBJECT}) != null && \\1\\.(contains|startsWith|endsWith)\\((${STRING_LIT})\\)`), read: (m) => ({ operator: { contains: 'contains', startsWith: 'starts_with', endsWith: 'ends_with' }[m[2]]!, value: unquote(m[3]) }) },
   { re: re(`(${SUBJECT}) == null \\|\\| !\\1\\.contains\\((${STRING_LIT})\\)`), read: (m) => ({ operator: 'not_contains', value: unquote(m[2]) }) },
-  { re: re(`(${SUBJECT}) != null && (${STRING_LIT}) in \\1`), read: (m) => ({ operator: 'contains', value: unquote(m[2]) }) },
-  { re: re(`(${SUBJECT}) == null \\|\\| !\\((${STRING_LIT}) in \\1\\)`), read: (m) => ({ operator: 'not_contains', value: unquote(m[2]) }) },
   { re: re(`(${SUBJECT}) == null \\|\\| (?:\\1 == ''|size\\(\\1\\) == 0)`), read: () => ({ operator: 'is_empty' }) },
   { re: re(`(${SUBJECT}) != null && (?:\\1 != ''|size\\(\\1\\) != 0)`), read: () => ({ operator: 'is_not_empty' }) },
   { re: re(`(${SUBJECT}) (==|!=) null`), read: () => null, nullTest: true },
@@ -342,6 +342,14 @@ function listOf(list: string, kind: Kind): unknown[] {
 
 /** One term (no outer parentheses) as a row, or `null`. */
 function readTerm(text: string, byValue: ReadonlyMap<string, EdgeConditionField>): EdgeConditionRow | null {
+  // List membership reads back through the writer's own reader, so the
+  // per-site spelling is known in one place.
+  const membership = readListMembership(text);
+  if (membership && new RegExp(`^${STRING_LIT}$`).test(membership.member)) {
+    const field = byValue.get(membership.subject);
+    if (!field) return null;
+    return { field: field.value, operator: membership.contains ? 'contains' : 'not_contains', value: unquote(membership.member) };
+  }
   for (const pattern of TERM_PATTERNS) {
     const m = pattern.re.exec(text);
     if (!m) continue;
