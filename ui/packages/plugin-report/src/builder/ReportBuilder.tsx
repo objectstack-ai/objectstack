@@ -110,6 +110,12 @@ export interface ReportBuilderProps {
   saving?: boolean;
   /** A host notice above the preview (a pending draft, a refusal). */
   banner?: React.ReactNode;
+  /**
+   * The host's controls at the header's end, after Save (the console's
+   * help and 「Ask AI」 buttons, objectstack#37858): the builder owns its top
+   * bar, so the host draws them here rather than over it.
+   */
+  headerEnd?: React.ReactNode;
   dataSource?: unknown;
   /** The preview's drill sink (「View details」). */
   onDrill?: (args: DatasetDrillArgs) => void;
@@ -161,6 +167,7 @@ export function ReportBuilder({
   dirty,
   saving,
   banner,
+  headerEnd,
   dataSource,
   onDrill,
   className,
@@ -221,7 +228,7 @@ export function ReportBuilder({
       data-testid="report-builder"
       data-report-name={typeof report.name === 'string' ? report.name : undefined}
     >
-      {/* Header: close, the name and its description, then Discard / Save. */}
+      {/* Header: close, the name and its description, then Discard / Save and the host's end controls. */}
       <header className="flex items-start gap-3 border-b px-4 py-3">
         <Button
           type="button"
@@ -275,6 +282,7 @@ export function ReportBuilder({
             {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
             {tt('report.builder.save', 'Save')}
           </Button>
+          {headerEnd}
         </div>
       </header>
 

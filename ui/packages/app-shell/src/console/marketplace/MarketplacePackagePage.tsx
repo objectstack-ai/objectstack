@@ -1464,7 +1464,9 @@ function MarketplacePackagePageBody() {
   if (error || !data) {
     return (
       <div className="mx-auto w-full max-w-6xl flex flex-col gap-6 p-4 sm:p-6">
-        <Button variant="ghost" size="sm" onClick={() => navigate(`${basePath}/system/marketplace`)}>
+        {/* Sized to its words, as on the loaded page: stretched across the
+            row it would run under the shell's corner Ask AI button. */}
+        <Button variant="ghost" size="sm" className="self-start -ml-2 text-muted-foreground hover:text-foreground" onClick={() => navigate(`${basePath}/system/marketplace`)}>
           <ArrowLeft className="h-4 w-4 mr-1.5" aria-hidden="true" />
           {t('marketplace.back')}
         </Button>
