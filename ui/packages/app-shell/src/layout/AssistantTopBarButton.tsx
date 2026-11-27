@@ -54,12 +54,13 @@ export function isMacPlatform(): boolean {
 }
 
 /**
- * The Ask AI entry's opening half, shared by every button that asks the
- * assistant from a page — this one when the drawer is closed, and Home's
- * 「Ask AI」 — so what opening means is decided in one place. Absent a target
- * it opens the drawer on whatever it shows now, exactly as the drawer's own
- * toggle does (a handoff it still holds is kept); with one, on that target.
- * Under no drawer host it goes to the pre-drawer address.
+ * The Ask AI entry's opening, for a button elsewhere on a page that asks the
+ * assistant the way the standing entry does — Home's 「Ask AI」. Absent a
+ * target it opens the drawer on whatever it shows now: the drawer's own
+ * toggle, which is what the standing button runs (a handoff the drawer still
+ * holds is kept); with one, on that target. Under no drawer host it goes to
+ * the pre-drawer address. What opening means changes here and in the
+ * button's toggle together.
  */
 export function useAskAiEntry(): (target?: ChatDockTarget) => void {
   const control = useChatDockControl();
@@ -89,7 +90,6 @@ export interface AssistantTopBarButtonProps {
 export function AssistantTopBarButton({ className, iconOnly = false }: AssistantTopBarButtonProps) {
   const { t } = useObjectTranslation();
   const control = useChatDockControl();
-  const askAi = useAskAiEntry();
   const planPending = usePlanApprovalPending();
   const phone = usePhoneViewport();
   const mac = React.useMemo(isMacPlatform, []);
@@ -134,7 +134,9 @@ export function AssistantTopBarButton({ className, iconOnly = false }: Assistant
   const button = control ? (
     <Button
       {...shared}
-      onClick={control.expanded ? control.toggle : () => askAi()}
+      // Opening is `useAskAiEntry`'s no-target arm, the drawer's own toggle;
+      // read straight off the handle so the button needs no router.
+      onClick={control.toggle}
       aria-pressed={control.expanded}
       aria-describedby={planPending ? markerId : undefined}
       data-testid="topbar-ai-assistant"

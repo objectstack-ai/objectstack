@@ -57,7 +57,6 @@ vi.mock('../../preview/DraftPreviewBar', () => ({ DraftPreviewBar: () => null })
 vi.mock('../../preview/UnpublishedAppBar', () => ({ UnpublishedAppBar: () => null }));
 
 import { ConsoleLayout } from '../ConsoleLayout';
-import { AssistantTopBarButton } from '../AssistantTopBarButton';
 import { NavigationProvider } from '../../context/NavigationContext';
 
 const APP = { name: 'crm', label: 'CRM', active: true, navigation: [] };
@@ -73,9 +72,10 @@ function mountConsole() {
     <MemoryRouter initialEntries={[LIST]}>
       <NavigationProvider>
         <ConsoleLayout activeAppName="crm" activeApp={APP} onAppChange={vi.fn()} objects={[]}>
-          {/* From 768 px up the robot sits in the page header's button group
-              (objectstack#36111), not in a top bar (objectstack#36112). */}
-          <AssistantTopBarButton />
+          {/* From 768 px up the entry sits in the page header's button group
+              (objectstack#36111), not in a top bar (objectstack#36112); this
+              page draws no header, so the layout's own corner entry is the
+              one under test (objectstack#37858, `ShellAssistantFallback`). */}
           <div data-testid="route-content">page</div>
           <LocationProbe />
         </ConsoleLayout>
