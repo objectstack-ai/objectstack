@@ -4,7 +4,7 @@
 
 feat(spec): the ask-question envelope a question tool's result carries, and `parseAskQuestionEnvelope`
 
-Clause-②: yes (widening)
+Clause-②: yes
 Metadata-protocol: added
 
 - New in `@objectstack/spec/ai`: `AskQuestionEnvelopeSchema` (`{ success: true, status: 'asked', reply, preface?, questions }`), `AskQuestionSchema` and `AskQuestionOptionSchema`, with the `AskQuestionEnvelope` / `AskQuestion` / `AskQuestionOption` types and their `…Parsed` pairs. One or two questions, two to four mutually exclusive options per question, labels unique within a question, at most one option `recommended`; the length limits are exported as `ASK_QUESTION_LIMITS`. Every level is closed: an unknown key is refused, never dropped.
