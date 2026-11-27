@@ -72,7 +72,7 @@ const paramKeys = (a: DeclaredAction): string[] => (a.params ?? []).map((p) => (
 /** The object's `record_page` actions, in the order the stable `order` sort gives them. */
 function headerOrder(): string[] {
   return actions()
-    .filter((a) => (a.locations ?? []).includes('record_page'))
+    .filter((a) => ((a.locations ?? []).includes('record_page') || (a.locations ?? []).includes('record')))
     .map((a, i) => ({ a, i }))
     .sort((x, y) => (x.a.order ?? 0) - (y.a.order ?? 0) || x.i - y.i)
     .map(({ a }) => a.name as string);
@@ -89,7 +89,7 @@ describe('sys_organization.rename_organization: the declaration', () => {
   });
 
   it('is offered at the record header and on the list row', () => {
-    expect(action('rename_organization').locations).toEqual(['record_page', 'record_row']);
+    expect(action('rename_organization').locations).toEqual(['record']);
   });
 
   it("targets better-auth's organization/update exactly as update_organization does", () => {
@@ -114,7 +114,7 @@ describe('sys_organization.rename_organization: the declaration', () => {
 describe('sys_organization: one door per field on the record header', () => {
   it('no record_page action that writes through organization/update collects a slug', () => {
     const headerWriters = actions()
-      .filter((a) => (a.locations ?? []).includes('record_page'))
+      .filter((a) => ((a.locations ?? []).includes('record_page') || (a.locations ?? []).includes('record')))
       .filter((a) => a.target === UPDATE_TARGET);
     expect(headerWriters.map((a) => a.name)).toEqual(['rename_organization']);
     for (const a of headerWriters) {

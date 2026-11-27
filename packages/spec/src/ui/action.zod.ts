@@ -1911,7 +1911,7 @@ const actionObject = () => strictObject({
    * backward compatible. Renderers MAY additionally prefer a `variant:'primary'`
    * action when two actions tie on `order` (see objectui record-header renderer).
    */
-  order: z.number().optional().describe('Sort order within a location group (lower = higher). Promotes/demotes an action toward the record page header's primary button; stable, so actions without `order` keep their registration order.'),
+  order: z.number().optional().describe('Sort order within a location group (lower = higher). Promotes/demotes an action toward the record page header\'s primary button; stable, so actions without `order` keep their registration order.'),
 
   /** UX Behavior */
   // NB this describe() renders into the InlineAction reference table too (both

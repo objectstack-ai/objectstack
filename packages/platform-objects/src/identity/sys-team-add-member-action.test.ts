@@ -41,7 +41,7 @@ describe('sys_team.add_team_member — Add Member opened from a team', () => {
   const fromList = action(SysTeamMember, 'add_team_member');
 
   it('is offered on the team row and the team record header', () => {
-    expect(fromTeam.locations).toEqual(['record_row', 'record_page']);
+    expect(fromTeam.locations).toEqual(['record']);
   });
 
   it('binds the team from the row it is opened on, as teamId', () => {

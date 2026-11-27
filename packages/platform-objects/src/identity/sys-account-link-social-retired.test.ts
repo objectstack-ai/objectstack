@@ -71,7 +71,7 @@ describe('#21849 — unlink_account is unchanged by the retirement', () => {
     expect(unlink?.type).toBe('api');
     expect(unlink?.target).toBe('/api/v1/auth/unlink-account');
     expect(unlink?.mode).toBe('delete');
-    expect(unlink?.locations).toEqual(['record_row', 'record_page']);
+    expect(unlink?.locations).toEqual(['record']);
     expect(unlink?.params).toEqual([
       { name: 'accountId', field: 'id', defaultFromRow: true, required: true },
     ]);

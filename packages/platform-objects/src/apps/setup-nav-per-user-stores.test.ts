@@ -147,6 +147,6 @@ describe('(4) Linked Accounts already serves "Identity links" (#23803)', () => {
   it('the grid\'s one row action, unlink_account, is offered on list rows', () => {
     const unlink = (SysAccount.actions ?? []).find((a) => a.name === 'unlink_account');
     expect(unlink, 'sys_account lost unlink_account').toBeDefined();
-    expect(unlink?.locations).toContain('record_row');
+    expect(unlink?.locations).toContain('record');
   });
 });

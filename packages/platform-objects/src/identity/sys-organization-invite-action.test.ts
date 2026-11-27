@@ -43,7 +43,7 @@ function action(name: string): HeaderAction {
 /** The object's `record_page` actions, in the order the stable `order` sort gives them. */
 function headerOrder(): string[] {
   return actions()
-    .filter((a) => (a.locations ?? []).includes('record_page'))
+    .filter((a) => ((a.locations ?? []).includes('record_page') || (a.locations ?? []).includes('record')))
     .map((a, i) => ({ a, i }))
     .sort((x, y) => (x.a.order ?? 0) - (y.a.order ?? 0) || x.i - y.i)
     .map(({ a }) => a.name as string);
@@ -66,7 +66,7 @@ describe('sys_organization.invite_user — the record header (#24016)', () => {
 
   it('is the one primary action in the header', () => {
     const primaries = actions()
-      .filter((a) => (a.locations ?? []).includes('record_page'))
+      .filter((a) => ((a.locations ?? []).includes('record_page') || (a.locations ?? []).includes('record')))
       .filter((a) => a.variant === 'primary')
       .map((a) => a.name);
     expect(primaries).toEqual(['invite_user']);

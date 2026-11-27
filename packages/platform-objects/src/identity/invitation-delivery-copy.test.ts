@@ -153,7 +153,7 @@ describe('sys_invitation.copy_invitation_link — the declaration', () => {
   it('is a script action bound to its handler by target, on the row menu and the record header', () => {
     expect(copy.type).toBe('script');
     expect(copy.target).toBe('copy_invitation_link');
-    expect(copy.locations).toEqual(['record_row', 'record_page']);
+    expect(copy.locations).toEqual(['record']);
   });
 
   it('shows the answer in a copyable text dialog, the acceptUrl field', () => {
