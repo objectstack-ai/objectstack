@@ -12,6 +12,10 @@
  *
  * CONTROL: a form view authoring neither keeps the page's own `Submit` /
  * `Cancel` and opens blank.
+ *
+ * objectstack-ai/objectstack#37665 — the same class, one key: the form view's
+ * own `columns` is the grid width, as the Setup canvas draws it, on both
+ * routes. CONTROL: a form without it keeps the per-section layout.
  */
 
 import { describe, expect, it, vi, afterEach } from 'vitest';
@@ -155,4 +159,42 @@ describe('the two helpers, directly', () => {
     expect(readPrefill(fields, search, null, { title: 'T', unknown_field: 'x' })).toStrictEqual({ title: 'T', channel: 'phone' });
     expect(readPrefill(fields, search, { title: 'Stored' }, { title: 'T' })).toStrictEqual({ title: 'Stored', channel: 'phone' });
   });
+});
+
+/** Fields per row of each section grid, read off its class (`sm:grid-cols-N`; none = one). */
+function sectionGridCounts(container: HTMLElement): number[] {
+  return Array.from(container.querySelectorAll<HTMLElement>('div.grid.grid-cols-1.gap-4')).map((el) => {
+    const m = /(?:^|\s)sm:grid-cols-(\d)(?:\s|$)/.exec(el.className);
+    return m ? Number(m[1]) : 1;
+  });
+}
+
+const TWO_SECTIONS = [{ fields: ['title'] }, { fields: ['channel'] }];
+
+describe('FormPage lays sections out by the form view\'s own columns (#37665)', () => {
+  for (const [route, url] of [
+    ['named', '/forms/showcase_inquiry.intake'],
+    ['public', '/f/intake'],
+  ] as const) {
+    it(`${route}: form \`columns: 1\` draws a \`columns: 2\` section in one column`, async () => {
+      vi.stubGlobal('fetch', stubFetch({ columns: 1, sections: [{ columns: 2, fields: ['title', 'channel'] }] }));
+      const { container } = renderAt(url);
+      await waitFor(() => expect(input('title')).not.toBeNull());
+      expect(sectionGridCounts(container)).toEqual([1]);
+    });
+
+    it(`${route}: form \`columns: 3\` draws undeclared sections three across`, async () => {
+      vi.stubGlobal('fetch', stubFetch({ columns: 3, sections: TWO_SECTIONS }));
+      const { container } = renderAt(url);
+      await waitFor(() => expect(input('title')).not.toBeNull());
+      expect(sectionGridCounts(container)).toEqual([3, 3]);
+    });
+
+    it(`${route}: CONTROL — no form \`columns\`: a declared section as written, an undeclared one at two`, async () => {
+      vi.stubGlobal('fetch', stubFetch({ sections: [{ columns: 1, fields: ['title'] }, { fields: ['channel'] }] }));
+      const { container } = renderAt(url);
+      await waitFor(() => expect(input('title')).not.toBeNull());
+      expect(sectionGridCounts(container)).toEqual([1, 2]);
+    });
+  }
 });

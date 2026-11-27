@@ -2350,6 +2350,10 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
           ...(kanbanCfg.summary && typeof kanbanCfg.summary === 'object' ? { summary: kanbanCfg.summary } : {}),
           ...(typeof kanbanCfg.showFieldLabels === 'boolean' ? { showFieldLabels: kanbanCfg.showFieldLabels } : {}),
           ...(typeof kanbanCfg.hideEmptyFields === 'boolean' ? { hideEmptyFields: kanbanCfg.hideEmptyFields } : {}),
+          // objectstack#36423 — the counts at each card's foot, only when declared.
+          ...(kanbanCfg.cardFooter && typeof kanbanCfg.cardFooter === 'object' && !Array.isArray(kanbanCfg.cardFooter)
+            ? { cardFooter: kanbanCfg.cardFooter }
+            : {}),
           ...(kanbanConditionalFormatting ? { conditionalFormatting: kanbanConditionalFormatting } : {}),
         };
       }

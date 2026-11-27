@@ -431,7 +431,8 @@ export const ImportRowResultSchema = lazySchema(() => z.object({
   errors: z.array(ValidateDataIssueSchema).optional().describe(
     'Every cell error of a failed row, one element per failed cell, in the validate verdict\'s issue shape '
     + '(`field`, `code`, `message`). The list holds the import\'s cell-coercion errors, and a cell error never '
-    + 'carries the advisory-only `rule` or `severity`. '
+    + 'carries the advisory-only `rule` or `severity`. A `reference_out_of_scope` cell error also carries '
+    + '`scope`: the row\'s own columns the lookup was resolved within, each with the cell the row gave it. '
     + 'Present only on a failed row that has at least one cell error, so a row '
     + 'that failed for another reason (a duplicate or ambiguous match key, say) omits it. The first-error keys '
     + '`field`, `code` and `error` stay and name element 0, so a reader of those keys sees the same answer '

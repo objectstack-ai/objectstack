@@ -1,9 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
 import { PLATFORM_CAPABILITY_PROVIDERS } from '@objectstack/spec/kernel';
+import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
+import type { PluginContext } from '@objectstack/core';
 import { SettingsService } from '../settings-service.js';
+import { SettingsServicePlugin } from '../settings-service-plugin.js';
+import { registerSettingsRoutes } from '../settings-routes.js';
 import type { CryptoAdapter } from '../crypto-adapter.js';
 import {
   aiSettingsManifest,
@@ -11,7 +15,16 @@ import {
   withAiEmbedderSection,
   aiTestActionHandler,
   aiTestEmbedderActionHandler,
+  aiProviderTestActionHandlers,
 } from './ai.manifest.js';
+import {
+  AI_PROVIDERS,
+  AI_MODEL_RULE_KEYS,
+  parseAiModelList,
+  registerAiModelRules,
+  resolveAiModelConfiguration,
+  type AiProviderId,
+} from './ai-models.js';
 
 /**
  * #8026 — the write-door cases below save a complete `openai` provider config,
@@ -563,3 +576,259 @@ describe('aiSettingsManifest — no provider is presented until one is configure
     }
   });
 });
+
+describe('aiSettingsManifest — several providers at once, a model list each, a default and a structured-output model', () => {
+  const specs = () => aiSettingsManifest.specifiers as any[];
+  const byKey = (k: string) => specs().find((s) => s.key === k);
+  const byId = (id: string) => specs().find((s) => s.id === id);
+
+  /** A service carrying the `ai` page and its save rule, as the settings plugin registers both. */
+  const ruled = (env: Record<string, string> = {}) => {
+    const svc = new SettingsService({ env, crypto: new ConfidentialTestAdapter() });
+    svc.registerManifest(aiSettingsManifest);
+    registerAiModelRules(svc, aiSettingsManifest);
+    return svc;
+  };
+
+  /** OpenAI as the default provider and Anthropic beside it, each with two models. */
+  const twoProviders = {
+    provider: 'openai',
+    openai_api_key: 'sk-openai-secret',
+    openai_model: 'gpt-4o',
+    openai_models: 'gpt-4o-mini',
+    anthropic_enabled: true,
+    anthropic_api_key: 'sk-ant-secret',
+    anthropic_model: 'claude-sonnet-4-20250514',
+    anthropic_models: 'claude-haiku-4-5',
+  };
+
+  const values = async (svc: SettingsService) => {
+    const payload = await svc.getNamespace('ai');
+    return Object.fromEntries(Object.entries(payload.values).map(([k, v]) => [k, (v as any)?.value]));
+  };
+
+  it('declares, per provider, an on/off toggle beside the default provider, a model list, and its own Test connection', () => {
+    for (const { id } of AI_PROVIDERS) {
+      expect(byKey(`${id}_enabled`), id).toMatchObject({ type: 'toggle', default: false });
+      expect(byKey(`${id}_enabled`).visible, id).toBe(`\${data.provider !== '${id}'}`);
+      expect(byKey(`${id}_models`), id).toMatchObject({ type: 'textarea' });
+      expect(byId(`test_${id}`), id).toMatchObject({
+        type: 'action_button',
+        handler: { kind: 'http', method: 'POST', url: `/api/settings/ai/test_${id}` },
+      });
+      // The provider's section shows while it is the default provider or turned on.
+      expect(byId(id).visible, id).toBe(`\${data.provider === '${id}' || data.${id}_enabled === true}`);
+    }
+    // One encrypted key per provider (Cloudflare's is its gateway token), as before.
+    for (const { id } of AI_PROVIDERS) expect(byKey(`${id}_api_key`), id).toMatchObject({ type: 'password', encrypted: true });
+  });
+
+  it('keeps `provider` as the default provider, and adds the default and structured-output models with existing specifier kinds', () => {
+    expect(byKey('provider')).toMatchObject({ type: 'select', label: 'Default provider' });
+    expect(byKey('default_model')).toMatchObject({ type: 'text', required: false });
+    expect(byKey('structured_output_provider')).toMatchObject({ type: 'select', required: false });
+    expect(byKey('structured_output_provider').options.map((o: any) => o.value))
+      .toEqual(byKey('provider').options.map((o: any) => o.value));
+    expect(byKey('structured_output_model')).toMatchObject({ type: 'text', required: false });
+    // Every specifier is one the spec declares: the whole page parses.
+    expect(() => SettingsManifestSchema.parse(aiSettingsManifest)).not.toThrow();
+  });
+
+  it('a model list takes ids separated by line breaks or commas; the gateway list keeps the gateway model shape', async () => {
+    expect(parseAiModelList(' gpt-4o-mini \n\n o3 , gpt-4o-mini,')).toEqual(['gpt-4o-mini', 'o3']);
+    expect(parseAiModelList(null)).toEqual([]);
+    const svc = ruled();
+    await expect(svc.setMany('ai', { ...twoProviders, openai_models: 'gpt-4o-mini\no3' })).resolves.toBeDefined();
+    await expect(
+      svc.setMany('ai', { provider: 'gateway', gateway_model: 'openai/gpt-4o', gateway_models: 'anthropic/claude-sonnet-4.6\nnot-a-gateway-id' }),
+    ).rejects.toMatchObject({ code: 'SETTINGS_VALIDATION', fields: [{ field: 'gateway_models', code: 'invalid_format' }] });
+  });
+
+  it('two providers on with two models each validate, and read back as two providers with their models', async () => {
+    const svc = ruled();
+    await expect(
+      svc.setMany('ai', { ...twoProviders, default_model: 'gpt-4o-mini', structured_output_provider: 'anthropic', structured_output_model: 'claude-haiku-4-5' }),
+    ).resolves.toBeDefined();
+    expect(resolveAiModelConfiguration(await values(svc))).toEqual({
+      providers: [
+        { provider: 'openai', models: ['gpt-4o', 'gpt-4o-mini'] },
+        { provider: 'anthropic', models: ['claude-sonnet-4-20250514', 'claude-haiku-4-5'] },
+      ],
+      defaultModel: { provider: 'openai', model: 'gpt-4o-mini' },
+      structuredOutputModel: { provider: 'anthropic', model: 'claude-haiku-4-5' },
+    });
+  });
+
+  it('a default model outside the default provider\'s models is refused with a named error, and nothing is stored', async () => {
+    const svc = ruled();
+    await expect(svc.setMany('ai', { ...twoProviders, default_model: 'claude-haiku-4-5' })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [{
+        field: 'default_model',
+        code: 'invalid_value',
+        constraint: { rule: 'default_model_not_listed', provider: 'openai', model: 'claude-haiku-4-5', models: ['gpt-4o', 'gpt-4o-mini'] },
+      }],
+    });
+    expect((await svc.get('ai', 'provider')).value).toBeNull();
+  });
+
+  it('a later save that drops the default model from its provider\'s list is refused at the list it changes', async () => {
+    const svc = ruled();
+    await svc.setMany('ai', { ...twoProviders, default_model: 'gpt-4o-mini' });
+    await expect(svc.setMany('ai', { openai_models: 'o3' })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [{ field: 'openai_models', code: 'invalid_value', constraint: { rule: 'default_model_not_listed' } }],
+    });
+    // Changing the default model together with the list is accepted.
+    await expect(svc.setMany('ai', { openai_models: 'o3', default_model: 'o3' })).resolves.toBeDefined();
+    // Turning the structured-output provider off later is refused at its toggle.
+    await svc.setMany('ai', { structured_output_provider: 'anthropic' });
+    await expect(svc.setMany('ai', { anthropic_enabled: false })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [{ field: 'anthropic_enabled', code: 'invalid_value', constraint: { rule: 'structured_output_provider_off' } }],
+    });
+  });
+
+  it('a structured-output provider that is off, or a model it does not list, is refused', async () => {
+    const svc = ruled();
+    await expect(
+      svc.setMany('ai', { ...twoProviders, anthropic_enabled: false, structured_output_provider: 'anthropic' }),
+    ).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [
+        { field: 'structured_output_provider', code: 'invalid_value', constraint: { rule: 'structured_output_provider_off', provider: 'anthropic' } },
+      ],
+    });
+    await expect(
+      svc.setMany('ai', { ...twoProviders, structured_output_model: 'claude-haiku-4-5' }),
+    ).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [{ field: 'structured_output_model', code: 'invalid_value', constraint: { rule: 'structured_output_model_not_listed', provider: 'openai' } }],
+    });
+  });
+
+  it('the refusal is written in the caller\'s language', async () => {
+    const svc = ruled();
+    await expect(
+      svc.setMany('ai', { ...twoProviders, default_model: 'o9' }, {}, { locale: 'zh-CN' }),
+    ).rejects.toMatchObject({ fields: [{ field: 'default_model', message: expect.stringContaining('默认模型「o9」') }] });
+  });
+
+  it('a legacy single-provider value set reads as one enabled provider with that model as the default — no rewrite', async () => {
+    const svc = ruled();
+    // The shape a deployment stored before several providers existed.
+    await svc.setMany('ai', { provider: 'deepseek', deepseek_api_key: 'sk-ds-secret', deepseek_model: 'deepseek-reasoner' });
+    const read = await values(svc);
+    expect(read.deepseek_enabled).toBe(false);
+    expect(read.default_model).toBeNull();
+    expect(resolveAiModelConfiguration(read)).toEqual({
+      providers: [{ provider: 'deepseek', models: ['deepseek-reasoner'] }],
+      defaultModel: { provider: 'deepseek', model: 'deepseek-reasoner' },
+      structuredOutputModel: { provider: 'deepseek', model: 'deepseek-reasoner' },
+    });
+    // The stored model key keeps its value: nothing was rewritten.
+    expect((await svc.get('ai', 'deepseek_model')).value).toBe('deepseek-reasoner');
+    // A legacy provider left at its manifest model reads that model as the default.
+    const fresh = ruled();
+    await fresh.setMany('ai', { provider: 'openai', openai_api_key: 'sk-openai-secret' });
+    expect(resolveAiModelConfiguration(await values(fresh)).defaultModel).toEqual({ provider: 'openai', model: 'gpt-4o' });
+  });
+
+  it('a save that touches none of the model keys is never refused for them', async () => {
+    const svc = ruled();
+    await svc.setMany('ai', { ...twoProviders });
+    await expect(svc.setMany('ai', { temperature: 0.2 })).resolves.toBeDefined();
+  });
+
+  it('no key value appears in any read of the settings', async () => {
+    const http = new RouteHttp();
+    const svc = ruled();
+    registerSettingsRoutes(http, svc, { contextFromRequest: platformAdmin as any });
+    const put = await http.call('PUT', 'ai', { ...twoProviders, default_model: 'gpt-4o' });
+    expect(put.status).toBe(200);
+    const get = await http.call('GET', 'ai');
+    expect(get.status).toBe(200);
+    for (const answer of [put, get]) {
+      const text = JSON.stringify(answer.body);
+      expect(text).not.toContain('sk-openai-secret');
+      expect(text).not.toContain('sk-ant-secret');
+    }
+    const refused = await http.call('PUT', 'ai', { default_model: 'claude-haiku-4-5' });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error.code).toBe('SETTINGS_VALIDATION');
+    expect(refused.body.error.details.fields[0]).toMatchObject({ field: 'default_model', code: 'invalid_value' });
+    expect(JSON.stringify(refused.body)).not.toContain('sk-');
+  });
+
+  it('each provider\'s Test connection checks that provider, whichever provider is the default', async () => {
+    const run = (provider: AiProviderId, values: Record<string, unknown>) =>
+      aiProviderTestActionHandlers[`test_${provider}`]!({ namespace: 'ai', actionId: `test_${provider}`, values, ctx: {} });
+    await expect(run('anthropic', { provider: 'openai', openai_api_key: 'k' })).resolves.toMatchObject({
+      ok: false, message: 'anthropic API key is required.',
+    });
+    await expect(run('anthropic', { provider: 'openai', anthropic_api_key: 'k', anthropic_model: 'claude-haiku-4-5' })).resolves.toMatchObject({
+      ok: true, message: expect.stringContaining('anthropic configured (model=claude-haiku-4-5)'),
+    });
+    // The unsaved form posted with the click is what is checked.
+    await expect(
+      aiProviderTestActionHandlers.test_gateway!({ namespace: 'ai', actionId: 'test_gateway', values: {}, payload: { values: { gateway_model: 'openai/gpt-4o' } }, ctx: {} }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(Object.keys(aiProviderTestActionHandlers).sort()).toEqual(AI_PROVIDERS.map((p) => `test_${p.id}`).sort());
+  });
+
+  it('the settings plugin registers the save rule and every provider\'s Test connection by default', async () => {
+    const predicates: string[] = [];
+    const register = SettingsService.prototype.registerWritePredicate;
+    const spy = vi.spyOn(SettingsService.prototype, 'registerWritePredicate').mockImplementation(function (
+      this: SettingsService,
+      ...args: Parameters<SettingsService['registerWritePredicate']>
+    ) {
+      predicates.push(`${args[0]}.${args[1]}`);
+      return register.apply(this, args);
+    });
+    let service: SettingsService | undefined;
+    const ctx = {
+      logger: { info() {}, warn() {}, error() {}, debug() {} },
+      registerService: (name: string, svc: unknown) => { if (name === 'settings') service = svc as SettingsService; },
+      getService: (name: string) => { throw new Error(`fixture: no '${name}' service`); },
+    } as unknown as PluginContext;
+    try {
+      await new SettingsServicePlugin({ env: {} }).init(ctx);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(predicates.filter((p) => p.startsWith('ai.')).sort()).toEqual(AI_MODEL_RULE_KEYS.map((k) => `ai.${k}`).sort());
+    const answer = await service!.runAction('ai', 'test_anthropic', { values: { anthropic_api_key: 'k' } });
+    expect(answer).toMatchObject({ ok: true, message: expect.stringContaining('anthropic configured') });
+  });
+});
+
+/** The settings routes over a recording HTTP double, for the read-and-refusal pin above. */
+class RouteHttp implements IHttpServer {
+  routes = new Map<string, RouteHandler>();
+  private add(method: string, path: string, handler: RouteHandler) { this.routes.set(`${method} ${path}`, handler); return this as any; }
+  get(path: string, h: RouteHandler) { return this.add('GET', path, h); }
+  post(path: string, h: RouteHandler) { return this.add('POST', path, h); }
+  put(path: string, h: RouteHandler) { return this.add('PUT', path, h); }
+  delete(path: string, h: RouteHandler) { return this.add('DELETE', path, h); }
+  patch(path: string, h: RouteHandler) { return this.add('PATCH', path, h); }
+  use() { return this as any; }
+  listen() { return Promise.resolve(); }
+  close() { return Promise.resolve(); }
+  getInstance() { return null; }
+
+  async call(method: 'GET' | 'PUT', namespace: string, body?: unknown): Promise<{ status: number; body: any }> {
+    const state: { status: number; body?: any } = { status: 200 };
+    const req = { params: { namespace }, query: {}, body, headers: {}, method, path: `/api/settings/${namespace}` } as IHttpRequest;
+    const res: IHttpResponse = {
+      json: ((data: unknown) => { state.body = data; }) as any,
+      send: (() => undefined) as any,
+      status: ((code: number) => { state.status = code; return res; }) as any,
+      header: (() => res) as any,
+    };
+    await this.routes.get(`${method} /api/settings/:namespace`)!(req, res);
+    return { status: state.status, body: state.body };
+  }
+}
+
+const platformAdmin = () => ({ enforced: true, permissions: ['manage_platform_settings'], userId: 'usr_admin' });

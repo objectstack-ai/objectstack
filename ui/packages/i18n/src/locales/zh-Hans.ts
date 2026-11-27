@@ -805,6 +805,9 @@ const zh = {
       // 服务端结构化导入错误的友好文案
       referenceNotFound: '找不到匹配 "{{value}}" 的记录',
       referenceAmbiguous: '"{{value}}" 匹配到多条记录，请使用唯一值或记录 ID',
+      referenceOutOfScope: '找到了 "{{value}}"，但它不在 {{scope}} 下',
+      scopeEntry: '{{label}} "{{value}}"',
+      scopeSeparator: '、',
       invalidBoolean: '"{{value}}" 不是有效的是/否值',
       invalidNumber: '"{{value}}" 不是有效的数字',
       invalidDate: '"{{value}}" 不是有效的日期',
@@ -1084,6 +1087,8 @@ const zh = {
       kanbanAddCardField: "添加字段",
       kanbanShowFieldLabels: "显示字段名",
       kanbanHideEmptyFields: "隐藏空字段",
+      kanbanFooterComments: "显示评论数",
+      kanbanFooterAttachments: "显示附件数",
       kanbanSummary: "列底统计",
       kanbanSummaryAvg: "平均值",
       kanbanSummaryMin: "最小值",
@@ -1142,6 +1147,11 @@ const zh = {
       hideHint: "这一列的卡片会移到「未分类」",
       createIn: "在「{{column}}」新建",
       create: "新建",
+    },
+    // objectstack#36423 — a card's foot counts (`kanban.cardFooter`).
+    cardFooter: {
+      comments: "未解决的评论：{{count}}",
+      attachments: "附件：{{count}}",
     },
     addCard: '添加卡片',
     addColumn: '添加列',

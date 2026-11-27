@@ -2044,6 +2044,20 @@ export interface McpHttpCaller {
 }
 
 /**
+ * [#37666] The tool options with this runtime's logger as the fault-line logger
+ * ({@link RegisterObjectToolsOptions.logger}), unless the caller handed its own.
+ * The plugin builds the runtime with the kernel's logger (`ctx.logger`), so the
+ * `/mcp` and stdio doors' 5xx lines go through the host's sink.
+ */
+function withFaultLogger(
+  toolOptions: (RegisterObjectToolsOptions & RegisterActionToolsOptions) | undefined,
+  logger: Logger | undefined,
+): RegisterObjectToolsOptions & RegisterActionToolsOptions {
+  if (!logger || toolOptions?.logger) return toolOptions ?? {};
+  return { ...toolOptions, logger };
+}
+
+/**
  * [#31836] The one line a skipped AI-registry tool leaves: which name, which
  * source was not served, and which was ({@link MCPServerRuntime.yieldBridgedTool}).
  */
@@ -2321,7 +2335,7 @@ export class MCPServerRuntime {
     }) as typeof server.registerTool;
     let registered: string[];
     try {
-      registered = wireBridgeTools(server, bridge, toolOptions);
+      registered = wireBridgeTools(server, bridge, withFaultLogger(toolOptions, this.config.logger));
     } finally {
       server.registerTool = registerTool;
     }
@@ -2475,7 +2489,7 @@ export class MCPServerRuntime {
                   error: err,
                   ...(door.code !== undefined ? { code: door.code } : {}),
                   request: { method: 'resources/read', path: uri },
-                });
+                }, logger);
               }
               // [#31373] …and the door's `declaredCode` / `userMessage`, after
               // `status`, when it serves them, as the record data tools do.
@@ -3057,7 +3071,7 @@ export class MCPServerRuntime {
       // [#8034] The SAME composition the long-lived server uses in
       // {@link bridgeDataTools} — including the by-capability action wiring
       // that used to be open-coded here. Two transports, one call site.
-      wireBridgeTools(server, opts.bridge, opts.toolOptions);
+      wireBridgeTools(server, opts.bridge, withFaultLogger(opts.toolOptions, this.config.logger));
     }
 
     if (opts.authoring) {

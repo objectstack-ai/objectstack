@@ -4874,9 +4874,10 @@ export const GetLocalesRequestSchema = lazySchema(() => z.object({}));
  *
  * `label` is the locale CODE, echoed back. Every descriptor on every serving
  * surface comes from one helper — `toLocaleDescriptors`
- * (`system/i18n-resolver.ts`), shared by the runtime dispatcher's `/i18n`
- * domain and `service-i18n`'s autonomous route — and it sets `label` to the
- * code, because nothing in the tree carries a locale name to set it from.
+ * (`system/i18n-resolver.ts`), called by the runtime dispatcher's `/i18n`
+ * domain, the one owner of the route (`service-i18n` mounts none since
+ * #23347) — and it sets `label` to the code, because nothing in the tree
+ * carries a locale name to set it from.
  *
  * This describe used to read "Display name of the locale" while no producer
  * ever wrote one: the declared-not-enforced shape ADR-0049 is about, one field

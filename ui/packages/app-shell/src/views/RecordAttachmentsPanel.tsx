@@ -44,7 +44,7 @@ import {
 import { createObjectStackUploadAdapter } from '@object-ui/data-objectstack';
 import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
 import { useDisplayLocale } from '@object-ui/i18n';
-import { useObjectTranslation, isPermissionError, classifyLoadError } from '@object-ui/react';
+import { useObjectTranslation, isPermissionError, classifyLoadError, notifyDataChanged } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { FilePreviewDialog, type FilePreviewItem } from '@object-ui/fields';
 import { resolveAffordance, type ConfirmationHandler } from '@object-ui/core';
@@ -502,6 +502,11 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
           const uploaded = await adapter.upload(file);
           const attachmentId = (uploaded.meta as any)?.attachmentId as string | undefined;
           if (!attachmentId) throw new Error('The server completed the upload but did not attach it to this record');
+          // objectstack#36423 — the upload writes `sys_attachment` through the
+          // storage route, not the data source, so no mutation event carries
+          // it: announce it, for a reader that counts this record's files (a
+          // board card's footer).
+          notifyDataChanged({ objectName: 'sys_attachment', recordId: attachmentId });
         }
         await refresh();
       } catch (err: any) {
@@ -575,6 +580,8 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
         if (callerId && uploaderIdOf(row) === callerId) {
           // The caller's own upload: the removal door, which needs no delete grant.
           await callAttachmentDoor(row.id, { method: 'DELETE' }, 'Delete failed');
+          // The removal door is not the data source either (see the upload).
+          notifyDataChanged({ objectName: 'sys_attachment', recordId: row.id });
         } else {
           await dataSource.delete('sys_attachment', row.id);
         }

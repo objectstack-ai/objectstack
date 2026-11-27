@@ -20,6 +20,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid at collection, not inside a case's clock: the dispatcher's reach loads
+// it lazily (`check:test-source-alias`).
+import '@objectstack/metadata';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { SandboxError } from '../sandbox/quickjs-runner.js';
@@ -73,7 +76,7 @@ async function invoke(thrown: unknown) {
 const validationSandboxError = () =>
     new SandboxError(
         "action 'submit_signoff' threw: ValidationError: issued_on is required",
-        'ValidationError: issued_on is required',
+        'issued_on is required',
         { code: 'VALIDATION_FAILED', fields: FIELDS },
     );
 
@@ -93,7 +96,9 @@ describe('#3918 follow-up — /actions surfaces code + fields on a validation fa
     it('keeps the human message as the toast text', async () => {
         const response = await invoke(validationSandboxError());
 
-        expect(response.body.error.message).toBe('ValidationError: issued_on is required');
+        // [#37533] The message alone, as a form save shows it; the class
+        // stays in the log line (`.message`) and the code in `error.code`.
+        expect(response.body.error.message).toBe('issued_on is required');
     });
 
     it('is an HTTP 400 — failures speak HTTP (#3962)', async () => {

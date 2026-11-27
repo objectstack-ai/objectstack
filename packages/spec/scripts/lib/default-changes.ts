@@ -800,6 +800,20 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
   ],
   19: [
     {
+      key: 'ai/AIModelConfig:provider',
+      from: '"openai"',
+      to: '(none)',
+      reason:
+        'An agent\'s `model` block may now omit the model name, and an absent name means the host\'s '
+        + 'default model for the environment. A block that names no model also names no provider, so '
+        + 'the parse no longer stamps `provider: \'openai\'` onto it: that would assert a provider for a '
+        + 'model the host picks. No runtime reads an agent\'s `model.provider` (the AI service reads '
+        + 'the name, `temperature` and `maxTokens` only), so no deployed agent changes behaviour; what '
+        + 'changes is the parsed value. Reading `AgentParsed[\'model\'][\'provider\']` now yields the '
+        + 'enum or `undefined` where it yielded the enum, and a display that showed `openai` for a '
+        + 'block that never wrote it shows nothing. To keep `openai`, write `provider: \'openai\'`.',
+    },
+    {
       key: 'ai/KnowledgeSource:refresh',
       from: '(none)',
       to: '{}',

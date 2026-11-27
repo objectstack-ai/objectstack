@@ -15,7 +15,8 @@
 > area, and the line that kept the Platform and AI types out of the builder no longer describe the surface. Each
 > sentence the amendment replaces is struck or marked where it stands and points to
 > [Amendment (2026-11-24)](#amendment-2026-11-24); everything not marked stands. *(Amended 2026-11-26: "the
-> development surface of one app" is reworded — Studio is the entry for developing a package; the note below.)*
+> development surface of one app" is reworded — Studio is the entry for developing a package:
+> [Amendment (2026-11-26)](#amendment-2026-11-26-position).)*
 
 > **Amendment (2026-11-25) — the menu draws two tiers, 常用 Common and 高级 Advanced.** The six groups stand. On a
 > package the menu lists the 常用 types under their groups, and one collapsed 高级 fold beneath them holds every other
@@ -172,11 +173,12 @@ Every type the spec registers, enumerated at `origin/main` `151e8123` from `pack
 | Group | `domain` | Order | Registered type | Tier |
 |---|---|---|---|---|
 | **数据 Data** | `data` | 1 | `object` 对象 | 常用 |
-| **数据 Data** | `data` | 2 | `picklist` 选项列表 | 高级 |
-| **数据 Data** | `data` | 3 | `hook` 钩子 | 高级 |
-| **数据 Data** | `data` | 4 | `mapping` 字段映射 | 高级 |
-| **数据 Data** | `data` | 5 | `object_extension` | 高级 |
-| **数据 Data** | `data` | 6 | `seed` | 高级 |
+| **数据 Data** | `data` | 2 | `dataset` 数据集 | 常用 |
+| **数据 Data** | `data` | 3 | `picklist` 选项列表 | 高级 |
+| **数据 Data** | `data` | 4 | `hook` 钩子 | 高级 |
+| **数据 Data** | `data` | 5 | `mapping` 字段映射 | 高级 |
+| **数据 Data** | `data` | 6 | `object_extension` | 高级 |
+| **数据 Data** | `data` | 7 | `seed` | 高级 |
 | **数据 Data** | `data` | — | `field` | — |
 | **界面 UI** | `ui` | 1 | `app` 应用 | 常用 |
 | **界面 UI** | `ui` | 2 | `page` 页面 | 常用 |
@@ -184,7 +186,6 @@ Every type the spec registers, enumerated at `origin/main` `151e8123` from `pack
 | **界面 UI** | `ui` | 4 | `report` 报表 | 常用 |
 | **界面 UI** | `ui` | 5 | `view` 视图 | 高级 |
 | **界面 UI** | `ui` | 6 | `action` 操作 | 高级 |
-| **界面 UI** | `ui` | 7 | `dataset` 数据集 | 高级 |
 | **自动化 Automation** | `automation` | 1 | `flow` 流程 | 常用 |
 | **自动化 Automation** | `automation` | 2 | `job` | 高级 |
 | **平台 Platform** | `system` | 1 | `doc` 文档 | 高级 |
@@ -195,7 +196,7 @@ Every type the spec registers, enumerated at `origin/main` `151e8123` from `pack
 | **平台 Platform** | `system` | 6 | `datasource` | 高级 |
 | **平台 Platform** | `system` | 7 | `external_catalog` | 高级 |
 | **访问 Access** | `security` | 1 | `permission` 权限集 | 常用 |
-| **访问 Access** | `security` | 2 | `position` 岗位 | 高级 |
+| **访问 Access** | `security` | 2 | `position` 岗位 | 常用 |
 | **访问 Access** | `security` | 3 | `assignment_rule` 分配规则 | 高级 |
 | **访问 Access** | `security` | 4 | `sharing_rule` 共享规则 | 高级 |
 | **访问 Access** | `security` | 5 | `queue` | 高级 |
@@ -207,6 +208,8 @@ Every type the spec registers, enumerated at `origin/main` `151e8123` from `pack
 | **AI** | `ai` | 5 | `knowledge_source` *(registered after the ruling — [item 6](#amendment-2026-11-25-silent))* | 高级 |
 
 *(Amended 2026-11-25: the table is redrawn one row per type and gains two columns, **Order** and **Tier** — [Amendment (2026-11-25)](#amendment-2026-11-25). Read again at `origin/main` `a33691e567`: 33 entries — the 32 of the first reading, each in the domain it had, and `ai_context`, registered `ai` on 2026-11-25 ([ADR-0160](./0160-record-scoped-ai-inquiry.md) D1). No type changed group, and the rows count 数据 Data 7 · 界面 UI 7 · 自动化 Automation 2 · 平台 Platform 7 · 访问 Access 6 · AI 4.)*
+
+*(Rewritten 2026-11-26, card [#37564](https://github.com/objectstack-ai/objectstack/issues/37564), which carries out [Amendment (2026-11-26)](#amendment-2026-11-26-moves) for two rows and decides nothing: `dataset` and `position`. `dataset` is registered `data` by the same change, so its row leaves 界面 UI, where it was seventh, for 数据 Data, where it is second, directly after `object`; each 数据 Data type behind it is one place later, and its tier is 常用. `position` keeps its place, and its tier is 常用. The registry holds the same 33 entries, and the rows now count 数据 Data 8 · 界面 UI 6 · 自动化 Automation 2 · 平台 Platform 7 · 访问 Access 6 · AI 4. The `datasource` row is not touched and `form` has no row yet: each is rewritten, or written, by the change that moves it.)*
 
 The rows are in the menu's order: by group, then by **Order**, which counts inside a group. **Tier** is 常用 Common or 高级 Advanced. The Chinese word beside a registered name is the one the ruling or its proposal uses for that type; a type neither names in Chinese has none. `field` carries no order and no tier because it draws no row (the second reading below).
 
@@ -455,7 +458,7 @@ When the registry and the placement list have changed, the three groups these mo
 
 That makes thirteen 常用 types: the ten of 2026-11-25, and these three.
 
-**The [type → group table](#type-to-group) is not redrawn today.** A test pins it, row by row, to the registry and to the placement list (`ui/packages/app-shell/src/views/studio-design/studioMenuPlacement.test.ts`), and both still hold `dataset` under `ui`, `datasource` with a row, no `form`, and every tier as ruled on 2026-11-25. A row is rewritten, or written, in the change that moves it — the same pull request, since the pin fails otherwise: `dataset`'s with its registry change and its tier, `position`'s with its tier, `datasource`'s with the menu's, and `form`'s when the type is taken off the directory's hidden types. Each of those carries out this section and needs no further ruling. Until then the table is what the menu draws.
+**The [type → group table](#type-to-group) is not redrawn today.** A test pins it, row by row, to the registry and to the placement list (`ui/packages/app-shell/src/views/studio-design/studioMenuPlacement.test.ts`), and both still hold `dataset` under `ui`, `datasource` with a row, no `form`, and every tier as ruled on 2026-11-25. A row is rewritten, or written, in the change that moves it — the same pull request, since the pin fails otherwise: `dataset`'s with its registry change and its tier, `position`'s with its tier, `datasource`'s with the menu's, and `form`'s when the type is taken off the directory's hidden types. Each of those carries out this section and needs no further ruling. Until then the table is what the menu draws. *(Amended 2026-11-26: since rewritten — `dataset`'s row and `position`'s, by card [#37564](https://github.com/objectstack-ai/objectstack/issues/37564), with the registry change and the placement list. `datasource`'s and `form`'s still wait for their changes — the [note under the table](#type-to-group).)*
 
 ### Organization-level content {#amendment-2026-11-26-org}
 

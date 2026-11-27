@@ -1725,6 +1725,9 @@ importers:
         specifier: workspace:*
         version: link:../spec
     devDependencies:
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../types
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5

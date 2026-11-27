@@ -2,7 +2,8 @@
 
 /**
  * objectstack#37200 — Studio's menu placement table agrees with the registry
- * and with the ruled order (ruling on #37192).
+ * and with the ruled order (ruling on #37192; ADR-0084 amended 2026-11-26,
+ * objectstack#37564: `dataset` and `position` placed in 常用 by name).
  *
  * Three holds:
  *  - against `DEFAULT_METADATA_TYPE_REGISTRY`: every type the directory can
@@ -50,12 +51,12 @@ describe('the menu placement table agrees with the registry (objectstack#37200)'
 });
 
 describe('the menu placement table holds the ruled order and tiers (objectstack#37200)', () => {
-  it('常用: object · app, page, dashboard, report · flow · permission · agent, tool, skill, in that order', () => {
+  it('常用: object, dataset · app, page, dashboard, report · flow · permission, position · agent, tool, skill, in that order', () => {
     expect(STUDIO_MENU_PLACEMENT.filter((row) => row.tier === 'common').map((row) => row.type)).toEqual([
-      'object',
+      'object', 'dataset',
       'app', 'page', 'dashboard', 'report',
       'flow',
-      'permission',
+      'permission', 'position',
       'agent', 'tool', 'skill',
     ]);
   });
@@ -63,10 +64,10 @@ describe('the menu placement table holds the ruled order and tiers (objectstack#
   it("高级: every other type, in the proposal's order", () => {
     expect(STUDIO_MENU_PLACEMENT.filter((row) => row.tier === 'advanced').map((row) => row.type)).toEqual([
       'picklist', 'hook', 'mapping', 'object_extension', 'seed',
-      'view', 'action', 'dataset',
+      'view', 'action',
       'job',
       'doc', 'book', 'email_template', 'translation', 'api', 'datasource', 'external_catalog',
-      'position', 'assignment_rule', 'sharing_rule', 'queue', 'capability',
+      'assignment_rule', 'sharing_rule', 'queue', 'capability',
       'ai_context', 'knowledge_source',
     ]);
   });
@@ -80,6 +81,16 @@ describe('the menu placement table holds the ruled order and tiers (objectstack#
   it('picklist and email template are advanced, as ruled', () => {
     expect(STUDIO_MENU_PLACEMENT.find((row) => row.type === 'picklist')?.tier).toBe('advanced');
     expect(STUDIO_MENU_PLACEMENT.find((row) => row.type === 'email_template')?.tier).toBe('advanced');
+  });
+
+  // ADR-0084, amended 2026-11-26 ("Placements, and what moves to Setup"): two
+  // placements by name. The rule's tests alone would sort each of them 高级.
+  it('dataset and position are common, placed by name: dataset directly after object, position directly after permission', () => {
+    const types = STUDIO_MENU_PLACEMENT.map((row) => row.type);
+    expect(STUDIO_MENU_PLACEMENT.find((row) => row.type === 'dataset')?.tier).toBe('common');
+    expect(STUDIO_MENU_PLACEMENT.find((row) => row.type === 'position')?.tier).toBe('common');
+    expect(types.indexOf('dataset')).toBe(types.indexOf('object') + 1);
+    expect(types.indexOf('position')).toBe(types.indexOf('permission') + 1);
   });
 
   it('each row holds a type and a tier, and nothing else (the group stays the served domain)', () => {
@@ -139,5 +150,44 @@ describe("the menu placement table equals ADR-0084's Order and Tier columns (obj
       const list = STUDIO_MENU_PLACEMENT.filter((row) => DOMAIN_OF.get(row.type) === domain).map((row) => row.type);
       expect(list, `group ${domain}`).toEqual(adr);
     }
+  });
+});
+
+/** One group of the menu as the list and the registry draw it: its 常用 types, then its 高级 types. */
+function groupTiers(domain: string): { common: string[]; advanced: string[] } {
+  const rows = STUDIO_MENU_PLACEMENT.filter((row) => DOMAIN_OF.get(row.type) === domain);
+  return {
+    common: rows.filter((row) => row.tier === 'common').map((row) => row.type),
+    advanced: rows.filter((row) => row.tier === 'advanced').map((row) => row.type),
+  };
+}
+
+describe('the groups the 2026-11-26 placements touch read as ADR-0084 lists them (objectstack#37564)', () => {
+  it('the registry serves dataset under data, so the menu draws it in 数据 Data with no special case', () => {
+    expect(DOMAIN_OF.get('dataset')).toBe('data');
+    expect(DOMAIN_OF.get('dashboard')).toBe('ui');
+    expect(DOMAIN_OF.get('report')).toBe('ui');
+  });
+
+  it('数据 Data: object · dataset | picklist · hook · mapping · object_extension · seed', () => {
+    expect(groupTiers('data')).toEqual({
+      common: ['object', 'dataset'],
+      advanced: ['picklist', 'hook', 'mapping', 'object_extension', 'seed'],
+    });
+  });
+
+  // `form` joins the 常用 types here, after `report`, when its type is registered and listed (ADR-0159).
+  it('界面 UI closes up behind dataset: app · page · dashboard · report | view · action', () => {
+    expect(groupTiers('ui')).toEqual({
+      common: ['app', 'page', 'dashboard', 'report'],
+      advanced: ['view', 'action'],
+    });
+  });
+
+  it('访问 Access: permission · position | assignment_rule · sharing_rule · queue · capability', () => {
+    expect(groupTiers('security')).toEqual({
+      common: ['permission', 'position'],
+      advanced: ['assignment_rule', 'sharing_rule', 'queue', 'capability'],
+    });
   });
 });

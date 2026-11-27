@@ -21,6 +21,23 @@ export {
   type CommentThreadData,
   type CommentThreadFilter,
 } from './commentThreads';
+// objectstack#36423 — many records' open-thread and attachment counts, one grouped read each.
+export {
+  useRecordCounts,
+  recordCountIds,
+  compileCommentCountQuery,
+  compileAttachmentCountQuery,
+  readRecordCounts,
+  askRecordCounts,
+  MAX_COUNT_ROUNDS,
+  COMMENT_COUNT_OBJECT,
+  ATTACHMENT_COUNT_OBJECT,
+  RECORD_COUNT_ALIAS,
+  type RecordCounts,
+  type RecordCountsData,
+  type RecordCountsInput,
+  type RecordCountQuery,
+} from './recordCounts';
 export { CommentItem, type CommentItemProps } from './CommentItem';
 export { CommentThread, type RecordCommentThreadProps, type CommentItemActions } from './CommentThread';
 export { CommentComposer, type CommentComposerProps } from './CommentComposer';

@@ -19,6 +19,7 @@ import { ErrorCode } from '@objectstack/spec/api';
 import { formatRefusal, loadScenarioFile, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import type { ScenarioTier } from '../../src/schema.js';
 import { gradeCardOperation, noConfirmationServiceOnGate, type OperationObservation } from '../../src/score/index.js';
+import { gradeRun, type RunTruth } from '../../src/score/scenario-run-grade.js';
 import type { PersonaAccount } from '../../src/runner/app.js';
 import { makeDriver, parseArgs } from '../../src/runner/cli.js';
 import {
@@ -892,6 +893,44 @@ describe('namespace-relative cards', () => {
     expect(namespacedScenario(namespacedScenario(crm)).card).toEqual(n); // a name already carrying the prefix keeps it
     expect(citationLabels(crm)).toEqual({ democrm_account: ['account'], democrm_contact: ['contact'], democrm_opportunity: ['opportunity'] });
     expect(permissionSetName(crm.card, 'sdr')).toBe('democrm_sdr');
+  });
+
+  describe('a multi-word object is cited by its name as words, in a source line only (#37684)', () => {
+    const invoice = load(resolve(HERE, '../../../../../docs/qa/scenarios/invoice_with_line_items.json'));
+    const travel = load(resolve(HERE, '../../../../../docs/qa/scenarios/travel_expense.json'));
+    const cited = (labels: Record<string, string[]>, object: string, replyText: string) =>
+      gradeRun({ figures: [{ label: 'total', value: 4_210, object }], objectLabels: labels } satisfies RunTruth, {}, { replyText, toolCalls: [] }).cited;
+
+    it('labels each object by its card name and, when it has more than one word, by those words', () => {
+      expect(citationLabels(invoice)).toEqual({
+        demoinvoice_invoice: ['invoice'],
+        demoinvoice_invoice_line: ['invoice_line', 'invoice line'],
+        demoinvoice_account: ['account'],
+        demoinvoice_payment: ['payment'],
+      });
+      expect(citationLabels(travel).demotravel_expense_claim).toEqual(['expense_claim', 'expense claim']);
+    });
+
+    it("grades the card's three reply shapes cited, whatever the case", () => {
+      const inv = citationLabels(invoice);
+      const trv = citationLabels(travel);
+      expect(cited(inv, 'demoinvoice_invoice', 'Total billed: 4,210.\nSource: Invoice')).toBe(true);
+      expect(cited(inv, 'demoinvoice_invoice_line', 'Line total: 4,210.\nSource: Invoice Line')).toBe(true);
+      expect(cited(inv, 'demoinvoice_invoice_line', 'Line total: 4,210.\n来源：INVOICE LINES')).toBe(true);
+      expect(cited(trv, 'demotravel_expense_claim', 'Claimed: 4,210.\nSource: Expense Claim (demotravel_expense_claim)')).toBe(true);
+      expect(cited(trv, 'demotravel_expense_claim', 'Claimed: 4,210.\nSource: Expense Claim')).toBe(true);
+    });
+
+    it('⛔ a source line naming another object, or the words outside a source line, still cite nothing', () => {
+      const inv = citationLabels(invoice);
+      const trv = citationLabels(travel);
+      // Wrong object: the line names the invoice, the figure is the lines'.
+      expect(cited(inv, 'demoinvoice_invoice_line', 'Line total: 4,210.\nSource: Invoice')).toBe(false);
+      expect(cited(trv, 'demotravel_expense_claim', 'Claimed: 4,210.\nSource: Claim Line')).toBe(false);
+      // The right words, but in the reply's prose rather than a source line.
+      expect(cited(inv, 'demoinvoice_invoice_line', 'Every invoice line adds up to 4,210.')).toBe(false);
+      expect(cited(trv, 'demotravel_expense_claim', 'The expense claims total 4,210.\nSource: Trip Request')).toBe(false);
+    });
   });
 
   it('prefixes the expected dashboards and every nav target, not only objects', () => {

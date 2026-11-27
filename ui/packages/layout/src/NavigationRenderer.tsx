@@ -1861,29 +1861,20 @@ export function NavigationGroupSection({
 
 // ---------------------------------------------------------------------------
 // NavigationItemRenderer (recursive)
+//
+// objectstack#37575 — memoised. The sidebar draws one of these per entry (about
+// seventy on the showcase app), each with its ⋯ menu and tooltip, and the shell
+// re-renders the sidebar every time a boot read lands. Unmemoised, every one of
+// those re-renders redrew every row: on the list page's first load, about eight
+// full passes over ~2,700 components before first paint. A row reads only its
+// props and the tree's contexts (active entry, phone, icon rail), so a row whose
+// props are unchanged has nothing new to draw; the hosts keep their callbacks
+// stable (`UnifiedSidebar`) so that this holds, and the target resolvers are
+// compared by what they answer for the row (`sameRowAnswers`).
 // ---------------------------------------------------------------------------
 
-function NavigationItemRenderer({
-  item,
-  basePath,
-  evalVis,
-  checkPerm,
-  checkCap,
-  checkDocTarget,
-  onAction,
-  enablePinning,
-  onPinToggle,
-  renderItemAction,
-  dragActivator,
-  row,
-  inList = true,
-  resolveTargetLabel,
-  resolveTargetIcon,
-  resolveTargetColor,
-  locale,
-  t: tProp,
-  templateContext,
-}: {
+/** A row's props (objectstack#37575: named, so the memo comparator below can read them). */
+interface NavItemRendererProps {
   item: NavigationItem;
   basePath: string;
   evalVis: VisibilityEvaluator;
@@ -1911,7 +1902,29 @@ function NavigationItemRenderer({
   locale?: string;
   t?: (key: string, options?: any) => string;
   templateContext?: NavTemplateContext;
-}) {
+}
+
+function NavigationItemRow({
+  item,
+  basePath,
+  evalVis,
+  checkPerm,
+  checkCap,
+  checkDocTarget,
+  onAction,
+  enablePinning,
+  onPinToggle,
+  renderItemAction,
+  dragActivator,
+  row,
+  inList = true,
+  resolveTargetLabel,
+  resolveTargetIcon,
+  resolveTargetColor,
+  locale,
+  t: tProp,
+  templateContext,
+}: NavItemRendererProps): React.ReactElement | null {
   // iOS-native mobile drawer polish: >=44px tap targets, larger text and
   // icons, rounder rows. Desktop (>=768px) keeps the compact rail untouched.
   // Decided once for the tree (`NavMobileSource`), not by a hook per row.
@@ -2162,6 +2175,46 @@ function NavigationItemRenderer({
       )}
     </SidebarMenuItem>
   );
+}
+
+const NavigationItemRenderer = React.memo(NavigationItemRow, sameRowAnswers);
+
+type NavRowRendererProps = NavItemRendererProps;
+const ROW_TARGET_RESOLVERS = new Set(['resolveTargetLabel', 'resolveTargetIcon', 'resolveTargetColor']);
+
+/**
+ * objectstack#37575 — whether a row's new props draw what its current ones draw.
+ *
+ * Every prop is compared by identity, except the three target resolvers. The
+ * host rebuilds those whenever its metadata store changes (each boot read
+ * that lands does that), while what a resolver answers for any one row rarely
+ * changes. A leaf row asks them for three things only: its label, its icon and
+ * its tile colour. If the new resolvers give the same three answers as the
+ * current ones, the row has nothing new to draw, and it keeps the resolvers it
+ * has, which still give those answers. A group draws its entries, and each of
+ * those asks its own questions, so a group with any new resolver is redrawn and
+ * its entries are compared one by one.
+ */
+function sameRowAnswers(prev: NavRowRendererProps, next: NavRowRendererProps): boolean {
+  const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
+  for (const key of keys) {
+    if (ROW_TARGET_RESOLVERS.has(key)) continue;
+    if (!Object.is(prev[key as keyof NavRowRendererProps], next[key as keyof NavRowRendererProps])) return false;
+  }
+  if (
+    prev.resolveTargetLabel === next.resolveTargetLabel &&
+    prev.resolveTargetIcon === next.resolveTargetIcon &&
+    prev.resolveTargetColor === next.resolveTargetColor
+  ) return true;
+  const { item, t, locale } = next;
+  if (item.type === 'group') return false;
+  if (resolveNavItemLabel(item, t, prev.resolveTargetLabel, locale) !== resolveNavItemLabel(item, t, next.resolveTargetLabel, locale)) return false;
+  if (resolveNavItemIcon(item, prev.resolveTargetIcon) !== resolveNavItemIcon(item, next.resolveTargetIcon)) return false;
+  if (item.type === 'object' && item.objectName) {
+    const target: NavIconTarget = { kind: 'object', objectName: item.objectName };
+    if (prev.resolveTargetColor?.(target) !== next.resolveTargetColor?.(target)) return false;
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------

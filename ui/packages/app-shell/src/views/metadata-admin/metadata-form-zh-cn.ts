@@ -25,7 +25,10 @@
  *
  *  - `view`, `page`, `report` — the curated inspectors render these forms
  *    from the bundled spec, so every section and field string is here: label,
- *    description, help text, placeholder. (`dashboard` is the fourth such
+ *    description, help text, placeholder, and a select's option names
+ *    (`options: { <value>: … }`, objectstack#37607 — each map copied from the
+ *    platform pack and pinned byte-equal to it by
+ *    `./metadata-form-option-names.test.ts`). (`dashboard` is the fourth such
  *    form; its hand-worded entries live in `./metadata-form-i18n.ts`.)
  *  - every other `METADATA_FORM_REGISTRY` type — its inspector renders the
  *    form the server served, already localized. The one reader of these forms
@@ -354,7 +357,13 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       // The children `report.form.ts` declares for both composites (objectstack#36447),
       // copied from the platform zh-CN bundle like every unmarked row here.
       'dateRange.dimension': { label: '日期字段', helpText: '时间段按数据来源里的哪个日期分组筛选；只有一个日期分组时可留空' },
-      'dateRange.defaultRange': { label: '默认时间段', helpText: '打开报表时显示的时间段' },
+      'dateRange.defaultRange': {
+        label: '默认时间段',
+        helpText: '打开报表时显示的时间段',
+        // Option names: the platform pack's map, pinned byte-equal by
+        // `metadata-form-option-names.test.ts`.
+        options: { today: '今天', yesterday: '昨天', this_week: '本周', last_week: '上周', this_month: '本月', last_month: '上月', next_month: '下月', this_quarter: '本季度', last_quarter: '上季度', next_quarter: '下季度', this_year: '今年', last_year: '去年', last_7_days: '近 7 天', last_30_days: '近 30 天', last_90_days: '近 90 天', next_30_days: '未来 30 天', custom: '自定义…' },
+      },
       'dateRange.allowCustomRange': { label: '允许自定义范围', helpText: '允许使用者自己选择开始和结束日期' },
       'exportOptions.formats': { label: '格式', helpText: '可下载的格式。不设置时提供 csv 与 xlsx；空列表则关闭下载' },
       'exportOptions.includeHeaders': { label: '包含表头', helpText: '在下载文件的第一行写入列名' },
@@ -619,7 +628,12 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       name: { label: '名称', helpText: 'snake_case 唯一标识符' },
       label: { label: '显示名称', helpText: '展示给用户的页面标题' },
       icon: { label: '图标', helpText: '导航菜单中显示的图标' },
-      type: { label: '类型', helpText: '页面种类。"List / Interface" 把来源视图绑定为经过编排的界面——它的展现形式（grid / kanban / calendar / …）是在 Interface 中设置的可视化，不是页面类型。' },
+      type: {
+        label: '类型',
+        helpText: '页面种类。"List / Interface" 把来源视图绑定为经过编排的界面——它的展现形式（grid / kanban / calendar / …）是在 Interface 中设置的可视化，不是页面类型。',
+        // Pinned byte-equal to the platform pack, as above.
+        options: { list: '列表 / 界面页', record: '记录页', home: '首页', app: '应用页', utility: '工具面板' },
+      },
       template: { label: '模板', helpText: '布局模板（如 "header-sidebar-main"）' },
       description: { label: '描述', helpText: '用于导航的页面描述' },
       source: { label: '页面源码', helpText: '页面源码文本。kind 为 \'html\' 时，它是受约束的 JSX，在保存时被编译成组件树——只解析，绝不执行。kind 为 \'react\' 时，它是真正的 React，由受信任运行时在渲染时执行。' },
@@ -649,7 +663,12 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       'interfaceConfig.addRecord.position': { label: '位置' },
       'interfaceConfig.emptyState': { label: '空状态', helpText: '列表没有记录时页面显示的内容：标题、说明、图标和一个链接。在此设置后，它将替换源视图的空状态。' },
       'interfaceConfig.buttons': { label: '按钮', helpText: '工具栏按钮——从该对象的操作中选择' },
-      'interfaceConfig.recordAction': { label: '记录操作', helpText: '点击记录时如何打开其详情' },
+      'interfaceConfig.recordAction': {
+        label: '记录操作',
+        helpText: '点击记录时如何打开其详情',
+        // Pinned byte-equal to the platform pack, as above.
+        options: { drawer: '抽屉（右侧预览）', page: '整页', none: '不可点击' },
+      },
       'interfaceConfig.showRecordCount': { label: '显示记录数', helpText: '显示记录数栏' },
       'interfaceConfig.allowPrinting': { label: '允许打印', helpText: '允许用户打印此页面' },
       isDefault: { label: '默认', helpText: '打开该对象的记录时使用此记录页。每个对象只能有一个默认记录页：第二个会被拒绝。' },

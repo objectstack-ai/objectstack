@@ -143,6 +143,10 @@ const COUNT_NEUTRAL = {
     // objectstack#37327 — a kanban lane's "Cards not loaded: N"; the number
     // stands after a label and a colon in every pack.
     'kanban.notLoaded',
+    // objectstack#36423 — a kanban card's foot counts, "Open comments: N" and
+    // "Attachments: N"; the number stands after a label and a colon in every pack.
+    'kanban.cardFooter.comments',
+    'kanban.cardFooter.attachments',
   ],
   /** Every pack phrases it count-invariantly: an `(s)` marker in `en`/`de`/
    *  `fr`/`es`/`pt` (the convention `perm-home-namespace-3546.test.tsx` pins),

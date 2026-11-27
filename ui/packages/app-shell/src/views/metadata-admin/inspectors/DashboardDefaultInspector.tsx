@@ -45,9 +45,7 @@ import { SchemaForm } from '../SchemaForm.js';
 import { fallbackFormPatch } from './fallbackFormPatch.js';
 import type { FormViewSpec } from '../SchemaForm.js';
 import { getDashboardForm, getDashboardSchema } from '../dashboard-schema.js';
-import { localizeDefaultPeriods } from '../default-period-labels.js';
 import { mergeServerFields } from '../mergeServerFields.js';
-import { useObjectTranslation } from '@object-ui/i18n';
 import { t, tFormat } from '../i18n.js';
 // `DashboardWidget.title` is the spec's `I18nLabel`, which @objectstack/spec
 // 17.0.0-rc.6 widened from plain `string` to `string | Record<string, string>`
@@ -175,7 +173,6 @@ export function DashboardDefaultInspector({
 
   // Graft any server-only top-level dashboard fields onto the bundled-spec
   // form so they are editable even when the bundled spec lags the server.
-  const { t: appT } = useObjectTranslation();
   const { schema, form } = React.useMemo(() => {
     const merged = mergeServerFields({
       bundledSchema: getDashboardSchema(),
@@ -187,16 +184,8 @@ export function DashboardDefaultInspector({
       sectionTitle: t('engine.inspector.moreFields', locale),
     });
     // After the graft, so a server-only section stacks too (objectui#11796).
-    // The Default Period options are named the way the report inspector names
-    // them (`localizeDefaultPeriods`): the console's locale packs for a zh
-    // designer, the producer's English otherwise.
-    return {
-      schema: merged.schema,
-      form: stackSectionsForNarrowPanel(localizeDefaultPeriods(merged.form, locale, (key, options) => appT(key, options))),
-    };
-    // `appT` changes with the app's language and when a locale pack lands, so
-    // the names follow both.
-  }, [serverSchema, locale, appT]);
+    return { schema: merged.schema, form: stackSectionsForNarrowPanel(merged.form) };
+  }, [serverSchema, locale]);
 
   return (
     <InspectorShell
