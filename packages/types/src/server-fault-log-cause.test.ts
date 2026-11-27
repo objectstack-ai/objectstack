@@ -13,6 +13,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { describe, it, expect, vi } from 'vitest';
 
@@ -176,7 +177,7 @@ function declaredWords(source: string, declaration: RegExp): string[] {
 }
 
 describe('the redact word lists equal the fixture, in both directions', () => {
-    const source = readFileSync(new URL('./server-fault-log.ts', import.meta.url), 'utf8');
+    const source = readFileSync(join(__dirname, 'server-fault-log.ts'), 'utf8');
 
     it('DEFAULT_REDACTED_WORDS', () => {
         expect(declaredWords(source, /const DEFAULT_REDACTED_WORDS = \[([^\]]*)\]/g)).toEqual([...DEFAULT_WORDS].sort());
