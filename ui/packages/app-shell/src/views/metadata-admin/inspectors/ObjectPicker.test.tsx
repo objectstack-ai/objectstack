@@ -19,6 +19,9 @@ import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+// Paid at collection, not inside a clocked case: the picker's closure loads
+// it lazily (check:test-source-alias).
+import '@objectstack/lint';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const h = vi.hoisted(() => {
