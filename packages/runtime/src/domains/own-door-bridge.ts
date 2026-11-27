@@ -240,7 +240,7 @@ export async function handleOwnDoorBridgeRequest(
  * `src/domains/` that takes the transport's request whole
  * (`context.request as Request`) or is built on this file's shared bridge body
  * reads no service through `deps.resolveService`, `deps.resolveServiceOrLoud`,
- * `deps.getService` or a scoped `deps.getObjectQL(context, …)`, and each such
+ * `deps.getService` or a `deps.getObjectQL` given an environment id, and each such
  * module that reads a slot reads it through this. A module that hands the
  * request on some other way is outside that net.
  *

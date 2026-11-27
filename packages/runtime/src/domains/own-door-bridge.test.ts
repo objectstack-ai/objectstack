@@ -707,7 +707,7 @@ describe('a dispatcher door is served only by the request\'s own kernel', () => 
      * with) or is built on the shared bridge body (`createOwnDoorBridgeDomain(`
      * / `handleOwnDoorBridgeRequest(`). A door module reads no service through
      * `deps.resolveService`, `deps.resolveServiceOrLoud`, `deps.getService` or a
-     * scoped `deps.getObjectQL(context, …)` anywhere in it, and one that reads
+     * `deps.getObjectQL` given an environment id anywhere in it, and one that reads
      * a slot itself reads it through `readDoorSlot`. Found, not listed, so a new
      * door module is held to this the day it lands. NOT covered: a module that
      * hands the request on some other way (building its own request from
