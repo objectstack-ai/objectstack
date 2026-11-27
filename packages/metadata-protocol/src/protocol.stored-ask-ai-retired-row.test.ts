@@ -11,12 +11,18 @@
  *     it by name through the metadata API), on a preview and an apply run
  *     alike, and writes nothing — there is no body to re-save;
  *   - the list read serves nothing for it, and the live row beside it as
- *     stored.
+ *     stored;
+ *   - a by-name read previewing drafts treats a pending draft row of it as no
+ *     draft, and serves the active item;
+ *   - the layered read reports no overlay for it and no pending draft;
+ *   - the metadata API's delete (`deleteMetaItem`, through
+ *     `SysMetadataRepository`) still reaches the row and takes it out.
  */
 import { describe, expect, it } from 'vitest';
 // Paid during collection, not inside a clocked case: the diagnostics `import()` it in a function body (`scripts/check-test-source-alias.mjs`).
 import '@objectstack/lint';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 interface Row {
@@ -55,7 +61,7 @@ function matches(r: Record<string, any>, where: Record<string, unknown>): boolea
  * seeded STRAIGHT into `sys_metadata`, the only way to hold a row that every
  * authoring door now refuses.
  */
-function makeStubEngine(seedRows: SeedRow[]) {
+function makeStubEngine(seedRows: SeedRow[], registered: Record<string, unknown>[] = []) {
     let nextId = 0;
     const tables = new Map<string, Record<string, any>[]>();
     tables.set(
@@ -96,15 +102,24 @@ function makeStubEngine(seedRows: SeedRow[]) {
             if (target) Object.assign(target, patch);
             return target ?? { id: 'x' };
         },
-        async delete(_t: string, opts?: Record<string, unknown>) {
+        async delete(t: string, opts?: Record<string, unknown>) {
+            // [#4550] The producer's own delete-verb dispatch contract.
             assertEngineDeleteDispatch(opts);
-            return { deleted: 0 };
+            const rows = rowsOf(t);
+            const at = rows.findIndex((r) => r.id === (opts as { where?: { id?: unknown } })?.where?.id);
+            if (at >= 0) rows.splice(at, 1);
+            return { deleted: at >= 0 ? 1 : 0 };
         },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             listItems: () => [],
+            getItem: (type: string, name: string) =>
+                (type === 'action' ? registered.find((i) => i.name === name) : undefined),
             isPackageDisabled: () => false,
             registerItem: () => { /* no-op */ },
             registerObject: () => { /* no-op */ },
+            removeRuntimeShadow: () => false,
+            removeOverlayEntry: () => { /* no-op */ },
         },
     };
     return { engine, tables };
@@ -161,5 +176,36 @@ describe('a stored ask_ai action row (ADR-0160 D7)', () => {
 
         expect(names).toContain('close_ticket');
         expect(names).not.toContain('ask_about_ticket');
+    });
+
+    it('a by-name read previewing drafts treats a pending ask_ai draft as no draft, and serves the active item', async () => {
+        // The active item is the registry's (a hydrated live row); the draft
+        // row of the same name is of the retired type.
+        const active = { name: 'ask_about_ticket', label: 'Close', objectName: 'ticket', type: 'script', target: 'close_ticket' };
+        const { engine } = makeStubEngine([{ ...askAiRow, state: 'draft' }], [active]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served = await protocol.getMetaItem({ type: 'action', name: 'ask_about_ticket', previewDrafts: true });
+
+        expect((served as { item?: unknown }).item).toMatchObject(active);
+        expect((served as { item?: Record<string, unknown> }).item?._draft).toBeUndefined();
+    });
+
+    it('the layered read reports no overlay and no pending draft for it', async () => {
+        const { engine } = makeStubEngine([askAiRow, { ...askAiRow, state: 'draft' }]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const layered = await protocol.getMetaItemLayered({ type: 'action', name: 'ask_about_ticket' }, { withDraft: true });
+
+        expect(layered).toMatchObject({ overlay: null, overlayScope: null, draft: null });
+    });
+
+    it('the metadata API delete reaches the row and takes it out', async () => {
+        const { engine, tables } = makeStubEngine([askAiRow, liveRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        await protocol.deleteMetaItem({ type: 'action', name: 'ask_about_ticket' });
+
+        expect(metaRows(tables).map((r) => r.name)).toEqual(['close_ticket']);
     });
 });
