@@ -40,4 +40,10 @@ export const BusinessUnit = ObjectSchema.create({
     manager: Field.text({ label: 'Manager', maxLength: 120 }),
     headcount: Field.number({ label: 'Headcount', min: 0, defaultValue: 0 }),
   },
+
+  // [ADR-0085 §5] The record's one section: the create and edit forms and the
+  // drawer lay a unit out by it, members in this order.
+  fieldGroups: [
+    { key: 'unit', label: 'Unit', fields: ['name', 'parent', 'kind', 'manager', 'headcount'] },
+  ],
 });

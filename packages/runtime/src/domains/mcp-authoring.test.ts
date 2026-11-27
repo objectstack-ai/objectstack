@@ -18,6 +18,11 @@
  *
  * Fail closed: an envelope with no user is injected nothing, and a grant
  * resolution that throws admits nothing.
+ *
+ * [#37944] The last group pins the in-process entry
+ * (`createInProcessAuthoringRegistry`) against this door: the same five tool
+ * definitions, the same refusal shape for a person without `manage_metadata`,
+ * the same writer, and saves stamped `copilot` where this door stamps `mcp`.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -53,6 +58,7 @@ import {
   type OpenAuthoringProtocol,
   type OpenAuthoringReadGateSources,
 } from './mcp-authoring.js';
+import { createInProcessAuthoringRegistry } from '../in-process-authoring.js';
 import { resolveExecutionContext } from '../security/resolve-execution-context.js';
 import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
 
@@ -1029,6 +1035,15 @@ describe('[ADR-0161 K4] save_metadata_draft asks the knowledge service to admit 
     expect(caller).toMatchObject({ userId: 'u1', isSystem: false, systemPermissions: BOTH });
   });
 
+  it('[ADR-0161 K4] a source refused 400 VALIDATION_ERROR keeps its code and status, and nothing is written', async () => {
+    const message = "The knowledge source 'faq' was not saved: it names no adapter, and 2 adapters are registered (a, b) with none the deployment's store.";
+    const admitAuthoredSource = vi.fn(async () => ({ admitted: false, status: 400, code: 'VALIDATION_ERROR', message }));
+    const { authoring, served } = await authorThroughDomain({ systemPermissions: BOTH, knowledge: { admitAuthoredSource } });
+    const refused = await save(authoring);
+    expect(refused.body.error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400, message });
+    expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
+  });
+
   it('fails closed: a verdict that throws is 503 SERVICE_UNAVAILABLE, and nothing is written', async () => {
     const knowledge = { admitAuthoredSource: async () => { throw new Error('registry unavailable'); } };
     const { authoring, served } = await authorThroughDomain({ systemPermissions: BOTH, knowledge });
@@ -1402,5 +1417,164 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
       expect(discarded.isError, `${type}: ${JSON.stringify(discarded.body)}`).toBe(true);
     }
     expect((await call(authoring, 'list_drafts', {})).body.drafts).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#37944] The in-process entry: the same five tools, as the signed-in person
+// ---------------------------------------------------------------------------
+
+/**
+ * One host kernel serving the door's services, as `dispatchAction`'s pins
+ * build one: the recording protocol, the human's grant engine, the security
+ * service, and `tenancy` / `kernel-resolver` when given. `scopes` records the
+ * environment each scoped lookup was asked under.
+ */
+function inProcessHost(opts: {
+  systemPermissions?: string[]; protocol?: OpenAuthoringProtocol; tenancy?: { posture: string };
+  qlThrows?: boolean; resolveKernel?: (ctx: any) => unknown;
+} = {}) {
+  const { ql, reads } = userQl(opts.systemPermissions ?? ADMIN);
+  const fake = fakeProtocol();
+  const protocol = opts.protocol ?? fake.protocol;
+  const security = { resolvePermissionSetNames: async (ctx: any) => (Array.isArray(ctx?.permissions) ? ctx.permissions : []) };
+  const warnings: unknown[][] = [];
+  const services: Record<string, unknown> = {
+    protocol,
+    security,
+    ...(opts.tenancy ? { tenancy: opts.tenancy } : {}),
+    ...(opts.resolveKernel ? { 'kernel-resolver': { resolveKernel: opts.resolveKernel } } : {}),
+    logger: { warn: (...args: unknown[]) => { warnings.push(args); }, debug: () => {}, info: () => {}, error: () => {} },
+  };
+  const resolve = (name: string): any => {
+    if (name === 'objectql') {
+      if (opts.qlThrows) throw new Error('engine lookup failed');
+      return ql;
+    }
+    return services[name] ?? null;
+  };
+  const scopes: string[] = [];
+  const kernel: any = {
+    getService: resolve,
+    getServiceAsync: async (name: string, scopeId?: string) => {
+      if (scopeId !== undefined) scopes.push(scopeId);
+      return resolve(name);
+    },
+    context: { getService: resolve },
+  };
+  return { kernel, grantReads: reads, protocolCalls: fake.calls, scopes, warnings };
+}
+
+/** A signed-in person's session envelope, as a host's session door resolves it: no OAuth grant. */
+const SESSION_EC = { userId: 'u1', isSystem: false, roles: [], permissions: [], systemPermissions: [] } as any;
+
+async function inProcessCall(authoring: { execute: (call: any) => Promise<any> }, toolName: string, input: unknown) {
+  const result = await authoring.execute({ toolCallId: `t-${toolName}`, toolName, input });
+  return { isError: result.isError === true, body: JSON.parse(result.output.value) };
+}
+
+describe('[#37944] createInProcessAuthoringRegistry serves the MCP door\'s five tools in process, as the signed-in person', () => {
+  it('is the runtime package\'s public entry', async () => {
+    const runtime = await import('../index.js');
+    expect(runtime.createInProcessAuthoringRegistry).toBe(createInProcessAuthoringRegistry);
+  });
+
+  it('a person holding manage_metadata is listed the same five tool definitions the MCP door lists, with no OAuth grant', async () => {
+    const host = inProcessHost();
+    const authoring = await createInProcessAuthoringRegistry(host.kernel, { executionContext: SESSION_EC });
+    expect(authoring.admitted).toBe(true);
+    // The admission read the person's own grants: the session envelope carries no capability.
+    expect(host.grantReads.length).toBeGreaterThan(0);
+
+    const { authoring: mcpDoor } = await authorThroughDomain();
+    expect(authoring.getAll()).toEqual(mcpDoor.registry.getAll());
+    expect(authoring.getAll().map((tool) => tool.name)).toEqual([...OPEN_AUTHORING_READ_TOOL_NAMES, ...OPEN_AUTHORING_WRITE_TOOL_NAMES]);
+    // No publish tool rides in.
+    expect(authoring.getAll().map((tool) => tool.name).some((name) => /publish/.test(name))).toBe(false);
+
+    const listed = await inProcessCall(authoring, 'list_metadata_items', { type: 'flow' });
+    expect(listed.isError).toBe(false);
+    expect(listed.body.items.map((item: any) => item.name)).toEqual(['lead_intake', 'close_won']);
+  });
+
+  it('a person without manage_metadata is listed no tool and a call is refused 403, the MCP door\'s refusal shape, before any read', async () => {
+    const host = inProcessHost({ systemPermissions: NOT_AN_AUTHOR });
+    const authoring = await createInProcessAuthoringRegistry(host.kernel, { executionContext: SESSION_EC });
+    expect(authoring.admitted).toBe(false);
+    expect(authoring.getAll()).toEqual([]);
+
+    const mcpEc = await oauthEnvelope(['metadata:write'], NOT_AN_AUTHOR);
+    const mcpRefusal = await call((await serve(mcpEc, { systemPermissions: NOT_AN_AUTHOR })).authoring!, 'save_metadata_draft', {});
+    for (const tool of [...OPEN_AUTHORING_READ_TOOL_NAMES, ...OPEN_AUTHORING_WRITE_TOOL_NAMES]) {
+      const refused = await inProcessCall(authoring, tool, { type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm' });
+      expect(refused.isError, tool).toBe(true);
+      expect(refused.body.error, tool).toMatchObject({ code: mcpRefusal.body.error.code, status: mcpRefusal.body.error.status });
+      expect(refused.body.error, tool).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+      // No OAuth half to name: the sentence names only the capability.
+      expect(refused.body.error.message, tool).not.toContain('metadata:write');
+    }
+    expect(host.protocolCalls).toEqual([]);
+  });
+
+  it('a draft save stamps surface copilot, not mcp, with no client, as the person, and answers the publish verdict', async () => {
+    const host = inProcessHost();
+    const authoring = await createInProcessAuthoringRegistry(host.kernel, { executionContext: SESSION_EC });
+    const saved = await inProcessCall(authoring, 'save_metadata_draft', { type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm', ifMatch: 'v7' });
+
+    expect(saved.isError).toBe(false);
+    const save = host.protocolCalls.find((c: any) => c[0] === 'saveMetaItem') as any[];
+    expect(save[1]).toMatchObject({
+      type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, packageId: 'com.acme.crm',
+      mode: 'draft', surface: 'copilot', writeFace: 'meta-dispatch', parentVersion: 'v7', actor: 'u1',
+    });
+    expect(save[1]).not.toHaveProperty('client');
+    expect(saved.body).toMatchObject({
+      saved: { type: 'flow', name: 'lead_intake', package: 'com.acme.crm', state: 'draft', version: 'v8' },
+      verdict: { publishable: false, refusals: [UNROUTABLE_ISSUE], advisories: [] },
+      review: { changes: '/studio/com.acme.crm/data?changes=review', item: '/studio/com.acme.crm/metadata/flow/lead_intake?review=1' },
+    });
+
+    // The MCP door's save, unchanged: `mcp` and the token's client.
+    const { authoring: mcpDoor, served } = await authorThroughDomain();
+    await call(mcpDoor, 'save_metadata_draft', { type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm' });
+    expect((served.protocolCalls.find((c: any) => c[0] === 'saveMetaItem') as any[])[1]).toMatchObject({ surface: 'mcp', client: { id: 'c1' } });
+  });
+
+  it('the writer is the MCP door\'s: under a walled tenancy posture the save is refused 403 before anything is written', async () => {
+    const host = inProcessHost({ tenancy: { posture: 'isolated' } });
+    const authoring = await createInProcessAuthoringRegistry(host.kernel, { executionContext: { ...SESSION_EC, posture: 'TENANT_ADMIN' } });
+    const refused = await inProcessCall(authoring, 'save_metadata_draft', { type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm' });
+    expect(refused.body.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(host.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
+  });
+
+  it('fails closed: no person, a system envelope, or a grant read that throws admits nothing', async () => {
+    for (const executionContext of [{ isSystem: false } as any, { ...SESSION_EC, isSystem: true }]) {
+      const host = inProcessHost();
+      const authoring = await createInProcessAuthoringRegistry(host.kernel, { executionContext });
+      expect(authoring.admitted).toBe(false);
+      expect(authoring.getAll()).toEqual([]);
+      expect((await inProcessCall(authoring, 'list_drafts', {})).body.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+      // No grant is read for it.
+      expect(host.grantReads).toEqual([]);
+      expect(host.protocolCalls).toEqual([]);
+    }
+    const throwing = inProcessHost({ qlThrows: true });
+    const authoring = await createInProcessAuthoringRegistry(throwing.kernel, { executionContext: SESSION_EC });
+    expect(authoring.admitted).toBe(false);
+    expect(authoring.getAll()).toEqual([]);
+  });
+
+  it('is placed as dispatchAction places a host call: the named environment scopes the lookups, and a resolver that refuses rejects', async () => {
+    const host = inProcessHost();
+    const authoring = await createInProcessAuthoringRegistry(host.kernel, { executionContext: SESSION_EC, environmentId: 'env_named' });
+    await inProcessCall(authoring, 'list_drafts', {});
+    expect(host.scopes.length).toBeGreaterThan(0);
+    expect(new Set(host.scopes)).toEqual(new Set(['env_named']));
+
+    const refusing = inProcessHost({ resolveKernel: async () => { throw Object.assign(new Error('not a member of env_named'), { status: 403 }); } });
+    await expect(createInProcessAuthoringRegistry(refusing.kernel, { executionContext: SESSION_EC, environmentId: 'env_named' }))
+      .rejects.toThrow('not a member of env_named');
+    expect(refusing.grantReads).toEqual([]);
   });
 });

@@ -2374,7 +2374,29 @@ const de = {
           availableObjects: "Liste die verfügbaren Datenobjekte auf.",
           recentActivity: "Fasse meine letzten Aktivitäten zusammen.",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'Diesen Datensatz zusammenfassen',
+            related: 'Was hängt mit diesem Datensatz zusammen?',
+          },
+          list: {
+            summarize: 'Die Datensätze in dieser Liste zusammenfassen',
+            recent: 'Welche Datensätze wurden diese Woche hinzugefügt?',
+          },
+          dashboard: {
+            explain: 'Was zeigt dieses Dashboard?',
+            standOut: 'Was fällt auf diesem Dashboard auf?',
+          },
+          report: {
+            summarize: 'Diesen Bericht zusammenfassen',
+            takeaways: 'Was sind die wichtigsten Erkenntnisse aus diesem Bericht?',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'Vorgeschlagene Fragen',
       discussing: "Angezeigt: {{target}}",
       focus: {
         pin: "Weiter zu diesem Datensatz fragen",
@@ -2411,7 +2433,7 @@ const de = {
         expand: "Erweitern",
         restore: "Seitenleiste wiederherstellen",
         open: "Assistent öffnen",
-        planAwaitingApproval: "Ein vorgeschlagener Plan wartet auf Ihre Freigabe",
+        planAwaitingApproval: "Eine Aktion wartet auf Ihre Freigabe",
         close: "Schließen",
         more: "Weitere Aktionen",
       },
@@ -3500,6 +3522,7 @@ const de = {
     recent: "Zuletzt",
     starred: "Markiert",
     removeFromFavorites: "{{name}} aus Favoriten entfernen",
+    conversationUnavailable: "Diese Unterhaltung ist nicht mehr verfügbar",
     allReports: "Alle Berichte",
     collapse: 'Seitenleiste einklappen',
     expand: 'Seitenleiste ausklappen',
@@ -4608,6 +4631,7 @@ const de = {
       add_field: "Dem Objekt ein Feld hinzufügen",
       apply_blueprint: "Die App nach dem Plan erstellen",
       apply_edit: "Die Änderung übernehmen",
+      ask_which: "Die Frage klären",
       create_metadata: "Einen Metadateneintrag anlegen",
       create_object: "Ein Objekt anlegen",
       create_package: "Ein Paket anlegen",
@@ -5468,6 +5492,7 @@ const de = {
       toggleFailed: "Ändern des App-Status fehlgeschlagen: {{reason}}",
       setDefaultDone: "{{name}} als Standard festgelegt",
       setDefaultFailed: "Festlegen der Standard-App fehlgeschlagen: {{reason}}",
+      restoreDefaultFailed: "{{name}} konnte nicht als Standard-App wiederhergestellt werden und ist daher nicht mehr der Standard: {{reason}}",
       appDeleted: "{{name}} gelöscht",
       deleteFailed: "Löschen der App fehlgeschlagen: {{reason}}",
       nothingToDelete: "Nichts zu löschen für {{name}}: {{reason}}",

@@ -2646,7 +2646,29 @@ const ar = {
           availableObjects: "اذكر كائنات البيانات المتاحة.",
           recentActivity: "لخّص نشاطي الأخير.",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'لخّص هذا السجل',
+            related: 'ما المرتبط بهذا السجل؟',
+          },
+          list: {
+            summarize: 'لخّص السجلات في هذه القائمة',
+            recent: 'ما السجلات التي أُضيفت هذا الأسبوع؟',
+          },
+          dashboard: {
+            explain: 'ماذا تعرض لوحة المعلومات هذه؟',
+            standOut: 'ما اللافت في لوحة المعلومات هذه؟',
+          },
+          report: {
+            summarize: 'لخّص هذا التقرير',
+            takeaways: 'ما أبرز النقاط في هذا التقرير؟',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'أسئلة مقترحة',
       discussing: "قيد العرض: {{target}}",
       focus: {
         pin: "مواصلة السؤال عن هذا السجل",
@@ -2683,7 +2705,7 @@ const ar = {
         expand: "توسيع",
         restore: "استعادة اللوحة الجانبية",
         open: "فتح المساعد",
-        planAwaitingApproval: "خطة مقترحة بانتظار موافقتك",
+        planAwaitingApproval: "إجراء بانتظار موافقتك",
         close: "إغلاق",
         more: "إجراءات أخرى",
       },
@@ -3815,6 +3837,7 @@ const ar = {
     recent: "الأخيرة",
     starred: "المميزة",
     removeFromFavorites: "إزالة {{name}} من المفضلة",
+    conversationUnavailable: "لم تعد هذه المحادثة متاحة",
     allReports: "كل التقارير",
     collapse: 'طي الشريط الجانبي',
     expand: 'توسيع الشريط الجانبي',
@@ -4982,6 +5005,7 @@ const ar = {
       add_field: "إضافة حقل إلى الكائن",
       apply_blueprint: "بناء التطبيق وفق الخطة",
       apply_edit: "تطبيق هذا التغيير",
+      ask_which: "توضيح السؤال",
       create_metadata: "إنشاء عنصر بيانات وصفية",
       create_object: "إنشاء كائن جديد",
       create_package: "إنشاء حزمة جديدة",
@@ -6075,6 +6099,7 @@ const ar = {
       toggleFailed: "فشل تغيير حالة التطبيق: {{reason}}",
       setDefaultDone: "تم تعيين {{name}} كافتراضي",
       setDefaultFailed: "فشل تعيين التطبيق الافتراضي: {{reason}}",
+      restoreDefaultFailed: "تعذرت استعادة {{name}} كتطبيق افتراضي، لذا لم يعد هو الافتراضي: {{reason}}",
       appDeleted: "تم حذف {{name}}",
       deleteFailed: "فشل حذف التطبيق: {{reason}}",
       nothingToDelete: "لا يوجد ما يُحذف لـ {{name}}: {{reason}}",

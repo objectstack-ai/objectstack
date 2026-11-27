@@ -79,6 +79,30 @@ export interface ChatDockConversationActions {
    * the build composer).
    */
   showDebug: boolean;
+  /**
+   * ui ADR-0057 Amendment A5 — the header's label for the thread in view: the
+   * label its history row carries. Absent before the first send creates the
+   * thread (the header reads "New conversation"), and while it is being read.
+   */
+  label?: string;
+  /** True while the label of an existing thread is still being read: the header draws no words yet. */
+  labelPending?: boolean;
+  /** The header's ＋: a new conversation, on the agent in use. */
+  startNew?: () => void;
+  /** The agent in use, by route name: what the header's ☆ stores with the thread (objectstack#37863). */
+  agent?: string;
+}
+
+/**
+ * ui ADR-0057 Amendment A5 — the conversation the drawer's body shows, as the
+ * host records it at a close: rows 3 and 8 of A5's table read it when the
+ * drawer is next opened from the entry.
+ */
+export interface ShownConversation {
+  /** Absent until the first send creates the thread. */
+  conversationId?: string;
+  /** The agent in use, by route name. */
+  agent?: string;
 }
 
 /** Reads a handoff from `location.state`; anything that is not a non-empty string is absent. */

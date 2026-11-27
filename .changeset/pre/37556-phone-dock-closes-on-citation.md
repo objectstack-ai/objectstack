@@ -2,6 +2,8 @@
 '@object-ui/app-shell': patch
 ---
 
+**Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+
 fix(console): on a phone, a page the AI assistant opens closes the assistant sheet so the page shows
 
 Clause-②: no

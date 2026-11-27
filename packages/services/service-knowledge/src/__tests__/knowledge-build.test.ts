@@ -412,6 +412,29 @@ describe('buildSourcesAtBoot — the first build', () => {
     expect(service.buildRecord('kb')).toMatchObject({ status: 'done' });
   });
 
+  it('[ADR-0161 K4] a source that names no adapter is built at boot on the one it is placed on; one that cannot be placed is left to the reading', async () => {
+    const db = makeEngine(ROWS);
+    const { adapter, calls } = makeAdapter();
+    const { service } = makeService(db.engine, adapter);
+    const { adapter: other } = makeAdapter();
+    const { adapter: unnamed } = makeAdapter();
+    service.registerSource(source({ adapter: undefined }));
+
+    await service.buildSourcesAtBoot();
+    expect(service.adapterIdFor(service.describeSources()[0]!.source)).toBe('memory');
+    expect(service.buildRecord('kb')).toMatchObject({ trigger: 'boot', status: 'done', result: { ok: true, indexed: 3 } });
+    expect(calls.upserted).toBe(3);
+
+    // A second node where two adapters arrived after the source and none is the deployment's:
+    // the pass builds nothing for it, and the reading names it.
+    const second = makeService(db.engine, other);
+    second.service.registerSource(source({ adapter: undefined }));
+    second.service.registerAdapter('app_store', unnamed);
+    await second.service.buildSourcesAtBoot();
+    expect(second.service.buildRecord('kb')).toBeUndefined();
+    expect(second.service.reportUnmountedAdapters()).toEqual(['kb']);
+  });
+
   it('a source with refresh.onRecordChange: false is left to its external indexer', async () => {
     const db = makeEngine(ROWS);
     const { adapter, calls } = makeAdapter();
@@ -599,6 +622,23 @@ describe('reconcileSources — which sources the reconcile walks (ADR-0161 K1)',
     const said = logger.warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("source 'kb' is not reconciled"));
     expect(said).toHaveLength(1);
     expect(said[0]).toContain('os knowledge rebuild');
+  });
+
+  it('[ADR-0161 K4] reads the store a source that names no adapter is placed on: one that lists no documents is left, one that does is walked', async () => {
+    const db = makeEngine(ROWS);
+    const { adapter, calls } = makeAdapter({ omit: ['listDocuments'] });
+    const { service } = makeService(db.engine, adapter);
+    service.registerSource(source({ adapter: undefined }));
+    const report = await service.reconcileSources();
+    expect(report.sources[0]).toMatchObject({ sourceId: 'kb', left: expect.stringContaining('no listDocuments') });
+    expect(calls).toMatchObject({ beginBuild: 0, upserted: 0 });
+
+    const listing = makeAdapter();
+    const walked = makeService(db.engine, listing.adapter);
+    walked.service.registerSource(source({ adapter: undefined }));
+    await walked.service.reconcileSources();
+    expect(walked.service.buildRecord('kb')).toMatchObject({ trigger: 'reconcile', status: 'done' });
+    expect(listing.calls.upserted).toBe(3);
   });
 
   it('leaves a source with refresh.onRecordChange: false to its external indexer', async () => {

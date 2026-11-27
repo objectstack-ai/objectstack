@@ -39,7 +39,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@object-ui/components';
-import { History, Maximize2, MessagesSquare, Minimize2, MoreHorizontal, Share2, X } from 'lucide-react';
+import { History, Maximize2, MessagesSquare, Minimize2, MoreHorizontal, Plus, Share2, Star, X } from 'lucide-react';
 import { formatNumber, useObjectTranslation } from '@object-ui/i18n';
 import { useAgents } from '@object-ui/plugin-chatbot/core';
 import { resolveApiBase } from '../console/ai/resolveApiBase.js';
@@ -48,12 +48,15 @@ import { useAiUsage } from '../hooks/useAiUsage.js';
 import { cloudConsoleUrl } from '../console/marketplace/marketplaceApi.js';
 import { getUpgradeUrl } from '../runtime-config.js';
 import { usePlanApprovalPending } from '../assistant/assistantBus.js';
+import { useFavorites } from '../context/FavoritesProvider.js';
+import { conversationFavoriteId, conversationFavoriteItem } from './conversationFavorites.js';
 import type { ChatSurfaceContext } from './chatSurfaceContext.js';
 import {
   readStoredDockFullWindow,
   writeStoredDockFullWindow,
   type ChatDockConversationActions,
   type ChatDockTarget,
+  type ShownConversation,
 } from './chatDockTarget.js';
 import {
   clampDockWidth,
@@ -362,12 +365,162 @@ function useDockBodyActions() {
   return { actions, setActions, shareOpen, setShareOpen };
 }
 
+/**
+ * ui ADR-0057 Amendment A5 — the header's words: the label of the thread in
+ * view as its history row carries it, "New conversation" before the first
+ * send, nothing while an existing thread's label is read (or before the body
+ * reports). A caller's `title` wins; a caller's own body has no thread to
+ * name, so it reads "New conversation".
+ */
+function useDockHeaderLabel(
+  title: string | undefined,
+  actions: ChatDockConversationActions | undefined,
+  ownBody: boolean,
+): string {
+  const { t } = useObjectTranslation();
+  const fresh = t('console.ai.newConversation', { defaultValue: 'New conversation' });
+  if (title !== undefined) return title;
+  if (ownBody) return fresh;
+  if (!actions || actions.labelPending) return '';
+  return actions.label ?? fresh;
+}
+
+interface DockHeaderButtonsProps {
+  actions: ChatDockConversationActions | undefined;
+  /** The rail and the sheet keep the history behind a button; absent in the full window. */
+  history?: { open: boolean; onToggle: () => void };
+  /** Finger-sized on the phone sheet. */
+  size: 'rail' | 'sheet';
+  /** Closes the history before a new thread replaces the one in view. */
+  onStartNew?: () => void;
+}
+
+/**
+ * objectstack#37863 — the header's ☆: adds the thread in view to the user's
+ * favourites, or removes it (pressed while it is one). Drawn once the first
+ * send has created the thread. While it is a favourite, the stored label
+ * follows the label the header reads.
+ */
+function DockFavoriteButton({
+  actions,
+  box,
+  icon,
+  testId,
+}: {
+  actions: ChatDockConversationActions;
+  box: string;
+  icon: string;
+  testId: string;
+}) {
+  const { t } = useObjectTranslation();
+  const { isFavorite, toggleFavorite, refreshLabel } = useFavorites();
+  const conversationId = actions.conversationId as string;
+  const id = conversationFavoriteId(conversationId);
+  const starred = isFavorite(id);
+  const label = actions.labelPending ? undefined : actions.label;
+  const refreshLabelRef = React.useRef(refreshLabel);
+  React.useLayoutEffect(() => {
+    refreshLabelRef.current = refreshLabel;
+  });
+  React.useEffect(() => {
+    if (starred && label) refreshLabelRef.current(id, label);
+  }, [starred, id, label]);
+  const name = starred
+    ? t('common.removeFromFavorites', { defaultValue: 'Remove from favorites' })
+    : t('common.addToFavorites', { defaultValue: 'Add to favorites' });
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className={cn(box, 'text-muted-foreground hover:text-foreground', starred && 'text-amber-500 hover:text-amber-600')}
+      onClick={() =>
+        toggleFavorite(
+          conversationFavoriteItem({
+            conversationId,
+            agent: actions.agent as string,
+            label: label ?? t('console.ai.newConversation', { defaultValue: 'New conversation' }),
+          }),
+        )
+      }
+      aria-pressed={starred}
+      aria-label={name}
+      title={name}
+      data-testid={testId}
+    >
+      <Star className={cn(icon, starred && 'fill-current')} />
+    </Button>
+  );
+}
+
+/**
+ * ui ADR-0057 Amendment A5 — the header's ☆ (objectstack#37863), ＋ and history buttons, as icons:
+ * ＋ starts a new conversation on the agent in use, the clock shows the
+ * history over the chat (pressed while it does) and goes back to the chat.
+ */
+function DockHeaderButtons({ actions, history, size, onStartNew }: DockHeaderButtonsProps) {
+  const { t } = useObjectTranslation();
+  const box = size === 'sheet' ? 'h-9 w-9' : 'h-7 w-7';
+  const icon = size === 'sheet' ? 'h-4 w-4' : 'h-3.5 w-3.5';
+  const startNew = actions?.startNew;
+  const newLabel = t('console.ai.newConversation', { defaultValue: 'New conversation' });
+  const historyLabel = history?.open
+    ? t('console.ai.dock.backToChat', { defaultValue: 'Back to chat' })
+    : t('console.ai.dock.history', { defaultValue: 'History' });
+  return (
+    <>
+      {actions?.conversationId && actions.agent ? (
+        <DockFavoriteButton
+          actions={actions}
+          box={box}
+          icon={icon}
+          testId={size === 'sheet' ? 'chat-dock-mobile-favorite' : 'chat-dock-favorite'}
+        />
+      ) : null}
+      {startNew ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(box, 'text-muted-foreground hover:text-foreground')}
+          onClick={() => {
+            onStartNew?.();
+            startNew();
+          }}
+          aria-label={newLabel}
+          title={newLabel}
+          data-testid={size === 'sheet' ? 'chat-dock-mobile-new' : 'chat-dock-new'}
+        >
+          <Plus className={icon} />
+        </Button>
+      ) : null}
+      {history ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(box, 'text-muted-foreground hover:text-foreground', history.open && 'bg-accent text-foreground')}
+          onClick={history.onToggle}
+          aria-pressed={history.open}
+          aria-label={historyLabel}
+          title={historyLabel}
+          data-testid={size === 'sheet' ? 'chat-dock-mobile-history-toggle' : 'chat-dock-history-toggle'}
+        >
+          <History className={icon} />
+        </Button>
+      ) : null}
+    </>
+  );
+}
+
 /** objectstack#34608 — what the drawer shows (see `chatDockTarget.ts`). */
 export interface ChatDockThreadProps {
   /** Absent → the ambient thread (see {@link ChatDockConversation}). */
   target?: ChatDockTarget;
   /** Replaces the target in place: a history row or a minted fresh thread. */
   onTargetChange?: (target: ChatDockTarget | undefined) => void;
+  /**
+   * ui ADR-0057 Amendment A5 — told the conversation the default body shows,
+   * so the host can record it at a close. Unused with `children`.
+   */
+  onShownConversationChange?: (shown: ShownConversation) => void;
 }
 
 export interface ChatDockPanelProps extends ChatDockThreadProps {
@@ -391,7 +544,7 @@ export interface ChatDockPanelProps extends ChatDockThreadProps {
   surfaceContext?: ChatSurfaceContext;
   /** objectui#8219 — the chip's display label for `surfaceContext.artifact`. Unused with `children`. */
   surfaceArtifactLabel?: string;
-  /** Header title override; default "Assistant". */
+  /** Header title override; default: the thread's label (ui ADR-0057 Amendment A5). */
   title?: string;
   /**
    * Body override. Default mounts {@link ChatDockConversation} (the console's
@@ -423,6 +576,7 @@ export function ChatDockPanel({
   title,
   target,
   onTargetChange,
+  onShownConversationChange,
   children,
 }: ChatDockPanelProps) {
   const { t } = useObjectTranslation();
@@ -431,6 +585,8 @@ export function ChatDockPanel({
   const full = dock.fullWindow;
   const closeLabel = t('console.ai.dock.close', { defaultValue: 'Close' });
   const body = useDockBodyActions();
+  const ownBody = children !== undefined;
+  const label = useDockHeaderLabel(title, ownBody ? undefined : body.actions, ownBody);
   return (
     <aside
       data-testid="chat-dock-panel"
@@ -458,34 +614,25 @@ export function ChatDockPanel({
           )}
         />
       )}
-      {/* objectstack#35445 — ONE title row: History, 「···」, Close. Usage,
-          Share and filling the window are in the menu; the
-          close is the drawer's 「×」 in both presentations, and the
-          conversation is kept for the next open. */}
-      <div className="flex h-11 shrink-0 items-center justify-between border-b px-3" data-testid="chat-dock-header">
-        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground/80">
-          <MessagesSquare className="size-3.5" />
-          {title ?? t('console.ai.dock.title', { defaultValue: 'AI Assistant' })}
-        </span>
-        <span className="flex items-center gap-0.5">
-          {/* The rail keeps the history behind this button; the full window
-              shows it beside the chat. */}
-          {!full && !children ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn('h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground', historyOpen && 'bg-accent text-foreground')}
-              onClick={() => setHistoryOpen((v) => !v)}
-              aria-pressed={historyOpen}
-              aria-label={historyOpen
-                ? t('console.ai.dock.backToChat', { defaultValue: 'Back to chat' })
-                : t('console.ai.dock.history', { defaultValue: 'History' })}
-              data-testid="chat-dock-history-toggle"
-            >
-              <History className="h-3.5 w-3.5" />
-              {t('console.ai.dock.history', { defaultValue: 'History' })}
-            </Button>
-          ) : null}
+      {/* ui ADR-0057 Amendment A5 (after objectstack#35445) — ONE title row:
+          the thread's label; ＋, the history (rail only: the full window
+          shows it beside the chat), 「···」, ×. Usage, Share and filling the
+          window are in the menu. */}
+      <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b px-3" data-testid="chat-dock-header">
+        <h2
+          className="min-w-0 flex-1 truncate text-sm font-medium text-foreground"
+          title={label || undefined}
+          data-testid="chat-dock-title"
+        >
+          {label}
+        </h2>
+        <span className="flex shrink-0 items-center gap-0.5">
+          <DockHeaderButtons
+            actions={ownBody ? undefined : body.actions}
+            history={!full && !ownBody ? { open: historyOpen, onToggle: () => setHistoryOpen((v) => !v) } : undefined}
+            size="rail"
+            onStartNew={() => setHistoryOpen(false)}
+          />
           <ChatDockMenu
             apiBase={apiBase}
             actions={children ? undefined : body.actions}
@@ -534,6 +681,7 @@ export function ChatDockPanel({
               onActionsChange={body.setActions}
               shareOpen={body.shareOpen}
               onShareOpenChange={body.setShareOpen}
+              onShownConversationChange={onShownConversationChange}
             />
           </React.Suspense>
         )}
@@ -557,7 +705,7 @@ export interface ChatDockMobileSheetProps extends ChatDockThreadProps {
   surfaceContext?: ChatSurfaceContext;
   /** Same contract as {@link ChatDockPanelProps.surfaceArtifactLabel}. */
   surfaceArtifactLabel?: string;
-  /** Header title override; default "Assistant". */
+  /** Header title override; default: the thread's label (ui ADR-0057 Amendment A5). */
   title?: string;
   /** Body override — same contract as {@link ChatDockPanel}. */
   children?: React.ReactNode;
@@ -586,12 +734,15 @@ export function ChatDockMobileSheet({
   title,
   target,
   onTargetChange,
+  onShownConversationChange,
   children,
 }: ChatDockMobileSheetProps) {
   const { t } = useObjectTranslation();
   const apiBase = React.useMemo(() => resolveApiBase(apiBaseProp), [apiBaseProp]);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const body = useDockBodyActions();
+  const ownBody = children !== undefined;
+  const label = useDockHeaderLabel(title, ownBody ? undefined : body.actions, ownBody);
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -600,30 +751,24 @@ export function ChatDockMobileSheet({
         data-testid="chat-dock-mobile-sheet"
       >
         <SheetHeader className="shrink-0 border-b px-4 py-2">
-          {/* History sits NEXT TO THE TITLE (left), finger-sized, well clear of
-              SheetContent's built-in close ✕ (absolute right-4) so a thumb can't
-              confuse the two. `pr-8` still reserves room for that ✕. */}
+          {/* ui ADR-0057 Amendment A5 — the rail's row: the thread's label,
+              then ＋, the history and 「···」, finger-sized; `pr-8` keeps
+              them clear of SheetContent's built-in close ✕ (absolute right-4),
+              the row's last control. */}
           <div className="flex items-center gap-1 pr-8">
-            <SheetTitle className="inline-flex items-center gap-1.5 text-sm font-medium">
-              <MessagesSquare className="size-4" />
-              {title ?? t('console.ai.dock.title', { defaultValue: 'AI Assistant' })}
+            <SheetTitle
+              className="min-w-0 flex-1 truncate text-left text-sm font-medium"
+              title={label || undefined}
+              data-testid="chat-dock-mobile-title"
+            >
+              {label}
             </SheetTitle>
-            {!children ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn('h-9 gap-1 px-2 text-muted-foreground hover:text-foreground', historyOpen && 'bg-accent text-foreground')}
-                onClick={() => setHistoryOpen((v) => !v)}
-                aria-pressed={historyOpen}
-                aria-label={historyOpen
-                  ? t('console.ai.dock.backToChat', { defaultValue: 'Back to chat' })
-                  : t('console.ai.dock.history', { defaultValue: 'History' })}
-                data-testid="chat-dock-mobile-history-toggle"
-              >
-                <History className="h-4 w-4" />
-                {t('console.ai.dock.history', { defaultValue: 'History' })}
-              </Button>
-            ) : null}
+            <DockHeaderButtons
+              actions={ownBody ? undefined : body.actions}
+              history={!ownBody ? { open: historyOpen, onToggle: () => setHistoryOpen((v) => !v) } : undefined}
+              size="sheet"
+              onStartNew={() => setHistoryOpen(false)}
+            />
             {/* objectstack#35445 — the same 「···」 as the rail, less filling the
                 window (the sheet already takes the screen). */}
             <ChatDockMenu
@@ -655,6 +800,7 @@ export function ChatDockMobileSheet({
                 onActionsChange={body.setActions}
                 shareOpen={body.shareOpen}
                 onShareOpenChange={body.setShareOpen}
+                onShownConversationChange={onShownConversationChange}
               />
             </React.Suspense>
           )}

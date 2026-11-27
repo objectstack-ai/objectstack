@@ -725,6 +725,11 @@ function useDatasetRows(
     error?: string;
     /** The query was refused because this viewer may not read the data (objectui#12330). */
     forbidden?: boolean;
+    /**
+     * The selection signature this outcome answers (objectstack#38008). Unset
+     * only on the first mount's `idle`, which carries no rows.
+     */
+    signature?: string;
   }>({
     status: 'idle',
     rows: [],
@@ -782,13 +787,13 @@ function useDatasetRows(
     if (!src || typeof src.queryDataset !== 'function') {
       lastQueriedSignatureRef.current = null;
       setDatasetObject(undefined);
-      setState({ status: 'error', rows: [], error: 'This data source does not support dataset queries.' });
+      setState({ status: 'error', rows: [], error: 'This data source does not support dataset queries.', signature });
       return;
     }
     if (!dataset || measures.length === 0) {
       lastQueriedSignatureRef.current = null;
       setDatasetObject(undefined);
-      setState({ status: 'idle', rows: [] });
+      setState({ status: 'idle', rows: [], signature });
       return;
     }
     let cancelled = false;
@@ -796,7 +801,7 @@ function useDatasetRows(
     lastQueriedSignatureRef.current = signature;
     if (!inPlace) {
       setDatasetObject(undefined);
-      setState({ status: 'loading', rows: [] });
+      setState({ status: 'loading', rows: [], signature });
     }
     src
       .queryDataset(dataset, {
@@ -829,6 +834,7 @@ function useDatasetRows(
             drillRanges: Array.isArray(res?.drillRanges) ? res.drillRanges : undefined,
             drillScopes: res?.drillScopes,
             totals: Array.isArray(res?.totals) ? res.totals : undefined,
+            signature,
           });
         }
       })
@@ -846,10 +852,10 @@ function useDatasetRows(
         // text, so the adapter's message (which quotes the server and names
         // the object) cannot reach the page. Every other failure keeps it.
         if (classifyLoadError(e) === 'forbidden') {
-          setState({ status: 'error', rows: [], forbidden: true });
+          setState({ status: 'error', rows: [], forbidden: true, signature });
           return;
         }
-        setState({ status: 'error', rows: [], error: String((e as Error)?.message ?? e) });
+        setState({ status: 'error', rows: [], error: String((e as Error)?.message ?? e), signature });
       });
     return () => {
       cancelled = true;
@@ -857,8 +863,25 @@ function useDatasetRows(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature, invalidationNonce]);
 
+  // objectstack#38008 — the render that carries a NEW selection runs before the
+  // effect above can mark it loading, so `state` still holds the previous
+  // selection's outcome. Handed out as is, the caller draws the new selection
+  // over rows that answer the old one: switching 「Compare with previous
+  // period」 on painted, for a frame, a comparison series with no comparison
+  // values. An outcome answers only the signature it was queried for; under
+  // any other it reads as loading.
+  if (state.signature !== undefined && state.signature !== signature) {
+    const stale: typeof state = STALE_SELECTION_STATE;
+    return stale;
+  }
   return state;
 }
+
+/** What {@link useDatasetRows} answers while its outcome belongs to a previous selection. */
+const STALE_SELECTION_STATE: { status: 'loading'; rows: Row[] } = Object.freeze({
+  status: 'loading' as const,
+  rows: Object.freeze([]) as unknown as Row[],
+});
 
 /**
  * `buildDatasetDrillFilter`, with a refused filter REPORTED instead of thrown —

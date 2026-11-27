@@ -1,5 +1,109 @@
 # @objectstack/plugin-approvals
 
+## 19.0.0-next.1
+
+### Patch Changes
+
+- 9b622bb: feat(service-messaging): a keyed notification param can be a list, each item rendered in the recipient's language; the approval "no one can approve" notice names a slate of any size in the reader's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - `EmitInput.keyedText.params` accepts a new value shape, `{ list, separator }`. Each `list` item is `{ key, params?, fallback }`: a catalog sentence with its own `{{hole}}` params, rendered per recipient. An item param can be text, `{ key, fallback }` or `{ object, fallback }`, but not another list. A sentence with no entry falls back to the item's `fallback`. The rendered items are joined by the `separator` entry (`{ key, fallback }`), so a list of any length reads in one language. A list holds 1 to `NOTIFICATION_LIST_PARAM_MAX_ITEMS` (100) items, and `emit()` refuses a malformed one before it writes anything. The new exports are the types `NotificationListParam`, `NotificationListItem` and `NotificationScalarParam`, and the constant `NOTIFICATION_LIST_PARAM_MAX_ITEMS`. Every existing param shape renders as before.
+  - The widening reaches the read side too. `NotificationTextParam` is now `NotificationScalarParam | NotificationListParam`, so the exported channel contract `Notification.keyedText` can carry a list param. A channel that reads `keyedText.params` must handle the list shape.
+  - An older reader does not understand a list row. After a rollback to a version before this one, it reads the row's keys as malformed and delivers or shows the whole notice as its stored English literal, title and body alike. Nothing fails. Within one install this cannot otherwise happen, because the two packages always release together.
+  - The approval submitter's notice for a request no one else can approve now names a slate of two or more slots through this list param, one `approvalNoApproverSlot` clause per slot, joined by `approvalNoApproverSlotSeparator`. Before, a slate of more than 8 slots named its slots in English inside a zh-CN, ja-JP or other non-English sentence. Now every slot reads in the recipient's language. The literal English body is unchanged. A slate of more slots than a list param holds (more than 100) is sent with the slots as one English clause list instead, as before, so `emit()` does not refuse the notice and the submitter is still told.
+  - The `approvalNoApproverHoldingSlots2` to `…Slots8` sentences stay in the packs, because notices already delivered carry those keys and are rendered again whenever the inbox is read.
+- c9741f4: fix(approvals): the Approval Actions list and an action's record page name the step and the platform's own notes in the reader's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_approval_action` read through the generic data door (Setup's Approval Actions list, an action's record page, the export) now serves, to a reader with a locale, the same text the approvals door's timeline serves:
+  
+  - `step_label`: the step's label from the app's language pack (`flows.<flow>.approvals.<step>.label`), as the Approval Requests list already did. Before, the stored authoring-language snapshot was served to every reader.
+  - `comment` on the rows the platform writes itself: the administrators' routing note, the submitter exclusion note and the no-approver note, which are stored as data on the request, and the cancellation written when the record a pending request is about is deleted ("Auto-cancelled: the … record '…' this request is about was deleted"), now a catalog sentence (`approvalAutoCancelledRecordDeleted`, in all eleven shipped languages) composed from the request's own columns. The approvals door's timeline serves that cancellation in the reader's language too.
+  
+  A comment a person wrote is served as written. A list that selects `step_label` or `comment` without the columns their text is picked by is served exactly the columns it selected. Storage is unchanged: the stored step label stays the authored text and the stored comment the English, which is what a system read, a reader with no locale and a language the pack does not hold are served. Nothing to migrate.
+- f19ae3a: feat(automation): every run of a tree is handed its root run and the run that carries its record, and each approval request records both in columns of its own
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  ADR-0162 Execution item 7, "The root run". A `subflow` body or a `map` item knew only its immediate parent (`$parentRunId`), so nothing could tell which runs, and which requests, belong to one whole approval.
+  
+  - **`@objectstack/service-automation`.** The engine stamps every run's context with its root run, `$rootRun`: `{ runId, flowName, object, startedAt }`, the run the tree was started on, its flow's key, the object it was started on (its context's `object`, with or without a record; `null` when it names none, never a `map` item's own object) and when it started. A run with no parent is its own root, also on each retry attempt; a child carries its parent's over, at any depth, and the stamp rides every suspension. Beside it, `$recordRun`: `{ runId, object, recordId }`, the highest run from this one up over which the record does not change, which is the root run or a `map` item run whose item is a record (a `subflow` child, and an item that is not a record, inherit their parent's). New: `AutomationEngine.rootRunOf(context)` and `recordRunOf(context)`, which answer them, and the `RootRun` and `RecordRun` types. A run parked before this release carries neither and gets both when it is resumed, derived in one walk of its links to its parents, before the suspension is consumed: a parent the store cannot read refuses that resume with `STORE_UNAVAILABLE` (nothing consumed, retry verbatim), and a parent that is no longer parked stamps the run `null` on both, said once at `warn`, while the run goes on; a child such a run starts inherits the `null`, and a `null` stamp is not walked again.
+  - **`@objectstack/plugin-approvals`.** The approval node hands both to `openNodeRequest` (new optional `rootRun` and `recordRun` inputs, types `ApprovalRootRun` and `ApprovalRecordRun`), and each request records `root_run_id`, `root_run_started_at` and `record_run_id` as it opens, three new read-only columns on `sys_approval_request` (in its free-text search set beside `flow_run_id`) with indexes on `(root_run_id, object_name, record_id)` and `(record_run_id)`. A run the engine could not place (the derivation above could not read its tree whole), and any run on an automation service without `rootRunOf`, opens its approval step as before, with the three columns empty. `ApprovalRootRun` and `ApprovalRecordRun` are exported from the plugin's index.
+  
+  Nothing to migrate. The columns are added by schema sync; requests opened before this release keep them empty.
+- 94b0314: fix(approvals): a step decided in a `subflow` child no longer tells the submitter "approved" while the parent opens a further step
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The decision that ends an approval tells its submitter the outcome (`approval.approved` / `approval.rejected`); a decision that ends only a step tells no one. To tell the two apart, the platform looked for a pending request on the decided request's own run. A step decided inside a `subflow` child hands the next step to the parent run, which opens it under the parent's run id, so nothing pending was found and the submitter was told "approved" while the next step was still open.
+  
+  The check now looks across the run that carries the request's record (`record_run_id`, recorded on each request since requests record their root run). A `subflow` child shares that run with its parent, so a further step on either side keeps the first decision quiet, and the decision that ends the approval tells the submitter as before.
+  
+  - A `map` item whose item is a record carries a run of its own, so each item's submitter is still told that item's outcome when its last step is decided, while the batch goes on to the next item.
+  - A request opened before requests recorded the run that carries their record is judged on its own run, as before.
+  
+  Nothing to migrate.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [0196476]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/platform-objects@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+  - @objectstack/formula@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

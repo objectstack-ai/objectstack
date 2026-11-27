@@ -1,5 +1,114 @@
 # @objectstack/plugin-security
 
+## 19.0.0-next.1
+
+### Major Changes
+
+- eb683b8: feat(security)!: View All and Modify All stop opening fields; `viewAllFields` is the one "every field" bit
+  
+  **BREAKING** (19.0.0): View All (`viewAllRecords`) and Modify All (`modifyAllRecords`) widen records only. They no longer cast a field vote, so a field that a permission set hides (`readable: false`) or locks (`editable: false`) stays hidden or locked for their holders. Reading every field of an object is `viewAllFields: true` on that object's entry; it votes read, never edit.
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: registered permission-view-all-fields-beside-record-bypass -->
+  
+  FROM → TO:
+  
+  - `objects.<name>: { viewAllRecords: true }` read every field of the object another set hides → it reads none of them. TO keep that read: `{ viewAllRecords: true, viewAllFields: true }`.
+  - `objects.<name>: { modifyAllRecords: true }` read and edited every field, the set's own rows included → it reads and edits only what the field rows allow. TO keep the read: `{ modifyAllRecords: true, viewAllFields: true }`, except a field the set's own `readable: false` row hides: that row now hides the field from the set's holders even with the bit, so delete it where they should still read the field. The edit is not restored by any bit, for a field another set locks or a field the set's own field row names without `editable: true` (an omitted `editable` is `false`): grant it with an explicit `editable: true` row in the set that should edit it.
+  - The same holds on a `'*'` entry.
+  
+  **Check your permission sets in one step.** A permission set is affected when one of its `objects` entries, the `'*'` entry included, has `viewAllRecords: true` or `modifyAllRecords: true` and does not have `viewAllFields: true`. For each such entry, add `viewAllFields: true` to it if the set should still read every field of that object. Beside View All that is all the read needs: with the bit, the set reads what View All read before. Beside Modify All it is not: the set's own `readable: false` rows now bind (before, Modify All overrode them), so a field such a row hides stays hidden from the set's holders until you delete the row. For the edit, Modify All no longer grants one: where its holders must still edit a field another set locks, or a field the set's own field row names without `editable: true`, add an explicit `editable: true` row in the set that should edit it.
+  
+  - Sets in your source: `os migrate meta --from 18 --write` adds `viewAllFields: true` beside every such bit (ADR-0087 conversion `permission-view-all-fields-beside-record-bypass`).
+  - Sets saved in a running deployment (Studio-saved, stored in `sys_metadata`): they are **not** rewritten on upgrade, and from 19 they are read with the new meaning. Studio's permission matrix has no control for `viewAllFields` today (it keeps the key when it saves a set that already carries it), so add it to the set's entry through the metadata API. No command lists the affected stored sets yet; a review list is follow-up #37375.
+  
+  The protocol-19 upgrade guide carries the same check as the semantic entry `permission-view-all-modify-all-cast-no-field-vote`.
+  
+  The error direction is safe: an unconverted set sees **fewer** fields after the upgrade, never more. No field that was hidden opens. A set whose object has no field row in any set changes nothing at all, because a field no set names already follows the object grant.
+  
+  Also in this change:
+  
+  - The built-in admin sets (`admin_full_access`, `organization_admin`) already carry `viewAllFields: true` on their `'*'` entry, so they still read every field. They no longer edit a field that another set they hold locks.
+  - Explain no longer reports a row-conditioned field lock as "superseded by the Modify All Data field vote": the lock binds per row for every caller.
+  - `@objectstack/lint`: the warning `security-superuser-field-mask-inert` is retired, since a set's own field rows now bind beside its own View All or Modify All. `security-cross-set-field-reopen` now reports only a field one set hides that another set's `viewAllFields` re-opens. `security-controlled-by-parent-master-reference-hidden` and the roll-up source-visibility rules now judge a mask beside Modify All like any other mask.
+  - `@objectstack/spec` and `@objectstack/metadata-core`: the conversion is a default flip, retired from the load path from day one. Only `os migrate meta --from 18` replays it: the authoring funnel skips it (it is retired from the load path), and the artifact-ingestion door (`DEFAULT_FLIPS_NOT_REPLAYED_HERE`) and every stored-row read (`applyConversionsToStoredItem`, `os migrate meta --stored` included) refuse it by id, so an artifact or stored set is read with the 19 meaning and never handed a field read its author did not write.
+  - `@objectstack/core`: `superuserFieldVote` is replaced by `viewAllFieldsReadVote(sets, object, field)`, which answers whether a set's `viewAllFields` reads the field. `holdsSuperuserBypass` is unchanged and answers the record bypass only.
+  - `@objectstack/scenarios`: the persona-grant scoring no longer treats Modify All as overriding a field lock.
+  - `@objectstack/cli` and `@objectstack/service-automation`: test comments only, restated for the 19 meaning.
+
+### Patch Changes
+
+- 58570d8: **Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  perf(sharing): a predicate update or delete asks record sharing for the write verdict of all its candidate rows at once, so its store reads no longer grow per row
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `ISharingService` (`@objectstack/spec/contracts`) gains two optional members, `checkEditMany(object, recordIds, context)` and `checkDeleteMany(object, recordIds, context)`. Each answers, for every id it is handed and in the same order, the tri-state verdict `checkEdit` / `checkDelete` answer for that id (`allow`, `abstain` or `deny`), with the same bases, the same order and the same verb boundary: an `edit` share answers `allow` to `checkEditMany` and `deny` to `checkDeleteMany`. A chunk whose lookup fails answers `deny` for each of its records, as `checkEdit` answers `deny` for a record whose lookup fails.
+  
+  `SharingService` (`@objectstack/plugin-sharing`) implements both, and `checkEdit` / `checkDelete` are now the one-record case of the same implementation. A list is read in chunks of 1,000 ids: one read of the chunk's rows and, for an update, one read of the caller's write-level shares on them. The caller's owner set, each queue membership and the Modify All probe are resolved at most once per call. A single record costs the reads it always did, except that an update of a record on an object with an ownership queue column now reads the row once instead of twice.
+  
+  `SecurityPlugin` (`@objectstack/plugin-security`) asks the set form on a predicate (`multi: true`) update or delete, for the matched rows the platform ownership floor does not already admit, where the kernel's `sharing` service serves it, and asks `checkEdit` / `checkDelete` per row, 25 at a time as before, where it does not. Which rows are written is unchanged either way. Measured on SQLite over 10,000 rows owned by another user: a member's predicate update went from 20,004 store reads and 6.6 s to 24 reads and 0.27 s, the same delete from 10,003 reads to 13, and a Modify All holder's update of all 10,000 rows from 10,004 reads to 14.
+  
+  Nothing to migrate. An `ISharingService` implementation that does not add the two members keeps working: callers ask it per record, with the same answers.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [0196476]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/platform-objects@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+  - @objectstack/formula@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes
@@ -220,7 +329,9 @@
   
   The predicate write now makes the by-id decision for each matched row the floor would refuse. Such a row is written when a write of that row by id would be, because the sharing service answers `allow` for it: ownership at the caller's write depth, Modify All, or, for an update only, an `edit` share or the row's queue. A row the service abstains on keeps the floor: on an object with no `owner_id`, and on a delete under `public_read_write` (an update there has no floor to keep, because that OWD opens row updates). A row it denies keeps the floor too. The row-level `check` on each updated row follows the same decision.
   
-  The by-id decision costs one sharing verdict, a few store reads, for each matched row the floor does not already admit. Measured on SQLite in memory:
+  The by-id decision is one sharing verdict for each matched row the floor does not already admit. The bundled sharing service (`@objectstack/plugin-sharing`) answers all of them through its set form, `checkEditMany` / `checkDeleteMany`, in chunks of 1,000 rows: one read of the chunk's rows and, for an update, one read of the caller's write-level shares on them, so the store reads grow per 1,000 rows rather than per row. Measured on SQLite over 10,000 rows owned by another user: a member's predicate update takes 24 store reads and about 0.27 s, the same delete 13 reads, and a Modify All holder's update of all 10,000 rows 14 reads, and it now writes those rows.
+  
+  A sharing service that does not implement the set form is asked `checkEdit` / `checkDelete` once per row, 25 at a time, with the same answers, and then each verdict costs a few store reads. Measured on SQLite in memory with the per-row form:
   
   - A member's predicate update matching 1,000 readable rows owned by other people, every verdict `deny`: 1,000 verdicts and 2,004 store reads, about 1.1 s, against 44 ms and 3 reads before.
   - The same at 10,000 rows: 10,000 verdicts and 20,004 store reads, about 5.3 s, against 47 ms before.

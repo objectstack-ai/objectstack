@@ -54,7 +54,7 @@ import {
 } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
-import { Bot, ChevronRight } from 'lucide-react';
+import { ChevronRight, MessageCircle } from 'lucide-react';
 import {
   NavigationOverlay,
   type NavigationOverlayMode,
@@ -520,22 +520,24 @@ export function RecordStackDrawer({
     [onOpenAsPage, path],
   );
   // objectstack#36998 — the drawer card sits over the right end of the
-  // console's top bar, where the assistant's one standing entry (the robot)
+  // console's top bar, where the assistant's one standing entry (「Ask AI」)
   // is, and over the assistant's drawer. So the bar carries the entry itself,
-  // drawn where the robot is (a layout hosting the assistant hands a dock
+  // drawn where that entry is (a layout hosting the assistant hands a dock
   // handle only while the runtime serves AI): it opens the record shown as
   // its full page, as ⤢ does, then opens the assistant beside it.
   const dock = useChatDockControl();
   const assistantEntry = dock && pane ? (
     <RecordTopBarButton
-      label={t('topbar.aiAssistant', { defaultValue: 'AI Assistant' })}
+      label={t('home.askAI', { defaultValue: 'Ask AI' })}
       onClick={() => {
         pane.openAsPage();
-        dock.open();
+        // ui ADR-0057 Amendment A5 — the entry's opening, as the top bar's.
+        if (dock.openEntry) dock.openEntry();
+        else dock.open();
       }}
       data-testid="record-pane-open-assistant"
     >
-      <Bot className="h-3.5 w-3.5" />
+      <MessageCircle className="h-3.5 w-3.5" />
     </RecordTopBarButton>
   ) : null;
   // The bar's slot for the record's ⊟, and the titles the records drawn
