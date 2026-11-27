@@ -717,10 +717,15 @@ the `embedder` it is given), and answers a search by an exact scan.
   (`knowledge_<source>` with exactly their columns) is never served: a search
   answers `KNOWLEDGE_REBUILD_REQUIRED`, and the table is dropped when the first
   complete reindex finishes. A table of any other shape under one of the
-  store's names is neither served nor dropped.
+  store's names (an object's table, in a database shared with object tables)
+  is neither served nor dropped: a rebuild that would replace it, like a
+  `dropSource`, is refused `SERVICE_UNAVAILABLE`, naming the table, and
+  nothing is removed.
 - **Re-embedding.** A passage whose text is unchanged (its `chunk_hash`) is
   not embedded again within a generation.
-- **When it cannot run.** A database that cannot be opened, or a platform
+- **When it cannot run.** A database that cannot be opened, one holding a
+  table named `knowledge_generation` that is not the store's (the reason names
+  it, and it is left as it is), or a platform
   with no native libSQL build (there is none for Windows on ARM): the plugin
   still registers and boot goes on; it warns with the reason, `healthCheck`
   answers `ok: false`, and every call answers `SERVICE_UNAVAILABLE`.
