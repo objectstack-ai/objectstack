@@ -17,11 +17,20 @@ import {
   GENERATION_TABLE,
   METADATA_VALUE_JSON,
   SCOPE_SCALAR_TYPES,
+  TRIGRAM_MIN_CHARS,
+  type KeywordIndexShape,
   type TableShape,
   tableShape,
   assertSourceId,
+  containsPattern,
+  dropKeywordIndexDdl,
+  ftsPhrase,
   generationDdl,
   generationTable,
+  keywordIndexDdl,
+  keywordIndexShape,
+  keywordNames,
+  keywordTerms,
   legacyTable,
   passageTableDdl,
   quoted,
@@ -78,6 +87,9 @@ const SEARCH_ATTEMPTS = 3;
 
 /** The standard ADR-0112 code of a search whose source's index was switched under it on every attempt. */
 const CONCURRENT_MODIFICATION = 'CONCURRENT_MODIFICATION';
+
+/** The `k` of reciprocal rank fusion: a passage at rank `r` of a leg adds `1 / (k + r)` to its score. */
+export const RRF_K = 60;
 
 /** A generation row: one index of one source under one fingerprint. */
 interface GenerationRow {
@@ -184,11 +196,31 @@ function withTimeout<T>(work: Promise<T>, ms: number, commit = false): Promise<T
  *
  * ## Search
  *
- * An exact scan by cosine distance, no approximate index: the organization
- * filter (ADR-0161 K8, item 9) and the metadata-equality `filter` run in the
- * same `WHERE`, before ranking, which libSQL's DiskANN index (`vector_top_k`)
- * cannot do — it ranks first. A passage whose cosine similarity is not
- * positive is not a hit.
+ * Two legs, merged by reciprocal rank fusion (`k` = {@link RRF_K}) before the
+ * knowledge service re-checks each hit as the caller. Each leg ranks at most
+ * `topK` passages; a passage's score is the sum of `1 / (k + rank)` over the
+ * legs that rank it, divided by the score of a passage first in both, so it
+ * lies in `(0, 1]`.
+ *
+ * - The vector leg: an exact scan by cosine distance, no approximate index. A
+ *   passage whose cosine similarity is not positive is not ranked by it.
+ * - The keyword leg: the query's terms ({@link keywordTerms}). A term of three
+ *   characters or more is matched as one FTS5 phrase in the passage table's
+ *   trigram index (so `X-200` is a phrase, never FTS5 syntax); a shorter one
+ *   (「出差」), which a trigram index cannot match, by `content LIKE` over the
+ *   rows in scope. A passage's keyword score sums, over the terms it holds,
+ *   the term's BM25 inverse document frequency among the rows in scope, so a
+ *   term most passages hold weighs little.
+ *
+ * The organization filter (ADR-0161 K8, item 9), the record scope (item 17)
+ * and the metadata-equality `filter` are one `WHERE`, run in both legs before
+ * either ranks — which libSQL's DiskANN index (`vector_top_k`) cannot do: it
+ * ranks first.
+ *
+ * The keyword index of a passage table is made with the table, and for a
+ * table made before it existed, by the first search of that table, from the
+ * rows it holds, in one transaction ({@link keywordIndexDdl}). Triggers keep
+ * it in step with every write, removal and drop of the table's rows.
  *
  * ## Generations (ADR-0161 K7; K8, item 8)
  *
@@ -242,6 +274,8 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
   private isReady = false;
   /** Sources whose legacy table is known to be absent. */
   private readonly noLegacy = new Set<string>();
+  /** Passage tables whose keyword index is known to be complete. */
+  private readonly keyed = new Set<string>();
 
   constructor(opts: TursoKnowledgeAdapterOptions) {
     this.id = opts.id ?? 'turso';
@@ -505,8 +539,12 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
           `vector, and this source's index holds ${active.dim}-wide vectors.`,
       );
     }
-    if (vector.every((x) => x === 0)) return [];
+    const vectorLeg = !vector.every((x) => x === 0);
+    const terms = keywordTerms(query);
+    if (!vectorLeg && terms.length === 0) return [];
 
+    // One WHERE for both legs: the organization filter, the record scope and
+    // the metadata filter, each bound as values. ?1 is the query vector.
     const args: unknown[] = [vectorLiteral(vector)];
     const where: string[] = [];
     if (opts.organizationIds !== undefined) {
@@ -520,24 +558,24 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       // compared with the stored keys (never put into a JSON path). A
       // `metadata` term holds for a stored string or number equal to an id as
       // text, or a list with such an element; any other value holds for nothing.
-      const terms: string[] = [];
+      const scopeTerms: string[] = [];
       for (const term of opts.scope) {
         if (term.ids.length === 0) continue;
         args.push(JSON.stringify(term.ids));
         const ids = `(SELECT value FROM json_each(?${args.length}))`;
         if (term.kind === 'record') {
-          terms.push(`source_record_id IN ${ids}`);
+          scopeTerms.push(`source_record_id IN ${ids}`);
           continue;
         }
         args.push(term.field);
-        terms.push(
+        scopeTerms.push(
           `EXISTS (SELECT 1 FROM json_each(metadata) AS m WHERE m.key = ?${args.length} AND (` +
             `(m.type IN ${SCOPE_SCALAR_TYPES} AND CAST(m.value AS TEXT) IN ${ids}) OR ` +
             `(m.type = 'array' AND EXISTS (SELECT 1 FROM json_each(m.value) AS e ` +
             `WHERE e.type IN ${SCOPE_SCALAR_TYPES} AND CAST(e.value AS TEXT) IN ${ids}))))`,
         );
       }
-      where.push(`(${terms.join(' OR ')})`);
+      where.push(`(${scopeTerms.join(' OR ')})`);
     }
     for (const [key, value] of Object.entries(opts.filter ?? {})) {
       args.push(key, JSON.stringify(value === undefined ? null : value));
@@ -545,22 +583,64 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         `EXISTS (SELECT 1 FROM json_each(metadata) WHERE key = ?${args.length - 1} AND ${METADATA_VALUE_JSON} = json(?${args.length}))`,
       );
     }
+    const inScope = where.length === 0 ? 'TRUE' : where.join(' AND ');
     args.push(topK);
-    const table = quoted(generationTable(opts.source.name, active.generation));
+    const limit = `?${args.length}`;
+    const tableName = generationTable(opts.source.name, active.generation);
+    const table = quoted(tableName);
+
+    const legs: string[] = [];
+    const ctes: string[] = [];
+    if (vectorLeg) {
+      ctes.push(`vec AS (
+        SELECT chunk_id, row_number() OVER (ORDER BY distance, chunk_id) AS pos FROM (
+          SELECT chunk_id, vector_distance_cos(embedding, vector32(?1)) AS distance FROM ${table} WHERE ${inScope}
+        ) WHERE distance < 1 ORDER BY distance, chunk_id LIMIT ${limit})`);
+      legs.push('SELECT chunk_id, pos AS vpos, NULL AS kpos FROM vec');
+    }
+    if (terms.length > 0) {
+      // A term's match: the trigram index for three characters or more, LIKE
+      // over the rows in scope below that.
+      const { map, fts } = keywordNames(tableName);
+      const matches = terms.map((term) => {
+        if ([...term].length >= TRIGRAM_MIN_CHARS) {
+          args.push(ftsPhrase(term));
+          return `(chunk_id IN (SELECT k.chunk_id FROM ${quoted(fts)} JOIN ${quoted(map)} k ON k.id = ${quoted(fts)}.rowid
+                     WHERE ${quoted(fts)} MATCH ?${args.length}))`;
+        }
+        args.push(containsPattern(term));
+        return `(content LIKE ?${args.length} ESCAPE '\\')`;
+      });
+      const idf = matches
+        .map((_, i) => `h${i} * ln(1.0 + (stats.n - stats.d${i} + 0.5) / (stats.d${i} + 0.5))`)
+        .join(' + ');
+      // Passages of equal keyword score are ranked by cosine distance, so the
+      // keyword leg never reorders by chunk id what the vector leg ranks.
+      const distance = vectorLeg ? 'vector_distance_cos(embedding, vector32(?1))' : '0';
+      ctes.push(
+        `cand AS (SELECT chunk_id, ${distance} AS distance, ${matches.map((m, i) => `${m} AS h${i}`).join(', ')}
+           FROM ${table} WHERE ${inScope} AND (${matches.join(' OR ')}))`,
+        `stats AS (SELECT (SELECT count(*) FROM ${table} WHERE ${inScope}) AS n,
+           ${matches.map((_, i) => `coalesce(sum(h${i}), 0) AS d${i}`).join(', ')} FROM cand)`,
+        `kw AS (
+          SELECT chunk_id, row_number() OVER (ORDER BY score DESC, distance, chunk_id) AS pos FROM (
+            SELECT cand.chunk_id, cand.distance, ${idf} AS score FROM cand, stats
+          ) ORDER BY score DESC, distance, chunk_id LIMIT ${limit})`,
+      );
+      legs.push('SELECT chunk_id, NULL AS vpos, pos AS kpos FROM kw');
+    }
     const result = await this.queued(client, async () => {
       // The generation may have been switched while the query was embedded.
       const now = await this.generations(opts.source.name);
       if (now.active?.generation !== active.generation) return undefined;
+      if (terms.length > 0) await this.ensureKeywordIndex(tableName);
       return client.execute({
-        sql: `SELECT * FROM (
-                SELECT chunk_id, document_id, source_record_id, content, title, metadata, doc_hash, heading_path,
-                       vector_distance_cos(embedding, vector32(?1)) AS distance
-                  FROM ${table}
-                 ${where.length === 0 ? '' : `WHERE ${where.join(' AND ')}`}
-              ) ranked
-              WHERE distance < 1
-              ORDER BY distance, chunk_id
-              LIMIT ?${args.length}`,
+        sql: `WITH ${ctes.join(',\n')}
+              SELECT p.chunk_id, p.document_id, p.source_record_id, p.content, p.title, p.metadata, p.doc_hash,
+                     p.heading_path, u.vpos, u.kpos
+                FROM (SELECT chunk_id, min(vpos) AS vpos, min(kpos) AS kpos FROM (${legs.join(' UNION ALL ')})
+                       GROUP BY chunk_id) u
+                JOIN ${table} p ON p.chunk_id = u.chunk_id`,
         args: args as InArgs,
       });
     });
@@ -574,14 +654,14 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       }
       return this.searchAttempt(query, opts, attempt + 1);
     }
-    return result.rows.map((r) => {
+    return fuse(result.rows, topK).map(({ row: r, score }) => {
       const headingPath = parseJson(r.heading_path);
       return {
         chunkId: String(r.chunk_id),
         documentId: String(r.document_id),
         sourceId: opts.source.name,
         ...(r.source_record_id === null ? {} : { sourceRecordId: String(r.source_record_id) }),
-        score: 1 - Number(r.distance),
+        score,
         snippet: String(r.content),
         ...(r.title === null ? {} : { title: String(r.title) }),
         metadata: asRecord(parseJson(r.metadata)),
@@ -855,7 +935,67 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
           'remove that table, or keep the store in a database of its own.',
       );
     }
+    await this.assertKeywordIndexOurs(tx, table, sourceId, generation);
     await tx.execute(`DROP TABLE IF EXISTS ${quoted(table)}`);
+    for (const statement of dropKeywordIndexDdl(table)) await tx.execute(statement);
+    this.keyed.delete(table);
+  }
+
+  /** The shape of the keyword index of the passage table `table` (`keywordIndexShape`). */
+  private async keywordShapeOf(db: Pick<Client, 'execute'>, table: string): Promise<KeywordIndexShape> {
+    const { map, fts, triggers } = keywordNames(table);
+    const names = [map, fts, ...triggers];
+    const rows = await db.execute({
+      sql: `SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name IN (${names.map(() => '?').join(', ')})`,
+      args: names,
+    });
+    const columns = await db.execute({ sql: 'SELECT name FROM pragma_table_info(?)', args: [map] });
+    return keywordIndexShape(table, rows.rows, columns.rows);
+  }
+
+  /**
+   * Refuses, naming it, an object under one of the keyword-index names of
+   * `table` that this store did not make; the transaction is rolled back with
+   * the refusal, so nothing of the call is removed.
+   */
+  private async assertKeywordIndexOurs(db: Pick<Client, 'execute'>, table: string, sourceId: string, generation: number): Promise<void> {
+    if ((await this.keywordShapeOf(db, table)) !== 'other') return;
+    const { map, fts } = keywordNames(table);
+    throw notReady(
+      `an object it did not make holds a name of the keyword index of generation ${generation} of source '${sourceId}'`,
+      `The database holds a table or trigger under '${map}', '${fts}' or a '${table}-kw-*' trigger that is not this ` +
+        `store's keyword index, so it is not dropped, and generation ${generation} of source '${sourceId}' cannot be ` +
+        'built, replaced or removed. Rename or remove it, or keep the store in a database of its own.',
+    );
+  }
+
+  /**
+   * Makes the keyword index of an active passage table made before the store
+   * kept one, from the rows the table holds, in one write transaction, and
+   * never touches an object of those names the store did not make. Runs inside
+   * the client's queue; known complete tables are skipped.
+   */
+  private async ensureKeywordIndex(table: string): Promise<void> {
+    if (this.keyed.has(table)) return;
+    const client = this.requireClient();
+    if ((await this.keywordShapeOf(client, table)) !== 'complete') {
+      await this.transaction(async (tx) => {
+        // Made by another process between the read and this transaction: kept.
+        const shape = await this.keywordShapeOf(tx, table);
+        if (shape === 'complete') return { commit: false, value: undefined };
+        if (shape === 'other') {
+          throw notReady(
+            `an object it did not make holds a name of the keyword index of '${table}'`,
+            `The database holds a table or trigger under a name of the keyword index of '${table}' that is not this ` +
+              "store's, so the keyword index cannot be made and the table is not searched. Rename or remove it, or " +
+              'keep the store in a database of its own.',
+          );
+        }
+        for (const statement of keywordIndexDdl(table)) await tx.execute(statement);
+        return { commit: true, value: undefined };
+      });
+    }
+    this.keyed.add(table);
   }
 
   /** Opens the next generation of a source: its row, and its table made afresh. */
@@ -886,7 +1026,9 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
           'the store in a database of its own.',
       );
     }
+    await this.assertKeywordIndexOurs(tx, table, sourceId, generation);
     for (const statement of passageTableDdl(table, embedder.dimensions)) await tx.execute(statement);
+    this.keyed.add(table);
     await tx.execute({
       sql: `INSERT INTO ${quoted(GENERATION_TABLE)} (source_id, generation, fingerprint, dim, model, state) VALUES (?, ?, ?, ?, ?, ?)`,
       args: [sourceId, generation, fingerprint ?? null, embedder.dimensions, embedder.model ?? null, state],
@@ -950,6 +1092,30 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       tx.close();
     }
   }
+}
+
+/**
+ * Reciprocal rank fusion of the two legs' rows (`vpos`, `kpos`: a row's rank
+ * in each leg, or null): best first, at most `topK`; a tie goes to the better
+ * vector rank, then to the chunk id. The score is the fused sum divided by
+ * that of a row first in both legs.
+ */
+function fuse<R extends Record<string, unknown>>(
+  rows: readonly R[],
+  topK: number,
+): Array<{ row: R; score: number }> {
+  const best = 2 / (RRF_K + 1);
+  const leg = (pos: unknown) => (pos === null || pos === undefined ? 0 : 1 / (RRF_K + Number(pos)));
+  const vectorRank = (row: R) => (row.vpos === null || row.vpos === undefined ? Infinity : Number(row.vpos));
+  return rows
+    .map((row) => ({ row, score: (leg(row.vpos) + leg(row.kpos)) / best }))
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        vectorRank(a.row) - vectorRank(b.row) ||
+        (String(a.row.chunk_id) < String(b.row.chunk_id) ? -1 : 1),
+    )
+    .slice(0, topK);
 }
 
 /** The passages of a document: the service's `chunks`, or the whole text as one. Empty passages are not stored. */

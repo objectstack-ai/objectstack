@@ -76,6 +76,16 @@ describe('KnowledgeSourceSchema — the one schema of the knowledge_source type'
     });
   });
 
+  it('[ADR-0161 K4 ◆] `adapter` may be omitted — the deployment\'s adapter — and a named one is kept as written', () => {
+    const { adapter: _named, ...unnamed } = SOURCE;
+    const parsed = KnowledgeSourceSchema.parse(unnamed);
+    expect('adapter' in parsed).toBe(false);
+    expect(parsed.name).toBe('kb_articles');
+    expect(KnowledgeSourceSchema.parse(SOURCE).adapter).toBe('memory');
+    // Not every value: a non-string adapter is still refused.
+    expect(issuesOf({ ...SOURCE, adapter: 42 }).map(([code, path]) => [code, path])).toEqual([['invalid_type', 'adapter']]);
+  });
+
   it('is the schema the metadata-type registry maps `knowledge_source` to — no second schema', () => {
     expect(getMetadataTypeSchema('knowledge_source')).toBe(KnowledgeSourceSchema);
   });

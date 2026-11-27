@@ -107,6 +107,20 @@ export interface KnowledgeServiceOptions {
   /** Optional structured logger. */
   logger?: KnowledgeLogger;
   /**
+   * [ADR-0161 K4 ◆] The deployment's adapter: the id of the store the
+   * runtime mounted beside this service for the `knowledge` capability
+   * (`pgvector` on PostgreSQL, `turso` otherwise — `resolveCapabilityArgument`
+   * in `@objectstack/core` sets it on the plugin it constructs). A source
+   * that names no `adapter` binds to it while an adapter of that id is
+   * registered. Only the runtime that mounts the store sets it: an adapter
+   * application code registers is never the deployment's by registering
+   * (`registerAdapter` takes no such mark). A service option, not an
+   * adapter-contract member (ADR-0161 K8, "What counts as a member").
+   * Omitted (a host that mounts the service itself), a source that names
+   * no adapter binds to the only adapter registered.
+   */
+  deploymentAdapter?: string;
+  /**
    * The `security` service, resolved at search time, for the field gate
    * (`knowledge-source-admission.ts`). Answers `undefined` when the host
    * registers none: the contract's fallback then applies (every field
@@ -238,6 +252,60 @@ export class KnowledgeService implements IKnowledgeService {
   }
 
   /**
+   * The id of the adapter `source` binds to, read now (ADR-0161 K4 ◆):
+   *
+   * 1. the `adapter` the source names — mounted or not: a named adapter that
+   *    is not mounted is {@link getAdapter}'s refusal;
+   * 2. else the deployment's adapter ({@link KnowledgeServiceOptions.deploymentAdapter}),
+   *    while an adapter of that id is registered;
+   * 3. else the only adapter registered.
+   *
+   * With none registered, throws `503 SERVICE_UNAVAILABLE`; with several and
+   * none the deployment's, `400 VALIDATION_ERROR` naming them, as the source's
+   * registration is refused ({@link refuseUnplacedSource}). Never cached:
+   * adapters register in their plugins' `start()`, after a source registered
+   * in code at `init()`, so the answer is taken where it is used.
+   */
+  adapterIdFor(source: KnowledgeSource): string {
+    if (source.adapter !== undefined) return source.adapter;
+    const deployment = this.options.deploymentAdapter;
+    if (deployment !== undefined && this.adapters.has(deployment)) return deployment;
+    const registered = this.listAdapters();
+    if (registered.length === 1) return registered[0]!;
+    if (registered.length === 0) throw noAdapterMountedError(this.label(source), deployment);
+    throw unplacedSourceError(this.label(source), registered);
+  }
+
+  /** The adapter `source` binds to ({@link adapterIdFor}), registered; throws the coded refusal otherwise. */
+  adapterFor(source: KnowledgeSource): IKnowledgeAdapter {
+    return this.getAdapter(this.adapterIdFor(source));
+  }
+
+  /** {@link adapterIdFor}, or `undefined` where it refuses: for a log line or a status answer. */
+  boundAdapterId(source: KnowledgeSource): string | undefined {
+    try {
+      return this.adapterIdFor(source);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Refuse, at registration, a source that names no adapter where the answer
+   * cannot become one: several adapters are registered and the runtime marked
+   * none the deployment's (ADR-0161 K4 ◆). With a mark, or with one adapter
+   * or none registered yet, the source is taken and placed where it is used:
+   * a store registers in its own `start()`, after a source registered at
+   * `init()`, so "none yet" is no verdict (AGENTS.md, startup registry reads).
+   */
+  private refuseUnplacedSource(source: KnowledgeSource, door: string): void {
+    if (source.adapter !== undefined || this.options.deploymentAdapter !== undefined) return;
+    const registered = this.listAdapters();
+    if (registered.length < 2) return;
+    throw unplacedSourceError(source.name, registered, ` ${door} did not register it.`);
+  }
+
+  /**
    * Say once, at `error`, which registered sources name an adapter nothing
    * registered — the boot's reading, taken by the plugin at
    * `kernel:bootstrapped`, once every plugin has started and registered its
@@ -246,15 +314,28 @@ export class KnowledgeService implements IKnowledgeService {
    */
   reportUnmountedAdapters(): string[] {
     const mounted = this.listAdapters();
-    const unmounted = this.describeSources().filter(({ source }) => !this.adapters.has(source.adapter));
-    for (const { id, source } of unmounted) {
+    const named: string[] = [];
+    for (const { id, source } of this.describeSources()) {
+      if (source.adapter === undefined) {
+        // [ADR-0161 K4 ◆] A source that names no adapter, which this boot
+        // cannot place: no adapter at all, or several and none the deployment's.
+        try {
+          this.adapterIdFor(source);
+        } catch (err) {
+          this.options.logger?.error?.(`${errorText(err)} Indexing and searching it answer that refusal.`);
+          named.push(id);
+        }
+        continue;
+      }
+      if (this.adapters.has(source.adapter)) continue;
       this.options.logger?.error?.(
         `[knowledge] source '${id}' names adapter '${source.adapter}', which is not mounted ` +
           `(mounted: ${mounted.length === 0 ? 'none' : mounted.join(', ')}). Indexing and searching it answer ` +
           `${UNMOUNTED_ADAPTER_CODE} until its adapter is one of those, or the '${source.adapter}' store is mounted.`,
       );
+      named.push(id);
     }
-    return unmounted.map(({ id }) => id);
+    return named;
   }
 
   listAdapters(): string[] {
@@ -288,6 +369,7 @@ export class KnowledgeService implements IKnowledgeService {
         `[knowledge] registerSource refused the source${describeName(source)}: ${parsed.message}`,
       );
     }
+    this.refuseUnplacedSource(parsed.source, 'registerSource');
     const packageId = packageIdOfItem(parsed.source);
     if (packageId !== undefined) {
       throw codedError(
@@ -300,7 +382,7 @@ export class KnowledgeService implements IKnowledgeService {
     }
     const { entry, replaced } = this.registry.register(parsed.source, 'code');
     if (replaced) this.options.logger?.warn?.(`[knowledge] source overwritten: ${entry.face}`);
-    this.options.logger?.info?.(`[knowledge] source registered: ${entry.face} (adapter=${entry.authored.adapter})`);
+    this.options.logger?.info?.(`[knowledge] source registered: ${entry.face} (adapter=${this.adapterLabel(entry.authored)})`);
     this.sourcesChanged();
   }
 
@@ -313,9 +395,10 @@ export class KnowledgeService implements IKnowledgeService {
    * caller holding `IKnowledgeService`.
    */
   registerMetadataSource(source: KnowledgeSource, holder: KnowledgeSourceHolder = {}): KnowledgeSourceEntry {
+    this.refuseUnplacedSource(source, 'The knowledge_source loader');
     const { entry, replaced } = this.registry.register(source, 'metadata', holder);
     this.options.logger?.info?.(
-      `[knowledge] source ${replaced ? 'reloaded' : 'registered'}: ${entry.face} (adapter=${entry.authored.adapter}` +
+      `[knowledge] source ${replaced ? 'reloaded' : 'registered'}: ${entry.face} (adapter=${this.adapterLabel(entry.authored)}` +
         `${entry.packageId === undefined ? '' : `, package=${entry.packageId}`})`,
     );
     this.sourcesChanged();
@@ -382,20 +465,27 @@ export class KnowledgeService implements IKnowledgeService {
   async dropMetadataSource(key: string): Promise<KnowledgeSourceEntry | undefined> {
     const entry = this.registry.byIndexKey(key);
     if (!entry || entry.door !== 'metadata') return undefined;
+    // Placed before the entry is forgotten: an unnamed adapter is placed
+    // among the adapters registered now, as every other use places it.
+    const adapterId = this.boundAdapterId(entry.handed);
     this.forget(entry);
     const kept = (why: string): void => {
       this.options.logger?.warn?.(
         `[knowledge] source '${entry.face}' was removed, and its index was not dropped: ${why} ` +
-          `What adapter '${entry.authored.adapter}' holds under the key '${entry.key}' stays until it is removed there.`,
+          `What adapter '${adapterId ?? this.adapterLabel(entry.authored)}' holds under the key '${entry.key}' stays until it is removed there.`,
       );
     };
-    const adapter = this.adapters.get(entry.authored.adapter);
+    const adapter = adapterId === undefined ? undefined : this.adapters.get(adapterId);
     if (!adapter) {
-      kept(`adapter '${entry.authored.adapter}' is not mounted.`);
+      kept(
+        adapterId === undefined
+          ? 'it names no adapter, and none could be placed for it.'
+          : `adapter '${adapterId}' is not mounted.`,
+      );
       return entry;
     }
     if (typeof adapter.dropSource !== 'function') {
-      kept(`adapter '${entry.authored.adapter}' has no dropSource.`);
+      kept(`adapter '${adapterId}' has no dropSource.`);
       return entry;
     }
     try {
@@ -458,6 +548,13 @@ export class KnowledgeService implements IKnowledgeService {
 
   private handedSources(): KnowledgeSource[] {
     return this.registry.entries().map((entry) => entry.handed);
+  }
+
+  /** How a log line names a source's adapter: the one it names, else the one it is placed on now. */
+  private adapterLabel(source: KnowledgeSource): string {
+    if (source.adapter !== undefined) return source.adapter;
+    const placed = this.boundAdapterId(source);
+    return placed === undefined ? "the deployment's, not placed yet" : `${placed}, the deployment's`;
   }
 
   /** How a log line or an answer names a handed source: its face. */
@@ -647,7 +744,7 @@ export class KnowledgeService implements IKnowledgeService {
     progress?: (step: KnowledgeBuildProgress) => void,
     fence?: KnowledgeBuildFence,
   ): Promise<KnowledgeReindexResult> {
-    const adapter = this.getAdapter(source.adapter);
+    const adapter = this.adapterFor(source);
 
     const engine = this.options.dataEngine;
     if (!engine) {
@@ -1106,7 +1203,7 @@ export class KnowledgeService implements IKnowledgeService {
       return reading('not-built-here', false, 'no data engine is bound, so the source cannot be walked.');
     }
     try {
-      const adapter = this.getAdapter(source.adapter);
+      const adapter = this.adapterFor(source);
       const plan = await this.planIndex(source, adapter);
       const ctx = plan.context('reindex');
       if (typeof adapter.indexStatus === 'function') {
@@ -1413,8 +1510,12 @@ export class KnowledgeService implements IKnowledgeService {
       // A source whose adapter is not mounted is named once at boot, at
       // `error`, by the boot's reading (`reportUnmountedAdapters`); the pass
       // adds no second line for it. On reload no reading runs, so the line
-      // below is the one that names it.
-      if (trigger === 'boot' && !this.adapters.has(entry.handed.adapter)) return;
+      // below is the one that names it. A source that names no adapter and
+      // cannot be placed is named by the same reading.
+      if (trigger === 'boot') {
+        const adapterId = this.boundAdapterId(entry.handed);
+        if (adapterId === undefined || !this.adapters.has(adapterId)) return;
+      }
       const reading = await this.readIndexStateOf(entry);
       if (reading.due) {
         logger?.info?.(`[knowledge] source '${entry.face}' is built now: ${reading.detail}`);
@@ -1576,7 +1677,8 @@ export class KnowledgeService implements IKnowledgeService {
     if (!this.options.dataEngine) {
       return { text: 'no data engine is bound, so the source cannot be walked.', unlisted: false };
     }
-    const adapter = this.adapters.get(entry.authored.adapter);
+    const adapterId = this.boundAdapterId(entry.handed);
+    const adapter = adapterId === undefined ? undefined : this.adapters.get(adapterId);
     if (adapter && typeof adapter.listDocuments !== 'function') {
       return {
         text:
@@ -2094,7 +2196,8 @@ export class KnowledgeService implements IKnowledgeService {
     let target: Promise<number | undefined> | undefined;
     const chunkTarget = (): Promise<number | undefined> => (target ??= this.readChunkTarget());
     for (const entry of admitted) {
-      const adapter = this.adapters.get(entry.source.adapter);
+      const adapterId = this.boundAdapterId(entry.source);
+      const adapter = adapterId === undefined ? undefined : this.adapters.get(adapterId);
       if (!adapter) {
         out.push(entry);
         continue;
@@ -2131,12 +2234,17 @@ export class KnowledgeService implements IKnowledgeService {
   ): Promise<Map<string, { hits: KnowledgeHit[]; answered: number }>> {
     const out = new Map<string, { hits: KnowledgeHit[]; answered: number }>();
     for (const { source, organizationIds, fingerprint, scope } of sources) {
-      const adapter = this.adapters.get(source.adapter);
-      if (!adapter) {
-        // Refused like an adapter that cannot serve: the caller is told which
-        // source was not searched and why; the boot said so at `error`
-        // (`reportUnmountedAdapters`), so no line per search.
-        const coded = codedRefusalOf(unmountedAdapterError(source.adapter, this.listAdapters()));
+      // Refused like an adapter that cannot serve: the caller is told which
+      // source was not searched and why; the boot said so at `error`
+      // (`reportUnmountedAdapters`), so no line per search. A source that
+      // names no adapter is placed here, as everywhere (`adapterIdFor`).
+      let adapterId: string;
+      let adapter: IKnowledgeAdapter;
+      try {
+        adapterId = this.adapterIdFor(source);
+        adapter = this.getAdapter(adapterId);
+      } catch (err) {
+        const coded = codedRefusalOf(err);
         if (coded !== undefined) refused.push({ sourceId: source.name, ...coded });
         continue;
       }
@@ -2158,12 +2266,12 @@ export class KnowledgeService implements IKnowledgeService {
         const foreign = hits.length - served.length;
         if (foreign > 0) {
           this.options.logger?.warn?.(
-            `[knowledge] adapter '${source.adapter}' answered ${foreign} hit(s) for source '${this.label(source)}' that name ` +
+            `[knowledge] adapter '${adapterId}' answered ${foreign} hit(s) for source '${this.label(source)}' that name ` +
               'another source; dropped — a hit is served only as the source it was searched for.',
           );
         }
         out.set(source.name, {
-          hits: scope === undefined ? served : this.checkScope(served, scope, source),
+          hits: scope === undefined ? served : this.checkScope(served, scope, source, adapterId),
           answered: hits.length,
         });
       } catch (err) {
@@ -2178,7 +2286,7 @@ export class KnowledgeService implements IKnowledgeService {
           continue;
         }
         this.options.logger?.error?.(
-          `[knowledge] adapter '${source.adapter}' search failed for source '${this.label(source)}': ${(err as Error).message}`,
+          `[knowledge] adapter '${adapterId}' search failed for source '${this.label(source)}': ${(err as Error).message}`,
         );
       }
     }
@@ -2229,14 +2337,19 @@ export class KnowledgeService implements IKnowledgeService {
    * the rest are dropped, and the first time an adapter's answer loses a hit
    * here it is reported once, at `warn` ({@link searchRound}).
    */
-  private checkScope(hits: KnowledgeHit[], terms: readonly AdapterScopeTerm[], source: KnowledgeSource): KnowledgeHit[] {
+  private checkScope(
+    hits: KnowledgeHit[],
+    terms: readonly AdapterScopeTerm[],
+    source: KnowledgeSource,
+    adapterId: string,
+  ): KnowledgeHit[] {
     const inScope = scopeCheck(terms);
     const kept = hits.filter(inScope);
     const dropped = hits.length - kept.length;
-    if (dropped > 0 && !this.scopeIgnoredReported.has(source.adapter)) {
-      this.scopeIgnoredReported.add(source.adapter);
+    if (dropped > 0 && !this.scopeIgnoredReported.has(adapterId)) {
+      this.scopeIgnoredReported.add(adapterId);
       this.options.logger?.warn?.(
-        `[knowledge] adapter '${source.adapter}' answered ${dropped} hit(s) for source '${this.label(source)}' outside the ` +
+        `[knowledge] adapter '${adapterId}' answered ${dropped} hit(s) for source '${this.label(source)}' outside the ` +
           "search's scope; dropped. The adapter does not apply AdapterSearchOptions.scope before ranking, or answers " +
           "hits without the document's metadata, so its scoped searches may answer fewer than topK. " +
           'Reported once for this adapter.',
@@ -2464,7 +2577,7 @@ export class KnowledgeService implements IKnowledgeService {
   ): Promise<void> {
     const objSource = source.source;
     try {
-      const adapter = this.getAdapter(source.adapter);
+      const adapter = this.adapterFor(source);
       const engine = this.options.dataEngine;
       if (!engine) {
         if (objSource.where !== undefined) {
@@ -2596,7 +2709,7 @@ export class KnowledgeService implements IKnowledgeService {
       const docId = documentIdFor(source.name, recordId);
       await this.serializeRecordSync(docId, async () => {
         try {
-          const adapter = this.getAdapter(source.adapter);
+          const adapter = this.adapterFor(source);
           await adapter.delete([docId], (await this.planIndex(source, adapter)).context('event-sync'));
         } catch (err) {
           this.options.logger?.warn?.(
@@ -2787,6 +2900,14 @@ export class KnowledgeService implements IKnowledgeService {
           'allowed to search what their source indexes. Nothing was written; try again.',
       );
     if (!ctx) return refuse(403, 'PERMISSION_DENIED', `${named}: the save carries no identity, and a missing identity is not a grant of authority.`);
+    // [ADR-0161 K4 ◆] A source that names no adapter where this deployment
+    // cannot place one is refused at its save as at its registration, so the
+    // author hears it: several adapters registered, none the deployment's.
+    const authoredAdapter = (item as { adapter?: unknown } | null | undefined)?.adapter;
+    const registeredAdapters = this.listAdapters();
+    if (authoredAdapter === undefined && this.options.deploymentAdapter === undefined && registeredAdapters.length > 1) {
+      return refuse(400, 'VALIDATION_ERROR', `${named}: it ${unplacedSourceText(registeredAdapters)}`);
+    }
     const engine = this.options.dataEngine;
     if (!engine) return unavailable('the knowledge service has no data engine');
 
@@ -3078,6 +3199,44 @@ function unmountedAdapterError(id: string, mounted: readonly string[]): Error {
         `Name one of those as the source's adapter, or mount the '${id}' store.`,
     ),
     { code: UNMOUNTED_ADAPTER_CODE, status: 503 },
+  );
+}
+
+/**
+ * [ADR-0161 K4 ◆] The refusal of a source that names no adapter where no
+ * adapter is registered: ADR-0112 `SERVICE_UNAVAILABLE` (503), as for a named
+ * adapter that is not mounted. Names the deployment's store when the runtime
+ * marked one.
+ */
+function noAdapterMountedError(source: string, deployment: string | undefined): Error {
+  return Object.assign(
+    new Error(
+      `[knowledge] source '${source}' names no adapter, and no adapter is mounted` +
+        `${deployment === undefined ? '' : ` (the deployment's store '${deployment}' is not mounted)`}. ` +
+        "Mount a knowledge store — `requires: ['knowledge']` mounts the deployment's — or name the source's adapter.",
+    ),
+    { code: UNMOUNTED_ADAPTER_CODE, status: 503 },
+  );
+}
+
+/**
+ * [ADR-0161 K4 ◆] The refusal of a source that names no adapter where several
+ * are registered and none is the deployment's: ADR-0112 `VALIDATION_ERROR`
+ * (400), naming the choices. The source must say which store holds it.
+ */
+function unplacedSourceError(source: string, registered: readonly string[], tail = ''): Error {
+  return Object.assign(new Error(`[knowledge] source '${source}' ${unplacedSourceText(registered)}${tail}`), {
+    code: 'VALIDATION_ERROR',
+    status: 400,
+  });
+}
+
+/** Why a source that names no adapter cannot be placed among `registered`, and what to write. */
+function unplacedSourceText(registered: readonly string[]): string {
+  return (
+    `names no adapter, and ${registered.length} adapters are registered (${registered.join(', ')}) with none the ` +
+    "deployment's store, so which one holds its index cannot be told. Name one of " +
+    `${registered.map((id) => `'${id}'`).join(', ')} as the source's \`adapter\`.`
   );
 }
 

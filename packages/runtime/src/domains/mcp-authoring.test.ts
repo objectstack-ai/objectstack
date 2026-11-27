@@ -1035,6 +1035,15 @@ describe('[ADR-0161 K4] save_metadata_draft asks the knowledge service to admit 
     expect(caller).toMatchObject({ userId: 'u1', isSystem: false, systemPermissions: BOTH });
   });
 
+  it('[ADR-0161 K4] a source refused 400 VALIDATION_ERROR keeps its code and status, and nothing is written', async () => {
+    const message = "The knowledge source 'faq' was not saved: it names no adapter, and 2 adapters are registered (a, b) with none the deployment's store.";
+    const admitAuthoredSource = vi.fn(async () => ({ admitted: false, status: 400, code: 'VALIDATION_ERROR', message }));
+    const { authoring, served } = await authorThroughDomain({ systemPermissions: BOTH, knowledge: { admitAuthoredSource } });
+    const refused = await save(authoring);
+    expect(refused.body.error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400, message });
+    expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
+  });
+
   it('fails closed: a verdict that throws is 503 SERVICE_UNAVAILABLE, and nothing is written', async () => {
     const knowledge = { admitAuthoredSource: async () => { throw new Error('registry unavailable'); } };
     const { authoring, served } = await authorThroughDomain({ systemPermissions: BOTH, knowledge });

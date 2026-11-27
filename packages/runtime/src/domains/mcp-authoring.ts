@@ -680,7 +680,11 @@ function openWriter(
             });
             if (!refused) return undefined;
             return {
-                code: refused.status === 403 ? PERMISSION_DENIED : SERVICE_UNAVAILABLE,
+                // A 403 is spelled in this door's vocabulary; any other verdict
+                // keeps its own ADR-0112 code, so a `400 VALIDATION_ERROR` (a
+                // source that names no adapter where none can hold it,
+                // ADR-0161 K4) arrives as one, as on the REST door.
+                code: refused.status === 403 ? PERMISSION_DENIED : (refused.code as ErrorCode),
                 message: refused.message,
                 status: refused.status,
             };

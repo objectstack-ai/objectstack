@@ -109,7 +109,8 @@ any AI consumer.**
 ### 3.1 `KnowledgeSource` (the `knowledge_source` metadata type)
 
 A knowledge source says *which records* to index, *which of their fields*
-become searchable text, and *which adapter* holds the index. It is a governed
+become searchable text, and, when it is not the deployment's store, *which
+adapter* holds the index. It is a governed
 metadata type, `knowledge_source` (ADR-0161 K4): a package ships it as a
 `*.knowledge-source.ts` (or `.yml`) file under the stack's `knowledgeSources`
 collection, and an administrator creates or changes one at run time in Studio
@@ -122,7 +123,7 @@ import type { KnowledgeSource } from '@objectstack/spec/ai';
 export const KbArticles: KnowledgeSource = {
   name: 'kb_articles',                      // snake_case; with its package, the source's identity
   label: 'Knowledge base',
-  adapter: 'pgvector',                      // the adapter id a plugin registered
+  // adapter: 'pgvector',                   // optional; omitted ⇒ the deployment's store
   source: {
     kind: 'object',                         // the one kind
     object: 'kb_article',
@@ -133,7 +134,7 @@ export const KbArticles: KnowledgeSource = {
   },
 };
 
-// objectstack.config.ts
+// objectstack.config.ts — the source mounts the knowledge service: no `requires` entry
 defineStack({ knowledgeSources: [KbArticles], /* … */ });
 ```
 
@@ -161,9 +162,27 @@ write instead, and `os migrate meta --from 18` converts the mechanical ones:
 | `refresh.cron` | removed: nothing scheduled it |
 | `source.kind: 'file'` / `'http'` with `prefix`, `mimeTypes`, `urls`, `userAgent` | removed: a source indexes an object's records |
 
-Every source binds to a named **adapter id** (e.g. `'pgvector'`, `'turso'`,
+A source binds to an **adapter id** (e.g. `'pgvector'`, `'turso'`,
 `'memory'`), resolved at run time to the plugin that registered itself under
-that name.
+that name (ADR-0161 K4):
+
+- **Named** — that adapter. One that is not mounted is refused at index and
+  search, `SERVICE_UNAVAILABLE` (503), naming the adapters that are.
+- **Omitted** — the deployment's adapter: the store the runtime mounted beside
+  the service (`pgvector` on PostgreSQL, `turso` otherwise; the runtime passes
+  `KnowledgeServicePlugin` its `deploymentAdapter` option when it mounts both),
+  else the only adapter registered. An adapter application code registers is
+  never the deployment's by registering. With several registered and none the
+  deployment's, the source is refused at registration and at its save,
+  `VALIDATION_ERROR` (400), naming them. The adapter is placed where it is
+  used, so a source registered before its store started finds it.
+
+**What mounts the service.** A stack that ships a `knowledge_source` — any
+item in its `knowledgeSources`, at the top level or in a package — is served
+the knowledge service and the deployment's store, exactly as
+`requires: ['knowledge']` serves them (the `mountedBy` of the `knowledge` row
+in `PLATFORM_CAPABILITY_PROVIDERS`). A host that mounts
+`KnowledgeServicePlugin` itself keeps its own, and the runtime adds no store.
 
 #### How a source is loaded
 
@@ -181,7 +200,9 @@ starts and follows the type from then on, with no restart:
 
 A deployment that holds a `knowledge_source` item but mounts no knowledge
 service says so once at boot, naming the items: nothing loads, indexes or
-searches them until `KnowledgeServicePlugin` and an adapter are mounted.
+searches them until `KnowledgeServicePlugin` and an adapter are mounted. Such
+an item is one the stack does not ship — saved at run time or installed in a
+package after the boot — since a shipped one mounts the service.
 
 #### Who may author one
 
@@ -607,8 +628,8 @@ Each plugin:
 3. Owns its own dependencies (SDK, fetch client, embedder).
 4. Owns its own lifecycle / health checks.
 
-Multiple adapters can co-exist; sources pick which one to use via the
-`adapter` field.
+Multiple adapters can co-exist; a source picks one with its `adapter` field,
+or leaves it out for the deployment's store (§3.1).
 
 ### 4.1 `knowledge-pgvector` — the open vector store on PostgreSQL
 
@@ -642,10 +663,14 @@ an exact scan.
   needed after. A database it cannot reach is reported as unreachable, with
   no SQL. A caller reads one sentence; the driver's text and the SQL go only
   to the operator — the health check, the boot warning and the log.
-- **Search.** An exact scan by cosine distance, so any width works —
-  including a 3072-wide model. The organization filter, the
+- **Search.** Two legs in one statement, merged by reciprocal rank fusion
+  (`k` = 60, each leg at most `topK`) before the service's re-check: an exact
+  scan by cosine distance, so any width works — including a 3072-wide model —
+  and a keyword leg on `to_tsvector('simple', content)` (a GIN expression
+  index), a word of three characters or more as a phrase, a shorter term or
+  one in Han, kana or Hangul script by `ILIKE`. The organization filter, the
   [record scope](#record-scope) and the metadata `filter` (equality per key)
-  run in the same `WHERE`, before ranking.
+  are one `WHERE`, run in both legs before either ranks.
   `queryPrefix` is put before every query before it is embedded, for a model
   that embeds questions and passages differently.
 - **Re-embedding.** A passage whose text is unchanged (its `chunk_hash`) is
@@ -703,9 +728,13 @@ the `embedder` it is given), and answers a search by an exact scan.
   `knowledge_<source>_g<n>`, its vector column sized for that generation
   (`<source>` is the source's index key). A key that is not snake_case is
   refused before any SQL.
-- **Search.** An exact scan by cosine distance; the organization filter, the
-  [record scope](#record-scope) and the metadata `filter` (JSON equality per
-  key) run in the same `WHERE`, before ranking. The store creates no DiskANN index: `vector_top_k` ranks
+- **Search.** Two legs merged by reciprocal rank fusion (`k` = 60, each leg
+  at most `topK`) before the service's re-check: an exact scan by cosine
+  distance, and a keyword leg in a contentless FTS5 trigram index beside each
+  passage table (kept in step by triggers), a term of three characters or
+  more as a quoted phrase, a shorter one by `LIKE`. The organization filter,
+  the [record scope](#record-scope) and the metadata `filter` (JSON equality
+  per key) are one `WHERE`, run in both legs before either ranks. The store creates no DiskANN index: `vector_top_k` ranks
   before it filters, and with one, 1,000 vectors of 1,536 dimensions grew a
   file from 8.2 MB to 329 MB and took 21.8 s to index. Without it the same
   1,000 passages take 8.3 MB and a search about 5 ms; 10,000 take 82 MB and
@@ -1252,8 +1281,8 @@ followed (§4.1, §4.2) are the adapters to run in production.
 | Audit + metrics | ⏳ Phase 2 |  |
 | `knowledge-llamaindex` | ⏳ Phase 2 |  |
 | `knowledge-dify` | ⏳ Phase 3 / community |  |
-| `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan, organization, record scope and metadata filter in SQL, index fingerprint (§4.1) |
-| `knowledge-turso` | ✅ | A libSQL file of its own; exact scan, organization, record scope and metadata filter in SQL, a generation built beside the active one (§4.2) |
+| `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan and a `tsvector` keyword leg merged by RRF, organization, record scope and metadata filter in SQL, index fingerprint (§4.1) |
+| `knowledge-turso` | ✅ | A libSQL file of its own; exact scan and an FTS5 trigram keyword leg merged by RRF, organization, record scope and metadata filter in SQL, a generation built beside the active one (§4.2) |
 
 ### 7.1 Non-goals for Phase 1
 

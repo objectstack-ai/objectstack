@@ -10,12 +10,13 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { composeStacks, defineStack } from '@objectstack/spec';
-import { PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
+import { PLATFORM_ALWAYS_ON_CAPABILITIES, PLATFORM_CAPABILITY_PROVIDERS } from '@objectstack/spec/kernel';
 import {
   resolveCapabilityArgument,
   resolveCapabilityExtras,
   resolveKnowledgeStore,
   resolveServedCapabilities,
+  stackItemCapabilities,
 } from './capability-composition.js';
 import { CAPABILITY_PROVIDERS, KNOWLEDGE_STORE_PROVIDERS } from './capability-providers.js';
 import { stackDeclaredCapabilities } from './stack-collections.js';
@@ -316,5 +317,54 @@ describe('resolveCapabilityExtras — what a boot mounts after a main provider',
   it('the knowledge row names the service, never a store: the store is the database\'s choice', () => {
     expect(CAPABILITY_PROVIDERS.knowledge).toMatchObject({ pkg: '@objectstack/service-knowledge', export: 'KnowledgeServicePlugin' });
     expect(CAPABILITY_PROVIDERS.knowledge.extras).toBeUndefined();
+  });
+});
+
+/**
+ * [ADR-0161 K8 item 12] A `knowledge_source` item mounts the knowledge
+ * service and the deployment's store, through the token's own provider row;
+ * and [K4 ◆] the service is told which store is the deployment's.
+ */
+describe("stackItemCapabilities — a stack's items mount their reader", () => {
+  const SOURCE = { name: 'ccp_notes', label: 'Notes', source: { kind: 'object', object: 'ccp_note', content: ['name'] } };
+
+  it('a stack holding a knowledge source mounts `knowledge`, at the top level or in a package body; none, nothing', () => {
+    expect(stackItemCapabilities({ knowledgeSources: [SOURCE] })).toEqual(['knowledge']);
+    const multi = twoPackages({ knowledgeSources: [SOURCE] });
+    // Anti-vacuity: the producer really left the source out of the top level.
+    expect(multi.knowledgeSources).toBeUndefined();
+    expect(stackItemCapabilities(multi)).toEqual(['knowledge']);
+    expect(stackItemCapabilities(twoPackages({}))).toEqual([]);
+    expect(stackItemCapabilities({ knowledgeSources: [] })).toEqual([]);
+    expect(stackItemCapabilities({})).toEqual([]);
+  });
+
+  it('is read off the spec provider row — one row today, the knowledge one', () => {
+    const rows = Object.entries(PLATFORM_CAPABILITY_PROVIDERS).filter(([, row]) => row.mountedBy !== undefined);
+    expect(rows).toEqual([['knowledge', expect.objectContaining({ mountedBy: { collection: 'knowledgeSources' } })]]);
+  });
+
+  it('an item token is declared (required), mounted after the declared ones, and reported as the items\' own', () => {
+    const served = resolveServedCapabilities(['automation'], { itemTokens: ['knowledge'] });
+    expect(served.tokens.slice(0, 2)).toEqual(['automation', 'knowledge']);
+    expect(served.declared.has('knowledge')).toBe(true);
+    expect([...served.byItems]).toEqual(['knowledge']);
+    // Listed under `requires` as well: the requirement is the author's, not the items'.
+    const both = resolveServedCapabilities(['knowledge'], { itemTokens: ['knowledge'] });
+    expect(both.tokens.filter((token) => token === 'knowledge')).toEqual(['knowledge']);
+    expect([...both.byItems]).toEqual([]);
+  });
+
+  it("the knowledge service is constructed with the deployment's store: the adapter id of the store the extras mount", () => {
+    const pg = { stack: {}, packageRoot: '/app', database: { driver: 'postgres', url: 'postgres://db/app' } };
+    const file = { stack: {}, packageRoot: '/app', database: { driver: 'sqlite', url: 'file:/app/.objectstack/data/objectstack.db' } };
+    for (const input of [pg, file]) {
+      const { argument } = resolveCapabilityArgument('knowledge', input);
+      const [store] = resolveCapabilityExtras('knowledge', input);
+      expect(argument).toEqual({ deploymentAdapter: resolveKnowledgeStore(input).store.adapterId });
+      expect(store?.pkg).toBe(resolveKnowledgeStore(input).store.pkg);
+    }
+    expect(resolveCapabilityArgument('knowledge', pg).argument).toEqual({ deploymentAdapter: 'pgvector' });
+    expect(resolveCapabilityArgument('knowledge', file).argument).toEqual({ deploymentAdapter: 'turso' });
   });
 });
