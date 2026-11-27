@@ -479,6 +479,9 @@ It accepted the seat's recommendation as presented:
 - **One container.** In the console shell, Home and every app page, the
   right-side drawer is the one place the assistant's conversation is drawn:
   the rail on a desktop, a bottom sheet on a phone. There is no `/ai` page.
+  *(Amendment A4: an app may place one AI inquiry page, `ai:chat`, in its
+  navigation; that page draws its own `ask` conversation, and the top-bar
+  robot is hidden while it is the active route.)*
   Three surfaces keep their own chrome, as before: Studio's copilot in its
   right slot (objectui#12725), the public `/s/:token` share page (read-only,
   ADR-0013) and the runtime bubble (§4). Studio's maximize, which navigated to
@@ -535,6 +538,72 @@ reach the drawer. A surface whose state matters for deep-linking (ui ADR-0054
 C3) reaches the drawer through those addresses, not through a query
 parameter on every page. Implemented under objectstack#34608 (the drawer)
 and objectstack#34610 (building with the app draft in the main area).
+
+## Amendment A4 (2026-11-27, Accepted) — an app's AI inquiry page
+
+**What it changes.** One exception to A3's "One container" ("In the console
+shell, Home and every app page, the right-side drawer is the one place the
+assistant's conversation is drawn … There is no `/ai` page."): an app may draw
+one `ask` conversation in a page of its own, and on that page A3's "Entry",
+the top-bar robot, is not shown. Everything else in A3 stands, and so does
+A2's key decision: the drawer's `ask` scope is still the product alone.
+
+**Why.** A3 left an app no place of its own for questions: the top-bar robot
+was its only AI entry. An app whose users come mainly to ask (a
+policy-inquiry app was the trigger) needs the question to be the first thing
+on its screen, as its home. Drawn beside the drawer, such a page would put
+two `ask` conversations on one screen, which is what A3 removed.
+
+**Maintainer ruling** (2026-11-27, recorded in objectstack#37788's body, on
+its "Filing gate" line), verbatim, not translated:
+
+> 先内置页面，再做页面积木
+
+(02:41Z, the route ruling)
+
+> 我们是一个开发平台，你搭的入口页面必须是通用的
+
+(02:51Z)
+
+> 做首页，本页隐藏机器人
+
+(03:16Z, the ruling on this ADR's conflict)
+
+**Decision.**
+
+- **One page per app.** An app may place one AI inquiry page in its
+  navigation: a `type: 'component'` entry whose `componentRef` is `ai:chat`.
+  Its copy (welcome title and subtitle, composer placeholder, suggested
+  questions) comes from that entry's declared `params` (objectstack#37787),
+  never from the URL. The page is platform-generic: it carries no business
+  wording of its own, and a key the entry does not declare falls back to
+  neutral platform copy.
+- **Home.** Placed first in the app's navigation, the page is the app's home.
+- **No robot on the page.** While the page is the active route, the top-bar
+  robot, the drawer's entry, is hidden, so one screen never draws two `ask`
+  conversations. On every other page the robot and the drawer are as A3
+  says.
+- **Agent.** The page runs `ask`; a maker gets `ask` there too. A hand-off
+  to build from the page opens the drawer, as a hand-off does today.
+- **Thread.** The page's conversation key is `app:PKG:ask`, bound to that
+  app's package. Once the conversation exists the page's address carries
+  `?c=ID`, and a reload restores it. A `?c=` naming a conversation that is
+  not the caller's, or that belongs to another app, opens the home state:
+  no error, and nothing of that conversation is shown. This is the page's
+  own address; A3's rule that what the drawer shows is never in the URL is
+  unchanged.
+- **A3 everywhere else.** The drawer is still the one container on Home, in
+  every app without such an entry, and on an app's other pages. The `/ai…`
+  addresses still open the drawer, and the floating button stays retired.
+
+**Consequences.** The `ai:chat` page is the one place in the console shell,
+outside the drawer, where an assistant conversation is drawn, and it never
+shares a screen with the drawer's entry. This amendment records the page and
+its relation to the drawer only: how an author adds the entry, and who sees
+it when the assistant is unavailable to them, are not decided here. A reader
+of A3 finds the exception at its "One container" bullet. The text lands
+before the page (seat repo:objectstack#1's routing call,
+2026-11-27T04:57Z). Implemented under objectstack#37788.
 
 ## Open design questions
 
