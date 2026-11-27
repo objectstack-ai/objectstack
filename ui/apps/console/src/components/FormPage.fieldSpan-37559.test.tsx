@@ -36,6 +36,8 @@ const OBJECT_SCHEMA = {
     owner: { type: 'text', label: 'Owner' },
     attachments: { type: 'file', label: 'Attachments', multiple: true },
     receipt: { type: 'file', label: 'Receipt' },
+    lines: { type: 'repeater', label: 'Lines' },
+    payload: { type: 'json', label: 'Payload' },
   },
 };
 
@@ -141,5 +143,23 @@ describe('objectstack#37559 — /forms/:name honours a form field span', () => {
   it('CONTROL — a form-level `multiple: true` over a single-file object field does not widen it', async () => {
     renderForm(['title', { field: 'receipt', multiple: true }]);
     expect(cellsOf(await rowOf('Receipt'))).toBe(1);
+  });
+
+  // objectstack#37677: the spec lists repeater as wide; the widget id it maps to
+  // (`field:object`) is shared with json, so the width is read off the OBJECT
+  // field's type. The record form's twin is plugin-form `repeaterAutoSpan-37677`.
+  it("a repeater field takes the whole row on `span: 'auto'`", async () => {
+    renderForm(['title', 'lines']);
+    expect(cellsOf(await rowOf('Lines'))).toBe(2);
+  });
+
+  it('CONTROL — a json field, on the same JSON editor, stays one cell', async () => {
+    renderForm(['title', 'payload']);
+    expect(cellsOf(await rowOf('Payload'))).toBe(1);
+  });
+
+  it('CONTROL — an authored colSpan wins over the repeater default', async () => {
+    renderForm([{ field: 'lines', colSpan: 1 }, 'title']);
+    expect(cellsOf(await rowOf('Lines'))).toBe(1);
   });
 });

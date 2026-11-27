@@ -82,11 +82,14 @@ describe('form WIDE_FIELD_TYPES — keyed on the spec vocabulary (#4250)', () =>
     }
   });
 
-  it('its spec-facing surface is EXACTLY the long-form family', () => {
+  it('its spec-facing surface is EXACTLY the long-form family, plus repeater', () => {
     // `grid` is not in this comparison by construction — it is an objectui-local
     // key (`GridFieldMetadata` in `@object-ui/types`), not a spec FieldType.
+    // `repeater` is wide on its declaration (objectstack#37677): its bare name is
+    // here for the designer's raw types, while its widget id (`field:object`,
+    // shared with json) is not, so the long-form widget-id leg above omits it.
     const wideSpecTypes = SPEC_TYPES.filter((t) => isWideFieldType(t));
-    expect([...wideSpecTypes].sort()).toEqual([...WIDE_SPEC_TYPES].sort());
+    expect([...wideSpecTypes].sort()).toEqual([...WIDE_SPEC_TYPES, 'repeater'].sort());
   });
 
   it('gives a richtext field the whole row, in both spellings', () => {

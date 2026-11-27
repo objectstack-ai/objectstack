@@ -67,6 +67,7 @@ const WIDE_FIELD_TYPES = new Set([
   'html',
   'grid',
   'richtext',
+  'repeater',
 ]);
 
 /**
@@ -113,16 +114,36 @@ export function isWideFieldType(type: string): boolean {
 const MULTI_FILE_FIELD_TYPES = new Set(['file', 'image', 'field:file', 'field:image']);
 
 /**
+ * The object field type that takes the whole row on its declaration alone,
+ * whatever widget id it maps to: `repeater`, an embedded array of rows
+ * (objectstack-ai/objectstack#37677).
+ *
+ * Read off the OBJECT field, not the resolved `FormField.type`, because the
+ * widget id it maps to is shared: `mapFieldTypeToFormType` maps `repeater` to
+ * `field:object`, the JSON editor that `json`, `object`, `composite` and
+ * `record` take too (objectui#11448). Putting `field:object` on
+ * {@link WIDE_FIELD_TYPES} would widen all five. `repeater` used to reach the
+ * full row through the wide `field:grid` widget it mapped to, and lost it when
+ * the alias moved, while the spec `span` docblock still lists it as wide.
+ *
+ * The bare name is also on {@link WIDE_FIELD_TYPES}, for the caller that
+ * passes a raw object-field type (app-shell's `ObjectFormDesigner`).
+ */
+const WIDE_DECLARED_FIELD_TYPES = new Set(['repeater']);
+
+/**
  * Does this form field take the whole row by default (the `span: 'auto'` rule)?
  *
- * A wide type (see {@link isWideFieldType}), or a `file` / `image` field whose
- * OBJECT field declares `multiple: true` — the rule plugin-detail's
+ * A wide type (see {@link isWideFieldType}), a field whose OBJECT field is a
+ * `repeater` (see {@link WIDE_DECLARED_FIELD_TYPES}), or a `file` / `image`
+ * field whose OBJECT field declares `multiple: true` — the rule plugin-detail's
  * `isWideDetailField` applies to the detail view, so a multi-file field reads
  * wide on both surfaces.
  *
- * `multiple` is read off the object-field definition the object-bound form
- * paths stash on the FormField (`FormField.field`), and nothing else, as the
- * detail rule reads it off the object schema: it is the field's declaration.
+ * `type` and `multiple` are read off the object-field definition the
+ * object-bound form paths stash on the FormField (`FormField.field`), and
+ * nothing else, as the detail rule reads `multiple` off the object schema:
+ * they are the field's declaration.
  * A field with no stashed object field (an inline member, a form mounted
  * without an object) keeps the type-only answer.
  *
@@ -132,6 +153,7 @@ const MULTI_FILE_FIELD_TYPES = new Set(['file', 'image', 'field:file', 'field:im
 function isWideFormField(field: FormField): boolean {
   if (!field.type) return false;
   if (isWideFieldType(field.type)) return true;
+  if (WIDE_DECLARED_FIELD_TYPES.has(field.field?.type)) return true;
   return MULTI_FILE_FIELD_TYPES.has(field.type) && field.field?.multiple === true;
 }
 
