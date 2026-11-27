@@ -19,6 +19,7 @@
 export const META_URL_TO_SINGULAR: Readonly<Record<string, string>> = Object.freeze({
   "objects": "object",
   "apps": "app",
+  "forms": "form",
   "pages": "page",
   "dashboards": "dashboard",
   "reports": "report",
@@ -76,6 +77,7 @@ export const REGISTRY_DECLARED_META_TYPES: ReadonlyArray<string> = Object.freeze
   "picklist",
   "mapping",
   "view",
+  "form",
   "page",
   "dashboard",
   "app",
