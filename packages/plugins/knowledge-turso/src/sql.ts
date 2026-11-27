@@ -281,10 +281,12 @@ export function vectorIndexNames(table: string): {
 /**
  * The settings of the DiskANN index, measured at 1,536 dimensions on 5,000
  * clustered vectors: neighbours compressed to one bit and at most 32 of them
- * cost about 3 ms a vector to insert and about 11 KB a vector on disk, with a
- * recall@10 of 0.998 against the exact scan; float8 neighbours cost three times
- * the time and size for no measured recall gain. Libsql's defaults (float32
- * neighbours) took 329 MB and 21.8 s for 1,000 vectors.
+ * cost about 3 ms a vector to insert and about 11 KB a vector on disk (with
+ * the float8 side table), with a recall@10 of 0.998 against the exact scan;
+ * float8 neighbours cost three times the time and size for no recall gain on
+ * clustered vectors (on unstructured random vectors both fall short: 0.94 and
+ * 0.75). libSQL's defaults (float32 neighbours) took 329 MB and 21.8 s for
+ * 1,000 vectors.
  */
 export const VECTOR_INDEX_SETTINGS = `'metric=cosine', 'compress_neighbors=float1bit', 'max_neighbors=32'`;
 
