@@ -428,7 +428,7 @@ const ACTION_EN = [
   'Text', 'Long text', 'Number', 'Checkbox', 'Select', 'Date', 'Date/time', 'Lookup',
   'Run a script — sandboxed JS / expression body',
   'Update fields on this record — no code',
-  'Record header', 'Record · more menu', 'Record · section', 'Record · related list', 'List toolbar', 'List · row',
+  'Record · page and rows', 'Record · page', 'Record · section', 'Record · related list', 'List toolbar', 'List · row',
 ] as const;
 
 describe('ActionDefaultInspector reads its words in the designer locale (objectui#10586)', () => {
