@@ -50,8 +50,8 @@
  *
  *   • `{ value: 'alpha' }` with NO `label` key still commits `label: ''`. That
  *     is the objectui#7014 Q2 ruling and it is pinned here as a control.
- *   • `{ value: 'a', label: 'A' }` — representable here, rejected by the spec
- *     (`too_small@[value]`, the two-character minimum). It stays an ordinary
+ *   • `{ value: 'A', label: 'A' }` — representable here, rejected by the spec
+ *     (`invalid_format@[value]`, the lowercase rule). It stays an ordinary
  *     editable row; the draft validator names it. This reader reports only what
  *     it cannot SHOW.
  *
@@ -298,15 +298,15 @@ describe('ObjectFieldInspector · the control — a well-formed option set is un
   });
 
   it('a value the SPEC rejects but this editor can show stays an ordinary editable row', () => {
-    const { savedOptions } = renderField([{ value: 'a', label: 'A' }]);
+    const { savedOptions } = renderField([{ value: 'A', label: 'A' }]);
     expect(malformedRows()).toHaveLength(0);
     expect(editableRows()).toHaveLength(1);
     fireEvent.change(screen.getByPlaceholderText('Label'), { target: { value: 'A II' } });
-    expect(savedOptions()).toEqual([{ value: 'a', label: 'A II' }]);
+    expect(savedOptions()).toEqual([{ value: 'A', label: 'A II' }]);
     // The reader does not report it; the contract does, and that division is
     // the reason this row is left alone.
-    expect(rejectionsOf(SelectOptionSchema as SpecSchema, { value: 'a', label: 'A II' })).toEqual([
-      'too_small@[value]',
+    expect(rejectionsOf(SelectOptionSchema as SpecSchema, { value: 'A', label: 'A II' })).toEqual([
+      'invalid_format@[value]',
     ]);
   });
 });
