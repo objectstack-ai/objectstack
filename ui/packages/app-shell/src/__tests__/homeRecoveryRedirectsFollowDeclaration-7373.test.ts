@@ -139,7 +139,7 @@ const RECOVERY_SITES: ReadonlyArray<{
       'packages/app-shell/src/console/ai/aiChatChrome.ts',
       'packages/app-shell/src/console/ai/agentCopy.ts',
     ],
-    site:'the AI page: no-agent screen + collapse-to-dock landing',
+    site: 'the AI page: no-agent screen + collapse-to-dock landing',
     expression: /const homePath = useHomePath\(\)/,
   },
   {
