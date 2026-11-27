@@ -30,6 +30,7 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import {
   createStdioDataBridge,
   enforceApiExposure,
+  engineObjectPackageDisabled,
   GATED_ACTIONS,
   type McpExposureError,
   type StdioProtocolObjectReads,
@@ -314,17 +315,26 @@ describe('[#25138] a disabled package\'s object is refused on every verb, 404 OB
     });
   }
 
-  it('the record resource\'s gate refuses it too, and the system caller is still let through', async () => {
+  it('the record resource\'s gate refuses it too, the system caller included (#36689, ruling A)', async () => {
+    // [#36689] Flipped on purpose: the system caller was let through here. The
+    // package question is the engine registry's (`engineObjectPackageDisabled`),
+    // asked of every caller before the exposure bypass, as `callData` asks it.
     const metadataService = makeMetadata([PACKAGE_OBJECTS[0]]) as unknown as IMetadataService;
-    const reads = { metadataService, protocol: disabledProtocol };
+    let disabled = true;
+    const engine = { registry: { isObjectPackageDisabled: (name: string) => disabled && name === PKG_OPEN } };
+    const reads = { metadataService, protocol: disabledProtocol, isObjectPackageDisabled: engineObjectPackageDisabled(engine) };
+    const SYSTEM = { isSystem: true } as unknown as ExecutionContext;
 
-    const err = (await enforceApiExposure(reads, PKG_OPEN, GATED_ACTIONS.get, PRINCIPAL)
-      .then(() => null, (e: unknown) => e)) as McpExposureError | null;
-    expect(err && { code: err.code, status: err.status }).toEqual({ code: 'OBJECT_PACKAGE_DISABLED', status: 404 });
+    for (const caller of [PRINCIPAL, SYSTEM]) {
+      const err = (await enforceApiExposure(reads, PKG_OPEN, GATED_ACTIONS.get, caller)
+        .then(() => null, (e: unknown) => e)) as McpExposureError | null;
+      expect(err && { code: err.code, status: err.status }).toEqual({ code: 'OBJECT_PACKAGE_DISABLED', status: 404 });
+    }
 
-    await expect(
-      enforceApiExposure(reads, PKG_OPEN, GATED_ACTIONS.get, { isSystem: true } as unknown as ExecutionContext),
-    ).resolves.toBeUndefined();
+    // CONTROL: re-enabled, the system caller is let through again (the
+    // exposure bypass is unchanged).
+    disabled = false;
+    await expect(enforceApiExposure(reads, PKG_OPEN, GATED_ACTIONS.get, SYSTEM)).resolves.toBeUndefined();
   });
 });
 
