@@ -25,10 +25,13 @@
  *    fully localized — verb template, object label, and since #7230 the field
  *    label. The authored option value was the one untranslated token left in
  *    it, so translating it makes the string uniformly localized. **Localized.**
- *  - `renderMilestoneSummary` (#7290) interpolates tokens into an author-written
- *    sentence that has no bundle key and is deliberately NOT translated (#7290
- *    called that a contract decision and left it). #7290's own change — a
- *    reference id → the record's title — is locale-INDEPENDENT data, the same
+ *  - `renderMilestoneSummary` (#7290) interpolates tokens into the author-written
+ *    sentence the row STORES. #7290 left that sentence untranslated as a
+ *    contract decision; since #37524 a reader whose language translates the
+ *    milestone (`objects.<o>._milestones.<field>.<value>.summary`) reads it
+ *    composed from the row's code instead, and the stored sentence itself is
+ *    still rendered untranslated, which is what this file pins. #7290's own
+ *    change — a reference id → the record's title — is locale-INDEPENDENT data, the same
  *    string in every locale, which is why it could be added to an untranslated
  *    sentence. An option label is locale-DEPENDENT rendering: reading the bundle
  *    there would guarantee a split sentence (`Deal moved to 已赢单`) in exactly

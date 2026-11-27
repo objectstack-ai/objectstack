@@ -389,18 +389,58 @@ describe('composeActivitySummary — a fired milestone (#37524)', () => {
     field: 'stage',
     value: 'won',
     tokens: { name: { text: 'Acme' }, stage: { text: 'Won', option: 'won' } },
+    names: ['name', 'stage'],
   };
-  function milestoneI18n() {
+  function milestoneI18n(summary = '赢单：{name}（{stage}）') {
     const i18n = makeI18n();
     i18n.loadTranslations('zh-CN', {
-      objects: { biz_deal: { _milestones: { stage: { won: { summary: '赢单：{name}（{stage}）{extra}' } } } } },
+      objects: { biz_deal: { _milestones: { stage: { won: { summary } } } } },
     });
     return i18n;
   }
+  const zhLocale = (summary?: string) =>
+    readerSummaryLocale(milestoneI18n(summary), 'zh-CN', (n) => MILESTONE_DEFS[n] ?? null)!;
 
-  it('composes the translated template, a select token by the reader\'s option label, an unstored token empty', () => {
-    const locale = readerSummaryLocale(milestoneI18n(), 'zh-CN', (n) => MILESTONE_DEFS[n] ?? null)!;
-    expect(composeActivitySummary(WON, locale)).toBe('赢单：Acme（赢单）');
+  it('composes the translated template, a select token by the reader\'s option label', () => {
+    expect(composeActivitySummary(WON, zhLocale())).toBe('赢单：Acme（赢单）');
+  });
+
+  it('[#37635] a token the fired template held whose value was empty renders empty, as in the stored sentence', () => {
+    // Written from `Deal won: {name} ({stage}) {note}` with `note` empty: the
+    // stored sentence has an empty there too, so the translation may.
+    const emptyNote: ActivitySummaryMessage = { ...WON, names: ['name', 'stage', 'note'] };
+    expect(composeActivitySummary(emptyNote, zhLocale('赢单：{name}（{stage}）{note}'))).toBe('赢单：Acme（赢单）');
+  });
+
+  it('[#37635] red first: a token the template gained after the row was written keeps the stored sentence', () => {
+    // The app added `{note}` to the template (and its translation) after this
+    // row was written from `Deal won: {name} ({stage})`: the row has no value
+    // for it, and its stored sentence is whole, so the reader reads that.
+    expect(composeActivitySummary(WON, zhLocale('赢单：{name}（{stage}），备注：{note}'))).toBeUndefined();
+  });
+
+  it('[#37635] a token only the translation names keeps the stored sentence', () => {
+    expect(composeActivitySummary(WON, zhLocale('赢单：{name}（{stage}）{extra}'))).toBeUndefined();
+  });
+
+  it('[#37635] a row written before token names were stored composes only when every token has a value', () => {
+    const { names: _names, ...legacy } = WON;
+    expect(composeActivitySummary(legacy as ActivitySummaryMessage, zhLocale())).toBe('赢单：Acme（赢单）');
+    expect(composeActivitySummary(legacy as ActivitySummaryMessage, zhLocale('赢单：{name}（{stage}）{note}'))).toBeUndefined();
+  });
+
+  it('[#37635] answers each milestone once per read: one packaged-base read per object for many rows', () => {
+    let packagedReads = 0;
+    const packaged = (n: string) => {
+      packagedReads += 1;
+      return MILESTONE_DEFS[n];
+    };
+    const locale = readerSummaryLocale(milestoneI18n(), 'zh-CN', (n) => MILESTONE_DEFS[n] ?? null, packaged)!;
+    for (let i = 0; i < 5; i++) expect(composeActivitySummary(WON, locale)).toBe('赢单：Acme（赢单）');
+    expect(packagedReads).toBe(1);
+    // A different milestone of the same object is its own answer, from the same base.
+    expect(composeActivitySummary({ ...WON, value: 'lost' }, locale)).toBeUndefined();
+    expect(packagedReads).toBe(1);
   });
 
   it('composes nothing — the stored sentence stands — for a locale with no entry, and on the writer\'s locale', () => {
@@ -428,5 +468,9 @@ describe('composeActivitySummary — a fired milestone (#37524)', () => {
     expect(readActivitySummaryMessage(WON)).toEqual(WON);
     expect(readActivitySummaryMessage({ ...WON, tokens: { name: 'Acme' } })).toBeNull();
     expect(readActivitySummaryMessage({ ...WON, value: 1 })).toBeNull();
+    expect(readActivitySummaryMessage({ ...WON, names: 'name' })).toBeNull();
+    expect(readActivitySummaryMessage({ ...WON, names: ['name', 1] })).toBeNull();
+    const { names: _names, ...legacy } = WON;
+    expect(readActivitySummaryMessage(legacy)).toEqual(legacy);
   });
 });
