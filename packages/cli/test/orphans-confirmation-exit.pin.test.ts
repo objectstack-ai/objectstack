@@ -128,6 +128,8 @@ type Runnable = { flags?: Record<string, { type?: unknown }>; run(argv: string[]
 /** Every non-migrate command module declaring a boolean `--yes`, keyed by its command id (`topic name`). */
 const POPULATION: string[] = [];
 const COMMANDS = new Map<string, Runnable>();
+/** Every command module the walk loaded, as a path under `src/commands`, member or not. */
+const WALKED: string[] = [];
 // Every command module is read, at any depth: a top-level command (`deploy.ts`
 // is `os deploy`) and a topic's subcommand one or more directories down
 // (`plugin/trust/add.ts` is `os plugin trust add`; a topic's `index.ts` is the
@@ -144,6 +146,7 @@ async function collect(dir: string, prefix: string[]): Promise<void> {
     const name = entry.name;
     if (!name.endsWith('.ts') || /\.(test|spec)\.ts$/.test(name) || name.endsWith('.d.ts')) continue;
     const mod = (await import(join(dir, name))) as { default?: unknown };
+    WALKED.push([...prefix, name].join('/'));
     if (typeof mod.default !== 'function') continue;
     const cls = mod.default as unknown as Runnable;
     if (cls.flags?.yes?.type !== 'boolean') continue;
@@ -390,8 +393,23 @@ const RUN_TIMEOUT = 60_000;
 // ---------------------------------------------------------------------------
 
 describe('the population: every non-migrate command that declares --yes', () => {
+  it('the walk loaded every command module outside migrate, at every depth', () => {
+    // Counted independently of the walk: a recursive listing of the same tree.
+    const onDisk = (readdirSync(COMMANDS_DIR, { recursive: true }) as string[])
+      .map((p) => p.split('\\').join('/'))
+      .filter((p) => !p.startsWith('migrate/') && p.endsWith('.ts') && !/\.(test|spec)\.ts$/.test(p) && !p.endsWith('.d.ts'))
+      .sort();
+    expect([...WALKED].sort(), 'every module under src/commands but migrate/').toEqual(onDisk);
+    expect(WALKED, 'a top-level command is read').toContain('deploy.ts');
+    expect(WALKED, 'a subcommand two directories down is read').toContain('plugin/trust/revoke.ts');
+  });
+
   it('is exactly the roster — a new member names how its gate is reached before it can pass', () => {
     expect(POPULATION, 'discovered from the command classes\' flags').toEqual(Object.keys(ROSTER).sort());
+  });
+
+  it('the census today: three commands outside migrate declare --yes', () => {
+    expect(POPULATION).toEqual(['db orphans', 'secret orphans', 'secret rewrap']);
   });
 });
 
