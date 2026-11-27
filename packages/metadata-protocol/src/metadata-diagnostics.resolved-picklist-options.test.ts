@@ -56,8 +56,8 @@ describe('diagnostics — options resolved from a shared picklist', () => {
     });
 
     it('a marked array on a field with no `picklist` is judged as written', () => {
-        // A one-character option value is refused; left out, nothing would be.
-        const stray = { name: 'stage', type: 'select', label: 'Stage', options: markResolvedPicklistOptions([{ label: 'X', value: 'x' }]) };
+        // An uppercase option value is refused; left out, nothing would be.
+        const stray = { name: 'stage', type: 'select', label: 'Stage', options: markResolvedPicklistOptions([{ label: 'X', value: 'X' }]) };
         const diagnostics = computeMetadataDiagnostics('object', objectWith({ stage: stray }));
         expect(diagnostics?.errors?.map((e) => e.path)).toEqual(['fields.stage.options.0.value']);
     });
