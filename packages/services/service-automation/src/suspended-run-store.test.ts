@@ -1709,3 +1709,70 @@ describe('ObjectStoreSuspendedRunStore — the wait clock survives the restart (
         expect((await store.load('run_abc'))?.activeMs).toBeUndefined();
     });
 });
+
+/**
+ * [#37705] The terminal history write runs outside every unit of work open
+ * when it is asked for. Its caller does not await it, and a record-change
+ * flow finishes inside the triggering write's unit: enrolled there, the
+ * write's first read took the unit's handle and failed once the unit had
+ * committed ("Transaction query already complete"), so the row never landed.
+ * The real-driver race is pinned on `ObjectQL.runOutsideOpenUnits` itself
+ * (`engine-scoped-transaction-late-write.test.ts`); this pins that EVERY
+ * statement of the write, the retention prune included, goes through it.
+ */
+describe('ObjectStoreSuspendedRunStore — the terminal write runs outside the open units (#37705)', () => {
+    function detachingEngine() {
+        const engine = createFakeEngine();
+        let detached = 0;
+        const calls: Array<[string, boolean]> = [];
+        const spy = <A extends unknown[], R>(name: string, fn: (...a: A) => R) => (...a: A): R => {
+            calls.push([name, detached > 0]);
+            return fn(...a);
+        };
+        const wrapped: SuspendedRunStoreEngine & { rows: Map<string, any> } = {
+            ...engine,
+            rows: engine.rows,
+            find: spy('find', engine.find.bind(engine)),
+            insert: spy('insert', engine.insert.bind(engine)),
+            update: spy('update', engine.update.bind(engine)),
+            delete: spy('delete', engine.delete!.bind(engine)),
+            runOutsideOpenUnits<T>(body: () => T): T {
+                detached++;
+                const out = body();
+                // The body is async: it stays "outside" until it settles.
+                if (out instanceof Promise) { void out.finally(() => { detached--; }).catch(() => {}); return out; }
+                detached--;
+                return out;
+            },
+        };
+        return { engine: wrapped, calls };
+    }
+
+    it('the insert of a new row, and the prune after it, all run inside runOutsideOpenUnits', async () => {
+        const { engine, calls } = detachingEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger(), { maxTerminalRunsPerFlow: 1 });
+        await store.recordTerminal(terminalRecord(1));
+        await store.recordTerminal(terminalRecord(2));
+        expect(engine.rows.has('run_r2')).toBe(true);
+        expect(engine.rows.has('run_r1'), 'the prune ran and deleted the overflow').toBe(false);
+        expect(calls.map(([name]) => name)).toEqual(expect.arrayContaining(['find', 'insert', 'delete']));
+        expect(calls.filter(([, outside]) => !outside), 'a statement ran inside the caller\'s units').toEqual([]);
+    });
+
+    it('the update of an existing row runs inside runOutsideOpenUnits', async () => {
+        const { engine, calls } = detachingEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        await store.recordTerminal(terminalRecord(1));
+        await store.recordTerminal(terminalRecord(1, { status: 'failed', error: 'again' }));
+        expect(engine.rows.get('run_r1')?.status).toBe('failed');
+        expect(calls.map(([name]) => name)).toContain('update');
+        expect(calls.filter(([, outside]) => !outside), 'a statement ran inside the caller\'s units').toEqual([]);
+    });
+
+    it('an engine without runOutsideOpenUnits (a double without units) still gets the row', async () => {
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        await store.recordTerminal(terminalRecord(1));
+        expect(engine.rows.has('run_r1')).toBe(true);
+    });
+});

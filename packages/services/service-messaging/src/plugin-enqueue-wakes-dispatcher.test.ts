@@ -112,6 +112,7 @@ async function bootMessagingKernel() {
     return {
         engine: kernel.getService<IDataEngine>('data'),
         messaging: kernel.getService<MessagingService>('messaging'),
+        objectql,
     };
 }
 
@@ -235,5 +236,43 @@ describe('#17623 MessagingServicePlugin — enqueueHttp() wakes the backed-off H
                 && (await httpStatusOf(engine, 'hdl_unannounced')) === 'success',
             DELIVERY_BUDGET_MS,
         );
+    }, 20_000);
+});
+
+/**
+ * [#37705] An `emit()` made inside a unit of work (a flow's `notify` node in
+ * the triggering write's unit) wakes the dispatcher at that unit's commit,
+ * through the engine's `runAfterOpenUnitsCommit`: the woken tick runs outside
+ * the unit, and on a pooled driver it could not see the delivery row before
+ * the commit.
+ */
+describe('#37705 MessagingServicePlugin — an emit() inside a unit wakes the dispatcher at its commit', () => {
+    it('hands the wake to runAfterOpenUnitsCommit, and the delivery goes out once the unit commits', async () => {
+        const { engine, messaging, objectql } = await bootMessagingKernel();
+        const sent: string[] = [];
+        messaging.registerChannel({
+            id: 'probe',
+            async send(_ctx, delivery) {
+                sent.push(delivery.recipient);
+                return { ok: true };
+            },
+        });
+        const deferred = vi.spyOn(objectql, 'runAfterOpenUnitsCommit');
+        let sentInsideUnit: string[] | undefined;
+        await objectql.transaction(async () => {
+            const result = await messaging.emit({
+                topic: 'wake.unit',
+                audience: ['user_in_unit'],
+                channels: ['probe'],
+                payload: { title: 'in a unit' },
+            });
+            expect(result.enqueued).toBe(1);
+            sentInsideUnit = [...sent];
+        });
+        expect(deferred, 'the wake went through the engine').toHaveBeenCalledTimes(1);
+        expect(sentInsideUnit).toEqual([]);
+        await until(() => sent.length === 1, DELIVERY_BUDGET_MS);
+        expect(sent).toEqual(['user_in_unit']);
+        void engine;
     }, 20_000);
 });
