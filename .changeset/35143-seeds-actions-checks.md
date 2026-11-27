@@ -26,4 +26,4 @@ Skills-docs: follow-up #37814
 - `{ type: 'create_record', config: { objectName: 'invoce', … } }` → `objectName: 'invoice'` (the object's full, namespaced name).
 - `body: { language: 'js', source: "await ctx.api.object('task').update(…)", capabilities: [] }` → `capabilities: ['api.write']`.
 
-No new exports. `@objectstack/spec` adds only the upgrade-guide entry `publish-refuses-seeds-and-actions-that-save-and-do-not-work`.
+`@objectstack/lint` exports two rule id constants, `SEED_RECORD_UNKNOWN_FIELD` and `ACTION_BODY_WRITE_CAPABILITY_UNDECLARED`, so `os explain` carries an entry for each; the rules themselves are not exported. `@objectstack/spec` adds only the upgrade-guide entry `publish-refuses-seeds-and-actions-that-save-and-do-not-work`.
