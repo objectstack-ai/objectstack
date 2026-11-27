@@ -12,3 +12,5 @@ Metadata-protocol: none
 The same sentence said no verifier is built. `os audit verify` reads the checkpoints back, so that clause is removed.
 
 The file sat at its token ceiling, so the words are paid for in the same file and no ceiling moves: the page drops the rationale sentence after "the file never shrinks" and its echo in the first validation example, the example list in the rule sentence (the Lifecycle Classes table carries a typical use per class), the hook names in the intro, the rationale clause of the Separation bullet, and three filler words in Safety Semantics.
+
+Eval case 16 of `skills/objectstack-data/evals/objects-fields-relationships.json` graded the two withdrawn statements (`not reported`, and `read as missing` for an object an author declares). It now expects the page as it stands: `must_contain` carries `expired` in their place, and `expected_output` ends with the three sentences of the new paragraph.
