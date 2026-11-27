@@ -2,13 +2,15 @@
 /**
  * Every `must_contain` token of every `skills/<bundle>/evals/*.json` must be
  * something the skill bundle actually TEACHES — present as a WHOLE token in the
- * bundle's own markdown.
+ * bundle's own markdown. So must every member of every `must_contain_any` group
+ * (see "`must_contain_any`" below).
  *
  * Run:  node scripts/check-skill-eval-tokens.mjs        (also `pnpm check:skill-eval-tokens`)
  *       node scripts/check-skill-eval-tokens.mjs --list        # every row + both oracles' counts
  *       node scripts/check-skill-eval-tokens.mjs --measure     # BOTH red lists, side by side
  *       node scripts/check-skill-eval-tokens.mjs --self-test   # fixtures, both directions
- * Exit: 0 = every `must_contain` token is taught, and the population is non-empty.
+ * Exit: 0 = every `must_contain` token and every `must_contain_any` member is
+ *           taught, and the population is non-empty.
  *       1 = THE GATE RAN AND FOUND ERRORS. A token no guide teaches, an eval
  *           assertion of the wrong shape, or a stale baseline row. Everything
  *           printed above the summary is a verdict about an eval.
@@ -139,6 +141,31 @@
  * narrow the entry to what a wrong answer writes (`fuzzy:`, not `fuzzy`), or drop
  * it. Plain substring, case-sensitive: that is how the assertion is graded.
  *
+ * ## `must_contain_any`: the any-of form, read the way the runner reads it
+ *
+ * The skill-evals runner (`packages/qa/scenarios/src/skill-evals/cases.ts`,
+ * `anyOfProblem`) also grades `assertions.must_contain_any`: a list of groups,
+ * each a non-empty list of non-empty literal tokens, a group met by any one of
+ * its tokens. This gate reads it on three axes, and each mirrors one the gate
+ * already takes for `must_contain`:
+ *
+ *   - SHAPE. The runner's refusals, one finding each: the value is not a list
+ *     (`not-an-array`); a group is not a list of strings (`bad-group`); a group
+ *     is empty, so no answer can meet it (`empty-group`); a group holds an empty
+ *     token, which every answer contains (`bad-token`). A malformed group is not
+ *     scored, as a malformed `must_contain` entry is not.
+ *   - TAUGHT. ⭐ EVERY member of every group must be taught, by the same oracle
+ *     and the same whole-token rule as a `must_contain` token — not "at least
+ *     one". Any one member passes an answer, so a member the bundle never says
+ *     is a word the case accepts as a correct answer without the skill ever
+ *     teaching it: the same untaught-token defect, reached through a group.
+ *     A member's row key carries its group, `... eval ID must_contain_any[G]
+ *     TOKEN`, so a baseline row names exactly one member of one group.
+ *   - TALLY. A case whose only positive assertion is groups asserts something,
+ *     so it is not counted under the EMPTY tally (item 3 below); and its members
+ *     count toward the population, so a bundle of such cases is not refused as
+ *     empty.
+ *
  * ## The baseline: declared, SHRINK-ONLY, and EMPTY at landing
  *
  * `KNOWN_UNTAUGHT_EVAL_TOKENS` is empty today, because the chosen oracle has no
@@ -167,7 +194,8 @@
  *      over a different corpus.
  *   3. **Whether `must_contain` is EMPTY.** An eval that asserts nothing is a
  *      real question and a different one; the count is printed on every run so
- *      it cannot hide, and no verdict is taken on it here.
+ *      it cannot hide, and no verdict is taken on it here. A case that holds a
+ *      `must_contain_any` group is not in that count: it asserts something.
  *   4. **`.claude/skills/**`.** This gate's root is the PUBLISHED bundle, the
  *      governed surface objectui#7461 was filed about — the same boundary
  *      `check-skill-examples.mjs` states for itself.
@@ -318,9 +346,49 @@ export function listBundles(root) {
     .map(({ dir, base }) => ({ dir, base, rel: relative(base, dir).split(sep).join('/') }));
 }
 
-/** The row key. One file, one eval, one token — the unit a per-row fix removes. */
-export function rowKey(evalPath, evalId, token) {
-  return `${evalPath} eval ${evalId} ${token}`;
+/**
+ * The row key. One file, one eval, one token — the unit a per-row fix removes.
+ * A `must_contain_any` member names its group too (`group` is the group's index),
+ * so a key cannot be mistaken for a `must_contain` token of the same eval; a
+ * `must_contain` token's key is unchanged.
+ */
+export function rowKey(evalPath, evalId, token, group = null) {
+  return group === null ? `${evalPath} eval ${evalId} ${token}` : `${evalPath} eval ${evalId} must_contain_any[${group}] ${token}`;
+}
+
+/**
+ * The `must_contain_any` shape check: one finding per refusal the runner makes
+ * (`anyOfProblem` in `packages/qa/scenarios/src/skill-evals/cases.ts`), and the
+ * groups that pass it, kept with their index. Pure.
+ *
+ * @returns {{ problems: Array<{ reason: string, detail: string }>, groups: Array<{ index: number, tokens: string[] }> }}
+ */
+export function anyOfShape(value) {
+  const problems = [];
+  const groups = [];
+  if (!Array.isArray(value)) {
+    problems.push({
+      reason: 'not-an-array',
+      detail: `must_contain_any is ${typeof value}, not a list of groups, each a non-empty list of strings`,
+    });
+    return { problems, groups };
+  }
+  for (const [index, group] of value.entries()) {
+    const at = `must_contain_any[${index}]`;
+    if (!Array.isArray(group) || !group.every((token) => typeof token === 'string')) {
+      problems.push({ reason: 'bad-group', detail: `${at} is ${JSON.stringify(group)}, not a list of strings` });
+    } else if (group.length === 0) {
+      problems.push({ reason: 'empty-group', detail: `${at} is an empty group: no answer could meet it` });
+    } else if (group.includes('')) {
+      problems.push({
+        reason: 'bad-token',
+        detail: `${at} holds an empty token: every answer contains it, so the group would be met by any answer`,
+      });
+    } else {
+      groups.push({ index, tokens: group });
+    }
+  }
+  return { problems, groups };
 }
 
 // ── Analysis ─────────────────────────────────────────────────────────────────
@@ -357,7 +425,14 @@ export function analyze({ root, baseline = KNOWN_UNTAUGHT_EVAL_TOKENS }) {
     const bundleText = guides.map((g) => g.text).join('\n');
 
     const evalFiles = walk(join(bundle.dir, 'evals'), (name) => name.endsWith('.json'));
-    const record = { rel: bundle.rel, guides: guides.map((g) => g.rel), evalFiles: [], evalCount: 0, emptyMustContain: 0 };
+    const record = {
+      rel: bundle.rel,
+      guides: guides.map((g) => g.rel),
+      evalFiles: [],
+      evalCount: 0,
+      emptyMustContain: 0,
+      anyOfGroups: 0,
+    };
 
     for (const full of evalFiles) {
       const evalPath = relative(bundle.base, full).split(sep).join('/');
@@ -386,8 +461,13 @@ export function analyze({ root, baseline = KNOWN_UNTAUGHT_EVAL_TOKENS }) {
         const assertions = item.assertions ?? {};
         const mustContain = assertions.must_contain ?? [];
         const mustNotContain = assertions.must_not_contain ?? [];
+        const anyOf = anyOfShape(assertions.must_contain_any ?? []);
+        record.anyOfGroups += anyOf.groups.length;
 
-        if (Array.isArray(mustContain) && mustContain.length === 0) record.emptyMustContain += 1;
+        // A case whose only positive assertion is groups asserts something.
+        if (Array.isArray(mustContain) && mustContain.length === 0 && anyOf.groups.length === 0) record.emptyMustContain += 1;
+
+        for (const problem of anyOf.problems) shapeFindings.push({ site: `${evalPath} eval ${item.id}`, ...problem });
 
         for (const [field, list] of [
           ['must_contain', mustContain],
@@ -429,21 +509,28 @@ export function analyze({ root, baseline = KNOWN_UNTAUGHT_EVAL_TOKENS }) {
         // ⛔ `must_not_contain` stops at the checks above and is NEVER scored
         // against the guides. The header states why; the self-test pins that an
         // entry absent from every guide does not red.
-        if (!Array.isArray(mustContain)) continue;
-        for (const token of mustContain) {
+        const score = (token, group) => ({
+          key: rowKey(evalPath, item.id, token, group),
+          evalPath,
+          evalId: item.id,
+          field: group === null ? 'must_contain' : 'must_contain_any',
+          group,
+          token,
+          bundleWhole: countWholeToken(bundleText, token),
+          bundleSubstring: countSubstring(bundleText, token),
+          perGuideRel,
+          perGuideExists: perGuide !== null,
+          perGuideWhole: perGuide === null ? null : countWholeToken(perGuide.text, token),
+          perGuideSubstring: perGuide === null ? null : countSubstring(perGuide.text, token),
+        });
+        for (const token of Array.isArray(mustContain) ? mustContain : []) {
           if (typeof token !== 'string' || token === '') continue;
-          rows.push({
-            key: rowKey(evalPath, item.id, token),
-            evalPath,
-            evalId: item.id,
-            token,
-            bundleWhole: countWholeToken(bundleText, token),
-            bundleSubstring: countSubstring(bundleText, token),
-            perGuideRel,
-            perGuideExists: perGuide !== null,
-            perGuideWhole: perGuide === null ? null : countWholeToken(perGuide.text, token),
-            perGuideSubstring: perGuide === null ? null : countSubstring(perGuide.text, token),
-          });
+          rows.push(score(token, null));
+        }
+        // EVERY member of a well-formed group, not "at least one": any one
+        // member passes an answer, so each must be something the bundle says.
+        for (const { index, tokens } of anyOf.groups) {
+          for (const token of tokens) rows.push(score(token, index));
         }
       }
     }
@@ -460,7 +547,7 @@ export function analyze({ root, baseline = KNOWN_UNTAUGHT_EVAL_TOKENS }) {
     preconditions.push({
       site: SCAN_ROOTS.join(', '),
       reason: 'empty-population',
-      detail: 'the bundles hold no must_contain token at all, so this run judged nothing',
+      detail: 'the bundles hold no must_contain token and no must_contain_any group at all, so this run judged nothing',
     });
   }
 
@@ -478,7 +565,8 @@ export function analyze({ root, baseline = KNOWN_UNTAUGHT_EVAL_TOKENS }) {
 // ── Verdict ──────────────────────────────────────────────────────────────────
 
 const REMEDY =
-  '\n    A `must_contain` token no guide in the bundle states as a WHOLE token.' +
+  '\n    A `must_contain` token (or a `must_contain_any` member) no guide in the' +
+  '\n    bundle states as a WHOLE token.' +
   '\n    ⛔ Do NOT rewrite guide prose to teach the token, and do NOT drop or' +
   '\n    re-point the row mechanically — objectui#7461 rules both out: which of' +
   '\n    the two is right is a per-row skills decision, funded per row.' +
@@ -503,6 +591,8 @@ function report(result) {
   const totalEvals = result.bundles.reduce((n, b) => n + b.evalCount, 0);
   const totalGuides = result.bundles.reduce((n, b) => n + b.guides.length, 0);
   const emptyMustContain = result.bundles.reduce((n, b) => n + b.emptyMustContain, 0);
+  const anyOfGroups = result.bundles.reduce((n, b) => n + b.anyOfGroups, 0);
+  const mustContainRows = result.rows.filter((r) => r.group === null).length;
 
   for (const f of result.shapeFindings) console.error(`  ${f.site}  [${f.reason}]  ${f.detail}`);
   for (const row of result.fresh) {
@@ -510,7 +600,9 @@ function report(result) {
       row.bundleSubstring > 0
         ? ` (it appears ${row.bundleSubstring} time(s) as a SUBSTRING only — see the whole-token rule)`
         : ' (it appears nowhere in the bundle, in any form)';
-    console.error(`  ${row.evalPath} eval ${row.evalId}  [untaught]  ${JSON.stringify(row.token)}${hint}`);
+    const where = row.group === null ? '' : ` must_contain_any[${row.group}]`;
+    const member = row.group === null ? '' : ' — a group member: any one member passes an answer, so each must be taught';
+    console.error(`  ${row.evalPath} eval ${row.evalId}${where}  [untaught]  ${JSON.stringify(row.token)}${hint}${member}`);
   }
   for (const key of result.stale) {
     console.error(`  ${key}  [stale-baseline]  this row is no longer red — delete its line, the list only shrinks`);
@@ -519,18 +611,21 @@ function report(result) {
   console.log(
     `Scanned ${result.bundles.length} skill bundle(s) under ${SCAN_ROOTS.join(', ')}: ` +
       `${result.bundles.reduce((n, b) => n + b.evalFiles.length, 0)} eval file(s), ${totalEvals} eval(s), ` +
-      `${result.rows.length} must_contain token(s), scored against ${totalGuides} guide file(s).`,
+      `${mustContainRows} must_contain token(s) and ${result.rows.length - mustContainRows} must_contain_any ` +
+      `member(s) in ${anyOfGroups} group(s), scored against ${totalGuides} guide file(s).`,
   );
   console.log(
-    `Oracle: ${ORACLE} — a token must occur as a WHOLE token (case-sensitive) somewhere in its own ` +
-      "bundle's markdown. `must_not_contain` is shape-checked, refused when its own case's expected_output " +
+    `Oracle: ${ORACLE} — a token, and every member of a must_contain_any group, must occur as a WHOLE ` +
+      "token (case-sensitive) somewhere in its own bundle's markdown. `must_not_contain` is shape-checked, " +
+      "refused when its own case's expected_output " +
       'contains it, and never scored against the guides.',
   );
   console.log(
     `Baseline: ${KNOWN_UNTAUGHT_EVAL_TOKENS.size} row(s) declared in KNOWN_UNTAUGHT_EVAL_TOKENS (⛔ SHRINK-ONLY).`,
   );
   console.log(
-    `Evals whose must_contain is EMPTY: ${emptyMustContain}. Printed so it cannot hide; no verdict is taken on it here.`,
+    `Evals whose must_contain is EMPTY and that hold no must_contain_any group: ${emptyMustContain}. ` +
+      'Printed so it cannot hide; no verdict is taken on it here.',
   );
   console.log(
     `Red under the chosen oracle: ${result.red.length} (${result.fresh.length} beyond the baseline). ` +
@@ -542,7 +637,7 @@ function report(result) {
     console.error(`\nThe eval assertions above do not hold up (exit ${EXIT_CODES.tokensUntaught}).`);
     return EXIT_CODES.tokensUntaught;
   }
-  console.log('\nEvery must_contain token is taught by its own skill bundle.');
+  console.log('\nEvery must_contain token and must_contain_any member is taught by its own skill bundle.');
   return EXIT_CODES.verified;
 }
 
@@ -732,6 +827,66 @@ export function selfTest() {
     );
     t('the narrowed entry (`fuzzy:`) passes against the same answer', ownAnswer(['fuzzy:', 'boost']).length === 0);
 
+    // ── must_contain_any: shape, taught, tally — each in both directions ────
+    const anyOf = (assertions) =>
+      analyze({
+        root: tree({
+          'skills/fixture/guides/alpha.md': 'The guide teaches ai:approve and a signed-in session, and charts.\n',
+          'skills/fixture/evals/alpha.json': evalDoc(assertions),
+        }),
+        baseline: new Set(),
+      });
+    const anyReasons = (value) => anyOf({ must_contain: ['charts'], must_contain_any: value }).shapeFindings.map((f) => f.reason);
+    t('must_contain_any that is not a list is a SHAPE failure', anyReasons('ai:approve').join() === 'not-an-array', anyReasons('ai:approve').join());
+    t(
+      'a group that is not a list of strings is a SHAPE failure, both spellings',
+      anyReasons(['ai:approve']).join() === 'bad-group' && anyReasons([['ai:approve', 7]]).join() === 'bad-group',
+    );
+    t('an EMPTY group is a SHAPE failure — no answer could meet it', anyReasons([[]]).join() === 'empty-group');
+    t('a group holding an EMPTY token is a SHAPE failure — every answer meets it', anyReasons([['ai:approve', '']]).join() === 'bad-token');
+    const wellFormed = anyOf({ must_contain_any: [['ai:approve', 'signed-in session'], ['charts']] });
+    t('well-formed groups raise NO shape finding', wellFormed.shapeFindings.length === 0, JSON.stringify(wellFormed.shapeFindings));
+    t(
+      'a malformed group is not scored, so its shape failure does not become a token red',
+      anyOf({ must_contain: ['charts'], must_contain_any: [['neverTaught', '']] }).red.length === 0,
+    );
+    t(
+      'every member of a taught group passes, and is scored — not skipped',
+      wellFormed.red.length === 0 && wellFormed.rows.filter((x) => x.field === 'must_contain_any').length === 3,
+      JSON.stringify(wellFormed.rows.map((x) => x.key)),
+    );
+    const oneUntaught = anyOf({ must_contain: ['charts'], must_contain_any: [['ai:approve', 'neverTaught']] });
+    t(
+      'ONE untaught member reds its group, though a taught sibling would pass an answer — every member must be taught',
+      oneUntaught.red.length === 1 &&
+        oneUntaught.red[0].key === 'skills/fixture/evals/alpha.json eval 1 must_contain_any[0] neverTaught',
+      JSON.stringify(oneUntaught.red.map((x) => x.key)),
+    );
+    t(
+      'a SUBSTRING-only member reds — `chart` inside `charts` is not taught',
+      anyOf({ must_contain_any: [['chart']] }).red.map((x) => x.token).join() === 'chart',
+    );
+    t(
+      'a baseline row suppresses exactly its member, keyed by group',
+      analyze({
+        root: tree({
+          'skills/fixture/guides/alpha.md': 'ai:approve\n',
+          'skills/fixture/evals/alpha.json': evalDoc({ must_contain_any: [['ai:approve', 'neverTaught']] }),
+        }),
+        baseline: new Set(['skills/fixture/evals/alpha.json eval 1 must_contain_any[0] neverTaught']),
+      }).fresh.length === 0,
+    );
+    const tally = (assertions) => anyOf(assertions).bundles[0].emptyMustContain;
+    t('a case whose only positive assertion is groups is NOT in the EMPTY tally', tally({ must_contain_any: [['ai:approve']] }) === 0);
+    t(
+      'a case with neither must_contain nor a group IS in the EMPTY tally',
+      tally({ must_contain: [], must_contain_any: [], must_not_contain: ['x'] }) === 1,
+    );
+    t(
+      'a bundle whose only positive assertions are groups is a population, not a PRECONDITION',
+      anyOf({ must_contain_any: [['ai:approve']] }).preconditions.length === 0,
+    );
+
     // ── the preconditions: never 0 for "nothing checked" ────────────────────
     t(
       'a tree with NO bundle at all is a PRECONDITION, never a pass',
@@ -786,7 +941,8 @@ export function selfTest() {
     `OK check-skill-eval-tokens self-test: ${cases.length} cases pass (the whole-token rule on all three ` +
       'measured false positives, both oracles on the sibling-taught row, must_not_contain never scored ' +
       'against the guides but refused when its own expected_output writes it, ' +
-      'the shrink-only baseline in both directions, and every precondition that must not read as a pass).',
+      'the shrink-only baseline in both directions, must_contain_any shape, every-member teaching and the ' +
+      'EMPTY tally each in both directions, and every precondition that must not read as a pass).',
   );
   return EXIT_CODES.verified;
 }
