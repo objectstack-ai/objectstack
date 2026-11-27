@@ -3765,6 +3765,10 @@ const en = {
         twoFactorTooManyAttempts: 'Too many incorrect codes. Sign in with your password again.',
         twoFactorExpired: 'This sign-in has expired. Sign in with your password again.',
         twoFactorLocked: 'Too many failed attempts. Your account is temporarily locked. Try again later.',
+        // objectstack#34171 — a cloud-managed runtime's 409 `RESOURCE_CONFLICT` on the
+        // password doors (`signInRefusalMessages`, `passwordDoorRefusalMessages`).
+        managedPasswordSignIn: "This deployment signs you in through its identity provider, so a password can't be used here. Use the identity provider's button above to sign in.",
+        managedPasswordReset: "This deployment signs you in through its identity provider, so no password is set or reset here. Sign in with the identity provider's button on the sign-in page.",
       },
     },
     register: {
@@ -4246,6 +4250,7 @@ const en = {
         report: 'Reports',
         page: 'Pages',
         url: 'Link',
+        aiChat: 'AI inquiry',
       },
       linkLabel: 'Label',
       linkUrl: 'URL',
@@ -4271,6 +4276,17 @@ const en = {
       creating: 'Creating…',
       newItemPendingDraft: 'A draft with this name is already pending. Try again.',
       newItemLeft: 'The new dashboard "{{name}}" could not be removed again; remove it in Studio.',
+      aiChatName: 'Ask AI',
+      aiChatDefaults: 'Leave a field empty to show the page\'s default.',
+      aiChatTitle: 'Heading',
+      aiChatSubtitle: 'Subtitle',
+      aiChatPlaceholder: 'Question box hint',
+      aiChatSuggestions: 'Suggested questions',
+      aiChatSuggestionsHint: 'One per line, at most 4.',
+      aiChatTooLong: 'At most {{max}} characters.',
+      aiChatTooMany: 'At most {{max}} questions.',
+      aiChatEdit: 'Edit inquiry page',
+      setAsHome: 'Set as home',
     },
     pins: {
       button: 'Header buttons',

@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/layout",
-  "version": "19.0.0-next.0",
+  "version": "19.0.0-next.1",
   "type": "module",
   "sideEffects": [
     "./dist/index.js",

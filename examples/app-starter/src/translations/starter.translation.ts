@@ -49,6 +49,10 @@ export const StarterTranslationBundle = defineTranslationBundle({
   },
 
   'zh-CN': {
+    // The package's own name, keyed by its manifest id (objectstack#35513).
+    packages: {
+      'com.example.starter': { name: '入门示例', description: '公司与联系人，菜单中附带平台的任务和备注。' },
+    },
     objects: {
       starter_company: {
         label: '公司',

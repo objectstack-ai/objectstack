@@ -103,6 +103,8 @@ interface BetterAuthErrorLike {
   dependents?: unknown;
   userMessage?: unknown;
   details?: unknown;
+  /** The ADR-0112 envelope's `error` object, when the body is `{ success: false, error }`. */
+  error?: unknown;
 }
 
 /**
@@ -196,21 +198,44 @@ function readDependents(raw: unknown): AuthErrorDependent[] | undefined {
  * and the absence of a code, never by the English sentence, so the status is
  * carried as well. The two-factor and invitation-preview errors in this file
  * already carry theirs.
+ *
+ * ## And the ADR-0112 envelope is read too (objectstack#34171)
+ *
+ * Not every refusal on these routes is better-auth's own flat body. A door
+ * the runtime answers before better-auth runs answers in the platform's
+ * ADR-0112 envelope, `{ success: false, error: { code, message, details } }`:
+ * a cloud-managed runtime's 409 `RESOURCE_CONFLICT` on the password doors is
+ * one (plugin-auth `cloudManagedRefusal`, and the hosted relay in front of
+ * it). better-fetch spreads that body too, so its half arrives nested under
+ * `error.error`. Each of `code`, `message`, `details` and `userMessage` is
+ * read from the flat body first and from the envelope's `error` only when the
+ * flat body has none, so a better-auth refusal answers exactly as before. Read
+ * at the top level only, the envelope's code was dropped and the page drew
+ * `Auth request failed with status 409` in every language.
  */
 function toAuthError(
   error: BetterAuthErrorLike,
   fallbackMessage?: string,
 ): AuthClientError {
+  const envelope: BetterAuthErrorLike = isPlainObject(error.error) ? (error.error as BetterAuthErrorLike) : {};
+  const message = error.message ?? stringOrUndefined(envelope.message);
+  const code = error.code || stringOrUndefined(envelope.code);
+  const userMessage = error.userMessage ?? envelope.userMessage;
+  const details = error.details ?? envelope.details;
   const err = new Error(
-    error.message ?? fallbackMessage ?? `Auth request failed with status ${error.status}`,
+    message ?? fallbackMessage ?? `Auth request failed with status ${error.status}`,
   ) as AuthClientError;
-  if (error.code) err.code = error.code;
+  if (code) err.code = code;
   if (typeof error.status === 'number') err.status = error.status;
   const dependents = readDependents(error.dependents);
   if (dependents) err.dependents = dependents;
-  if (typeof error.userMessage === 'string' && error.userMessage.trim()) err.userMessage = error.userMessage;
-  if (isPlainObject(error.details)) err.details = error.details;
+  if (typeof userMessage === 'string' && userMessage.trim()) err.userMessage = userMessage;
+  if (isPlainObject(details)) err.details = details;
   return err;
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -951,16 +976,14 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
         email,
         redirectTo: resolveSpaRoute('/reset-password'),
       });
-      if (error) {
-        throw new Error(error.message ?? `Auth request failed with status ${error.status}`);
-      }
+      // `toAuthError` keeps the refusal's code (objectstack#34171): a
+      // cloud-managed runtime refuses this door with 409 RESOURCE_CONFLICT.
+      if (error) throw toAuthError(error);
     },
 
     async resetPassword(token: string, newPassword: string) {
       const { error } = await betterAuth.resetPassword({ token, newPassword });
-      if (error) {
-        throw new Error(error.message ?? `Auth request failed with status ${error.status}`);
-      }
+      if (error) throw toAuthError(error);
     },
 
     // --- Phone-number OTP (framework#2780) -------------------------------
@@ -1079,12 +1102,14 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
         body: JSON.stringify({ newPassword }),
       });
       if (!response.ok) {
-        let message = `Set password failed with status ${response.status}`;
+        let body: BetterAuthErrorLike = {};
         try {
-          const body = (await response.json()) as { error?: { message?: string; code?: string } };
-          if (body?.error?.message) message = body.error.message;
+          const parsed: unknown = await response.json();
+          if (isPlainObject(parsed)) body = parsed;
         } catch { /* not JSON */ }
-        throw new Error(message);
+        // `toAuthError` reads the ADR-0112 envelope's code (objectstack#34171):
+        // a cloud-managed runtime refuses this door with 409 RESOURCE_CONFLICT.
+        throw toAuthError({ ...body, status: response.status }, `Set password failed with status ${response.status}`);
       }
     },
 

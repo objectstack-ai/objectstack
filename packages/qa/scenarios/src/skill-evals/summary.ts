@@ -33,6 +33,8 @@ export interface CaseScore {
   /** Tokens the with-skill arm missed or carried, over its failing turns (deduplicated). */
   withSkillMissing: string[];
   withSkillForbidden: string[];
+  /** `must_contain_any` groups the with-skill arm left unmet, over its failing turns (deduplicated, each group whole). */
+  withSkillUnmetAny: string[][];
 }
 
 export interface BundleSummary {
@@ -99,7 +101,7 @@ export function summariseRound(
   notRun: ReadonlyArray<{ case: SkillEvalCase; arm: Arm }>,
 ): RoundSummary {
   const byCase = new Map<string, CaseScore>();
-  for (const c of cases) if (c.shouldTrigger === undefined) byCase.set(c.key, { key: c.key, bundle: c.bundle, withSkill: empty(), noSkill: empty(), withSkillMissing: [], withSkillForbidden: [] });
+  for (const c of cases) if (c.shouldTrigger === undefined) byCase.set(c.key, { key: c.key, bundle: c.bundle, withSkill: empty(), noSkill: empty(), withSkillMissing: [], withSkillForbidden: [], withSkillUnmetAny: [] });
   const byTrigger = new Map<string, TriggerCaseScore>();
   for (const c of cases) if (c.shouldTrigger !== undefined) byTrigger.set(c.key, { key: c.key, bundle: c.bundle, shouldTrigger: c.shouldTrigger, tally: empty(), loadedBySkillTool: 0, loadedByReadOnly: 0, othersLoaded: {} });
   let cost = 0;
@@ -123,6 +125,7 @@ export function summariseRound(
     if (r.arm === 'with-skill' && r.verdict === 'fail') {
       for (const t of r.missing) if (!s.withSkillMissing.includes(t)) s.withSkillMissing.push(t);
       for (const t of r.forbidden) if (!s.withSkillForbidden.includes(t)) s.withSkillForbidden.push(t);
+      for (const g of r.unmetAny ?? []) if (!s.withSkillUnmetAny.some((x) => JSON.stringify(x) === JSON.stringify(g))) s.withSkillUnmetAny.push(g);
     }
   }
   for (const j of notRun) {
@@ -211,7 +214,9 @@ export function renderSummaryMarkdown(s: RoundSummary, head: { title: string; li
     out.push(`| **all** | ${s.cases.length} | ${pct(s.totals.withSkill)} | ${pct(s.totals.noSkill)} | ${s.bundles.reduce((n, b) => n + b.withSkillFailures.length, 0)} | ${s.bundles.reduce((n, b) => n + b.noSkillAtLeastWithSkill.length, 0)} | ${outOf(s.totals.withSkill)} / ${outOf(s.totals.noSkill)} |`);
     out.push('', '## Per case', '', '| case | with-skill | no-skill | with-skill missed | with-skill carried forbidden |', '|:--|--:|--:|:--|:--|');
     for (const c of s.cases) {
-      out.push(`| ${c.key} | ${pct(c.withSkill)} | ${pct(c.noSkill)} | ${c.withSkillMissing.map(code).join(' ')} | ${c.withSkillForbidden.map(code).join(' ')} |`);
+      // An unmet any-of group is named whole, after the all-of tokens: `(none of: a / b)`.
+      const missed = [...c.withSkillMissing.map(code), ...c.withSkillUnmetAny.map((g) => `(none of: ${g.map(code).join(' / ')})`)];
+      out.push(`| ${c.key} | ${pct(c.withSkill)} | ${pct(c.noSkill)} | ${missed.join(' ')} | ${c.withSkillForbidden.map(code).join(' ')} |`);
     }
   }
   if (tr.cases.length) {

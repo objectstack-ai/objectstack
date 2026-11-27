@@ -4,6 +4,8 @@
 '@objectstack/plugin-security': patch
 ---
 
+**Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+
 perf(sharing): a predicate update or delete asks record sharing for the write verdict of all its candidate rows at once, so its store reads no longer grow per row
 
 Clause-②: yes (widening)

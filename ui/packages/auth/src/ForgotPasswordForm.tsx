@@ -9,6 +9,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from './useAuth.js';
 import type { AuthLinkComponentProps } from './types.js';
+import { refusalText } from './refusal-text.js';
 import {
   AUTH_FIELD_LABEL_CLASS,
   AUTH_INPUT_CLASS,
@@ -90,6 +91,15 @@ export interface ForgotPasswordFormProps {
   labels?: ForgotPasswordFormLabels;
   /** Hide the icon disc above the form title. Defaults to false. */
   hideIcon?: boolean;
+  /**
+   * Map of refusal `code` → localized message, as `LoginForm`'s
+   * `errorMessages` (objectstack#34171). A refusal with a known code shows the
+   * mapped string instead of the raw English server message (a cloud-managed
+   * runtime refuses the reset doors with 409 `RESOURCE_CONFLICT`); a refusal
+   * whose code the map has no entry for, or that carries none, shows the
+   * server message as before. `CODE:cause` keys are tried first.
+   */
+  errorMessages?: Record<string, string>;
 }
 
 const DefaultLink = ({ href, className, children }: AuthLinkComponentProps) => (
@@ -134,6 +144,7 @@ export function ForgotPasswordForm({
   hideIcon = false,
   linkComponent: LinkComp = DefaultLink,
   labels = {},
+  errorMessages,
 }: ForgotPasswordFormProps) {
   const {
     forgotPassword,
@@ -245,7 +256,7 @@ export function ForgotPasswordForm({
       onSuccess?.();
     } catch (err) {
       const authError = err instanceof Error ? err : new Error(String(err));
-      setError(authError.message);
+      setError(refusalText(authError, errorMessages));
       onError?.(authError);
     } finally {
       resetRequestPending.current = false;
@@ -268,7 +279,7 @@ export function ForgotPasswordForm({
       setOtpCooldown(60);
     } catch (err) {
       const authError = err instanceof Error ? err : new Error(String(err));
-      setError(authError.message);
+      setError(refusalText(authError, errorMessages));
       onError?.(authError);
     } finally {
       setOtpSending(false);
@@ -285,7 +296,7 @@ export function ForgotPasswordForm({
       onSuccess?.();
     } catch (err) {
       const authError = err instanceof Error ? err : new Error(String(err));
-      setError(authError.message);
+      setError(refusalText(authError, errorMessages));
       onError?.(authError);
     } finally {
       setResetting(false);
