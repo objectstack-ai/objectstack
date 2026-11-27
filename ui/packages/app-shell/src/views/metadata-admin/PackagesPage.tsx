@@ -696,7 +696,7 @@ export function PackageDetailSheet({
   onChanged: () => void;
 }) {
   const locale = useMetadataLocale();
-  const { packageName } = useObjectLabel();
+  const { packageName, packageDescription } = useObjectLabel();
   // `ce986aafc` — the console's metadata client, for the ONE action on this
   // sheet that must report: "publish drafts" promotes metadata, and the runtime
   // authoring gate's findings for those promotions ride the response. This hook
@@ -842,6 +842,7 @@ export function PackageDetailSheet({
   // title shows — the package's name in the reader's language where its
   // translation bundle carries one (objectstack#35513), else `manifest.name`.
   const displayName = packageName({ id, name: pkg.manifest.name });
+  const shownDescription = packageDescription({ id, description: pkg.manifest.description });
   const deleteArmed = deleteMode !== '' && deleteTyped.trim() === displayName.trim();
 
   // objectui#13339 — the sheet's one message line answers the action the
@@ -1161,8 +1162,8 @@ export function PackageDetailSheet({
           <DetailRow label={t('engine.packages.col.status', locale)}>
             <StatusBadge pkg={pkg} />
           </DetailRow>
-          {pkg.manifest.description && (
-            <DetailRow label={t('engine.packages.detail.description', locale)}>{pkg.manifest.description}</DetailRow>
+          {shownDescription && (
+            <DetailRow label={t('engine.packages.detail.description', locale)}>{shownDescription}</DetailRow>
           )}
         </div>
 
