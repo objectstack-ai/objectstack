@@ -7,7 +7,7 @@ fix(formula)!: a flow condition that orders a bare date field against text befor
 
 Clause-②: no (narrowing)
 Metadata-protocol: narrowed
-Skills-docs: none — no page under `skills/**` teaches date arithmetic in a flow condition; `content/docs/data-modeling/formulas.mdx` already names date arithmetic an error, and the refusal's own sentence names the fix
+Skills-docs: none — `skills/objectstack-formula/SKILL.md` already states "The build refuses `end - start`, `date + n`, `today() + 30`" and names no site or spelling it is limited to, so it now holds for this flow-condition spelling as written
 
 <!-- adr-0087: registered flow-condition-bare-ordering-before-record-date-arithmetic-refused -->
 
