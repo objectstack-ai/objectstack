@@ -20,6 +20,8 @@
  * unmarked one with the same JSON are two verdicts.
  */
 import { describe, expect, it } from 'vitest';
+// Paid at collection, not inside a case's clocked window (check:test-source-alias).
+import '@objectstack/lint';
 import { markResolvedPicklistOptions } from '@objectstack/metadata-core';
 import { computeMetadataDiagnostics, decorateMetadataItem } from './metadata-diagnostics.js';
 

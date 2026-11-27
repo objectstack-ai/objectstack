@@ -63,6 +63,9 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
+// Paid at collection, not inside a case's clocked window (check:test-source-alias).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import { SelectOptionSchema, FieldSchema } from '@objectstack/spec/data';
 

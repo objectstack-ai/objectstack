@@ -14,6 +14,8 @@
  * `{ label: 'no-overlay', value: 'no-overlay' }`.
  */
 import { describe, expect, it } from 'vitest';
+// Paid at collection, not inside a case's clocked window (check:test-source-alias).
+import '@objectstack/lint';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { Field } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation } from './protocol.js';
