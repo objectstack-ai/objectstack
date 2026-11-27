@@ -1,6 +1,6 @@
 ---
 '@object-ui/plugin-grid': patch
-'@object-ui/i18n': minor
+'@object-ui/i18n': patch
 '@object-ui/layout': patch
 '@object-ui/app-shell': patch
 '@object-ui/console': patch
