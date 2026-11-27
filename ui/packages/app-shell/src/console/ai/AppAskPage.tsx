@@ -32,7 +32,8 @@ import { ArrowUp, Plus, Sparkles } from 'lucide-react';
 import { useAuth } from '@object-ui/auth';
 import { Badge, Button, Textarea, cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { resolveNavItemLabel, type NavigationItem } from '@object-ui/layout';
+import { resolveNavItemLabel } from '@object-ui/layout';
+import type { NavigationItem } from '@object-ui/types';
 import { resolveAgentParam, useAgents } from '@object-ui/plugin-chatbot/core';
 import { ChatPane, type PendingFirstMessage } from './AiChatPage.js';
 import { AiUnavailable } from './AiUnavailable.js';
@@ -79,9 +80,12 @@ export function AppAskPage() {
   const entry = React.useMemo(() => findAiChatNavEntry(app), [app]);
   const copy = React.useMemo(() => readAiChatPageCopy(entry), [entry]);
   const pageLabel = entry ? resolveNavItemLabel(entry as unknown as NavigationItem, t, undefined, language) : '';
-  const title = copy.title ?? t('console.ai.empty.ask.title');
-  const subtitle = copy.subtitle ?? t('console.ai.empty.ask.description');
-  const placeholder = copy.placeholder ?? t('console.ai.askAnything');
+  const title = copy.title ?? t('console.ai.empty.ask.title', { defaultValue: 'Ask your data' });
+  const subtitle = copy.subtitle ?? t('console.ai.empty.ask.description', {
+      defaultValue:
+        'Ask questions about your records — counts, lists, and summaries across the data you can access.',
+    });
+  const placeholder = copy.placeholder ?? t('console.ai.askAnything', { defaultValue: 'Ask anything…' });
 
   // ── The agent: always the platform `ask` ────────────────────────────────
   const apiBase = React.useMemo(() => resolveApiBase(), []);
@@ -250,8 +254,8 @@ export function AppAskPage() {
         subtitle={subtitle}
         placeholder={placeholder}
         suggestions={copy.suggestions}
-        scopeLabel={t('console.ai.askPage.scopeBadge')}
-        sendLabel={t('console.ai.submit')}
+        scopeLabel={t('console.ai.askPage.scopeBadge', { defaultValue: 'Answers prefer this app' })}
+        sendLabel={t('console.ai.submit', { defaultValue: 'Submit' })}
         onAsk={ask}
       />
     );
@@ -267,7 +271,7 @@ export function AppAskPage() {
           inConversation && !unavailable ? (
             <Button variant="outline" size="sm" onClick={startOver} data-testid="app-ask-page-new">
               <Plus className="mr-1 h-4 w-4" />
-              {t('console.ai.newConversation')}
+              {t('console.ai.newConversation', { defaultValue: 'New conversation' })}
             </Button>
           ) : undefined
         }

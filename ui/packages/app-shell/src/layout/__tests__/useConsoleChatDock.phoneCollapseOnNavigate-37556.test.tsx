@@ -62,6 +62,9 @@ vi.mock('../ChatDock', async (importOriginal) => ({
 }));
 
 import { useConsoleChatDock } from '../useConsoleChatDock';
+import { isAppAskPagePath } from '../consoleRoutePaths';
+import { ChatDockControlProvider } from '../chatDockControl';
+import { AssistantTopBarButton } from '../AssistantTopBarButton';
 
 const HOME = '/home';
 const CITED = '/apps/crm/account/record/a1?section=pricing';
@@ -293,5 +296,97 @@ describe('a chat navigation closes the phone sheet, not the desktop rail (object
     expect(screen.getByTestId('location')).toHaveTextContent(CITED);
     expect(screen.getByTestId('chat-dock-panel')).toBeInTheDocument();
     expect(screen.queryByTestId('chat-dock-mobile-sheet')).not.toBeInTheDocument();
+  });
+});
+
+// ui ADR-0057 Amendment A4 (objectstack#37788) — on an app's AI inquiry page
+// the drawer is closed and its triggers are hidden or inert, so one screen
+// never holds two ask conversations; a build hand-off still opens it, and on
+// every other page the drawer is as the user left it. The host is the real
+// `useConsoleChatDock`, told the route the way `ConsoleLayout` tells it.
+const ASK_PAGE = '/apps/crm/component/ai/chat';
+const LIST_PAGE = '/apps/crm/account';
+
+function AskPageHost() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { control, rail } = useConsoleChatDock({
+    enabled: true,
+    appPackageId: 'crm',
+    askPageActive: isAppAskPagePath(location.pathname),
+  });
+  return (
+    <ChatDockControlProvider value={control}>
+      <AssistantTopBarButton />
+      <button data-testid="open-ask" onClick={() => control?.open()} />
+      <button data-testid="open-ask-thread" onClick={() => control?.open({ agent: 'ask', conversationId: 'c-ask' })} />
+      <button data-testid="open-build" onClick={() => control?.open({ agent: 'build' })} />
+      <button data-testid="to-ask-page" onClick={() => navigate(ASK_PAGE)} />
+      <button data-testid="to-list" onClick={() => navigate(LIST_PAGE)} />
+      {rail}
+    </ChatDockControlProvider>
+  );
+}
+
+function mountAskPageHost(entry: string) {
+  return render(
+    <MemoryRouter initialEntries={[entry]}>
+      <AskPageHost />
+    </MemoryRouter>,
+  );
+}
+
+const pressToggleChord = () =>
+  act(() => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'I', metaKey: true, shiftKey: true, bubbles: true }));
+  });
+const rail = () => screen.queryByTestId('chat-dock-panel');
+const robot = () => screen.queryByTestId('topbar-ai-assistant');
+
+describe('the AI inquiry page holds the one ask conversation on its screen (objectstack#37788)', () => {
+  it('the drawer is closed on the page and comes back as it was on the next page', () => {
+    setWidth(1024);
+    mountAskPageHost(LIST_PAGE);
+    click('open-ask');
+    expect(rail()).toBeInTheDocument();
+
+    click('to-ask-page');
+    expect(rail()).not.toBeInTheDocument();
+
+    click('to-list');
+    expect(rail()).toBeInTheDocument();
+  });
+
+  it('the robot is hidden on the page only', () => {
+    setWidth(1024);
+    mountAskPageHost(ASK_PAGE);
+    expect(robot()).not.toBeInTheDocument();
+    click('to-list');
+    expect(robot()).toBeInTheDocument();
+  });
+
+  it('the keyboard toggle and an ask open are inert on the page', () => {
+    setWidth(1024);
+    mountAskPageHost(ASK_PAGE);
+    pressToggleChord();
+    expect(rail()).not.toBeInTheDocument();
+    click('open-ask');
+    expect(rail()).not.toBeInTheDocument();
+    click('open-ask-thread');
+    expect(rail()).not.toBeInTheDocument();
+  });
+
+  it('control: off the page the keyboard toggle opens the drawer', () => {
+    setWidth(1024);
+    mountAskPageHost(LIST_PAGE);
+    pressToggleChord();
+    expect(rail()).toBeInTheDocument();
+  });
+
+  it('a build hand-off from the page still opens the drawer', () => {
+    setWidth(1024);
+    mountAskPageHost(ASK_PAGE);
+    click('open-build');
+    expect(rail()).toBeInTheDocument();
   });
 });
