@@ -32,7 +32,6 @@
 import '@objectstack/metadata';
 import { describe, it, expect, vi } from 'vitest';
 import { actionsDoorAnswerOf } from '@objectstack/types';
-import { assertEngineFindOnePredicate } from '@objectstack/objectql';
 
 import { HttpDispatcher } from './http-dispatcher.js';
 import { callData, invokeBusinessAction } from './action-execution.js';
@@ -83,7 +82,6 @@ function makeRig() {
             const id = query?.where?.id;
             return typeof id === 'string' && (READABLE[object] ?? []).includes(id) ? [{ id, name: id }] : [];
         }),
-        findOne: vi.fn(async (object: string, query: any) => { assertEngineFindOnePredicate(object, query); return null; }),
         insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
     };
     const metadata: any = {
