@@ -125,6 +125,15 @@ the matching records still gets up to `topK` hits
 hit's `title` is the value of the object's display field (`nameField`, else the
 derived title field).
 
+The two open stores, [pgvector](#self-hosted-vector-store-postgresql--pgvector)
+and [libSQL](#local-vector-store-a-libsql-file), search with two legs: the
+vector leg ranks by meaning, and a keyword leg ranks the passages that hold the
+query's terms as written — an order number, a model code like `X-200`, a
+person's name, a short term like 「出差」 — which a vector alone can rank
+below `topK`. The two rankings are merged by reciprocal rank fusion, so a hit's
+`score` is 1 for a passage first in both and 0.5 for one first in only one, and
+the merge happens before the permission re-check.
+
 ```ts
 const knowledge = ctx.getService('knowledge');
 
@@ -345,7 +354,7 @@ os knowledge rebuild support_articles  # start a complete build and follow its p
 new KnowledgePgvectorPlugin({ queryPrefix: '' /* e.g. BGE's query instruction */ }),
 ```
 
-- It searches by an exact scan, so a 3072-wide model works; the organization filter and the metadata `filter` run in SQL before ranking.
+- It searches with two legs merged by reciprocal rank fusion: an exact cosine scan, so a 3072-wide model works, and a keyword match on a `simple` `tsvector` (a GIN index), with `ILIKE` for a term under three characters or one in Chinese, Japanese or Korean script. The organization filter, the record scope and the metadata `filter` run in SQL in both legs, before ranking.
 - An unchanged passage is not sent to the embedder again on a reindex.
 - When the embedding model, its dimensions or the split change, it builds the new index beside the old one under a builder lock, then switches to it ([generations](#generations-the-new-index-is-built-beside-the-old-one)).
 - Without the `vector` extension (or the right to create it), boot goes on: the plugin warns with the SQL a database owner runs, and its sources answer `SERVICE_UNAVAILABLE` until then.
@@ -361,7 +370,7 @@ Details — the tables, an approximate index as an operator's step, rebuilds —
 new KnowledgeTursoPlugin(), // or { url: 'file:/var/lib/app/knowledge.db' }, ':memory:', a libsql:// URL
 ```
 
-- It searches by an exact scan; the organization filter, the record scope and the metadata `filter` run in SQL before ranking. 10,000 passages of 1,536 dimensions take about 82 MB and a search about 50 ms; larger sources belong on pgvector.
+- It searches with two legs merged by reciprocal rank fusion: an exact cosine scan, and a keyword match in an FTS5 trigram index beside each passage table, with `LIKE` for a term under three characters (「出差」). The organization filter, the record scope and the metadata `filter` run in SQL in both legs, before ranking. 10,000 passages of 1,536 dimensions take about 82 MB and a search about 50 ms; larger sources belong on pgvector.
 - A changed model or split is rebuilt beside the old index, which keeps answering until the reindex completes.
 - Where libSQL has no native build (Windows on ARM), boot goes on and its sources answer `SERVICE_UNAVAILABLE`.
 
