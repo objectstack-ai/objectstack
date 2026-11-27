@@ -1964,7 +1964,7 @@ async function composeServedPlatform(input: {
    */
   serveFlags?: { readonly dev?: boolean; readonly preset?: string };
 }): Promise<{ authFamily: unknown[]; plugins: unknown[]; notes: string[] }> {
-  const { CAPABILITY_PROVIDERS, providesCapability, resolveServedCapabilities } = await import('@objectstack/core');
+  const { CAPABILITY_PROVIDERS, providesCapability, resolveServedCapabilities, stackItemCapabilities } = await import('@objectstack/core');
   const config = input.config ?? {};
   // `serve`'s `requires` — the rule {@link composeAuthGatedSecurity} states.
   const requires = !isHostConfig(config) && Array.isArray(input.artifactRequires)
@@ -2038,7 +2038,10 @@ async function composeServedPlatform(input: {
     }
     return composeProviderForDeclarations(new Ctor() as object);
   };
-  for (const token of resolveServedCapabilities(requires).tokens) {
+  // [ADR-0161 K8 item 12] The tokens the stack's items mount (a shipped
+  // `knowledge_source` mounts `knowledge`), read off the same config `serve`
+  // reads them from (`stackItemCapabilities`), so both boots compose one set.
+  for (const token of resolveServedCapabilities(requires, { itemTokens: stackItemCapabilities(config) }).tokens) {
     const spec = CAPABILITY_PROVIDERS[token];
     // A tier token (`auth`, `ui`, `i18n`, `ai`) or one no open package
     // provides mounts nothing in `serve`'s resolver either.
