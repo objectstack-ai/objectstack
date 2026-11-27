@@ -11,8 +11,9 @@
  * matches nothing. There is no free-text fallback: when the catalog cannot be
  * read, nothing can be added and the view is shared with everyone (a name
  * already picked can still be removed). Under the list it previews, read-only,
- * which positions the picked set reaches. It grants nothing: granting stays in
- * Setup.
+ * which positions the picked set reaches (the sets each position grants in
+ * force, as the server serves them), and says the gate applies to the creator
+ * too. It grants nothing: granting stays in Setup.
  */
 
 import { useId } from 'react';
@@ -51,7 +52,7 @@ export function ViewAudiencePicker({ audience, value, onChange, disabled }: View
     const reached = positionsReached(value, loaded.positions) ?? [];
     preview = reached.length === 0
       ? t('view.switcher.audienceNoPosition', {
-        defaultValue: 'No position holds every picked capability: only people granted them directly, and the object’s editors, will see this view',
+        defaultValue: 'No position holds every picked capability: only people granted them directly will see this view',
       })
       : t('view.switcher.audiencePositions', {
         defaultValue: '{{positions}} will see this view',
@@ -137,6 +138,15 @@ export function ViewAudiencePicker({ audience, value, onChange, disabled }: View
       {preview && (
         <p className="text-xs text-muted-foreground" data-testid="view-audience-preview">
           {preview}
+        </p>
+      )}
+      {/* The gate refuses a view item whole, its creator included, and the card
+          opens the view once it is created: say so while a gate is picked. */}
+      {value.length > 0 && (
+        <p className="text-xs text-muted-foreground" data-testid="view-audience-self">
+          {t('view.switcher.audienceSelf', {
+            defaultValue: 'This applies to you too: if you do not hold every capability picked, the view leaves your own list once it is created',
+          })}
         </p>
       )}
     </div>

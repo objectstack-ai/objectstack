@@ -1392,7 +1392,8 @@ const pt = {
       audienceGrantedBy: 'Concedida por {{sets}}',
       audienceRemove: 'Remover {{name}}',
       audiencePositions: '{{positions}} verão esta visualização',
-      audienceNoPosition: 'Nenhum cargo tem todas as permissões escolhidas: só quem as recebeu diretamente e os editores do objeto verão esta visualização',
+      audienceNoPosition: 'Nenhum cargo tem todas as permissões escolhidas: só quem as recebeu diretamente verá esta visualização',
+      audienceSelf: 'Isso também vale para você: se você não tiver todas as permissões escolhidas, a visualização sai da sua própria lista depois de criada',
       audiencePositionsUnread: 'Não foi possível ler os cargos, então não é mostrado quem verá esta visualização',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: 'Um rascunho não publicado já usa o nome desta visualização, então nada foi compartilhado. Dê outro nome à visualização e tente novamente.',

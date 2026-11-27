@@ -1397,7 +1397,8 @@ const es = {
       audienceGrantedBy: 'Concedido por {{sets}}',
       audienceRemove: 'Quitar {{name}}',
       audiencePositions: '{{positions}} verán esta vista',
-      audienceNoPosition: 'Ningún puesto tiene todos los permisos elegidos: solo quienes los tengan concedidos directamente y los editores del objeto verán esta vista',
+      audienceNoPosition: 'Ningún puesto tiene todos los permisos elegidos: solo quienes los tengan concedidos directamente verán esta vista',
+      audienceSelf: 'Esto también le afecta: si no tiene todos los permisos elegidos, la vista desaparecerá de su propia lista una vez creada',
       audiencePositionsUnread: 'No se pudieron leer los puestos, así que no se muestra quién verá esta vista',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: 'Un borrador sin publicar ya usa el nombre de esta vista, así que no se compartió nada. Ponle otro nombre a la vista e inténtalo de nuevo.',

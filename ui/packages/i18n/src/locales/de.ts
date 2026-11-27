@@ -1360,7 +1360,8 @@ const de = {
       audienceGrantedBy: 'Vergeben durch {{sets}}',
       audienceRemove: '{{name}} entfernen',
       audiencePositions: '{{positions}} sehen diese Ansicht',
-      audienceNoPosition: 'Keine Position hat alle gewählten Berechtigungen: Nur direkt Berechtigte und die Bearbeiter des Objekts sehen diese Ansicht',
+      audienceNoPosition: 'Keine Position hat alle gewählten Berechtigungen: Nur direkt Berechtigte sehen diese Ansicht',
+      audienceSelf: 'Das gilt auch für Sie: Haben Sie nicht alle gewählten Berechtigungen, verschwindet die Ansicht nach dem Erstellen auch aus Ihrer eigenen Liste',
       audiencePositionsUnread: 'Die Positionen konnten nicht gelesen werden, daher wird nicht angezeigt, wer diese Ansicht sieht',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: 'Ein unveröffentlichter Entwurf verwendet bereits den Namen dieser Ansicht, daher wurde nichts geteilt. Geben Sie der Ansicht einen anderen Namen und versuchen Sie es erneut.',

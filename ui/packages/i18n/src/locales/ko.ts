@@ -1360,7 +1360,8 @@ const ko = {
       audienceGrantedBy: '{{sets}}에서 부여',
       audienceRemove: '{{name}} 제거',
       audiencePositions: '{{positions}}이(가) 이 보기를 봅니다',
-      audienceNoPosition: '선택한 모든 권한을 가진 직위가 없습니다. 직접 부여받은 사람과 개체 편집자만 이 보기를 봅니다',
+      audienceNoPosition: '선택한 모든 권한을 가진 직위가 없습니다. 직접 부여받은 사람만 이 보기를 봅니다',
+      audienceSelf: '이는 본인에게도 적용됩니다. 선택한 모든 권한을 갖고 있지 않으면 생성 후 이 보기는 본인 목록에서도 사라집니다',
       audiencePositionsUnread: '직위를 읽을 수 없어 이 보기를 볼 사람이 표시되지 않습니다',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: '게시되지 않은 초안이 이미 이 보기의 이름을 사용하고 있어 공유하지 않았습니다. 보기 이름을 바꾸고 다시 시도하세요.',

@@ -1497,7 +1497,8 @@ const ar = {
       audienceGrantedBy: 'تمنحها {{sets}}',
       audienceRemove: 'إزالة {{name}}',
       audiencePositions: 'سيرى هذا العرض: {{positions}}',
-      audienceNoPosition: 'لا يوجد منصب يحمل كل الصلاحيات المختارة: لن يرى هذا العرض إلا من مُنحت لهم مباشرة ومحررو الكائن',
+      audienceNoPosition: 'لا يوجد منصب يحمل كل الصلاحيات المختارة: لن يرى هذا العرض إلا من مُنحت لهم مباشرة',
+      audienceSelf: 'ينطبق هذا عليك أيضًا: إذا لم تكن تحمل كل الصلاحيات المختارة، فسيختفي العرض من قائمتك أنت أيضًا بعد إنشائه',
       audiencePositionsUnread: 'تعذرت قراءة المناصب، لذا لا يظهر من سيرى هذا العرض',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: 'توجد مسودة غير منشورة تستخدم اسم هذا العرض بالفعل، لذلك لم تتم المشاركة. غيّر اسم العرض وحاول مرة أخرى.',

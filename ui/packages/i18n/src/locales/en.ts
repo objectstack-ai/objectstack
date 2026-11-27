@@ -1672,7 +1672,8 @@ const en = {
       audienceGrantedBy: 'Granted by {{sets}}',
       audienceRemove: 'Remove {{name}}',
       audiencePositions: '{{positions}} will see this view',
-      audienceNoPosition: 'No position holds every picked capability: only people granted them directly, and the object’s editors, will see this view',
+      audienceNoPosition: 'No position holds every picked capability: only people granted them directly will see this view',
+      audienceSelf: 'This applies to you too: if you do not hold every capability picked, the view leaves your own list once it is created',
       audiencePositionsUnread: 'The positions could not be read, so who will see this view is not shown',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: 'An unpublished draft already uses this view’s name, so nothing was shared. Give the view another name and try again.',

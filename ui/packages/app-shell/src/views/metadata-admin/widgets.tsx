@@ -854,6 +854,16 @@ interface RefMultiRegistry {
   allAddedKey: string;
   /** What the picked names mean, drawn under the list (the capability picker's position preview). */
   footer?: (selected: readonly string[], context: WidgetContext | undefined, locale: SupportedLocale) => React.ReactNode;
+  /** A second line under an offered item (the capability picker: the permission sets granting it). */
+  detail?: (name: string, context: WidgetContext | undefined, locale: SupportedLocale) => string | undefined;
+  /**
+   * A CLOSED list (objectstack#34908): no typed-name box on any arm. A catalog
+   * nobody fed says `unreadKey`, a completed read that found nothing says
+   * `noneKey`, a failed read shows only the failure notice — so a name that
+   * matches nothing can never be added. Names already stored stay listed and
+   * removable on every arm.
+   */
+  closed?: { unreadKey: string; noneKey: string };
 }
 
 /**
@@ -871,6 +881,11 @@ interface RefMultiRegistry {
  *    a text box that adds the typed names. ⛔ Never the raw-JSON face an
  *    unregistered hint falls back to;
  *  - LOADED — an add picker offering the declared items not yet picked.
+ *
+ * A registry declared `closed` (the capability picker, objectstack#34908)
+ * offers no text box on any arm: FAILED shows only its notice, `idle` and an
+ * empty load each say why nothing can be added, LOADING shows a disabled
+ * picker.
  *
  * A stored name the LOADED catalog does not declare stays in the list, flagged
  * `(not found)`, so it is neither dropped nor read as a declared item
@@ -989,14 +1004,35 @@ function RefMultiWidget({
             <SelectContent>
               {remaining.map((o) => (
                 <SelectItem key={o.name} value={o.name}>
-                  <span className="flex items-center gap-2">
-                    {o.label && o.label !== o.name && <span>{o.label}</span>}
-                    <code className="text-xs text-muted-foreground">{o.name}</code>
+                  <span className="flex flex-col">
+                    <span className="flex items-center gap-2">
+                      {o.label && o.label !== o.name && <span>{o.label}</span>}
+                      <code className="text-xs text-muted-foreground">{o.name}</code>
+                    </span>
+                    {registry.detail?.(o.name, context, locale) && (
+                      <span className="text-[11px] text-muted-foreground" data-testid={`${testId}-detail`}>
+                        {registry.detail(o.name, context, locale)}
+                      </span>
+                    )}
                   </span>
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+        ) : registry.closed ? (
+          // A closed list offers no typed-name box: say why nothing can be
+          // added (a failed read already shows its notice above).
+          loadError ? null : loading ? (
+            <Select value="" disabled>
+              <SelectTrigger data-testid={`${testId}-add`} aria-label={addLabel}>
+                <SelectValue placeholder={t('engine.form.loadingOptions', locale)} />
+              </SelectTrigger>
+            </Select>
+          ) : (
+            <p className="text-xs text-muted-foreground" data-testid={`${testId}-closed`}>
+              {t(declared ? registry.closed.noneKey : registry.closed.unreadKey, locale)}
+            </p>
+          )
         ) : (
           freeform
         ))}
@@ -1054,10 +1090,19 @@ function CapabilityAudienceFooter({
 /**
  * The `ref-multi:capability` registration: the capabilities the environment
  * knows (declared, or granted by a permission set), each offered with the
- * permission sets granting it, and the positions the picked set reaches.
+ * permission sets granting it, and the positions the picked set reaches. The
+ * list is CLOSED: no arm offers a typed-name box, so a gate cannot name a
+ * capability nothing declares or grants (objectstack#34908).
  */
 const CAPABILITY_REGISTRY: RefMultiRegistry = {
   type: 'capability',
+  closed: { unreadKey: 'engine.form.capabilitiesUnread', noneKey: 'engine.form.capabilitiesNone' },
+  detail: (name, context, locale) => {
+    const state = context?.capabilityAudience;
+    if (state?.status !== 'loaded') return undefined;
+    const sets = state.data.capabilities.find((c) => c.name === name)?.grantedBy ?? [];
+    return sets.length > 0 ? tFormat('engine.form.capabilityGrantedBy', locale, { sets: sets.join(', ') }) : undefined;
+  },
   catalog: (context) =>
     context?.capabilityAudience
       ? mapLoaded(context.capabilityAudience, (audience) =>

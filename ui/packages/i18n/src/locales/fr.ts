@@ -1392,7 +1392,8 @@ const fr = {
       audienceGrantedBy: 'Accordée par {{sets}}',
       audienceRemove: 'Retirer {{name}}',
       audiencePositions: '{{positions}} verront cette vue',
-      audienceNoPosition: 'Aucun poste ne détient toutes les autorisations choisies : seules les personnes qui les ont reçues directement et les éditeurs de l’objet verront cette vue',
+      audienceNoPosition: 'Aucun poste ne détient toutes les autorisations choisies : seules les personnes qui les ont reçues directement verront cette vue',
+      audienceSelf: 'Cela vous concerne aussi : si vous ne détenez pas toutes les autorisations choisies, la vue quitte votre propre liste une fois créée',
       audiencePositionsUnread: 'Les postes n’ont pas pu être lus, qui verra cette vue n’est donc pas affiché',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: 'Un brouillon non publié utilise déjà le nom de cette vue, donc rien n’a été partagé. Donnez un autre nom à la vue et réessayez.',

@@ -1360,7 +1360,8 @@ const ja = {
       audienceGrantedBy: '付与元：{{sets}}',
       audienceRemove: '{{name}} を削除',
       audiencePositions: '{{positions}} がこのビューを見られます',
-      audienceNoPosition: '選択したすべての権限を持つ役職はありません。直接付与された人とオブジェクトの編集者だけがこのビューを見られます',
+      audienceNoPosition: '選択したすべての権限を持つ役職はありません。直接付与された人だけがこのビューを見られます',
+      audienceSelf: 'これはあなた自身にも適用されます。選択したすべての権限を持っていない場合、作成後このビューはあなたのリストからも消えます',
       audiencePositionsUnread: '役職を読み込めないため、このビューを見られる人は表示されません',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: '未公開の下書きがすでにこのビューの名前を使っているため、共有しませんでした。ビューの名前を変えてもう一度お試しください。',

@@ -1387,7 +1387,8 @@ const zh = {
       audienceGrantedBy: '由 {{sets}} 授予',
       audienceRemove: '移除 {{name}}',
       audiencePositions: '{{positions}} 会看到此视图',
-      audienceNoPosition: '没有岗位同时持有所选的全部能力：只有被直接授予这些能力的人和该对象的编辑者能看到此视图',
+      audienceNoPosition: '没有岗位同时持有所选的全部能力：只有被直接授予这些能力的人能看到此视图',
+      audienceSelf: '这对你自己同样生效：如果你没有持有所选的全部能力，视图创建后也会从你自己的列表中消失',
       audiencePositionsUnread: '无法读取岗位，因此不显示谁会看到此视图',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: '一个尚未发布的草稿已经用了这个视图的名称，所以没有共享。请换个名称再试。',

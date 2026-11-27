@@ -6,17 +6,20 @@
  * What is pinned:
  *   - the catalog: the capabilities offered are the ones the registry declares
  *     and every name a permission set grants (a closed list), each with the
- *     sets granting it; a position holds what its named sets grant; a failed
- *     position read keeps the catalog and says the positions are unknown;
+ *     sets granting it; a position holds what the sets it grants IN FORCE
+ *     grant, as `?include=grants` serves them (never its raw `permissionSets`);
+ *     an undecorated or failed position read leaves the positions unknown;
  *   - the preview: a position is listed when its sets grant EVERY picked
  *     capability (the gate is all-of); nothing picked is no gate;
  *   - the create card's shared scope: the corrected hint, the picker offered
  *     only for a shared view and only from the catalog, its position preview,
  *     the open view's gate as the starting pick, and the pick on the request;
- *     a failed catalog read adds nothing (no free text);
+ *     a failed catalog read adds nothing (no free text); a picked gate says it
+ *     applies to the creator too;
  *   - the host: the picked gate replaces the one the open view would hand on,
  *     an empty pick writes no key, and no picker leaves the body as before;
- *   - the Studio form widget `ref-multi:capability`: the closed list and the
+ *   - the Studio form widget `ref-multi:capability`: the closed list (no
+ *     typed-name box on any arm), each option with its granting sets, and the
  *     same preview under it.
  */
 
@@ -61,10 +64,16 @@ const PERMISSION_SETS = [
   { name: 'sales_lead_set', systemPermissions: ['view_deal_sales', 'view_deal_finance'] },
   { name: 'finance_set', systemPermissions: ['view_deal_finance'] },
 ];
+// As `GET /meta/position?include=grants` serves them: `_grantedPermissionSets`
+// is the server's answer (the sets in force); the raw `permissionSets` a
+// position names is NOT what the preview reads — `paused_lead` names a set
+// but grants none (switched off), and `accountant` names one that is not served.
+const grants = (...sets: string[]) => sets.map((name) => ({ name, via: 'definition' }));
 const POSITIONS = [
-  { name: 'sales_rep', label: '业务员', permissionSets: ['sales_rep_set'] },
-  { name: 'sales_lead', label: '销售主管', permissionSets: ['sales_lead_set'] },
-  { name: 'accountant', permissionSets: ['finance_set', 'missing_set'] },
+  { name: 'sales_rep', label: '业务员', permissionSets: ['sales_rep_set'], _grantedPermissionSets: grants('sales_rep_set') },
+  { name: 'sales_lead', label: '销售主管', permissionSets: ['sales_lead_set'], _grantedPermissionSets: grants('sales_lead_set') },
+  { name: 'accountant', permissionSets: ['finance_set', 'missing_set'], _grantedPermissionSets: grants('finance_set') },
+  { name: 'paused_lead', permissionSets: ['sales_lead_set'], _grantedPermissionSets: [] },
 ];
 
 const AUDIENCE = buildCapabilityAudience(CAPABILITIES, PERMISSION_SETS, POSITIONS);
@@ -78,12 +87,18 @@ describe('the audience catalog', () => {
     ]);
   });
 
-  it('a position holds what its named permission sets grant, and nothing of its own', () => {
+  it('a position holds what the sets it grants IN FORCE (as served) grant, never what its raw definition names', () => {
     expect(AUDIENCE.positions).toEqual([
       { name: 'accountant', capabilities: ['view_deal_finance'] },
+      { name: 'paused_lead', capabilities: [] },
       { name: 'sales_lead', label: '销售主管', capabilities: ['view_deal_finance', 'view_deal_sales'] },
       { name: 'sales_rep', label: '业务员', capabilities: ['export_reports', 'view_deal_sales'] },
     ]);
+  });
+
+  it('a position list served without its grants leaves the positions unknown, never joined in the browser', () => {
+    const undecorated = POSITIONS.map(({ _grantedPermissionSets: _served, ...raw }) => raw);
+    expect(buildCapabilityAudience(CAPABILITIES, PERMISSION_SETS, undecorated).positions).toBeNull();
   });
 
   it('the preview lists a position only when its sets grant EVERY picked capability; nothing picked is no gate', () => {
@@ -92,6 +107,14 @@ describe('the audience catalog', () => {
     expect(positionsReached(['view_deal_sales'], positions)!.map((p) => p.name)).toEqual(['sales_lead', 'sales_rep']);
     expect(positionsReached(['view_deal_sales', 'view_deal_finance'], positions)!.map((p) => p.name)).toEqual(['sales_lead']);
     expect(positionsReached(['nobody_has_this'], positions)).toEqual([]);
+  });
+
+  it('reads the positions with their served grants', async () => {
+    const list = vi.fn(async (type: string, _options?: { include?: 'grants' }) =>
+      (type === 'capability' ? CAPABILITIES : type === 'permission' ? PERMISSION_SETS : POSITIONS) as unknown[]);
+    const audience = await loadCapabilityAudience({ list });
+    expect(list).toHaveBeenCalledWith('position', { include: 'grants' });
+    expect(positionsReached(['view_deal_sales'], audience.positions!)!.map((p) => p.name)).toEqual(['sales_lead', 'sales_rep']);
   });
 
   it('a failed position read keeps the catalog and leaves the positions unknown; a failed capability read fails the load', async () => {
@@ -190,7 +213,18 @@ describe('the create card: who sees a shared view', () => {
     mountCard({ loadAudience: async () => AUDIENCE, initialRequiredPermissions: ['export_reports', 'view_deal_finance'] });
     toShared();
     await settle();
-    expect(screen.getByTestId('view-audience-preview').textContent).toMatch(/^No position holds every picked capability/);
+    expect(screen.getByTestId('view-audience-preview').textContent).toBe(
+      'No position holds every picked capability: only people granted them directly will see this view',
+    );
+  });
+
+  it('while a gate is picked, it says the gate applies to the creator too; with none picked it says nothing of the kind', async () => {
+    mountCard({ loadAudience: async () => AUDIENCE });
+    toShared();
+    await settle();
+    expect(screen.queryByTestId('view-audience-self')).toBeNull();
+    await addCapability('view_deal_sales');
+    expect(screen.getByTestId('view-audience-self').textContent).toMatch(/^This applies to you too/);
   });
 
   it('starts from the open view\'s gate, which can be removed: the request then carries an empty gate', async () => {
@@ -315,8 +349,45 @@ describe('the view form\'s audience row in Studio', () => {
     expect(screen.getByTestId('ref-multi-capability-audience').textContent).toMatch(/everyone who can see the list/i);
   });
 
-  it('CONTROL: no catalog fed, no preview', () => {
+  it('offers each capability with the permission sets granting it', async () => {
+    mountRow(AUDIENCE, []);
+    fireEvent.keyDown(screen.getByTestId('ref-multi-capability-add'), { key: 'ArrowDown' });
+    const listbox = await screen.findByRole('listbox');
+    expect(within(listbox).getAllByTestId('ref-multi-capability-detail').map((d) => d.textContent)).toEqual([
+      'Granted by sales_rep_set',
+      'Granted by finance_set, sales_lead_set',
+      'Granted by sales_lead_set, sales_rep_set',
+    ]);
+  });
+
+  it('is a closed list: no catalog fed, an empty one, or a failed read offers no box to type a name in', () => {
     mountRow(null, ['view_deal_sales']);
     expect(screen.queryByTestId('ref-multi-capability-audience')).toBeNull();
+    expect(screen.queryByTestId('ref-multi-capability-freeform')).toBeNull();
+    expect(screen.getByTestId('ref-multi-capability-closed').textContent).toBe('The capability list is not available here, so none can be added.');
+    cleanup();
+    mountRow({ capabilities: [], positions: [] }, []);
+    expect(screen.queryByTestId('ref-multi-capability-freeform')).toBeNull();
+    expect(screen.getByTestId('ref-multi-capability-closed').textContent).toMatch(/^No capability is defined yet/);
+    cleanup();
+    render(
+      <SchemaForm
+        schema={{ type: 'object', properties: { requiredPermissions: { type: 'array', title: 'Required permissions', items: { type: 'string' } } } } as never}
+        form={{ type: 'simple', sections: [{ label: 'S', fields: [{ field: 'requiredPermissions', widget: 'ref-multi:capability' }] }] } as never}
+        value={{ requiredPermissions: ['view_deal_sales'] }}
+        onChange={() => {}}
+        widgetContext={{ conditionScope: 'none', capabilityAudience: { status: 'error', message: 'denied' } }}
+      />,
+    );
+    expect(screen.getByTestId('ref-multi-capability-load-failed')).toBeInTheDocument();
+    expect(screen.queryByTestId('ref-multi-capability-freeform')).toBeNull();
+    expect(screen.getByTestId('ref-multi-capability')).toHaveTextContent('view_deal_sales');
+  });
+
+  it('nothing reachable: the preview no longer promises the object\'s editors', () => {
+    mountRow(AUDIENCE, ['export_reports', 'view_deal_finance']);
+    expect(screen.getByTestId('ref-multi-capability-audience').textContent).toBe(
+      'No position holds every picked capability: only people granted them directly will see it.',
+    );
   });
 });

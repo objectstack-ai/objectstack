@@ -223,10 +223,11 @@ Setup.
    nothing there.
 
 Under the pick, the console previews the positions that will see the view: the
-positions whose permission sets grant **every** capability picked. The preview
-is advice, and the server stays the authority. It does not account for a
-deactivated permission set, and it cannot name people who hold a set directly
-rather than through a position.
+positions whose permission sets grant **every** capability picked. It reads
+which sets each position grants from the server, the sets the resolver grants
+its holders, so a position that has been switched off reaches no one. The preview is
+still advice, and the server stays the authority: it cannot name people who
+hold a set directly rather than through a position.
 
 <Callout type="warn">
 **The gate applies to you too.** Pick a capability you do not hold, and the view
