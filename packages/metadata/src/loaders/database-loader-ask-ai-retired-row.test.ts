@@ -11,7 +11,10 @@
  *   - the row is still found BY NAME: `exists` answers true and `delete`
  *     takes it out, so the metadata API's delete door reaches it. A loader
  *     that resolved a row's identity through the converted body would find no
- *     name for it and leave it in the store for good.
+ *     name for it and leave it in the store for good;
+ *   - a write of the same name still reads the row's object binding from its
+ *     stored body, so the loader names the row's object and keeps the two
+ *     bindings apart (red when identity is read through the converted body).
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -66,5 +69,21 @@ describe('DatabaseLoader — a stored ask_ai action row (ADR-0160 D7)', () => {
     await loader.delete('action', 'ask_about_ticket');
     expect(await storedNames()).toEqual(['close_ticket']);
     expect(await loader.exists('action', 'ask_about_ticket')).toBe(false);
+  });
+
+  it('a write of the same name still reads the row\'s own object binding, so the two bindings keep apart', async () => {
+    // The row was written before the loader named objects (`bundle_member`
+    // empty). Its object comes from its stored body, which the converted read
+    // no longer has; a loader that took identity from that read would count
+    // it object-less and leave it unnamed beside the new binding.
+    await loader.save('action', 'ask_about_ticket', { ...CLOSE, name: 'ask_about_ticket', objectName: 'case' });
+    const rows = (await driver.find('sys_metadata', { where: { type: 'action', name: 'ask_about_ticket' } })) as Array<{
+      id: string;
+      bundle_member: string | null;
+    }>;
+    expect(rows.map((r) => [r.id === 'r_ask' ? 'stored' : 'saved', r.bundle_member]).sort()).toEqual([
+      ['saved', 'case'],
+      ['stored', 'ticket'],
+    ]);
   });
 });
