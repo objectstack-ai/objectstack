@@ -44,6 +44,15 @@ const MODEL_PROVIDER_RETIRED =
   + 'and an agent that names no model runs on the deployment\'s default model. '
   + 'Run `os migrate meta --from 18` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
+// The wrong-layer spelling: `provider` written at the agent's top level. It
+// used to point at `model.provider`; with that key retired, it carries the
+// same answer (the `memory.longTerm` spellings' precedent below).
+const AGENT_PROVIDER_SPELLING_RETIRED =
+  'there is no provider key on an agent, at the top level or under `model` — the provider that '
+  + 'serves an agent is chosen by the deployment\'s AI settings (`agent.model.provider` was '
+  + 'removed in @objectstack/spec 19.0.0, ADR-0049 enforce-or-remove). Delete the key; to pin a '
+  + 'model, name it in `agent.model.model`.';
+
 // [#37712] The default the retired `provider` emitted, captured as a literal
 // at retirement (`acceptRetiredDefaultResidue`, the #12840 rule for a retired
 // DEFAULTED key). Every agent a released 18.x toolchain parsed with a `model`
@@ -368,7 +377,10 @@ export const AgentSchema = lazySchema(() => strictObject({
       + 'with `access` / `permissions`.',
     // ── Wrong-layer pointers ──────────────────────────────────────────────
     temperature: 'model settings live under `model` — write `model: { temperature: … }`',
-    provider: 'model settings live under `model` — write `model: { provider: … }`',
+    // Not a wrong-layer pointer any more (#37712): `model.provider` was retired,
+    // so this answers with the retirement's fact instead of steering an author
+    // onto the tombstone.
+    provider: AGENT_PROVIDER_SPELLING_RETIRED,
     maxTokens:
       'ambiguous at this level — per-request model output is `model.maxTokens`; a budget '
       + 'ceiling for the whole invocation is `guardrails.maxTokensPerInvocation`',

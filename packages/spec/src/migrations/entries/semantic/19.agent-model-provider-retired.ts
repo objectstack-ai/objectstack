@@ -25,9 +25,9 @@ export const entry: SemanticMigration = {
     + 'four values (`openai`, `azure_openai`, `anthropic`, `local`) neither matched that list nor could '
     + 'follow it. Authoring now refuses the key with a prescription, and TypeScript rejects it. The D2 '
     + 'conversion `agent-model-provider-removed` deletes it from existing sources and stored rows, '
-    + 'losslessly: no value of it ever chose a provider. What no conversion can decide is whether an '
-    + 'agent whose author wrote a provider, and no model name, should now name a model the deployment '
-    + 'offers or run on its default model',
+    + 'losslessly: no value of it ever chose a provider. What no conversion can decide is whether the '
+    + 'model an agent names is one the target deployment offers: an author who wrote a provider meant '
+    + 'a model from it, and the deployment resolves the name only among the providers it has turned on',
   acceptanceCriteria:
     'No agent declares `model.provider`; the key is refused at parse with its prescription, and '
     + 'TypeScript rejects it. Every agent that must run on a particular model names it in `model.model`, '

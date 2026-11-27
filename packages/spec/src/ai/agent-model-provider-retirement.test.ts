@@ -99,6 +99,24 @@ describe('agent model provider retirement — the tombstone, at every door that 
     expect(AIModelConfigSchema.safeParse({ provider: 'openai ' }).success).toBe(false);
   });
 
+  it('a `provider` at the agent TOP level is answered with the retirement, never steered onto `model.provider`', () => {
+    for (const provider of ['openai', 'anthropic']) {
+      const r = AgentSchema.safeParse({ ...MODEL_AGENT, provider });
+      expect(r.success, provider).toBe(false);
+      const issues = r.error!.issues;
+      expect(issues).toHaveLength(1);
+      expect(issues[0].code).toBe('unrecognized_keys');
+      expect(issues[0].path).toEqual([]);
+      expect(issues[0].message).toContain('there is no provider key on an agent, at the top level or under `model`');
+      expect(issues[0].message).toContain('name it in `agent.model.model`');
+      expect(issues[0].message).not.toMatch(/model: \{ provider/);
+    }
+    // CONTROL: the neighbouring wrong-layer pointer still points.
+    const temp = AgentSchema.safeParse({ ...MODEL_AGENT, temperature: 0.2 });
+    expect(temp.success).toBe(false);
+    expect(temp.error!.issues[0].message).toContain('write `model: { temperature: … }`');
+  });
+
   it('the walked shape keeps `provider` as a key — the tombstone stays reachable for its refusal', () => {
     expect(Object.keys(AIModelConfigSchema.shape)).toContain('provider');
     expect(Object.keys(AIModelConfigSchema.shape), 'CONTROL: its live neighbour').toContain('model');
