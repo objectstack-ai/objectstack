@@ -32,6 +32,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// `./protocol.js` reaches `@objectstack/lint` only through a dynamic import; paid
+// here at module scope so the first load lands during collection, not inside a
+// clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/lint';
 import { resolveObjectSortability } from '@objectstack/spec/api';
 import { FieldType } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation } from './protocol.js';
