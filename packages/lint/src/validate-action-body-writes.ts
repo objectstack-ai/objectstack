@@ -209,6 +209,12 @@ export interface ActionBodySite {
   name: string;
   source: string;
   path: string;
+  /**
+   * [#35143] The body's `capabilities` grant as written (`[]` when absent, the
+   * spec default) — read by `validate-action-body-capabilities.ts`, which asks
+   * whether the body calls what it was granted.
+   */
+  capabilities: readonly unknown[];
 }
 
 /** The object an action binds to, by the same rule `collectBundleActions` uses. */
@@ -285,7 +291,12 @@ export function collectActionBodies(stack: AnyRec): ActionBodySite[] {
       const key = `${actionObjectBinding(action, parentObject) ?? ''}\u0000${name}\u0000${source}`;
       if (seen.has(key)) return;
       seen.add(key);
-      sites.push({ name, source, path: `${pathPrefix}[${index}].body.source` });
+      sites.push({
+        name,
+        source,
+        path: `${pathPrefix}[${index}].body.source`,
+        capabilities: Array.isArray(body.capabilities) ? body.capabilities : [],
+      });
     });
   };
 

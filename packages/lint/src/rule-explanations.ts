@@ -4891,8 +4891,11 @@ const OBJECT_REFERENCE_SITES =
   'Judged: the object names no other rule resolves, each a plain string the schema ships as ' +
   'written: a `lookup`, `master_detail` or `user` field\'s `reference`; a view container\'s own ' +
   '`object`; an action param\'s `reference` and `objectOverride`; a dashboard global filter\'s ' +
-  '`optionsFrom.object`; a dataset\'s base `object`; and a nav entry\'s `requiresObject`, with ' +
-  'the `objectName` of an entry that carries one. Interpolated names (`${…}`) resolve at render ' +
+  '`optionsFrom.object`; a dataset\'s base `object`; a nav entry\'s `requiresObject`, with ' +
+  'the `objectName` of an entry that carries one; and the object a seed dataset (`data[].object`), a ' +
+  'flow `get_record` / `create_record` / `update_record` / `delete_record` / object-form `screen` node ' +
+  '(`config.objectName`) or a standalone action (`objectName`) is bound to, where an object the stack ' +
+  'extends (`objectExtensions`) also resolves. Interpolated names (`${…}`) resolve at render ' +
   'time and are skipped.';
 
 /** The resolution ladder — both object-reference ids. Held to `PLATFORM_OBJECT_PREFIXES` by the rule's test. */
@@ -4918,7 +4921,10 @@ const OBJECT_REFERENCE_MISS_COST =
   '(ADR-0021), so every one of them queries nothing. A nav entry\'s `requiresObject`: the entry is ' +
   'hidden unless the object is registered, so a typo hides it for good, and it suppresses the nav ' +
   'cross-reference check that would have caught the target; the gated `objectName` is exempt from ' +
-  'the build-time check, so it is verified only here.';
+  'the build-time check, so it is verified only here. A seed dataset: the seed load finds no object ' +
+  'and loads none of its records. A flow node: the step asks the engine for an object that is not ' +
+  'there and fails the run on every execution. A standalone action: it registers against no object, ' +
+  'so no list or record page carries it.';
 
 const OBJECT_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
   rule: 'object-reference-unknown',

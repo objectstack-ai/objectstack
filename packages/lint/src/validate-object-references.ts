@@ -51,6 +51,11 @@
  *     views belong to. `getViewsByObject()` indexes views by exactly this key,
  *     so a container bound to a name nothing registers is dead at runtime —
  *     none of its views is ever found — while authoring stayed green.
+ *   - [#35143] the object a seed dataset, a flow CRUD / object-form screen
+ *     node or a standalone action is bound to — `data[].object`,
+ *     `config.objectName`, `actions[].objectName`. A miss is work that never
+ *     happens: the seed loads nothing, the step fails every run, the action is
+ *     carried by no page. An object the stack extends resolves at these three.
  *
  * ── Severity ladder (the point of the rule) ──────────────────────────────
  *
@@ -87,7 +92,22 @@ import {
 import { referenceCarrierOf, referenceTargetOf } from '@objectstack/spec/data';
 
 import { closureDependencyRemedy, packagesOf, recordsOf, suggestName } from './object-graph.js';
+import { walkFlowNodes } from './flow-walk.js';
 import type { UserTextParams } from './finding-user-text.js';
+
+/**
+ * [#35143] The flow node types whose `config.objectName` names the object the
+ * step reads, writes or renders — the four CRUD executors (`crud-nodes.ts`,
+ * `@objectstack/service-automation`) and an object-form `screen`. Each takes the
+ * name as written and asks the engine for it at run time.
+ */
+const OBJECT_BOUND_FLOW_NODE_TYPES: ReadonlySet<string> = new Set([
+  'get_record',
+  'create_record',
+  'update_record',
+  'delete_record',
+  'screen',
+]);
 
 /** Materialized once for the repeated edit-distance scans in `suggestName`. */
 const PLATFORM_NAMES: readonly string[] = [...PLATFORM_PROVIDED_OBJECT_NAMES];
@@ -540,6 +560,79 @@ export function validateObjectReferences(
       'dataset base object',
       '',
       { dataset: dsName },
+    );
+  }
+
+  // ── [#35143] Seeds, flow nodes and actions → the object they are bound to ──
+  // Three bindings that name the object a write lands on, so a miss is not a
+  // degraded control but work that never happens:
+  //
+  //  - a seed dataset's `object`. `defineStack` refuses an unprefixed miss
+  //    already, but answers a platform-prefixed name by its prefix alone
+  //    (`isPlatformObjectName`), so `sys_nothing_here` built clean; and a
+  //    `seed` saved at the runtime publish door was judged by nothing. The
+  //    seed load looks the object up, finds none and loads no record of it.
+  //  - a flow node's `config.objectName` — `get_record`, `create_record`,
+  //    `update_record`, `delete_record`, and a `screen` that renders an
+  //    object's form. Nothing resolved it at all: the step reaches the engine
+  //    with a name no object carries and fails the run on every execution. The
+  //    START node's `objectName` is `flow-trigger-unknown-object`'s subject
+  //    (`validate-flow-trigger-readiness.ts`) and is not read here.
+  //  - a standalone action's `objectName`, the object `defineStack` folds it
+  //    into and the runtime keys its dispatch by. `defineStack` refuses a miss
+  //    on the CLI; at the runtime `action` publish door nothing did, and the
+  //    action registered against no object, so no list or record page carries
+  //    it and its object route answers 404.
+  //
+  // The same ladder as every site above, with one addition: an object this
+  // stack EXTENDS (`objectExtensions[].extend`) resolves, because the stack's
+  // own metadata says the object exists in another package — the exemption
+  // `defineStack` already grants an action's `objectName` for the same reason.
+  // An embedded action (`objects[].actions[]`) is bound by the object it is
+  // written on and is not read.
+  const extended = new Set<string>();
+  for (const ext of recordsOf(stack.objectExtensions)) {
+    const n = strName(ext.extend);
+    if (n) extended.add(n);
+  }
+  const checkBound = (target: string | undefined, where: string, path: string, subject: string) => {
+    const name = strName(target);
+    if (name && extended.has(name)) return;
+    check(name, where, path, subject);
+  };
+
+  const seeds = Array.isArray(stack.data) ? (stack.data as unknown[]) : [];
+  for (let si = 0; si < seeds.length; si++) {
+    const seed = seeds[si];
+    if (!seed || typeof seed !== 'object') continue;
+    checkBound(strName((seed as AnyRec).object), `seed #${si}`, `data[${si}].object`, 'seed object');
+  }
+
+  const flows = recordsOf(stack.flows);
+  for (let fi = 0; fi < flows.length; fi++) {
+    const flow = flows[fi];
+    const flowName = strName(flow.name) ?? `#${fi}`;
+    for (const { node, path } of walkFlowNodes(flow, `flows[${fi}]`)) {
+      if (typeof node.type !== 'string' || !OBJECT_BOUND_FLOW_NODE_TYPES.has(node.type)) continue;
+      const config = node.config;
+      if (!config || typeof config !== 'object' || Array.isArray(config)) continue;
+      checkBound(
+        strName((config as AnyRec).objectName),
+        `flow "${flowName}" · node "${strName(node.label) ?? strName(node.id) ?? '?'}"`,
+        `${path}.config.objectName`,
+        `${node.type} object`,
+      );
+    }
+  }
+
+  for (let ai = 0; ai < globalActions.length; ai++) {
+    const action = globalActions[ai];
+    if (!action || typeof action !== 'object') continue;
+    checkBound(
+      strName(action.objectName),
+      `action "${strName(action.name) ?? `#${ai}`}"`,
+      `actions[${ai}].objectName`,
+      'action object',
     );
   }
 

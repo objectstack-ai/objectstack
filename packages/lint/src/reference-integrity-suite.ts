@@ -248,9 +248,18 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // prescription the flow and view doors print (declare the dependency,
   // ADR-0141 D1). Absent — the CLI, or a write that names no package — the
   // rule prints the hint it always did. The verdict and severity do not move.
+  //
+  // [#35143] `seed` and `action` join: the member now resolves the object a
+  // seed dataset (`data[].object`) and a standalone action (`objectName`) is
+  // bound to, and those two writes are the doors those bindings arrive through
+  // (Studio, REST `/meta`, an MCP/AI author). Safe for the reason above: the
+  // binding resolves against `stack.objects`, which every per-write snapshot
+  // carries, and the member's other rungs find no such collection on a seed or
+  // action snapshot. A flow node's `config.objectName` rides the `flow` door the
+  // member already gates.
   {
     name: 'validateObjectReferences',
-    runtimeTypes: ['flow', 'dataset'],
+    runtimeTypes: ['flow', 'dataset', 'seed', 'action'],
     run: (stack, ctx) =>
       validateObjectReferences(stack, ctx?.packageScope ? { packageScope: ctx.packageScope } : {}),
   },

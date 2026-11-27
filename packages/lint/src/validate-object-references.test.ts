@@ -445,6 +445,102 @@ describe('validateObjectReferences — ADR-0021 dataset base object (#14105)', (
   });
 });
 
+describe('[#35143] validateObjectReferences — the object a seed, a flow node or an action is bound to', () => {
+  const flow = (nodes: Record<string, unknown>[]) => ({
+    name: 'crm_flow',
+    label: 'F',
+    type: 'autolaunched',
+    nodes: [{ id: 'start', type: 'start', label: 'Start' }, ...nodes],
+    edges: [],
+  });
+
+  it('errors on a seed dataset over an object that does not exist, and warns on a platform-shaped one', () => {
+    const findings = validateObjectReferences({
+      ...baseStack(),
+      data: [
+        { object: 'crm_led', externalId: 'name', records: [] },
+        { object: 'sys_nothing_here', externalId: 'name', records: [] },
+        { object: 'crm_lead', externalId: 'name', records: [] },
+        { object: 'sys_user', externalId: 'name', records: [] },
+      ],
+    });
+    expect(findings.map((f) => [f.severity, f.rule, f.path])).toEqual([
+      ['error', OBJECT_REFERENCE_UNKNOWN, 'data[0].object'],
+      ['warning', OBJECT_REFERENCE_UNREGISTERED_PLATFORM, 'data[1].object'],
+    ]);
+    expect(findings[0].message).toContain('Did you mean "crm_lead"?');
+  });
+
+  it('errors on a flow CRUD or object-form screen node bound to an object that does not exist', () => {
+    const findings = validateObjectReferences({
+      ...baseStack(),
+      flows: [
+        flow([
+          { id: 'g', type: 'get_record', label: 'Get', config: { objectName: 'crm_lead' } },
+          { id: 'c', type: 'create_record', label: 'Make', config: { objectName: 'crm_nope', fields: {} } },
+          { id: 'u', type: 'update_record', label: 'Upd', config: { objectName: 'crm_acount', fields: {} } },
+          { id: 'd', type: 'delete_record', label: 'Del', config: { objectName: 'crm_gone' } },
+          { id: 's', type: 'screen', label: 'Form', config: { objectName: 'crm_form_obj' } },
+          { id: 't', type: 'create_record', label: 'Tpl', config: { objectName: '{target}' } },
+          {
+            id: 'loop',
+            type: 'loop',
+            label: 'Loop',
+            config: { collection: 'xs', body: { nodes: [{ id: 'n', type: 'get_record', label: 'Inner', config: { objectName: 'crm_inner' } }] } },
+          },
+        ]),
+      ],
+    });
+    expect(findings.every((f) => f.rule === OBJECT_REFERENCE_UNKNOWN && f.severity === 'error')).toBe(true);
+    expect(findings.map((f) => f.path)).toEqual([
+      'flows[0].nodes[2].config.objectName',
+      'flows[0].nodes[3].config.objectName',
+      'flows[0].nodes[4].config.objectName',
+      'flows[0].nodes[5].config.objectName',
+      'flows[0].nodes[7].config.body.nodes[0].config.objectName',
+    ]);
+    expect(findings[1].message).toContain('Did you mean "crm_account"?');
+  });
+
+  it('leaves the start node to the trigger rule', () => {
+    expect(
+      validateObjectReferences({
+        ...baseStack(),
+        flows: [{ name: 'f', nodes: [{ id: 'start', type: 'start', config: { objectName: 'crm_nope' } }], edges: [] }],
+      }),
+    ).toEqual([]);
+  });
+
+  it('errors on a standalone action bound to an object that does not exist; an embedded one is not read', () => {
+    const findings = validateObjectReferences({
+      objects: [
+        ...baseStack().objects,
+        { name: 'crm_note', fields: { name: { type: 'text' } }, actions: [{ name: 'inline', objectName: 'crm_wrong' }] },
+      ],
+      actions: [
+        { name: 'go', label: 'Go', objectName: 'crm_lead' },
+        { name: 'bad', label: 'Bad', objectName: 'crm_laed' },
+        { name: 'headless', label: 'H' },
+      ],
+    });
+    expect(findings.map((f) => [f.rule, f.path, f.where])).toEqual([
+      [OBJECT_REFERENCE_UNKNOWN, 'actions[1].objectName', 'action "bad"'],
+    ]);
+  });
+
+  it('resolves an object the stack extends at the three bindings', () => {
+    expect(
+      validateObjectReferences({
+        ...baseStack(),
+        objectExtensions: [{ extend: 'hr_employee', fields: {} }],
+        data: [{ object: 'hr_employee', externalId: 'name', records: [] }],
+        actions: [{ name: 'go', label: 'Go', objectName: 'hr_employee' }],
+        flows: [flow([{ id: 'c', type: 'create_record', label: 'C', config: { objectName: 'hr_employee', fields: {} } }])],
+      }),
+    ).toEqual([]);
+  });
+});
+
 describe('validateObjectReferences — the severity ladder', () => {
   // The `sys_approval_process` case: platform-shaped but registered by nothing.
   // ADR-0019 removed the process object when approval became a flow node.
