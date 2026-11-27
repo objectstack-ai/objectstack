@@ -1,6 +1,9 @@
 ---
 '@object-ui/plugin-chatbot': patch
 '@object-ui/app-shell': patch
+'@object-ui/core': patch
+'@object-ui/plugin-grid': patch
+'@object-ui/plugin-form': patch
 ---
 
 feat(chatbot)!: the build chat's frontend is retired — the plan, change, build-result and handoff cards, their detectors and the props that fed them are removed
@@ -15,6 +18,8 @@ Metadata-protocol: none
 `publishHealthFromResponse` and `PublishHealth` stay at both entry points of `@object-ui/plugin-chatbot`; the preview's Publish all still reads them.
 
 In `@object-ui/app-shell`, `ConversationsSidebar` no longer takes `includeAskConversations`: the sidebar lists the active agent's conversations. Delete the prop where a host passes it.
+
+`@object-ui/core`, `@object-ui/plugin-grid` and `@object-ui/plugin-form` carry comment and test edits only, which drop references to the deleted build-chat code. They change no behaviour.
 
 ## What leaves, and what to write instead
 
