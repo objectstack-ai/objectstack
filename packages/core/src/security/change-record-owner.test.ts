@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
-import { OWNER_FIELD_DEF } from '@objectstack/spec/data';
+import { OWNER_FIELD_DEF, QUEUE_FIELD_DEF } from '@objectstack/spec/data';
 import {
   CHANGE_OWNER_DISABLED,
   CHANGE_OWNER_NOTIFICATION_TOPIC,
@@ -19,8 +19,6 @@ import { recordNotFoundError } from '../utils/record-not-found.js';
 
 type Row = Record<string, any>;
 
-const QUEUE_FIELD_DEF = { type: 'text', system: true };
-
 // Registered shapes, as `applySystemFields` leaves them: the owner column and
 // the queue column ride together on an owner-bearing object (ADR-0142 D3).
 const lead = { name: 'lead', label: 'Lead', sharingModel: 'private', fields: { name: { type: 'text' }, owner_id: OWNER_FIELD_DEF, queue: QUEUE_FIELD_DEF } };
@@ -31,6 +29,19 @@ const orgOwned = { name: 'setting_row', ownership: 'org', fields: { name: { type
 const managed = { name: 'auth_session', managedBy: 'better-auth', fields: { user_id: { type: 'lookup', reference: 'sys_user' } } };
 const platform = { name: 'sys_team', fields: { name: { type: 'text' } } };
 const noQueue = { name: 'memo', fields: { owner_id: OWNER_FIELD_DEF } };
+// [#36262] An external (ADR-0015) object with a provable owner: the injection
+// still registers `queue` beside `owner_id`, with no column behind it.
+const extAccount = {
+  name: 'ext_account', label: 'Account', sharingModel: 'private', external: { remoteName: 'accounts' },
+  fields: { name: { type: 'text' }, owner_id: { type: 'lookup', reference: 'sys_user', label: 'Account owner' }, queue: QUEUE_FIELD_DEF },
+};
+// [#36262] The registered list shape of `fields`, the platform's queue column among them.
+const listed = {
+  name: 'listed_lead', sharingModel: 'private',
+  fields: [{ name: 'name', type: 'text' }, { name: 'owner_id', ...OWNER_FIELD_DEF }, { name: 'queue', ...QUEUE_FIELD_DEF }],
+};
+// [#36262] A field the author named `queue`: theirs, not the ownership queue.
+const authoredQueue = { name: 'ticket', sharingModel: 'private', fields: { owner_id: OWNER_FIELD_DEF, queue: { type: 'text', label: 'Support queue' } } };
 // [#35315 phase 2] The cascade's children of `lead`: one declared cascade, one
 // plain lookup, and — registered raw, past the parse that refuses it — a
 // cascade on a controlled_by_parent detail, which is never a candidate.
@@ -39,7 +50,7 @@ const leadCall = { name: 'lead_call', sharingModel: 'private', fields: { lead: {
 const leadLine = { name: 'lead_line', sharingModel: 'controlled_by_parent', fields: { lead: { type: 'master_detail', reference: 'lead', transferBehavior: 'cascade' }, owner_id: OWNER_FIELD_DEF } };
 
 const SCHEMAS: Record<string, unknown> = Object.fromEntries(
-  [lead, pinned, line, lineOptedIn, orgOwned, managed, platform, noQueue, leadTask, leadCall, leadLine].map((o) => [o.name, o]),
+  [lead, pinned, line, lineOptedIn, orgOwned, managed, platform, noQueue, extAccount, listed, authoredQueue, leadTask, leadCall, leadLine].map((o) => [o.name, o]),
 );
 
 const CALLER = { userId: 'u_manager', tenantId: 'org_1' };
@@ -66,6 +77,9 @@ function fakeEngine(opts: {
     lead: [{ id: 'l1', owner_id: 'u_a' }, { id: 'l2', owner_id: 'u_b' }, { id: 'l3', owner_id: 'u_a' }],
     contract_line: [{ id: 'c1', owner_id: 'u_a' }],
     memo: [{ id: 'm1', owner_id: 'u_a' }],
+    ext_account: [{ id: 'x1', owner_id: 'u_a' }],
+    listed_lead: [{ id: 'd1', owner_id: 'u_a' }],
+    ticket: [{ id: 'k1', owner_id: 'u_a' }],
     lead_task: [
       { id: 't1', lead: 'l1', owner_id: 'u_a' },
       { id: 't2', lead: 'l1', owner_id: 'u_b' },
@@ -199,7 +213,7 @@ describe('[#35402] changeRecordOwner — one record', () => {
 
   it('a queue target on an object with no queue column is refused before any write', async () => {
     const engine = fakeEngine();
-    const err = await refusalOf(changeRecordOwner(engine, 'memo', 'm1', { queue: 'triage' }, CALLER));
+    const err = await refusalOf(changeRecordOwner(engine, 'ext_account', 'x1', { queue: 'triage' }, CALLER));
     expect(err).toBeInstanceOf(UserWorkTransferRefusal);
     expect({ code: err.code, status: err.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
     expect(engine.calls.some((c) => c.op === 'update')).toBe(false);
@@ -242,6 +256,47 @@ describe('[#35402] changeRecordOwner — one record', () => {
         expect(engine.calls.some((c) => c.op === 'update')).toBe(false);
       }
     }
+  });
+});
+
+describe('[#36262] a queue target asks for the queue column with storage behind it, as the engine does', () => {
+  it('an external object with an owner, whose injected queue has no column, is refused 400 before any write: single and bulk', async () => {
+    const engine = fakeEngine();
+    const single = await refusalOf(changeRecordOwner(engine, 'ext_account', 'x1', { queue: 'triage' }, CALLER));
+    expect({ code: single.code, status: single.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(single.message).toMatch(/^'ext_account' has no ownership queue column/);
+    const bulk = await refusalOf(changeRecordsOwner(engine, 'ext_account', ['x1'], { queue: 'triage' }, CALLER));
+    expect({ code: bulk.code, status: bulk.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(engine.calls.some((c) => c.op === 'update')).toBe(false);
+    expect(engine.tables.ext_account[0]).toEqual({ id: 'x1', owner_id: 'u_a' });
+  });
+
+  it('the external object still takes a person target: only the queue column is missing', async () => {
+    const result = await changeRecordOwner(fakeEngine(), 'ext_account', 'x1', { ownerId: 'u_next' }, CALLER);
+    expect(result).toEqual({ object: 'ext_account', id: 'x1', ownerId: 'u_next', notified: false });
+  });
+
+  it('list-shaped fields with the platform\'s queue column are admitted, single and bulk', async () => {
+    const engine = fakeEngine();
+    const result = await changeRecordOwner(engine, 'listed_lead', 'd1', { queue: 'triage' }, CALLER);
+    expect(result).toEqual({ object: 'listed_lead', id: 'd1', ownerId: null, queue: 'triage', notified: false });
+    const report = await changeRecordsOwner(engine, 'listed_lead', ['d1'], { queue: 'triage' }, CALLER);
+    expect(report).toMatchObject({ updated: 1, failed: 0 });
+  });
+
+  it('control: a local object with the provisioned queue column is admitted, whether its document lists the column or the injection adds it', async () => {
+    for (const [object, id] of [['lead', 'l1'], ['memo', 'm1']] as const) {
+      const engine = fakeEngine();
+      const result = await changeRecordOwner(engine, object, id, { queue: 'triage' }, CALLER);
+      expect(result, object).toEqual({ object, id, ownerId: null, queue: 'triage', notified: false });
+    }
+  });
+
+  it('a field the author named queue is not the ownership queue: refused 400 before any write', async () => {
+    const engine = fakeEngine();
+    const err = await refusalOf(changeRecordOwner(engine, 'ticket', 'k1', { queue: 'triage' }, CALLER));
+    expect({ code: err.code, status: err.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(engine.calls.some((c) => c.op === 'update')).toBe(false);
   });
 });
 

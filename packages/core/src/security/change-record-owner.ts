@@ -93,6 +93,7 @@ import {
   canServeApiOperation,
   type EnableLike,
   referenceTargetOf,
+  resolveInjectedColumnProvenance,
   resolveUserActionTransfer,
   transferCascadeIneligibilityReason,
   transferIneligibilityReason,
@@ -356,6 +357,8 @@ export function changeOwnerOffRefusal(object: string, reason: string): Error {
  * read and before any write or notification. `getSchema` still resolves such
  * an object (disable is reversible and keeps it registered), so the switch
  * alone would let it through.
+ *
+ * Whether the object can take a queue target is {@link carriesQueueColumn}.
  */
 function offeredDefinition(engine: ChangeOwnerEngine, object: string, target: ChangeOwnerTarget): AnyRec {
   const def = asRecord(engine.getSchema(object));
@@ -363,14 +366,29 @@ function offeredDefinition(engine: ChangeOwnerEngine, object: string, target: Ch
   if (engine.registry?.isObjectPackageDisabled?.(object) === true) throw objectPackageDisabledError(object);
   const reason = changeOwnerOffReason(object, def);
   if (reason) throw changeOwnerOffRefusal(object, reason);
-  if (target.queue !== undefined) {
-    const fields = asRecord(def.fields);
-    if (!fields || !Object.prototype.hasOwnProperty.call(fields, QUEUE_FIELD)) {
-      throw new UserWorkTransferRefusal(400, 'VALIDATION_ERROR',
-        `'${object}' has no ownership queue column, so its records cannot be moved to a queue; name a person in ownerId instead`);
-    }
+  if (target.queue !== undefined && !carriesQueueColumn(def)) {
+    throw new UserWorkTransferRefusal(400, 'VALIDATION_ERROR',
+      `'${object}' has no ownership queue column, so its records cannot be moved to a queue; name a person in ownerId instead`);
   }
   return def;
+}
+
+/**
+ * [ADR-0142 D3] Does `def` carry the platform's `queue` column with storage
+ * behind it — the engine's own test (`carriesQueueColumn`, `@objectstack/objectql`'s
+ * assignment rules), asked of the spec's provenance verdict so this package
+ * and the engine judge one answer.
+ *
+ * Not "does a field named `queue` appear in `fields`". The injection registers
+ * `queue` wherever it registers `owner_id`, on an external (ADR-0015) object
+ * too, where no column backs it: a name test admits that object and sends the
+ * remote system a queue write instead of refusing. A `queue` field the author
+ * declared is the author's, not the ownership queue, and admits nothing. And
+ * the verdict reads either registered `fields` shape, a list as well as a
+ * record keyed by name.
+ */
+function carriesQueueColumn(def: AnyRec): boolean {
+  return resolveInjectedColumnProvenance(def, QUEUE_FIELD) === 'injected-provisioned';
 }
 
 /** The change-set one record's owner change writes. */

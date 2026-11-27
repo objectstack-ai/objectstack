@@ -8,7 +8,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { recordNotFoundError } from '@objectstack/core';
-import { OWNER_FIELD_DEF } from '@objectstack/spec/data';
+import { OWNER_FIELD_DEF, QUEUE_FIELD_DEF } from '@objectstack/spec/data';
 import { RestServer } from './rest-server';
 import { DEFAULT_ORGANIZATION_ID, installDefaultOrganization } from './default-organization.testkit.js';
 
@@ -32,7 +32,7 @@ function mockRes() {
 const CALLER = { userId: 'u_manager', tenantId: 'org_1' };
 
 const SCHEMAS: Record<string, unknown> = {
-  lead: { name: 'lead', label: 'Lead', sharingModel: 'private', fields: { owner_id: OWNER_FIELD_DEF, queue: { type: 'text' } } },
+  lead: { name: 'lead', label: 'Lead', sharingModel: 'private', fields: { owner_id: OWNER_FIELD_DEF, queue: QUEUE_FIELD_DEF } },
   // A `private` object whose author switched the action off (ruling 7000907189, acceptance).
   pinned_lead: { name: 'pinned_lead', sharingModel: 'private', userActions: { transfer: false }, fields: { owner_id: OWNER_FIELD_DEF } },
   // [#35315 phase 2] A declared cascade to `lead`, and a plain lookup beside it.
