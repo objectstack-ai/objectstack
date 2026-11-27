@@ -3303,10 +3303,11 @@ export function disabledHoldersOnlyRefusal(
  * no package of a name every holder of which is disabled, where a
  * PACKAGE-UNBOUND row or draft is stored for the name. That row is the
  * holder's customization (a package-less row over a held name is never a
- * second item), so it is hidden with its holder, from the reads and from the
- * writes alike: the save edited it unseen, the draft save stored a draft no
- * read reaches, and the delete and the draft discard removed what the next
- * enable would have served.
+ * second item), so it is hidden with its holder: the reads withhold it, and
+ * the writes naming no package that ask {@link packagelessHolderRefusal} leave
+ * it alone. The save edited it unseen, the draft save stored a draft no read
+ * reaches, the delete and the draft discard removed what the next enable
+ * would have served, and the per-item publish and rollback rewrote it.
  *
  * `409 RESOURCE_CONFLICT`, the refusal family of
  * {@link disabledHoldersOnlyRefusal}, with no new code, and naming no package
