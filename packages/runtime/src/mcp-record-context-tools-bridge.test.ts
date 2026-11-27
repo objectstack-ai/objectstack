@@ -498,7 +498,7 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
                 { name: 'rc_disabled_child', label: 'Disabled child', object: 'rc_policy', fields: ['title'], related: [{ object: 'rc_off', fields: ['version'] }] },
                 // [ADR-0160 D1] An author defect: `rc_ghost` is an object the stack does not define.
                 {
-                    name: 'rc_ghost_child', label: 'Ghost child', object: 'rc_policy', fields: ['title'],
+                    name: 'rc_misspelt_child', label: 'Misspelt child', object: 'rc_policy', fields: ['title'],
                     related: [{ object: 'rc_ghost', fields: ['version'] }, { object: 'rc_step', fields: ['label'], orderBy: [{ field: 'rank', order: 'asc' }] }],
                 },
                 {
@@ -779,8 +779,8 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         // Precondition: no package and no environment defines it, so it is an author defect (`os validate`).
         expect(engine.getSchema('rc_ghost')).toBeUndefined();
         expect(await protocol.getMetaItems({ type: 'object' } as never)).not.toContainEqual(expect.objectContaining({ name: 'rc_ghost' }));
-        const member = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_ghost_child' });
-        const plain = await bothAsPlain({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_ghost_child' });
+        const member = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_misspelt_child' });
+        const plain = await bothAsPlain({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_misspelt_child' });
         for (const answer of [member, plain]) {
             expect(answer.isError).toBe(false);
             // The other entry still answers; the undefined one has no section, no name and no statement.
