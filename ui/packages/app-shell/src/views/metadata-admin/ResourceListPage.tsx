@@ -138,6 +138,7 @@ import { formatChangedAt, useListChangedAt } from './listChangedAt.js';
 import { useListDraftMarks } from './listDraftMarks.js';
 import { ListChangedCell } from './ListChangedCell.js';
 import { StudioListHeader } from './StudioListHeader.js';
+import { STUDIO_MENU_TYPE_ICONS } from '../studio-design/StudioMenu.js';
 import { STUDIO_SOURCE_KEY, studioListSource, studioSourceKind, type StudioSourceKind } from './studioListSource.js';
 
 /**
@@ -289,6 +290,10 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // The area's host outside Setup: Setup's access directory mounts a host too,
   // and keeps Setup's list.
   const studioList = !!host && !inSetup;
+  // objectstack#37918 — in the Studio list the type's icon is the one the
+  // Studio menu beside it draws for that type: the title row's icon, and the
+  // tile of a row that names no icon of its own. Setup keeps the registry's.
+  const studioTypeGlyph = studioList ? STUDIO_MENU_TYPE_ICONS[type] : undefined;
   // objectstack#29566 — the area's cross-package leg (`/studio/~all/metadata`)
   // outside the environment scope: the list of a type across packages. It
   // names no package and never repairs one into the URL (`?package=X` would
@@ -1189,13 +1194,14 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       // objectstack#37918 (decision 7) — the item's own icon and colour (an
       // object's `icon` and `color`, the palette tile every object is drawn
       // with), the label as the primary line, the API name small and mono below.
-      const itemIcon = typeof row.item.icon === 'string' && row.item.icon ? row.item.icon : config.iconName;
+      const ownIcon = typeof row.item.icon === 'string' && row.item.icon ? row.item.icon : undefined;
+      const itemIcon = ownIcon ?? config.iconName;
       return (
         <span className={cn('inline-flex min-w-0 items-center gap-3', cellClass)} data-testid={`metadata-row-${info.name}`}>
           {type === 'object' ? (
             <ObjectIconTile icon={itemIcon} color={row.item.color as string | undefined} size="lg" />
           ) : (
-            <NeutralIconTile icon={itemIcon} size="lg" />
+            <NeutralIconTile icon={itemIcon} glyph={ownIcon ? undefined : studioTypeGlyph} size="lg" />
           )}
           <span className="min-w-0">
             <span className="flex items-center gap-1.5">
@@ -1837,7 +1843,10 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     return (
       <div className="flex flex-col h-full overflow-hidden">
         <StudioListHeader
-          icon={React.createElement(getIcon(config.iconName ?? 'layers'), { className: 'h-4 w-4' })}
+          icon={React.createElement(studioTypeGlyph ?? getIcon(config.iconName ?? 'layers'), {
+            className: 'h-4 w-4',
+            'data-studio-type-icon': type,
+          })}
           title={typeLabel}
           badge={
             diagnosticStats.length > 0 ? (

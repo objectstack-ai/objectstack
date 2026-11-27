@@ -31,6 +31,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import '@objectstack/spec/identity';
 import { MetadataAreaHostContext, type MetadataAreaHost } from './metadataAreaHost';
+import { STUDIO_MENU_TYPE_ICONS } from '../studio-design/StudioMenu';
 
 const BASE = 'hotcrm';
 const PAIR = `${BASE}.custom`;
@@ -194,6 +195,21 @@ describe('decision 7 — the title row and the toolbar (objectstack#37918)', () 
       tFormat('engine.list.sourceFilter.all', 'en-US', { count: 4 }),
     );
     expect(within(toolbar).getByTestId('metadata-list-search')).toBeInTheDocument();
+  });
+
+  it("the title row's icon is the Studio menu's icon for the type", async () => {
+    // The lucide class that names a glyph (`lucide-table-2`), read off the menu's own icon.
+    const glyphClass = (svg: Element | null) =>
+      [...(svg?.classList ?? [])].filter((c) => c.startsWith('lucide-')).sort().join(' ');
+    const menu = render(React.createElement(STUDIO_MENU_TYPE_ICONS.object));
+    const menuGlyph = glyphClass(menu.container.querySelector('svg'));
+    menu.unmount();
+    expect(menuGlyph).not.toBe('');
+    mount(WRITABLE);
+    await settled();
+    const titleIcon = screen.getByTestId('studio-list-header').querySelector('[data-studio-type-icon]');
+    expect(titleIcon).toHaveAttribute('data-studio-type-icon', 'object');
+    expect(glyphClass(titleIcon)).toBe(menuGlyph);
   });
 
   it('gone: the breadcrumb, the stat tiles, refresh, the sort dropdown and "only customizations"', async () => {

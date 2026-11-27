@@ -165,7 +165,7 @@ function writeAdvancedCookie(open: boolean): void {
  * Each listed type's line icon, drawn bare (no tile) before its name, as the
  * app menu draws an entry's. A type with no row here draws its group's icon.
  */
-const STUDIO_MENU_TYPE_ICONS: Readonly<Record<string, LucideIcon>> = {
+export const STUDIO_MENU_TYPE_ICONS: Readonly<Record<string, LucideIcon>> = {
   object: Table2,
   app: LayoutGrid,
   page: File,
