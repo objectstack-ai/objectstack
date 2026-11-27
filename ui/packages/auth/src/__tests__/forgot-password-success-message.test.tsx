@@ -263,3 +263,43 @@ describe('ForgotPasswordForm — a submit while a reset request is pending is ig
     expect(reset.forgotPassword).toHaveBeenCalledTimes(2);
   });
 });
+
+// objectstack#34171 — the form maps a refusal by `code` through its
+// `errorMessages` prop, as `LoginForm` does: a cloud-managed runtime refuses the
+// reset request with 409 `RESOURCE_CONFLICT`. A code the map lacks keeps the
+// server's message.
+describe('ForgotPasswordForm — a refusal is mapped by code through errorMessages (objectstack#34171)', () => {
+  const MANAGED = 'Host text: sign in with the identity provider button.';
+
+  async function bannerAfter(err: Error, errorMessages?: Record<string, string>): Promise<string> {
+    const forgotPassword = vi.fn().mockRejectedValue(err);
+    render(
+      <AuthProvider authUrl="/api/auth" client={createMockClient({ forgotPassword })}>
+        <ForgotPasswordForm errorMessages={errorMessages} />
+      </AuthProvider>,
+    );
+    await submit('user@example.com');
+    return (await screen.findByRole('alert')).textContent ?? '';
+  }
+
+  function coded(code: string, message: string): Error {
+    const err = new Error(message) as Error & { code?: string };
+    err.code = code;
+    return err;
+  }
+
+  it('RESOURCE_CONFLICT shows the mapped sentence, not the server message', async () => {
+    const text = await bannerAfter(coded('RESOURCE_CONFLICT', 'Server English sentence.'), { RESOURCE_CONFLICT: MANAGED });
+    expect(text).toBe(MANAGED);
+  });
+
+  it('CONTROL: a code the map lacks keeps the server message', async () => {
+    const text = await bannerAfter(coded('SOMETHING_ELSE', 'Server English sentence.'), { RESOURCE_CONFLICT: MANAGED });
+    expect(text).toBe('Server English sentence.');
+  });
+
+  it('CONTROL: with no errorMessages the server message is shown as before', async () => {
+    const text = await bannerAfter(coded('RESOURCE_CONFLICT', 'Server English sentence.'));
+    expect(text).toBe('Server English sentence.');
+  });
+});

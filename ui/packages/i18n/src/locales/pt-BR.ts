@@ -3121,6 +3121,8 @@ const pt = {
         twoFactorTooManyAttempts: "Muitos códigos incorretos. Faça login novamente com sua senha.",
         twoFactorExpired: "Este login expirou. Faça login novamente com sua senha.",
         twoFactorLocked: "Muitas tentativas malsucedidas. Sua conta está temporariamente bloqueada. Tente novamente mais tarde.",
+        managedPasswordSignIn: "Esta implantação faz o login pelo provedor de identidade dela, por isso não é possível usar uma senha aqui. Use o botão do provedor de identidade acima para entrar.",
+        managedPasswordReset: "Esta implantação faz o login pelo provedor de identidade dela, por isso nenhuma senha é definida ou redefinida aqui. Entre com o botão do provedor de identidade na página de login.",
         invalidCredentials: "E-mail ou senha inválidos. Após várias tentativas sem sucesso, o login fica pausado por um tempo. Esqueceu a senha? Redefina-a para entrar imediatamente.",
         invalidCredentialsNoMail: 'E-mail ou senha inválidos. Após várias tentativas sem sucesso, o login fica pausado por um tempo. Esqueceu a senha? Peça ao seu administrador para redefini-la.',
         emailNotVerified: "Por favor, verifique seu e-mail antes de fazer login.",

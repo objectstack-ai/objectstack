@@ -3126,6 +3126,8 @@ const es = {
         twoFactorTooManyAttempts: "Demasiados códigos incorrectos. Vuelva a iniciar sesión con su contraseña.",
         twoFactorExpired: "Este inicio de sesión ha caducado. Vuelva a iniciar sesión con su contraseña.",
         twoFactorLocked: "Demasiados intentos fallidos. Su cuenta está bloqueada temporalmente. Inténtelo más tarde.",
+        managedPasswordSignIn: "Esta implementación inicia sesión a través de su proveedor de identidad, así que aquí no se puede usar una contraseña. Usa el botón del proveedor de identidad de arriba para iniciar sesión.",
+        managedPasswordReset: "Esta implementación inicia sesión a través de su proveedor de identidad, así que aquí no se establece ni se restablece ninguna contraseña. Inicia sesión con el botón del proveedor de identidad en la página de inicio de sesión.",
         invalidCredentials: "Correo o contraseña inválidos. Tras varios intentos fallidos, el inicio de sesión se pausa durante un tiempo. ¿Olvidaste tu contraseña? Restablécela para iniciar sesión de inmediato.",
         invalidCredentialsNoMail: 'Correo o contraseña inválidos. Tras varios intentos fallidos, el inicio de sesión se pausa durante un tiempo. ¿Olvidaste tu contraseña? Pide a tu administrador que la restablezca.',
         emailNotVerified: "Verifique su correo electrónico antes de iniciar sesión.",

@@ -3765,6 +3765,10 @@ const en = {
         twoFactorTooManyAttempts: 'Too many incorrect codes. Sign in with your password again.',
         twoFactorExpired: 'This sign-in has expired. Sign in with your password again.',
         twoFactorLocked: 'Too many failed attempts. Your account is temporarily locked. Try again later.',
+        // objectstack#34171 — a cloud-managed runtime's 409 `RESOURCE_CONFLICT` on the
+        // password doors (`signInRefusalMessages`, `passwordDoorRefusalMessages`).
+        managedPasswordSignIn: "This deployment signs you in through its identity provider, so a password can't be used here. Use the identity provider's button above to sign in.",
+        managedPasswordReset: "This deployment signs you in through its identity provider, so no password is set or reset here. Sign in with the identity provider's button on the sign-in page.",
       },
     },
     register: {
