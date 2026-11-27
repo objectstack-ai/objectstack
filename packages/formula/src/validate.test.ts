@@ -1411,3 +1411,70 @@ describe('a flow condition\'s record.<field> / previous.<field> read takes the d
     expect(codes('record.title > 5')).toEqual(['type-mismatch-run-fails']);
   });
 });
+
+// [#36377] A flow condition that orders the BARE date name against a text
+// literal before it does arithmetic on the field's `record.` / `previous.` read
+// (`due_date > "2026-01-01" && record.due_date + 1 > 5`) was refused by no pass:
+// the Timestamp typing met the ordering first and stood it down for the bare
+// name and the record-root pass alike, and the record-root date-text pass stood
+// down because the roots' own typing met date arithmetic first, a shape it read
+// as answered elsewhere. The run faults on the `YYYY-MM-DD` text every time. The
+// mixed spelling now takes the verdict, code and words its all-bare and
+// all-root spellings take.
+describe('a flow condition that orders the bare date name before date arithmetic on its record. / previous. read is refused (#36377)', () => {
+  const fieldTypes = { title: 'text', borrow_date: 'date', due_date: 'date', picked_up_at: 'datetime' };
+  const CONDITION: ExprSchemaHint = { scope: 'flattened', fields: Object.keys(fieldTypes), fieldTypes, faultOutcome: 'run-fails' };
+  const errorsOf = (source: string, hint: ExprSchemaHint = CONDITION) => validateExpression('predicate', source, hint).errors;
+  const codes = (source: string, hint: ExprSchemaHint = CONDITION) => errorsOf(source, hint).map((e) => e.code);
+  const verdicts = (source: string, hint: ExprSchemaHint = CONDITION) =>
+    errorsOf(source, hint).map((e) => ({ code: e.code, params: e.params, message: e.message }));
+  const ROW = { title: 'Dune', borrow_date: '2026-11-16', due_date: '2026-11-30', picked_up_at: '2026-11-16T09:30:00.000Z' };
+  const run = (source: string) => celEngine.evaluate({ dialect: 'cel', source }, { ...ROW, record: ROW, previous: ROW });
+
+  it('refuses the mixed spelling with exactly the verdict the all-root spelling gets, naming the root read', () => {
+    for (const [root, field, op] of [
+      ['record', 'due_date', '+ 1'], ['previous', 'due_date', '- 7'], ['record', 'picked_up_at', '+ 1'],
+    ] as const) {
+      const allRoot = `${root}.${field} > "2026-01-01" && ${root}.${field} ${op} > 5`;
+      const mixed = `${field} > "2026-01-01" && ${root}.${field} ${op} > 5`;
+      const expected = verdicts(allRoot);
+      expect(expected.map((v) => v.code), allRoot).toEqual(['date-text-arithmetic-run-fails']);
+      expect(expected[0].params, allRoot).toMatchObject({ reference: `${root}.${field}` });
+      expect(verdicts(mixed), mixed).toEqual(expected);
+      // Both fault on the field's text on every run.
+      expect(run(mixed), mixed).toMatchObject({ ok: false });
+    }
+    // The all-bare spelling takes the same code, naming the bare name.
+    expect(verdicts('due_date > "2026-01-01" && due_date + 1 > 5').map((v) => [v.code, v.params]))
+      .toEqual([['date-text-arithmetic-run-fails', { operands: 'DateText + int', reference: 'due_date' }]]);
+  });
+
+  it('takes the row\'s outcome arm: run-may-fail where none is declared, run-fails kept when bare names are unproven', () => {
+    const mixed = 'due_date > "2026-01-01" && record.due_date + 1 > 5';
+    expect(codes(mixed, { ...CONDITION, faultOutcome: undefined })).toEqual(['date-text-arithmetic-run-may-fail']);
+    expect(codes(mixed, { ...CONDITION, bareNamesUnproven: true })).toEqual(['date-text-arithmetic-run-fails']);
+    // A flow variable holding the bare name leaves the bare ordering `dyn`, so the record-root pass meets the
+    // root read's arithmetic first and answers it under `date-arithmetic`, as for `record.due_date + 1 > 5` alone.
+    expect(codes(mixed, { ...CONDITION, flowVariables: ['due_date'] })).toEqual(['date-arithmetic-run-fails']);
+  });
+
+  it('CONTROL: the arithmetic first keeps its date-arithmetic verdict, and the prescribed rewrites stay clean', () => {
+    expect(codes('record.due_date + 1 > 5 && due_date > "2026-01-01"')).toEqual(['date-arithmetic-run-fails']);
+    for (const source of [
+      'due_date > "2026-01-01" && record.due_date < today()',
+      'due_date > "2026-01-01" && daysBetween(record.due_date, today()) > 5',
+      'due_date > "2026-01-01" && addDays(previous.due_date, -7) < today()',
+    ]) {
+      expect(validateExpression('predicate', source, CONDITION), source).toEqual({ ok: true, errors: [], warnings: [] });
+    }
+  });
+
+  it('the #30025 swap under unproven bare names hands a root read\'s date-arithmetic verdict the row\'s arm', () => {
+    // The bare text mismatch is not proven the field's; the root read's date arithmetic is, and its answer wins.
+    const unproven: ExprSchemaHint = { ...CONDITION, bareNamesUnproven: true };
+    expect(verdicts('title > 5 && record.due_date + 1 > 5', unproven).map((v) => [v.code, v.params])).toEqual([[
+      'date-arithmetic-run-fails',
+      { operands: 'google.protobuf.Timestamp + int', reference: 'record.due_date' },
+    ]]);
+  });
+});
