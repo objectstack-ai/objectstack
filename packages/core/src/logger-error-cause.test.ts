@@ -114,7 +114,26 @@ describe('a cause is redacted like the error', () => {
     });
 });
 
+/**
+ * The glued redact qualifiers (`CONCATENATED_SECRET_QUALIFIERS`, one copy in
+ * `logger.ts` and one in `@objectstack/types`), each glued to a default word,
+ * so an edit to either copy's list fails the parity block below.
+ */
+const GLUED_QUALIFIERS = [
+    'access', 'account', 'admin', 'api', 'app', 'auth', 'bearer', 'client', 'csrf', 'db', 'database',
+    'encryption', 'id', 'jwt', 'master', 'oauth', 'private', 'public', 'refresh', 'root', 'secret',
+    'service', 'session', 'shared', 'sign', 'signing', 'ssh', 'token', 'user', 'webhook', 'xsrf',
+];
+const gluedQualifierCause = () => Object.fromEntries(GLUED_QUALIFIERS.map((qualifier) => [`${qualifier}key`, 'x']));
+
 describe('parity — the logger and the fault log render one shape', () => {
+    it('CONTROL — the glued-qualifier fixture is withheld field by field, so it exercises each qualifier', () => {
+        const [line] = faultCauseChain(new Error('w', { cause: gluedQualifierCause() }));
+        const parsed = JSON.parse(line.message) as Record<string, string>;
+        expect(Object.keys(parsed)).toHaveLength(GLUED_QUALIFIERS.length);
+        expect(Object.values(parsed).every((value) => value === '***REDACTED***')).toBe(true);
+    });
+
     const cycle = () => {
         const a = new Error('a');
         (a as { cause?: unknown }).cause = new Error('b', { cause: a });
@@ -138,6 +157,7 @@ describe('parity — the logger and the fault log render one shape', () => {
                 apiKey: 'x', apikey: 'x', accesstoken: 'x', refresh_tokens: ['x'], clientSecret: 'x', password: 'x', API_KEY: 'x',
             },
         })],
+        ['every glued qualifier on a default word', () => new Error('w', { cause: gluedQualifierCause() })],
         ['an array inside an object cause', () => new Error('w', {
             cause: { code: 'E3', attempts: [{ host: 'db-1', password: 'x' }, { host: 'db-2', authToken: 'y' }] },
         })],

@@ -20,8 +20,15 @@ describe('AIModelConfigSchema', () => {
     };
 
     const result = AIModelConfigSchema.parse(config);
-    expect(result.provider).toBe('openai');
+    expect(result.provider).toBeUndefined();
     expect(result.temperature).toBe(0.7);
+  });
+
+  it('adds no provider to a block that names none — the host picks the model and its provider', () => {
+    const result = AIModelConfigSchema.parse({ temperature: 0.2 });
+    expect('provider' in result).toBe(false);
+    expect(AIModelConfigSchema.parse({ provider: 'anthropic' }).provider).toBe('anthropic');
+    expect(AIModelConfigSchema.safeParse({ provider: 'google' }).success).toBe(false);
   });
 
   it('should accept all providers', () => {
@@ -46,6 +53,40 @@ describe('AIModelConfigSchema', () => {
     };
 
     expect(() => AIModelConfigSchema.parse(config)).not.toThrow();
+  });
+
+  it('accepts a config that omits the model name — absent means the environment default', () => {
+    const result = AIModelConfigSchema.parse({ temperature: 0.2 });
+    expect(result.model).toBeUndefined();
+    expect(result.temperature).toBe(0.2);
+    expect(result.provider).toBeUndefined();
+    expect(AIModelConfigSchema.parse({}).model).toBeUndefined();
+  });
+
+  it('keeps an explicit model name exactly as written', () => {
+    expect(AIModelConfigSchema.parse({ model: 'x' }).model).toBe('x');
+  });
+
+  it('still refuses an unknown key in a config without a model name', () => {
+    const result = AIModelConfigSchema.safeParse({ temperature: 0.2, tier: 'fast' });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.some((i) => i.code === 'unrecognized_keys')).toBe(true);
+  });
+
+  it('still refuses a non-string model name', () => {
+    expect(AIModelConfigSchema.safeParse({ model: 4 }).success).toBe(false);
+  });
+
+  it('an agent whose model block only sets temperature parses', () => {
+    const agent = AgentSchema.parse({
+      name: 'ask_helper',
+      label: 'Ask Helper',
+      role: 'Helper',
+      instructions: 'Answer questions.',
+      model: { temperature: 0.2 },
+    });
+    expect(agent.model?.model).toBeUndefined();
+    expect(agent.model?.temperature).toBe(0.2);
   });
 
   it('should enforce temperature constraints', () => {
