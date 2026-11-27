@@ -1780,6 +1780,7 @@ export function ObjectFieldInspector({
                   disabled={locked}
                   placeholder={tr('designer.field.objectNamePlaceholder')}
                   locale={locale}
+                  objectsOnly
                 />
               </DisplayPatchLock>
               {heldNeed === 'target' && <HeldHint>{tr('designer.field.hint.pickTarget')}</HeldHint>}
@@ -3447,6 +3448,7 @@ function SummaryConfigFields({
         disabled={readOnly}
         placeholder={tr('designer.field.objectNamePlaceholder')}
         locale={locale}
+        objectsOnly
       />
       <InspectorSelectField
         label={tr('designer.field.summary.function')}
