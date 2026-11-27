@@ -339,10 +339,10 @@ function mountAskPageHost(entry: string) {
   );
 }
 
-const pressToggleChord = () =>
-  act(() => {
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'I', metaKey: true, shiftKey: true, bubbles: true }));
-  });
+/** ⌘/Ctrl+Shift+I — the dock's own toggle, as a user presses it. */
+const pressToggleChord = () => {
+  fireEvent.keyDown(document, { key: 'I', metaKey: true, shiftKey: true });
+};
 const rail = () => screen.queryByTestId('chat-dock-panel');
 const robot = () => screen.queryByTestId('topbar-ai-assistant');
 
