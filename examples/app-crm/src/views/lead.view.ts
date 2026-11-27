@@ -44,55 +44,9 @@ export const LeadViews = defineView({
       },
     },
   },
-  // The default form. Since #36425 the Console's create and edit surfaces lay
-  // the record out by the object's fieldGroups and no longer load it, so it is
-  // inert there (lint: form-view-internal-not-loaded). The public Web-to-Lead
-  // form below stays a NAMED form: it is served by its slug and keeps loading.
-  form: {
-    type: 'simple',
-    sections: [
-      {
-        name: 'lead_information',
-        label: 'Lead Information',
-        columns: 2,
-        fields: [
-          { field: 'name',     required: true },
-          { field: 'company' },
-          { field: 'email' },
-          { field: 'phone' },
-          { field: 'title' },
-          { field: 'source' },
-        ],
-      },
-      {
-        name: 'qualification',
-        label: 'Qualification',
-        columns: 2,
-        fields: [
-          { field: 'status',    required: true },
-          { field: 'lead_score' },
-          { field: 'assigned_to' },
-          { field: 'account' },
-        ],
-      },
-      {
-        name: 'conversion',
-        label: 'Conversion',
-        columns: 2,
-        fields: [
-          { field: 'converted_opportunity' },
-          { field: 'is_closed' },
-        ],
-      },
-      {
-        name: 'notes',
-        label: 'Notes',
-        columns: 1,
-        fields: [{ field: 'notes' }],
-      },
-    ],
-  },
-
+  // No default form: the create and edit forms lay a lead out by the
+  // object's `fieldGroups` (objects/lead.object.ts). The public Web-to-Lead
+  // form below is a NAMED form: it is served by its slug and keeps loading.
   formViews: {
     /**
      * PUBLIC / ANONYMOUS — Web-to-Lead.
