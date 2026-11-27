@@ -237,6 +237,36 @@ export interface StdioObjectReads {
    * route.
    */
   isObjectPackageDisabled?: (object: string) => boolean;
+  /**
+   * [#36689 S1] An object's definition as the engine registry holds it, the
+   * field map `callData`'s relation walk reads first
+   * (`resolveWriteResponseSchema`): the registry the engine lowers a
+   * nested-relation condition against, so a site the engine would lower is a
+   * site this walk finds, where the protocol and the metadata copy hold no
+   * definition (a package object registered during the boot of a kernel with
+   * an `environmentId`). Build it with {@link engineObjectDefinition}. Absent,
+   * or answering nothing, the walk reads {@link readObjectDeclaration}, as
+   * before.
+   */
+  engineObjectDefinition?: (object: string) => ObjectDef | undefined;
+}
+
+/**
+ * [#36689 S1] The {@link StdioObjectReads.engineObjectDefinition} read over the
+ * engine this transport reads through: `registry.getObject`, read at each use,
+ * as `callData`'s `resolveWriteResponseSchema` reads it. A registry that cannot
+ * answer, or throws, answers nothing.
+ */
+export function engineObjectDefinition(engine: unknown): (object: string) => ObjectDef | undefined {
+  return (object) => {
+    try {
+      const registry = (engine as { registry?: { getObject?: (name: string) => unknown } } | null | undefined)?.registry;
+      const def = typeof registry?.getObject === 'function' ? registry.getObject(object) : undefined;
+      return def !== null && typeof def === 'object' ? (def as ObjectDef) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
 }
 
 /**
@@ -441,6 +471,11 @@ async function stdioExpandMap(
       err.param = 'expand';
       throw err;
     }
+    // [#36689 M1] A target whose package is disabled serves nothing: withheld,
+    // on the engine registry's word, for every caller and on every host — the
+    // by-name read below cannot refuse where the host has no protocol service.
+    // `callData`'s expansion gate withholds the same target the same way.
+    if (reads.isObjectPackageDisabled?.(target) === true) continue;
     let declared: ObjectDef | undefined;
     try {
       declared = await readObjectDeclaration(reads, target);
@@ -1030,13 +1065,19 @@ async function enforceRelationTargetExposure(
   depth = 0,
 ): Promise<void> {
   if (where == null || depth > RELATION_CONDITION_WALK_DEPTH) return;
-  let def: ObjectDef | null | undefined;
-  try {
-    // [#25138] The field map from the definition the gate judged, so a
-    // package object's relation conditions are found where it has no copy.
-    def = await readObjectDeclaration(reads, object);
-  } catch {
-    def = undefined; // no field map, no site: the gate above falls open the same way
+  // [#36689 S1] The field map the engine lowers the condition against, first,
+  // as `callData`'s walk reads it: a site the engine would lower is a site
+  // found here, where neither the protocol nor the metadata copy holds the
+  // definition.
+  let def: ObjectDef | null | undefined = reads.engineObjectDefinition?.(object);
+  if (!def) {
+    try {
+      // [#25138] The field map from the definition the gate judged, so a
+      // package object's relation conditions are found where it has no copy.
+      def = await readObjectDeclaration(reads, object);
+    } catch {
+      def = undefined; // no field map, no site: the gate above falls open the same way
+    }
   }
   for (const site of relationConditionSites(def?.fields, where)) {
     const position = `${prefix}.${site.field}`;
@@ -1487,7 +1528,13 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   // the write-response strip, and one listing for discovery.
   // [#36689] …and the disabled-package question, asked of the engine's
   // registry for every caller ({@link engineObjectPackageDisabled}).
-  const reads: StdioObjectReads = { metadataService, protocol, isObjectPackageDisabled: engineObjectPackageDisabled(engine) };
+  const reads: StdioObjectReads = {
+    metadataService,
+    protocol,
+    isObjectPackageDisabled: engineObjectPackageDisabled(engine),
+    // [#36689 S1] …and the field map the relation walk finds sites in.
+    engineObjectDefinition: engineObjectDefinition(engine),
+  };
   // [#25245] …and that listing is the view the object resources read too.
   const objectView = stdioObjectView(reads);
   // [ADR-0106 D1/D5] …served to the principal through the object-schema mask:

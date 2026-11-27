@@ -44,7 +44,7 @@ const BETA = { name: 'dq_beta', label: 'Beta', fields: { name: text('name'), sec
 const GAMMA = { name: 'dq_gamma', label: 'Gamma', fields: { name: text('name'), b2_ref: lookup('b2_ref', 'dq_beta') } };
 
 const SYSTEM = { isSystem: true } as unknown as ExecutionContext;
-const MEMBER = { userId: 'dq_member', isSystem: false, positions: [], permissions: [] } as unknown as ExecutionContext;
+const MEMBER = { userId: 'dq_member', organizationId: 'org_default', isSystem: false, positions: [], permissions: [] } as unknown as ExecutionContext;
 
 const manifest = (id: string) => ({ id, name: id, version: '1.0.0', type: 'app' }) as any;
 
@@ -55,7 +55,7 @@ afterEach(async () => {
   }
 });
 
-async function makeHarness(opts: { withProtocol: boolean; principal: ExecutionContext }) {
+async function makeHarness(opts: { withProtocol: boolean; principal: ExecutionContext; copies?: boolean }) {
   const engine = new ObjectQL();
   live.push(engine);
   engine.registerDriver(new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as any, true);
@@ -74,14 +74,21 @@ async function makeHarness(opts: { withProtocol: boolean; principal: ExecutionCo
   const beta: any = await engine.insert('dq_beta', { name: 'beta', secret_note: SECRET });
   const gamma: any = await engine.insert('dq_gamma', { name: 'gamma', b2_ref: beta.id });
   await engine.insert('dq_alpha', { name: 'alpha', b_ref: beta.id, c_ref: gamma.id });
-  const protocol = opts.withProtocol
-    ? (new ObjectStackProtocolImplementation(engine as any) as unknown as StdioProtocolObjectReads)
+  // The real protocol's by-name reads, which refuse a disabled package's object
+  // themselves. Its merged listing is left out: its metadata store is not wired
+  // in this harness, so the listing would answer an outage, and a protocol
+  // without a listing is a shape the bridge serves (the copy lists instead).
+  const real = opts.withProtocol ? new ObjectStackProtocolImplementation(engine as any) : undefined;
+  const protocol: StdioProtocolObjectReads | undefined = real
+    ? { getMetaItem: real.getMetaItem.bind(real) as any, getMetaItemForExecution: real.getMetaItemForExecution.bind(real) as any }
     : undefined;
   // A metadata service holding a copy of each object: the read the gate and
   // the relation walk fall back to (a host with no protocol service, or a
   // protocol whose metadata store is not wired here). A copy cannot say its
   // package is disabled, so it never refuses by itself.
-  const copies: Record<string, unknown> = { dq_alpha: ALPHA, dq_beta: BETA, dq_gamma: GAMMA };
+  // `copies: false` [#36689 S1]: no copy of any of them, the shape of a package
+  // object registered during the boot of a kernel with an `environmentId`.
+  const copies: Record<string, unknown> = opts.copies === false ? {} : { dq_alpha: ALPHA, dq_beta: BETA, dq_gamma: GAMMA };
   const metadataService = { getObject: async (name: string) => copies[name] } as unknown as IMetadataService;
   const bridge = createStdioDataBridge({
     engine: engine as unknown as IDataEngine,
@@ -149,6 +156,46 @@ for (const withProtocol of [true, false]) {
       }
     });
   }
+
+  for (const [who, principal] of [['a system context', SYSTEM], ['a member', MEMBER]] as const) {
+    describe(`[#36689 M1] ${host}, ${who}: an expansion into a disabled package's object is withheld`, () => {
+      it('query_records with expand serves the row and never the related record; re-enabled, the related record comes back', async () => {
+        const h = await makeHarness({ withProtocol, principal });
+        const run = () => h.bridge.query('dq_alpha', { limit: 5, expand: ['b_ref'] });
+        h.engine.registry.disablePackage(PKG_B);
+        const withheld = JSON.stringify(await run());
+        expect(withheld).toContain('alpha');
+        expect(withheld).not.toContain(SECRET);
+        // CONTROL: the same read, the package re-enabled, expands the record.
+        h.engine.registry.enablePackage(PKG_B);
+        expect(JSON.stringify(await run())).toContain(SECRET);
+      });
+    });
+
+    describe(`[#36689 S1] ${host}, ${who}: no definition from the protocol or the metadata copy`, () => {
+      for (const [shape, where, param] of [
+        ['one hop', { b_ref: { secret_note: SECRET } }, 'where.b_ref'],
+        ['two hops', { c_ref: { b2_ref: { secret_note: SECRET } } }, 'where.c_ref.b2_ref'],
+      ] as const) {
+        it(`a nested-relation condition (${shape}) is still found on the engine's field map and refused at its full position`, async () => {
+          const h = await makeHarness({ withProtocol, principal, copies: false });
+          h.engine.registry.disablePackage(PKG_B);
+          const err = await refusalOf(() => count(h, where));
+          expect(envelope(err)).toEqual({ code: 'OBJECT_PACKAGE_DISABLED', status: 404, object: 'dq_beta', param });
+        });
+      }
+    });
+  }
+
+  describe(`[#36689 S1] ${host}: CONTROL with no copy, the package re-enabled, the condition is lowered`, () => {
+    it('a two-hop condition counts the stored value and not another', async () => {
+      const h = await makeHarness({ withProtocol, principal: SYSTEM, copies: false });
+      h.engine.registry.disablePackage(PKG_B);
+      h.engine.registry.enablePackage(PKG_B);
+      expect(await count(h, { c_ref: { b2_ref: { secret_note: SECRET } } })).toBe(1);
+      expect(await count(h, { c_ref: { b2_ref: { secret_note: 'NOPE' } } })).toBe(0);
+    });
+  });
 
   describe(`[#36689] ${host}: CONTROL the package re-enabled, a system context is served again`, () => {
     it('the addressed object is read, and its row comes back', async () => {
