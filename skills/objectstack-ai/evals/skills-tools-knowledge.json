@@ -14,7 +14,7 @@
     {
       "id": 2,
       "prompt": "Our copilot should use Anthropic with a low temperature (0.3) and cap responses at 2000 tokens. Where do these settings go in the metadata?",
-      "expected_output": "Places sampling under the agent's `model` block (`AIModelConfigSchema`): `provider: 'anthropic'`, a free-string `model`, `temperature: 0.3` (0–2, outside is a parse error) and `maxTokens: 2000`. States that there is no top-level `temperature` / `maxTokens` on an agent and that the inline `provider` enum is `openai | azure_openai | anthropic | local`.",
+      "expected_output": "Places sampling under the agent's `model` block (`AIModelConfigSchema`): `provider: 'anthropic'`, `temperature: 0.3` (0–2, outside is a parse error) and `maxTokens: 2000`; a free-string `model` is optional (absent runs on the host's default model), so omitting it is correct. States that there is no top-level `temperature` / `maxTokens` on an agent and that the inline `provider` enum is `openai | azure_openai | anthropic | local`, with no default.",
       "files": [],
       "assertions": {
         "must_contain": ["provider", "anthropic", "temperature", "maxTokens"],
