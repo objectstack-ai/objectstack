@@ -250,6 +250,16 @@
         "must_contain": ["formViews", "group: 'contact_info', columns: 2", "type: 'form'", "fieldGroups"],
         "must_not_contain": ["modalSize:", "formViews.default"]
       }
+    },
+    {
+      "id": 26,
+      "prompt": "Add a 'Delete Task' button on the `project_task` record page that deletes the task. Our in-app assistant must be able to run it too, but only after the user agrees, since a deleted task's time entries go with it.",
+      "expected_output": "One registered `defineAction` on `objectName: 'project_task'` with a placement (`locations: ['record_header']`), a body that deletes the current record (a `type: 'script'` `js` body calling `ctx.api.object('project_task').delete(...)` on `ctx.recordId`, with `capabilities: ['api.write']`), `confirmText` for the person clicking, and `ai: { exposed: true, description: '…', requiresConfirmation: true }`. `confirmText` is the click dialog's copy only and gates no AI call, so the assistant's run is held for the user's approval by `ai.requiresConfirmation: true`, not by `confirmText` or by a sentence in `ai.description` asking the model to confirm first.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["requiresConfirmation: true", "exposed: true", "confirmText", "project_task"],
+        "must_not_contain": ["requireConfirmation:", "confirm: true"]
+      }
     }
   ]
 }
