@@ -555,6 +555,51 @@ const CAPABILITY_PATTERNS: Array<{ rx: RegExp; cap: 'api.read' | 'api.write' | '
   { rx: /ctx\.activity\.append\b/, cap: 'activity.append' },
 ];
 
+/** The write leaves the `api.write` pattern above names, as one alternation. */
+const OBJECT_WRITE_LEAVES = 'insert|updateMany|update|upsert|deleteMany|delete|patch|remove|create';
+
+/** The index of the `)` closing the `(` at `open`, or -1. Counts nesting; strings are not special. */
+function closingParen(source: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === '(') depth++;
+    else if (ch === ')' && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * [#35143] Whether the body writes through `.object(...)` in a shape the
+ * `api.write` pattern's single regex cannot read — the shapes the publish
+ * check `action-body-write-capability-undeclared` reads, so a handler `os build`
+ * lowers is never refused by the next step of the same build:
+ *
+ * - an argument holding a call or other parentheses: `ctx.api.object(name()).update(…)`;
+ * - `?.` before the leaf: `ctx.api.object('x')?.update(…)`;
+ * - a bound handle: `const repo = ctx.api.object('x'); … repo.update(…)`.
+ *
+ * Receiver-loose like the patterns above, for their reason: an over-inferred
+ * grant is one the sandbox never checks, an under-inferred one is a 403 at
+ * every call.
+ */
+function callsObjectWriteThroughHandle(source: string): boolean {
+  const chainedWrite = new RegExp(String.raw`^\s*\??\.\s*(?:${OBJECT_WRITE_LEAVES})\b`);
+  const handles: string[] = [];
+  for (const m of source.matchAll(/\??\.\s*object\s*\(/g)) {
+    const open = (m.index ?? 0) + m[0].length - 1;
+    const close = closingParen(source, open);
+    if (close < 0) continue;
+    const after = source.slice(close + 1);
+    if (chainedWrite.test(after)) return true;
+    const bound = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?[\w$.? \t]*$/.exec(source.slice(0, m.index ?? 0));
+    if (bound && /^\s*(?:;|\n|$)/.test(after)) handles.push(bound[1]);
+  }
+  return handles.some((name) =>
+    new RegExp(String.raw`(?<![\w$.])${name.replace(/\$/g, '\\$')}\s*\??\.\s*(?:${OBJECT_WRITE_LEAVES})\s*\(`).test(source),
+  );
+}
+
 export interface ExtractedBody {
   /** Pure function-body source (without the surrounding `(ctx) => {...}`). */
   source: string;
@@ -659,6 +704,8 @@ export function extractLoweredBody(
   for (const { rx, cap } of CAPABILITY_PATTERNS) {
     if (rx.test(source)) inferred.add(cap);
   }
+  // [#35143] The `.object(...)` write shapes one regex cannot read; see the helper.
+  if (callsObjectWriteThroughHandle(source)) inferred.add('api.write');
   // [#22837] The ctx-anchored patterns above spell `ctx.`; a rebound body
   // reaches the same members through the handler's own names.
   for (const cap of reboundCapabilities(source, rebind)) inferred.add(cap);

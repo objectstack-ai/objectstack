@@ -72,6 +72,37 @@ describe('extractHookBody', () => {
     expect(extractHookBody(fn, 'hook c2').capabilities).toEqual(['api.write']);
   });
 
+  // [#35143] The shapes the publish check `action-body-write-capability-undeclared`
+  // reads (`bodyApiWriteCalls`) beyond a direct chain. Each lowered without a
+  // grant before, so `os build` lowered a handler and then refused it.
+  it.each([
+    ['a bound handle', async (ctx: any) => {
+      const repo = ctx.api.object('foo');
+      await repo.update('id', { done: true });
+    }],
+    ['a bound handle through an alias of ctx.api', async (ctx: any) => {
+      const api = ctx.api;
+      const repo = api.object('foo');
+      await repo.deleteMany({ done: true });
+    }],
+    ['`?.` before the leaf', async (ctx: any) => {
+      await ctx.api.object('foo')?.insert({ name: 'x' });
+    }],
+    ['an object argument holding a call', async (ctx: any) => {
+      await ctx.api.object(String('foo')).upsert({ name: 'x' }, { on: ['name'] });
+    }],
+  ])('infers api.write through %s', (_shape, fn) => {
+    expect(extractHookBody(fn, 'hook shapes').capabilities).toContain('api.write');
+  });
+
+  it('infers no api.write from a bound handle that only reads (control)', () => {
+    const fn = async (ctx: any) => {
+      const repo = ctx.api.object('foo');
+      return repo.find({});
+    };
+    expect(extractHookBody(fn, 'hook read handle').capabilities).not.toContain('api.write');
+  });
+
   it('infers log', () => {
     const fn = (ctx: any) => {
       ctx.log.info('hi');
