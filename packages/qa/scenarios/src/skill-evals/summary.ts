@@ -214,7 +214,7 @@ export function renderSummaryMarkdown(s: RoundSummary, head: { title: string; li
     out.push(`| **all** | ${s.cases.length} | ${pct(s.totals.withSkill)} | ${pct(s.totals.noSkill)} | ${s.bundles.reduce((n, b) => n + b.withSkillFailures.length, 0)} | ${s.bundles.reduce((n, b) => n + b.noSkillAtLeastWithSkill.length, 0)} | ${outOf(s.totals.withSkill)} / ${outOf(s.totals.noSkill)} |`);
     out.push('', '## Per case', '', '| case | with-skill | no-skill | with-skill missed | with-skill carried forbidden |', '|:--|--:|--:|:--|:--|');
     for (const c of s.cases) {
-      // An unmet any-of group is named whole, after the all-of tokens: `(none of: a / b)`.
+      // An unmet any-of group is named whole, after the all-of tokens, each token a code span as theirs are: (none of: `a` / `b`).
       const missed = [...c.withSkillMissing.map(code), ...c.withSkillUnmetAny.map((g) => `(none of: ${g.map(code).join(' / ')})`)];
       out.push(`| ${c.key} | ${pct(c.withSkill)} | ${pct(c.noSkill)} | ${missed.join(' ')} | ${c.withSkillForbidden.map(code).join(' ')} |`);
     }
