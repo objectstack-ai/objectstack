@@ -66,7 +66,6 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
   useObjectTranslation: () => ({
     t: (key: string, options?: Record<string, unknown>) => String(options?.defaultValue ?? key),
     offerableLanguages: offerable.value,
-    appContentLanguages: null,
   }),
 }));
 
