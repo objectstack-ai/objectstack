@@ -307,7 +307,6 @@ export const salesAgent = AgentSchema.parse({
   instructions: 'You help sales team with customer data and pipeline management.',
   
   model: {
-    provider: 'openai',
     model: 'gpt-4-turbo',
     temperature: 0.3,
   },

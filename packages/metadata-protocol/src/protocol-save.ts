@@ -23,6 +23,7 @@
  * not move.
  */
 
+import { applyOldShapeFormRowRemovals, healOldShapeFormRowRemovals, formAddressClashRefusal, packagelessListOverFormRefusal, type OldShapeFormRowRemoval } from './protocol-form-writes.js';
 import { MetadataAuthoringSurfaceSchema } from '@objectstack/spec/api';
 import { stampHtmlPageRequires } from './runtime-authoring-gate.js';
 import { SysMetadataRepository, actionCustomizationHoldersOf, actionHeldOnlyOnOtherObjects, actionRowsBindingObjectOf, isPackageBoundRow, packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
@@ -96,6 +97,7 @@ import { installedManifestsOfEngine } from './installed-manifests.js';
 import { packageScopedRefusalOf } from './protocol-meta-item-reads.js';
 import { pairsOf } from '@objectstack/metadata-core';
 import { BatchRowHealError, canJudgeBatchObjects, isBatchObjectType, readActiveBatchRow, settleBatchObjectRows, undoBatchRowWrite, undoOutcomeForLog, type WrittenBatchRow } from './batch-object-registration.js';
+import { retireOverlayCacheOnRollback } from './meta-overlay-cache.js';
 
 export class ProtocolSaveFacet {
     /**
@@ -340,7 +342,7 @@ export class ProtocolSaveFacet {
     }
 
     /** [#28355] The body of {@link saveMetaItem} before its refusal audit; that method's docblock is the contract. */
-    static async saveMetaItemUnaudited(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'assertRuntimeAuthoringRules' | 'authoredLockFamily' | 'authoringChannel' | 'carryForwardRedactedCredentials' | 'classifyObjectContribution' | 'codeOnlyCreateError' | 'codeOnlyOverrideError' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'emitMetaItemPublished' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'envWritableTypes' | 'externalBindingSaveRefusal' | 'flowCanonicalizeFallbackWarned' | 'flowSaveReplaysRetired' | 'foldObjectExtendersFromRegistry' | 'getMetaItems' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isWritablePackage' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'readMetaItem' | 'receiptVersion' | 'recordMetadataAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseOverride' | 'refuseUngrammaticalMetaItemName' | 'refuseUnmintableMetaType' | 'registryAllowsOverlay' | 'resolveFlowCanonicalizer' | 'resolveSduiManifest' | 'restoreInjectedColumnEchoes' | 'restoreTranslatedObjectEchoes' | 'restoredCredentialPathsFor' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'runAuthoringGate' | 'runMutationProjector' | 'saveConflict' | 'saveWriteBinding' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'storableViewFallbackWarned' | 'storedParentForToken' | 'stripServedObjectColumns' | 'tenantAuthoredWriteRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal' | 'viewContainerNameCollisionRefusal'>, request: SaveMetaItemRequest) {
+    static async saveMetaItemUnaudited(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'assertRuntimeAuthoringRules' | 'authoredLockFamily' | 'authoringChannel' | 'carryForwardRedactedCredentials' | 'classifyObjectContribution' | 'codeOnlyCreateError' | 'codeOnlyOverrideError' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'emitMetaItemPublished' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'envWritableTypes' | 'externalBindingSaveRefusal' | 'flowCanonicalizeFallbackWarned' | 'flowSaveReplaysRetired' | 'foldObjectExtendersFromRegistry' | 'getMetaItems' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isWritablePackage' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'readMetaItem' | 'receiptVersion' | 'recordMetadataAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseOverride' | 'refuseUngrammaticalMetaItemName' | 'refuseUnmintableMetaType' | 'registryAllowsOverlay' | 'resolveFlowCanonicalizer' | 'resolveSduiManifest' | 'restoreInjectedColumnEchoes' | 'restoreTranslatedObjectEchoes' | 'restoredCredentialPathsFor' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'runAuthoringGate' | 'runMutationProjector' | 'saveConflict' | 'saveWriteBinding' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'storableViewFallbackWarned' | 'storedParentForToken' | 'stripServedObjectColumns' | 'tenantAuthoredWriteRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal' | 'viewContainerNameCollisionRefusal' | 'expandRuntimeViewContainer' | 'readFlattenedMetaItems' | 'readActiveOverlayRows' | 'storedOverlayEntries' | 'expandStoredViewContainers' | 'restoreArtifactRegistryView'>, request: SaveMetaItemRequest) {
         // [ADR-0131 D6] FIRST, before every other gate and every read: an
         // organization-scoped write is refused for every type, draft or
         // publish. See {@link organizationScopedWriteRefusal}.
@@ -1502,6 +1504,26 @@ export class ProtocolSaveFacet {
                 );
                 if (containerCollision) throw containerCollision;
             }
+            // [ADR-0159 D5, card ② item 5] …and a package-less `view` write
+            // that would store a LIST at a name a read-only package authors
+            // as a `form` item, with the same envelope. See
+            // {@link packagelessListOverFormRefusal}.
+            {
+                const listOverForm = packagelessListOverFormRefusal(
+                    host, singularType, request.item, request.name, request.packageId,
+                );
+                if (listOverForm) throw listOverForm;
+            }
+            // [ADR-0159 ruled question 3 = A] …and a `form` that would be left
+            // open on a public address another form holds (the effective
+            // `form` read, projected old shapes included), `409`
+            // `FORM_ADDRESS_TAKEN`. See {@link formAddressClashRefusal}.
+            {
+                const clash = await formAddressClashRefusal(
+                    host, singularType, request.item, request.name, request.packageId,
+                );
+                if (clash) throw clash;
+            }
             let baseline: unknown;
             if ((PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view'
                 && typeof host.engine.registry?.getItem === 'function') {
@@ -2319,8 +2341,28 @@ export class ProtocolSaveFacet {
                 });
             }
         }
+        // [ADR-0159 D5, card ② item 5] A published `form` write also removes
+        // the old-shape row that carries the form at its address, in the same
+        // transaction (the repository's `put` joins it): a `form` write that
+        // fails leaves both rows as they were. ⛔ Form content only.
+        const formRowRemoval = mode === 'publish' && singularTypeForRepo === 'form';
+        let removedOldShapeRows: OldShapeFormRowRemoval[] = [];
+        const putFormAware = async (put: () => Promise<any>): Promise<any> => {
+            if (!formRowRemoval) return put();
+            const run = async () => {
+                const written = await put();
+                removedOldShapeRows = await applyOldShapeFormRowRemovals(host, {
+                    name: request.name,
+                    packageId: request.packageId ?? null,
+                    actor: request.actor ?? null,
+                    source: writeSource ?? 'protocol.saveMetaItem',
+                });
+                return written;
+            };
+            return typeof host.engine?.transaction === 'function' ? retireOverlayCacheOnRollback(host.engine, () => host.engine.transaction!(run)) : run();
+        };
         try {
-            const result = await repo.put(ref, request.item, {
+            const result = await putFormAware(() => repo.put(ref, request.item, {
                 parentVersion,
                 // #4556 — `actor` lands in `sys_metadata_history.recorded_by`,
                 // a lookup('sys_user'). No caller actor → NULL, never the
@@ -2341,7 +2383,10 @@ export class ProtocolSaveFacet {
                         ...(request.client !== undefined ? { draftChangesClient: authoringClientOf(request.client) } : {}),
                     }
                     : {}),
-            });
+            }));
+            // [ADR-0159 D5] The registry heal of each old-shape row the write
+            // removed or re-saved, after the commit.
+            await healOldShapeFormRowRemovals(host, removedOldShapeRows);
             // Persistence succeeded — NOW it's safe to mutate the
             // in-memory registry. If put() had thrown, the registry
             // would still reflect the prior state. Drafts are NOT
@@ -3264,6 +3309,15 @@ export async function environmentActionPublishSlotRefusal(
 }
 
 /**
+ * The writes naming no package that ask the disabled-holders judgment
+ * ({@link packagelessHolderRefusal}): the save (publish and draft mode), the
+ * delete and the draft discard, and [ADR-0150 D3, the 2026-11-26 note] the
+ * per-item publish and the per-item rollback. Every verb but `delete` writes a
+ * row, so its refusal says nothing was written.
+ */
+export type DisabledHoldersWriteVerb = 'save' | 'delete' | 'publish' | 'rollback';
+
+/**
  * [ADR-0150 D3, ruling A on the disabled-only name] The refusal of a write
  * naming no package of a name every holder of which is disabled. A disabled
  * package holds no name, so the read naming no package answers the missing
@@ -3272,11 +3326,11 @@ export async function environmentActionPublishSlotRefusal(
  * {@link packagelessAddressAmbiguityRefusal}, with no new code.
  */
 export function disabledHoldersOnlyRefusal(
-    verb: 'save' | 'delete',
+    verb: DisabledHoldersWriteVerb,
     type: string,
     name: string,
 ): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
-    const [nothing, single] = verb === 'save'
+    const [nothing, single] = verb !== 'delete'
         ? ['Nothing was written.', 'no row to write']
         : ['Nothing was deleted.', 'no row to remove'];
     const err = new Error(
@@ -3294,10 +3348,11 @@ export function disabledHoldersOnlyRefusal(
  * no package of a name every holder of which is disabled, where a
  * PACKAGE-UNBOUND row or draft is stored for the name. That row is the
  * holder's customization (a package-less row over a held name is never a
- * second item), so it is hidden with its holder, from the reads and from the
- * writes alike: the save edited it unseen, the draft save stored a draft no
- * read reaches, and the delete and the draft discard removed what the next
- * enable would have served.
+ * second item), so it is hidden with its holder: the reads withhold it, and
+ * the writes naming no package that ask {@link packagelessHolderRefusal} leave
+ * it alone. The save edited it unseen, the draft save stored a draft no read
+ * reaches, the delete and the draft discard removed what the next enable
+ * would have served, and the per-item publish and rollback rewrote it.
  *
  * `409 RESOURCE_CONFLICT`, the refusal family of
  * {@link disabledHoldersOnlyRefusal}, with no new code, and naming no package
@@ -3306,11 +3361,11 @@ export function disabledHoldersOnlyRefusal(
  * hidden row where it is and stores a second row beside it.
  */
 export function disabledHoldersCustomizationRefusal(
-    verb: 'save' | 'delete',
+    verb: DisabledHoldersWriteVerb,
     type: string,
     name: string,
 ): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
-    const nothing = verb === 'save' ? 'Nothing was written.' : 'Nothing was deleted.';
+    const nothing = verb !== 'delete' ? 'Nothing was written.' : 'Nothing was deleted.';
     // Kept well under the 500 characters a door's client message is cut at
     // (`truncateClientMessage`), so the remedy's last sentence arrives.
     const err = new Error(
@@ -3476,6 +3531,9 @@ export async function packagelessRowHeldBaseDraftAddress(
  * bare draft discard answer as the bare read does in the two states below,
  * whether or not a row is stored at the address (over none, the delete and
  * the discard are refused too, not answered the no-op receipt).
+ * [ADR-0150 D3, the 2026-11-26 note] The bare per-item publish and the bare
+ * per-item rollback ask the second state only (`arms: 'disabled-holders'`),
+ * after the ADR-0146 D11 close, so they write nothing a disabled holder hides.
  * Asked after {@link servedPackagelessSaveAddress} (a name an enabled and a
  * disabled package both hold) and after the rows' own refusal (two or more
  * bindings), so neither answer moves.
@@ -3513,7 +3571,7 @@ export async function packagelessRowHeldBaseDraftAddress(
  */
 export function packagelessHolderRefusal(
     host: Pick<ProtocolHost, 'engine' | 'shippedArtifactsOf'>,
-    verb: 'save' | 'delete',
+    verb: DisabledHoldersWriteVerb,
     shownType: string,
     type: string,
     name: string,
@@ -3529,6 +3587,13 @@ export function packagelessHolderRefusal(
          */
         readonly customized?: boolean;
     },
+    /**
+     * `'disabled-holders'`: the disabled-holders judgment only, never the
+     * two-enabled-holders refusal. The per-item publish and rollback ask it
+     * so (ADR-0150 D3, the 2026-11-26 note); each has its own refusal of
+     * two holders' rows (`packagelessAddressAmbiguityRefusal`, `historySlotOf`).
+     */
+    arms: 'all' | 'disabled-holders' = 'all',
 ): (Error & { code: 'RESOURCE_CONFLICT'; status: 409 }) | undefined {
     const registry = host.engine?.registry as HolderRegistry | undefined;
     if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(type) !== true) return undefined;
@@ -3538,7 +3603,7 @@ export function packagelessHolderRefusal(
     // A package-unbound row at the address leaves the ENABLED holders' answer
     // as it was (the write edits that row); only the disabled-holders
     // judgment below reads past it.
-    if (!address.unbound && typeof registry.resolveItem === 'function') {
+    if (arms === 'all' && verb !== 'rollback' && !address.unbound && typeof registry.resolveItem === 'function') {
         try {
             registry.resolveItem(type, name, null, member);
         } catch (error) {

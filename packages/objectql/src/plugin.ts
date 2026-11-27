@@ -45,6 +45,7 @@ import { RecordCurrencyFollowRefusedError } from './record-currency-aggregate-do
 // [#22070] The builtin audit stamps are wrapped like a bound hook but registered in code.
 import { wrapDeclarativeHook } from './hook-wrappers.js';
 import { announceStoredExpressionHoles } from './stored-expression-backfill.js';
+import { announceUnservedKnowledgeSources } from './knowledge-source-unserved.js';
 import { announceSummaryHoles } from './summary-hole-announce.js';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
 import { WORK_CALENDAR_OBJECT, WorkCalendarService, installWorkCalendarHooks } from './work-calendar-service.js';
@@ -1480,6 +1481,10 @@ export class ObjectQLPlugin implements Plugin {
         // `os migrate summary-nulls`; a bounded sample read that writes nothing
         // and never fails the boot (`summary-hole-announce.ts`).
         if (this.ql) await announceSummaryHoles(this.ql, ctx.logger);
+        // [ADR-0161 K4 · ADR-0078] `knowledge_source` items with no knowledge
+        // service to load them are valid and inert: said once, at warn, never
+        // a boot refusal (`knowledge-source-unserved.ts`).
+        await announceUnservedKnowledgeSources({ getService: (name) => ctx.getService(name), logger: ctx.logger });
     });
     ctx.hook('metadata:reloaded', async (payload?: unknown) => {
         await this.resyncAuthoredHooks(ctx);

@@ -74,11 +74,10 @@
  */
 
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
-import { operationUserMessage } from '@objectstack/core';
 import type { ICommentDoorsService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRequest, DomainRoute } from '../domain-handler-registry.js';
-import { requestLocaleOf } from './own-door-bridge.js';
+import { catalogNotImplemented } from './own-door-bridge.js';
 
 /** The prefix the domain claims (a segment claim, narrowed by the handler). */
 export const COMMENTS_DOMAIN_PREFIX = '/comments';
@@ -163,22 +162,10 @@ export async function handleCommentsRequest(
     // [#37610] The `501` is the operation-message catalog's, in the request's
     // top `Accept-Language` tag, as the own-door bridge answers its own.
     if (!service) {
-        return {
-            handled: true,
-            response: deps.error(
-                operationUserMessage('comment_doors_service_unregistered', { locale: requestLocaleOf(context) }),
-                501,
-            ),
-        };
+        return catalogNotImplemented(deps, context, 'comment_doors_service_unregistered');
     }
     if (typeof service.handleCommentDoor !== 'function') {
-        return {
-            handled: true,
-            response: deps.error(
-                operationUserMessage('comment_doors_member_missing', { locale: requestLocaleOf(context) }),
-                501,
-            ),
-        };
+        return catalogNotImplemented(deps, context, 'comment_doors_member_missing');
     }
 
     const request = context.request as Request;

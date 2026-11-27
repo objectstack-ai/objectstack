@@ -3102,6 +3102,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/lifecycle/lifecycle-service.sealed-expiry.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/meta-object-primary-designation-roundtrip.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3819,6 +3824,11 @@
     {
       "file": "packages/plugins/plugin-approvals/src/team-member-org-screen.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-audit/src/audit-seal/audit-seal-retention-floor.test.ts",
+      "verb": "delete",
       "pinned": 1
     },
     {

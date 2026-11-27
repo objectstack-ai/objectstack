@@ -132,6 +132,9 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'objectActions.bulkDeleteSuccess_one': 'Deleted {{count}} {{label}} record',
   'objectActions.bulkDeleteSuccess_other': 'Deleted {{count}} {{label}} records',
   'objectActions.bulkDeletePartial': '{{succeeded}} deleted, {{failed}} failed',
+  // objectstack#37816 — the outcome's reason lines (`bulkDeleteRefusalLines`).
+  'objectActions.bulkDeleteRefusedNamed': '{{names}}: {{reason}}',
+  'objectActions.bulkDeleteMoreReasons': 'And {{more}} more',
   'detail.actions': 'Actions',
   'detail.previousPage': 'Previous',
   'detail.nextPage': 'Next',

@@ -37,7 +37,7 @@
 // ## The population — DERIVED from `reportForm`, ⛔ not from the catalog's keys
 //
 // The source that MANUFACTURES these leaves is `reportForm`
-// (`packages/spec/src/ui/report.form.ts`), walked exactly as the CLI extractor
+// (`packages/spec/src/ui/report.metadata-form.ts`), walked exactly as the CLI extractor
 // walks it (`walkMetadataForms` / `walkFormField` in
 // `packages/cli/src/utils/i18n-extract.ts`): every section's `label` and
 // `description`, then every field it declares, recursively, with the same

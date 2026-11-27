@@ -205,6 +205,7 @@ Every type the spec registers, enumerated at `origin/main` `151e8123` from `pack
 | **AI** | `ai` | 2 | `tool` 工具 | 常用 |
 | **AI** | `ai` | 3 | `skill` 技能 | 常用 |
 | **AI** | `ai` | 4 | `ai_context` *(registered after the ruling — [item 6](#amendment-2026-11-25-silent))* | 高级 |
+| **AI** | `ai` | 5 | `knowledge_source` *(registered after the ruling — [item 6](#amendment-2026-11-25-silent))* | 高级 |
 
 *(Amended 2026-11-25: the table is redrawn one row per type and gains two columns, **Order** and **Tier** — [Amendment (2026-11-25)](#amendment-2026-11-25). Read again at `origin/main` `a33691e567`: 33 entries — the 32 of the first reading, each in the domain it had, and `ai_context`, registered `ai` on 2026-11-25 ([ADR-0160](./0160-record-scoped-ai-inquiry.md) D1). No type changed group, and the rows count 数据 Data 7 · 界面 UI 7 · 自动化 Automation 2 · 平台 Platform 7 · 访问 Access 6 · AI 4.)*
 

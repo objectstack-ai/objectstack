@@ -68,15 +68,18 @@ export const KnowledgeChunkSchema = lazySchema(() => z.object({
 /**
  * One logical document submitted to an adapter for indexing.
  *
- * For `object` sources, one ObjectQL record produces exactly one
- * document. For `file` / `http` sources, the adapter is free to split
- * a single file into many documents if that's the natural unit.
+ * One ObjectQL record of the object a source names produces exactly one
+ * document, and the knowledge service assembles it (ADR-0161 K1): no caller
+ * hands the service a document.
  */
 export const KnowledgeDocumentSchema = lazySchema(() => z.object({
   /** Globally-unique document id. Snake / kebab-safe. */
   id: z.string().describe('Document id'),
-  /** Logical source this document belongs to. */
-  sourceId: z.string().describe('Owning KnowledgeSource id'),
+  /**
+   * The source this document belongs to: its index key, the string the
+   * adapter is handed as `AdapterContext.source.name`.
+   */
+  sourceId: z.string().describe('Index key of the owning knowledge source'),
   /**
    * Underlying ObjectQL record id when the source kind is `object`.
    * Powers permission-aware retrieval: hits referencing a record are
@@ -102,9 +105,8 @@ export const KnowledgeDocumentSchema = lazySchema(() => z.object({
    * The organization the document belongs to (ADR-0161 K8, item 9). Set by the
    * knowledge service when it assembles a document from a record: the
    * record's `organization_id`, under a walled tenancy posture (`group` or
-   * `isolated`, ADR-0105 D1). Absent for `file` / `http` sources, under the
-   * `single` posture, and for a record that carries no organization; a
-   * caller-supplied value is refused by `indexDocument`. Stored by the adapter
+   * `isolated`, ADR-0105 D1). Absent under the
+   * `single` posture and for a record that carries no organization. Stored by the adapter
    * and read by its search: when the search is handed
    * `AdapterSearchOptions.organizationIds`, only documents whose organization
    * is in that set are ranked, so a document without one is not. An adapter
@@ -118,8 +120,7 @@ export const KnowledgeDocumentSchema = lazySchema(() => z.object({
    * A hash of the assembled document — its content, title and metadata, and its
    * `organizationId` when it has one, in a stable key order, behind a version
    * prefix (ADR-0161 K8, item 2). Set by
-   * the knowledge service on every document it hands an adapter; a
-   * caller-supplied value is refused by `indexDocument`. Stored by the adapter
+   * the knowledge service on every document it hands an adapter. Stored by the adapter
    * and returned as stored by `listDocuments`; an unchanged hash lets a
    * complete reindex skip writing the document again. Adapters never compute
    * or alter it.
@@ -129,9 +130,8 @@ export const KnowledgeDocumentSchema = lazySchema(() => z.object({
   /**
    * The document's passages, cut by the knowledge service's splitter
    * (ADR-0161 K8, item 5). Set by the service, and only on a document handed
-   * to an adapter that declares `capabilities.chunks`; a caller-supplied value
-   * is refused by `indexDocument`. Derived from `content`, so it is not part
-   * of `docHash`. An adapter that receives it indexes these passages as given.
+   * to an adapter that declares `capabilities.chunks`. Derived from `content`,
+   * so it is not part of `docHash`. An adapter that receives it indexes these passages as given.
    */
   chunks: z.array(KnowledgeChunkSchema).optional()
     .describe('Service-cut passages of the document, handed to an adapter that declares capabilities.chunks'),

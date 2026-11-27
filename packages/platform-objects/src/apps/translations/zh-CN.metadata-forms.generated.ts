@@ -1659,10 +1659,17 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "锁定者",
         helpText: "锁定该视图配置的用户"
       },
+      requiredPermissions: {
+        label: "所需权限",
+        helpText: "谁能看此视图：查看者必须持有的能力，列出的每一项都要具备。能力由权限集授予，岗位通过其权限集获得这些能力。留空则所有能看到该列表的人都能看到此视图。要给多类人看，请选一个能力并授予每类人的权限集。由服务器强制执行：其他人在列表中看不到此视图，直接打开也会被拒绝。这也适用于你自己：列出你未持有或拼错的能力后，你也将无法再打开此视图。"
+      },
       object: {
         label: "对象"
       }
     }
+  },
+  form: {
+    label: "表单"
   },
   page: {
     label: "页面",
@@ -1871,6 +1878,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "筛选",
         description: "应用到所有组件的默认筛选与全局筛选"
       },
+      access: {
+        label: "访问权限",
+        description: "谁可以查看此仪表盘。"
+      },
       advanced: {
         label: "高级设置",
         description: "性能与无障碍"
@@ -2051,6 +2062,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "globalFilters.targetWidgets": {
         label: "目标组件"
+      },
+      requiredPermissions: {
+        label: "所需权限",
+        helpText: "谁能看此仪表盘：查看者必须持有的能力，列出的每一项都要具备。能力由权限集授予，岗位通过其权限集获得这些能力。留空则所有人都能看到此仪表盘。要给多类人看，请选一个能力并授予每类人的权限集。由服务器强制执行：其他人在列表中看不到此仪表盘，直接打开也会被拒绝。这也适用于你自己：列出你未持有或拼错的能力后，你也将无法再打开此仪表盘。"
       }
     }
   },
@@ -3288,7 +3303,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       model: {
         label: "模型",
-        helpText: "AI 模型配置（提供方、模型名、温度等）"
+        helpText: "AI 模型配置（模型名、温度等）"
       },
       planning: {
         label: "规划",
@@ -3473,5 +3488,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "根对象的一个长文本字段（textarea、markdown、html、richtext）。选其他字段会在保存时报告，资料包也就不带正文。"
       }
     }
+  },
+  knowledge_source: {
+    label: "知识源"
   }
 };

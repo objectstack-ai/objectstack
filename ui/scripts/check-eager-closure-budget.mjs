@@ -1405,8 +1405,52 @@ import { isEntrypoint } from './invoked-as.mjs';
  * same run called blind (1.91x). Not the other three per-chunk rows, which
  * stayed in range; not {@link REGRESSION_THIS_GATE_MUST_CATCH_BYTES}. No
  * exemption was added.
+ *
+ * ## ⭐ RE-PINNED AFTER THE SPEC'S MODULE-SCOPE INITIALIZERS BECAME DROPPABLE (objectstack#37572)
+ *
+ * From 2,489,948 to 2,407,237: down by 82,711 bytes, exactly what the closure
+ * lost between {@link BASELINE}'s previous reading (`cc378e93`, 1,982,059
+ * across 85 of 2387 chunks) and this change's branch commit `003fde60`
+ * (1,899,348 across 123 of 2616). Lowered by that amount, as the
+ * objectstack#25925 entry above was: ⛔ not re-derived as the new reading plus
+ * half a regression and ⛔ not rounded.
+ *
+ * The control is `main` at `ce4d8c7d`, built in the same container by the
+ * same instrument (`pnpm console:build`, reading
+ * `ui/apps/console/dist/eager-closure.json`): 1,996,960 across 124 of 2615.
+ * So the change itself took 97,612 bytes out; the other 14,901 is `main`'s own
+ * growth between `cc378e93` and `ce4d8c7d`, which this re-pin does not give
+ * back as headroom. Gzipped bytes:
+ *
+ *   | chunk                | `ce4d8c7d` | `003fde60` |   delta |
+ *   |----------------------|-----------:|-----------:|--------:|
+ *   | `vendor-objectstack` |    698,253 |    647,764 | -50,489 |
+ *   | `plugin-form`        |     48,162 |          — | -48,162 |
+ *   | everything else      |  1,250,545 |  1,251,584 |  +1,039 |
+ *   | ⇒ aggregate          |  1,996,960 |  1,899,348 | -97,612 |
+ *
+ *   - `vendor-objectstack`: `@objectstack/spec`'s build now wraps each
+ *     module-scope initializer the bundler cannot prove pure (a spread of
+ *     another schema's shape, a `.extend()` / `.pick()` chain, a derived
+ *     table) in a `#__PURE__` arrow, so an initializer nobody reads is
+ *     dropped with the schema graph it holds (`wrapModuleScopeInitializers`
+ *     in `packages/spec/tsup.config.ts`). Initializers that write into an
+ *     object that already exists (`Object.assign(Existing, …)`) are left alone.
+ *   - `plugin-form`: the record page's `RelatedRecordActionsBridge` read
+ *     `createKeepsField` from the package root, which kept the whole form
+ *     package eager; it now reads it from the side-effect-free
+ *     `@object-ui/plugin-form/core`.
+ *
+ * Headroom 507,889 bytes = 0.71x {@link REGRESSION_THIS_GATE_MUST_CATCH_BYTES}
+ * over {@link BASELINE}: exactly the headroom the objectstack#25925 entry left.
+ *
+ * ⛔ What did not move: the four per-chunk rows. `vendor-objectstack` reads
+ * 647,764 under its 842,730 ceiling (0.27x of a regression), in range, so
+ * {@link PER_CHUNK_GZIP_CEILINGS} and {@link PER_CHUNK_BASELINE} stand; the
+ * other three chunks did not move. Not
+ * {@link REGRESSION_THIS_GATE_MUST_CATCH_BYTES}. No exemption was added.
  */
-export const MAX_EAGER_CLOSURE_GZIP_BYTES = 2_489_948;
+export const MAX_EAGER_CLOSURE_GZIP_BYTES = 2_407_237;
 
 /**
  * The measurement the ceiling above was derived from. Exported so the two
@@ -1418,6 +1462,18 @@ export const MAX_EAGER_CLOSURE_GZIP_BYTES = 2_489_948;
 export const BASELINE = Object.freeze({
   /**
    * `emitEagerClosureReport`'s `eagerGzipBytes` on this commit.
+   *
+   * `003fde60` is objectstack#37572's branch commit, re-pinned with the
+   * ceiling it was lowered with (the objectstack#37572 entry on
+   * {@link MAX_EAGER_CLOSURE_GZIP_BYTES} carries its table and its `ce4d8c7d`
+   * control, ⛔ not restated here). It is a branch commit because the pull
+   * request's own diff is what moved the figure. The commit that re-pins this
+   * file and its unit test reaches no bundler input, so it cannot move the
+   * figure it pins.
+   *
+   * ⚠️ The paragraph below describes the reading this one superseded, the
+   * previous baseline `cc378e93` (1,982,059 across 85 of 2387 chunks), kept as
+   * its provenance.
    *
    * `cc378e93` is `main` in this repository, re-pinned with the ceiling it was
    * lowered with (the objectstack#25925 entry on
@@ -1597,10 +1653,10 @@ export const BASELINE = Object.freeze({
    * and not from `main` once it is squash-merged — the dead end objectui#9355
    * added `squashMerge` below to route around.
    */
-  gzipBytes: 1_982_059,
-  chunks: 85,
-  totalChunks: 2387,
-  commit: 'cc378e93',
+  gzipBytes: 1_899_348,
+  chunks: 123,
+  totalChunks: 2616,
+  commit: '003fde60',
 
   /**
    * The squash merge that carried the reading above onto `main`, recorded when
@@ -1612,7 +1668,10 @@ export const BASELINE = Object.freeze({
    * objectui#11438, objectui#11717, objectui#11798, objectui#11854,
    * objectui#11939, objectui#12030 and objectui#13410, deliberately; and `null`
    * after objectstack#25925 because its reading was taken on `main` itself,
-   * which a `main` checkout resolves without a handle. This field can only ever be BACK-FILLED: a squash sha does
+   * which a `main` checkout resolves without a handle. ⭐ Back-filled for
+   * objectstack#37572: `003fde60` above is that pull request's branch commit,
+   * and `50b4bf82` is the squash that landed it on `main` (#37786), the tree a
+   * `main` checkout can build to re-check the reading. This field can only ever be BACK-FILLED: a squash sha does
    * not exist until the pull request merges, so the change that re-pins the
    * field above ⛔ cannot write its own here. ⛔ Do not guess one: a wrong sha in
    * this position is worse than an absent one, because it RESOLVES, and a
@@ -1628,7 +1687,7 @@ export const BASELINE = Object.freeze({
    * that records what this constant carries as data reds on a back-fill, as it
    * was written to, and is re-pinned to two strings when that happens.
    */
-  squashMerge: null,
+  squashMerge: '50b4bf82',
 });
 
 /**
@@ -2631,9 +2690,14 @@ export const PER_CHUNK_GZIP_CEILINGS = Object.freeze({
  * `ui-components` by +12,267 (the markdown modules its entry on
  * {@link MAX_EAGER_CLOSURE_GZIP_BYTES} attributes), every ceiling stayed in
  * range, and no ceiling moved. objectstack#25925 re-pinned the aggregate onto
- * BASELINE's `cc378e93` and `vendor-objectstack` with it, from the same build,
- * when both lines had drifted blind; the other three keys stayed in range and
- * where they were. The aggregate is the later reading for every other key:
+ * `cc378e93` and `vendor-objectstack` with it, from the same build, when both
+ * lines had drifted blind; the other three keys stayed in range and where they
+ * were. objectstack#37572 re-pinned the aggregate onto BASELINE's `003fde60`
+ * and left every key where it was: across its two builds (`ce4d8c7d` and
+ * `003fde60`) `vendor-objectstack` moved by −50,489, `framework` by −1 and
+ * `ui-components` and `i18n-locale-en` by 0, every ceiling stayed in range,
+ * and no ceiling moved, so `vendor-objectstack`'s `cc378e93` reading is no
+ * longer the aggregate's. The aggregate is the later reading for every other key:
  * `bbf6b02d9` (2026-09-13, objectui#9251) for `ui-components`, and `3f775eeb8`
  * for `framework`. ⚠️ `i18n-locale-en`'s commit was `755d34a5f` when it
  * was taken and the aggregate has moved on since, which is exactly why the two

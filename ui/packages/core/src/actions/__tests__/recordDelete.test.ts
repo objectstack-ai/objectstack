@@ -190,9 +190,103 @@ describe('recordDelete.run — several records', () => {
     expect(toast.error).toHaveBeenCalledTimes(1);
     expect(toast.error).toHaveBeenCalledWith(
       'objectActions.bulkDeletePartial {"succeeded":1,"failed":1}',
+      { description: 'refused b' },
     );
     expect(toast.success).not.toHaveBeenCalled();
     expect(res).toEqual({ success: false });
+  });
+});
+
+/**
+ * objectstack-ai/objectstack#37758 — a batch with refusals said only
+ * "0 deleted, 4 failed": each refusal's reason (the server's localized
+ * sentence, which the one-record toast shows) was dropped. The summary title
+ * keeps its counts; the description gives the reasons, one line per distinct
+ * reason, led by the names of the records it refused.
+ */
+describe('recordDelete.run — a batch with refusals names the reasons (objectstack#37758)', () => {
+  const EVENT = { name: 'crm_event', label: 'Event', nameField: 'name', fields: { name: { type: 'text' } } };
+  const RESTRICT = 'This event is still referenced by attendee records. Delete or reassign them first.';
+
+  /** A data source that refuses the ids in `refusals` with the error given there. */
+  function refusing(refusals: Record<string, unknown>, objectDef: unknown = EVENT) {
+    const h = harness();
+    h.dataSource.delete.mockImplementation(async (_resource: string, id: string) => {
+      if (id in refusals) throw refusals[id];
+      return true;
+    });
+    return { ...h, deps: { ...h.deps, objectDef } };
+  }
+
+  const ev = (id: string, name?: string) => (name ? { id, name } : { id });
+
+  it('an all-refused batch for one reason reads as that reason, with the records it refused', async () => {
+    const c = refusing({ e1: new Error(RESTRICT), e2: new Error(RESTRICT), e3: new Error(RESTRICT), e4: new Error(RESTRICT) });
+    await recordDelete.run(c.deps, {
+      params: { records: [ev('e1', 'Kickoff'), ev('e2', 'Review'), ev('e3', 'Launch'), ev('e4', 'Retro')] },
+    });
+
+    expect(c.toast.error).toHaveBeenCalledTimes(1);
+    expect(c.toast.error).toHaveBeenCalledWith('objectActions.bulkDeletePartial {"succeeded":0,"failed":4}', {
+      description: `objectActions.bulkDeleteRefusedNamed {"names":"Kickoff, Review, Launch +1","reason":"${RESTRICT}"}`,
+    });
+  });
+
+  it('a mixed batch: one line per distinct reason, in the order handed in; the deleted record is not named', async () => {
+    const c = refusing({ e2: new Error(RESTRICT), e3: new Error('Record is locked'), e4: new Error(RESTRICT) });
+    await recordDelete.run(c.deps, {
+      params: { records: [ev('e1', 'Kickoff'), ev('e2', 'Review'), ev('e3', 'Launch'), ev('e4', 'Retro')] },
+    });
+
+    expect(c.toast.error).toHaveBeenCalledWith('objectActions.bulkDeletePartial {"succeeded":1,"failed":3}', {
+      description: [
+        `objectActions.bulkDeleteRefusedNamed {"names":"Review, Retro","reason":"${RESTRICT}"}`,
+        'objectActions.bulkDeleteRefusedNamed {"names":"Launch","reason":"Record is locked"}',
+      ].join('\n'),
+    });
+  });
+
+  it('records with no name: the reason reads alone, since the title already counts them', async () => {
+    const c = refusing({ x1: new Error(RESTRICT), x2: new Error(RESTRICT) }, undefined);
+    await recordDelete.run(c.deps, { params: { records: [{ id: 'x1' }, { id: 'x2' }] } });
+
+    expect(c.toast.error).toHaveBeenCalledWith('objectActions.bulkDeletePartial {"succeeded":0,"failed":2}', {
+      description: RESTRICT,
+    });
+  });
+
+  it('past three reasons the rest are counted, not listed', async () => {
+    const c = refusing({ a: new Error('r1'), b: new Error('r2'), c: new Error('r3'), d: new Error('r4'), e: new Error('r5') }, undefined);
+    await recordDelete.run(c.deps, { params: { records: ['a', 'b', 'c', 'd', 'e'].map((id) => ({ id })) } });
+
+    expect(c.toast.error).toHaveBeenCalledWith('objectActions.bulkDeletePartial {"succeeded":0,"failed":5}', {
+      description: ['r1', 'r2', 'r3', 'objectActions.bulkDeleteMoreReasons {"more":2}'].join('\n'),
+    });
+  });
+
+  it("an external datasource's refusal reads as the read-only sentence, as the one-record toast reads it", async () => {
+    const external = Object.assign(new Error('EXTERNAL_WRITE_FORBIDDEN: datasource flags …'), { code: 'EXTERNAL_WRITE_FORBIDDEN' });
+    const c = refusing({ a: external, b: external }, undefined);
+    await recordDelete.run(c.deps, { params: { records: [{ id: 'a' }, { id: 'b' }] } });
+
+    expect(c.toast.error).toHaveBeenCalledWith('objectActions.bulkDeletePartial {"succeeded":0,"failed":2}', {
+      description: 'form.readOnlyExternalSource',
+    });
+  });
+
+  it('CONTROL — refusals that carry no message keep the bare count toast, with no description', async () => {
+    const c = refusing({ a: new Error(''), b: { status: 500 } }, undefined);
+    await recordDelete.run(c.deps, { params: { records: [{ id: 'a' }, { id: 'b' }] } });
+
+    expect(c.toast.error).toHaveBeenCalledTimes(1);
+    expect(c.toast.error).toHaveBeenCalledWith('objectActions.bulkDeletePartial {"succeeded":0,"failed":2}');
+  });
+
+  it('CONTROL — the one-record refusal toast is unchanged', async () => {
+    const c = refusing({ e1: new Error(RESTRICT) });
+    await recordDelete.run(c.deps, { params: { record: ev('e1', 'Kickoff') }, recordId: 'e1' });
+
+    expect(c.toast.error).toHaveBeenCalledWith('objectActions.deleteFailed {"label":"Lead"}', { description: RESTRICT });
   });
 });
 

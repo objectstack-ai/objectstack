@@ -184,7 +184,9 @@ describe('[#24693] os migrate audit-mail-bodies over an 18.0 database', () => {
   }, 300_000);
 
   it('2. --apply leaves 0 clear copies, and moves no byte but the masked bodies', () => {
-    const run = runCommand(file, ['--apply', '--yes']);
+    // [#31908] sys_audit_log declares lifecycle.seal, and SQLite offers no session lock: an --apply run
+    // needs --sealer-stopped (ADR-0154 D3 amended, B). No server seals this fixture while the command runs.
+    const run = runCommand(file, ['--apply', '--yes', '--sealer-stopped']);
     expect(run.status, run.out).toBe(0);
     expect(run.report?.failures).toBe(0);
     expect(run.report?.rewritten).toBe(fixtureClear.audit + fixtureClear.activity);
@@ -219,7 +221,7 @@ describe('[#24693] os migrate audit-mail-bodies over an 18.0 database', () => {
 
   it('3. a second --apply masks nothing and changes no byte', () => {
     const before = snapshot(file);
-    const again = runCommand(file, ['--apply', '--yes']);
+    const again = runCommand(file, ['--apply', '--yes', '--sealer-stopped']);
     expect(again.status, again.out).toBe(0);
     expect(again.report?.rewritten).toBe(0);
     expect(again.report?.failures).toBe(0);

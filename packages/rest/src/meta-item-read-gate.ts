@@ -1861,6 +1861,23 @@ export function createMetaItemReadGate(
         };
     }
 
+    if (metaType === 'form') {
+        // [ADR-0159, card ② item 2] A `form` item's audience: the form's own
+        // `requiredPermissions` (a projected item carries its view item's gate
+        // too, `projectViewForms`). A caller refused a form's document at
+        // `/meta/view/NAME` is refused it at `/meta/form/NAME`, whole.
+        return async (document) => {
+            if (document == null) return serve(document);
+            const ctx = await resolveCallerOnce();
+            const sysPerms = callerSystemPermissions(ctx);
+            if (!sysPerms) return serve(document);
+            if (!holdsRequiredPermissions((document as any).requiredPermissions, sysPerms)) {
+                return refuse(await audienceRefusal(sources, ctx));
+            }
+            return serve(document);
+        };
+    }
+
     if (metaType === 'object') {
         // [#22639] An object's own `listViews` — see {@link filterObjectListViewsForUser}.
         return async (document) => {
@@ -2038,6 +2055,19 @@ export function createMetaListReadGate(
                 if (gated != null) out.push(gated);
             }
             return changed ? out : items;
+        };
+    }
+
+    if (metaType === 'form') {
+        // [ADR-0159] The list face of the `form` arm above: a form the caller
+        // does not hold is left out.
+        return async (items) => {
+            if (items.length === 0) return items;
+            const sysPerms = callerSystemPermissions(await sources.resolveCaller());
+            if (!sysPerms) return items;
+            const kept = items.filter((it: any) => !it || typeof it !== 'object'
+                || holdsRequiredPermissions(it.requiredPermissions, sysPerms));
+            return kept.length === items.length ? items : kept;
         };
     }
 
@@ -2274,7 +2304,7 @@ export function metaTypeReadRefusal(
  * each transport's `/meta` entry, before any handler resolves the protocol or
  * writes the store; never per document.
  *
- * ## The row, and why the capability
+ * ## The rows, and why each capability
  *
  *  - `datasource` → `manage_platform_settings`. The datasource family's own
  *    write doors — `POST /api/v1/datasources`, `PATCH` and `DELETE
@@ -2283,6 +2313,17 @@ export function metaTypeReadRefusal(
  *    create, update and remove the same stored definition a `/meta` write of
  *    this type persists, and admit only this capability. One operation reached
  *    through two mounted doors cannot admit two different sets of callers.
+ *  - `knowledge_source` → `manage_knowledge_sources` (ADR-0161 K4, guard one;
+ *    ruled on #37304, Q2 = B). Saving a knowledge source sends the fields it
+ *    lists, for every record it selects, to the embedding provider and starts
+ *    an index build that may be billed, so authoring one is granted on its
+ *    own: held by default by platform administrators only
+ *    (`ADMIN_FULL_ACCESS_CAPABILITIES`), and asked BESIDE `manage_metadata`,
+ *    which the door itself still asks. A grant on the indexed object's
+ *    records is not read here and implies nothing. This type has no write
+ *    door outside `/meta`, so the capability is the ruling's, and these doors
+ *    are where it is asked: REST and the dispatcher at their `/meta` entry,
+ *    and the MCP draft door (`mcp-authoring.ts`) with the human as the caller.
  *
  * ## Why `external_catalog` has no row here
  *
@@ -2292,8 +2333,10 @@ export function metaTypeReadRefusal(
  * `FEDERATION_WRITE_CAPABILITY` (`manage_metadata`, in
  * `./external-datasource-routes.ts`), which every `/meta` write door already
  * demands. ⛔ A row here names the capability the type's own WRITE door
- * requires FOR THE WRITE — matched, never minted; a type whose write door asks
- * nothing beyond the authoring admission for the write has no row.
+ * requires FOR THE WRITE — matched, never minted here (a capability no other
+ * door asks enters by a maintainer's ruling, as `knowledge_source`'s did); a
+ * type whose write door asks nothing beyond the authoring admission for the
+ * write has no row.
  *
  * That door also requires `manage_platform_settings` (the 2026-11-03 ruling:
  * seeing a datasource's remote structure needs the read capability on every
@@ -2317,6 +2360,7 @@ export function metaTypeReadRefusal(
  */
 export const META_TYPE_WRITE_CAPABILITIES: Readonly<Record<string, string>> = Object.freeze({
     datasource: 'manage_platform_settings',
+    knowledge_source: 'manage_knowledge_sources',
 });
 
 /** The verbs {@link metaTypeWriteRefusal} judges. */
@@ -3458,6 +3502,9 @@ const PACKAGED_BASE_ACCESSORS: ReadonlyMap<string, string> = new Map<string, str
     ['app', 'getPackagedAppBase'],
     ['book', 'getPackagedBookBase'],
     ['mapping', 'getPackagedMappingBase'],
+    // [ADR-0159, ADR-0029 D9.2a] A `form` override's own changed text outranks
+    // its base's catalog, the base an authored `form` item or an old shape's projection.
+    ['form', 'getPackagedFormBase'],
 ]);
 
 /**

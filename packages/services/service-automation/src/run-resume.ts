@@ -16,6 +16,7 @@
  */
 
 import { withFlowRunSlot } from './flow-slots.js';
+import { deriveRunLinks, isRunLinkStamped, RECORD_RUN_CONTEXT_KEY, ROOT_RUN_CONTEXT_KEY, type RunLinkDerivation } from './root-run.js';
 import type { FlowParsed, FlowRunSummary } from '@objectstack/spec/automation';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { AutomationContext, AutomationResult, ResumeSignal } from '@objectstack/spec/contracts';
@@ -1794,7 +1795,59 @@ export async function resumeInternal(
         // suspension is consumed and leave it consumed with no continuation;
         // the persisted `run.context` is left as it was, and the repair
         // journal therefore still snapshots the pause exactly as it parked.
-        const segmentContext = await this.resolveDecisionSegmentContext(run, signal);
+        let segmentContext = await this.resolveDecisionSegmentContext(run, signal);
+
+        // [ADR-0162 Execution item 7] A run parked before the engine stamped
+        // root runs carries no stamp: it gets its root run and its record run
+        // here, derived in one walk of its links to its parents, so every node
+        // of this segment and every child it starts reads them (an approval
+        // step that opens here records them). BEFORE the claim, for the reason
+        // the segment context above is: a parent the store cannot read refuses
+        // this resume without consuming anything, and the identical resume can
+        // be retried. A chain that cannot be read whole (a parent that is no
+        // longer parked) is not a reason to stop the run: it continues stamped
+        // `null` (so it is not walked again), said once here, and each reader
+        // decides what a run with none means (an approval step opens its
+        // request with none recorded).
+        if (!isRunLinkStamped(segmentContext)) {
+            let derivation: RunLinkDerivation;
+            try {
+                derivation = await deriveRunLinks(run, (parentId) => this.loadSuspendedRunStrict(parentId));
+            } catch (err) {
+                const message = (err as Error).message;
+                // The same durability reading, the same envelope, as the
+                // strict load of the run itself at the top of this function.
+                this.logger.error(
+                    `[automation] durable suspended-run store unreachable while reading the parent runs of '${runId}' ` +
+                        `to derive its root run — the suspension was NOT consumed, so the run stays parked and this ` +
+                        `resume can be retried verbatim once the store is reachable; the caller was told the same via ` +
+                        `the STORE_UNAVAILABLE result. The store's own failure is in this record's meta.`,
+                    undefined,
+                    describeThrownForLog(err),
+                );
+                return {
+                    success: false,
+                    code: 'STORE_UNAVAILABLE',
+                    error: `Durable suspended-run store unreachable for a parent of run '${runId}' — retry once the store is available: ${message}`,
+                };
+            }
+            if (derivation.kind === 'derived') {
+                segmentContext = {
+                    ...segmentContext,
+                    [ROOT_RUN_CONTEXT_KEY]: derivation.rootRun,
+                    [RECORD_RUN_CONTEXT_KEY]: derivation.recordRun,
+                } as AutomationContext;
+            } else {
+                segmentContext = { ...segmentContext, [ROOT_RUN_CONTEXT_KEY]: null, [RECORD_RUN_CONTEXT_KEY]: null } as AutomationContext;
+                // FUNCTIONAL, so `warn`: nothing the run claims to persist is
+                // lost, and the reader that needs a root run says so itself.
+                this.logger.warn(
+                    `[automation] run '${runId}' was parked before runs recorded their root run, and its root run ` +
+                        `could not be derived because ${derivation.reason}; it continues with no root run, and a request ` +
+                        `an approval step of it opens records none.`,
+                );
+            }
+        }
 
         // Consume the suspension *before* running downstream work — a run
         // resumes exactly once per pause, and a duplicate resume after a

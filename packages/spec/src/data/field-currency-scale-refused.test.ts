@@ -16,7 +16,7 @@
  * change. The write seam drops `currency` from its enforced set in the same
  * change (pinned in that package's `record-validator.test.ts`); this file pins
  * the authoring half: the parse door, and the OFFER beside it. The object
- * designer's quick-add grid (`object.form.ts`, the registered `object` form)
+ * designer's quick-add grid (`object.metadata-form.ts`, the registered `object` form)
  * showed its `scale` input on currency rows until the at-tier review of this
  * change caught it; a door that refuses a key a registered form still offers is
  * the offer-vs-door shape the retirement exists to remove, so the last block
@@ -31,7 +31,7 @@
 import { describe, expect, it } from 'vitest';
 import { Field, FieldSchema } from './field.zod';
 import { ObjectSchema } from './object.zod';
-import { objectForm } from './object.form';
+import { objectForm } from './object.metadata-form';
 import { METADATA_FORM_REGISTRY } from '../system/metadata-form-registry';
 
 type Issue = { code: string; path: PropertyKey[]; message: string };
@@ -155,7 +155,7 @@ describe('CONTROLS: what the refusal must leave alone', () => {
 
 type FormRow = Record<string, unknown>;
 
-/** `defineForm` stores a predicate as `{ dialect, source }`; accept the bare string too. */
+/** `defineMetadataForm` stores a predicate as `{ dialect, source }`; accept the bare string too. */
 function predicateSource(row: FormRow): string | undefined {
   const raw = row.visibleWhen;
   if (raw == null) return undefined;

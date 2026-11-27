@@ -794,7 +794,7 @@ describe('#19403 round 7 — the provenance table agrees these leaves are now au
 });
 
 describe('#19403 round 7 — the population, DERIVED from the registry and a shape', () => {
-  it('⭐ the registry and the catalog describe the same 33 metadata types', () => {
+  it('⭐ the registry and the catalog describe the same 35 metadata types', () => {
     // The ratchet's anchor. The catalog is GENERATED from this registry, so a
     // new metadata type arrives in both at once — which is what makes the bare
     // class below pick up a future unauthored display pair without anybody
@@ -807,7 +807,11 @@ describe('#19403 round 7 — the population, DERIVED from the registry and a sha
     // description, authored in the three locales on arrival.
     // 32 → 33: `ai_context` joined it (ADR-0160 D1, #37140), bare with a label
     // and no description, authored in the three locales on arrival.
-    expect(REGISTRY_TYPES.length).toBe(33);
+    // 33 → 34: `form` joined it (ADR-0159 card ②, #37086), bare with a label
+    // and no description (no designer until card ③), authored on arrival.
+    // 34 → 35: `knowledge_source` joined it (ADR-0161 K4, #37304), bare with a
+    // label and no description, authored in every locale on arrival.
+    expect(REGISTRY_TYPES.length).toBe(35);
     expect([...REGISTRY_TYPES].sort()).toEqual(Object.keys(enMetadataForms as Record<string, any>).sort());
   });
 
@@ -815,16 +819,18 @@ describe('#19403 round 7 — the population, DERIVED from the registry and a sha
     // Lit.
     // 16 / 17 → 15 / 18: `ai_context` gained its form (ADR-0160 D1 clause 2,
     // #37143), so it is a panel type now.
-    expect(BARE_TYPES.length).toBe(15);
+    // 15 → 16: `form` joined bare (ADR-0159 card ②, #37086).
+    // 16 / 18 → 17 / 18: `knowledge_source` arrives bare (#37304).
+    expect(BARE_TYPES.length).toBe(17);
     expect(PANEL_TYPES.length).toBe(18);
     expect(BARE_TYPES.length + PANEL_TYPES.length).toBe(REGISTRY_TYPES.length);
     for (const type of ['seed', 'mapping', 'api', 'doc', 'book', 'capability', 'picklist', 'sharing_rule', 'queue', 'assignment_rule', 'object_extension']) {
       expect(BARE_TYPES, `${type} is bare`).toContain(type);
     }
     for (const type of AUTHORED_BARE_TYPES) expect(BARE_TYPES, `${type} is bare`).toContain(type);
-    // 26 leaves: fifteen labels, and a description on the eleven that carry one.
-    expect(BARE_LEAVES.length).toBe(26);
-    expect(BARE_LEAVES.filter((l) => l.prop === 'label').length).toBe(15);
+    // 28 leaves: seventeen labels, and a description on the eleven that carry one.
+    expect(BARE_LEAVES.length).toBe(28);
+    expect(BARE_LEAVES.filter((l) => l.prop === 'label').length).toBe(17);
     expect(BARE_LEAVES.filter((l) => l.prop === 'description').length).toBe(11);
     expect(BARE_LEAVES.every((l) => ['label', 'description'].includes(l.prop))).toBe(true);
   });
@@ -906,13 +912,13 @@ describe('#19403 round 7 — the population, DERIVED from the registry and a sha
     expect(flagged.length).toBe(BARE_LEAVES.length);
   });
 
-  it('⭐ this class is now DONE — zero of its 26 leaves echoes in all three locales', () => {
+  it('⭐ this class is now DONE — zero of its 28 leaves echoes in all three locales', () => {
     const echoing = BARE_LEAVES.filter((l) =>
       TRANSLATED_LOCALES.every(([, forms]) => forms[l.type]?.[l.prop] === l.en),
     );
     expect(echoing.map((l) => `${l.type}.${l.prop}`)).toEqual([]);
     // Lit — and it really walked the class, which a zero alone would not show.
-    expect(BARE_LEAVES.length).toBe(26);
+    expect(BARE_LEAVES.length).toBe(28);
   });
 });
 

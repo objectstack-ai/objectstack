@@ -929,7 +929,7 @@ The predicate's **binding root** is set by the layer, not the key:
 | Page components (`*.page.ts`) | `record` + `current_user` (plus `page.<var>`) |
 | Runtime record form **fields** (`*.view.ts`) | `record` + `previous` + `current_user` (objectui#6010) |
 | Runtime record form **sections** (`*.view.ts`) | `record` + `previous` + `current_user` (objectui#6110 + #6111) |
-| Metadata-editing forms (`*.form.ts`) | `data` — the row under edit |
+| Metadata-editing forms (`*.metadata-form.ts`) | `data` — the row under edit |
 
 The two form rows were one row until objectui#6010 bound the host predicate scope
 on the SDUI form renderer's authored-predicate call sites — at that point only the

@@ -377,7 +377,9 @@
         "$TURBO_ROOT$/examples/app-showcase/src/ui/views/task.view.ts",
         "$TURBO_ROOT$/sdui.manifest.json",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
+        "$TURBO_ROOT$/packages/runtime/src/sandbox/quickjs-runner.ts",
+        "$TURBO_ROOT$/packages/objectql/src/declared-read-columns.ts"
       ]
     },
     "@objectstack/cloud-connection#test": {
@@ -876,6 +878,8 @@
         "$TURBO_ROOT$/skills/objectstack-automation/SKILL.md",
         "$TURBO_ROOT$/packages/types/src/data-error-classification.ts",
         "$TURBO_ROOT$/packages/core/src/utils/import-runner.ts",
+        "$TURBO_ROOT$/examples/app-crm/src/objects/index.ts",
+        "$TURBO_ROOT$/examples/app-crm/src/views/lead.view.ts",
         "$TURBO_ROOT$/content/**",
         "$TURBO_ROOT$/docs/**",
         "$TURBO_ROOT$/skills/**"

@@ -78,12 +78,17 @@ export default defineConfig({
     // [ADR-0160] The stack tests load `objectstack.config.ts`, whose plugins
     // include `RecordContextServicePlugin`: aliased so they boot the executor
     // in this checkout, not a build of it.
+    //
+    // [ADR-0161 K4] The same for `KnowledgeServicePlugin` and the in-memory
+    // store the showcase's knowledge source names.
     alias: [
       { find: /^@objectstack\/formula$/, replacement: path.resolve(__dirname, '../../packages/formula/src/index.ts') },
       { find: /^@objectstack\/plugin-email$/, replacement: path.resolve(__dirname, '../../packages/plugins/plugin-email/src/index.ts') },
       { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../../packages/lint/src/index.ts') },
       { find: /^@objectstack\/service-print$/, replacement: path.resolve(__dirname, '../../packages/services/service-print/src/index.ts') },
       { find: /^@objectstack\/service-record-context$/, replacement: path.resolve(__dirname, '../../packages/services/service-record-context/src/index.ts') },
+      { find: /^@objectstack\/knowledge-memory$/, replacement: path.resolve(__dirname, '../../packages/plugins/knowledge-memory/src/index.ts') },
+      { find: /^@objectstack\/service-knowledge$/, replacement: path.resolve(__dirname, '../../packages/services/service-knowledge/src/index.ts') },
     ],
   },
   test: {

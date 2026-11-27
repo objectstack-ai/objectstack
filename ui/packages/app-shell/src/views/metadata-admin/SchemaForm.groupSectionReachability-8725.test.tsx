@@ -46,6 +46,9 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { resolveSectionGroupReferences, sectionEntryName } from '@object-ui/plugin-form';
 import { SchemaForm } from './SchemaForm';
+// Paid at module top, during collection (check:test-source-alias): the source under test reaches it through a dynamic import.
+import '@objectstack/formula';
+import '@objectstack/lint';
 import type { FormSectionSpec, FormViewSpec } from './form-spec';
 import type { RichMetadataTypeEntry } from './useMetadata';
 
@@ -112,7 +115,7 @@ const SCHEMA_ID = 'demo_type_8725';
 
 /**
  * A form document spelled the way it ARRIVES from `/meta/types`: plain data
- * carrying the `data` binding `defineForm` writes onto every metadata form.
+ * carrying the `data` binding `defineMetadataForm` writes onto every metadata form.
  */
 function serverForm(sections: unknown[], type = 'simple'): FormViewSpec {
   return { type, data: { provider: 'schema', schemaId: SCHEMA_ID }, sections } as unknown as FormViewSpec;

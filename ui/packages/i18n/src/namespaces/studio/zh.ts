@@ -4324,6 +4324,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.translationPreview.category.dashboards': '仪表盘',
   'engine.translationPreview.category.datasets': '数据集',
   'engine.translationPreview.category.reports': '报表',
+  'engine.translationPreview.category.forms': '表单',
   'engine.translationPreview.category.pages': '页面',
   'engine.translationPreview.category.flows': '流程',
   'engine.translationPreview.category.hooks': '钩子',

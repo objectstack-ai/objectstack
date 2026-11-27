@@ -1164,7 +1164,7 @@ const VISIBILITY_ROOT_MISLAYERED_EXPLANATION: RuleExplanation = {
   paragraphs: [
     'ADR-0089 D3 binds a different root on each layer. A runtime view or page surface binds the live ' +
       'record as `record`, plus `current_user` (and page state as `page.VAR` on a page component); a ' +
-      'metadata-editing form — a `*.form.ts` module or a schema-bound form view — binds the row under ' +
+      'metadata-editing form — a `*.metadata-form.ts` module or a schema-bound form view — binds the row under ' +
       'edit as `data`.',
     'A predicate rooted at the other layer\'s namespace never matches, and the element renders ' +
       'unconditionally. The rule is a warning rather than an error because the root is at least a ' +
@@ -1498,6 +1498,47 @@ const ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
       'are not a flag set, is refused: QuickJS refuses it too. Syntax the host accepts and QuickJS does ' +
       'not is not caught here; at run time such an action answers a 500 that names the action and the ' +
       'compile error.',
+  ],
+};
+
+const ACTION_BODY_WRITE_CAPABILITY_UNDECLARED_EXPLANATION: RuleExplanation = {
+  rule: 'action-body-write-capability-undeclared',
+  covers: 'the grant a script action body\'s writes need',
+  paragraphs: [
+    'A script action body runs in the QuickJS sandbox with only the capabilities its `body.capabilities` ' +
+      'lists (none by default). The sandbox installs the six `ctx.api` write leaves (`insert`, `update`, ' +
+      '`delete`, `updateMany`, `deleteMany`, `upsert`) behind `api.write`, and a call the body was not ' +
+      'granted throws at the call site: the action answers `403 INSUFFICIENT_PRIVILEGES` every time it ' +
+      'reaches the call, and nothing is written.',
+    'The rule reads the body\'s source with comments, strings and template literals blanked, and finds ' +
+      'a write leaf called through `ctx.api` (with `?.` allowed), through a local bound once to `ctx.api` ' +
+      '(`const api = ctx.api`, or `api` destructured from `ctx`), or through a handle bound once to ' +
+      '`.object(…)` (`const repo = ctx.api.object(\'x\'); repo.update(…)`). It does not parse or run ' +
+      'the body: the runtime save door may load no parser. A write spelled another way is not found, ' +
+      'which leaves the author where the sandbox would.',
+    'To fix it, add `\'api.write\'` to the action\'s `body.capabilities` (Studio\'s action inspector ' +
+      'draws the list), or remove the write. A body `os build` lowers from a handler gets the grant ' +
+      'inferred from the same shapes, so a handler is not refused by its own build.',
+  ],
+};
+
+const SEED_RECORD_UNKNOWN_FIELD_EXPLANATION: RuleExplanation = {
+  rule: 'seed-record-unknown-field',
+  covers: 'which keys a seed record may carry',
+  paragraphs: [
+    'The seed load writes each record through the engine\'s insert, keys as authored. The insert door ' +
+      'refuses a key the object does not declare, and the load runs in partial mode, so that record is ' +
+      'dropped while the rest land: the build and the publish read as passed, and the first sign is a ' +
+      '`[Seeder] … dropped record(s)` line at boot.',
+    'A key is accepted when the engine\'s door accepts it: a field of the object as served (fields an ' +
+      'object extension adds count), a system column the platform injects on that object (the owner, ' +
+      'tenant and audit columns, unless the object opts out), or one of the columns every table carries ' +
+      '(`id`, `created_at`, `updated_at`). A seed `columns` key that names none of them is refused too: ' +
+      'its policy governs nothing, and the column it was meant for keeps the `always` default. A dataset ' +
+      'whose object is not known, or whose object has no field map, is not judged.',
+    'To fix it, spell the key as the field it means, declare the field on the object, or remove the ' +
+      'key. `defineSeed` refuses such a key when it runs; this rule asks the same of a plain ' +
+      '`data: [{ object, records }]` entry and of a seed saved at the runtime save door.',
   ],
 };
 
@@ -4891,8 +4932,11 @@ const OBJECT_REFERENCE_SITES =
   'Judged: the object names no other rule resolves, each a plain string the schema ships as ' +
   'written: a `lookup`, `master_detail` or `user` field\'s `reference`; a view container\'s own ' +
   '`object`; an action param\'s `reference` and `objectOverride`; a dashboard global filter\'s ' +
-  '`optionsFrom.object`; a dataset\'s base `object`; and a nav entry\'s `requiresObject`, with ' +
-  'the `objectName` of an entry that carries one. Interpolated names (`${…}`) resolve at render ' +
+  '`optionsFrom.object`; a dataset\'s base `object`; a nav entry\'s `requiresObject`, with ' +
+  'the `objectName` of an entry that carries one; and the object a seed dataset (`data[].object`), a ' +
+  'flow `get_record` / `create_record` / `update_record` / `delete_record` / object-form `screen` node ' +
+  '(`config.objectName`) or a standalone action (`objectName`) is bound to, where an object the stack ' +
+  'extends (`objectExtensions`) also resolves. Interpolated names (`${…}`) resolve at render ' +
   'time and are skipped.';
 
 /** The resolution ladder — both object-reference ids. Held to `PLATFORM_OBJECT_PREFIXES` by the rule's test. */
@@ -4918,7 +4962,10 @@ const OBJECT_REFERENCE_MISS_COST =
   '(ADR-0021), so every one of them queries nothing. A nav entry\'s `requiresObject`: the entry is ' +
   'hidden unless the object is registered, so a typo hides it for good, and it suppresses the nav ' +
   'cross-reference check that would have caught the target; the gated `objectName` is exempt from ' +
-  'the build-time check, so it is verified only here.';
+  'the build-time check, so it is verified only here. A seed dataset: the seed load finds no object ' +
+  'and loads none of its records. A flow node: when no installed package defines the object either, ' +
+  'the step asks the engine for an object that is not there and fails the run every time it executes. ' +
+  'A standalone action: it registers against no object, so no list or record page carries it.';
 
 const OBJECT_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
   rule: 'object-reference-unknown',
@@ -4929,6 +4976,15 @@ const OBJECT_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
     OBJECT_REFERENCE_LADDER,
     'An error: a stack\'s own objects are namespace-prefixed and present, so an unprefixed name that ' +
       'resolves nowhere has no legitimate elsewhere. Nothing reports the miss at run time.',
+    // [#35143] The flow-node split, as `flow-trigger-unknown-object` draws it.
+    'One site is split by what the run can see. A flow node\'s `config.objectName` is a warning on ' +
+      '`os validate`, `os build` and `os lint`: a package the stack declares in `dependencies` may define ' +
+      'the object, and a build cannot see that package\'s objects, so the step may well run. At the ' +
+      'runtime save door it is an error: a write into a package is judged against that package\'s ' +
+      'closure, and a write that names no package against every object the deployment serves, so a ' +
+      'name outside either exists nowhere the run can reach. A stack that defines no object at all is ' +
+      'not judged at the seed, flow-node and action sites, nor is a door write when the host hands ' +
+      'over no objects.',
     OBJECT_REFERENCE_MISS_COST,
     'To fix it, point the reference at an object this stack or its artifact defines, or at a platform ' +
       'object by its full name (the platform user object is `sys_user`, not `user`). The verdict names ' +
@@ -5141,6 +5197,67 @@ const FORM_VIEW_INTERNAL_NOT_LOADED_EXPLANATION: RuleExplanation = {
     'The rule is a warning: the declared form still parses, installs and runs, and changes nothing. To ' +
       'clear it, move the sections into the object\'s field groups, put each required and show/hide rule ' +
       'on its field (a create-time default goes on the field\'s `defaultValue`), and delete the form.',
+  ],
+};
+
+// ── Form items (`validate-form-items.ts`, ADR-0159) ───────────────────────────
+
+const FORM_PUBLIC_ADDRESS_TAKEN_EXPLANATION: RuleExplanation = {
+  rule: 'form-public-address-taken',
+  covers: 'why two forms cannot share one public address',
+  paragraphs: [
+    'A public form answers at `/forms/<slug>`, the slug its `sharing.publicLink` names. Two forms on one ' +
+      'address answer one of them, and nothing says which: the anonymous doors take the first form that ' +
+      'is open there, so a second form can take over an address an administrator thinks is closed.',
+    'A form HOLDS an address while its `sharing.publicLink` names it, switched on or off: a form that ' +
+      'keeps its link with `enabled: false` or `allowAnonymous: false` still holds it, so a successor on ' +
+      'the same address is refused until the retired form\'s link is cleared. The forms read are every ' +
+      'authored `form` item and every form an old `view` shape carries (a container\'s `form`, a ' +
+      '`formViews` entry, a `viewKind: \'form\'` item), under the names they are served as.',
+    'Only an authored `form` left OPEN on a held address is refused; a closed form is never refused, and ' +
+      'two old-shape forms on one address keep today\'s behaviour. The runtime `form` write door refuses ' +
+      'the same save with `409 FORM_ADDRESS_TAKEN`. To clear it, give the form another public link, or ' +
+      'clear the link of the form that holds the address.',
+  ],
+};
+
+const FORM_CONSUMER_LESS_EXPLANATION: RuleExplanation = {
+  rule: 'form-consumer-less',
+  covers: 'what counts as a consumer of a form',
+  paragraphs: [
+    'A `form` item is a named form with a consumer (ADR-0159 D1): a public link (`sharing.publicLink`), ' +
+      'or an action of `type: \'form\'` whose `target` is the form\'s name. A form with neither is reached ' +
+      'by nothing: it installs and steers nothing. A record create or edit form is not a `form` item; it ' +
+      'is the object\'s `fieldGroups`.',
+    'Not raised for an item that declares `overrides`: an override with no link over a base form that has ' +
+      'a consumer is what keeps that address closed, and removing it would re-open the base\'s form. The ' +
+      'rule is a warning. To clear it, give the form a public link, open it from an action of type `form`, ' +
+      'or remove it.',
+  ],
+};
+
+const FORM_OBJECT_OUTSIDE_CLOSURE_EXPLANATION: RuleExplanation = {
+  rule: 'form-object-outside-closure',
+  covers: 'which objects a form may bind',
+  paragraphs: [
+    'A `form` item submits into the one object its `object` names (ADR-0159 D2). Under a stated package ' +
+      'scope that object must be inside the package\'s closure: its own objects, the objects of the ' +
+      'packages its manifest declares in `dependencies`, and platform objects — the closure a list view\'s ' +
+      'object is judged against. A form bound outside it installs into a deployment where the object may ' +
+      'not exist, and its public submit has nowhere to write.',
+    'To clear it, bind the form to an object inside the closure, or declare a dependency on the package ' +
+      'that ships the object.',
+  ],
+};
+
+const FORM_OBJECT_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'form-object-unknown',
+  covers: 'why a form must bind an object that exists',
+  paragraphs: [
+    'A `form` item submits into the one object its `object` names (ADR-0159 D2). Judged against the whole ' +
+      'collection a runtime write is judged against, the object exists nowhere in the deployment, so the ' +
+      'form has nothing to render and its submit nothing to write into.',
+    'To clear it, bind the form to an object that exists, or save the object before you publish the form.',
   ],
 };
 
@@ -6743,17 +6860,31 @@ const FLOW_TRIGGER_OBJECT_MISSING_EXPLANATION: RuleExplanation = {
 
 const FLOW_CONDITION_OPTION_LABEL_EXPLANATION: RuleExplanation = {
   rule: 'flow-condition-option-label',
-  covers: 'why a start condition compares option values',
+  covers: 'why flow conditions and filters use option values',
   paragraphs: [
-    'A select field stores the option\'s `value`, never its `label`. A record-change start condition that ' +
-      'reads the field and compares it with a quoted label (`record.stage == \'Closed Lost\'` where the option ' +
-      'is `{ value: \'closed_lost\', label: \'Closed Lost\' }`) is false on every record, or true on every ' +
-      'record for `!=`, so the condition never tells one record from another.',
-    'Reported only when the label is the comparand of that field: `F == \'L\'`, `F != \'L\'`, `\'L\' == F`, or ' +
-      'a member of `F in [...]`, with `F` read bare or as `record.F` / `previous.F`. A label quoted elsewhere ' +
-      'in the condition, such as the comparand of another field, is not. A label that is also some option\'s ' +
-      'value is never reported. Fields whose options come from a shared picklist are not judged: the stack ' +
-      'does not hold that list.',
+    'A select field stores the option\'s `value`, never its `label`. A flow that compares the field with a ' +
+      'quoted label (`record.stage == \'Closed Lost\'` where the option is ' +
+      '`{ value: \'closed_lost\', label: \'Closed Lost\' }`) never matches a record, or matches every record ' +
+      'for `!=`, and the run still reports success.',
+    'The rule reads every place a flow compares the field: a record-change start condition, an edge ' +
+      '`condition`, a `decision` branch\'s `expression`, and the `filter` of a `get_record`, `update_record` or ' +
+      '`delete_record` step or of a time-relative sweep. A flow filter reaches the data engine as written and ' +
+      'is never translated from label to value, so the read finds nothing, the update or delete changes ' +
+      'nothing, and the branch is never taken.',
+    'In a condition, reported only when the label is the comparand of that field: `F == \'L\'`, ' +
+      '`F != \'L\'`, `\'L\' == F`, or a member of `F in [...]`. `F` is the trigger record\'s field, read bare or ' +
+      'as `record.F` / `previous.F`, or a field of the row a single-row `get_record` step bound to its ' +
+      '`outputVariable` (`deal.F`). A variable that something else in the flow also binds is not judged: ' +
+      'which row it holds is decided by the run.',
+    'In a filter, reported when the label is the field\'s plain equality, its `$eq` / `$ne` operand or a ' +
+      'member of its `$in` / `$nin` list, at the top level or under `$and` / `$or` / `$not`. A related ' +
+      'object\'s field, an ordering or text operator, and a string carrying a brace (a template such as ' +
+      '`{current_user_id}`) are not judged. To find rows that still hold a label on purpose, for a clean-up ' +
+      'after the options changed, write the operand as a CEL value envelope (`{ dialect: \'cel\', source }`): ' +
+      'it is not judged.',
+    'Everywhere, a label quoted elsewhere, such as the comparand of another field, is not reported, and a ' +
+      'label that is also some option\'s value never is. Fields whose options come from a shared picklist are ' +
+      'not judged: the stack does not hold that list.',
   ],
 };
 
@@ -6963,6 +7094,8 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [ACTION_RECORD_WRITE_DISCARDED_EXPLANATION.rule]: ACTION_RECORD_WRITE_DISCARDED_EXPLANATION,
   [ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION.rule]: ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION,
   [ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION.rule]: ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION,
+  [ACTION_BODY_WRITE_CAPABILITY_UNDECLARED_EXPLANATION.rule]: ACTION_BODY_WRITE_CAPABILITY_UNDECLARED_EXPLANATION,
+  [SEED_RECORD_UNKNOWN_FIELD_EXPLANATION.rule]: SEED_RECORD_UNKNOWN_FIELD_EXPLANATION,
   [HOOK_BODY_DOES_NOT_COMPILE_EXPLANATION.rule]: HOOK_BODY_DOES_NOT_COMPILE_EXPLANATION,
   [JOB_BODY_DOES_NOT_COMPILE_EXPLANATION.rule]: JOB_BODY_DOES_NOT_COMPILE_EXPLANATION,
   [ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
@@ -7093,6 +7226,10 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [PAGE_SECTION_GROUP_UNKNOWN_EXPLANATION.rule]: PAGE_SECTION_GROUP_UNKNOWN_EXPLANATION,
   [FORM_SECTION_GROUP_UNKNOWN_EXPLANATION.rule]: FORM_SECTION_GROUP_UNKNOWN_EXPLANATION,
   [FORM_VIEW_INTERNAL_NOT_LOADED_EXPLANATION.rule]: FORM_VIEW_INTERNAL_NOT_LOADED_EXPLANATION,
+  [FORM_PUBLIC_ADDRESS_TAKEN_EXPLANATION.rule]: FORM_PUBLIC_ADDRESS_TAKEN_EXPLANATION,
+  [FORM_CONSUMER_LESS_EXPLANATION.rule]: FORM_CONSUMER_LESS_EXPLANATION,
+  [FORM_OBJECT_OUTSIDE_CLOSURE_EXPLANATION.rule]: FORM_OBJECT_OUTSIDE_CLOSURE_EXPLANATION,
+  [FORM_OBJECT_UNKNOWN_EXPLANATION.rule]: FORM_OBJECT_UNKNOWN_EXPLANATION,
   [FLOW_TEMPLATE_FIELD_UNPROVISIONED_EXPLANATION.rule]: FLOW_TEMPLATE_FIELD_UNPROVISIONED_EXPLANATION,
   [FLOW_TEMPLATE_LOOKUP_TRAVERSAL_EXPLANATION.rule]: FLOW_TEMPLATE_LOOKUP_TRAVERSAL_EXPLANATION,
   [FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION.rule]: FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION,

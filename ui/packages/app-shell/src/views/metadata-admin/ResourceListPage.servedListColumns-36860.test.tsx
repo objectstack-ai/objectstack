@@ -34,7 +34,7 @@ const HOOKS: Record<string, unknown>[] = [
   // `priority` and `async` left at their schema defaults: stored rows omit them.
   { name: 'audit_all', label: 'Audit all', object: ['account', 'contact'], events: ['afterDelete'] },
 ];
-const AGENTS: Record<string, unknown>[] = [{ name: 'helper', label: 'Helper', model: { provider: 'openai', model: 'gpt-4o' } }];
+const AGENTS: Record<string, unknown>[] = [{ name: 'helper', label: 'Helper', model: { model: 'gpt-4o' } }];
 const QUEUES: Record<string, unknown>[] = [{ name: 'tier1', label: 'Tier 1', members: [{ type: 'user', id: 'a' }, { type: 'user', id: 'b' }] }];
 const SKILLS: Record<string, unknown>[] = [{ name: 'triage', label: 'Triage', tools: ['a', 'b'] }];
 

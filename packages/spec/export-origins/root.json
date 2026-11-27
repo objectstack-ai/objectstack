@@ -160,6 +160,7 @@
     "defineHook": "src/data/hook.zod.ts#defineHook (function)",
     "defineJob": "src/system/job.zod.ts#defineJob (function)",
     "defineMapping": "src/data/mapping.zod.ts#defineMapping (function)",
+    "defineMetadataForm": "src/ui/view.zod.ts#defineMetadataForm (function)",
     "defineObjectExtension": "src/data/object.zod.ts#defineObjectExtension (function)",
     "definePage": "src/ui/page.zod.ts#definePage (function)",
     "definePermissionSet": "src/security/permission.zod.ts#definePermissionSet (function)",

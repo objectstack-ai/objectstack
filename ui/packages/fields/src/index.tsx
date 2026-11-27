@@ -450,7 +450,7 @@ export interface CellRendererProps {
    * (objectstack#36344): a heading is a bold line at the cell's own text size
    * instead of a heading element, so a value that starts with `# Heading`
    * keeps the row's height. The record page does not pass it and keeps the
-   * heading sizes.
+   * heading elements, at the document face's sizes (objectstack#37801).
    *
    * A `date` field that declares no `format` then paints `formatDate`'s
    * absolute default face instead of `'relative'`, and the relative phrase

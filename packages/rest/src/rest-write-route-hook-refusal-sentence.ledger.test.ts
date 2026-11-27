@@ -66,6 +66,7 @@ import { REST_ROUTE_LEDGER } from './rest-route-ledger.js';
 import { sandboxFaultAnswer } from './error-response.js';
 import { isSandboxOwnFault } from '@objectstack/types';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { projectedFormsOf } from '@objectstack/spec/ui';
 
 const SENTENCE = 'Locked rows cannot be changed here.';
 const WRAPPER = `hook 'mz_guard' threw: Error: ${SENTENCE}`;
@@ -129,9 +130,12 @@ const UNIT_CODE_FIELDS = {
 const READS: Record<string, Fn> = {
     getDiscovery: async () => ({ version: 'v0', routes: {} }),
     getMetaTypes: async () => [],
-    getMetaItems: async (req: { type?: string }) => (req?.type === 'view' ? [FORM_VIEW] : [SCHEMA]),
+    // [ADR-0159 D5] No `form` item: the form door reads FORM_VIEW through the projection.
+    getMetaItems: async (req: { type?: string }) => (req?.type === 'view' ? [FORM_VIEW] : req?.type === 'form' ? projectedFormsOf([FORM_VIEW]) : [SCHEMA]),
     // [#28409] The form doors' withdrawal layer beside the effective list.
     getMetaItemsPerPackage: async (req: { type?: string }) => (req?.type === 'view' ? [FORM_VIEW] : []),
+    // [ADR-0159 D6 rule 7] No stored body the projection cannot read.
+    getUnreadableFormBodies: async () => [],
     getMetaItem: async () => SCHEMA,
     findData: async () => ({ records: [] }),
     getData: async () => ({ record: { id: 'r1' } }),

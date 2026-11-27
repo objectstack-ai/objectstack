@@ -16,7 +16,7 @@ import {
 } from './hook-refusal-codes';
 import { hookRefusalMessageKey } from '../system/i18n-resolver';
 import { TranslationDataSchema } from '../system/translation.zod';
-import { hookForm } from './hook.form';
+import { hookForm } from './hook.metadata-form';
 
 // #26170 (maintainer ruling 6431311681, letter A): a hook declares its refusal
 // catalogue, `refusals: { <CODE>: { message, status? } }`, and its body refuses

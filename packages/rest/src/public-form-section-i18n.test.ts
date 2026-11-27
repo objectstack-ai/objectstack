@@ -28,7 +28,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from '@objectstack/objectql';
-import { expandViewContainer } from '@objectstack/spec/ui';
+import { expandViewContainer, projectedFormsOf } from '@objectstack/spec/ui';
 import { RestServer } from './rest-server';
 
 // [#10126] Pay the first transform of the dist-resolved workspace dep the
@@ -153,6 +153,7 @@ function buildServer(view: Record<string, any>, packagedView?: Record<string, an
         getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
         getMetaTypes: vi.fn().mockResolvedValue([]),
         getMetaItems: vi.fn(async ({ type }: { type: string }) => {
+            if (type === 'form') return projectedFormsOf([view]);
             if (type === 'view') return [view];
             if (type === 'object') return [ticketObject];
             return [];
@@ -412,6 +413,7 @@ describe('[#33952] GET /forms/:slug — a field label a code package\'s fieldPat
             getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
             getMetaTypes: vi.fn().mockResolvedValue([]),
             getMetaItems: vi.fn(async ({ type }: { type: string }) => {
+                if (type === 'form') return projectedFormsOf([formView()]);
                 if (type === 'view') return [formView()];
                 if (type === 'object') return [patchedTicket];
                 return [];

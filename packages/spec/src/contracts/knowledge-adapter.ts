@@ -31,7 +31,17 @@ import type { KnowledgeSource } from '../ai/knowledge-source.zod';
  * forwards-compatible.
  */
 export interface AdapterContext {
-  /** The source these documents belong to. */
+  /**
+   * The source these documents belong to, as the service hands it over.
+   *
+   * `source.name` is the source's **index key**: the one string an adapter
+   * keys everything it holds for the source by, and the string
+   * `KnowledgeDocument.sourceId` carries. For a source no package holds it is
+   * the name as authored. For a source a package ships it also carries that
+   * package (ADR-0150 D4), spelled by the service, so two packages' sources of
+   * one name are two keys. An adapter never derives the key, parses it or
+   * shows it to a person; it stores and compares it.
+   */
   source: KnowledgeSource;
   /** Trace id for correlation across logs / metrics. */
   traceId?: string;
@@ -142,7 +152,7 @@ export interface AdapterSearchOptions {
    * holds a membership in.
    *
    * - **Absent** (`undefined`): no organization filter — the `single` posture,
-   *   the system identity, a `file` / `http` source, an object outside
+   *   the system identity, an object outside
    *   tenancy. Rank every document of the source, as before this member.
    * - **Present**: rank only the documents whose
    *   `KnowledgeDocument.organizationId` is in the set, and filter BEFORE
@@ -368,6 +378,20 @@ export interface IKnowledgeAdapter {
    * holds for the source, and makes a generation it built the active one.
    */
   completeBuild?(ctx: AdapterContext): Promise<void>;
+
+  /**
+   * Remove everything the adapter holds for `ctx.source` (ADR-0161 K8,
+   * item 4): every document, passage and vector of every generation, the one
+   * under construction included, and whatever it recorded about the index.
+   * After it `indexStatus` answers as for a source it has never seen, and a
+   * source registered again under the same key is built from nothing.
+   *
+   * The service calls it when a source stops being served: its metadata item
+   * was removed, or a package now holds its name. Calling it for a source the
+   * adapter holds nothing for is not an error. An adapter without it keeps
+   * what it holds, and the service says so once in its log, naming the source.
+   */
+  dropSource?(ctx: AdapterContext): Promise<void>;
 
   /**
    * Optional liveness probe. When implemented, used by the service's

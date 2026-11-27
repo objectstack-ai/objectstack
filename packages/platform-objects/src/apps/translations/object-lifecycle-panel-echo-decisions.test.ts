@@ -1155,7 +1155,7 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // `bodyExtra` — authored in all three locales.
       // 623 since #20301:
       // the list view's own `tabs` is a retired key, and its form repeater left
-      // `view.form.ts` with it — the repeater's own label and its nine row labels
+      // `view.metadata-form.ts` with it — the repeater's own label and its nine row labels
       // (`name`, `label`, `icon`, `view`, `filter`, `order`, `pinned`,
       // `isDefault`, `visible`), ten leaves authored in all three locales, out of
       // the catalog.
@@ -1343,7 +1343,14 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // `uiReadonlyWhen` rows (the hand lock), authored in every locale.
       // 840 since #37141: the skill form's `context` row (ADR-0160 D8) — one
       // row label, authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(840);
+      // 841 since #37086: the `form` type's own label (ADR-0159 card ②),
+      // authored in all three locales. 844 since #34908: the view and
+      // dashboard forms offer the audience gate (`requiredPermissions`) — two
+      // row labels and the dashboard's `access` section label, authored in
+      // all three locales.
+      // 845 since #37304: the `knowledge_source` type's own label (ADR-0161
+      // K4), authored in every locale.
+      expect(translated.length, `${locale} positive control`).toBe(845);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

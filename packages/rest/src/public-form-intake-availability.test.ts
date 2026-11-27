@@ -14,7 +14,10 @@ import { RestServer } from './rest-server';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at
 // MODULE LOAD rather than inside a clocked `it()` body.
-import '@objectstack/spec/ui';
+import { projectedFormsOf } from '@objectstack/spec/ui';
+// …and `@objectstack/objectql`, which `rest-server.ts`'s meta-object routes reach
+// through a dynamic import inside a handler (`check:test-source-alias`).
+import '@objectstack/objectql';
 
 const ORG = 'org_alpha';
 const SLUG = 'contact-us';
@@ -70,6 +73,8 @@ function build(setup: Setup) {
   const createData = vi.fn().mockResolvedValue({ object: 'inquiry', id: 'rec_1', record: {} });
   const getMetaItems = vi.fn(async (req: { type: string }) => {
     if (req.type === 'view') return [formView(setup.allowAnonymous ?? true)];
+    // [ADR-0159 D5] The `form` read, as the protocol serves it for an old-shape-only fixture: the projection of the views.
+    if (req.type === 'form') return projectedFormsOf([formView(setup.allowAnonymous ?? true)]);
     if (req.type === 'object') return [inquiryObject(setup.tenancyDisabled ?? false)];
     return [];
   });
@@ -177,7 +182,8 @@ describe('[#21476] a public form that cannot take intake on this posture is not 
     // file field carrying a value is refused), which reads it whenever a
     // declared field carries a value. None for the predicate: a predicate
     // that read the object on this posture would be a second object read.
-    expect(s.getMetaItems.mock.calls.map(([r]) => r.type)).toEqual(['view', 'object']);
+    // [ADR-0159 D5] Beside it, the env-wide `form` read the candidates come from.
+    expect(s.getMetaItems.mock.calls.map(([r]) => r.type)).toEqual(['view', 'form', 'object']);
   });
 
   it('CONTROL: a degraded walled request reads the posture IN FORCE (single) — accepted', async () => {

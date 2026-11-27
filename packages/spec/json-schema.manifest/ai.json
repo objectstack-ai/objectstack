@@ -36,20 +36,16 @@
     "ai/DatasetToolCatalogDimension",
     "ai/DatasetToolCatalogEntry",
     "ai/DatasetToolCatalogMeasure",
-    "ai/EmbeddingModel",
     "ai/FileContent",
-    "ai/FileKnowledgeSource",
     "ai/FunctionCall",
     "ai/GetRecordContextInput",
     "ai/GetRecordContextOutput",
-    "ai/HttpKnowledgeSource",
     "ai/ImageContent",
     "ai/KnowledgeChunk",
     "ai/KnowledgeDocument",
     "ai/KnowledgeHit",
     "ai/KnowledgeRefreshPolicy",
     "ai/KnowledgeSource",
-    "ai/KnowledgeSourceKind",
     "ai/KnowledgeSplit",
     "ai/KnowledgeSplitStrategy",
     "ai/ListDatasetsInput",
@@ -101,8 +97,6 @@
     "ai/TokenUsageStats",
     "ai/Tool",
     "ai/ToolCall",
-    "ai/TransformPipelineStep",
-    "ai/VectorStore",
-    "ai/VectorStoreProvider"
+    "ai/TransformPipelineStep"
   ]
 }

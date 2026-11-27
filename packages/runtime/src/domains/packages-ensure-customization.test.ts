@@ -24,7 +24,7 @@
 
 // Pays `@objectstack/metadata`'s first load at collection, never inside a clocked case.
 import '@objectstack/metadata';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -391,6 +391,52 @@ describe(`${ENSURE_PATH}: the caller's authority is the install door's`, () => {
     });
 });
 
+/**
+ * [#37304, ADR-0161 K4] Why this door is not asked `manage_knowledge_sources`:
+ * it creates no knowledge source. A base that holds one, as a registered item
+ * and as a stored row, gets a pair that holds none, and the door writes one
+ * manifest and no row.
+ */
+describe(`${ENSURE_PATH}: the pair of a base that holds a knowledge source holds none`, () => {
+    const SOURCE = { name: 'crm_faq', label: 'FAQ', adapter: 'memory', source: { kind: 'object', object: 'crm_article', content: ['body'] } };
+    const STORED = {
+        id: 'row_crm_faq', type: 'knowledge_source', name: SOURCE.name, package_id: CRM.id, state: 'active',
+        metadata: JSON.stringify(SOURCE),
+    };
+
+    it('201 for a manage_metadata caller, zero knowledge sources in the pair, and no row written', async () => {
+        const d = withBase(door());
+        d.registry.registerItem('knowledge_source', { ...SOURCE }, 'name', CRM.id);
+        // The base's stored row answers every `sys_metadata` read that does not
+        // name another package; every engine write is recorded.
+        const rowWrites: unknown[] = [];
+        d.engine.find = async (object: string, query: any) => {
+            if (object !== 'sys_metadata') return [];
+            const owner = query?.where?.package_id;
+            return owner === undefined || owner === CRM.id ? [{ ...STORED }] : [];
+        };
+        for (const verb of ['insert', 'update', 'upsert', 'delete', 'bulkInsert', 'bulkUpdate']) {
+            d.engine[verb] = async (...args: unknown[]) => { rowWrites.push([verb, ...args]); return args[1] ?? null; };
+        }
+        // CONTROL: the base does hold one, by the listing the package gate reads.
+        expect(d.registry.listItems('knowledge_source', CRM.id)).toHaveLength(1);
+
+        const r = await ensure(d, CRM.id, ADMIN);
+        expect(r.response.status, JSON.stringify(r.response.body)).toBe(201);
+        expect(r.response.body.data).toMatchObject({ packageId: PAIR_ID, created: true });
+
+        expect(d.registry.listItems('knowledge_source', PAIR_ID)).toEqual([]);
+        const listed = await d.protocol!.getMetaItemsPerPackage({ type: 'knowledge_source', packageId: PAIR_ID });
+        expect(listed.items).toEqual([]);
+        expect(rowWrites).toEqual([]);
+        // One manifest persisted, and it carries no source.
+        expect(d.published).toHaveLength(1);
+        expect(JSON.stringify(d.published[0])).not.toContain('knowledge');
+        // The base still holds its own.
+        expect(d.registry.listItems('knowledge_source', CRM.id)).toHaveLength(1);
+    });
+});
+
 describe(`${ENSURE_PATH}: one pair under concurrency`, () => {
     it('two concurrent calls leave one pair: one 201, one 200, one write', async () => {
         // Each persist settles a tick later, so both calls are in flight together.
@@ -479,12 +525,24 @@ describe('POST /api/v1/packages/:id/duplicate: a copy into a pair id is refused,
         const d = withBase(door());
         const source = { id: 'com.acme.notes', name: 'Notes', version: '1.0.0', type: 'app', namespace: 'notes' };
         expect((await install(d, source)).response.status).toBe(201);
+        // [#37304] Counted inside `duplicatePackage` only. Before the copy
+        // runs, the door reads the source package's knowledge sources to admit
+        // them for the caller (`packages-knowledge-source-gate.test.ts`); those
+        // reads are the door's, and this pins the copy's own order: the target
+        // id is refused before the copy reads a row.
         let rowsRead = 0;
+        let copying = false;
         const find = d.engine.find;
-        d.engine.find = async (...args: unknown[]) => { rowsRead++; return find(...args); };
+        d.engine.find = async (...args: unknown[]) => { if (copying) rowsRead++; return find(...args); };
+        const duplicatePackage = d.protocol!.duplicatePackage.bind(d.protocol);
+        const copies = vi.spyOn(d.protocol!, 'duplicatePackage').mockImplementation(async (request) => {
+            copying = true;
+            try { return await duplicatePackage(request); } finally { copying = false; }
+        });
         const writes = d.published.length;
         const r = await d.dispatcher.handlePackages(`/${source.id}/duplicate`, 'POST', { targetPackageId: PAIR_ID }, {}, ctx(ADMIN)) as any;
         expectRefusal(r, 400, 'VALIDATION_ERROR', `Package '${PAIR_ID}' is the paired customization package of '${CRM.id}'`, ENSURE_PATH.replace('POST ', ''));
+        expect(copies).toHaveBeenCalledTimes(1);
         expect(rowsRead).toBe(0);
         expect(d.registry.getPackage(PAIR_ID)).toBeUndefined();
         expect(d.published).toHaveLength(writes);

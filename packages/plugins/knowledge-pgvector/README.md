@@ -9,11 +9,13 @@ import { KnowledgePgvectorPlugin } from '@objectstack/knowledge-pgvector';
 
 const kernel = new ObjectKernel();
 kernel.use(new KnowledgeServicePlugin({
-  sources: [{ id: 'task_notes', label: 'Notes', adapter: 'pgvector',
-    source: { kind: 'object', object: 'task', contentFields: ['notes'] }}],
+  sources: [{ name: 'task_notes', label: 'Notes', adapter: 'pgvector',
+    source: { kind: 'object', object: 'task', content: ['notes'] }}],
 }));
 kernel.use(new KnowledgePgvectorPlugin());
 ```
+
+A source is usually a `knowledge_source` metadata item (a `*.knowledge-source.ts` file in an app, or one authored in Studio) that names this adapter with `adapter: 'pgvector'`; the `sources` option above registers one from code.
 
 ## Options
 
@@ -36,7 +38,9 @@ Its tables are in their own schema, `os_knowledge` — never the connection's ow
 - `knowledge_generation` — one row per source and generation: the index fingerprint it was built under, the recipe hash, the vector width, the model.
 - `knowledge_vec_d<width>` — one passage table per vector width (`knowledge_vec_d1536`, `knowledge_vec_d3072`, …), created the first time a width is written.
 
-Rows are keyed by source id. Two deployments that share one database — staging and production, say — must each set their own `schema`, or a source id they both use would be one index.
+Rows are keyed by the source's index key: its name, or for a source a package ships, the knowledge service's spelling of that package and name (so two packages' sources of one name are two indexes). Two deployments that share one database — staging and production, say — must each set their own `schema`, or a source name they both use would be one index.
+
+When a source stops being served (its metadata item was removed, or a package now holds its name), the knowledge service calls `dropSource`: every generation of the source is retired in one transaction, so nothing searches or writes it from then on, and its passages are then deleted in batches, the generation rows last.
 
 ## Setup when the connection may not create them
 

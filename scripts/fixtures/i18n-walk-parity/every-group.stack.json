@@ -154,6 +154,17 @@
     }
   ],
 
+  "forms": [
+    {
+      "name": "parity_object.parity_form",
+      "object": "parity_object",
+      "label": "Parity Form",
+      "type": "simple",
+      "sections": [{ "fields": [{ "field": "name" }] }],
+      "submitBehavior": { "kind": "thank-you", "title": "Thanks", "message": "Received." }
+    }
+  ],
+
   "flows": [
     {
       "name": "parity_flow",

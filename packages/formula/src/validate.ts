@@ -24,7 +24,6 @@ import {
   firstDateTextVerdict,
   firstTypeMismatch,
   inferCelType,
-  recordRootReadsFaultDateArith,
   RECORD_ROOT_READ_RE,
   parseCelToAst,
   parseCelToAstWithReason,
@@ -920,18 +919,23 @@ const DATE_TEXT_FAMILY_RE = /^date-text-(?:call|arithmetic)(?:-|$)/;
  * root read, left `dyn`, checked clean. Typed here with every field's type
  * (a flow variable shadows a bare name, never a root member), every bare name
  * `dyn`, the same verdict, code and words come back, naming the read as
- * written. The order is the bare name's own: there {@link firstTypeMismatch}
- * answers `date-arith` when the Timestamp typing's first fault is date/duration
- * arithmetic against a number, and the date-text check is asked only once it
- * answers null. So the pass stands down exactly where the roots' first
- * Timestamp-typing fault is that shape (`record.due_date + 1`, the
- * `date-arithmetic` family's, {@link recordRootReadsFaultDateArith}), and on no
- * other fault: `record.due_date - record.borrow_date > 3` (a Duration ordered
- * against a number) and an expression that orders a date field against a text
- * literal before it calls `timestamp()` are judged, as their bare spellings
- * are. Only `date-text-call*` / `date-text-arithmetic*` are kept. The outcome arm is
- * the row's: a root read keeps the declared outcome whatever binds the bare
- * names (#30025), so `bareNamesUnproven` is not asked.
+ * written. The order is the bare name's own: the date-text check is asked
+ * only once {@link firstTypeMismatch} answers null, and this pass is reached
+ * only there, so it never stands down on a shape that check answers (its
+ * record-root pass answers `record.due_date + 1` under `date-arith`, #34946).
+ * [#36377] Nor on any other: the roots' own Timestamp typing meeting date
+ * arithmetic first is no answer. `due_date > "2026-01-01" && record.due_date + 1 > 5`
+ * orders the bare name against a text literal first, which the runtime answers
+ * and {@link firstTypeMismatch} stands down on for the bare name and the root
+ * pass alike, so it answers null and the arithmetic on the root read faults on
+ * every run; judged here it takes the `date-text-arithmetic` verdict its all-bare
+ * and all-root spellings take. `record.due_date - record.borrow_date > 3` (a
+ * Duration ordered against a number) and an expression that orders a date
+ * field against a text literal before it calls `timestamp()` are judged, as
+ * their bare spellings are. Only `date-text-call*` / `date-text-arithmetic*`
+ * are kept. The outcome arm is the row's: a root read keeps the declared
+ * outcome whatever binds the bare names (#30025), so `bareNamesUnproven` is
+ * not asked.
  */
 function recordRootDateTextIssue(
   source: string,
@@ -941,7 +945,6 @@ function recordRootDateTextIssue(
   faultOutcome: ExprSchemaHint['faultOutcome'],
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
   if (!RECORD_ROOT_READ_RE.test(source) || !Object.values(celFieldTypes).includes('timestamp')) return null;
-  if (recordRootReadsFaultDateArith(source, celFieldTypes)) return null;
   const dateOnly = new Set(Object.keys(celFieldTypes).filter((name) => fieldTypes[name] === 'date'));
   const found = dateTextIssue(source, {}, 'flattened', role, dateArm('flattened', faultOutcome, false), dateOnly, celFieldTypes);
   return found && DATE_TEXT_FAMILY_RE.test(found.issue.code) ? found : null;
@@ -1497,9 +1500,11 @@ function scalarLiteralOf(node: unknown): string | undefined {
  * 'frontend'` is `false`, and so is `null == 'frontend'`, so the expression
  * answers `false` (for `!=`, `true`) on every row whatever the list holds — a
  * condition that never fires, or always does, with no fault and no log line.
- * The prescription is membership, in the null-guarded spelling the Studio
- * condition builder writes: `'a' in null` faults, so `S != null && V in S`
- * for `==` and `S == null || !(V in S)` for `!=`.
+ * The prescription is membership, null-guarded because `'a' in null` faults,
+ * and spelled for the site by {@link listMembershipSource} — the one spelling
+ * the Studio condition builder writes too: `has()`-guarded for a
+ * `<root>.<field>` read, `!= null`-guarded for a bare name at a flattened
+ * site, `.contains(…)` where the source compiles to a query filter.
  *
  * Accepted, deliberately: `S == null` / `S != null` (either side), which test
  * whether the list is set; a list compared with a list literal or with
@@ -1509,7 +1514,7 @@ function scalarLiteralOf(node: unknown): string | undefined {
  * At a `'flattened'` site nothing is judged unless the caller declares the run
  * proven to bind a row of the typed object ({@link ExprSchemaHint.faultOutcome}
  * `'run-fails'`); elsewhere the names hold what the entrance handed the run.
- * The prescription is spelled for the site ({@link listMembershipRewrite}).
+ * The prescription is spelled for the site ({@link listMembershipSource}).
  *
  * The subject is read through `rootMemberOf`, the field-existence pass's own
  * member reader, so `record.f` and `record['f']` (and `previous.…`) are
@@ -1657,16 +1662,23 @@ function forEachListEquality(
   walk(tree, new Set());
 }
 
-/** A read {@link checkListEquality} judges: `<root>.<field>`, or a bare field name at a flattened site. */
-interface ListSubjectRead {
+/**
+ * A read {@link checkListEquality} judges, and the site a membership test is
+ * spelled for: `<root>.<field>`, or a bare field name at a flattened site.
+ */
+export interface ListSubjectRead {
   readonly reference: string;
   readonly bare: boolean;
 }
 
 /**
- * The membership test that replaces `<reference> <operator> <operand>`, in
- * the spelling that works where the source is read, parenthesised whole so it
- * can stand where the comparison stood (`A && (…)`):
+ * Membership of `member` (a CEL literal) in the list `read.reference` —
+ * `contains` ⇒ the member is in the list, else its complement — in the
+ * spelling that works where the source is read. Two or three clauses, NOT
+ * parenthesised: a caller that joins it with other terms parenthesises it.
+ * This is the one prescription: the `list-equality` refusal's rewrite is this
+ * text parenthesised, and the Studio condition builder writes this text, so
+ * the two cannot prescribe different spellings for one site.
  *
  * - a `<root>.<field>` read evaluated as CEL: `has()`-guarded, because an
  *   action's `visible` / `disabled` / `pressed` binds a sparse row (a key
@@ -1681,27 +1693,37 @@ interface ListSubjectRead {
  *   on a list column; its comparand is text, so a number or boolean literal
  *   is passed as its text (`$contains` names a stored `3` by `"3"`).
  */
+export function listMembershipSource(
+  read: ListSubjectRead,
+  member: string,
+  contains: boolean,
+  filterCompiled = false,
+): string {
+  const r = read.reference;
+  if (filterCompiled && !read.bare) {
+    const text = member.startsWith('"') || member.startsWith("'") ? member : JSON.stringify(member);
+    return contains ? `${r} != null && ${r}.contains(${text})` : `${r} == null || !${r}.contains(${text})`;
+  }
+  if (read.bare) {
+    return contains ? `${r} != null && ${member} in ${r}` : `${r} == null || !(${member} in ${r})`;
+  }
+  return contains
+    ? `has(${r}) && ${r} != null && ${member} in ${r}`
+    : `!has(${r}) || ${r} == null || !(${member} in ${r})`;
+}
+
+/**
+ * The membership test that replaces `<reference> <operator> <operand>`:
+ * {@link listMembershipSource}, parenthesised whole so it can stand where the
+ * comparison stood (`A && (…)`).
+ */
 function listMembershipRewrite(
   read: ListSubjectRead,
   operator: '==' | '!=',
   operand: string,
   filterCompiled: boolean,
 ): string {
-  const r = read.reference;
-  if (filterCompiled && !read.bare) {
-    const text = operand.startsWith('"') || operand.startsWith("'") ? operand : JSON.stringify(operand);
-    return operator === '=='
-      ? `(${r} != null && ${r}.contains(${text}))`
-      : `(${r} == null || !${r}.contains(${text}))`;
-  }
-  if (read.bare) {
-    return operator === '=='
-      ? `(${r} != null && ${operand} in ${r})`
-      : `(${r} == null || !(${operand} in ${r}))`;
-  }
-  return operator === '=='
-    ? `(has(${r}) && ${r} != null && ${operand} in ${r})`
-    : `(!has(${r}) || ${r} == null || !(${operand} in ${r}))`;
+  return `(${listMembershipSource(read, operand, operator === '==', filterCompiled)})`;
 }
 
 /** The `list-equality` refusal for `<reference> <operator> <operand>`. */

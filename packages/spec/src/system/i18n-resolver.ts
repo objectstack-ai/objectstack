@@ -1456,6 +1456,11 @@ function translateBulkActionDefs(
  * One string off a form section's `objects.<object>._sections.<section>` node,
  * across the locale chain — `undefined` when no locale carries it, and the
  * caller then leaves the authored value in place.
+ *
+ * A `form` item passes its `formName`: its own
+ * `forms.<form>.sections.<section>` node is read first, across the whole
+ * locale chain, and `_sections` is the object-level default after it
+ * (ADR-0159 D8), the order {@link translateForm} reads `title` in.
  */
 function lookupSectionText(
   bundle: TranslationBundle | undefined,
@@ -1463,8 +1468,13 @@ function lookupSectionText(
   sectionName: string,
   attr: 'label' | 'description',
   opts: ResolveOptions | undefined,
+  formName?: string,
 ): string | undefined {
   if (!bundle) return undefined;
+  if (formName !== undefined) {
+    const own = lookupFormText(bundle, formName, ['sections', sectionName, attr], opts);
+    if (own !== undefined) return own;
+  }
   for (const code of localeChain(opts)) {
     const candidate = pickData(bundle, code)?.objects?.[objectName]?._sections?.[sectionName]?.[attr];
     if (typeof candidate === 'string' && candidate.length > 0) return candidate;
@@ -1476,7 +1486,9 @@ function lookupSectionText(
  * One string off a form section entry's
  * `objects.<object>._sections.<section>.fields.<field>` node, across the
  * locale chain — `undefined` when no locale carries it, and the caller then
- * leaves the authored value in place.
+ * leaves the authored value in place. A `form` item's `formName` reads
+ * `forms.<form>.sections.<section>.fields.<field>` first, as
+ * {@link lookupSectionText} does.
  */
 function lookupSectionEntryText(
   bundle: TranslationBundle | undefined,
@@ -1485,8 +1497,13 @@ function lookupSectionEntryText(
   fieldName: string,
   attr: FormSectionEntryAttr,
   opts: ResolveOptions | undefined,
+  formName?: string,
 ): string | undefined {
   if (!bundle) return undefined;
+  if (formName !== undefined) {
+    const own = lookupFormText(bundle, formName, ['sections', sectionName, 'fields', fieldName, attr], opts);
+    if (own !== undefined) return own;
+  }
   for (const code of localeChain(opts)) {
     const candidate = pickData(bundle, code)?.objects?.[objectName]?._sections?.[sectionName]
       ?.fields?.[fieldName]?.[attr];
@@ -1560,6 +1577,7 @@ function translateFormSections(
   objectName: string,
   opts: ResolveOptions | undefined,
   packagedConfig: Record<string, unknown> | undefined,
+  formName?: string,
 ): unknown {
   if (!Array.isArray(sections)) return sections;
   let changed = false;
@@ -1573,7 +1591,7 @@ function translateFormSections(
         ? undefined
         : lookupSectionText(
           catalogFor(catalogs, valueOverridesPackagedBase(packagedSection, attr, authored)),
-          objectName, sectionName, attr, opts,
+          objectName, sectionName, attr, opts, formName,
         );
 
     const label = text('label', section.label);
@@ -1585,6 +1603,7 @@ function translateFormSections(
       sectionName,
       opts,
       packagedSection,
+      formName,
     );
     if (label === undefined && description === undefined && fields === section.fields) return raw;
     changed = true;
@@ -1622,6 +1641,7 @@ function translateFormSectionEntries(
   sectionName: string,
   opts: ResolveOptions | undefined,
   packagedSection: Record<string, unknown> | undefined,
+  formName?: string,
 ): unknown {
   if (!Array.isArray(entries)) return entries;
   let changed = false;
@@ -1635,7 +1655,7 @@ function translateFormSectionEntries(
         ? undefined
         : lookupSectionEntryText(
           catalogFor(catalogs, valueOverridesPackagedBase(packagedEntry, attr, entry[attr])),
-          objectName, sectionName, fieldName, attr, opts,
+          objectName, sectionName, fieldName, attr, opts, formName,
         );
 
     const label = text('label');
@@ -1943,6 +1963,98 @@ export function translateView<T extends ViewLike>(
   };
 }
 
+/** Minimal `form` item shape consumed by {@link translateForm}. */
+export interface FormLike {
+  name: string;
+  object: string;
+  label?: string;
+  description?: string;
+  title?: string;
+  sections?: unknown;
+  submitBehavior?: unknown;
+  [key: string]: any;
+}
+
+/** One string off `forms.<name>` (a path below it), across the locale chain. */
+function lookupFormText(
+  bundle: TranslationBundle | undefined,
+  formName: string,
+  path: readonly string[],
+  opts: ResolveOptions | undefined,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    let node: any = (pickData(bundle, code) as { forms?: Record<string, unknown> } | undefined)?.forms?.[formName];
+    for (const key of path) node = node?.[key];
+    if (typeof node === 'string' && node.length > 0) return node;
+  }
+  return undefined;
+}
+
+/**
+ * [ADR-0159 D8] Apply the active locale to a `form` item.
+ *
+ * Every string reads `forms.<name>` FIRST. The form tails a form defined in a
+ * view had under `objects.<object>._views.<key>` (`title`, and the thank-you
+ * panel's `submitBehavior`) are the declared fallback, read when the family
+ * has no value, so a bundle written for the old shape keeps translating the
+ * same form. `label` and `description` read `forms.<name>` only: under
+ * `_views.<key>` they are the view's own strings, never a form's. Section
+ * copy reads `forms.<name>.sections.<section>` first and keeps
+ * `objects.<object>._sections.<section>` as its object-level default, key by
+ * key ({@link translateFormSections}). The override rule is the view's:
+ * a string authored on top of the packaged form keeps its text against the
+ * catalog (ADR-0029 D9.2a, {@link valueOverridesPackagedBase}).
+ */
+export function translateForm<T extends FormLike>(
+  form: T,
+  bundle: TranslationBundle | undefined,
+  opts?: TranslateDocumentOptions,
+): T {
+  if (typeof form.name !== 'string' || typeof form.object !== 'string') return form;
+  const base = asRecord(opts?.packagedBase);
+  const catalogs = labelCatalogs(bundle, opts);
+  const name = form.name;
+  const objectName = form.object;
+  const key = name.startsWith(`${objectName}.`) ? name.slice(objectName.length + 1) : name;
+  const own = (attr: 'label' | 'description'): string | undefined => {
+    const value = form[attr];
+    if (typeof value !== 'string' || value.length === 0) return undefined;
+    return lookupFormText(catalogFor(catalogs, valueOverridesPackagedBase(base, attr, value)), name, [attr], opts);
+  };
+  const label = own('label');
+  const description = own('description');
+  let title: unknown = form.title;
+  if (typeof form.title === 'string' && form.title.length > 0) {
+    const catalog = catalogFor(catalogs, valueOverridesPackagedBase(base, 'title', form.title));
+    title = lookupFormText(catalog, name, ['title'], opts)
+      ?? lookupViewText(catalog, objectName, key, 'title', opts)
+      ?? form.title;
+  }
+  const submitBehavior = translateFormSubmitBehavior(
+    form.submitBehavior,
+    catalogs,
+    (catalog, attr) => lookupFormText(catalog, name, ['submitBehavior', attr], opts)
+      ?? lookupSubmitBehaviorText(catalog, objectName, key, attr, opts),
+    base,
+  );
+  const sections = catalogs.unchanged
+    ? translateFormSections(form.sections, catalogs, formSectionObjectName(form, objectName), opts, base, name)
+    : form.sections;
+  if (label === undefined && description === undefined && title === form.title
+    && submitBehavior === form.submitBehavior && sections === form.sections) {
+    return form;
+  }
+  return {
+    ...form,
+    ...(label !== undefined ? { label } : {}),
+    ...(description !== undefined ? { description } : {}),
+    ...(title !== form.title ? { title } : {}),
+    ...(submitBehavior !== form.submitBehavior ? { submitBehavior } : {}),
+    ...(sections !== form.sections ? { sections } : {}),
+  };
+}
+
 /**
  * Apply the active locale to an action metadata document by overwriting
  * `label`, `description`, `confirmText`, `successMessage`, `disabledReason`,
@@ -2029,49 +2141,83 @@ export function translateAction<T extends ActionLike>(
  * needed exactly that and kept a hand-copied `TRANSLATABLE_META_TYPES` set
  * under a "keep in sync with the type dispatch" comment; it is now derived from
  * {@link TRANSLATABLE_METADATA_TYPES} instead, so adding a translator here
- * reaches the REST boundary with nothing else to remember (#3786).
+ * reaches the REST boundary with nothing else to remember (#3786) — beyond its
+ * name in {@link TRANSLATED_METADATA_TYPE_NAMES}, which the type check asks for.
  */
-const METADATA_DOCUMENT_TRANSLATORS: Record<
-  string,
-  (doc: any, bundle: TranslationBundle | undefined, opts?: TranslateDocumentOptions) => any
-> = {
+type MetadataDocumentTranslator = (
+  doc: any,
+  bundle: TranslationBundle | undefined,
+  opts?: TranslateDocumentOptions,
+) => any;
+
+/**
+ * The metadata types the dispatch table below translates, as data that names
+ * no translator. {@link TRANSLATABLE_METADATA_TYPES} is built from THIS list,
+ * not from the table's keys: a reader of the set (the console asks it before
+ * every metadata read) would otherwise reach every translator and every schema
+ * they read, and keep them all in its bundle. The table `satisfies` a record
+ * keyed by exactly these names, so a translator added there without its name
+ * here, or a name here with no translator, fails the type check.
+ */
+const TRANSLATED_METADATA_TYPE_NAMES = [
+  'view',
+  'action',
+  'object',
+  'app',
+  'dashboard',
+  'dataset',
+  'page',
+  'picklist',
+  'position',
+  'permission',
+  'report',
+  'book',
+  'mapping',
+  'form',
+] as const;
+
+const METADATA_DOCUMENT_TRANSLATORS: Readonly<Record<string, MetadataDocumentTranslator>> = {
   view: translateView,
   action: translateAction,
   object: translateObject,
   app: translateApp,
   dashboard: translateDashboard,
   // A dataset's measure labels are drawn on the dashboard, under every metric
-  // tile and on every chart axis (#14253). Registering it HERE is the whole
-  // wiring — `TRANSLATABLE_METADATA_TYPES` is derived below, and
-  // `@objectstack/rest` reads the derived set.
+  // tile and on every chart axis (#14253). Registering it HERE, with its name
+  // in `TRANSLATED_METADATA_TYPE_NAMES` (the type check asks for both), is the
+  // whole wiring — `TRANSLATABLE_METADATA_TYPES` is built from that list, and
+  // `@objectstack/rest` reads the set.
   dataset: translateDataset,
   page: translatePage,
   picklist: translatePicklist,
   // The security catalog's two display surfaces: the console's `position-ref`
   // and `permission-ref` pickers list `GET /meta/position` and
-  // `GET /meta/permission`, so registering here is the whole wiring.
+  // `GET /meta/permission`, so registering here (and in the name list) is the
+  // whole wiring.
   position: translatePosition,
   permission: translatePermissionSet,
   // The console's report index and report page both read `GET /meta/report`,
-  // so registering here is the whole wiring.
+  // so registering here (and in the name list) is the whole wiring.
   report: translateReport,
   // A doc book's title and section titles: the console's docs portal builds
   // its sidebar from `GET /meta/book`, and the tree route translates the book
   // it resolves through this same table (`createMetaBookTreeAnswer`).
   book: translateBook,
   // A named import mapping's label: the console's import wizard offers each
-  // mapping by label from `GET /meta/mapping`, so registering here is the
-  // whole wiring.
+  // mapping by label from `GET /meta/mapping`, so registering here (and in
+  // the name list) is the whole wiring.
   mapping: translateMapping,
-};
+  // [ADR-0159 D8] A `form` item: `forms.<name>` first, its old-shape `_views`
+  // tails as the declared fallback.
+  form: translateForm,
+} satisfies Record<(typeof TRANSLATED_METADATA_TYPE_NAMES)[number], MetadataDocumentTranslator>;
 
 /**
  * Metadata types whose user-facing labels {@link translateMetadataDocument}
- * localizes. Derived from the dispatch table — never restate it.
+ * localizes. Equal to the dispatch table's keys — the type check above holds
+ * the two together — never restate it.
  */
-export const TRANSLATABLE_METADATA_TYPES: ReadonlySet<string> = new Set(
-  Object.keys(METADATA_DOCUMENT_TRANSLATORS),
-);
+export const TRANSLATABLE_METADATA_TYPES: ReadonlySet<string> = new Set<string>(TRANSLATED_METADATA_TYPE_NAMES);
 
 /**
  * Generic metadata translator: dispatches to `translateView` /
@@ -2745,10 +2891,11 @@ function translateDatasetMembers(
  * Chinese tile titles with `Untouched > 14 days` directly beneath them
  * (#14253).
  *
- * Registering the translator in {@link METADATA_DOCUMENT_TRANSLATORS} is the
- * whole wiring: `TRANSLATABLE_METADATA_TYPES` is DERIVED from that table, and
- * `@objectstack/rest` reads the derived set, so the REST boundary follows with
- * nothing else to remember (#3786).
+ * Registering the translator in {@link METADATA_DOCUMENT_TRANSLATORS}, with
+ * its name in {@link TRANSLATED_METADATA_TYPE_NAMES} (the type check refuses
+ * one without the other), is the whole wiring: `TRANSLATABLE_METADATA_TYPES`
+ * is built from that list, and `@objectstack/rest` reads the set, so the REST
+ * boundary follows with nothing else to remember (#3786).
  *
  * ## Writes only where the bundle answered
  *
@@ -6403,7 +6550,7 @@ export function resolveMetadataFormLabels<T extends Record<string, any>>(
   // measurement is why. This helper takes ANY form-shaped object (`T extends
   // Record<string, any>`), and it is exported: its one in-repo caller
   // (`rest-server.ts` translating `getMetaTypes()` entries) now feeds it
-  // post-parse forms from `METADATA_FORM_REGISTRY`, all of them `defineForm`
+  // post-parse forms from `METADATA_FORM_REGISTRY`, all of them `defineMetadataForm`
   // outputs, so for THAT caller the branch is unreachable — but a stored
   // `sys_metadata` body still carries the authored key (`saveMetaItem` keeps
   // the body verbatim and the read replays the ADR-0087 conversion chain, not

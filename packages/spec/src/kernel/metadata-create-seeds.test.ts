@@ -91,6 +91,17 @@ describe('metadata create seeds validate against their spec schemas', () => {
       // (merge question 11). Same category as `sharing_rule`.
       'queue',
       'assignment_rule',
+      // [ADR-0159 card ②] `form` is runtime-creatable (a `/meta/form` save) but
+      // Studio has no form designer for it yet: the console keeps reading forms
+      // from `view` until card ③ (#37087), which brings the designer and its
+      // seed. Deferred work, named here so it is not a silent gap.
+      'form',
+      // [ADR-0161 K4] `knowledge_source` is runtime-creatable, and its create
+      // seed is deferred work with a name: it lands with the Studio form and
+      // the MCP create seed (rows 5 and 5b of #37000), which are what would
+      // serve one. Until then a source is created by a `/meta` save or shipped
+      // in a package, never from a blank form.
+      'knowledge_source',
     ]);
     const seeded = new Set(listMetadataCreateSeedTypes());
     const missing = listMetadataTypeSchemaTypes().filter((t) => !seeded.has(t) && !KNOWN_UNSEEDED.has(t));

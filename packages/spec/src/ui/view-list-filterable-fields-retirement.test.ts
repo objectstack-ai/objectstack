@@ -58,7 +58,7 @@ import { ObjectSchema } from '../data/object.zod';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../migrations/registry';
 import { ComponentPropsMap } from './component.zod';
-import { viewForm } from './view.form';
+import { viewForm } from './view.metadata-form';
 import {
   ListViewSchema,
   ObjectListViewSchema,

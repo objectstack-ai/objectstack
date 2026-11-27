@@ -7100,6 +7100,59 @@ describe('validateStackExpressions — a flow condition\'s record. / previous. r
   });
 });
 
+// [#36377] A flow CONDITION that orders the BARE date name against a text
+// literal before it does arithmetic on the field's `record.` / `previous.`
+// read got zero findings, while its all-bare and all-root spellings were
+// refused, and it fails every run on the `YYYY-MM-DD` text. It now takes the
+// all-root spelling's finding, at the same path and severity.
+describe('validateStackExpressions — a bare date ordering before date arithmetic on a record. / previous. read is refused (#36377)', () => {
+  const LOAN = {
+    name: 'library_loan',
+    fields: { due_date: { type: 'date', required: true }, picked_up_at: { type: 'datetime', required: true } },
+  };
+  type Site = 'start' | 'edge' | 'decision';
+  const stackWith = (site: Site, condition: string) => ({
+    objects: [LOAN],
+    flows: [{
+      name: 'loan_due',
+      nodes: [
+        {
+          id: 'start', type: 'start',
+          config: { objectName: 'library_loan', triggerType: 'record-after-update', ...(site === 'start' ? { condition } : {}) },
+        },
+        ...(site === 'decision'
+          ? [{ id: 'gate', type: 'decision', config: { conditions: [{ label: 'Due', expression: condition }] } }]
+          : []),
+        { id: 'end', type: 'end' },
+      ],
+      edges: site === 'decision'
+        ? [{ id: 'e1', source: 'start', target: 'gate' }, { id: 'e2', source: 'gate', target: 'end' }]
+        : [{ id: 'e1', source: 'start', target: 'end', ...(site === 'edge' ? { condition } : {}) }],
+    }],
+  });
+  const shape = (issues: ExprIssue[]) => issues.map((i) => [i.severity, i.path ?? i.where, i.message]);
+
+  it.each(['start', 'edge', 'decision'] as const)(
+    'refuses the mixed spelling in a %s condition with the all-root spelling\'s finding',
+    (site) => {
+      for (const [root, field, op] of [
+        ['record', 'due_date', '+ 1'], ['previous', 'due_date', '- 7'], ['record', 'picked_up_at', '+ 1'],
+      ] as const) {
+        const allRoot = validateStackExpressions(stackWith(site, `${root}.${field} > "2026-01-01" && ${root}.${field} ${op} > 5`));
+        expect(allRoot.map((i) => i.severity), `${site}: ${root}.${field}`).toEqual(['error']);
+        const mixed = `${field} > "2026-01-01" && ${root}.${field} ${op} > 5`;
+        expect(shape(validateStackExpressions(stackWith(site, mixed))), `${site}: ${mixed}`).toEqual(shape(allRoot));
+      }
+    },
+  );
+
+  it('CONTROL: the same bare ordering before an ordering of the root read against today() stays clean', () => {
+    for (const site of ['start', 'edge', 'decision'] as const) {
+      expect(validateStackExpressions(stackWith(site, 'due_date > "2026-01-01" && record.due_date < today()')), site).toEqual([]);
+    }
+  });
+});
+
 /**
  * [ADR-0113 D1, as amended] A `required` field's own `visibleWhen` decides its
  * requirement on the write, and a predicate the server cannot evaluate counts

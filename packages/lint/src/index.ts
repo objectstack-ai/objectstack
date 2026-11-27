@@ -319,6 +319,19 @@ export {
   FORM_VIEW_INTERNAL_NOT_LOADED,
 } from './validate-internal-form-views.js';
 export type { InternalFormViewFinding } from './validate-internal-form-views.js';
+// [ADR-0159 card ②] The `form` type's authoring rules: the public-address
+// refusal (gating), the consumer-less advisory and the object binding.
+export {
+  stackForms,
+  validateFormConsumers,
+  validateFormObjectBindings,
+  validateFormPublicAddresses,
+  FORM_CONSUMER_LESS,
+  FORM_OBJECT_OUTSIDE_CLOSURE,
+  FORM_OBJECT_UNKNOWN,
+  FORM_PUBLIC_ADDRESS_TAKEN,
+} from './validate-form-items.js';
+export type { FormItemFinding, FormObjectBindingOptions, StackForm } from './validate-form-items.js';
 
 // A form open to anonymous intake that declares a file field (ruling C on #25572).
 export { validatePublicFormFileFields, PUBLIC_FORM_FILE_FIELD } from './validate-public-form-file-fields.js';
@@ -1125,6 +1138,12 @@ export {
   judgeBodyCompile,
   ACTION_BODY_DOES_NOT_COMPILE,
 } from './validate-action-body-compiles.js';
+// [#35143] The Seeds and actions family's two new rule ids, exported so
+// `os explain` can carry an entry for each (the explanation table holds an
+// entry only for an id the barrel exports). The rules themselves run through
+// the registry and are not exported.
+export { ACTION_BODY_WRITE_CAPABILITY_UNDECLARED } from './validate-action-body-capabilities.js';
+export { SEED_RECORD_UNKNOWN_FIELD } from './validate-seed-record-keys.js';
 export type {
   ActionBodyCompileFinding,
   HostCompileFailure,

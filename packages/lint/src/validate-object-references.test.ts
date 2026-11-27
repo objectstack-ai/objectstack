@@ -10,6 +10,7 @@ import { runAuthoringRules, splitBySeverity } from './authoring-rules.js';
 import { PLATFORM_OBJECT_PREFIXES } from '@objectstack/spec/system';
 import { defineStack } from '@objectstack/spec';
 import { explainRule } from './rule-explanations.js';
+import { runRuntimeAuthoringRules } from './runtime-gate.js';
 
 // [#22161] Each `object-reference-unregistered-platform` finding is one
 // verdict sentence; the reasoning it used to carry is
@@ -442,6 +443,202 @@ describe('validateObjectReferences — ADR-0021 dataset base object (#14105)', (
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe('warning');
     expect(findings[0].rule).toBe(OBJECT_REFERENCE_UNREGISTERED_PLATFORM);
+  });
+});
+
+describe('[#35143] validateObjectReferences — the object a seed, a flow node or an action is bound to', () => {
+  const flow = (nodes: Record<string, unknown>[]) => ({
+    name: 'crm_flow',
+    label: 'F',
+    type: 'autolaunched',
+    nodes: [{ id: 'start', type: 'start', label: 'Start' }, ...nodes],
+    edges: [],
+  });
+
+  it('errors on a seed dataset over an object that does not exist, and warns on a platform-shaped one', () => {
+    const findings = validateObjectReferences({
+      ...baseStack(),
+      data: [
+        { object: 'crm_led', externalId: 'name', records: [] },
+        { object: 'sys_nothing_here', externalId: 'name', records: [] },
+        { object: 'crm_lead', externalId: 'name', records: [] },
+        { object: 'sys_user', externalId: 'name', records: [] },
+      ],
+    });
+    expect(findings.map((f) => [f.severity, f.rule, f.path])).toEqual([
+      ['error', OBJECT_REFERENCE_UNKNOWN, 'data[0].object'],
+      ['warning', OBJECT_REFERENCE_UNREGISTERED_PLATFORM, 'data[1].object'],
+    ]);
+    expect(findings[0].message).toContain('Did you mean "crm_lead"?');
+  });
+
+  const crudFlowStack = () => ({
+    ...baseStack(),
+    flows: [
+      flow([
+        { id: 'g', type: 'get_record', label: 'Get', config: { objectName: 'crm_lead' } },
+        { id: 'c', type: 'create_record', label: 'Make', config: { objectName: 'crm_nope', fields: {} } },
+        { id: 'u', type: 'update_record', label: 'Upd', config: { objectName: 'crm_acount', fields: {} } },
+        { id: 'd', type: 'delete_record', label: 'Del', config: { objectName: 'crm_gone' } },
+        { id: 's', type: 'screen', label: 'Form', config: { objectName: 'crm_form_obj' } },
+        { id: 't', type: 'create_record', label: 'Tpl', config: { objectName: '{target}' } },
+        {
+          id: 'loop',
+          type: 'loop',
+          label: 'Loop',
+          config: { collection: 'xs', body: { nodes: [{ id: 'n', type: 'get_record', label: 'Inner', config: { objectName: 'crm_inner' } }] } },
+        },
+      ]),
+    ],
+  });
+  const CRUD_MISS_PATHS = [
+    'flows[0].nodes[2].config.objectName',
+    'flows[0].nodes[3].config.objectName',
+    'flows[0].nodes[4].config.objectName',
+    'flows[0].nodes[5].config.objectName',
+    'flows[0].nodes[7].config.body.nodes[0].config.objectName',
+  ];
+
+  it('advises (not refuses) on the CLI a flow CRUD or object-form screen node bound to a name the stack does not define', () => {
+    // No closure and no whole collection: a dependency package the build cannot
+    // see may define the name, so the trigger rule's split applies (#24669).
+    const findings = validateObjectReferences(crudFlowStack());
+    expect(findings.map((f) => [f.severity, f.rule])).toEqual(CRUD_MISS_PATHS.map(() => ['warning', OBJECT_REFERENCE_UNKNOWN]));
+    expect(findings.map((f) => f.path)).toEqual(CRUD_MISS_PATHS);
+    expect(findings[1].message).toContain('Did you mean "crm_account"?');
+    expect(findings[0].hint).toContain('`dependencies`');
+  });
+
+  it('refuses the same nodes against the whole served collection, and under a closure', () => {
+    for (const options of [
+      { wholeCollection: true },
+      { packageScope: { packageId: 'com.acme.crm', dependencies: [] } },
+    ]) {
+      const findings = validateObjectReferences(crudFlowStack(), options);
+      expect(findings.map((f) => [f.severity, f.path])).toEqual(CRUD_MISS_PATHS.map((p) => ['error', p]));
+    }
+  });
+
+  it('CLI: a stack that declares a dependency it does not carry builds, with the flow node advised and nothing refused', () => {
+    // The dependency's object is not in the stack: `os validate` / `build` /
+    // `lint` cannot see it, so the step bound to it must not fail the build.
+    const stack = {
+      ...baseStack(),
+      manifest: { id: 'com.acme.ext', name: 'ext', version: '1.0.0', type: 'app', dependencies: { 'com.acme.billing': '^1.0.0' } },
+      flows: [flow([{ id: 'c', type: 'create_record', label: 'Bill', config: { objectName: 'billing_invoice', fields: {} } }])],
+    };
+    for (const command of ['validate', 'build', 'lint'] as const) {
+      const { errors, advisories } = splitBySeverity(runAuthoringRules(command, { normalized: stack as never }));
+      expect(errors.filter((f) => f.rule === OBJECT_REFERENCE_UNKNOWN), command).toEqual([]);
+      expect(advisories.filter((f) => f.rule === OBJECT_REFERENCE_UNKNOWN).map((f) => f.path), command)
+        .toEqual(['flows[0].nodes[1].config.objectName']);
+    }
+  });
+
+  it('leaves the start node to the trigger rule', () => {
+    expect(
+      validateObjectReferences({
+        ...baseStack(),
+        flows: [{ name: 'f', nodes: [{ id: 'start', type: 'start', config: { objectName: 'crm_nope' } }], edges: [] }],
+      }),
+    ).toEqual([]);
+  });
+
+  it('errors on a standalone action bound to an object that does not exist; an embedded one is not read', () => {
+    const findings = validateObjectReferences({
+      objects: [
+        ...baseStack().objects,
+        { name: 'crm_note', fields: { name: { type: 'text' } }, actions: [{ name: 'inline', objectName: 'crm_wrong' }] },
+      ],
+      actions: [
+        { name: 'go', label: 'Go', objectName: 'crm_lead' },
+        { name: 'bad', label: 'Bad', objectName: 'crm_laed' },
+        { name: 'headless', label: 'H' },
+      ],
+    });
+    expect(findings.map((f) => [f.rule, f.path, f.where])).toEqual([
+      [OBJECT_REFERENCE_UNKNOWN, 'actions[1].objectName', 'action "bad"'],
+    ]);
+  });
+
+  describe('at the runtime publish doors', () => {
+    const objects = baseStack().objects.map((o) => ({ ...o, sharingModel: 'private' }));
+    const objectRefErrors = (r: { errors: Array<{ rule: string; path: string }> }) =>
+      r.errors.filter((e) => e.rule === OBJECT_REFERENCE_UNKNOWN).map((e) => e.path);
+
+    it('a `seed` write does not run the ladder: the save door owns a seed over an unknown object (#34864)', () => {
+      // The save door refuses it with the draft and publish-promotion carve-outs
+      // a snapshot of served objects cannot see, so the member stays off `seed`.
+      const result = runRuntimeAuthoringRules({
+        type: 'seed',
+        item: { object: 'crm_led', externalId: 'name', records: [{ name: 'a' }] },
+        context: { objects },
+      });
+      expect(objectRefErrors(result)).toEqual([]);
+      expect(result.rulesRun).not.toContain('validateReferenceIntegrity');
+    });
+
+    it('an `action` write bound to an object the deployment does not serve is refused; bound to a served one it passes', () => {
+      const write = (objectName: string) =>
+        runRuntimeAuthoringRules({
+          type: 'action',
+          item: { name: 'go', label: 'Go', objectName, type: 'script', locations: ['record_header'], body: { language: 'js', source: 'return 1;' } },
+          context: { objects },
+        });
+      expect(objectRefErrors(write('crm_laed'))).toEqual(['actions[0].objectName']);
+      expect(write('crm_lead').errors).toEqual([]);
+    });
+
+    it('an empty object set with no closure is no universe, so no verdict; under a closure it is one (#24668, #24563)', () => {
+      const write = (packageScope?: { packageId: string; dependencies: string[] }) =>
+        runRuntimeAuthoringRules({
+          type: 'action',
+          item: { name: 'go', label: 'Go', objectName: 'crm_lead', type: 'script', locations: ['record_header'], body: { language: 'js', source: 'return 1;' } },
+          context: { objects: [] },
+          ...(packageScope ? { packageScope } : {}),
+        });
+      expect(objectRefErrors(write())).toEqual([]);
+      expect(objectRefErrors(write({ packageId: 'com.acme.ext', dependencies: [] }))).toEqual(['actions[0].objectName']);
+    });
+
+    it('an `action` saved into a package is judged against its closure: another package\'s object resolves only once declared', () => {
+      // `crm_lead` is owned by `com.acme.crm`; the action is saved into `com.acme.ext`.
+      const owned = objects.map((o) => ({ ...o, _packageId: 'com.acme.crm' }));
+      const write = (dependencies: string[]) =>
+        runRuntimeAuthoringRules({
+          type: 'action',
+          item: { name: 'go', label: 'Go', objectName: 'crm_lead', type: 'script', locations: ['record_header'], body: { language: 'js', source: 'return 1;' } },
+          context: { objects: owned },
+          packageScope: { packageId: 'com.acme.ext', dependencies },
+        });
+      const refused = write([]).errors.filter((e) => e.rule === OBJECT_REFERENCE_UNKNOWN);
+      expect(refused.map((e) => [e.path, e.severity])).toEqual([['actions[0].objectName', 'error']]);
+      expect(refused[0].hint).toContain('com.acme.ext');
+      expect(write(['com.acme.crm']).errors).toEqual([]);
+    });
+
+    it('a `flow` write whose create_record node names an object the deployment does not serve is refused', () => {
+      const write = (objectName: string) =>
+        runRuntimeAuthoringRules({
+          type: 'flow',
+          item: flow([{ id: 'c', type: 'create_record', label: 'Make', config: { objectName, fields: { name: 'x' } } }]),
+          context: { objects },
+        });
+      expect(objectRefErrors(write('crm_nope'))).toEqual(['flows[0].nodes[1].config.objectName']);
+      expect(objectRefErrors(write('crm_lead'))).toEqual([]);
+    });
+  });
+
+  it('resolves an object the stack extends at the three bindings', () => {
+    expect(
+      validateObjectReferences({
+        ...baseStack(),
+        objectExtensions: [{ extend: 'hr_employee', fields: {} }],
+        data: [{ object: 'hr_employee', externalId: 'name', records: [] }],
+        actions: [{ name: 'go', label: 'Go', objectName: 'hr_employee' }],
+        flows: [flow([{ id: 'c', type: 'create_record', label: 'C', config: { objectName: 'hr_employee', fields: {} } }])],
+      }),
+    ).toEqual([]);
   });
 });
 

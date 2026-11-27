@@ -86,7 +86,7 @@ const EMBEDDED_JSON_TYPED_LIST =
  * Semantic near-misses on `FieldSchema` — a different **word** for the same
  * intent, or a key that was retired outright.
  *
- * Every entry here was found in the wild. The rename half is what `object.form.ts`
+ * Every entry here was found in the wild. The rename half is what `object.metadata-form.ts`
  * had drifted into by #4120; the retired half is the `auditTrail` / `dataQuality`
  * / `encryptionConfig` family pruned in 2026-06 plus the field-level `index` flag
  * removed in the 16.x line (#2377). Edit distance cannot reach most of these

@@ -31,7 +31,12 @@ import { RestServer } from './rest-server';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at
 // MODULE LOAD rather than inside a clocked `it()` body.
-import '@objectstack/spec/ui';
+import { projectedFormsOf } from '@objectstack/spec/ui';
+
+// Pay the first transform of `@objectstack/objectql`, which the route source
+// reaches through a dynamic `import()`, at MODULE LOAD rather than inside a
+// clocked `it()` body (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/objectql';
 
 const ORG = 'org_alpha';
 
@@ -98,10 +103,10 @@ interface Setup {
 function build(setup: Setup) {
   const createData = vi.fn().mockResolvedValue({ object: 'inquiry', id: 'rec_1', record: {} });
   const getMetaItems = vi.fn(async (req: Record<string, unknown> & { type: string }) => {
-    if (req.type === 'view') {
-      if (setup.envWideViews) return setup.envWideViews;
-      return [formView(setup.envWide, setup.sharing), ...(setup.extraViews ?? [])];
-    }
+    const views = () => setup.envWideViews ?? [formView(setup.envWide, setup.sharing), ...(setup.extraViews ?? [])];
+    if (req.type === 'view') return views();
+    // [ADR-0159 D5] The `form` read, as the protocol serves it for an old-shape-only fixture: the projection of the views.
+    if (req.type === 'form') return projectedFormsOf(views());
     if (req.type === 'object') return [inquiryObject];
     return [];
   });

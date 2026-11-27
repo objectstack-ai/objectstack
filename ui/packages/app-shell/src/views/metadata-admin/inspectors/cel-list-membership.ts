@@ -12,16 +12,25 @@
  * with one value, so it is false for every record (and `S != V` true for every
  * record); `S.contains(V)` faults ("no matching overload"); and `V in S` is
  * membership. So a list subject is offered membership and the empty checks,
- * and membership is written null-safe:
+ * and membership is written null-safe, in the spelling the validator's
+ * `list-equality` refusal prescribes for the same site — both take it from
+ * `@objectstack/formula`'s `listMembershipSource`, read here rather than
+ * restated:
  *
- * - contains → `S != null && V in S`;
- * - does not contain → `S == null || !(V in S)`.
+ * - a `<root>.<field>` subject (`record.f`, `previous.f`) is `has()`-guarded,
+ *   since an action row is sparse and `previous` is `null` on a create:
+ *   contains → `has(S) && S != null && V in S`, does not contain →
+ *   `!has(S) || S == null || !(V in S)`;
+ * - a bare subject (a flow start condition's field) is `!= null`-guarded:
+ *   contains → `S != null && V in S`, does not contain →
+ *   `S == null || !(V in S)`.
  *
  * Which operators a list subject takes is the shared filter builder's answer
  * (`jsonColumnFilterOperators`), read here rather than restated, so the
  * builders and the list toolbar's `FilterBuilder` cannot disagree.
  */
 
+import { listMembershipSource } from '@objectstack/formula';
 import { jsonColumnFilterOperators, type FilterBuilderOperator } from '@object-ui/components';
 
 /** The two facts that decide whether a field holds a list. */
@@ -43,25 +52,32 @@ export function listSubjectOperators(field: ListSubjectFacts): readonly FilterBu
 
 /**
  * Membership of `member` (already a CEL literal or reference) in the list
- * `subject`: `contains` ⇒ `S != null && V in S`, else its complement
- * `S == null || !(V in S)`. Both are two clauses, so a caller parenthesises
- * the result when it joins it with other terms.
+ * `subject`, or its complement, as `listMembershipSource` spells it for the
+ * subject's site: a subject with a root (`record.f`, `previous.f`) is a
+ * `<root>.<field>` read, a subject without one a bare name. Several clauses,
+ * so a caller parenthesises the result when it joins it with other terms.
  */
 export function listMembershipCel(subject: string, member: string, contains: boolean): string {
-  return contains ? `${subject} != null && ${member} in ${subject}` : `${subject} == null || !(${member} in ${subject})`;
+  return listMembershipSource({ reference: subject, bare: !subject.includes('.') }, member, contains);
 }
 
 const SUBJECT = '[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*';
-const CONTAINS_RE = new RegExp(`^(${SUBJECT}) != null && (.+) in \\1$`);
-const NOT_CONTAINS_RE = new RegExp(`^(${SUBJECT}) == null \\|\\| !\\((.+) in \\1\\)$`);
+const MEMBERSHIP_SHAPES: ReadonlyArray<readonly [RegExp, boolean]> = [
+  [new RegExp(`^has\\((${SUBJECT})\\) && \\1 != null && (.+) in \\1$`), true],
+  [new RegExp(`^!has\\((${SUBJECT})\\) \\|\\| \\1 == null \\|\\| !\\((.+) in \\1\\)$`), false],
+  [new RegExp(`^(${SUBJECT}) != null && (.+) in \\1$`), true],
+  [new RegExp(`^(${SUBJECT}) == null \\|\\| !\\((.+) in \\1\\)$`), false],
+];
 
 /**
  * Read `text` back as the membership {@link listMembershipCel} writes, or
  * `null`. Accepts exactly what the writer emits for the parts it reads — the
- * member's own text is the caller's to read as a value.
+ * member's own text is the caller's to read as a value — so a spelling the
+ * writer does not use for that subject's site (an unguarded `record.f` read)
+ * does not read back.
  */
 export function readListMembership(text: string): { subject: string; member: string; contains: boolean } | null {
-  for (const [re, contains] of [[CONTAINS_RE, true], [NOT_CONTAINS_RE, false]] as const) {
+  for (const [re, contains] of MEMBERSHIP_SHAPES) {
     const m = re.exec(text);
     if (m && listMembershipCel(m[1], m[2], contains) === text) return { subject: m[1], member: m[2], contains };
   }

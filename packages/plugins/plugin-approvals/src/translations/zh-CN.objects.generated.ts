@@ -105,6 +105,18 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "Flow Node",
         help: "Approval node id within the flow that opened this request."
       },
+      root_run_id: {
+        label: "根运行",
+        help: "此请求所属审批发起时所在的自动化运行。"
+      },
+      root_run_started_at: {
+        label: "根运行开始时间",
+        help: "此请求所属审批发起时所在的运行的开始时间。"
+      },
+      record_run_id: {
+        label: "记录运行",
+        help: "承载此请求所在记录的自动化运行。"
+      },
       node_config_json: {
         label: "Node Config",
         help: "Snapshot of the Approval node config (approvers/behavior) for node-driven requests."

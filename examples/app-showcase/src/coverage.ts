@@ -93,6 +93,8 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
 
   // ── ui ──
   view: { status: 'demonstrated', files: ['src/ui/views/task.view.ts', 'src/ui/views/project.view.ts'] },
+  // [ADR-0159] One authored `form` item, a public form on an address no other form holds.
+  form: { status: 'demonstrated', files: ['src/ui/forms/feedback.form.ts'] },
   page: { status: 'demonstrated', files: ['src/ui/pages/index.ts'] },
   dashboard: {
     status: 'demonstrated',
@@ -218,6 +220,12 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
     files: ['src/ai/record-context.ai-context.ts'],
     notes:
       'Two context packs (ADR-0160): a project brief (own fields, a lookup read through to the account, its open tasks as a related list, filtered, ordered by due date and cut by `where` / `orderBy` / `limit`) and a task with its notes as a body (whole, or an outline read by anchor). Read by `get_record_context` over MCP; the service is wired in objectstack.config.ts plugins.',
+  },
+  knowledge_source: {
+    status: 'demonstrated',
+    files: ['src/ai/task-notes.knowledge-source.ts'],
+    notes:
+      'One knowledge source (ADR-0161 K4): the titles and notes of open tasks, with `status` and `priority` kept for filtering. `content` lists its fields by name — what is listed is what leaves the row store for the index. Loaded, built and kept in step by the knowledge service; read by `search_knowledge` over MCP as the caller. The service and the in-memory store the source names (`adapter: \'memory\'`) are wired in objectstack.config.ts plugins.',
   },
   skill: {
     status: 'waived',

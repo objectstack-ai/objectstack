@@ -101,9 +101,11 @@
  * gating a sort with it would refuse the two types that sort CORRECTLY:
  * `summary` is a `table.float` maintained by the engine and `autonumber` a
  * `table.string` the engine assigns. The distinction is pinned by name in the
- * engine's own conformance suite and restated in `protocol.ts`'s
- * `UNMATERIALIZED_SORT_TYPES` note; widening here would produce the false
- * finding that makes authors stop trusting the linter (ADR-0072 D1).
+ * engine's own conformance suite and restated at both runtime sort doors,
+ * which read `isVirtualSearchField` too (the "ONE SOURCE" notes on
+ * `assertSortFieldsExist`'s third verdict and `assertOrderByIsMaterializable`);
+ * widening here would produce the false finding that makes authors stop
+ * trusting the linter (ADR-0072 D1).
  *
  * ── Which sort positions are walked, and which were checked and are not ──
  *
@@ -214,11 +216,11 @@
  * carry since #8340.
  *
  * WHY THIS AXIS NEEDS ITS OWN AUTHORING ANSWER — neither runtime door refuses
- * it. Both key on `formula` ALONE (`UNMATERIALIZED_SORT_TYPES`): the ingress
- * gate's third verdict (`assertSortFieldsExist`, #6994) and the engine's
- * (`assertOrderByIsMaterializable`, #7095). An injected anchor is a `datetime`
- * or `lookup`, it IS in `gate.known` (the registry injected it into the served
- * schema), and it is undotted — so it passes all three verdicts and reaches
+ * it. Both key on the computed type ALONE (`isVirtualSearchField`, `formula`
+ * today): the ingress gate's third verdict (`assertSortFieldsExist`, #6994)
+ * and the engine's (`assertOrderByIsMaterializable`, #7095). An injected
+ * anchor is a `datetime` or `lookup`, it IS in `gate.known` (the registry
+ * injected it into the served schema), and it is undotted — so it passes all three verdicts and reaches
  * the driver. Measured (#10474) with a real `SqlDriver` over better-sqlite3,
  * the object declared exactly as `examples/app-showcase` declares it, against
  * a remote `customers` table carrying `[id, name, email, region,

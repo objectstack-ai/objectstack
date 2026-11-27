@@ -84,7 +84,9 @@ describe('a sealed object chained by organization_id, on a live engine (ADR-0154
   const past = Math.floor(Date.now() / H) * H - 3 * H; // a window three hours ago: settled
   const hot = () => engine.getDriverForObject(CHAIN_PROBE) as unknown as Driver;
   const sealer = () => (plugin as unknown as { sealer: AuditSealer }).sealer;
-  const verify = (orgs: string[]) => verifyAuditLedger({ engine: engine as never, crypto, orgs });
+  // `sys_audit_log` is sealed by default and archives to 'archive', which this boot never connects: nothing was
+  // archived, as `os audit verify` establishes before it reads the hot store alone.
+  const verify = (orgs: string[]) => verifyAuditLedger({ engine: engine as never, crypto, orgs, archive: () => 'none' });
   let written = 0;
 
   beforeAll(async () => {

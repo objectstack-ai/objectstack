@@ -187,6 +187,11 @@ export { validateExpression, introspectScope, expectedDialect, inferExpressionTy
 // caller that resolves hop targets (`@objectstack/lint`): the hint describes
 // the root object's fields only.
 export { findHopListEquality } from './validate';
+// The one list-membership prescription, per site: the `list-equality`
+// refusal's rewrite and the Studio condition builder both spell membership
+// with it, so the two cannot disagree on a site.
+export { listMembershipSource } from './validate';
+export type { ListSubjectRead } from './validate';
 export type { FieldRole, ExprInput, ExprSchemaHint, ExprFaultOutcome, ExprValidationError, ExprValidationResult, InferredValueType } from './validate';
 // #22727 — the declaration authoring stamps onto a formula field: its
 // `returnType`, and for a provably-money result its currency, copied from the

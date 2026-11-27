@@ -76,6 +76,7 @@ import type { ApiRoutes, CapabilityDescriptor, ServiceInfo, WellKnownCapabilitie
 // `DiscoverySchema` "System Identity" field — never a literal again.
 import { resolveDiscoveryVersion } from './discovery-version.js';
 import { CORE_SERVICE_PROVIDER, serviceUnavailableMessage } from '@objectstack/spec/system';
+import { projectViewForms } from '@objectstack/spec/ui';
 import { SERVICE_CONFIG } from './protocol-discovery-services.js';
 import type { ProtocolHost } from './protocol-host.js';
 import { servedOverrideBaseOf } from './served-override.js';
@@ -86,7 +87,7 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
  * answers: the artifact item IS the packaged declaration for each (none has an
  * extension fold, unlike the object).
  */
-export type PackagedArtifactBaseType = 'dashboard' | 'view' | 'report' | 'page' | 'dataset' | 'app' | 'book' | 'mapping';
+export type PackagedArtifactBaseType = 'dashboard' | 'view' | 'report' | 'page' | 'dataset' | 'app' | 'book' | 'mapping' | 'form';
 
 export class ProtocolDiscoveryAndBasesFacet {
     /** The body of `ObjectStackProtocolImplementation#getProjectId`; the method's docblock there is its contract. */
@@ -930,6 +931,22 @@ export class ProtocolDiscoveryAndBasesFacet {
     /** The body of `ObjectStackProtocolImplementation#getPackagedMappingBase`; the method's docblock there is its contract. */
     static getPackagedMappingBase(host: Pick<ProtocolHost, 'packagedArtifactBase'>, name: string): unknown {
         return host.packagedArtifactBase('mapping', name);
+    }
+
+    /**
+     * The body of `ObjectStackProtocolImplementation#getPackagedFormBase`; the
+     * method's docblock there is its contract. [ADR-0159 D5, ADR-0029 D9.2a]
+     * The base's authored `form` item, else the form its old shape carries at
+     * the name, read through THE projection: until card ④ a `form` override's
+     * base still ships most first-party forms as an old shape, and the text the
+     * override changed outranks that base's catalog either way.
+     */
+    static getPackagedFormBase(host: Pick<ProtocolHost, 'packagedArtifactBase'>, name: string): unknown {
+        const authored = host.packagedArtifactBase('form', name);
+        if (authored !== undefined && authored !== null) return authored;
+        const view = host.packagedArtifactBase('view', name);
+        if (view === undefined || view === null) return undefined;
+        return projectViewForms(view).forms.find((form) => form.name === name);
     }
 
     /** The body of `ObjectStackProtocolImplementation#servedOverrideBaseOf`; the method's docblock there is its contract. */

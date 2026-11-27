@@ -1659,10 +1659,17 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Verrouillé par",
         helpText: "Utilisateur qui a verrouillé la configuration de la vue"
       },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this view either."
+      },
       object: {
         label: "Objet"
       }
     }
+  },
+  form: {
+    label: "Formulaire"
   },
   page: {
     label: "Page",
@@ -1871,6 +1878,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Filtres",
         description: "Filtres par défaut et globaux appliqués à l’ensemble des widgets."
       },
+      access: {
+        label: "Access",
+        description: "Who can see this dashboard."
+      },
       advanced: {
         label: "Avancé",
         description: "Réglages d’accessibilité et de performances."
@@ -2051,6 +2062,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "globalFilters.targetWidgets": {
         label: "Widgets cibles"
+      },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Who sees this dashboard: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone sees this dashboard. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the dashboard in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this dashboard either."
       }
     }
   },
@@ -3288,7 +3303,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       model: {
         label: "Modèle",
-        helpText: "Configuration du modèle d’IA (fournisseur, nom du modèle, température, etc.)"
+        helpText: "Configuration du modèle d’IA (nom du modèle, température, etc.)"
       },
       planning: {
         label: "Planification",
@@ -3473,5 +3488,8 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "A long-text field of the root object (textarea, markdown, html, richtext). Any other field is reported when the pack is saved, and the pack then carries no body."
       }
     }
+  },
+  knowledge_source: {
+    label: "Source de connaissances"
   }
 };

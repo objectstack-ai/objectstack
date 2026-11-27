@@ -9,7 +9,7 @@
  * unified across the platform (ROADMAP M9), swap `evaluatePredicate`
  * for the real CEL evaluator without touching SchemaForm.tsx.
  *
- * Supported subset (covers everything used in spec `*.form.ts` today):
+ * Supported subset (covers everything used in spec `*.metadata-form.ts` today):
  *   - `path == 'literal'`       string equality
  *   - `path != 'literal'`       string inequality
  *   - `path == 123`             number equality

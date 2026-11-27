@@ -25,7 +25,7 @@ import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 
 import { FieldSchema } from './field.zod';
-import { fieldForm } from './field.form';
+import { fieldForm } from './field.metadata-form';
 
 // =========================================================================
 // 1. The accepted shape — full parse green, the authored value kept
@@ -132,7 +132,7 @@ describe('the JSON-schema projection of FieldSchema carries mailAssociation', ()
 
 describe('field.form offers mailAssociation on exactly the type the door accepts', () => {
   const rows = (fieldForm.sections ?? []).flatMap((s) => s.fields ?? []) as Array<{ field?: string; visibleWhen?: unknown }>;
-  // `defineForm` normalizes a bare predicate string to its `{ dialect, source }`
+  // `defineMetadataForm` normalizes a bare predicate string to its `{ dialect, source }`
   // envelope, so the gate is read off `source`.
   const gateOf = (row: { visibleWhen?: unknown }) => {
     const v = row.visibleWhen as string | { source?: string } | undefined;

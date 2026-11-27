@@ -216,13 +216,6 @@ export const EMPTY_STATE_REGISTRY: EmptyStateEntry[] = [
       "Which VIEW a proposed app-menu entry opens; absent/null means the object's default list. It is presentation breadth, not authorization — the entry's `target` already fixes WHICH OBJECT is reachable, and record- and field-level security are enforced downstream, so naming a view can only ever change how the same permitted rows are laid out. The empty state is also the pre-existing behaviour every app already has, which is what makes it the safe default here (cloud#2150 added the key precisely because there was no way to say anything ELSE). Note the failure direction is cosmetic and visible: an entry labelled 「工单看板」 that omits this opens the list — wrong-looking, never over-granting.",
   },
   {
-    file: 'packages/spec/src/ai/knowledge-source.zod.ts',
-    property: 'mimeTypes',
-    semantics: 'scope',
-    rationale:
-      'Which files under a storage prefix get indexed into a knowledge source. Ingestion scope, not read authorization — retrieval is gated separately. NOTE the shape though: it is a vacuous-allow-list ("allow-list" whose empty value admits everything), the same shape as #3896. `storage.zod.ts` models the identical concept the better way — an explicit `mode: "whitelist"` discriminator plus `.min(1)`, so an empty whitelist cannot be expressed at all. Prefer that form for new allow-lists; changing this one is a breaking change to an authorable field and is not in scope here.',
-  },
-  {
     file: 'packages/services/service-messaging/src/objects/notification-preference.object.ts',
     property: 'user_id',
     semantics: 'scope',

@@ -54,10 +54,10 @@ describe.skipIf(!PG_URL)('knowledge-pgvector — complete reindex over ObjectQL 
   let embedder: FakeEmbedder;
   const ids = recordIds();
   const source = {
-    id: 'driver_walk',
+    name: 'driver_walk',
     label: 'Driver walk',
     adapter: 'pgvector',
-    source: { kind: 'object', object: OBJECT, contentFields: ['body'], metadataFields: ['status'] },
+    source: { kind: 'object', object: OBJECT, content: ['body'], metadataFields: ['status'] },
   } as KnowledgeSource;
 
   beforeAll(async () => {
@@ -94,7 +94,7 @@ describe.skipIf(!PG_URL)('knowledge-pgvector — complete reindex over ObjectQL 
   });
 
   it('indexes every record exactly once, skips none, purges none', async () => {
-    const first = await svc.reindexSource(source.id);
+    const first = await svc.reindexSource(source.name);
     expect(first).toMatchObject({ ok: true, discovered: ids.length, indexed: ids.length, skipped: 0, failed: 0 });
     expect(first.purged ?? 0).toBe(0);
     expect([...upserted].sort()).toEqual([...ids].sort());
@@ -102,7 +102,7 @@ describe.skipIf(!PG_URL)('knowledge-pgvector — complete reindex over ObjectQL 
 
   it('a second complete reindex writes nothing, embeds nothing, and purges nothing', async () => {
     const before = { upserts: upserted.length, embeds: embedder.calls };
-    const second = await svc.reindexSource(source.id);
+    const second = await svc.reindexSource(source.name);
     expect(second).toMatchObject({ ok: true, discovered: ids.length, indexed: 0, skipped: ids.length, failed: 0 });
     expect(second.purged ?? 0).toBe(0);
     expect(upserted.length).toBe(before.upserts);

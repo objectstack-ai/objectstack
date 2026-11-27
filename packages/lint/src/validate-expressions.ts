@@ -999,7 +999,7 @@ function rulePredicates(rule: AnyRec, path: string, depth = 0, keyPrefix = ''): 
  *  - `data.status == 'x'` — `data` is the LEGAL root of this very
  *    `visibleWhen` key on a METADATA form (`view.zod.ts`: "Root: `record` …
  *    in runtime forms, or `data` in metadata forms"). Two form kinds, one key
- *    name, different roots — and the repo's own `*.form.ts` files are full of
+ *    name, different roots — and the repo's own `*.metadata-form.ts` files are full of
  *    the `data` spelling for an author to copy.
  *
  * A denylist cannot track `SCOPE_ROOTS`: every root added there is unreported
@@ -1339,7 +1339,7 @@ const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
     'the predicate no longer merely faults — and BOTH of its outcomes are wrong, in opposite ' +
     'directions. Under a host that publishes a predicate scope the renderer RESOLVES it ' +
     // `sectionFields` is spelled WITHOUT its `.ts` extension for the same
-    // reason the `*.form` spelling below is: this is a STRING literal, and
+    // reason the `*.metadata-form` spelling below is: this is a STRING literal, and
     // #5017's receiver scan strips comments but not strings, so `sectionFields.ts`
     // inside the message registers `sectionFields` as a read receiver of this
     // rule. Measured — it went red on the first run, exactly as the sibling did.
@@ -1455,11 +1455,11 @@ export function fieldRuleRootIssue(
       `but only in the renderer, so moving a server-enforced object rule there swaps a loud ` +
       `error for a silent enforcement gap; it is not a fourth answer.`
     : root === 'data'
-      // The `*.form` spelling is deliberately not `*.form.ts`: this is a
+      // The `*.metadata-form` spelling is deliberately not `*.metadata-form.ts`: this is a
       // STRING literal, and #5017's receiver scan strips comments but not
       // strings, so `form.ts` inside the message registers `form` as a read
       // receiver of this rule. Measured — it went red on the first run.
-      ? `\`data\` is the root of a METADATA form (a \`*.form\` module — the metadata row ` +
+      ? `\`data\` is the root of a METADATA form (a \`*.metadata-form\` module — the metadata row ` +
         `being edited); ` +
         `this is an OBJECT field, whose runtime form binds the row as \`record\` — one key name, ` +
         `two form kinds, two roots. Rewrite \`data.<key>\` as \`record.<field>\`.`

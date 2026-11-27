@@ -6,7 +6,10 @@ export type {
   KnowledgeSearchRefusal,
   KnowledgeSearchReport,
   KnowledgeServiceOptions,
+  KnowledgeSourceDescription,
 } from './knowledge-service.js';
+export { KNOWLEDGE_SOURCE_TYPE, indexKeyOf } from './knowledge-source-registry.js';
+export type { KnowledgeSourceDoor, KnowledgeSourceEntry, KnowledgeSourceHolder } from './knowledge-source-registry.js';
 export {
   ASSEMBLY_RULE_VERSION,
   INDEX_FINGERPRINT_VERSION,

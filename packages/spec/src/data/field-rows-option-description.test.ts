@@ -33,7 +33,7 @@
  * [#13671] Section 3 was added later and is about the OTHER half of the same
  * offer-vs-door pair this file already documents. The `icon` control in
  * section 2 used to assert one thing — the door refuses `icon` — while
- * `object.form.ts` went on OFFERING an `icon` input, so the file was green
+ * `object.metadata-form.ts` went on OFFERING an `icon` input, so the file was green
  * across a live disagreement. Section 3 pins the offer side; the file keeps
  * its name because the two subjects are one story (`options[]` keys the
  * authoring form and the publish door must agree about).
@@ -42,7 +42,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { FieldSchema, SelectOptionSchema } from './field.zod';
-import { objectForm } from './object.form';
+import { objectForm } from './object.metadata-form';
 import { FormSelectOptionSchema } from '../ui/view.zod';
 
 // =========================================================================
@@ -228,7 +228,7 @@ describe('SelectOptionSchema accepts `description` — declared because the look
  *
  * The `icon` case in section 2 used to stand alone and assert ONE thing: the
  * publish door refuses `icon`. That was true and is still true — but while it
- * held, `object.form.ts`'s options repeater went on OFFERING an `icon` text
+ * held, `object.metadata-form.ts`'s options repeater went on OFFERING an `icon` text
  * input labelled "Lucide icon name", so a Studio author was taught a key the
  * door rejects and found out at the 422. The pin was green across a live
  * disagreement because it only ever looked at one side of it.

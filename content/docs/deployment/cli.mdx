@@ -937,7 +937,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (81)...
+  → Running author-time rules (85)...
   → Checking that every required capability has a provider installable in this edition...
   → Collecting package docs (ADR-0046)... 0 collected
   → Writing artifact...
@@ -2389,6 +2389,16 @@ crypto provider `os serve` seals with is available.
 **Run them with the server stopped.** A running server's sealer seals each hour
 ten minutes after it ends, and it can seal a row between the command's decision
 and its write; that row then reads `modified`.
+
+**The audit seal lock.** An `--apply` run holds the audit seal lock from before
+its first write to after its last, archive runs included, on the database of
+each object it covers that declares `lifecycle.seal`. `sys_audit_log` declares
+it, so this is every run that covers the audit log. On Postgres and MySQL the
+run waits up to ten minutes for a sealer pass in flight, then refuses having
+changed nothing: run it again once that pass has finished. On SQLite and Turso,
+which offer no session lock, the run stops before writing and names
+`--sealer-stopped`: stop every server that seals the database, then run it again
+with the flag. A dry run takes no lock and needs no flag.
 
 #### `os migrate organization-ownership`
 

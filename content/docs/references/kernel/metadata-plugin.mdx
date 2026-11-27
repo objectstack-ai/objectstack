@@ -179,7 +179,7 @@ const result = MetadataBulkResultSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **types** | `Enum<'object' \| 'object_extension' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'picklist' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'api' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'capability' \| 'sharing_rule' \| 'queue' \| 'assignment_rule' \| 'agent' \| 'tool' \| 'skill' \| 'ai_context'>[]` | optional | Filter by metadata types |
+| **types** | `Enum<'object' \| 'object_extension' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'picklist' \| 'view' \| 'form' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'api' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'capability' \| 'sharing_rule' \| 'queue' \| 'assignment_rule' \| 'agent' \| 'tool' \| 'skill' \| 'ai_context' \| 'knowledge_source'>[]` | optional | Filter by metadata types |
 | **namespaces** | `string[]` | optional | Filter by namespaces |
 | **packageId** | `string` | optional | Filter by owning package |
 | **search** | `string` | optional | Full-text search query |
@@ -233,6 +233,7 @@ const result = MetadataBulkResultSchema.parse(data);
 * `mapping`
 * `picklist`
 * `view`
+* `form`
 * `page`
 * `dashboard`
 * `app`
@@ -258,6 +259,7 @@ const result = MetadataBulkResultSchema.parse(data);
 * `tool`
 * `skill`
 * `ai_context`
+* `knowledge_source`
 
 
 ---
@@ -268,7 +270,7 @@ const result = MetadataBulkResultSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'object' \| 'object_extension' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'picklist' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| … +19 more>` | ✅ | Metadata type identifier |
+| **type** | `Enum<'object' \| 'object_extension' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'picklist' \| 'view' \| 'form' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| … +21 more>` | ✅ | Metadata type identifier |
 | **label** | `string` | ✅ | Display label for the metadata type |
 | **description** | `string` | optional | Description of the metadata type |
 | **filePatterns** | `string[]` | ✅ | Glob patterns to discover files of this type |
@@ -292,6 +294,7 @@ const result = MetadataBulkResultSchema.parse(data);
 * `mapping`
 * `picklist`
 * `view`
+* `form`
 * `page`
 * `dashboard`
 * `app`
@@ -317,6 +320,7 @@ const result = MetadataBulkResultSchema.parse(data);
 * `tool`
 * `skill`
 * `ai_context`
+* `knowledge_source`
 
 ### Nested Shape: `MetadataTypeRegistryEntry.actions[number]`
 

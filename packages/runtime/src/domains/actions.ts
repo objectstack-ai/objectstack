@@ -93,6 +93,7 @@ import { refusedNameAnswer } from './catalog-activation.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
+import { catalogNotImplemented } from './own-door-bridge.js';
 
 /**
  * [ADR-0126 §8 item 2] The reserved first segment of the activation door,
@@ -273,14 +274,7 @@ async function handleActionActivationWrite(
     if (typeof ql.setActionActive !== 'function') {
         // An engine too old to carry the projection cannot make this durable,
         // and a 200 here would report a switch that never existed.
-        return {
-            handled: true,
-            response: deps.error(
-                `This deployment's data engine does not implement the packaged-metadata activation ledger ` +
-                `(ADR-0126 §8), so a packaged action cannot be switched off here.`,
-                501,
-            ),
-        };
+        return catalogNotImplemented(deps, context, 'action_activation_ledger_unsupported');
     }
     try {
         // An action no package ships carries NO package key: absent is the

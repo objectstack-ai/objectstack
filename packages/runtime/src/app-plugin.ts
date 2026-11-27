@@ -520,8 +520,8 @@ export class AppPlugin implements Plugin {
             // register an app". `manifest`/`functions` are envelope-level
             // wrappers and don't count.
             const APP_CATEGORY_KEYS = [
-                'objects', 'views', 'apps', 'pages', 'dashboards', 'reports',
-                'flows', 'workflows', 'triggers', 'agents', 'tools', 'skills', 'aiContexts',
+                'objects', 'views', 'forms', 'apps', 'pages', 'dashboards', 'reports',
+                'flows', 'workflows', 'triggers', 'agents', 'tools', 'skills', 'aiContexts', 'knowledgeSources',
                 'actions', 'permissions', 'positions', 'translations',
                 'sharingRules', 'data', 'emailTemplates',
                 'docs', 'books',

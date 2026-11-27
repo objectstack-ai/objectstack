@@ -16,7 +16,7 @@
 // #16458 (PR #17227) titled exactly one repeater, `dashboard.header.actions`.
 // The class was left silent: the 22nd repeater added next month reproduces the
 // defect with every gate green. THIS FILE IS THE LOUDNESS. It enumerates every
-// repeater declared across every `*.form.ts` in this package, derives each
+// repeater declared across every `*.metadata-form.ts` in this package, derives each
 // one's row schema through the platform's own predicate, and requires every
 // row property to carry a title — with a shrink-only ledger of the carriers
 // that are still owed one.
@@ -40,25 +40,25 @@ import { z } from 'zod';
 
 import { getMetadataTypeSchema } from './metadata-type-schemas';
 
-import { skillForm } from '../ai/skill.form';
-import { agentForm } from '../ai/agent.form';
-import { toolForm } from '../ai/tool.form';
-import { flowForm } from '../automation/flow.form';
-import { objectForm } from '../data/object.form';
-import { fieldForm } from '../data/field.form';
-import { hookForm } from '../data/hook.form';
-import { positionForm } from '../identity/position.form';
-import { actionForm } from '../ui/action.form';
-import { appForm } from '../ui/app.form';
-import { dashboardForm } from '../ui/dashboard.form';
-import { datasetForm } from '../ui/dataset.form';
-import { pageForm } from '../ui/page.form';
-import { reportForm } from '../ui/report.form';
-import { viewForm } from '../ui/view.form';
+import { skillForm } from '../ai/skill.metadata-form';
+import { agentForm } from '../ai/agent.metadata-form';
+import { toolForm } from '../ai/tool.metadata-form';
+import { flowForm } from '../automation/flow.metadata-form';
+import { objectForm } from '../data/object.metadata-form';
+import { fieldForm } from '../data/field.metadata-form';
+import { hookForm } from '../data/hook.metadata-form';
+import { positionForm } from '../identity/position.metadata-form';
+import { actionForm } from '../ui/action.metadata-form';
+import { appForm } from '../ui/app.metadata-form';
+import { dashboardForm } from '../ui/dashboard.metadata-form';
+import { datasetForm } from '../ui/dataset.metadata-form';
+import { pageForm } from '../ui/page.metadata-form';
+import { reportForm } from '../ui/report.metadata-form';
+import { viewForm } from '../ui/view.metadata-form';
 
 /**
- * Every `*.form.ts` in this package, by its export name. `check:generated`
- * does not police this list, so `it('covers every *.form.ts', …)` below reads
+ * Every `*.metadata-form.ts` in this package, by its export name. `check:generated`
+ * does not police this list, so `it('covers every *.metadata-form.ts', …)` below reads
  * the directory listing this file cannot — it asserts the COUNT against the
  * form exports the domain barrels carry, which is what a new form file moves.
  */

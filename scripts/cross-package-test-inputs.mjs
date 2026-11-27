@@ -1025,6 +1025,15 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       //     them. A real read: the enumeration changes if the mask does.
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
+      //   src/validate-action-body-capabilities.test.ts (#35143) READS the
+      //     sandbox runner's source and pins the rule's write-method set to its
+      //     `WRITE` list, so a method the runner starts gating on `api.write`
+      //     turns this suite red instead of leaving the rule a method short.
+      'packages/runtime/src/sandbox/quickjs-runner.ts',
+      //   src/validate-seed-record-keys.test.ts (#35143) READS the engine's
+      //     `PLATFORM_PROVISIONED_COLUMNS` and pins the rule's mirror of it, so
+      //     a column the engine starts provisioning turns this suite red.
+      'packages/objectql/src/declared-read-columns.ts',
     ],
     heldBy: {
       // `const commandsDir = join(repoRoot, 'packages/cli/src/commands')`
@@ -1498,11 +1507,19 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // scanned them in this package (`rest-server-canonical-query-ast.test.ts`;
     // the three `error-response-*` arm-derivation tests) now read them there,
     // each bound to one relative literal.
+    //
+    // The two `examples/app-crm` files are ADR-0159 card ②'s byte-equal pin
+    // (`public-form-app-crm-byte-equal.test.ts`): it boots the CRM's lead
+    // object and its lead views, the container whose `formViews` entry is the
+    // first-party public form, and holds `GET /forms/contact-us` to the answer
+    // taken before the `form` type. An edit to either file can move that answer.
     globs: [
       'content/docs/protocol/objectql/state-machine.mdx',
       'skills/objectstack-automation/SKILL.md',
       'packages/types/src/data-error-classification.ts',
       'packages/core/src/utils/import-runner.ts',
+      'examples/app-crm/src/objects/index.ts',
+      'examples/app-crm/src/views/lead.view.ts',
       'content/**',
       'docs/**',
       'skills/**',

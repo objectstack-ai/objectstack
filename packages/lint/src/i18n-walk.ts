@@ -130,6 +130,11 @@
  *   pages.<page>.components.<tabsId>.items.<value>.label  (a `page:tabs` item label)
  *   pages.<page>.components.<formId>.submitBehavior.title / .message
  *                                       (an `object-form`'s thank-you panel)
+ *   forms.<form>.label / .description / .title   (an authored `form` item, ADR-0159 D8)
+ *   forms.<form>.submitBehavior.title / .message
+ *   forms.<form>.sections.<section>.label / .description
+ *   forms.<form>.sections.<section>.fields.<field>.{label,placeholder,helpText}
+ *                                       (each read before `objects.<object>._sections.…`)
  *   flows.<flow>.label
  *   flows.<flow>.screens.<node_id>.title                       (#7646 / #11287)
  *   flows.<flow>.screens.<node_id>.description                 (#22507)
@@ -204,6 +209,18 @@ export interface ExpectedEntry {
   /** Lookup path expressed as an array of segments. */
   path: string[];
   /**
+   * [ADR-0159 D8] The address the translator reads when a bundle has no value
+   * at {@link path}: a `form` item's section copy is read at
+   * `forms.<name>.sections.<section>…` first and at the object-level default
+   * `objects.<object>._sections.<section>…` for each key the form's node
+   * lacks. A bundle that carries either has translated the string, so the
+   * coverage gate counts it covered, and `os i18n extract` scaffolds no
+   * translated-locale value over one the default already holds.
+   *
+   * Unset (every other entry): {@link path} is the one address.
+   */
+  fallbackPath?: string[];
+  /**
    * Value `os i18n extract` seeds the default-locale skeleton with — the
    * English literal on the schema, or the fallback the renderer displays when
    * the author omitted one (an object's own name, a humanized field path).
@@ -265,6 +282,7 @@ export interface ExpectedEntry {
     | 'report'
     | 'picklist'
     | 'page'
+    | 'form'
     | 'flow'
     | 'hook'
     | 'position'
@@ -556,7 +574,7 @@ function pushViewEmptyState(out: ExpectedEntry[], viewPath: string[], view: any,
   pushEntry(out, [...viewPath, 'emptyState', 'message'], emptyState.message, 'view', { objectName });
 }
 
-type EntryScope = Pick<ExpectedEntry, 'objectName' | 'appName' | 'metadataType' | 'flowName'>;
+type EntryScope = Pick<ExpectedEntry, 'objectName' | 'appName' | 'metadataType' | 'flowName' | 'fallbackPath'>;
 
 /** Narrow to a usable source string; an empty string is not authored text. */
 function inlineText(value: unknown): string | undefined {
@@ -1267,6 +1285,11 @@ function walkObjectSections(config: any, out: ExpectedEntry[]): void {
     }
   }
 
+  // (b) [ADR-0159 D8] An authored `form` item's sections are NOT walked here:
+  // their copy is keyed at the form's own node (`forms.<name>.sections.…`,
+  // {@link walkForms}), with this object-level slot as the default each key
+  // falls back to.
+
   // (b) authored page sections — a record page's `record:details`.
   //
   // Reuses `@objectstack/lint`'s shared page traversal rather than growing a
@@ -1876,6 +1899,9 @@ export function collectExpectedEntries(
   // ── Import mappings (`mappings.<name>.label`) ─────────────────────
   walkMappings(config, out);
 
+  // ── [ADR-0159 D8] `form` items (`forms.<name>.…`) ─────────────────
+  walkForms(config, out);
+
   // ── Pages + their `page:header` copy ──────────────────────────────
   const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
   for (const page of pages) {
@@ -1963,8 +1989,8 @@ export function collectExpectedEntries(
  *     actions to the object (`obj.actions`) *and* to the top-level `actions`
  *     list — measured to be the SAME object reference, not a copy — so the two
  *     action branches above both emit `objects.<o>._actions.<a>.*`.
- *   - **Two declarations, one form field.** `field.form.ts` and
- *     `object.form.ts` each declare `deleteBehavior` twice, gated on
+ *   - **Two declarations, one form field.** `field.metadata-form.ts` and
+ *     `object.metadata-form.ts` each declare `deleteBehavior` twice, gated on
  *     `visibleWhen` (`lookup` vs `master_detail`). Both variants render into
  *     the same key, because {@link walkFormField} keys on the field path.
  *     Config-independent: it duplicates six entries on *every* config,
@@ -2244,6 +2270,58 @@ function walkMappings(config: any, out: ExpectedEntry[]): void {
     const name = mapping.name;
     if (typeof name !== 'string' || name.length === 0) continue;
     pushOptional(out, ['mappings', name, 'label'], mapping.label, 'mapping');
+  }
+}
+
+/**
+ * [ADR-0159 D8] Emit `forms.<name>.{label, description, title}` and its
+ * thank-you panel's `forms.<name>.submitBehavior.{title, message}` for each
+ * authored `form` item — the address `translateForm` reads first. ⛔ No
+ * `objects.<object>._views.<key>` tail is emitted for an authored `form`: that
+ * address is the old shapes' fallback, read, never scaffolded for the new
+ * type.
+ *
+ * Section copy is the form's own too: `forms.<name>.sections.<section>.{label,
+ * description}` and `.fields.<field>.{label, placeholder, helpText}`, for a
+ * named section and the copy it authors (`translateForm` translates authored
+ * copy only), each with the object-level default
+ * `objects.<object>._sections.<section>…` as its {@link ExpectedEntry.fallbackPath}:
+ * D8 keeps that slot live, shared with field groups, so a bundle that
+ * translates the section there has translated the form's too.
+ */
+function walkForms(config: any, out: ExpectedEntry[]): void {
+  const forms: any[] = Array.isArray(config?.forms) ? config.forms : [];
+  for (const form of forms) {
+    if (!form || typeof form !== 'object') continue;
+    const name = form.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    const extra = typeof form.object === 'string' && form.object ? { objectName: form.object } : undefined;
+    pushOptional(out, ['forms', name, 'label'], form.label, 'form', extra);
+    pushOptional(out, ['forms', name, 'description'], form.description, 'form', extra);
+    pushOptional(out, ['forms', name, 'title'], form.title, 'form', extra);
+    pushThankYouPanel(out, ['forms', name], form.submitBehavior, 'form', extra);
+    const objectName = typeof form.object === 'string' && form.object ? form.object : undefined;
+    for (const raw of Array.isArray(form.sections) ? form.sections : []) {
+      if (!raw || typeof raw !== 'object') continue;
+      const section = raw as Record<string, unknown>;
+      if (typeof section.name !== 'string' || section.name.length === 0) continue;
+      const at = (tail: string[]) => ({
+        ...extra,
+        ...(objectName ? { fallbackPath: ['objects', objectName, '_sections', section.name as string, ...tail] } : {}),
+      });
+      for (const attr of ['label', 'description'] as const) {
+        pushOptional(out, ['forms', name, 'sections', section.name, attr], section[attr], 'form', at([attr]));
+      }
+      for (const entryRaw of Array.isArray(section.fields) ? section.fields : []) {
+        if (!entryRaw || typeof entryRaw !== 'object') continue;
+        const entry = entryRaw as Record<string, unknown>;
+        if (typeof entry.field !== 'string' || entry.field.length === 0) continue;
+        for (const attr of SECTION_ENTRY_ATTRS) {
+          pushEntry(out, ['forms', name, 'sections', section.name, 'fields', entry.field, attr], entry[attr], 'form',
+            at(['fields', entry.field, attr]));
+        }
+      }
+    }
   }
 }
 

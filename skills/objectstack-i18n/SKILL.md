@@ -163,7 +163,7 @@ All translatable content for a single object is aggregated under
 | `_actions.{action_name}` | `label`, `description`, `confirmText`, `submitText` (the param dialog's button verb — only under an action that declares `params`), `cancelText` (the dismiss button of the confirm or param dialog — only under an action that declares `confirmText` or a non-empty `params`), `successMessage`, `disabledReason` (the sentence a greyed action shows; absent keeps the console's default), `params.{param_name}` (and `.options.{value}` beneath it — an option's stored `value` in that param's inline `options`), `outcomeMessages.{outcome}` (an outcome the action's own `outcomeMessages` declares), `resultDialog.title` / `.description` / `.acknowledge` (only under an action that declares a `resultDialog`), `resultDialog.fields.{path}` (the literal `path` of a field in `resultDialog.fields[]`, dots included — `client.secret` is one key), `preflight.fields.{path}` (only under an action that declares `preflight`: a field's literal `path` in its `preflight.fields[]`, its value a plain string as under `resultDialog.fields`), `resultDialog.columns.{path}.{column_path}` / `preflight.columns.{path}.{column_path}` (a table's column headers, beside `fields`: the literal `path` of a `format: 'table'` field, then of one of its `columns[]`, each a plain string; `defineTranslationBundle` refuses any other key under `preflight`, a `title` included); the same keys hold under `globalActions.{action_name}` |
 | `_sections.{section_name}` | Form section `label`, `description`; `fields.{field_name}` — the `label`, `placeholder`, `helpText` an entry overrides for that form alone (`helpText` here, `help` under `fields.{field_name}` above: each spells what its source does) |
 | `_tabs.{tab_name}` | Filter-preset tab `label` (`ViewTabSchema.name`) |
-| `_relatedLists.{list}` | `label` of an object-form `relatedLists` entry on this (parent) object, by its literal `list` (`event.related_to` is one key); an entry with no `label` has no key and keeps the child field's `relatedListTitle`, else the child's plural label. Spelled `relatedLists`, the group is refused, naming this one |
+| `_relatedLists.{list}` | `label` of an object-form `relatedLists` entry on this (parent) object, by its literal `list` (`event.related_to` is one key); an entry with no `label` has no key and keeps the child field's `relatedListTitle`, else the child's plural label. Where the paired `.custom` package's `relatedLists` (**objectstack-data**) re-states the entry without a `label`, or hides it, `os validate` refuses the key: drop it, or re-state the entry with the owner's own `label`. Spelled `relatedLists`, the group is refused, naming this one |
 | `_validations.{rule_name}` | `message` only — the sentence a rejected write returns (replaces the retired `validationMessages`) |
 | `_actions.{action_name}.refusals.{CODE}` | `message`, and `reasons.{reason}.message` per declared reason — the sentences of the action's `refusals` catalogue (**objectstack-ui** → Actions), for a code and reason it declares (any other is `translation-target-unknown`); the same under `globalActions.{action_name}` |
 
@@ -263,9 +263,8 @@ directory tree for you.
 A **`translation` metadata item** — created in
 the Studio, through the metadata API, or by an agent — carries one locale's worth of the
 **same** `objects.*` groups documented above plus the `locale` it translates. `locale` is
-required, one locale per item, and published items load at boot and on every publish,
-layering **over** the file bundles (delete the item and the shipped value returns). There
-is exactly one shape; nothing converts between formats. Author with `defineTranslation`;
+required, and published items load at boot and on every publish, layering **over**
+the file bundles (delete the item and the shipped value returns). Author with `defineTranslation`;
 exact Zod shape is `TranslationItemSchema` in
 `node_modules/@objectstack/spec/src/system/translation.zod.ts`.
 
@@ -291,8 +290,7 @@ what the runtime implements.)
 
 ### No ICU MessageFormat
 
-There is no ICU MessageFormat engine (the aspirational `messageFormat` config knob
-was removed). To pluralize, select the form in application code before calling `t()`.
+There is no ICU MessageFormat engine. To pluralize, select the form in application code before calling `t()`.
 
 ---
 
@@ -373,8 +371,7 @@ case-insensitive → same platform-table language (`zh-TW` → `zh-Hant`) → ba
 
 The contract declares optional methods — `getFieldLabels`, `getCoverage`,
 `suggestTranslations` — that **no shipped implementation provides**: extension
-points for a custom workbench or TMS adapter. (`getAppBundle` /
-`loadAppBundle` went with the `o.*` shape they returned.)
+points for a custom workbench or TMS adapter.
 
 ### Registration
 

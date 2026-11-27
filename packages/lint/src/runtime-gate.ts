@@ -97,6 +97,7 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   flow: 'flows',
   object: 'objects',
   view: 'views',
+  form: 'forms',
   action: 'actions',
   page: 'pages',
   dashboard: 'dashboards',

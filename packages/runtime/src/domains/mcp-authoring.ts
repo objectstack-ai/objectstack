@@ -149,7 +149,12 @@
 
 import { createRequire } from 'node:module';
 import { resolveUserAuthzGrants, userTextLocalesOf } from '@objectstack/core';
-import { metaWriteCapabilityVerdict, walledCatalogWriteVerdict } from '@objectstack/metadata-core';
+import {
+    KNOWLEDGE_SOURCE_ADMISSION_SERVICE,
+    authoredKnowledgeSourceRefusal,
+    metaWriteCapabilityVerdict,
+    walledCatalogWriteVerdict,
+} from '@objectstack/metadata-core';
 import {
     createMetaItemReadGate,
     createMetaListReadGate,
@@ -194,6 +199,17 @@ const SERVER_SPEC_VERSION: string | undefined = (() => {
 })();
 
 /**
+ * The SemVer example the door's agent-facing text shows: this server's own
+ * `@objectstack/spec` version, so an agent that copies the example declares the
+ * version the verdict below accepts. A literal example ages into another major
+ * and teaches a value the door refuses. Without a readable version the text
+ * names the form instead of inventing a number.
+ */
+function specVersionExample(server = SERVER_SPEC_VERSION): string {
+    return server ? `e.g. ${server}` : 'MAJOR.MINOR.PATCH';
+}
+
+/**
  * [#34774] The save's judgement of the client's declared spec version (#34659
  * ruling D4 = A), before anything is written: another major is refused with the
  * install line (`refusal`), another minor is saved with an `advisory`, and none
@@ -203,7 +219,7 @@ const SERVER_SPEC_VERSION: string | undefined = (() => {
 function clientSpecVersionVerdict(declared: unknown, server = SERVER_SPEC_VERSION): { refusal?: string; advisory?: string } {
     if (declared === undefined) return {};
     if (typeof declared !== 'string' || !SEMVER_2_0_0_VERSION_PATTERN.test(declared)) {
-        return { refusal: '`clientSpecVersion` is the `@objectstack/spec` version you built against, in SemVer form (e.g. 18.6.0).' };
+        return { refusal: `\`clientSpecVersion\` is the \`@objectstack/spec\` version you built against, in SemVer form (${specVersionExample(server)}).` };
     }
     if (!server) return { advisory: `This server could not read its own @objectstack/spec version, so ${declared} was not compared.` };
     const [clientMajor, clientMinor] = declared.split('.').map(Number);
@@ -350,7 +366,7 @@ const WRITE_TOOLS: readonly AIToolDefinition[] = Object.freeze([
                 clientSpecVersion: {
                     type: 'string',
                     minLength: 1,
-                    description: 'Recommended: the `@objectstack/spec` version you built the item against (SemVer, e.g. 18.6.0). '
+                    description: `Recommended: the \`@objectstack/spec\` version you built the item against (SemVer, ${specVersionExample()}). `
                         + 'This server\'s version is the `Authoring contract` line of its instructions. Another major is '
                         + 'refused before anything is saved, naming the version to install; another minor is saved and '
                         + 'advised. The saved item is still validated either way.',
@@ -408,6 +424,13 @@ export interface OpenAuthoringWriter {
     userTextLocales: string[];
     /** The walled refusal for a write of `type` (`walledCatalogWriteVerdict`). */
     writeVerdict(type: string): Promise<{ allowed: true } | { allowed: false; code: ErrorCode; message: string; status: number }>;
+    /**
+     * [ADR-0161 K4, guard two] The refusal of a `knowledge_source` save whose
+     * author may not themselves search what it would index
+     * (`authoredKnowledgeSourceRefusal`, judged for the admitted human), or
+     * `undefined` when the save may go on. Every other type answers `undefined`.
+     */
+    itemSaveRefusal(type: string, item: unknown): Promise<{ code: ErrorCode; message: string; status: number } | undefined>;
 }
 
 /**
@@ -490,7 +513,7 @@ export async function resolveOpenAuthoringInjection(
                     return undefined;
                 }
             },
-            ...(reader ? { readGate: openReadGateSources(deps, context, reader), writer: openWriter(deps, context, clientId) } : {}),
+            ...(reader ? { readGate: openReadGateSources(deps, context, reader), writer: openWriter(deps, context, clientId, reader) } : {}),
             logger: deps.logger,
         }),
         principal: {
@@ -558,8 +581,17 @@ async function resolveHumanReader(
  * transport reads; a posture that cannot be read refuses the write `503`,
  * never a permit. The caller's posture rung is the request envelope's, as the
  * `/meta` doors and the MCP `import_object` tool read it.
+ *
+ * [ADR-0161 K4, guard two] `itemSaveRefusal` judges a `knowledge_source` save
+ * for the admitted HUMAN (`reader`, the caller `resolveHumanReader` admitted):
+ * their grants, never the request envelope's.
  */
-function openWriter(deps: DomainHandlerDeps, context: HttpProtocolContext, clientId: string | undefined): OpenAuthoringWriter {
+function openWriter(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    clientId: string | undefined,
+    reader: MetaReadGateCaller,
+): OpenAuthoringWriter {
     const ec: any = context.executionContext;
     return {
         ...(clientId ? { clientId } : {}),
@@ -578,6 +610,24 @@ function openWriter(deps: DomainHandlerDeps, context: HttpProtocolContext, clien
             }
             const walled = walledCatalogWriteVerdict({ type, tenancyPosture, isSystem: ec?.isSystem === true, callerPosture: ec?.posture });
             return walled.allowed ? { allowed: true } : { allowed: false, code: PERMISSION_DENIED, message: walled.message, status: 403 };
+        },
+        async itemSaveRefusal(type, item) {
+            const refused = await authoredKnowledgeSourceRefusal({
+                type,
+                item,
+                // The human the door admitted: their grants, never the envelope's.
+                executionContext: reader,
+                // The classified lookup (`resolveServiceOrLoud`): an absent
+                // service answers `undefined`, a registered one that cannot be
+                // resolved rejects and the predicate answers `503`.
+                resolveKnowledgeService: () => deps.resolveServiceOrLoud(context, KNOWLEDGE_SOURCE_ADMISSION_SERVICE, context.environmentId),
+            });
+            if (!refused) return undefined;
+            return {
+                code: refused.status === 403 ? PERMISSION_DENIED : SERVICE_UNAVAILABLE,
+                message: refused.message,
+                status: refused.status,
+            };
         },
     };
 }
@@ -824,6 +874,9 @@ export function createOpenAuthoringRegistry(opts: {
                         if (typeWriteRefused) return refuse(typeWriteRefused.code, typeWriteRefused.message, typeWriteRefused.status);
                         const walled = await writer.writeVerdict(type);
                         if (!walled.allowed) return refuse(walled.code, walled.message, walled.status);
+                        // [ADR-0161 K4, guard two] Source admission at save, for the human.
+                        const itemRefused = await writer.itemSaveRefusal(type, item);
+                        if (itemRefused) return refuse(itemRefused.code, itemRefused.message, itemRefused.status);
                         // Built field by field: `item` is data, never a channel, so no
                         // `force`, `mode` or `writeFace` rides in through it.
                         const saved = await protocol.saveMetaItem({

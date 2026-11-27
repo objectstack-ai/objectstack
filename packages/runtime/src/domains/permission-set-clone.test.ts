@@ -24,6 +24,7 @@
 // Pays `@objectstack/metadata`'s first load at collection, never inside a clocked case.
 import '@objectstack/metadata';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { MULTI_REPLICA_PACKAGE_CHANGE_REFUSED } from '@objectstack/service-cluster';
 import { installedManifestsOf, pairOf } from '@objectstack/metadata-core';
 
@@ -757,5 +758,41 @@ describe('an explicit `package` naming an App member\'s pair — the target rule
         expect(String((res as any)?.response?.body?.error?.message)).toContain('[new_similar_target_outside_closure]');
         expect(h.ensures).toEqual([]);
         expect(h.saves).toHaveLength(0);
+    });
+});
+
+// [#37811] This door's 501 sentence is the operation-message catalog's, in the
+// request's top `Accept-Language` tag: byte-identical English with no header,
+// the catalog's Japanese under `ja-JP`, and `Vary: Accept-Language` either way.
+const JA_37811 = { request: { headers: { 'accept-language': 'ja-JP,ja;q=0.9' } } };
+const LANGS_37811 = [['en', {}], ['ja-JP', JA_37811]] as const;
+const sentence37811 = (locale: 'en' | 'ja-JP', key: string, params: Record<string, string> = {}): string =>
+    BUILTIN_OPERATION_MESSAGES[locale][key].replace(/\{\{(\w+)\}\}/g, (_m, name: string) => params[name] ?? '');
+const vary37811 = (response: unknown): unknown => (response as any)?.headers?.Vary;
+
+describe('[#37811] the clone door\'s 501s follow the request\'s language', () => {
+    it('permission_set_clone_pair_unsupported names the set and its read-only package', async () => {
+        for (const [locale, extra] of LANGS_37811) {
+            const h = boot({ noEnsure: true });
+            const res = await clone(h, { ...HOLDER(), ...extra } as HttpProtocolContext, PACKAGED.name, { name: 'x_copy', label: 'X' });
+            expect(statusOf(res)).toBe(501);
+            expect(res.response?.body?.error?.code).toBe('NOT_IMPLEMENTED');
+            expect(res.response?.body?.error?.message).toBe(sentence37811(locale, 'permission_set_clone_pair_unsupported', {
+                name: PACKAGED.name,
+                packageId: PACKAGED.packageId,
+            }));
+            expect(vary37811(res.response)).toBe('Accept-Language');
+            expect(h.saves).toEqual([]);
+        }
+    });
+
+    it('permission_set_clone_no_protocol', async () => {
+        for (const [locale, extra] of LANGS_37811) {
+            const h = boot({ noProtocol: true });
+            const res = await clone(h, { ...HOLDER(), ...extra } as HttpProtocolContext, PACKAGED.name, { name: 'x_copy', label: 'X' });
+            expect(statusOf(res)).toBe(501);
+            expect(res.response?.body?.error?.message).toBe(sentence37811(locale, 'permission_set_clone_no_protocol'));
+            expect(vary37811(res.response)).toBe('Accept-Language');
+        }
     });
 });

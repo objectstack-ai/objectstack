@@ -91,14 +91,13 @@ import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import {
     admitInboundHookAddress,
     inboundHookRefusalResponse,
-    operationUserMessage,
     type InboundHookRouteMatch,
 } from '@objectstack/core';
 import { automationAddressRegistryOf } from './automation-address.js';
 import type { ITriggerApiService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
-import { requestLocaleOf } from './own-door-bridge.js';
+import { catalogNotImplemented } from './own-door-bridge.js';
 
 /** The slot the member lives on — the trigger package's own name (ADR-0041 §2). */
 const TRIGGER_API_SLOT = 'trigger-api';
@@ -187,22 +186,10 @@ export async function handleInboundHookRequest(
     // [#37662] The `501` is the operation-message catalog's, in the request's
     // top `Accept-Language` tag, as the own-door bridge answers its own.
     if (!service) {
-        return {
-            handled: true,
-            response: deps.error(
-                operationUserMessage('automation_hooks_service_unregistered', { locale: requestLocaleOf(context) }),
-                501,
-            ),
-        };
+        return catalogNotImplemented(deps, context, 'automation_hooks_service_unregistered');
     }
     if (typeof service.handleInboundHook !== 'function') {
-        return {
-            handled: true,
-            response: deps.error(
-                operationUserMessage('automation_hooks_member_missing', { locale: requestLocaleOf(context) }),
-                501,
-            ),
-        };
+        return catalogNotImplemented(deps, context, 'automation_hooks_member_missing');
     }
 
     const request = context.request as Request;
