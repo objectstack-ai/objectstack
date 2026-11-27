@@ -8773,6 +8773,11 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * at which step, and what the mirrored status field on the business record
    * still says. Whether to re-run the downstream actions or re-open the
    * approval is a judgement call this cannot make.
+   *
+   * **Which rows one sweep reads (#37808).** Two ordered windows of at most
+   * `limit` (default 500) each: the newest decisions, and the next page of a
+   * walk over every decided request by id (`strandScanCursor`). `scanned`
+   * counts the distinct rows of both. See the body for why that misses no row.
    */
   async inspectStrandedRequests(options?: { limit?: number }): Promise<{
     scanned: number;
