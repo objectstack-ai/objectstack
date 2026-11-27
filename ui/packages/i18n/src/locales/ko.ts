@@ -3953,6 +3953,8 @@ const ko = {
     bulkDeleteSuccess_one: "{{count}}개의 {{label}} 레코드 삭제됨",
     bulkDeleteSuccess_other: "{{count}}개의 {{label}} 레코드 삭제됨",
     bulkDeletePartial: "{{succeeded}}개 삭제됨, {{failed}}개 실패",
+    bulkDeleteRefusedNamed: "{{names}}: {{reason}}",
+    bulkDeleteMoreReasons: "외 {{more}}개 이유",
   },
   objectViewActions: {
     renameFailed: "보기 이름 변경 실패",

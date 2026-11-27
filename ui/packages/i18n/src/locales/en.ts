@@ -4929,6 +4929,8 @@ const en = {
     bulkDeleteSuccess_one: 'Deleted {{count}} {{label}} record',
     bulkDeleteSuccess_other: 'Deleted {{count}} {{label}} records',
     bulkDeletePartial: '{{succeeded}} deleted, {{failed}} failed',
+    bulkDeleteRefusedNamed: '{{names}}: {{reason}}',
+    bulkDeleteMoreReasons: 'And {{more}} more',
   },
   objectViewActions: {
     renameFailed: 'Failed to rename view',

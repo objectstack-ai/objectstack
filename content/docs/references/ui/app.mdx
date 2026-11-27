@@ -233,7 +233,7 @@ const result = ActionNavItemSchema.parse(data);
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'component'` | ✅ |  |
 | **componentRef** | `string` | ✅ | Component registry key (e.g. "metadata:directory") |
-| **params** | `Record<string, any>` | optional | Props passed to the component |
+| **params** | `Record<string, any>` | optional | Props passed to the component. For `componentRef: 'ai:chat'` they are the AI inquiry page's copy, judged by `AiChatNavParamsSchema`. |
 
 ### Nested Shape: `App.navigation[number][type='doc']`
 
@@ -399,7 +399,7 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'component'` | ✅ |  |
 | **componentRef** | `string` | ✅ | Component registry key (e.g. "metadata:directory") |
-| **params** | `Record<string, any>` | optional | Props passed to the component |
+| **params** | `Record<string, any>` | optional | Props passed to the component. For `componentRef: 'ai:chat'` they are the AI inquiry page's copy, judged by `AiChatNavParamsSchema`. |
 
 ### Nested Shape: `ComponentNavItem.dataSource`
 
@@ -653,7 +653,7 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'component'` | ✅ |  |
 | **componentRef** | `string` | ✅ | Component registry key (e.g. "metadata:directory") |
-| **params** | `Record<string, any>` | optional | Props passed to the component |
+| **params** | `Record<string, any>` | optional | Props passed to the component. For `componentRef: 'ai:chat'` they are the AI inquiry page's copy, judged by `AiChatNavParamsSchema`. |
 
 ### Nested Shape: `NavigationArea.navigation[number][type='doc']`
 
@@ -852,7 +852,7 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'component'` | ✅ |  |
 | **componentRef** | `string` | ✅ | Component registry key (e.g. "metadata:directory") |
-| **params** | `Record<string, any>` | optional | Props passed to the component |
+| **params** | `Record<string, any>` | optional | Props passed to the component. For `componentRef: 'ai:chat'` they are the AI inquiry page's copy, judged by `AiChatNavParamsSchema`. |
 
 ### Nested Shape: `NavigationContribution.items[number][type='doc']`
 
@@ -1139,7 +1139,7 @@ This schema accepts one of the following structures:
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'component'` | ✅ |  |
 | **componentRef** | `string` | ✅ | Component registry key (e.g. "metadata:directory") |
-| **params** | `Record<string, any>` | optional | Props passed to the component |
+| **params** | `Record<string, any>` | optional | Props passed to the component. For `componentRef: 'ai:chat'` they are the AI inquiry page's copy, judged by `AiChatNavParamsSchema`. |
 
 ### Nested Shape: `NavigationItem[type='component'].dataSource`
 

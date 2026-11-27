@@ -376,7 +376,8 @@ const SITES = [
     // `checkAppLandingItems` joined the spec object with `landing` (objectstack#28022, spec half)
     // and was attached by objectstack#28450 with the console's landing redirect: a landing `item`
     // must name an openable entry of the app's own navigation, and its `visible` reads no `data`.
-    attached: ['checkAppLandingItems'],
+    // `checkAppSingleAiChatEntry` joined with the `ai:chat` navigation entry: at most one per app.
+    attached: ['checkAppLandingItems', 'checkAppSingleAiChatEntry'],
     notAttachable: [],
   },
   {
@@ -476,9 +477,12 @@ const SITES = [
  * Exported checks that belong to NO `specFieldsExcept` site. `GlobalFilterSchema`
  * is mirrored by a `.shape` spread in `complex.zod.ts` whose own `superRefine`
  * re-parses the spec-owned keys through the spec schema, so its check already
- * runs there — measured below rather than assumed.
+ * runs there — measured below rather than assumed. `checkAiChatNavParams` is a
+ * navigation ITEM check (the spec mounts it on its whole navigation union), so it
+ * is chained on the hand-written `NavigationItemSchema` flat arm in `app.zod.ts`,
+ * not on a derivation site.
  */
-const CARRIED_ELSEWHERE = ['checkGlobalFilterDateDefaultValue'] as const;
+const CARRIED_ELSEWHERE = ['checkGlobalFilterDateDefaultValue', 'checkAiChatNavParams'] as const;
 
 /**
  * Every `check*` FUNCTION `@objectstack/spec/ui` exports, name → binding, read

@@ -31,6 +31,7 @@
   "scripts/strictness-ledger.test.ts",
   "src/ai/agent-lifecycle-retirement.test.ts",
   "src/ai/agent-memory-store-retirement.test.ts",
+  "src/ai/agent-model-provider-retirement.test.ts",
   "src/ai/tool-confirmation-prescription-tense.pin.test.ts",
   "src/api/docs-viewer-keys-retirement.test.ts",
   "src/api/error-catalog-docs.test.ts",

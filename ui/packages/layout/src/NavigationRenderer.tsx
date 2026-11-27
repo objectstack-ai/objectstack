@@ -80,7 +80,7 @@ import { isElementApiDataSourceShape } from '@object-ui/react';
 // does): this file has its OWN `resolveLabel` over the KEYED vocabulary, and
 // the spec's resolver reads the INLINE locale map — neither accepts the other's
 // shape.
-import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
+import { AI_CHAT_COMPONENT_REF, resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
 // Internal module, not re-exported by `index.ts` (objectui#11395). ⛔ Do not
 // re-export `byNavOrder` from this file: `index.ts` re-exports it whole.
 import { byNavOrder } from './navOrder';
@@ -1190,6 +1190,10 @@ export function resolveHref(
         return { href: `${basePath}/metadata${metaQs}`, external: false };
       }
       let url = `${basePath}/component/${segs.join('/')}`;
+      // `ai:chat` (the AI inquiry home page): its params are page copy and a
+      // suggestion list (`AiChatNavParamsSchema`), read by the page off the
+      // navigation entry itself — never serialised into the URL.
+      if (ref === AI_CHAT_COMPONENT_REF) return { href: url, external: false };
       if (navParams && typeof navParams === 'object') {
         const usp = new URLSearchParams();
         for (const [k, v] of Object.entries(navParams)) {

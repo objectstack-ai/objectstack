@@ -3288,7 +3288,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       model: {
         label: "Model",
-        helpText: "AI model configuration (provider, model name, temperature, etc.)"
+        helpText: "AI model configuration (model name, temperature, etc.)"
       },
       planning: {
         label: "Planning",

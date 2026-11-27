@@ -1130,6 +1130,15 @@ describe('[#34774] save_metadata_draft judges the client\'s declared spec versio
       expect(written, String(declared)).toEqual([]);
     }
   });
+
+  it('the parameter description and the SemVer refusal give this server\'s own version as the example, never a literal that ages into another major', async () => {
+    const { body, tool } = await save('18');
+    const description: string = tool.parameters.properties.clientSpecVersion.description;
+    for (const [where, text] of [['description', description], ['refusal', body.error.message as string]] as const) {
+      expect(text, where).toContain(`e.g. ${SERVER}`);
+      expect(text, where).not.toContain('18.6.0');
+    }
+  });
 });
 
 describe('delete_metadata_draft discards a pending draft only', () => {

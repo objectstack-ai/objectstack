@@ -4037,6 +4037,8 @@ const pt = {
     bulkDeleteSuccess_many: "{{count}} de registros de {{label}} excluídos",
     bulkDeleteSuccess_other: "{{count}} registros de {{label}} excluídos",
     bulkDeletePartial: "{{succeeded}} excluídos, {{failed}} com falha",
+    bulkDeleteRefusedNamed: "{{names}}: {{reason}}",
+    bulkDeleteMoreReasons: "E mais {{more}}",
   },
   objectViewActions: {
     renameFailed: "Não foi possível renomear a exibição",

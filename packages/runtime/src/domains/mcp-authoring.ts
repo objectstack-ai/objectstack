@@ -199,6 +199,17 @@ const SERVER_SPEC_VERSION: string | undefined = (() => {
 })();
 
 /**
+ * The SemVer example the door's agent-facing text shows: this server's own
+ * `@objectstack/spec` version, so an agent that copies the example declares the
+ * version the verdict below accepts. A literal example ages into another major
+ * and teaches a value the door refuses. Without a readable version the text
+ * names the form instead of inventing a number.
+ */
+function specVersionExample(server = SERVER_SPEC_VERSION): string {
+    return server ? `e.g. ${server}` : 'MAJOR.MINOR.PATCH';
+}
+
+/**
  * [#34774] The save's judgement of the client's declared spec version (#34659
  * ruling D4 = A), before anything is written: another major is refused with the
  * install line (`refusal`), another minor is saved with an `advisory`, and none
@@ -208,7 +219,7 @@ const SERVER_SPEC_VERSION: string | undefined = (() => {
 function clientSpecVersionVerdict(declared: unknown, server = SERVER_SPEC_VERSION): { refusal?: string; advisory?: string } {
     if (declared === undefined) return {};
     if (typeof declared !== 'string' || !SEMVER_2_0_0_VERSION_PATTERN.test(declared)) {
-        return { refusal: '`clientSpecVersion` is the `@objectstack/spec` version you built against, in SemVer form (e.g. 18.6.0).' };
+        return { refusal: `\`clientSpecVersion\` is the \`@objectstack/spec\` version you built against, in SemVer form (${specVersionExample(server)}).` };
     }
     if (!server) return { advisory: `This server could not read its own @objectstack/spec version, so ${declared} was not compared.` };
     const [clientMajor, clientMinor] = declared.split('.').map(Number);
@@ -355,7 +366,7 @@ const WRITE_TOOLS: readonly AIToolDefinition[] = Object.freeze([
                 clientSpecVersion: {
                     type: 'string',
                     minLength: 1,
-                    description: 'Recommended: the `@objectstack/spec` version you built the item against (SemVer, e.g. 18.6.0). '
+                    description: `Recommended: the \`@objectstack/spec\` version you built the item against (SemVer, ${specVersionExample()}). `
                         + 'This server\'s version is the `Authoring contract` line of its instructions. Another major is '
                         + 'refused before anything is saved, naming the version to install; another minor is saved and '
                         + 'advised. The saved item is still validated either way.',
