@@ -5,7 +5,9 @@ import { classifyAdmissionTenancyPosture } from '@objectstack/core';
 import type {
   IDataEngine,
   IEmbedder,
+  IJobService,
   IRealtimeService,
+  JobRunOutcome,
 } from '@objectstack/spec/contracts';
 import type { KnowledgeSource } from '@objectstack/spec/ai';
 import { EMBEDDER_SERVICE, KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
@@ -20,7 +22,14 @@ import { RECORD_RESTORED_EVENT } from '@objectstack/spec/data';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { KnowledgeService } from './knowledge-service.js';
 import type { KnowledgeLogger } from './knowledge-service.js';
-import type { KnowledgeBuildLock } from './knowledge-build.js';
+import {
+  RECONCILE_DEFAULT_CRON,
+  RECONCILE_JOB,
+  RECONCILE_MAX_WAIT_MS,
+  RECONCILE_QUIET_MS,
+  type KnowledgeBuildLock,
+  type KnowledgeReconcileReport,
+} from './knowledge-build.js';
 import type { KnowledgeFieldSecurity } from './knowledge-source-admission.js';
 import { createKnowledgeReapGuard, guardedObjectsFor } from './knowledge-reap-guard.js';
 import { KnowledgeSourceLoader } from './knowledge-source-loader.js';
@@ -333,8 +342,11 @@ export interface KnowledgeServicePluginOptions {
    * see `KnowledgeService.handleRecordUpsert`.
    *
    * The aggregate `data.records.updated` / `data.records.deleted` events a
-   * predicate write (`multi: true`) publishes carry a count, not records:
-   * they cannot be synced and only log a warning that the index may be stale.
+   * predicate write (`multi: true`) publishes carry a count, not records, so
+   * they cannot be synced one by one: each asks for a reconcile of every
+   * source over the object (`KnowledgeService.requestReconcile`), which
+   * starts once no further predicate write on it arrived for two minutes,
+   * and logs a warning saying so. Unless `reconcile: false`.
    * @default true
    */
   enableEventSync?: boolean;
@@ -351,6 +363,30 @@ export interface KnowledgeServicePluginOptions {
    * @default true
    */
   buildAtBoot?: boolean;
+  /**
+   * The reconcile (ADR-0161 K1: "a reconcile pass keeps it correct";
+   * `KnowledgeService.reconcileSources`): one job on the platform's job
+   * service walks every source whose store lists its documents, completely,
+   * so each index ends equal to its source — the documents of rows inserted
+   * or changed without an event written, those of rows deleted or moved out
+   * of `where` purged, and nothing embedded again for a row that did not
+   * change. It also runs after a predicate write, once the object has had no
+   * further one for two minutes (event sync on).
+   *
+   * - Omitted: the job runs once a day at 03:00 UTC
+   *   (`RECONCILE_DEFAULT_CRON`, `'0 3 * * *'`).
+   * - `{ cron, timezone }`: the job runs on that cron expression, in that
+   *   IANA time zone (UTC when omitted). Either member may be omitted.
+   * - `false`: no job is scheduled and a predicate write asks for no
+   *   reconcile; an administrator keeps an index correct with
+   *   `os knowledge rebuild`.
+   *
+   * With no job service composed, the plugin says so once at boot and
+   * nothing reconciles on a schedule (the predicate-write reconcile still
+   * runs).
+   * @default { cron: '0 3 * * *' }
+   */
+  reconcile?: false | { cron?: string; timezone?: string };
 }
 
 /**
@@ -414,6 +450,8 @@ export class KnowledgeServicePlugin implements Plugin {
   /** The one reap guard, and the objects it is registered for so far ({@link syncReapGuards}). */
   private reapGuard: ReturnType<typeof createKnowledgeReapGuard> | undefined;
   private readonly guardedObjects = new Set<string>();
+  /** The job service the reconcile is scheduled on, kept to cancel it at destroy ({@link scheduleReconcile}). */
+  private jobs: IJobService | undefined;
 
   constructor(private readonly options: KnowledgeServicePluginOptions = {}) {}
 
@@ -578,6 +616,12 @@ export class KnowledgeServicePlugin implements Plugin {
     ctx.hook('kernel:bootstrapped', () => {
       this.service?.reportUnmountedAdapters();
     });
+    // [ADR-0161 K1] The daily reconcile. The job service may start after this
+    // plugin: it is resolved once every plugin has started, when an absent
+    // one is absent for good.
+    ctx.hook('kernel:bootstrapped', async () => {
+      await this.scheduleReconcile(ctx);
+    });
 
     if (this.options.enableEventSync === false) return;
     const service = this.service;
@@ -650,48 +694,144 @@ export class KnowledgeServicePlugin implements Plugin {
         // [#4639] Aggregate events from a predicate write (`multi: true`).
         // A knowledge index is a PER-RECORD projection, and `matched: 40`
         // names no record — there is no upsert or delete this handler could
-        // derive from it, and none of the adapters take a predicate. So the
-        // index is now stale in a way this subscription cannot repair.
+        // derive from it, and none of the adapters take a predicate.
         //
-        // Say so rather than falling through to the `return` below: a silent
-        // no-op here reads identically to "nothing happened", which is how the
-        // gap stayed invisible before #4639 gave bulk writes an event at all.
-        //
-        // [#4672] The warn STAYS, and it is deliberately still a warn about a
-        // gap — but a narrower gap than it named before. The platform's own
-        // predicate delete (the retention sweep's reap, and the source this
-        // issue called out as the main one) no longer reaches this handler as a
-        // stale index at all: `installReapGuards` de-indexes those rows before
-        // they are deleted. What is left is APPLICATION-level predicate writes
-        // — a caller's own `multi: true` update/delete — which no guard sits in
-        // front of. The event stream cannot repair that half (it names no
-        // record); a complete reindex does, by the purge ADR-0161 K8 items 1
-        // and 2 gave it. Reporting it accurately is the whole job of this
-        // branch.
-        // A complete reindexSource refreshes the rows that still exist and
-        // match and, over an adapter that lists its documents, purges the
-        // documents of rows that are gone or no longer match — the warning
-        // says so, and names the adapter case it cannot repair.
+        // [#4672] The platform's own predicate delete (the retention sweep's
+        // reap) never reaches this handler as a stale index: the lifecycle
+        // reap guard de-indexes those rows before they are deleted. What is
+        // left is APPLICATION-level predicate writes. [ADR-0161 K1, K3 item 3]
+        // Those are the reconcile's: the branch asks for a reconcile of every
+        // source over the object, which starts once the object has had no
+        // further predicate write for the quiet period — one walk per source
+        // however many bulk events arrive — and refreshes the rows that still
+        // match and purges the documents of rows that are gone or no longer
+        // match. A source whose store does not list its documents cannot be
+        // reconciled, and the warning keeps saying so.
         if (type === 'data.records.updated' || type === 'data.records.deleted') {
-          const matched = payload.matched;
-          ctx.logger.warn?.(
-            `KnowledgeServicePlugin: '${object}' had a predicate write (${type}) affecting ` +
-              `${typeof matched === 'number' ? matched : 'an unreported number of'} record(s). ` +
-              'A bulk event carries a count, not records, so the knowledge index for this object ' +
-              'may now be stale and cannot be repaired from the event stream. ' +
-              'Retention-sweep deletes are covered separately: the lifecycle reap guard de-indexes those rows ' +
-              'before they are deleted; ' +
-              'application-level predicate writes are not. A complete reindexSource (no limit, no dryRun) refreshes ' +
-              'the documents of rows that still exist and match, and purges the documents of rows that are gone or ' +
-              'no longer match when the source\'s adapter lists its documents; over an adapter that does not, they ' +
-              'stay in the index.',
-            { object, type, matched },
-          );
+          this.onPredicateWrite(ctx, service, object, type, payload.matched);
           return;
         }
       });
       ctx.logger.info?.('KnowledgeServicePlugin: event sync subscription active.');
     });
+  }
+
+  /**
+   * One aggregate event of a predicate write (`multi: true`) on `object`: ask
+   * for a reconcile of every source over it (`KnowledgeService.requestReconcile`)
+   * and say, at `warn`, what will happen and when. A source whose store does
+   * not list its documents cannot be reconciled: for it the warning says, as
+   * before, that the index may stay stale. `reconcile: false` asks for
+   * nothing and says that for every source. An object no source indexes is
+   * not stale anywhere: `debug` only.
+   */
+  private onPredicateWrite(ctx: PluginContext, service: KnowledgeService, object: string, type: string, matched: unknown): void {
+    const count = typeof matched === 'number' ? matched : 'an unreported number of';
+    const head =
+      `KnowledgeServicePlugin: '${object}' had a predicate write (${type}) affecting ${count} record(s). ` +
+      'A bulk event carries a count, not records, so ';
+    const reapNote =
+      'Retention-sweep deletes are covered separately: the lifecycle reap guard de-indexes those rows before they ' +
+      'are deleted; ';
+    const unrepaired = (sources: string): string =>
+      head +
+      `the knowledge index ${sources}may now be stale and cannot be repaired from the event stream. ` +
+      reapNote +
+      'application-level predicate writes are not. A complete reindexSource (no limit, no dryRun) refreshes ' +
+      'the documents of rows that still exist and match, and purges the documents of rows that are gone or ' +
+      "no longer match when the source's adapter lists its documents; over an adapter that does not, they " +
+      'stay in the index.';
+    if (this.options.reconcile === false) {
+      ctx.logger.warn?.(unrepaired('for this object '), { object, type, matched });
+      return;
+    }
+    const request = service.requestReconcile(object);
+    if (request.scheduled.length === 0 && request.unlisted.length === 0) {
+      ctx.logger.debug?.(`KnowledgeServicePlugin: '${object}' had a predicate write (${type}); no source the service keeps indexes it.`);
+      return;
+    }
+    if (request.scheduled.length > 0) {
+      const minutes = (ms: number): string => `${Math.round(ms / 60_000)} minute(s)`;
+      ctx.logger.warn?.(
+        head +
+          `the knowledge index of source(s) ${request.scheduled.join(', ')} cannot be repaired from the event stream ` +
+          `and may be stale until its reconcile, which starts once '${object}' has had no further predicate write ` +
+          `for ${minutes(RECONCILE_QUIET_MS)} (at the latest ${minutes(RECONCILE_MAX_WAIT_MS)} after the first): it ` +
+          'refreshes the documents of rows that still exist and match, and purges the documents of rows that are ' +
+          'gone or no longer match. ' +
+          reapNote.replace(/; $/, '.'),
+        { object, type, matched, reconcile: request.scheduled },
+      );
+    }
+    if (request.unlisted.length > 0) {
+      ctx.logger.warn?.(
+        unrepaired(`of source(s) ${request.unlisted.join(', ')} (an adapter that does not list its documents, so no reconcile can repair it) `),
+        { object, type, matched, unlisted: request.unlisted },
+      );
+    }
+  }
+
+  /**
+   * Schedule the reconcile job ({@link KnowledgeServicePluginOptions.reconcile})
+   * on the composed job service, at `kernel:bootstrapped`. `reconcile: false`
+   * schedules nothing, said at `info`; no job service is said once at `warn`;
+   * a schedule the job service refuses (an unreadable cron expression) is
+   * said at `warn`, naming the option. The handler answers a `JobRunOutcome`
+   * (see {@link reconcileJobOutcome}), so the job's run history shows a
+   * reconcile whose walk of some source did not finish as `degraded`.
+   */
+  private async scheduleReconcile(ctx: PluginContext): Promise<void> {
+    const service = this.service;
+    if (!service) return;
+    const option = this.options.reconcile;
+    if (option === false) {
+      ctx.logger.info?.(
+        'KnowledgeServicePlugin: reconcile is off (reconcile: false): no index is reconciled on a schedule or after a ' +
+          'predicate write; rebuild a source with os knowledge rebuild.',
+      );
+      return;
+    }
+    let jobs: IJobService | undefined;
+    try {
+      jobs = ctx.getService<IJobService | undefined>('job') ?? undefined;
+    } catch (err) {
+      if (!isServiceNotRegisteredError(err, 'job')) {
+        ctx.logger.warn?.(
+          `KnowledgeServicePlugin: the job service could not be read (${err instanceof Error ? err.message : String(err)}), ` +
+            'so nothing reconciles the knowledge indexes on a schedule; rebuild a source with os knowledge rebuild.',
+        );
+        return;
+      }
+    }
+    if (!jobs || typeof jobs.schedule !== 'function') {
+      ctx.logger.warn?.(
+        'KnowledgeServicePlugin: no job service is composed, so nothing reconciles the knowledge indexes on a schedule: ' +
+          'a row deleted or changed without an event stays as it is in an index until an operator rebuild ' +
+          "(os knowledge rebuild). Compose the job capability (requires: ['job']) to reconcile them daily.",
+      );
+      return;
+    }
+    const cron = option?.cron ?? RECONCILE_DEFAULT_CRON;
+    const timezone = option?.timezone;
+    try {
+      await jobs.schedule(
+        RECONCILE_JOB,
+        { type: 'cron', expression: cron, ...(timezone === undefined ? {} : { timezone }) },
+        async (): Promise<JobRunOutcome> => reconcileJobOutcome(await service.reconcileSources()),
+      );
+    } catch (err) {
+      ctx.logger.warn?.(
+        `KnowledgeServicePlugin: the reconcile job was not scheduled: the job service refused '${cron}'` +
+          `${timezone === undefined ? '' : ` in ${timezone}`} (${err instanceof Error ? err.message : String(err)}). ` +
+          'Correct the plugin\'s reconcile option; until then nothing reconciles the indexes on a schedule.',
+      );
+      return;
+    }
+    this.jobs = jobs;
+    ctx.logger.info?.(
+      `KnowledgeServicePlugin: reconcile scheduled ('${cron}'${timezone === undefined ? ' UTC' : ` ${timezone}`}, job '${RECONCILE_JOB}'): ` +
+        'each source whose store lists its documents is walked completely, unchanged documents are not embedded again.',
+    );
   }
 
   /**
@@ -904,9 +1044,19 @@ export class KnowledgeServicePlugin implements Plugin {
    * the same one either way: a teardown the kernel does not reach.
    */
   async destroy(): Promise<void> {
-    // The boot's first-build pass starts no further build; one already
-    // walking runs to its end (a walk cannot be cancelled part-way).
+    // The boot's first-build pass and the reconcile start no further build;
+    // one already walking runs to its end (a walk cannot be cancelled
+    // part-way). The reconcile job is cancelled.
     this.service?.stopBuilds();
+    const jobs = this.jobs;
+    this.jobs = undefined;
+    if (jobs) {
+      try {
+        await jobs.cancel(RECONCILE_JOB);
+      } catch {
+        // the job service is going down too
+      }
+    }
     for (const unsubscribe of this.unsubscribes.splice(0)) {
       try {
         unsubscribe();
@@ -935,6 +1085,21 @@ export class KnowledgeServicePlugin implements Plugin {
   async stop(_ctx?: PluginContext): Promise<void> {
     await this.destroy();
   }
+}
+
+/**
+ * The run outcome of one reconcile job run: `degraded`, naming each source
+ * whose walk failed, lost its lease or timed out, when one did; `completed`
+ * otherwise (a source another node held, or one the reconcile does not walk,
+ * is not a failure). Never a throw: a retry would walk every source again.
+ */
+export function reconcileJobOutcome(report: KnowledgeReconcileReport): JobRunOutcome {
+  if (report.unfinished.length === 0) return { outcome: 'completed' };
+  const named = report.unfinished.map((u) => `${u.sourceId} (${u.status}${u.message === undefined ? '' : `: ${u.message}`})`);
+  return {
+    outcome: 'degraded',
+    reason: `${report.unfinished.length} of ${report.sources.length} source(s) not reconciled: ${named.join('; ')}`,
+  };
 }
 
 /** The slice of the metadata protocol the loader reads, reached duck-typed. */
