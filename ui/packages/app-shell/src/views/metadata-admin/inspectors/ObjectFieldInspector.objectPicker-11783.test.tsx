@@ -131,3 +131,96 @@ describe('Lookup Related object — resolves the committed name only (objectui#1
     expect(refs).toEqual(['sys_user']);
   });
 });
+
+/**
+ * objectstack#36747 — the Lookup's *Related object* and the roll-up's *Child
+ * object* take objects only. No expression is legal at either door, so typed
+ * text that names no listed object saves nothing and the picker says so; an
+ * object the catalog lists — here one that exists only as a pending draft
+ * (served by the draft-overlaid list, absent from the published one) — is
+ * still chosen.
+ */
+describe('Lookup and roll-up target doors take objects only (objectstack#36747)', () => {
+  const DOORS = [
+    {
+      door: 'Lookup Related object',
+      label: 'Related object',
+      field: { type: 'lookup', label: 'Technician' },
+      target: (def: Record<string, unknown> | undefined) => def?.reference,
+    },
+    {
+      door: 'roll-up Child object',
+      label: 'Child object',
+      field: { type: 'summary', label: 'Total' },
+      target: (def: Record<string, unknown> | undefined) =>
+        (def?.summaryOperations as Record<string, unknown> | undefined)?.object,
+    },
+  ] as const;
+
+  function DoorHarness({ field, onPatch }: { field: Record<string, unknown>; onPatch: (p: Record<string, unknown>) => void }) {
+    const [draft, setDraft] = React.useState<Record<string, unknown>>({
+      name: 'repairs_work_order',
+      fields: { target_field: field },
+    });
+    return (
+      <ObjectFieldInspector
+        type="object"
+        name="repairs_work_order"
+        draft={draft}
+        selection={{ kind: 'field', id: 'target_field' }}
+        onPatch={(p) => {
+          onPatch(p);
+          setDraft((d) => ({ ...d, ...p }));
+        }}
+        onClearSelection={vi.fn()}
+        onSelectionChange={vi.fn()}
+        readOnly={false}
+        locale="en-US"
+      />
+    );
+  }
+
+  /** The input under the door's visible label. */
+  const doorInput = (label: string): HTMLInputElement =>
+    screen.getByText(label, { selector: 'label' }).parentElement!.querySelector('input')!;
+
+  /** Focus the door and wait until the catalog has answered (its draft-only object is offered). */
+  async function openLoaded(input: HTMLInputElement): Promise<HTMLElement> {
+    await userEvent.click(input);
+    return waitFor(() => {
+      const o = document.querySelector(`[data-object-name="${h.NAME}"]`);
+      expect(o).not.toBeNull();
+      return o as HTMLElement;
+    });
+  }
+
+  for (const d of DOORS) {
+    const targetsIn = (onPatch: ReturnType<typeof vi.fn>) =>
+      onPatch.mock.calls
+        .map(([p]) => d.target(readFields((p as Record<string, unknown>).fields).entries.find((e) => e.name === 'target_field')?.def))
+        .filter((v) => v !== undefined);
+
+    it(`${d.door}: typed text naming no listed object is refused, not saved`, async () => {
+      const onPatch = vi.fn();
+      render(<DoorHarness field={d.field} onPatch={onPatch} />);
+      const input = doorInput(d.label);
+      await openLoaded(input);
+      await userEvent.type(input, 'no_such_object');
+      await userEvent.keyboard('{Enter}');
+      expect(targetsIn(onPatch)).toEqual([]);
+      expect(document.querySelector('[data-object-refused]')).not.toBeNull();
+    });
+
+    it(`${d.door}: a listed object that exists only as a draft is chosen`, async () => {
+      // The premise: the draft-only object is absent from the published list…
+      expect((await h.client.list('object')).map((o) => o.name)).not.toContain(h.NAME);
+      const onPatch = vi.fn();
+      render(<DoorHarness field={d.field} onPatch={onPatch} />);
+      // …and offered by the picker's catalog all the same.
+      const option = await openLoaded(doorInput(d.label));
+      await userEvent.click(option);
+      expect(targetsIn(onPatch)).toEqual([h.NAME]);
+      expect(document.querySelector('[data-object-refused]')).toBeNull();
+    });
+  }
+});
