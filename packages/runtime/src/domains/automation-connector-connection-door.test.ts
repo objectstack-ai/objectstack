@@ -14,6 +14,7 @@
 // (`connector-connection-door.test.ts`).
 
 import { describe, it, expect, vi } from 'vitest';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 // The stack loads the metadata service lazily; pay that load at collection, never in a clocked case.
 import '@objectstack/metadata';
 
@@ -468,5 +469,34 @@ describe('ADR-0143 D2.1 — connector connection door: the begin leg takes the i
         }
         expect(h.get).toHaveBeenCalledWith({ connector: 'crm', context: expect.objectContaining({ tenantId: 'org_a' }) });
         expect(h.revoke).toHaveBeenCalledWith({ connector: 'crm', context: expect.objectContaining({ tenantId: 'org_a' }) });
+    });
+});
+
+// [#37811] This door's 501 sentence is the operation-message catalog's, in the
+// request's top `Accept-Language` tag: byte-identical English with no header,
+// the catalog's Japanese under `ja-JP`, and `Vary: Accept-Language` either way.
+const JA_37811 = { request: { headers: { 'accept-language': 'ja-JP,ja;q=0.9' } } };
+const LANGS_37811 = [['en', {}], ['ja-JP', JA_37811]] as const;
+const sentence37811 = (locale: 'en' | 'ja-JP', key: string, params: Record<string, string> = {}): string =>
+    BUILTIN_OPERATION_MESSAGES[locale][key].replace(/\{\{(\w+)\}\}/g, (_m, name: string) => params[name] ?? '');
+const vary37811 = (response: unknown): unknown => (response as any)?.headers?.Vary;
+
+describe('[#37811] the absent-member 501 follows the request\'s language and names the member', () => {
+    it('automation_connector_connections_unsupported, on the read, begin, revoke and callback legs', async () => {
+        const h = boot({ service: { handlerReady: true } });
+        for (const [locale, extra] of LANGS_37811) {
+            const ctx = { ...ADMIN(), ...extra } as HttpProtocolContext;
+            for (const [call, member] of [
+                [() => connection(h, 'GET', ctx), 'getConnectorConnection'],
+                [() => connection(h, 'POST', ctx), 'beginConnectorConnection'],
+                [() => connection(h, 'DELETE', ctx), 'revokeConnectorConnection'],
+                [() => callback(h, ctx, { code: AUTH_CODE, state: 's' }), 'completeConnectorConnection'],
+            ] as const) {
+                const { response } = await call();
+                expect(statusOf(response)).toBe(501);
+                expect(messageOf(response)).toBe(sentence37811(locale, 'automation_connector_connections_unsupported', { member }));
+                expect(vary37811(response)).toBe('Accept-Language');
+            }
+        }
     });
 });
