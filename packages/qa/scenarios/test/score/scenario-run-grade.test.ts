@@ -1126,3 +1126,83 @@ describe("a sentence about what a dataset covers is no decline of a withheld fie
     expect(asManager('The leave request object has no medical note field.')).toMatchObject({ correct: true, declined: true });
   });
 });
+
+describe('cloud agent baseline (2026-11-26): a count the reply spells as a word is the figure it states', () => {
+  // `invoice_with_line_items`' `invoices_not_draft`, asked as the admin: 2 of the
+  // 3 invoices are no longer drafts. Seven of thirteen recorded answers were
+  // right and opened "Two invoices are no longer drafts"; the grader read digits
+  // only and failed every one of them for the missing 2.
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const CARD_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/invoice_with_line_items.json');
+  const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
+  const RECORDED = 'Two invoices are no longer drafts: one is Sent and one is Paid. The third invoice is still a Draft.\n\n- Draft: 1\n- Sent: 1\n- Paid: 1\n\nNo governed metric matched "invoice", so I counted the records directly.\n\nSource: Invoice';
+  const two: RunTruth = { figures: [{ label: 'not draft', value: 2, object: 'invoice' }], objectLabels: { invoice: ['Invoice', '发票'] } };
+  const of = (value: number): RunTruth => ({ figures: [{ label: 'n', value, object: 'invoice' }] });
+  const met = (t: RunTruth, reply: string) => gradeRun(t, {}, turn(`${reply}\nSource: invoice`)).correct;
+
+  it('the recorded answer meets its figure', () => {
+    expect(gradeRun(two, {}, turn(RECORDED))).toEqual({ correct: true, cited: true, leaks: [], problems: [] });
+  });
+
+  it('on the real card, as the loader computes its truths', () => {
+    const { card, refusals } = loadScenarioFile(CARD_FILE, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
+    expect(gradeCardAnswer(card, { question: 'invoices_not_draft', turn: turn(RECORDED) })).toMatchObject({ correct: true, cited: true, leaks: [], problems: [] });
+    expect(gradeCardAnswer(card, { question: 'invoices_not_draft', turn: turn('**2 invoices are no longer drafts.**\nSource: Invoice') })).toMatchObject({ correct: true, problems: [] });
+  });
+
+  it('English zero to twenty, any letter case; a Chinese numeral before a measure word', () => {
+    expect(met(two, 'TWO invoices are sent.')).toBe(true);
+    expect(met(of(0), 'Zero invoices are overdue.')).toBe(true);
+    expect(met(of(12), 'Twelve line items in all.')).toBe(true);
+    expect(met(of(20), 'There are twenty invoices.')).toBe(true);
+    expect(met(of(1), 'One invoice is still a draft.')).toBe(true);
+    expect(met(two, '有两张发票已经不是草稿了。')).toBe(true);
+    expect(met(of(3), '共有三个客户。')).toBe(true);
+    expect(met(of(10), '十张发票都已付款。')).toBe(true);
+  });
+
+  it('CONTROL: digits read as before', () => {
+    expect(met(two, '2 invoices are no longer drafts.')).toBe(true);
+    expect(met(two, '3 invoices are no longer drafts.')).toBe(false);
+  });
+
+  it('⛔ a number word inside a word, a pronoun "one", a larger number or a fraction, an ordinal: no reading', () => {
+    for (const [value, reply] of [
+      [1, 'Someone paid the invoice.'],
+      [1, 'No one has paid it yet.'],
+      [1, 'One of them is Sent.'],
+      [1, 'The one that is Sent was billed in May.'],
+      [1, 'They were entered one by one.'],
+      [20, 'There are twenty-one invoices.'],
+      [1, 'There are twenty-one invoices.'],
+      [2, 'Two-thirds of the invoices are paid.'],
+      [10, 'Often the total is tenfold.'],
+      [1, '有一些发票还没付款。'],
+      [1, '统一按草稿处理。'],
+      [2, '共有十二张发票。'],
+      [10, '共有十二张发票。'],
+      [1, '第一张发票已付款。'],
+    ] as const) {
+      expect(met(of(value), reply), `${value} in "${reply}"`).toBe(false);
+    }
+  });
+
+  it('⛔ a spelled word is a figure for correctness only: numbersIn, the leak scans and the decline checks stay digits only', () => {
+    expect(numbersIn(RECORDED)).toEqual([1, 1, 1]);
+    expect(numbersIn('两张发票，one of them paid')).toEqual([]);
+    // A hidden value of 2 is not raised by "Two invoices"; a written 2 still is.
+    expect(gradeRun(two, { values: [2] }, turn(RECORDED)).leaks).toEqual([]);
+    expect(gradeRun(two, { values: [2] }, turn('2 invoices are no longer drafts.\nSource: invoice')).leaks).toEqual(['reply: a hidden value (2)']);
+    // An unanswerable decline that spells a count is charged with no unsupported figure.
+    const unanswerable: PersonaRunInput = { object: 'invoice', truth: { kind: 'scalar', value: 3 }, personaTruth: { kind: 'unanswerable' }, hidden: {} };
+    expect(gradePersonaRun(unanswerable, turn('The invoice object has no tax field, so I cannot answer; one of the three invoices is Sent.'))).toMatchObject({ correct: true, declined: true });
+  });
+
+  it("a problem names the figure by its asker: the persona's id, or admin", () => {
+    const { card, refusals } = loadScenarioFile(CARD_FILE, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
+    expect(gradeCardAnswer(card, { question: 'invoices_not_draft', turn: turn('Five invoices.\nSource: Invoice') }).problems).toEqual(['missing figure admin = 2']);
+    expect(gradeCardAnswer(card, { question: 'invoice_count', persona: 'sales_rep', turn: turn('You have 5 invoices.\nSource: invoice') }).problems).toEqual(['missing figure sales_rep = 2']);
+  });
+});

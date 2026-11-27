@@ -177,6 +177,7 @@ export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): P
   return gradePersonaRun(
     {
       object: q.object,
+      ...(answer.persona !== undefined ? { asker: answer.persona } : {}),
       truth,
       personaTruth,
       hidden,
