@@ -137,11 +137,12 @@ describe('Lookup Related object — resolves the committed name only (objectui#1
 
 /**
  * objectstack#36747 — the Lookup's *Related object* and the roll-up's *Child
- * object* take objects only. No expression is legal at either door, so typed
- * text that names no listed object saves nothing and the picker says so; an
- * object the catalog lists — here one that exists only as a pending draft
- * (served by the draft-overlaid list, absent from the published one) — is
- * still chosen.
+ * object* take objects only. No expression is legal at either door, so once
+ * the catalog has answered, typed text that names no listed object is refused:
+ * the picker says so, nothing is committed, and a target the field already
+ * has stays as it was. An object the catalog lists — here one that exists
+ * only as a pending draft (served by the draft-overlaid list, absent from the
+ * published one) — is still chosen.
  */
 describe('Lookup and roll-up target doors take objects only (objectstack#36747)', () => {
   const DOORS = [
@@ -149,12 +150,14 @@ describe('Lookup and roll-up target doors take objects only (objectstack#36747)'
       door: 'Lookup Related object',
       label: 'Related object',
       field: { type: 'lookup', label: 'Technician' },
+      withTarget: { type: 'lookup', label: 'Technician', reference: 'sys_user' },
       target: (def: Record<string, unknown> | undefined) => def?.reference,
     },
     {
       door: 'roll-up Child object',
       label: 'Child object',
       field: { type: 'summary', label: 'Total' },
+      withTarget: { type: 'summary', label: 'Total', summaryOperations: { object: 'sys_user', function: 'count' } },
       target: (def: Record<string, unknown> | undefined) =>
         (def?.summaryOperations as Record<string, unknown> | undefined)?.object,
     },
@@ -202,6 +205,20 @@ describe('Lookup and roll-up target doors take objects only (objectstack#36747)'
       onPatch.mock.calls
         .map(([p]) => d.target(readFields((p as Record<string, unknown>).fields).entries.find((e) => e.name === 'target_field')?.def))
         .filter((v) => v !== undefined);
+
+    it(`${d.door}: a refused typo keeps the target the field already has`, async () => {
+      const onPatch = vi.fn();
+      render(<DoorHarness field={d.withTarget} onPatch={onPatch} />);
+      const input = doorInput(d.label);
+      await openLoaded(input);
+      await userEvent.clear(input);
+      await userEvent.type(input, 'no_such_object');
+      await userEvent.keyboard('{Enter}');
+      // No patch touches the field: its stored target is not erased.
+      expect(onPatch).not.toHaveBeenCalled();
+      expect(input).toHaveValue('sys_user');
+      expect(document.querySelector('[data-object-refused]')).not.toBeNull();
+    });
 
     it(`${d.door}: typed text naming no listed object is refused, not saved`, async () => {
       const onPatch = vi.fn();
