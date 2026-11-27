@@ -1015,7 +1015,8 @@ later for a new object gets its hooks when it arrives.
 - **A user delete** de-indexes the row through `afterDelete`, by the row's id.
 - **A predicate write** (`multi: true`) is synced row by row: an object with an
   `afterUpdate` / `afterDelete` hook gets one dispatch per matched row, so no
-  aggregate event is involved. Such a write is held to the engine's per-row
+  aggregate event is involved and no predicate-write reconcile is asked for
+  (the scheduled [reconcile](#reconcile-keeping-the-index-correct) still runs). Such a write is held to the engine's per-row
   hook ceiling (10,000 matched rows, `MAX_BULK_PER_ROW_HOOK_ROWS`), as it is on
   every object that already carries a per-row hook (the audit plugin's, for
   one): over it the write is refused and nothing is written.
