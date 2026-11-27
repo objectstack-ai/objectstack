@@ -133,10 +133,12 @@ import type { PlatformLocaleTag } from '@objectstack/spec/system';
  * (`candidateTail`, `leftCandidateTail`) the note carries ONE sentence
  * (`ownPhraseFirst`): a word cut out of a longer phrase of the question, or
  * reworded, is not asked about, and `list_datasets` is called once more with
- * the phrase as the user wrote it, never the whole question; when that phrase
- * matches nothing and has no candidate, the word is asked about after all, so
- * a re-sent phrase never turns a measure candidate into a labelled fallback
- * (D3 rule 4 is for a word with no candidate). The question that follows is conditioned
+ * the phrase as the user wrote it, never the whole question. The answer to
+ * that second call is composed like any other: this file cannot know a call
+ * is a re-send, so a phrase that still has a measure among its candidates is
+ * asked about, and one that matches nothing and has no candidate takes the
+ * labelled fallback (D3 rule 4), as it would have had the client sent it
+ * first. The question that follows is conditioned
  * on the word being the user's own, for the reason the section above gives: a
  * reader told to re-send and to ask in one breath asks. Nothing about the
  * answer changes: `matches`, `candidates`, `decision` and `terms` are what
@@ -231,7 +233,7 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     severalTail: 'Ask the user which one they mean, listing each one\'s label, dataset label and description; do not pick one, and compute nothing until they answer.',
     candidateHit: (t, ms) => `"${t}" matches no member exactly; possible readings: ${ms}.`,
     candidateTail: 'For a word that is the user\'s own, ask the user which one they mean, listing each one\'s label, dataset label and description (with a single reading, ask whether it is the one meant); do not pick one, never treat a reading as a match, and compute nothing until they answer.',
-    ownPhraseFirst: 'First check each such word against the question: a word you cut out of a longer phrase the user wrote, or reworded, is not asked about; call list_datasets once more with that phrase exactly as written, never the whole question. If that phrase matches nothing and has no possible reading, the word is asked about after all.',
+    ownPhraseFirst: 'First check each such word against the question: a word you cut out of a longer phrase the user wrote, or reworded, is not asked about; call list_datasets once more with that phrase exactly as written, never the whole question.',
     groupingCandidateHit: (t, ms) => `"${t}" matches no member exactly; it may name a grouping: ${ms}.`,
     groupingCandidateTail: 'A possible grouping is not a question: do not ask the user about it, and it does not stop a matched measure; group the answer only as the question asks.',
     groupingHit: (t, ms) => `"${t}" equals a grouping, not a number: ${ms}.`,
@@ -256,7 +258,7 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     severalTail: '先问用户指的是哪一个，列出每一个的名称、所属数据集名称和说明；不要替用户选，用户回答前不要计算。',
     candidateHit: (t, ms) => `「${t}」没有精确匹配任何成员，可能指的是：${ms}。`,
     candidateTail: '如果这个词就是用户的原话，先问用户指的是哪一个，列出每一个的名称、所属数据集名称和说明（只有一个时，问是不是它）；不要替用户选，也不要把它当作匹配，用户回答前不要计算。',
-    ownPhraseFirst: '先逐个对照用户的问题：如果某个词是你从用户写的更长词组里截出来的，或是你改写过的，就不要就它提问，改用用户原话里的完整词组（不是整句问题）再调用一次 list_datasets；如果那个词组既没有匹配也没有候选，仍然就原来的词提问。',
+    ownPhraseFirst: '先逐个对照用户的问题：如果某个词是你从用户写的更长词组里截出来的，或是你改写过的，就不要就它提问，改用用户原话里的完整词组（不是整句问题）再调用一次 list_datasets。',
     groupingCandidateHit: (t, ms) => `「${t}」没有精确匹配任何成员，可能指分组维度：${ms}。`,
     groupingCandidateTail: '可能的分组维度不需要追问：不要就它问用户，它也不妨碍计算已匹配的指标；只按问题本身的要求分组。',
     groupingHit: (t, ms) => `「${t}」是分组维度，不是数字：${ms}。`,
@@ -281,7 +283,7 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     severalTail: '先問使用者指的是哪一個，列出每一個的名稱、所屬資料集名稱和說明；不要替使用者選，使用者回答前不要計算。',
     candidateHit: (t, ms) => `「${t}」沒有精確符合任何成員，可能指的是：${ms}。`,
     candidateTail: '如果這個詞就是使用者的原話，先問使用者指的是哪一個，列出每一個的名稱、所屬資料集名稱和說明（只有一個時，問是不是它）；不要替使用者選，也不要把它當作符合，使用者回答前不要計算。',
-    ownPhraseFirst: '先逐一對照使用者的問題：如果某個詞是你從使用者寫的更長詞組裡截出來的，或是你改寫過的，就不要就它提問，改用使用者原話裡的完整詞組（不是整句問題）再呼叫一次 list_datasets；如果那個詞組既沒有符合也沒有候選，仍然就原來的詞提問。',
+    ownPhraseFirst: '先逐一對照使用者的問題：如果某個詞是你從使用者寫的更長詞組裡截出來的，或是你改寫過的，就不要就它提問，改用使用者原話裡的完整詞組（不是整句問題）再呼叫一次 list_datasets。',
     groupingCandidateHit: (t, ms) => `「${t}」沒有精確符合任何成員，可能指分組維度：${ms}。`,
     groupingCandidateTail: '可能的分組維度不需要追問：不要就它問使用者，它也不妨礙計算已符合的指標；只按問題本身的要求分組。',
     groupingHit: (t, ms) => `「${t}」是分組維度，不是數字：${ms}。`,
@@ -306,7 +308,7 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     severalTail: 'どれを指しているかユーザーに確認し、それぞれの名前、データセット名、説明を示してください。代わりに選ばず、回答があるまで計算しないでください。',
     candidateHit: (t, ms) => `「${t}」はどのメンバーにも完全には一致しません。候補：${ms}。`,
     candidateTail: 'ユーザー自身が書いた語については、どれを指しているかユーザーに確認し、それぞれの名前、データセット名、説明を示してください（候補が一つなら、それで合っているか確認してください）。代わりに選ばず、候補を一致として扱わず、回答があるまで計算しないでください。',
-    ownPhraseFirst: 'まず各語を質問と照らし合わせてください。ユーザーが書いたより長い語句から切り出した語や、言い換えた語については確認せず、ユーザーが書いたとおりの語句（質問文全体ではなく）でもう一度だけ list_datasets を呼び出してください。その語句に一致も候補もなければ、元の語について確認してください。',
+    ownPhraseFirst: 'まず各語を質問と照らし合わせてください。ユーザーが書いたより長い語句から切り出した語や、言い換えた語については確認せず、ユーザーが書いたとおりの語句（質問文全体ではなく）でもう一度だけ list_datasets を呼び出してください。',
     groupingCandidateHit: (t, ms) => `「${t}」はどのメンバーにも完全には一致しません。グループ分けの候補：${ms}。`,
     groupingCandidateTail: 'グループ分けの候補は確認の対象ではありません。ユーザーに確認せず、一致した指標の計算も止めないでください。グループ分けは質問が求めるとおりにしてください。',
     groupingHit: (t, ms) => `「${t}」は数値ではなくグループ分けです：${ms}。`,

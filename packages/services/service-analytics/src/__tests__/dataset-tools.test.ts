@@ -1642,10 +1642,10 @@ describe('[#35005] list_datasets nextStep — a grouping or time word with a can
   it('[#34996] before either question the note sends a word that is not the user\'s own again, and the question is for the user\'s own word', async () => {
     /** The re-send sentence, by the locale the context names. */
     const OWN_PHRASE_FIRST: Record<string, string> = {
-      en: 'a word you cut out of a longer phrase the user wrote, or reworded, is not asked about; call list_datasets once more with that phrase exactly as written, never the whole question. If that phrase matches nothing and has no possible reading, the word is asked about after all.',
-      'zh-CN': '如果某个词是你从用户写的更长词组里截出来的，或是你改写过的，就不要就它提问，改用用户原话里的完整词组（不是整句问题）再调用一次 list_datasets；如果那个词组既没有匹配也没有候选，仍然就原来的词提问。',
-      'zh-TW': '如果某個詞是你從使用者寫的更長詞組裡截出來的，或是你改寫過的，就不要就它提問，改用使用者原話裡的完整詞組（不是整句問題）再呼叫一次 list_datasets；如果那個詞組既沒有符合也沒有候選，仍然就原來的詞提問。',
-      'ja-JP': 'ユーザーが書いたより長い語句から切り出した語や、言い換えた語については確認せず、ユーザーが書いたとおりの語句（質問文全体ではなく）でもう一度だけ list_datasets を呼び出してください。その語句に一致も候補もなければ、元の語について確認してください。',
+      en: 'a word you cut out of a longer phrase the user wrote, or reworded, is not asked about; call list_datasets once more with that phrase exactly as written, never the whole question.',
+      'zh-CN': '如果某个词是你从用户写的更长词组里截出来的，或是你改写过的，就不要就它提问，改用用户原话里的完整词组（不是整句问题）再调用一次 list_datasets。',
+      'zh-TW': '如果某個詞是你從使用者寫的更長詞組裡截出來的，或是你改寫過的，就不要就它提問，改用使用者原話裡的完整詞組（不是整句問題）再呼叫一次 list_datasets。',
+      'ja-JP': 'ユーザーが書いたより長い語句から切り出した語や、言い換えた語については確認せず、ユーザーが書いたとおりの語句（質問文全体ではなく）でもう一度だけ list_datasets を呼び出してください。',
     };
     /** What conditions each question: the word is the user's own. */
     const USERS_OWN: Record<string, readonly [alone: string, beside: string]> = {

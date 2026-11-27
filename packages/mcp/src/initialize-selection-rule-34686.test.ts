@@ -277,8 +277,7 @@ describe('[#35005] initialize instructions — the ask-back is scoped in the sam
     const list = getDatasetToolDefinitions().find((d) => d.name === LIST_DATASETS_TOOL_NAME)!;
     const OWN_WORD = (tool: string) =>
       'Only the user\'s own word is asked about: one you cut out of a longer phrase of the question, or reworded, '
-      + `is sent to ${tool} once more as the user wrote it instead, never the whole question; if that phrase `
-      + 'matches nothing and has no candidate, the word is asked about after all.';
+      + `is sent to ${tool} once more as the user wrote it instead, never the whole question.`;
     expect(text).toContain(OWN_WORD('list_datasets'));
     expect(list.description).toContain(OWN_WORD('`list_datasets`'));
     // Each follows the question it conditions, and comes before the grouping sentence.
