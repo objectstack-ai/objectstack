@@ -1,5 +1,88 @@
 # @objectstack/formula
 
+## 19.0.0-next.1
+
+### Minor Changes
+
+- 561fe12: fix(formula)!: a flow condition that orders a bare date field against text before date arithmetic on `record.FIELD` or `previous.FIELD` is now refused, as its all-bare and all-root spellings already were
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/objectstack-formula/SKILL.md` already states "The build refuses `end - start`, `date + n`, `today() + 30`" and names no site or spelling it is limited to, so it now holds for this flow-condition spelling as written
+  
+  <!-- adr-0087: registered flow-condition-bare-ordering-before-record-date-arithmetic-refused -->
+  
+  **BREAKING** accept-set narrowing. In a flow condition (a start, edge or `decision` branch condition) the run binds the record's fields under their bare names and also as `record`, with the row before the write as `previous`. A condition that first orders a `date` or `datetime` field's bare name against a text literal and then does arithmetic against a number on a `record.FIELD` / `previous.FIELD` read, such as `due_date > "2026-01-01" && record.due_date + 1 > 5`, passed `os validate` and the publish door with no finding. The flow then failed on every run, because the field reaches the run as its text and the evaluator cannot add a number to it. The all-bare spelling (`due_date > "2026-01-01" && due_date + 1 > 5`) and the all-root spelling (`record.due_date > "2026-01-01" && record.due_date + 1 > 5`) were refused already.
+  
+  - **The verdict.** The mixed spelling now gets the all-root spelling's verdict: `date-text-arithmetic-run-fails` on a record-triggered flow or a sweep of the typed object, `date-text-arithmetic-run-may-fail` elsewhere, naming the read as written. A root read keeps the row's arm where bare names are unproven. Where a flow variable holds the bare name, the ordering is not the field's, and the root read's arithmetic takes `date-arithmetic-run-fails`, as `record.due_date + 1 > 5` alone does.
+  - **Where.** `os validate` / `os build` (`validateStackExpressions`) report an `error`, and the flow publish door refuses the publish with `INVALID_METADATA` (422). `registerFlow` logs it as an advisory and still registers the flow, so a stored flow keeps its run-time behaviour until it is next published.
+  - **Not refused.** The same bare ordering beside an ordering of the root read (`due_date > "2026-01-01" && record.due_date < today()`), and `daysBetween` / `addDays` over it. The run-time evaluator is unchanged.
+  
+  ## FROM → TO
+  
+  | FROM | TO |
+  |:---|:---|
+  | `due_date > "2026-01-01" && record.due_date + 1 > 5` | `due_date > "2026-01-01" && daysBetween(record.due_date, today()) > 5` (days past due) or `due_date > "2026-01-01" && addDays(record.due_date, 1) < today()` (a shifted date) |
+  | `due_date > "2026-01-01" && previous.due_date - 7 < today()` | `due_date > "2026-01-01" && addDays(previous.due_date, -7) < today()` |
+  
+  One-line fix: in a flow condition, never add or subtract a number on a date field read through `record` or `previous`, whatever precedes it; use `daysBetween(a, b)` for a span and `addDays(d, n)` to shift a date.
+
+### Patch Changes
+
+- 0196476: fix(studio): a list condition built in Studio is the membership the validator prescribes for its site, so it no longer faults on a sparse action row or on a `previous` that is null on a create
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `@objectstack/formula` exports `listMembershipSource(read, member, contains, filterCompiled?)` and its `ListSubjectRead` type: the list-membership test for one site, unparenthesised. The `list-equality` refusal's rewrite is this text in parentheses. The Studio builders now take their spelling from the same place, for the two sites they write: `has(S) && S != null && V in S` (complement `!has(S) || S == null || !(V in S)`) for a `record.` or `previous.` read, and `S != null && V in S` for a bare name in a flow. The third arm, `S.contains(…)` where the condition compiles to a query filter (a sharing rule's `condition`), is the validator's alone: no Studio host tells the builder that a mount is filter-compiled, so the builders never write it (follow-up: objectstack-ai/objectstack#37847).
+  
+  The Studio condition builder and the flow edge's condition rows (`@object-ui/app-shell`) write membership through it. Before, both wrote `S != null && V in S` for every subject, and on an action's `visible` / `disabled` / `pressed`, whose row carries only the fields the list fetched, `record.labels != null` faults with "No such key" when `labels` is absent; on a create `previous` is null and `previous.labels != null` faults the same way. A bare name in a flow's start condition is written as before.
+  
+  A `record.` or `previous.` condition the builder stored in the old unguarded spelling opens in the raw CEL editor unchanged instead of as a row. Nothing else to migrate: rebuilding the row in the builder writes the guarded form.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [91875c7]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

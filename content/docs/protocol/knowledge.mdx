@@ -977,7 +977,8 @@ then rolls back, the index is wrong in one of two ways:
 
 The row's next event or a `reindexSource` repairs a row that still exists. A
 document built from an **insert** that rolled back has no row left to repair it
-from; it stays until a complete reindex purges it (below).
+from; it stays until a complete reindex purges it (below) — at the latest, the
+next [reconcile](#reconcile-keeping-the-index-correct).
 
 `data.record.restored` is
 published after the restore's own unit has committed.
@@ -989,17 +990,20 @@ published after the restore's own unit has committed.
   back-pressure.
 
 <Callout type="warn">
-  **A predicate write leaves the index stale.** A `multi: true` update/delete
-  reaches `updateMany` / `deleteMany`, which report only an affected row count,
-  so it publishes the aggregate `data.records.updated` / `data.records.deleted`
+  **A predicate write leaves the index stale until its reconcile.** A
+  `multi: true` update/delete reaches `updateMany` / `deleteMany`, which report
+  only an affected row count, so it publishes the aggregate
+  `data.records.updated` / `data.records.deleted`
   ([#4639](https://github.com/objectstack-ai/objectstack/issues/4639)) rather
   than per-record events. A knowledge index is a per-record projection and
-  `matched: 40` names no record, so there is no upsert or delete to derive —
-  the service logs a warning naming the object and count instead of failing
-  silently. A complete `reindexSource` refreshes the documents of rows that
-  still exist and match, and — over an adapter that implements
-  `listDocuments` — purges those of deleted rows and of rows that stopped
-  matching. Over an adapter that does not, they stay in the index.
+  `matched: 40` names no record, so there is no upsert or delete to derive.
+  Instead the event asks for a [reconcile](#reconcile-keeping-the-index-correct)
+  of every source over the object, which starts once the object has had no
+  further predicate write for two minutes (at the latest ten minutes after the
+  first), and the service logs a warning naming the object, the count and the
+  sources. Over an adapter that does not implement `listDocuments` no
+  reconcile can repair the index, and the warning says the documents of
+  deleted rows and of rows that stopped matching stay in it.
 </Callout>
 
 ### Reindex: skip and purge
@@ -1075,9 +1079,58 @@ de-indexed too.
   retention.
 
 Application-level predicate writes are not de-indexed as they happen. Their
-stale documents are removed by the next complete `reindexSource`, over an
-adapter that implements `listDocuments` ([Reindex: skip and
-purge](#reindex-skip-and-purge)); nothing runs that reindex on a schedule yet.
+stale documents are removed by the reconcile they ask for (below), over an
+adapter that implements `listDocuments`.
+
+### Reconcile: keeping the index correct
+
+Events keep an index fresh; the reconcile keeps it correct (ADR-0161 K1).
+`KnowledgeService.reconcileSources()` walks every source it covers with a
+complete build — the same walk as the first build and `os knowledge rebuild`,
+under the same cluster lease and fence, with the same [skip and
+purge](#reindex-skip-and-purge) and the same `completeBuild`. Its build record
+says `trigger: 'reconcile'`. One reconcile repairs:
+
+- a document whose row was deleted, or left `where`, by a predicate write;
+- a document built from an insert that rolled back;
+- a row whose event was lost, or whose sync failed;
+- a row changed while the embedder was down.
+
+A document whose row did not change is skipped, so it is not sent to the
+embedding provider again: a reconcile of a current index costs a read of
+every row the source's `where` matches.
+
+**What it walks.** An `object` source whose `refresh.onRecordChange` is not
+`false`, with a data engine bound, on an adapter that implements
+`listDocuments`. An adapter without `listDocuments` can neither skip nor
+purge, so a walk would re-embed every document and remove nothing: such a
+source is left alone, and the service says so once per source at `warn`,
+naming `os knowledge rebuild`. Sources are walked one after another; a build
+of a source another node holds is `not-run` on this one.
+
+**The index state.** The reconcile is the third moment the service reads a
+source's index state, beside the boot and a source reload. A source whose
+state reads `nothing`, `new-fingerprint`, `recipe-changed` or
+`no-recipe-hash` is built as the boot would build it, a new generation for a
+new fingerprint: a split or embedder setting saved while the server runs is
+picked up by the next reconcile instead of at the next restart. The build's
+start line says what it costs, as every build's does.
+
+**When it runs.**
+
+- **Daily.** `KnowledgeServicePlugin` schedules one job, `knowledge:reconcile`,
+  on the platform's job service, at 03:00 UTC (`'0 3 * * *'`). The plugin's
+  `reconcile` option moves it (`{ cron, timezone }`) or turns it off
+  (`false`, which also stops the predicate-write reconcile). A run whose walk
+  of some source failed, lost its lease or timed out is `degraded` in the
+  job's run history, naming the source; every other run is `success`. With no
+  job service composed, the plugin says once at boot that nothing reconciles
+  on a schedule.
+- **After a predicate write**, as above: one request per source however many
+  bulk events arrive, started once the object has had no further predicate
+  write for two minutes, and at the latest ten minutes after the first.
+
+The record of the last build stays in memory on the node that ran it.
 
 ---
 

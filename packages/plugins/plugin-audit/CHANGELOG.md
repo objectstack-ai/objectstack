@@ -1,5 +1,117 @@
 # @objectstack/plugin-audit
 
+## 19.0.0-next.1
+
+### Minor Changes
+
+- 0296d97: feat(plugin-audit): the audit log is sealed by default, and sealed rows expire by whole checkpoints under a signed expiry amendment
+  
+  Clause-②: yes (narrowing) — narrowed: because `sys_audit_log` now declares `lifecycle.seal` on every deployment, `os migrate audit-key-material`, `audit-mail-bodies`, `audit-metadata-bodies` and `audit-side-copies` with `--apply` refuse on SQLite or Turso without `--sealer-stopped`, and on Postgres or MySQL take the audit seal lock and refuse when a sealer pass still holds it after ten minutes, where 18.6.0 ran them unlocked on a deployment that sealed nothing; `os audit verify` exits 1 on a row in a window at or before the newest window a trusted `window` checkpoint names that no checkpoint holds (`late`, unsealed), where it read the window unsealed and exited 0; `os audit verify` refuses with `archive_not_connected` and exits 2 wherever the `archive` datasource is declared and not connected on its own boot, where 18.6.0 printed that nothing is sealed and exited 0; `verifyAuditLedger` throws for `sys_audit_log` when the `archive` datasource it archives to is not connected and no `archive` is passed; and on an object whose packaged metadata declares `lifecycle.seal` and no `archive`, a `lifecycle` settings override of `retention.maxAge` or `ttl.expireAfter` below the declared window, global or for one organization, is rejected and reported at `error`, and the declared window applies, where 18.6.0 applied it. An object created at runtime is outside the override arm and outside signed expiry: it keeps the 18.6.0 row-cutoff retention sweep, and a settings override applies to it; the `os audit verify` arms hold for it as for any sealed object. This breaks the bound changeset `35c9a30` (#33675) set, "No object declares `lifecycle.seal` by default, so a deployment that did not opt in sees no change": this release is the one that opts every deployment in. Widened: `@objectstack/objectql` `LifecycleService.registerExpiryPrefix` and the types `LifecycleExpiryPrefix`, `LifecycleExpiryPrefixRequest` (with its `tenants` windows and `tenantColumn`), `LifecycleExpiryPrefixRun`, the predicate `takesSignedExpiry` with its type `SignedExpiryRegistryLike`, and three optional owner reads on `LifecycleEngineLike.registry`; a sweep entry's `policy` gains `'expiry'` and `skipped[].reason` gains `seal-expiry-pending` and `seal-delete-unsupported`.
+  Metadata-protocol: semantic — on an object whose packaged metadata declares `lifecycle.seal`, the authored `retention.maxAge`, `ttl.expireAfter` and `archive.keep` no longer delete a row at its row cutoff: rows leave by whole checkpoints under a signed expiry amendment, counted to the start of a UTC day, at most 10,000 a sweep, and not at all while no sealer runs; an object created at runtime keeps its row cutoff
+  Skills-docs: follow-up owed — this claim's second PR (amendment 7193137455) rewrites `skills/objectstack-data/rules/lifecycle.md`, which still says the sweeper deletes sealed rows
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: the moved answers are whether an os migrate audit-* --apply run may proceed while a sealer could be sealing sys_audit_log, how os audit verify reads a lagging chain, and when a sealed row may be deleted. A declaration keeps its meaning as a lower bound, so no author's declaration needs rewriting. The one-line fix for each is in the body. -->
+  
+  **BREAKING** for operators and library callers, because the audit log is now sealed on every deployment:
+  
+  - **`os migrate audit-* --apply` on SQLite or Turso** stops before writing and names the flag. Fix: stop every server that seals the database, then run it again with `--sealer-stopped`.
+  - **The same run on Postgres or MySQL** waits up to ten minutes for a sealer pass in flight, then refuses having changed nothing. Fix: run it again once that pass has finished.
+  - **`os audit verify` exits 1** on a row it reads `late` and unsealed in a window another chain of the object already sealed. Fix: none is owed by the command; read the rows the report names (a chain a fault left behind), and run it again after the sealer's next pass.
+  - **`os audit verify` exits 2** (`archive_not_connected`) where the `archive` datasource is declared and the command's boot does not connect it. Fix: declare the datasource with `autoConnect: true`, or make it reachable from where the command runs.
+  - **`verifyAuditLedger`** (`@objectstack/plugin-audit`) throws for `sys_audit_log` when its `archive` datasource is not connected. Fix: pass `archive`, for example `archive: () => 'none'` where the deployment has no archive datasource.
+  - **On a sealed object with no `archive` whose lifecycle is declared in packaged metadata, a retention override cannot shorten the declared window.** An override below it is rejected at every sweep, reported at `error` (`floorViolations` on the sweep report), and the declared window applies. On an object that archives, an override still sets when rows move to the archive. Fix: remove the override or raise it to at least the declared window; to keep rows for less time, shorten the window the object declares.
+  
+  Every dry run is unchanged. A deployment's own objects that do not declare `lifecycle.seal` keep the row-cutoff retention they had.
+  
+  ADR-0154 D8 and D10 (#31908, slice P4c, the last one).
+  
+  - **`sys_audit_log` is sealed.** Its lifecycle declares `seal: { valueFields: ['old_value', 'new_value', 'metadata'] }`, so every deployment whose `AuditPlugin` has a crypto provider (`os serve` hands it one) signs each hour's audit rows into a per-organization checkpoint, and `os audit verify` checks them. The three value columns enter each checkpoint as salted commitments; every other column enters in clear.
+  - **Sealed rows leave only by whole checkpoints.** Signed expiry covers objects whose lifecycle is declared in packaged metadata; an object created at runtime keeps the 18.6.0 row-cutoff retention sweep, its rows then reading as missing. Extending signed expiry to runtime-created objects is a separate card. The LifecycleService no longer deletes a row of a sealed object whose lifecycle is declared in packaged metadata by a row cutoff (`retention.maxAge`, `ttl.expireAfter`, or the archive's `keep` prune). It hands each policy to the sealed expiry the audit sealer registers (`LifecycleService.registerExpiryPrefix`, `@objectstack/objectql`). Per chain, the sealer takes the consecutive checkpoints from the chain's first remaining one whose windows ended before the cutoff (aligned down to a UTC day, so once its backlog is drained a chain gains at most one expiry amendment a day), each admitted under a trusted signing key, at most 10,000 rows a sweep. It signs and stores the chain's `expiry` amendment first. The sweep then deletes exactly those rows, by id, from the hot store and the archive, and only after them the checkpoints and their seeds. A sweep stopped part way resumes under the stored amendment and signs no second one. A run a reap guard vetoes in part is not completed and is retried. The verifier reads an expired row as `expired` while its checkpoint stands, and after it is gone honours the range as before (D8).
+  - **`os migrate audit-* --apply` on SQLite or Turso now needs `--sealer-stopped` for the audit log.** The rule 18.6.0 set for a sealed object now holds on every deployment, since `sys_audit_log` is one: stop every server that seals the database, then run with the flag. That includes the `os migrate audit-side-copies --apply` an upgrade from 18.4.0 or earlier runs. Postgres and MySQL take the audit seal lock, and a dry run is unchanged.
+  - **No sealer, no deletion.** While no sealed expiry is registered (an `AuditPlugin` with no crypto provider, a one-shot boot), a sealed object's rows past their policy are kept, the archive copy still runs, the sweep reports `seal-expiry-pending`, and the lifecycle service says so once at `warn`; such a host keeps `sys_audit_log` past `archive.keep`, and its sealer reports the missing provider hourly at `error`. An archive store with no `bulkDelete` is never planned (`seal-delete-unsupported`), so no amendment is signed over rows it could not delete. A chain whose first remaining checkpoint does not follow its last expiry (a checkpoint removed outside the platform), or whose next checkpoint does not verify under a trusted key, is not expired past that point, and the sealer says so. An expiry acts only on the chain's own checkpoints and amendments, linked in order; a stopped expiry is resumed only over checkpoints that also each verify under a trusted key and run on to the amendment's last sequence and digest; otherwise nothing in its range is deleted, and the sealer says so. The verifier holds an expiry it honours to the same. An expiry deletes rows for good: a deleted row cannot be restored from the ledger.
+  - **On a sealed object with no `archive`, a retention override cannot shorten the declared window.** `AuditPlugin` registers a retention floor (the mechanism the job queue uses for its idempotency window) for every object whose packaged metadata declares `lifecycle.seal` and no `archive`, at its declared `retention.maxAge` and `ttl.expireAfter`, refreshed before every sealer pass so it follows the declaration. An override, global or for one organization, may lengthen the window; one below it is rejected and the declared window applies. `archive.keep` takes no override. A lifecycle service that takes a sealed expiry but no retention floors is given no expiry, so its sealed rows are kept, and the plugin says so at `error`.
+  - **A tenant-scoped retention override applies to its organization's chain where it is set on the chain column.** Tenant windows are set on the object's `organization_id` column, so this holds on an object chained by it (`seal.chainField: 'organization_id'`). The lifecycle service hands each tenant's window, through the same floors, to the sealed expiry (`LifecycleExpiryPrefixRequest.tenants`), with the column the windows are set on (`LifecycleExpiryPrefixRequest.tenantColumn`). Where that is the object's chain column, an organization's chain expires under its own window and its amendment signs that value. Every other chain expires under the longest window configured: the chain of rows about no organization, and every chain of an object whose windows are set on another column than its chain column, which may hold rows of several organizations. On such an object a shorter tenant window has no effect on its sealed rows: they are kept to the longest. No row expires under a window shorter than one set for it.
+  - **A fully expired chain continues.** Its next checkpoint chains onto the expiry: sequence after the expiry's last, linked to its `last_removed_digest`.
+  - **`os audit verify` stays loud for a chain a fault left behind** (seat ruling 6885452378, ADR-0154 D3 as amended): a window that starts at or before the newest window a trusted `window` checkpoint names is sealed, so a row there that no checkpoint holds reads `late` and unsealed, and the check fails.
+  - **The verify harness hands its crypto provider to `AuditPlugin`.** `bootStack` gives an `AuditPlugin` it mounts (an `extraPlugins` entry, a stack `plugins` entry, or the provider `requires: ['audit']` constructs) the same `harnessCryptoProvider()` instance that settings and the engine get, never a bare `LocalCryptoProvider`; an instance composed with its own provider keeps it.
+  - The `lifecycle.seal` description no longer says the retention sweeper deletes sealed rows.
+
+### Patch Changes
+
+- 9b99640: feat(spec,plugin-audit): an activity milestone's timeline row reads in the reader's language — `objects.<object>._milestones.<field>.<value>.summary`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37585
+  
+  - **Translation slot.** An object translation accepts `_milestones`, keyed by an `activityMilestones` entry's watched `field` and then the `value` it fires on, each carrying `summary`: the milestone's template in that language, with the same `{field}` tokens. `milestones` and `activityMilestones` are refused, and the refusal names `_milestones` as the key to write. `resolveObjectMilestoneSummary` (`@objectstack/spec/system`) reads it along the locale chain.
+  - **Timeline rows.** A fired milestone's `sys_activity` row now stores a summary code (`metadata.summary_message`, `key: 'activityMilestone'`): the pair, and each interpolated token's value with the select option it matched. On a read whose caller has a locale, a language that translates the milestone serves the row's `summary` composed from its template, a select token named by the option label in that language. The stored `summary` is unchanged — the authored sentence — and a language with no entry, a read with no locale, and every row written before this change read it as stored. A tenant that reworded a packaged milestone's `summary` keeps its words. The field redaction still judges the composed text by the fields the row was composed from.
+  - **Extraction and references.** `os i18n extract` scaffolds the key for each milestone pair (the first entry of a repeated pair, the one that fires), and the translation-reference rule flags a `_milestones` key over a pair no milestone of the object declares.
+  - **Docs.** `content/docs/ui/translations.mdx` and the i18n standard's reference table name the key.
+- 44ccf94: fix(plugin-audit): a milestone row written before its template gained a token reads its stored sentence, not a translation with a hole
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A fired milestone's activity row now also stores the names of every `{token}` its template held (`names` in the row's summary code). A reader whose language translates the milestone composes the translation only when each token it names either has the row's stored value or was in the template and empty; a token the app added to the template after the row was written, or one only the translation names, leaves the row's stored sentence in place, which has no hole. A row written before this change carries no names, so it composes only when every token of the translation has a stored value.
+  
+  Also: the `{token}` pattern has one exported definition (`milestoneTokenRe`, `activity-summary-message.ts`) that the writer and the reader share; a read answers each milestone's translation once and reads each object's packaged base once, instead of once per row; and two `@objectstack/spec` doc comments on `scalarOverridesPackagedBase` now name the five scalars it is asked about.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e69fa46]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/objectql@19.0.0-next.1
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/platform-objects@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+  - @objectstack/plugin-hono-server@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

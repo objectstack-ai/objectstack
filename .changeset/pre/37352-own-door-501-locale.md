@@ -3,6 +3,8 @@
 '@objectstack/runtime': patch
 ---
 
+**Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+
 Clause-②: yes (widening)
 Metadata-protocol: none
 Skills-docs: none (no page under `skills/**` names the own-door bridge or its `501` sentences)

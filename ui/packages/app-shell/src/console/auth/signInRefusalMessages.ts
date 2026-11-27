@@ -77,5 +77,45 @@ export function signInRefusalMessages(
     ACCOUNT_TEMPORARILY_LOCKED: t('auth.login.errors.twoFactorLocked', {
       defaultValue: 'Too many failed attempts. Your account is temporarily locked. Try again later.',
     }),
+    // objectstack#34171 — a cloud-managed runtime refuses the password sign-in
+    // with 409 `RESOURCE_CONFLICT` (plugin-auth `cloudManagedRefusal`, and the
+    // hosted relay in front of it): its people sign in through its identity
+    // provider, whose button the page draws above the form. Self-hosted
+    // deployments never answer this code on sign-in.
+    RESOURCE_CONFLICT: t('auth.login.errors.managedPasswordSignIn', {
+      defaultValue:
+        "This deployment signs you in through its identity provider, so a password can't be used here. Use the identity provider's button above to sign in.",
+    }),
+  };
+}
+
+/**
+ * Refusal `code` → localized text for the doors that request, reset or set a
+ * password: the forgot-password form's `errorMessages`, the reset-password
+ * page and the set-password page (objectstack#34171).
+ *
+ * Three plugin-auth producers answer 409 `RESOURCE_CONFLICT` on these doors,
+ * and the sentence is true for the reader of each: the person signs in through
+ * the identity provider, and no local password is set or reset here for them.
+ *
+ *   - `cloud-managed.ts`: a cloud-managed runtime sets or resets no local
+ *     password for anyone (and the hosted relay in front of it answers the same).
+ *   - `sso-only-local-password.ts`: on a self-hosted deployment in SSO-only
+ *     mode, an account the identity provider provisions has no local password
+ *     set or reset (`reset-password`, `set-initial-password`).
+ *   - `pending-sso-marker.ts`: a pending SSO person, added ahead of a first
+ *     single sign-on, in every mode.
+ *
+ * The sentence sends the person to the identity provider's button on the
+ * sign-in page. It is kept apart from `signInRefusalMessages` on purpose:
+ * that map's two-factor sentences (`INVALID_CODE`, …) describe the sign-in step
+ * and would be wrong on a reset door. Any other code keeps the server's text.
+ */
+export function passwordDoorRefusalMessages(t: TranslateFn): Record<string, string> {
+  return {
+    RESOURCE_CONFLICT: t('auth.login.errors.managedPasswordReset', {
+      defaultValue:
+        "This deployment signs you in through its identity provider, so no password is set or reset here. Sign in with the identity provider's button on the sign-in page.",
+    }),
   };
 }

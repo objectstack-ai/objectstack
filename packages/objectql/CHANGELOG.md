@@ -1,5 +1,187 @@
 # @objectstack/objectql
 
+## 19.0.0-next.1
+
+### Minor Changes
+
+- 0296d97: feat(plugin-audit): the audit log is sealed by default, and sealed rows expire by whole checkpoints under a signed expiry amendment
+  
+  Clause-②: yes (narrowing) — narrowed: because `sys_audit_log` now declares `lifecycle.seal` on every deployment, `os migrate audit-key-material`, `audit-mail-bodies`, `audit-metadata-bodies` and `audit-side-copies` with `--apply` refuse on SQLite or Turso without `--sealer-stopped`, and on Postgres or MySQL take the audit seal lock and refuse when a sealer pass still holds it after ten minutes, where 18.6.0 ran them unlocked on a deployment that sealed nothing; `os audit verify` exits 1 on a row in a window at or before the newest window a trusted `window` checkpoint names that no checkpoint holds (`late`, unsealed), where it read the window unsealed and exited 0; `os audit verify` refuses with `archive_not_connected` and exits 2 wherever the `archive` datasource is declared and not connected on its own boot, where 18.6.0 printed that nothing is sealed and exited 0; `verifyAuditLedger` throws for `sys_audit_log` when the `archive` datasource it archives to is not connected and no `archive` is passed; and on an object whose packaged metadata declares `lifecycle.seal` and no `archive`, a `lifecycle` settings override of `retention.maxAge` or `ttl.expireAfter` below the declared window, global or for one organization, is rejected and reported at `error`, and the declared window applies, where 18.6.0 applied it. An object created at runtime is outside the override arm and outside signed expiry: it keeps the 18.6.0 row-cutoff retention sweep, and a settings override applies to it; the `os audit verify` arms hold for it as for any sealed object. This breaks the bound changeset `35c9a30` (#33675) set, "No object declares `lifecycle.seal` by default, so a deployment that did not opt in sees no change": this release is the one that opts every deployment in. Widened: `@objectstack/objectql` `LifecycleService.registerExpiryPrefix` and the types `LifecycleExpiryPrefix`, `LifecycleExpiryPrefixRequest` (with its `tenants` windows and `tenantColumn`), `LifecycleExpiryPrefixRun`, the predicate `takesSignedExpiry` with its type `SignedExpiryRegistryLike`, and three optional owner reads on `LifecycleEngineLike.registry`; a sweep entry's `policy` gains `'expiry'` and `skipped[].reason` gains `seal-expiry-pending` and `seal-delete-unsupported`.
+  Metadata-protocol: semantic — on an object whose packaged metadata declares `lifecycle.seal`, the authored `retention.maxAge`, `ttl.expireAfter` and `archive.keep` no longer delete a row at its row cutoff: rows leave by whole checkpoints under a signed expiry amendment, counted to the start of a UTC day, at most 10,000 a sweep, and not at all while no sealer runs; an object created at runtime keeps its row cutoff
+  Skills-docs: follow-up owed — this claim's second PR (amendment 7193137455) rewrites `skills/objectstack-data/rules/lifecycle.md`, which still says the sweeper deletes sealed rows
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: the moved answers are whether an os migrate audit-* --apply run may proceed while a sealer could be sealing sys_audit_log, how os audit verify reads a lagging chain, and when a sealed row may be deleted. A declaration keeps its meaning as a lower bound, so no author's declaration needs rewriting. The one-line fix for each is in the body. -->
+  
+  **BREAKING** for operators and library callers, because the audit log is now sealed on every deployment:
+  
+  - **`os migrate audit-* --apply` on SQLite or Turso** stops before writing and names the flag. Fix: stop every server that seals the database, then run it again with `--sealer-stopped`.
+  - **The same run on Postgres or MySQL** waits up to ten minutes for a sealer pass in flight, then refuses having changed nothing. Fix: run it again once that pass has finished.
+  - **`os audit verify` exits 1** on a row it reads `late` and unsealed in a window another chain of the object already sealed. Fix: none is owed by the command; read the rows the report names (a chain a fault left behind), and run it again after the sealer's next pass.
+  - **`os audit verify` exits 2** (`archive_not_connected`) where the `archive` datasource is declared and the command's boot does not connect it. Fix: declare the datasource with `autoConnect: true`, or make it reachable from where the command runs.
+  - **`verifyAuditLedger`** (`@objectstack/plugin-audit`) throws for `sys_audit_log` when its `archive` datasource is not connected. Fix: pass `archive`, for example `archive: () => 'none'` where the deployment has no archive datasource.
+  - **On a sealed object with no `archive` whose lifecycle is declared in packaged metadata, a retention override cannot shorten the declared window.** An override below it is rejected at every sweep, reported at `error` (`floorViolations` on the sweep report), and the declared window applies. On an object that archives, an override still sets when rows move to the archive. Fix: remove the override or raise it to at least the declared window; to keep rows for less time, shorten the window the object declares.
+  
+  Every dry run is unchanged. A deployment's own objects that do not declare `lifecycle.seal` keep the row-cutoff retention they had.
+  
+  ADR-0154 D8 and D10 (#31908, slice P4c, the last one).
+  
+  - **`sys_audit_log` is sealed.** Its lifecycle declares `seal: { valueFields: ['old_value', 'new_value', 'metadata'] }`, so every deployment whose `AuditPlugin` has a crypto provider (`os serve` hands it one) signs each hour's audit rows into a per-organization checkpoint, and `os audit verify` checks them. The three value columns enter each checkpoint as salted commitments; every other column enters in clear.
+  - **Sealed rows leave only by whole checkpoints.** Signed expiry covers objects whose lifecycle is declared in packaged metadata; an object created at runtime keeps the 18.6.0 row-cutoff retention sweep, its rows then reading as missing. Extending signed expiry to runtime-created objects is a separate card. The LifecycleService no longer deletes a row of a sealed object whose lifecycle is declared in packaged metadata by a row cutoff (`retention.maxAge`, `ttl.expireAfter`, or the archive's `keep` prune). It hands each policy to the sealed expiry the audit sealer registers (`LifecycleService.registerExpiryPrefix`, `@objectstack/objectql`). Per chain, the sealer takes the consecutive checkpoints from the chain's first remaining one whose windows ended before the cutoff (aligned down to a UTC day, so once its backlog is drained a chain gains at most one expiry amendment a day), each admitted under a trusted signing key, at most 10,000 rows a sweep. It signs and stores the chain's `expiry` amendment first. The sweep then deletes exactly those rows, by id, from the hot store and the archive, and only after them the checkpoints and their seeds. A sweep stopped part way resumes under the stored amendment and signs no second one. A run a reap guard vetoes in part is not completed and is retried. The verifier reads an expired row as `expired` while its checkpoint stands, and after it is gone honours the range as before (D8).
+  - **`os migrate audit-* --apply` on SQLite or Turso now needs `--sealer-stopped` for the audit log.** The rule 18.6.0 set for a sealed object now holds on every deployment, since `sys_audit_log` is one: stop every server that seals the database, then run with the flag. That includes the `os migrate audit-side-copies --apply` an upgrade from 18.4.0 or earlier runs. Postgres and MySQL take the audit seal lock, and a dry run is unchanged.
+  - **No sealer, no deletion.** While no sealed expiry is registered (an `AuditPlugin` with no crypto provider, a one-shot boot), a sealed object's rows past their policy are kept, the archive copy still runs, the sweep reports `seal-expiry-pending`, and the lifecycle service says so once at `warn`; such a host keeps `sys_audit_log` past `archive.keep`, and its sealer reports the missing provider hourly at `error`. An archive store with no `bulkDelete` is never planned (`seal-delete-unsupported`), so no amendment is signed over rows it could not delete. A chain whose first remaining checkpoint does not follow its last expiry (a checkpoint removed outside the platform), or whose next checkpoint does not verify under a trusted key, is not expired past that point, and the sealer says so. An expiry acts only on the chain's own checkpoints and amendments, linked in order; a stopped expiry is resumed only over checkpoints that also each verify under a trusted key and run on to the amendment's last sequence and digest; otherwise nothing in its range is deleted, and the sealer says so. The verifier holds an expiry it honours to the same. An expiry deletes rows for good: a deleted row cannot be restored from the ledger.
+  - **On a sealed object with no `archive`, a retention override cannot shorten the declared window.** `AuditPlugin` registers a retention floor (the mechanism the job queue uses for its idempotency window) for every object whose packaged metadata declares `lifecycle.seal` and no `archive`, at its declared `retention.maxAge` and `ttl.expireAfter`, refreshed before every sealer pass so it follows the declaration. An override, global or for one organization, may lengthen the window; one below it is rejected and the declared window applies. `archive.keep` takes no override. A lifecycle service that takes a sealed expiry but no retention floors is given no expiry, so its sealed rows are kept, and the plugin says so at `error`.
+  - **A tenant-scoped retention override applies to its organization's chain where it is set on the chain column.** Tenant windows are set on the object's `organization_id` column, so this holds on an object chained by it (`seal.chainField: 'organization_id'`). The lifecycle service hands each tenant's window, through the same floors, to the sealed expiry (`LifecycleExpiryPrefixRequest.tenants`), with the column the windows are set on (`LifecycleExpiryPrefixRequest.tenantColumn`). Where that is the object's chain column, an organization's chain expires under its own window and its amendment signs that value. Every other chain expires under the longest window configured: the chain of rows about no organization, and every chain of an object whose windows are set on another column than its chain column, which may hold rows of several organizations. On such an object a shorter tenant window has no effect on its sealed rows: they are kept to the longest. No row expires under a window shorter than one set for it.
+  - **A fully expired chain continues.** Its next checkpoint chains onto the expiry: sequence after the expiry's last, linked to its `last_removed_digest`.
+  - **`os audit verify` stays loud for a chain a fault left behind** (seat ruling 6885452378, ADR-0154 D3 as amended): a window that starts at or before the newest window a trusted `window` checkpoint names is sealed, so a row there that no checkpoint holds reads `late` and unsealed, and the check fails.
+  - **The verify harness hands its crypto provider to `AuditPlugin`.** `bootStack` gives an `AuditPlugin` it mounts (an `extraPlugins` entry, a stack `plugins` entry, or the provider `requires: ['audit']` constructs) the same `harnessCryptoProvider()` instance that settings and the engine get, never a bare `LocalCryptoProvider`; an instance composed with its own provider keeps it.
+  - The `lifecycle.seal` description no longer says the retention sweeper deletes sealed rows.
+- adb65d1: feat(spec)!: `form` is a metadata type of its own — `defineForm`, `*.form.ts` and a stack's `forms:` — and the anonymous form doors read a form over both types (ADR-0159 card ②)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  ADR-0159 makes a public form a `form` item: `name` (`OBJECT.KEY`, the name it is served under), `object` (its one binding) and a form view's body at the top level, its keys taken from `FormViewSchema` by reference. A stack lists them under `forms:`, one per `*.form.ts` module built with `defineForm`. The three old `view` shapes that carry a form (a container's `form`, a `formViews` entry, a `viewKind: 'form'` item) keep loading and serving exactly as before: one projection reads them as `form` items, under the names they are served as today, and nothing an author wrote stops loading.
+  
+  `@objectstack/platform-objects` ships the `form` type's display label in its metadata-form bundles, translated in every bundled locale.
+  
+  <!-- adr-0087: registered form-type-define-form-and-packageless-list-at-form-name -->
+  
+  **BREAKING** (the protocol is narrowed, and a published export changes meaning):
+  
+  - **The export.** `defineForm` on `@objectstack/spec` and `@objectstack/spec/ui` builds a `form` item. FROM: (since the previous change) no `defineForm`; before that, the Studio metadata-form helper. TO: `defineForm({ name: 'crm_lead.web_to_lead', object: 'crm_lead', sections, sharing })`. The fix for a Studio form: `defineMetadataForm`, as the rename's own entry says; the compiler names every call (a Studio body is refused by `FormSchema`: it has no `name` and `object`).
+  - **The refusal.** A package-less `view` write that would store a LIST at a name a read-only package authors as a `form` item is refused with `400 VALIDATION_ERROR`, naming the package — on the save, on the publish of a draft saved before the gate, and on a rollback or revert that restores such a body. Items and container expansions alike. Saves admitted today that it refuses: a list at a name several packages ship; a list at a name whose base has no pair; a re-save of a row the base's pair already holds; a container that overlays the package's own. The door that remains: save the list under another key, or into an app of the environment's own. It bites for a name only from the release in which a package authors it as a `form` item.
+  
+  What lands with the type:
+  
+  - `@objectstack/spec`: `FormSchema`, `defineForm`, the registry row (`*.form.ts|yml|json`, overlay-capable, no environment overlay), `form` in the customization package's listed types, the stack's `forms` collection, the `forms` translation family (`forms.NAME` first, the `_views.KEY` title and thank-you tails as the fallback, `_views.KEY.label` never read; a form's own section copy at `forms.NAME.sections.SECTION`, with `objects.OBJECT._sections.SECTION` as its object-level default), the projection `projectViewForms`, the intake layer `formIntakeLayer` / `openFormAt`, and the error code `FORM_ADDRESS_TAKEN`.
+  - `@objectstack/metadata-protocol`: the effective `form` read resolves a form over both types in the one served-row order (a stored `view` row over a package's form keeps replacing it when the package moves to `forms:`); a `form` save, reset or delete at a package removes, in the same transaction, only that package's old-shape row that carries that same form — named as the `form` read serves it (form content only: a list of the name, and a container member served under another name, are untouched); an undo puts back the rows the publish moved, for the revert of a package commit and for a refused package publish on a runtime that cannot roll back alike, and when one view row a commit edited cannot be put back, every form item of that commit is kept as published and each is listed in `failed[]`; a `form` left open on a public address another form holds is refused with `409 FORM_ADDRESS_TAKEN`, naming both, on the save, on the publish of a draft whose address another form took after it was saved, and on a rollback to a version open on a held address (a switched-off form that keeps its link still holds the address; a write that leaves the form closed is never refused); the override gate accepts a `form` override over a base that ships the form as an old shape; a stored body whose form content cannot be read closes the links it names and is reported once per process, at `error`, the first time the form doors read it, naming the row, the links it closes and the repair save; and after a refused or undone publish the doors and the meta reads answer only committed state.
+  - `@objectstack/rest`: `GET /forms/:slug` and its submit read candidates from the effective `form` read and judge withdrawal across `form` and `view`, effective and per-package, old shapes projected first — narrowing only, in both directions; a body that cannot be read closes the links it names. `/meta/form/NAME` refuses whom `/meta/view/NAME` refuses. `GET /meta/view` answers as before.
+  - `@objectstack/lint`: `form-public-address-taken` (gating), `form-consumer-less` (advisory, never for an `overrides` item), `form-object-outside-closure` / `form-object-unknown`; the i18n walk emits `forms.NAME.*` keys and no `_views` tail for a `form` item, a form's section copy at `forms.NAME.sections.SECTION` with `objects.OBJECT._sections.SECTION` as the address it falls back to; the translation reference lint judges a `forms.NAME.sections` key against the form's named sections and their entries. No new advisory for an old shape.
+  - `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/objectql`, `@objectstack/runtime`, `@objectstack/cli`: the `forms` collection is loaded, typed, registered and counted for i18n coverage like every other; in `@objectstack/cli` a key translated at the address the walk names as its fallback is covered, and `os i18n extract` scaffolds no translated-locale value over one.
+- d58bf7a: feat(spec)!: a knowledge source is a governed metadata type, `knowledge_source`, loaded by the knowledge service
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37310. Here only the enumeration row: `skills/objectstack-platform/SKILL.md` lists the new top-level key `knowledgeSources`, and `skills/objectstack-ai/SKILL.md`'s compiled `supportKb` example writes `name` and `content`, because the 18 spelling no longer parses.
+  
+  <!-- adr-0087: registered knowledge-source-id-to-name, knowledge-source-content-fields-to-content, knowledge-source-inert-keys-removed, knowledge-source-content-lists-fields, knowledge-source-file-http-kinds-retired, knowledge-source-inert-keys-retired, knowledge-source-registration-governed -->
+  
+  ADR-0161 K4, K5, K6 and K8 item 4 (#37304).
+  
+  **BREAKING.** A knowledge source written for 18 is refused at parse until it is moved. `os migrate meta --from 18` lists every edit and `--write` applies the ones it can prove.
+  
+  | Wrote (18) | Write instead (19) |
+  |:--|:--|
+  | `id: 'support_kb'` | `name: 'support_kb'` (the value is unchanged, so the index is found again and nothing is rebuilt) |
+  | `source.contentFields: ['title', 'body']` | `source.content: ['title', 'body']` |
+  | `contentFields: ['*']` | `content` with every field named (a hand edit: only the author knows which fields may leave the row store) |
+  | `embedding`, `vectorStore`, `adapterConfig`, `refresh.cron` | delete the key: nothing read it |
+  | `source.kind: 'file'` or `'http'`, with `prefix`, `mimeTypes`, `urls`, `userAgent` | a source indexes the records of one object (`kind: 'object'`); a file or URL source has no replacement |
+  | `knowledge.indexDocument(…)`, `knowledge.deleteDocument(…)` | no call: the service builds every document from the records a source selects; `reindexSource` rebuilds a source |
+  | `KnowledgeServicePlugin({ sources: [{ id, … }] })`, `registerSource({ id, … })` | the same call with the 19 shape, or the source shipped as metadata in the stack's `knowledgeSources` |
+  
+  What changes:
+  
+  - **The type.** `knowledge_source` is registered in the metadata type registry with the one schema `KnowledgeSourceSchema`; a stack carries its sources in the new top-level collection `knowledgeSources`, in `*.knowledge-source.ts` or `.yml` files. An item can be created and changed at run time (Studio, MCP); it takes no environment overlay. Studio's menu lists the type, and the metadata form bundles carry its label in every locale. Two packages may each ship a source of one name (ADR-0150, addendum of 2026-11-25): each has its own index, and `search_knowledge` lists a package's source as `NAMESPACE-NAME` and takes that spelling in `sourceIds`.
+  - **The schema is strict.** An undeclared key is refused, never dropped. `content` is a non-empty list of field names; an empty-string member is refused, and `'*'` is refused with the instruction to list the fields: embedding is egress, and the wildcard sent every text field of a record to the embedder, including one added to the object later. Credential-class and `internal` fields stay unindexed even when named.
+  - **The loader.** `KnowledgeServicePlugin` reads the published items when it starts and follows the type while it runs: an added source is registered and built when a build is due; a changed one is registered again, and a changed `where` or `metadataFields` rebuilds inside the generation while a changed `content` or `split` builds a new one; a removed one is unregistered and its index dropped. The reap guard now follows the sources, so a retention delete on an object first indexed by a source added after boot de-indexes the row. A deployment that holds an item and mounts no knowledge service says so once at boot, naming the items.
+  - **`IKnowledgeAdapter.dropSource?(ctx)`** removes everything an adapter holds for a source: every generation, the one under construction included, and what it recorded about the index. `knowledge-memory`, `knowledge-pgvector` and `knowledge-turso` implement it, and the contract suite (`@objectstack/service-knowledge/testing`) takes a new `implements.dropSource` declaration. Over an adapter without it, a removed source's index is kept and the service says so once. An adapter is handed the source's index key as `ctx.source.name` (it was `ctx.source.id`): the bare name for a source no package holds, so an existing index is found under the same key.
+  - **A capability of its own.** New platform capability `manage_knowledge_sources`: a write of a `knowledge_source` through `/meta` (REST and the dispatcher: save, publish, rollback, delete) and through the MCP draft door needs it beside `manage_metadata`. Platform administrators hold it by default; a grant on the indexed object's records does not imply it. A caller without it is refused `403 PERMISSION_DENIED`, naming the capability. The package doors ask it too: every write to an existing package that holds a knowledge source (an item, a pending draft, or for the commit revert and the rollback a commit that touched one) needs the capability: enable, disable, publish, publish-drafts, discard-drafts, the commit revert, rollback, revert, adopt-orphans, duplicate, the manifest update and delete. A package that holds none is written as before. The install door is not asked, and neither is ensure-customization, which writes nothing of the base and creates an empty pair. For a caller without the capability the doors read the package's holding before their own request checks, so such a caller hears this `403` ahead of a `400`, `404` or `422` the door would have answered for the same request; a holding that cannot be read refuses `503` and changes nothing (a host with no metadata store holds none). A duplicate also admits each knowledge source it copies for the caller (source admission, below), and refuses the whole copy when one is refused.
+  - **Source admission at save.** Those same doors save a source only when its author may themselves search what it would index: an object of a disabled package, an object the API does not serve for `search`, a system object without `enable.aiReadable`, or a field the author may not query refuses the save `403`, naming the object or the field; a verdict that cannot be reached, or a knowledge service that is registered and cannot be resolved, refuses `503`. The fields judged are the ones the source serves and the ones its `where` reads, at save and at search: a source whose `where` reads a field a caller may not query is not searched for that caller. Over MCP it is the human who is judged. Where no knowledge service is mounted there is nothing to ask, and the save goes on.
+  - **One name, one source.** `KnowledgeServicePlugin({ sources })` and `registerSource` stay a door for the same schema and parse with it: a retired key is refused with its prescription (`400 VALIDATION_ERROR`), not converted. A source registered in code belongs to no package. It shares one slot with an environment-authored item of the same name, and the second of the two to arrive is refused `409 RESOURCE_CONFLICT`, naming both doors; a metadata item reloading its own earlier version is not a second arrival.
+  - **The push door leaves.** `IKnowledgeService.indexDocument` and `deleteDocument` are removed, with the `file` / `http` branches that served them. They are runtime-interface-only members with no metadata form, so the compiler reports each call (`TS2339`).
+  - **Removed exports**, twelve, all from `@objectstack/spec/ai`. The whole `embedding` module leaves with `embedding` and `vectorStore`, because the knowledge source was its only composer: `EmbeddingModelSchema`, `VectorStoreSchema`, `VectorStoreProviderSchema` and the types `EmbeddingModel`, `VectorStore`, `VectorStoreProvider`. The source kinds leave with `file` and `http`: `FileKnowledgeSourceSchema`, `HttpKnowledgeSourceSchema`, `KnowledgeSourceKindSchema` and the types `FileKnowledgeSource`, `HttpKnowledgeSource`, `KnowledgeSourceKind`. None has a replacement; an import of one is a compile error.
+  - **CLI.** `os knowledge status` prints the package that holds a source and no longer prints a source kind.
+
+### Patch Changes
+
+- 8071f35: fix(automation): a record-change flow's run history and its notification deliveries land again when the triggering write runs in a unit of work
+  
+  Clause-②: yes (widening) — `ObjectQL` is exported from the `@objectstack/objectql` entry, and it gains two public methods, `runOutsideOpenUnits(body)` and `runAfterOpenUnitsCommit(body)`; `@objectstack/core` gains the root export `wakeAfterOpenUnitsCommit(engine, wake)`; the `@objectstack/service-automation` interface `SuspendedRunStoreEngine` gains the matching optional member `runOutsideOpenUnits`, so an engine that does not supply it still satisfies the interface. No existing signature or accepted input narrows. `DispatchLoop`'s change is to the async context its ticks run in, and the dispatchers' change is to when a wake is sent, not to any API. The level stays `patch` because nothing a metadata author can write changes (`Metadata-protocol: none`).
+  Metadata-protocol: none
+  
+  On 19.0.0-next.0 a record-change flow fired by a write whose object carries a metadata `before*` hook, or a blocking `after*` hook that can abort, finished inside the unit of work the write door opens for that write. Two pieces of work the run starts and does not await then ran on that unit's transaction after it had committed, and the database answered "Transaction query already complete":
+  
+  - the run's terminal history row (`sys_automation_run`) never landed, so the run was missing from the Runs surfaces and from every read of its history, with an `error` line naming the persist;
+  - a `notify` node's outbox wake started the notification dispatcher's tick in the same unit, so the tick's delivery updates failed, and with them the audit rows (`sys_activity`) those updates write.
+  
+  Both now run outside the unit:
+  
+  - `ObjectQL.runOutsideOpenUnits(body)` is new: it runs work its caller starts and does not await outside every unit of work open at the call, the same exit an `async: true` hook's run takes. Its calls run on their own connection, and a rollback of the unit open at the call does not undo them.
+  - The durable run-history store writes a finished run's row through it.
+  - `DispatchLoop` (the notification, HTTP-delivery, database-queue and audit-seal loops) runs every tick in the async context it was constructed in, never in the context of the caller of `start()`, `wake()` or `wakeAt()`.
+  - A wake for a row the open unit just wrote is sent at that unit's commit, and not at all when it rolls back: `ObjectQL.runAfterOpenUnitsCommit(body)` is new, and the notification and HTTP outboxes' wake and the database queue's `publish` and `replay` wake go through it (`wakeAfterOpenUnitsCommit` in `@objectstack/core`). A tick woken inside the unit runs outside it, and on a pooled driver (Postgres, MySQL) it could not see the row yet, so the row would have waited for a later, backed-off tick. A unit opened by `ScopedContext`'s `beginTransaction` trio holds the wake back while an engine call carrying its handle runs; a wake made outside such a call, by code that holds the trio handle only explicitly, goes at once, and on a pooled driver waits one backed-off tick.
+  - A loop's home is the context it is constructed in, so a loop is constructed at boot; `DbQueueAdapter`'s first `subscribe()` under `autoStart` starts it too and belongs at boot.
+  
+  What a reader sees change: a run's history row is written beside the run, not inside the triggering write's unit, so it is not rolled back with that write, and it can land a moment after the write has returned. Read it the way you read any history row written by a run that is not awaited: wait for it to land rather than reading it once straight after the write.
+- e69fa46: refactor(objectql): the engine's own sort door judges a computed field type by the spec's predicate, as the Data API's door does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `ObjectQL.find` and `ObjectQL.findOne` refuse an order by a field whose type is computed on read (`400 INVALID_SORT`), for callers that reach the engine directly, such as hooks and flows. The engine decided "computed on read" from a `formula` literal of its own. The Data API's sort door and the sortability projection served on `GET /meta/object/:name` decide it from `@objectstack/spec/data`'s `isVirtualSearchField`. The engine door now reads that predicate too.
+  
+  Nothing changes for a caller: the spec's set holds `formula` and nothing else, so every sort is accepted or refused as before, with the same code, status and message. What changes is what happens when a computed type is added to the spec's `SEARCH_VIRTUAL_TYPES`: an in-process `find` is refused together with the Data API, instead of sending the order to a driver that has no column for it and returning the rows unsorted.
+  
+  What to do: nothing.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [0196476]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [031a19d]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [6679160]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [92b4167]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [f7f9345]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+  - @objectstack/formula@19.0.0-next.1
+  - @objectstack/metadata-protocol@19.0.0-next.1
+  - @objectstack/metadata@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes
@@ -1188,9 +1370,9 @@
   - **A `before*` write meant to survive a refusal now rolls back.** There is no per-hook opt-out: `onError: 'log'` decides only whether the hook's own throw refuses the write, not whether its writes survive a refusal elsewhere. The one exception is an append-only ledger on another datasource (an object whose `lifecycle.class` is `audit`, `telemetry` or `event`), which is written outside the unit and survives the rollback, as in any unit. **Fix, if you relied on it:** record the attempt from an `after*` hook with `async: true` (it runs only after a commit), or record it where the write is made.
   - **Inside the new unit, the rules of any unit apply,** so writes that were accepted are now refused on objects carrying such a hook:
     - A `before*` hook whose body writes a business row to an object on another datasource has that write refused with `CrossDatasourceTransactionWriteError`, and the outer write is refused with it. **Fix:** keep the objects the hook writes on the default datasource.
-    - A MongoDB default store needs a replica set for this unit, as it does for `transaction()` and for the `after*` unit already (read in the driver's code: it always opens a session transaction; not measured on a standalone server). **Fix:** run MongoDB as a replica set.
+    - A MongoDB default store needs a replica set for this unit, as it does for `transaction()` and for the `after*` unit already. Measured on a MongoDB 8.0 standalone server: every write on such an object is refused, the hook's own `ctx.api` write first, even when nothing in the write fails ("This MongoDB deployment does not support retryable writes"; adding `retryWrites=false` to the connection string does not change the answer). **Fix:** run MongoDB as a replica set.
     - A `ctx.api.transaction(...)` a `before*` hook opens joins the door's unit instead of committing on its own, and an `async: true` `after*` hook on the same write starts after the unit commits.
-    - On PostgreSQL a statement that fails at the database aborts the whole unit (`25P02`, "current transaction is aborted"), and the unit takes no savepoint around a hook's `ctx.api` write. So a `before*` hook whose `ctx.api` statement fails there (a constraint, a type error) now refuses the outer write even when the hook body catches the error, `onError: 'log'` swallows it, or its `retryPolicy` re-runs it; that write was stored before. Read in the driver's code, not measured on PostgreSQL; the measurement is carried on #34563. **Fix:** check the condition before the hook writes, or make that write from an `after*` hook with `async: true`.
+    - On PostgreSQL and on a MongoDB replica set a statement that fails at the database aborts the whole unit, and the unit takes no savepoint around a hook's `ctx.api` write. So a `before*` hook whose `ctx.api` statement fails there (a constraint, a type error) now refuses the outer write even when the hook body catches the error, `onError: 'log'` swallows it, or its `retryPolicy` re-runs it (the retry is refused too); that write was stored before. Measured on PostgreSQL 16 and a MongoDB 8.0 replica set with a unique-constraint failure (#34563): the outer write is refused with the database's own error, `25P02` ("current transaction is aborted") on PostgreSQL and code `251` ("Transaction … has been aborted") on MongoDB, and neither the row nor the hook's writes are stored. On SQLite the same hooks let the write through. **Fix:** check the condition before the hook writes, or make that write from an `after*` hook with `async: true`.
   - **Unchanged:** a write already inside a unit (a caller's `transaction()`, an atomic batch or cascade) joins it, and that unit's owner still decides. No unit is opened for a hook registered in code with `registerHook` (the platform's own audit stamps among them), a write with `skipAutomations`, an object whose datasource is not the default one, or a default driver with no transactions (ADR-0119 D1, such as a libSQL remote transport). On those a `before*` hook's writes stay stored after a refusal, as the refusal's message says.
   - **Cost:** one transaction per write on objects that carry such a hook. On SQLite the write lock is held through the whole `before*` chain, including awaited work inside the hooks. Objects without such a hook pay one map lookup.
 - a2bb7d5: feat(objectql): a bulk update recomputes its parents' roll-up summaries once, at the end of the batch

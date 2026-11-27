@@ -79,6 +79,7 @@ export interface CoverageIssue {
     | 'permission'
     | 'book'
     | 'mapping'
+    | 'package'
     | 'metadataForm';
   /** Human-readable explanation. */
   message: string;
@@ -403,6 +404,10 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   // A named import mapping's label (`mappings.<m>.label`) — the name the
   // import wizard offers it by, reported as `i18n/missing-mapping` (#34939).
   mapping: 'mapping',
+  // A package's display name and description (`packages.<id>.name` /
+  // `.description`) — what Setup's package list and Studio's package switcher
+  // call it, reported as `i18n/missing-package` (#35513).
+  package: 'package',
   metadataType: 'metadataForm',
   metadataFormSection: 'metadataForm',
   metadataFormField: 'metadataForm',
@@ -431,6 +436,7 @@ const SOURCE_NOUN: Record<CoverageIssue['source'], string> = {
   permission: 'Permission set',
   book: 'Book',
   mapping: 'Import mapping',
+  package: 'Package',
   metadataForm: 'Metadata form',
 };
 
@@ -480,6 +486,7 @@ const SOURCE_SURFACE: Record<CoverageIssue['source'], string> = {
   permission: 'permission sets',
   book: 'doc books',
   mapping: 'import mappings',
+  package: 'packages',
   metadataForm: 'metadata forms',
 };
 

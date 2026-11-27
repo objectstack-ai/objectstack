@@ -88,12 +88,15 @@ export const PLATFORM_TOOLS_BY_PACKAGE: Readonly<Record<string, readonly string[
    * (cloud#3656), and the `ask` agent's read-only `get_record_history`, which
    * reads one record's change history the user may see so a chat can undo the
    * last edit — the restore itself still goes through a confirm card
-   * (cloud#4347).
+   * (cloud#4347), and the `ask` agent's `ask_which`, which writes nothing:
+   * when a data question has 2–3 plausible readings it returns them to the
+   * user as a question and ends the turn (cloud#4773).
    */
   'service-ai-studio': [
     'add_field',
     'apply_blueprint',
     'apply_edit',
+    'ask_which',
     'create_metadata',
     'create_object',
     'create_package',

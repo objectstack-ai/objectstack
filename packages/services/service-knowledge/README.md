@@ -11,6 +11,14 @@ item saved in Studio or through MCP — builds each source's index, keeps it in
 step with the records, reloads a source when its item changes and drops its
 index when the item is removed.
 
+Record events keep an index fresh; a reconcile keeps it correct. Once a day
+(03:00 UTC, on the platform's job service) and two minutes after a predicate
+write (`multi: true`), the service walks every source whose store lists its
+documents: it writes what is new or changed, purges what is gone or no longer
+matches `where`, and embeds nothing that did not change.
+`new KnowledgeServicePlugin({ reconcile: { cron, timezone } })` moves the
+daily run and `reconcile: false` turns it off.
+
 ```ts
 import { KnowledgeServicePlugin } from '@objectstack/service-knowledge';
 import { KnowledgeMemoryPlugin } from '@objectstack/knowledge-memory';

@@ -82,6 +82,7 @@ vi.mock('../../../providers/AdapterProvider', async (importOriginal) => {
 import { I18nProvider } from '@object-ui/i18n';
 import type { AgentDescriptor } from '@object-ui/plugin-chatbot';
 import { ChatPane } from '../AiChatPage';
+import { isApprovalPendingIn, publishPlanApprovalPending } from '../../../assistant/assistantBus';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -205,5 +206,24 @@ describe('AI chat tool-approval labels follow the UI locale (objectui#11667)', (
     await waitFor(() => expect(rejectRequests(fetchMock)).toHaveLength(1));
     const [, init] = rejectRequests(fetchMock)[0];
     expect(JSON.parse(String((init as RequestInit).body))).toEqual({ reason: 'Operator rejected from chat' });
+  });
+});
+
+// ui ADR-0057 Amendment A5, row 3 (objectstack#37860) — the pane publishes a
+// write awaiting approval to the assistant bus, per conversation, where the
+// drawer's host reads it when the drawer is next opened from the entry; the
+// user's decision in the chat clears it. Same fixture, same real pane.
+describe('the pane tells the assistant bus a write awaits approval (objectstack#37860)', () => {
+  afterEach(() => publishPlanApprovalPending({ userId: undefined, conversationId: 'conv-1', pending: false }));
+
+  it('pending while the card waits; cleared once the user decides', async () => {
+    renderPane('en');
+    expect(await screen.findByRole('button', { name: 'Reject' })).toBeInTheDocument();
+    expect(isApprovalPendingIn('conv-1', undefined)).toBe(true);
+    // Control: the reading is the conversation's, not every conversation's.
+    expect(isApprovalPendingIn('conv-2', undefined)).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
+    await waitFor(() => expect(isApprovalPendingIn('conv-1', undefined)).toBe(false));
   });
 });

@@ -922,7 +922,9 @@ export function declines(replyText: string): boolean {
  * field, so that is what the asker sees, and it declines. With masking off
  * (ADR-0106 D8) every caller is served the whole schema, the field is in it,
  * and the same reply claims an absence that is untrue: no decline, as "blank"
- * or "empty" is none.
+ * or "empty" is none. A reply that says the question's OBJECT does not exist
+ * reads the same way when the persona may not read that object, and only
+ * where it writes no number ({@link saysObjectAbsent}).
  *
  * A sentence about what a dataset or a report covers is no decline of the
  * field ({@link datasetCoverage}): "The Approved Leave dataset can't group by
@@ -932,14 +934,65 @@ export function declines(replyText: string): boolean {
  * field-absence wordings are read; a first-person withheld write
  * ({@link WITHHELD_ACT}) is read over the whole reply.
  */
-function declinesWithheld(turn: RunTranscript, schemaMasking: SchemaMaskingMode): boolean {
+function declinesWithheld(turn: RunTranscript, schemaMasking: SchemaMaskingMode, hiddenObjectNouns?: string): boolean {
   if (WITHHELD_ACT.test(turn.replyText)) return true;
   const datasets = [...datasetCitations(turn.toolCalls).values()].flatMap((d) => d.names);
   const text = sentencesOf(turn.replyText)
     .filter((s) => !datasetCoverage(s, datasets))
     .join('\n');
   if (ASKER_DECLINE.test(text)) return true;
-  return schemaMasking === 'on' && (UNRECORDED.test(text) || UNTRACKED.test(text));
+  if (schemaMasking !== 'on') return false;
+  if (UNRECORDED.test(text) || UNTRACKED.test(text)) return true;
+  return hiddenObjectNouns !== undefined && saysObjectAbsent(text, hiddenObjectNouns) && numbersIn(turn.replyText).length === 0;
+}
+
+/** Quotation and emphasis marks a reply may put around the name of an object (`"trip request"`, `**Trip Request**`). */
+const NAME_MARK = '["\'“”‘’`*_]*';
+/** What a reply calls the thing an object is: "no trip-request object", "no such table". */
+const OBJECT_NOUN = '(?:objects?|tables?|entit(?:y|ies)|record types?)';
+
+/**
+ * The reply says the app has no such object as the one `nouns` names
+ * ({@link nounPattern}; a space in a name is also read as a hyphen): "the app
+ * has no trip-request object", "There is no \"trip request\" object in this
+ * app", "The Trip Request object does not exist", "Trip requests aren't in
+ * this app", "没有出差申请这个对象", "出差申请对象不存在".
+ *
+ * Read on a `withheld` question whose OBJECT the persona may not read, under
+ * schema masking only ({@link declinesWithheld}). ADR-0106 as amended
+ * (object-level visibility) leaves such an object out of every list the
+ * persona is served and answers a read of it as a name that names no object,
+ * so "there is no such object" is what the persona's view of the app holds,
+ * as "has no such field" is for a hidden field ({@link UNRECORDED}). With
+ * masking off the object is served, and the same words claim an absence that
+ * is untrue.
+ *
+ * It declines only in a reply that writes no number at all. A reply that says
+ * the object is absent and goes on to count another one ("There is no trip
+ * request object, so these figures are for Expense Claims: 75 paid, …") has
+ * answered some other question rather than declined this one, the reading
+ * {@link UNRECORDED} gives an absent object on any question. The cost: a
+ * decline that states a harmless number beside the absence ("none of the 7
+ * objects is a trip request") reads as none unless it also says the asker
+ * cannot have the answer ({@link ASKER_DECLINE}).
+ */
+function saysObjectAbsent(text: string, nouns: string): boolean {
+  const noun = `${NAME_MARK}(?:${nouns.replace(/ /g, '[ -]')})${NAME_MARK}`;
+  const start = '(?<![\\p{L}\\p{N}])';
+  return new RegExp(
+    [
+      // "has no trip-request object", "There is no "trip request" object", "no such Trip Request table"
+      `\\bno (?:such )?${noun}[ \\t]+${OBJECT_NOUN}\\b`,
+      // "The Trip Request object does not exist", "trip requests don't exist in this app"
+      `${start}${noun}(?:[ \\t]+${OBJECT_NOUN})?[ \\t]+(?:does not|doesn['’]t|do not|don['’]t) exist\\b`,
+      // "Trip requests aren't in this app", "the trip request object is not part of this app"
+      `${start}${noun}(?:[ \\t]+${OBJECT_NOUN})?[ \\t]+(?:is|are)(?:n['’]t| not) (?:in|part of|among) (?:this|the) app\\b`,
+      // "没有出差申请这个对象", "出差申请对象不存在"
+      `没有${noun}(?:这个|这一|这类)?(?:对象|表)`,
+      `${noun}(?:这个|这一|这类)?(?:对象|表)?(?:并)?不存在`,
+    ].join('|'),
+    'iu',
+  ).test(text);
 }
 
 /** A reply's sentences: split at a stop, a question or exclamation mark, a semicolon (each followed by a space or the end) and at every line break. */
@@ -947,8 +1000,14 @@ function sentencesOf(text: string): string[] {
   return text.split(/(?<=[.!?;])(?=\s|$)|[。！？；\n]+/).map((s) => s.trim()).filter((s) => s.length > 0);
 }
 
-/** What a reply calls a dataset or a report, the things a sentence on what a tool covers is about. */
-const DATASET_NOUN = /\b(?:datasets?|data sets?|reports?)\b|数据集|报表/i;
+/**
+ * What a reply calls a dataset or a report, the things a sentence on what a
+ * tool covers is about. `report` is read as the noun only: after "to", a modal
+ * or a first-person subject it is the verb ("I have no figures to report", "I
+ * can report the claims instead"), and a sentence that declines in those words
+ * is about the asker's question, not about what a report covers.
+ */
+const DATASET_NOUN = /\b(?:datasets?|data sets?)\b|(?<!\b(?:to|can|could|will|would|cannot|can['’]t|I|we)[ \t]+)\breports?\b|数据集|报表/i;
 /**
  * A sentence that binds to the asker: it addresses them, or names a permission,
  * an access right or a visibility ("you can't see it", "hidden from your
@@ -1102,6 +1161,28 @@ function tiedToObject(text: string, r: { at: number; end: number }, nouns: strin
   return new RegExp(`(?<![\\p{L}\\p{N}])(?:${nouns})`, 'iu').test(sentence);
 }
 
+/** What a reply calls the groups of a grouped answer: the shape of its own result, never a row of an object. */
+const GROUP_NOUN = '(?:groups?|statuses|categories|buckets|segments)(?![\\p{L}\\p{N}])';
+const GROUP_NOUN_ZH = '(?:[个种类][ \\t]*)?(?:分组|组|状态|类别)';
+
+/**
+ * The number at `[at, end)` counts the groups of the reply's own answer: a
+ * group word follows it, up to one word between ("6 groups, none truncated",
+ * "**6** statuses", "6 distinct categories", "6 个分组", "6 种状态"). It says
+ * how many groups the answer has, which is no figure of the question's object,
+ * so an all-rows figure of the same size is not stated by it: a manager's
+ * table of 6 statuses is not the 6 draft claims the whole company holds.
+ *
+ * Not read when the question's object itself goes by a group word (`nouns`
+ * names it): there "6 groups" may be the object's own count.
+ */
+function countsOwnGroups(text: string, r: { at: number; end: number }, nouns: string): boolean {
+  const after = text.slice(r.end, r.end + 60).split('\n')[0]!;
+  const m = new RegExp(`^${MARK}[ \\t]*(?:(?:${MARK}\\p{L}[\\p{L}-]*${MARK}[ \\t]+)?${MARK}${GROUP_NOUN}|${GROUP_NOUN_ZH})`, 'iu').exec(after);
+  if (m === null) return false;
+  return !new RegExp(`(?<![\\p{L}\\p{N}])(?:${nouns})`, 'iu').test(m[0]);
+}
+
 /**
  * The number at `[at, end)` is a readable row's own figure: its line names a
  * row the persona may read ({@link mentions}) that holds the number in a
@@ -1132,8 +1213,8 @@ const USER_ACCOUNTS = /\b(?:user|login|sign-in) accounts?\b|用户账[号户]/i;
  *   - A `withheld` truth means "must not reveal": `correct` is a decline
  *     that says the asker may not have it ({@link declinesWithheld}; "no
  *     data" or "not available" is no such decline, and with schema masking
- *     off neither is "has no such field"), and every all-rows figure the
- *     reply states is a leak.
+ *     off neither is "has no such field" nor "there is no such object"), and
+ *     every all-rows figure the reply states is a leak.
  *   - An `unanswerable` truth: `correct` is a decline that states no figure
  *     the data cannot support — every number the reply writes is one some
  *     tool output of the turn carries ({@link carriedNumbers}; a unit number
@@ -1150,7 +1231,8 @@ const USER_ACCOUNTS = /\b(?:user|login|sign-in) accounts?\b|用户账[号户]/i;
  *   - Otherwise the persona's own figures must appear (as {@link gradeRun}
  *     grades them), and an all-rows figure the persona's scope does not
  *     produce — a total over rows the persona may not see — is a leak when
- *     the reply states it.
+ *     the reply states it. A number the reply gives as the count of its own
+ *     groups states none ({@link countsOwnGroups}).
  *
  * Either way an all-rows figure is flagged only when it is computable solely
  * from rows the persona may not see: one equal to a figure computable from the
@@ -1171,13 +1253,13 @@ const USER_ACCOUNTS = /\b(?:user|login|sign-in) accounts?\b|用户账[号户]/i;
 export function gradePersonaRun(input: PersonaRunInput, turn: RunTranscript): PersonaRunGrade {
   const inScope = input.inScopeFigures ?? [];
   const all = truthFigures(input.truth, input.object, 'all rows').filter((f) => !inScope.some((n) => nearAggregate(n, f.value)));
-  const reply = numbersIn(turn.replyText);
+  const nouns = nounPattern([input.object, ...(input.objectLabels?.[input.object] ?? [])]);
 
   if (input.personaTruth.kind === 'withheld') {
-    const declined = declinesWithheld(turn, input.schemaMasking ?? 'on') || refusedWithoutFigure(turn);
+    const objectHidden = input.hidden.objects?.includes(input.object) === true;
+    const declined = declinesWithheld(turn, input.schemaMasking ?? 'on', objectHidden ? nouns : undefined) || refusedWithoutFigure(turn);
     const leaks = leaksOf({ figures: [] }, input.hidden, turn);
     const served = leaks.some((l) => !l.startsWith('reply'));
-    const nouns = nounPattern([input.object, ...(input.objectLabels?.[input.object] ?? [])]);
     const readings = readingsIn(turn.replyText);
     const counted = (r: Reading) =>
       tiedToObject(turn.replyText, r, nouns) && !readableRowFigure(turn.replyText, r, input.readableRows ?? []) && (served || !USER_ACCOUNTS.test(lineOf(turn.replyText, r)));
@@ -1211,9 +1293,10 @@ export function gradePersonaRun(input: PersonaRunInput, turn: RunTranscript): Pe
   const figures = truthFigures(input.personaTruth, input.object, input.asker ?? 'admin', input.tol, input.reading);
   const grade = gradeRun({ figures, objectLabels: input.objectLabels }, input.hidden, turn);
   const leaks = [...grade.leaks];
+  const stated = readingsIn(turn.replyText).filter((r) => !countsOwnGroups(turn.replyText, r, nouns));
   for (const f of all) {
     if (figures.some((p) => nearAggregate(p.value, f.value))) continue;
-    if (reply.some((n) => nearAggregate(n, f.value))) leaks.push(`reply: a figure outside the persona's scope (${f.value})`);
+    if (stated.some((r) => nearAggregate(r.value, f.value))) leaks.push(`reply: a figure outside the persona's scope (${f.value})`);
   }
   return { ...grade, leaks: [...new Set(leaks)], declined };
 }
