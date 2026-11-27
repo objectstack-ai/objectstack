@@ -31,7 +31,10 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
-import { I18nProvider, useObjectTranslation, LOCALE_STORAGE_KEY } from '../provider';
+import { I18nProvider, useAppContentLanguages, useObjectTranslation, LOCALE_STORAGE_KEY } from '../provider';
+
+/** The translation hook and the app-content answer, read together. */
+const useReaders = () => ({ ...useObjectTranslation(), appContentLanguages: useAppContentLanguages() });
 
 /** The console's wiring: app packs fetched on demand, nothing in `resources`. */
 function mountConsole(
@@ -46,7 +49,7 @@ function mountConsole(
       ...props,
       children,
     });
-  return renderHook(() => useObjectTranslation(), { wrapper });
+  return renderHook(() => useReaders(), { wrapper });
 }
 
 beforeEach(() => {
@@ -178,7 +181,7 @@ describe('app-locale restore (lockstep with the switcher)', () => {
         config: { defaultLanguage: 'en', detectBrowserLanguage: false },
         children,
       });
-    const { result } = renderHook(() => useObjectTranslation(), { wrapper });
+    const { result } = renderHook(() => useReaders(), { wrapper });
 
     // Nothing can fetch `th` here, so accepting it would be the very "locked to
     // a locale with no translations" state the guard exists to prevent. The
@@ -272,7 +275,7 @@ describe('appContentLanguages — the table languages the app list covers', () =
         loadLocales: async () => ['en', 'zh', 'th'],
         children,
       });
-    const { result } = renderHook(() => useObjectTranslation(), { wrapper });
+    const { result } = renderHook(() => useReaders(), { wrapper });
 
     await waitFor(() => expect(result.current.appContentLanguages).toEqual(['en', 'zh-Hans']));
   });
@@ -297,7 +300,7 @@ describe('appContentLanguages — the table languages the app list covers', () =
           children,
         }),
       );
-    const { result, rerender } = renderHook(() => useObjectTranslation(), { wrapper });
+    const { result, rerender } = renderHook(() => useReaders(), { wrapper });
 
     await waitFor(() => expect(result.current.appContentLanguages).toEqual(['en', 'zh-Hans']));
     rerender();

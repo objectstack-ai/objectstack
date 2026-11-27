@@ -494,27 +494,21 @@ interface I18nContextValue {
    * is no longer narrowed to the app's own locale list: a language the app
    * ships no translation for is still selectable — the interface renders in
    * it, the app's own content falls back to the deployment's default language
-   * — and {@link I18nContextValue.appContentLanguages} says which those are.
+   * — and {@link useAppContentLanguages} says which those are.
    * Never `null`: the list does not wait on the app's answer any more.
    */
   offerableLanguages: readonly string[];
-  /**
-   * The table languages the app's own locale list covers (objectui#4039), as
-   * table tags, de-duplicated, in the app's order: the languages in which the
-   * app's content (object, field and view labels) is translated too. A menu
-   * marks every other offered language with a hint that the app's content
-   * shows in the default language (objectstack#35425).
-   *
-   * `null` means "not known": still asking, no
-   * {@link I18nProviderProps.loadLocales} wiring, a signed-out page (the
-   * console asks only with a session), a failed read, or an answer that names
-   * no table language. Mark nothing then: a hint on every row would claim a
-   * fact nobody has read.
-   */
-  appContentLanguages: readonly string[] | null;
 }
 
 const ObjectI18nContext = createContext<I18nContextValue | null>(null);
+
+/**
+ * The table languages the app's own content is translated into, in a context
+ * of its own ({@link useAppContentLanguages}). The app's list lands after the
+ * console has drawn; in the main context it gave every translated component a
+ * new value to re-render for, though only a language menu reads it.
+ */
+const AppContentLanguagesContext = createContext<readonly string[] | null>(null);
 
 /**
  * Re-render a reader when the store GAINS translations, not only when the
@@ -910,15 +904,18 @@ export function I18nProvider({
       direction,
       i18n: i18nInstance,
       offerableLanguages,
-      appContentLanguages,
     }),
-    [language, direction, i18nInstance, loadLanguage, offerableLanguages, appContentLanguages],
+    [language, direction, i18nInstance, loadLanguage, offerableLanguages],
   );
 
   return React.createElement(
     ObjectI18nContext.Provider,
     { value: contextValue },
-    React.createElement(I18nextProvider, { i18n: i18nInstance }, children),
+    React.createElement(
+      AppContentLanguagesContext.Provider,
+      { value: appContentLanguages },
+      React.createElement(I18nextProvider, { i18n: i18nInstance }, children),
+    ),
   );
 }
 
@@ -1014,12 +1011,27 @@ export function useObjectTranslation(ns?: string) {
      * (objectstack#35425), inside a provider or not.
      */
     offerableLanguages: context ? context.offerableLanguages : BUILT_IN_LANGUAGE_CODES,
-    /**
-     * The table languages the app's own content is translated into, or `null`
-     * when not known. Outside a provider there is nobody to ask: `null`.
-     */
-    appContentLanguages: context ? context.appContentLanguages : null,
   };
+}
+
+/**
+ * The table languages the app's own locale list covers (objectui#4039), as
+ * table tags, de-duplicated, in the app's order: the languages in which the
+ * app's content (object, field and view labels) is translated too. A menu
+ * marks every other offered language with a hint that the app's content
+ * shows in the default language (objectstack#35425).
+ *
+ * `null` means "not known": still asking, no
+ * {@link I18nProviderProps.loadLocales} wiring, a signed-out page (the
+ * console asks only with a session), a failed read, an answer that names no
+ * table language, or no provider at all. Mark nothing then: a hint on every
+ * row would claim a fact nobody has read.
+ *
+ * Its own hook, not a field of {@link useObjectTranslation}: the answer lands
+ * after first paint, and only its readers re-render for it (objectstack#37575).
+ */
+export function useAppContentLanguages(): readonly string[] | null {
+  return useContext(AppContentLanguagesContext);
 }
 
 /**

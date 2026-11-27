@@ -1383,8 +1383,8 @@ const NavIsMobileContext = React.createContext<boolean>(false);
  * group's label is hidden and its entries are the rail's icons, so a group
  * draws its entries there whether it is open or not: a closed group's entries
  * would otherwise be in no rail icon at all. The group's own open state is
- * left as it is, so the expanded sidebar shows it as the reader left it. Only
- * the groups read it, so a toggle re-renders the groups, not every row.
+ * left as it is, so the expanded sidebar shows it as the reader left it. A
+ * row reads it too: its tooltip is drawn only in the rail.
  */
 const NavIconRailContext = React.createContext<boolean>(false);
 
@@ -1404,7 +1404,7 @@ const NavIconRailContext = React.createContext<boolean>(false);
  * sidebar opens or closes, so the rows below do not re-render on a toggle:
  * `children` is the element the root rendered, and the provided value is the
  * same boolean. The icon-rail answer it also provides does change on a
- * toggle, and only the groups read it ({@link NavIconRailContext}).
+ * toggle ({@link NavIconRailContext}).
  */
 function NavMobileSource({ children }: { children: React.ReactNode }) {
   const sidebar = useOptionalSidebar();
@@ -1934,17 +1934,18 @@ function NavigationItemRow({
   // Decided once for the tree (`NavMobileSource`), not by a hook per row.
   const isMobile = React.useContext(NavIsMobileContext);
   const mobileBtnClass = isMobile ? 'min-h-[44px] text-[15px] gap-3 rounded-xl' : undefined;
-  // A row's tooltip names it in the icon rail. On a phone the primitive draws
-  // the tooltip `hidden`, so a row there skips the Tooltip it would never show:
-  // one Radix Tooltip per row was a measurable part of every drawer open
-  // (objectstack#29141).
-  const rowTooltip = (label: string) => (isMobile ? undefined : label);
   // The initial open state (objectui#13336): see `groupOpensOnFirstView`.
   const activeNavId = React.useContext(ActiveNavIdContext);
   const initialOpen = React.useMemo(() => groupOpensOnFirstView(item, activeNavId), [item, activeNavId]);
   const [isOpen, setIsOpen] = useState(initialOpen);
   // In the icon rail a group lists its entries open or not (objectstack#32156).
   const inIconRail = React.useContext(NavIconRailContext);
+  // A row's tooltip names it in the icon rail, the only place the primitive
+  // shows it (its content is `hidden` in the expanded sidebar and on a phone),
+  // so a row anywhere else skips the Radix Tooltip: each one re-rendered its
+  // row once more right after mounting, when its anchor reported in, and every
+  // row had one (objectstack#29141, objectstack#37575).
+  const rowTooltip = (label: string) => (inIconRail ? label : undefined);
 
   // --- Per-item guards: `visible`, `requiredPermissions`, and the
   // runtime-capability gates (an entry whose required object/service is not
@@ -2185,6 +2186,8 @@ const NavigationItemRenderer = React.memo(NavigationItemRow, sameRowAnswers);
 
 type NavRowRendererProps = NavItemRendererProps;
 const ROW_TARGET_RESOLVERS = new Set(['resolveTargetLabel', 'resolveTargetIcon', 'resolveTargetColor']);
+/** The props a leaf row is compared by what they answer for it, not by identity. */
+const ROW_ANSWER_PROPS = new Set([...ROW_TARGET_RESOLVERS, 'checkCap']);
 
 /**
  * objectstack#37575 — whether a row's new props draw what its current ones draw.
@@ -2198,20 +2201,29 @@ const ROW_TARGET_RESOLVERS = new Set(['resolveTargetLabel', 'resolveTargetIcon',
  * has, which still give those answers. A group draws its entries, and each of
  * those asks its own questions, so a group with any new resolver is redrawn and
  * its entries are compared one by one.
+ *
+ * The capability checker is compared the same way: the host rebuilds it with
+ * the resolvers, and a leaf row asks it about its own `requiresObject` and
+ * `requiresService` only.
  */
 function sameRowAnswers(prev: NavRowRendererProps, next: NavRowRendererProps): boolean {
   const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
   for (const key of keys) {
-    if (ROW_TARGET_RESOLVERS.has(key)) continue;
+    if (ROW_ANSWER_PROPS.has(key)) continue;
     if (!Object.is(prev[key as keyof NavRowRendererProps], next[key as keyof NavRowRendererProps])) return false;
   }
   if (
     prev.resolveTargetLabel === next.resolveTargetLabel &&
     prev.resolveTargetIcon === next.resolveTargetIcon &&
-    prev.resolveTargetColor === next.resolveTargetColor
+    prev.resolveTargetColor === next.resolveTargetColor &&
+    prev.checkCap === next.checkCap
   ) return true;
   const { item, t, locale } = next;
   if (item.type === 'group') return false;
+  const requiresObject = (item as { requiresObject?: string }).requiresObject;
+  const requiresService = (item as { requiresService?: string }).requiresService;
+  if (requiresObject && prev.checkCap('object', requiresObject) !== next.checkCap('object', requiresObject)) return false;
+  if (requiresService && prev.checkCap('service', requiresService) !== next.checkCap('service', requiresService)) return false;
   if (resolveNavItemLabel(item, t, prev.resolveTargetLabel, locale) !== resolveNavItemLabel(item, t, next.resolveTargetLabel, locale)) return false;
   if (resolveNavItemIcon(item, prev.resolveTargetIcon) !== resolveNavItemIcon(item, next.resolveTargetIcon)) return false;
   if (item.type === 'object' && item.objectName) {
