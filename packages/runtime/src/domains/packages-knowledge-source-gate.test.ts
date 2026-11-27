@@ -41,10 +41,10 @@ interface Holding {
     drafts?: any[];
     commits?: any[];
     /** A listing that throws, by member name. */
-    throws?: 'getMetaItems' | 'listDrafts' | 'listCommits';
+    throws?: 'getMetaItemsPerPackage' | 'listDrafts' | 'listCommits';
 }
 
-function make(holding: Holding = {}) {
+function make(holding: Holding = {}, knowledge?: unknown) {
     const fail = (member: Holding['throws']) => () => {
         if (holding.throws === member) throw new Error('metadata store unreachable');
     };
@@ -60,8 +60,8 @@ function make(holding: Holding = {}) {
         deletePackage: vi.fn().mockResolvedValue({ deletedCount: 1 }),
         revertStoredPackage: vi.fn().mockResolvedValue({ stored: true }),
         // The three listings the gate reads.
-        getMetaItems: vi.fn(async ({ type }: any) => {
-            fail('getMetaItems')();
+        getMetaItemsPerPackage: vi.fn(async ({ type }: any) => {
+            fail('getMetaItemsPerPackage')();
             return { items: type === 'knowledge_source' ? (holding.items ?? []) : [] };
         }),
         listDrafts: vi.fn(async ({ type }: any) => {
@@ -90,7 +90,11 @@ function make(holding: Holding = {}) {
     const kernel: any = {
         context: {
             getService: (name: string) =>
-                name === 'objectql' ? objectql : name === 'protocol' ? protocol : name === 'metadata' ? metadata : null,
+                name === 'objectql' ? objectql
+                    : name === 'protocol' ? protocol
+                        : name === 'metadata' ? metadata
+                            : name === 'knowledge' ? (knowledge ?? null)
+                                : null,
         },
     };
     return { dispatcher: new HttpDispatcher(kernel), protocol, metadata, registry };
@@ -140,7 +144,7 @@ describe('/packages — a package that holds a knowledge source is written by a 
             }
         });
 
-        it(`${door.name}: a holder of both capabilities goes on, and the package is not read for it`, async () => {
+        it(`${door.name}: a holder of both capabilities goes on, and the capability gate reads no draft listing for it`, async () => {
             const s = make({ items: [SOURCE_ITEM], drafts: [SOURCE_DRAFT] });
             const r = await call(s, door, authed(BOTH, door.tenantId));
             expect(r.response?.status).not.toBe(403);
@@ -157,7 +161,7 @@ describe('/packages — a package that holds a knowledge source is written by a 
         });
 
         it(`${door.name}: fails closed — a listing that throws refuses 503, and the writer never runs`, async () => {
-            const s = make({ throws: 'getMetaItems' });
+            const s = make({ throws: 'getMetaItemsPerPackage' });
             const r = await call(s, door, authed(METADATA_ONLY, door.tenantId));
             expect(r.response?.status).toBe(503);
             expect(r.response?.body?.error?.message).toContain('could not be read');
@@ -216,6 +220,73 @@ describe('/packages — the verbs that rewrite items from the timeline read the 
         const s = make({ throws: 'listCommits' });
         expect((await call(s, rollback, authed(METADATA_ONLY))).response?.status).toBe(503);
         expect(s.protocol.rollbackToPackageCommit).not.toHaveBeenCalled();
+    });
+});
+
+describe('/packages — duplicate admits each knowledge source it copies for the caller (guard two)', () => {
+    const DUPLICATE = DOORS.find((d) => d.name === 'POST /:id/duplicate')!;
+    const REFUSAL = {
+        admitted: false, status: 403, code: 'PERMISSION_DENIED',
+        message: "The knowledge source \"faq\" was not saved: you may not query field 'salary' of object 'article'.",
+    };
+    /** A stack whose kernel also serves a knowledge service answering `admit`. */
+    function withKnowledge(holding: Holding, admit: (item: unknown, ctx: unknown) => unknown) {
+        const admitAuthoredSource = vi.fn(async (item: unknown, c: unknown) => admit(item, c));
+        return { ...make(holding, { admitAuthoredSource }), admitAuthoredSource };
+    }
+
+    it('a holder of both capabilities who may not search what a source indexes is refused with the gate\'s sentence, and nothing is copied', async () => {
+        const s = withKnowledge({ items: [SOURCE_ITEM] }, () => REFUSAL);
+        const caller = authed(BOTH);
+        const r = await call(s, DUPLICATE, caller);
+        expect(r.response?.status).toBe(403);
+        expect(r.response?.body?.error?.message).toContain('nothing was copied');
+        expect(r.response?.body?.error?.message).toContain(REFUSAL.message);
+        expect(s.protocol.duplicatePackage).not.toHaveBeenCalled();
+        // Judged as the caller, on the item the package holds.
+        expect(s.admitAuthoredSource).toHaveBeenCalledWith(SOURCE_ITEM, caller.executionContext);
+    });
+
+    it('every source is asked about: the second one refused refuses the duplicate', async () => {
+        const second = { ...SOURCE_ITEM, name: 'handbook' };
+        const s = withKnowledge({ items: [SOURCE_ITEM, second] }, (item: any) => (item.name === 'handbook' ? REFUSAL : { admitted: true }));
+        expect((await call(s, DUPLICATE, authed(BOTH))).response?.status).toBe(403);
+        expect(s.admitAuthoredSource).toHaveBeenCalledTimes(2);
+        expect(s.protocol.duplicatePackage).not.toHaveBeenCalled();
+    });
+
+    it('fails closed: a verdict that throws, and a listing that throws, refuse 503', async () => {
+        const thrown = withKnowledge({ items: [SOURCE_ITEM] }, () => { throw new Error('registry unavailable'); });
+        expect((await call(thrown, DUPLICATE, authed(BOTH))).response?.status).toBe(503);
+        expect(thrown.protocol.duplicatePackage).not.toHaveBeenCalled();
+
+        const unread = withKnowledge({ throws: 'getMetaItemsPerPackage' }, () => ({ admitted: true }));
+        const r = await call(unread, DUPLICATE, authed(BOTH));
+        expect(r.response?.status).toBe(503);
+        expect(r.response?.body?.error?.message).toContain('Nothing was copied');
+        expect(unread.protocol.duplicatePackage).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL: admitted sources are copied; a package with none, and a host with no knowledge service, copy as before', async () => {
+        const admitted = withKnowledge({ items: [SOURCE_ITEM] }, () => ({ admitted: true }));
+        expect((await call(admitted, DUPLICATE, authed(BOTH))).response?.status).not.toBe(403);
+        expect(admitted.protocol.duplicatePackage).toHaveBeenCalled();
+
+        const none = withKnowledge({ items: [] }, () => REFUSAL);
+        expect((await call(none, DUPLICATE, authed(METADATA_ONLY))).response?.status).not.toBe(403);
+        expect(none.admitAuthoredSource).not.toHaveBeenCalled();
+        expect(none.protocol.duplicatePackage).toHaveBeenCalled();
+
+        const noService = make({ items: [SOURCE_ITEM] });
+        expect((await call(noService, DUPLICATE, authed(BOTH))).response?.status).not.toBe(403);
+        expect(noService.protocol.duplicatePackage).toHaveBeenCalled();
+    });
+
+    it('the engine\'s own call is not asked', async () => {
+        const s = withKnowledge({ items: [SOURCE_ITEM] }, () => REFUSAL);
+        expect((await call(s, DUPLICATE, system())).response?.status).not.toBe(403);
+        expect(s.admitAuthoredSource).not.toHaveBeenCalled();
+        expect(s.protocol.duplicatePackage).toHaveBeenCalled();
     });
 });
 

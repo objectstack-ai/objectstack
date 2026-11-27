@@ -47,6 +47,10 @@ import type { GetPackageCustomizationsResponse } from '@objectstack/spec/api';
 // [ADR-0131 D3 · D12 items 7–8] The walled refusal's one predicate, asked by
 // every package write door below, never restated here.
 import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
+// [ADR-0161 K4, guard two] Source admission, asked for each knowledge source a
+// duplicate would copy (`refuseDuplicatedKnowledgeSources`).
+import { KNOWLEDGE_SOURCE_ADMISSION_SERVICE, authoredKnowledgeSourceRefusal } from '@objectstack/metadata-core';
+import { isMissingTableError } from '@objectstack/types';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
 // [#21727] ADR-0087 D1's protocol handshake and the brand predicate for its
 // refusal. The install branch asks the predicate ahead of its generic catch,
@@ -505,6 +509,48 @@ async function refuseKnowledgeSourcePackageWrite(
     };
 }
 
+/** The metadata store objects the knowledge-source listings read. */
+const KNOWLEDGE_SOURCE_ITEM_STORE = 'sys_metadata';
+const KNOWLEDGE_SOURCE_HISTORY_STORE = 'sys_metadata_commit';
+
+/**
+ * Whether a listing failed because this host has no metadata store to list:
+ * the store's table was never created (`isMissingTableError`, the predicate the
+ * protocol's own overlay reads use), or the engine holds no such object
+ * (`OBJECT_NOT_FOUND` carrying the store's own name). A store that does not
+ * exist holds no draft, item or commit, so the listing's answer is "none" and
+ * the door goes on as it does on that host today.
+ *
+ * Conservative in the direction the protocol's rule is: only those two
+ * positively identified shapes read as absent. Every other failure is a
+ * listing that could not be read, and the gate refuses.
+ */
+function knowledgeSourceStoreIsAbsent(error: unknown, store: string): boolean {
+    if (isMissingTableError(error, store)) return true;
+    for (let node: any = error, depth = 0; node !== null && typeof node === 'object' && depth < 8; node = node.cause, depth += 1) {
+        if (node.code === 'OBJECT_NOT_FOUND' && node.object === store) return true;
+    }
+    return false;
+}
+
+/**
+ * The knowledge sources a package holds, read from the per-package layer
+ * (`getMetaItemsPerPackage`): the package's own items, never another
+ * package's item served under the same name. A protocol with no such layer,
+ * and a host with no metadata store ({@link knowledgeSourceStoreIsAbsent}),
+ * answer none. Throws when the listing throws for any other reason.
+ */
+async function packageKnowledgeSourceItems(protocol: PackagesDomainProtocol, packageId: string): Promise<any[]> {
+    if (typeof protocol.getMetaItemsPerPackage !== 'function') return [];
+    try {
+        const listed: any = await protocol.getMetaItemsPerPackage({ type: KNOWLEDGE_SOURCE_PACKAGE_TYPE, packageId });
+        return Array.isArray(listed?.items) ? listed.items : [];
+    } catch (e) {
+        if (knowledgeSourceStoreIsAbsent(e, KNOWLEDGE_SOURCE_ITEM_STORE)) return [];
+        throw e;
+    }
+}
+
 /**
  * The first knowledge source a verb's reach holds, as a phrase the refusal
  * can name, or `undefined` when the reach holds none. Throws when a listing
@@ -525,26 +571,26 @@ async function knowledgeSourceInPackageReach(
         try {
             drafts = (await protocol.listDrafts({ packageId, type: KNOWLEDGE_SOURCE_PACKAGE_TYPE }))?.drafts ?? [];
         } catch (e: any) {
-            // The listing's own answer for an id no installed package and no
-            // draft carries: there is nothing pending to reach, and the door
-            // answers that id as it always has.
-            if (e?.code !== 'INVALID_REQUEST') throw e;
+            // `INVALID_REQUEST` is the listing's own answer for an id no
+            // installed package and no draft carries: there is nothing pending
+            // to reach, and the door answers that id as it always has. A host
+            // with no metadata store holds no draft either.
+            if (e?.code !== 'INVALID_REQUEST' && !knowledgeSourceStoreIsAbsent(e, KNOWLEDGE_SOURCE_ITEM_STORE)) throw e;
         }
         const draft = drafts.find((d) => isKnowledgeSource(d?.type));
         if (draft) return `a pending draft of the knowledge source${named(draft.name)}`;
     }
     if (reach.includes('items')) {
-        const read = typeof protocol.getMetaItemsPerPackage === 'function'
-            ? protocol.getMetaItemsPerPackage({ type: KNOWLEDGE_SOURCE_PACKAGE_TYPE, packageId })
-            : typeof (protocol as any).getMetaItems === 'function'
-                ? (protocol as any).getMetaItems({ type: KNOWLEDGE_SOURCE_PACKAGE_TYPE, packageId })
-                : undefined;
-        const listed: any = await read;
-        const items: any[] = Array.isArray(listed?.items) ? listed.items : [];
+        const items = await packageKnowledgeSourceItems(protocol, packageId);
         if (items.length > 0) return `the knowledge source${named(items[0]?.name)}`;
     }
     if (reach.includes('history') && typeof protocol.listCommits === 'function') {
-        const commits: any[] = (await protocol.listCommits({ packageId })) ?? [];
+        let commits: any[] = [];
+        try {
+            commits = (await protocol.listCommits({ packageId })) ?? [];
+        } catch (e) {
+            if (!knowledgeSourceStoreIsAbsent(e, KNOWLEDGE_SOURCE_HISTORY_STORE)) throw e;
+        }
         const one = input.commitId === undefined ? undefined : commits.find((c) => c?.id === input.commitId);
         // A named commit the timeline lists is judged alone; one it does not
         // list, and the rollback, are judged on the whole timeline.
@@ -554,6 +600,69 @@ async function knowledgeSourceInPackageReach(
         }
     }
     return undefined;
+}
+
+/**
+ * [ADR-0161 K4, guard two, at the duplicate door] A duplicate saves each of
+ * the source package's knowledge sources again, in the copy, and the caller
+ * is the author of every one of them. So each is admitted for that caller
+ * before anything is copied, by the predicate the `/meta` save asks
+ * (`authoredKnowledgeSourceRefusal`): the caller must themselves be allowed to
+ * search what the source indexes. The first source refused refuses the whole
+ * duplicate with the predicate's own status and sentence; nothing was copied.
+ *
+ * Asked of every caller but the engine's own call, a holder of
+ * `manage_knowledge_sources` included: the capability says who may author a
+ * source, and this says what a given author may index.
+ *
+ * The item is judged as the source package holds it. The copy renames the
+ * package's objects, and the renamed object carries the same fields, so the
+ * source's own object is the one whose rules the caller can be asked about
+ * before the copy exists.
+ *
+ * Fail direction: closed, as the predicate's is. A listing that throws
+ * refuses `503`; a protocol with no per-package listing holds nothing to
+ * judge.
+ */
+async function refuseDuplicatedKnowledgeSources(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    protocol: PackagesDomainProtocol,
+    packageId: string,
+): Promise<HttpDispatcherResult | null> {
+    const ec: any = context?.executionContext;
+    if (ec?.isSystem) return null;
+    const action = `Duplicating package "${packageId}"`;
+    let items: any[] = [];
+    try {
+        items = await packageKnowledgeSourceItems(protocol, packageId);
+    } catch (e) {
+        return {
+            handled: true,
+            response: deps.error(
+                `${action} is refused: the knowledge sources of the package could not be read `
+                + `(${clientFacingFailureText(e, 'the listing failed')}), and each one a duplicate copies is admitted for `
+                + 'the caller first. Nothing was copied; try again.',
+                503,
+            ),
+        };
+    }
+    for (const item of items) {
+        const refused = await authoredKnowledgeSourceRefusal({
+            type: KNOWLEDGE_SOURCE_PACKAGE_TYPE,
+            item,
+            executionContext: ec,
+            resolveKnowledgeService: () =>
+                deps.resolveServiceOrLoud(context, KNOWLEDGE_SOURCE_ADMISSION_SERVICE, context.environmentId),
+        });
+        if (refused) {
+            return {
+                handled: true,
+                response: deps.error(`${action} is refused, and nothing was copied. ${refused.message}`, refused.status),
+            };
+        }
+    }
+    return null;
 }
 
 /**
@@ -3994,6 +4103,11 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // the target package record (`installPackage`) ahead of its copy
             // loop, so a refusal any later still leaves the empty shell behind.
             const notABase = requireDuplicableSource(deps, qlService, id); if (notABase) return notABase;
+            // [ADR-0161 K4, guard two] Each knowledge source the copy would
+            // hold is admitted for this caller, before the copy's package
+            // record is minted.
+            const sourceAdmission = await refuseDuplicatedKnowledgeSources(deps, _context, protocol, id);
+            if (sourceAdmission) return sourceAdmission;
             try {
                 const actor = resolvePackageWriteActor(_context);
                 const result = await protocol.duplicatePackage({
