@@ -72,4 +72,7 @@ export {
   knowledgeSetupNavItem,
   KNOWLEDGE_SETUP_NAV_BUNDLE_ID,
 } from './knowledge-settings-contribution.js';
-export type { KnowledgeSettingsContribution } from './knowledge-settings-contribution.js';
+export type {
+  KnowledgeSettingsContribution,
+  KnowledgeSettingsContributionOptions,
+} from './knowledge-settings-contribution.js';
