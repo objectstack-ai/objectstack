@@ -41,14 +41,6 @@ export default ObjectSchema.create({
   sharingModel: 'public_read_write',
   fields: {
     invoice_number: { type: 'text', required: true },
-    total: {
-      type: 'summary',
-      summaryOperations: {
-        object: 'invoice_line_item',
-        field: 'amount',
-        function: 'sum',
-      },
-    },
   }
 });
 
@@ -190,6 +182,13 @@ A parent `summary` field aggregates a child collection. The engine recomputes it
 **server-side** on every child insert/update/delete, in the write's
 transaction.
 
+```json
+{
+  "type": "summary",
+  "summaryOperations": { "object": "invoice_line", "field": "amount", "function": "sum" }
+}
+```
+
 `object` is the child object to aggregate, `field` its field (ignored for
 `count`), `function` one of `count` / `sum` / `min` / `max` / `avg`. Optional:
 `filter` (below) and `relationshipField` (omitted: the child's `lookup` /
@@ -214,9 +213,9 @@ operator and compound forms work
 completion rate = a child count ÷ a capacity) is a `formula` over a working
 `summary` — author the summary first; the rate computes only once it does.
 
-**A `summary` declared after its parent rows exist reads `NULL`** on every
-existing parent until a child of it is written. The backfill is
-`os migrate summary-nulls --apply`
+**The recompute runs only on a child write.** A `summary` declared after its
+parent rows exist reads `NULL` on every existing parent until a child of it is
+written. The backfill is `os migrate summary-nulls --apply`
 (`--recompute-undefined-on-empty OBJECT.FIELD` for a `min` / `max` / `avg`
 declared late) — never an edit to a child. Declare the summary with the object
 where you can; declared late, run the migration before you call the number ready.
@@ -360,8 +359,8 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
   (`sys_attachment`, `sys_approval_request`, `sys_activity`). An entry is the child,
   `object.field` or `{ list, label, columns }`; its `label` translates at
   `objects.{parent}._relatedLists.{list}.label` (none: no key). A `.custom`
-  arrangement re-stating the entry with no `label`, or hiding it, leaves none,
-  and `os validate` refuses the key: drop it, or re-state the entry with the
+  arrangement re-stating the entry with no `label`, or hiding it, leaves none and
+  `os validate` refuses the key: drop it, or re-state the entry with the
   owner's `label`. A child in the stack with no inbound FK
   is refused everywhere; one that exists nowhere is refused by `os validate` /
   `os build` (bar a platform or sibling-artifact name) and by a metadata
