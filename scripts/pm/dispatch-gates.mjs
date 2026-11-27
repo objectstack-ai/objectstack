@@ -12316,6 +12316,18 @@ export function servedKeySetPinGaps(pins = SERVED_KEY_SET_PINS, declarations = S
 }
 
 /**
+ * One change-kind predicate per served key-set pin, each bound to the types its test holds. Refused at load when a
+ * pin names a type with no declaration row: that pin would derive nothing for the type, in silence.
+ */
+function servedKeySetPredicates(pins = SERVED_KEY_SET_PINS) {
+  const gaps = servedKeySetPinGaps(pins);
+  if (gaps.length > 0) {
+    throw new Error(`dispatch-gates: a served key-set pin names a type no SERVED_KEY_SET_DECLARATIONS row declares — ${gaps.join(', ')}`);
+  }
+  return Object.fromEntries(Object.entries(pins).map(([key, pin]) => [key, (path) => changesServedKeySet(path, pin)]));
+}
+
+/**
  * The one shape a PACKAGE-TEST subset gate's name may take: `pnpm --filter PKG exec vitest run FILE`, FILE
  * relative to that package, one file and no other argument. Returns the FILE, or null.
  *
@@ -12365,14 +12377,6 @@ export function ciJobRunsRunner({ ciJob, ciRunner }, workflowEntries) {
   return false;
 }
 
-// Refused at load: a pin naming a type with no declaration row would derive nothing for it, in silence.
-{
-  const gaps = servedKeySetPinGaps();
-  if (gaps.length > 0) {
-    throw new Error(`dispatch-gates: a served key-set pin names a type no SERVED_KEY_SET_DECLARATIONS row declares — ${gaps.join(', ')}`);
-  }
-}
-
 /**
  * The change-kind roster is data: `CHANGE_KIND_ROWS` in `dispatch-gates.data.mjs` carries each kind, the
  * NAME of the predicate that recognises it, and the gates it names — with the docblock that governs the
@@ -12393,7 +12397,7 @@ const CHANGE_KIND_PREDICATES = Object.freeze({
   'ui-scripts-suite-input': (path) => readByUiScriptsSuite(path),
   'spec-migration-entry': (path) => readBySpecMigrationEntryConsumers(path),
   // One per served key-set pin, each bound to the types its test holds.
-  ...Object.fromEntries(Object.entries(SERVED_KEY_SET_PINS).map(([key, pin]) => [key, (path) => changesServedKeySet(path, pin)])),
+  ...servedKeySetPredicates(),
   // One per population net (#31257), each bound to its own net.
   ...Object.fromEntries(Object.entries(POPULATION_NETS).map(([key, net]) => [key, (path) => reachesPopulationNet(path, net)])),
   'published-readme-claim': (path) => takesAReadmeClaim(path),
