@@ -154,6 +154,9 @@ import { recordNotFoundError, userTextLocalesOf } from '@objectstack/core';
 // asks beside its exposure gate (`RestServer.enforceApiAccess`, the runtime
 // dispatcher's `refuseUnexposedDataAction`), asked here by the write arms.
 import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
+// [#36689] The disabled-package question `callData` asks of every caller, and
+// the data plane's one refusal for it: ⛔ never a second copy of either.
+import { objectPackageDisabledError, registryObjectPackageDisabled } from '@objectstack/core';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
@@ -223,6 +226,29 @@ export interface StdioObjectReads {
    * verdict the rest of the boot can still contradict.
    */
   protocol?: () => StdioProtocolObjectReads | undefined;
+  /**
+   * [#36689] Whether `object`'s owning package is disabled: the engine
+   * registry's `isObjectPackageDisabled`, read through
+   * `registryObjectPackageDisabled` (`@objectstack/core`), the one predicate
+   * `callData` asks and the data plane asks before it refuses `404
+   * OBJECT_PACKAGE_DISABLED`. Asked of EVERY caller, a system context included,
+   * by {@link enforceApiExposure}; build it with {@link engineObjectPackageDisabled}.
+   * Absent, or a registry without the member, disables nothing, as on the data
+   * route.
+   */
+  isObjectPackageDisabled?: (object: string) => boolean;
+}
+
+/**
+ * [#36689] The {@link StdioObjectReads.isObjectPackageDisabled} predicate over
+ * the engine this transport reads through: its registry, read at each use (as
+ * `callData` reads it once per call), through `registryObjectPackageDisabled`.
+ * ⛔ Never a second copy of the predicate. An engine without a registry (a
+ * test double, a foreign engine) disables nothing, as on the data route.
+ */
+export function engineObjectPackageDisabled(engine: unknown): (object: string) => boolean {
+  return (object) =>
+    registryObjectPackageDisabled((engine as { registry?: unknown } | null | undefined)?.registry)(object);
 }
 
 /** What {@link createStdioDataBridge} needs from the host plugin. */
@@ -878,8 +904,17 @@ export function servedLocaleObjectView(view: McpObjectView, sources: ServedLocal
  *
  * Three behaviours are matched to the HTTP path deliberately, not by accident:
  *
- *  - **`isSystem` bypasses.** These flags govern API *exposure*, so an internal
- *    engine self-write is not subject to them (`callData`'s first condition).
+ *  - **`isSystem` bypasses the exposure question, never the package one.**
+ *    These flags govern API *exposure*, so an internal engine self-write is not
+ *    subject to them (`callData`'s `exposureGated`). [#36689] The
+ *    disabled-package question is asked FIRST, of every caller, a system
+ *    context included (the #35526 ruling, 「系统身份也一律拒绝」, extended to this
+ *    door by the #36689 ruling, letter A): the engine registry's
+ *    `isObjectPackageDisabled` ({@link StdioObjectReads.isObjectPackageDisabled}),
+ *    the predicate `callData` asks, refused with the data plane's own
+ *    `objectPackageDisabledError`. Asked of the registry, not of the
+ *    protocol's by-name read, so a host with no `protocol` service, whose
+ *    copy read below cannot refuse, refuses too.
  *  - **Unresolvable metadata FAILS OPEN.** A definition that cannot be read
  *    ({@link readObjectDeclaration} throwing past its own fallback to the copy)
  *    or that resolves nothing falls back to the schema defaults (`apiEnabled`
@@ -914,6 +949,12 @@ export async function enforceApiExposure(
   context: ExecutionContext,
   condition?: string,
 ): Promise<void> {
+  // [#36689] Every caller, before the exposure bypass: `callData`'s order.
+  // A relation-condition target carries its position as `param`, as there.
+  if (reads.isObjectPackageDisabled?.(object) === true) {
+    const refusal = objectPackageDisabledError(object);
+    throw condition === undefined ? refusal : Object.assign(refusal, { param: condition });
+  }
   if (context?.isSystem) return;
 
   let def: ObjectDef | null | undefined;
@@ -975,8 +1016,9 @@ export async function enforceApiExposure(
  * against its target's field map, and every target on the way is asked the
  * whole of {@link enforceApiExposure} (disabled package first, then exposure)
  * at its full position (`where.c_ref.b_ref`), the order the data door's walk
- * asks in. A system context is asked nothing at any hop: {@link enforceApiExposure}
- * owns that bypass, and this walk only reaches it. `depth` is a backstop against a self-referential
+ * asks in. [#36689] A system context is asked the disabled-package question
+ * at every hop and the exposure question at none: {@link enforceApiExposure}
+ * owns both, and this walk only reaches it. `depth` is a backstop against a self-referential
  * in-process `where`, never the hop limit.
  */
 async function enforceRelationTargetExposure(
@@ -1443,7 +1485,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   const { engine, metadataService, protocol, resolvePrincipal, keyedDigest, security, schemaReadDelegates } = deps;
   // [#25138] One definition source for the gate, the relation-target gate and
   // the write-response strip, and one listing for discovery.
-  const reads: StdioObjectReads = { metadataService, protocol };
+  // [#36689] …and the disabled-package question, asked of the engine's
+  // registry for every caller ({@link engineObjectPackageDisabled}).
+  const reads: StdioObjectReads = { metadataService, protocol, isObjectPackageDisabled: engineObjectPackageDisabled(engine) };
   // [#25245] …and that listing is the view the object resources read too.
   const objectView = stdioObjectView(reads);
   // [ADR-0106 D1/D5] …served to the principal through the object-schema mask:
