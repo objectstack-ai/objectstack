@@ -2,7 +2,8 @@
 
 /**
  * objectui#11795 — Studio stays a desktop tool, and on a phone it says so: one
- * line under the header (`engine.studio.desktopHint`), shown below `md` (the
+ * line under the strip that opens the menu (`engine.studio.desktopHint`;
+ * objectstack#37456 — Studio has no top bar), shown below `md` (the
  * width `useIsMobile` answers for), and nowhere wider.
  *
  * The REAL surface on its Data tab; the chat dock and the panels it does not
@@ -112,21 +113,21 @@ function renderSurfaceAt(width: number) {
 const HINT = t('engine.studio.desktopHint', 'en');
 
 describe('StudioDesignSurface — the one-line desktop hint on a phone (objectui#11795)', () => {
-  it('a phone-width window shows the hint once, under the header', async () => {
+  it('a phone-width window shows the hint once, under the strip that opens the menu', async () => {
     renderSurfaceAt(390);
 
     const hint = await screen.findByText(HINT);
     expect(hint).toHaveAttribute('role', 'note');
     expect(screen.getAllByText(HINT)).toHaveLength(1);
-    // Directly below the Studio header, above the pillar.
-    expect(hint.previousElementSibling?.tagName).toBe('HEADER');
+    // Directly below the phone's strip (the menu's drawer control), above the pillar.
+    expect(hint.previousElementSibling).toHaveAttribute('data-testid', 'studio-mobile-strip');
   });
 
   it('the control: from `md` up, no hint', async () => {
     renderSurfaceAt(768);
 
-    // The header is up (its first control drawn), and the phone's line is not.
-    await screen.findByTestId('studio-back-to-app');
+    // The left column is up (its way back drawn), and the phone's line is not.
+    await screen.findByTestId('studio-package-back');
     await act(async () => {
       await new Promise((r) => setTimeout(r, 50));
     });

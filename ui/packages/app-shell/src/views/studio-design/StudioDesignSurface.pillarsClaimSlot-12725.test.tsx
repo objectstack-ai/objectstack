@@ -459,7 +459,9 @@ describe('no copilot served: the slot\'s toggle ends the page\'s title row (obje
 
     const button = await screen.findByTestId('studio-slot-toggle');
     expect(screen.getAllByTestId('studio-slot-toggle')).toHaveLength(1);
-    expect(within(screen.getByTestId('studio-shell-header')).queryByTestId('studio-slot-toggle')).toBeNull();
+    // objectstack#37456 — there is no top bar to hold it, and the left column does not either.
+    expect(screen.queryByTestId('studio-shell-header')).toBeNull();
+    expect(screen.getByTestId('studio-top-left')).not.toContainElement(button);
     expect(screen.getByTestId('studio-pillars-host')).toContainElement(button);
     expect(slot().contains(button)).toBe(false);
     // The last control of its row, the hairline right before it.

@@ -378,8 +378,8 @@ type OptionRow =
  *     been showing the author all along, and the spec accepts it. A present but
  *     non-string `label` is a different fact — there are authored bytes being
  *     destroyed — and that one IS malformed.
- *   • A `value` this editor can represent but the SPEC rejects (`'a'` — the
- *     select option's two-character minimum) stays an ordinary editable row.
+ *   • A `value` this editor can represent but the SPEC rejects (`'A'` — the
+ *     select option's lowercase rule) stays an ordinary editable row.
  *     The author can see it and fix it in place, and the draft validator is the
  *     surface that names it. This reader reports only what it cannot show.
  */
@@ -2542,8 +2542,8 @@ function OptionsEditor({
 }) {
   // Local editing buffer. We keep a blank trailing row visible for input but
   // only PERSIST rows whose `value` is non-empty — otherwise the blank row
-  // fails the spec identifier rule ("System identifier must be at least 2
-  // characters") and shows a confusing error mid-edit. The editor is remounted
+  // fails the spec option-value rule ("Option value must not be empty") and
+  // shows a confusing error mid-edit. The editor is remounted
   // per field (key={entry.name}), so seeding from `incoming` once is correct.
   //
   // ⚠️ That `value`-is-empty filter is HALF of objectui#8632, and the half that

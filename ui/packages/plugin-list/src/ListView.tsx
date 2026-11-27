@@ -1739,6 +1739,28 @@ function kanbanBlockOf(schema: ListViewSchema): Record<string, any> {
   return { ...(schema.kanban || {}) };
 }
 
+/** objectstack#36423 — the board's `kanban.cardFooter` as its two members, absent ones off. */
+type BoardCardFooter = { comments?: boolean; attachments?: boolean };
+function boardCardFooterOf(block: Record<string, any> | undefined): BoardCardFooter {
+  const footer = block?.cardFooter;
+  if (!footer || typeof footer !== 'object' || Array.isArray(footer)) return {};
+  return {
+    ...(footer.comments === true ? { comments: true } : {}),
+    ...(footer.attachments === true ? { attachments: true } : {}),
+  };
+}
+
+/**
+ * The `cardFooter` a footer toggle writes: the member on (`true`) or gone, and
+ * no block at all (`undefined`, "the block without this key") once neither is on.
+ */
+function nextCardFooter(current: BoardCardFooter, member: keyof BoardCardFooter, on: boolean): BoardCardFooter | undefined {
+  const next: BoardCardFooter = { ...current };
+  if (on) next[member] = true;
+  else delete next[member];
+  return next.comments || next.attachments ? next : undefined;
+}
+
 /**
  * The host-composed `rowActionDefs` (objectui#8653): declared on no list
  * mirror because the spec refuses it by name, so this is its one narrow cast,
@@ -5608,7 +5630,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // ObjectKanban's own `columns` prop is its LANES, so it goes out as
         // `cardFields` (mirrors plugin-view's adapter), and the block's `lanes`
         // goes out as that `columns`.
-        const { columns: kanbanCardColumns, titleField, summarizeField, lanes, summary: laneStatistic, showFieldLabels, hideEmptyFields } = kanbanCfg as Record<string, any>;
+        const { columns: kanbanCardColumns, titleField, summarizeField, lanes, summary: laneStatistic, showFieldLabels, hideEmptyFields, cardFooter } = kanbanCfg as Record<string, any>;
         const laneField = kanbanLaneFieldOf(schema, objectDef);
         // objectstack#28211 — the block's `lanes`, the lanes the board draws
         // in the author's order, go out as the node's `columns` (its lanes).
@@ -5661,6 +5683,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           ...(laneStatistic && typeof laneStatistic === 'object' ? { summary: laneStatistic } : {}),
           ...(typeof showFieldLabels === 'boolean' ? { showFieldLabels } : {}),
           ...(typeof hideEmptyFields === 'boolean' ? { hideEmptyFields } : {}),
+          // objectstack#36423 — the counts at each card's foot, relayed only when declared.
+          ...(cardFooter && typeof cardFooter === 'object' && !Array.isArray(cardFooter) ? { cardFooter } : {}),
           // objectui#12619 — a board that pages its own lanes queries with the
           // EFFECTIVE filter, as every view that queries for itself does
           // (`selfQueryFilter`): the toolbar Filter and the chips reach its
@@ -7444,6 +7468,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // list's draft over it), and the whole next block a change writes. Plain
   // per-render values, not memos (AGENTS.md #10).
   const kanbanBlock = currentView === 'kanban' ? kanbanBlockOf(schema) : undefined;
+  const boardCardFooter = boardCardFooterOf(kanbanBlock);
   const boardLaneField = kanbanBlock ? kanbanLaneFieldOf(schema, objectDef) : undefined;
   const writeKanban = kanbanBlock && onKanbanChange
     ? (patch: Record<string, unknown>) => {
@@ -7572,6 +7597,26 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 value: kanbanBlock.hideEmptyFields !== false,
                 onChange: (next: boolean) => writeKanban({ hideEmptyFields: next ? undefined : false }),
               },
+              // objectstack#36423 — the counts at each card's foot: off unless
+              // the view asks. Each is offered only where the object has it
+              // (comments: `enable.feeds`, opt-out; attachments: `enable.files`,
+              // opt-in); turning the last one off writes no `cardFooter`.
+              ...(objectDef?.enable?.feeds !== false
+                ? {
+                    footerComments: {
+                      value: boardCardFooter.comments === true,
+                      onChange: (next: boolean) => writeKanban({ cardFooter: nextCardFooter(boardCardFooter, 'comments', next) }),
+                    },
+                  }
+                : {}),
+              ...(objectDef?.enable?.files === true
+                ? {
+                    footerAttachments: {
+                      value: boardCardFooter.attachments === true,
+                      onChange: (next: boolean) => writeKanban({ cardFooter: nextCardFooter(boardCardFooter, 'attachments', next) }),
+                    },
+                  }
+                : {}),
             }
           : {}),
         summary: writeKanban

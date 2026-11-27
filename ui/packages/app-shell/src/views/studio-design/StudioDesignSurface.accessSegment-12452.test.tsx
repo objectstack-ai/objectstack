@@ -220,7 +220,7 @@ function shieldMarkup(): string {
 describe('Studio menu: Access is a group of its own, and More is gone (objectui#12452, objectstack#36899)', () => {
   it('the Access group holds the permission-set entry, a link to the area list, with no More trigger', async () => {
     renderAt(`/studio/${PKG}/data`);
-    await screen.findByTestId('studio-shell-header');
+    await screen.findByTestId('studio-top-left');
 
     const group = within(menu()).getByTestId('studio-menu-group-security');
     expect(group).toHaveTextContent(ACCESS);
@@ -250,7 +250,7 @@ describe('Studio menu: Access is a group of its own, and More is gone (objectui#
 
   it('control: with Data open, the permission-set entry carries neither, and the object entry carries both', async () => {
     renderAt(`/studio/${PKG}/data`);
-    await screen.findByTestId('studio-shell-header');
+    await screen.findByTestId('studio-top-left');
 
     expect(entry(PERMISSION_ENTRY)).not.toHaveAttribute('aria-current');
     expect(entry(PERMISSION_ENTRY)).toHaveAttribute('data-active', 'false');

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 28 — spawns the real producer once per single-cause fixture: twelve in-process bootStack boots, no two the same configuration (a top-level requires, a package body's, the top level over the bodies, the control, an explicit instance, triggers with its hard dependencies, record-context with mcp, its no-token control, a host-mounted record-context, knowledge with realtime, its no-token control, knowledge on a file database under OS_HOME), each its case's subject; 5.9 s in a local run for the first six, 10.0 s with the three record-context boots, 14.8 s with the two knowledge boots, 19.0 s with the file-database knowledge boot (local, verbose reporter); slowest CI reading 11.4 s (scheduled full-battery run 41199450735, Test Core shard log) read before the record-context boots, scaled by the local ratio to 21.7 s, x 1.25, rounded up — the first CI reading after the knowledge boots re-measures it
+// test-budget: 70 — spawns the real producer once per single-cause fixture: twelve in-process bootStack boots, no two the same configuration (a top-level requires, a package body's, the top level over the bodies, the control, an explicit instance, triggers with its hard dependencies, record-context with mcp, its no-token control, a host-mounted record-context, knowledge with realtime, its no-token control, knowledge on a file database under OS_HOME), each its case's subject; 5.9 s in a local run for the first six, 10.0 s with the three record-context boots, 14.8 s with the two knowledge boots, 19.0 s with the file-database knowledge boot (local, verbose reporter); slowest CI reading 53.7 s (scheduled CI run 45914939800, job Test Core (10/10) 140232535871, head 80519b5991, after PR #37708), x 1.25 = 67.1 s, rounded up to the next 10 s
 
 /**
  * #22301 item 1 — `bootStack` mounts the providers an app's `requires` names,
@@ -368,7 +368,10 @@ describe("requires: ['knowledge'] — the knowledge service and one store", () =
     ).map((p) => (p as { name?: string }).name);
     expect(served).toEqual(expect.arrayContaining([KNOWLEDGE, TURSO]));
     expect(served).not.toContain(PGVECTOR);
-  });
+    // Budget, as the last case's: 111-114 ms in file order, 431 ms run alone on a cold module cache
+    // (local, three runs); the full run's last shard read this file at 3.3x local, so 1.4 s cold —
+    // the file's 120_000 keeps it off vitest's 5000 ms default on a loaded runner.
+  }, 120_000);
 
   // The arm `os dev` and `os serve` mount on SQLite: a FILE database, so the
   // store is a libSQL file whose URL the operator may save in Settings. On a
@@ -463,5 +466,10 @@ describe("requires: ['knowledge'] — the knowledge service and one store", () =
       vi.doUnmock('@objectstack/knowledge-turso');
       vi.resetModules();
     }
-  });
+    // Budget: the module cache was just cleared, so constructServedProviders re-imports the provider
+    // graph — 1138-1365 ms locally (three runs, verbose reporter). The scheduled full run's last Test
+    // Core shard (run 45888214247) took this file at 3.3x local (52.8 s of tests outside this case vs
+    // 16.2 s) and ran this case past vitest's 5000 ms default; 1365 ms x 3.3 = 4.5 s leaves no margin
+    // there, so it takes the file's per-case 120_000 like every boot above.
+  }, 120_000);
 });

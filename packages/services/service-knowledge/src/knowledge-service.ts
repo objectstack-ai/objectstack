@@ -522,7 +522,8 @@ export class KnowledgeService implements IKnowledgeService {
   /**
    * The paged walk of {@link reindexSource}; runs inside that source's chain.
    * Under a build's `fence` it stops before a page once the fence says so
-   * (and before its purge and completion), and stops waiting on a read, a
+   * (and before `beginBuild`, before each purge deletion, and before its
+   * purge and completion), and stops waiting on a read, a
    * write, the listing, the purge or `beginBuild` once the build is
    * cancelled, so the source's chain is not held by such a call that never
    * answers. Each page and each purge deletion restarts the fence's bound.
@@ -601,6 +602,23 @@ export class KnowledgeService implements IKnowledgeService {
     // A complete walk is a build (K7, rule 3): the adapter is told before the
     // first write, and may open a generation for a new fingerprint — or refuse.
     const build = cap === undefined;
+    // A build cancelled, or whose lease was lost, while its walk waited its
+    // turn in the source's queue does not begin: `beginBuild` is where a store
+    // that keeps generations takes its builder lock (K7, rule 2).
+    const unbegun = fence?.stop();
+    if (unbegun !== undefined) {
+      return {
+        ok: false,
+        object,
+        discovered: 0,
+        indexed: 0,
+        skipped: 0,
+        purged: null,
+        failed: 0,
+        failures: [],
+        message: `reindex of source '${source.id}' stopped before its build began, and nothing was written: ${unbegun.message}`,
+      };
+    }
     if (build && typeof adapter.beginBuild === 'function') {
       try {
         await fencedCall(fence, adapter.beginBuild(ctx));
@@ -811,9 +829,14 @@ export class KnowledgeService implements IKnowledgeService {
         engine,
         candidates,
         // Each settled deletion (or confirmed keep) is progress: a large,
-        // healthy purge restarts the fence's bound as it goes.
+        // healthy purge restarts the fence's bound as it goes. A build that
+        // lost its lease, or was cancelled, re-reads and deletes no further
+        // candidate: the fence is asked once the candidate's turn comes.
         serialize: async (documentId, task) => {
-          const outcome = await chainAfter(this.recordSyncTails, documentId, task);
+          const outcome = await chainAfter(this.recordSyncTails, documentId, () => {
+            const halt = fence?.stop();
+            return halt === undefined ? task() : Promise.reject(new Error(halt.message));
+          });
           fence?.progressed();
           return outcome;
         },
@@ -827,6 +850,17 @@ export class KnowledgeService implements IKnowledgeService {
       };
     }
     if (purge.failure !== undefined) {
+      const purgeHalt = fence?.stop();
+      if (purgeHalt !== undefined) {
+        return {
+          ...done,
+          ok: false,
+          purged: purge.purged,
+          message:
+            `reindex of source '${source.id}' walked every page, and stopped during its purge after ` +
+            `${purge.purged} deletion(s): ${purgeHalt.message}`,
+        };
+      }
       return {
         ...done,
         ok: false,

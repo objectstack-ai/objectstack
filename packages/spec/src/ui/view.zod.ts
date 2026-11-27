@@ -2542,6 +2542,38 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
     'Whether a card leaves out a field that holds no value. Omit for true (left out); false keeps the field with an empty value.',
   ),
   /**
+   * objectstack#36423 — the counts a card shows at its foot. `comments: true`
+   * shows how many comment threads of the record are open (top-level and not
+   * resolved): the number the record page's comments icon shows, except a
+   * reply whose parent was deleted (a thread of its own there) and a comment
+   * not yet stamped with the record pair (`os migrate comment-parent-pair
+   * --apply`; the record page reads by `thread_id`). `attachments: true`
+   * shows how many files are attached to it (an object with `enable.files`).
+   * Each is read for the whole board in one grouped read per counted object
+   * over the cards it has loaded, never one read per card, under the reader's
+   * permissions; where the server cuts that answer to its default page size,
+   * one more grouped read over the cards it did not name, up to 20 in all.
+   * A count of zero draws nothing. Absent, or a member absent or `false`:
+   * that count is neither read nor drawn — the board as it was before this
+   * key.
+   *
+   * An object, so a later foot item is one more member rather than a second
+   * key. ⛔ No spec-side default.
+   */
+  cardFooter: strictObject({
+    surface: 'this kanban card footer',
+    history: VIEW_HISTORY,
+  }, {
+    comments: z.boolean().optional().describe(
+      'Show how many comment threads of the record are open (not resolved). Omit or false: not shown, and not read.',
+    ),
+    attachments: z.boolean().optional().describe(
+      'Show how many files are attached to the record (objects with enable.files). Omit or false: not shown, and not read.',
+    ),
+  }).optional().describe(
+    'The counts each card shows at its foot, each read for the whole board over its loaded cards in grouped reads, never one per card. Omit to show none.',
+  ),
+  /**
    * [#16894] The one item-titled view config of the family that omitted this
    * key. `GalleryConfigSchema`, `TimelineConfigSchema`, `CalendarConfigSchema`,
    * `GanttConfigSchema` and `ListMapConfigSchema` all declare `titleField`
@@ -8657,25 +8689,25 @@ export function defineList(
  * members inline, and the wall names the derive path for a row whose members
  * cannot be spelled.
  *
- * The refusal itself is `SystemIdentifierSchema`'s grammar message
- * (`shared/identifiers.zod.ts`), reached through `SelectOptionSchema.value`,
+ * The refusal itself is the option-value grammar message
+ * (`SelectOptionValueSchema`, `data/field.zod.ts`), reached through `SelectOptionSchema.value`,
  * which the form face reuses BY REFERENCE (pinned in
  * `form-select-option.test.ts`). That message cannot carry this remedy where it
- * is declared: the same grammar bounds object-field options and three
- * object-storage names, and "derive the members from the served JSON Schema"
+ * is declared: the same grammar bounds object-field options and picklist
+ * items, and "derive the members from the served JSON Schema"
  * is true only on a schema-bound form. `defineMetadataForm` is exactly that door — it
  * stamps `data.provider: 'schema'` on every form it builds — so the remedy is
  * appended here, to the issue that door raises, and nowhere else.
  */
 const FORM_OPTION_VALUE_DERIVE_REMEDY =
-  'An enum member carrying a hyphen, a capital or a single character cannot be a form option '
+  'An enum member carrying a hyphen or a capital cannot be a form option '
   + '`value`, which is a lowercase system identifier. When this row edits a spec enum whose '
   + 'members cannot be spelled as option values, omit `options`: the control derives the '
   + 'members from the served JSON Schema, and their meanings go in `helpText`.';
 
 /**
- * The two issue codes the system-identifier grammar raises on a string: the
- * pattern (`invalid_format`) and the two-character floor (`too_small`).
+ * The two issue codes the option-value grammar raises on a string: the
+ * pattern (`invalid_format`) and the empty-value floor (`too_small`).
  */
 const OPTION_VALUE_GRAMMAR_CODES: ReadonlySet<string> = new Set(['invalid_format', 'too_small']);
 

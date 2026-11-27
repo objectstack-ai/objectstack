@@ -171,12 +171,12 @@ function servedEnum(type: string, key: string): string[] {
   return members as string[];
 }
 
-// The card's own three members, plus the two-character floor.
+// The card's own three members, plus the empty-value floor.
 const UNSPELLABLE = [
   { value: 'new-tab', code: 'invalid_format', why: 'a hyphen (action.openIn)' },
   { value: 'perRecord', code: 'invalid_format', why: 'a capital (action.execution)' },
   { value: 'system-data', code: 'invalid_format', why: 'a hyphen (object.managedBy)' },
-  { value: 'x', code: 'too_small', why: 'a single character' },
+  { value: '', code: 'too_small', why: 'an empty value' },
 ] as const;
 
 describe('defineMetadataForm: the refusal of an unspellable option value names the derive path', () => {

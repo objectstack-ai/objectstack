@@ -25,7 +25,8 @@
  *     reports a bare one of the first kind as a Build finding, so every
  *     authoring prompt (build, iterate, template iterate) states it;
  *   - the structure the Build half checks by exact name beyond the seed
- *     ({@link structureLines}): each lookup's target, each single-choice field
+ *     ({@link structureLines}): each lookup's target (a row marked
+ *     `masterDetail` named as a master-detail, never as a lookup), each single-choice field
  *     with its minimum option count, each dashboard, each app navigation
  *     target, and each dataset with its members and their vocabulary. Every Build check traces to text the prompt carries, so a
  *     faithful build never fails for not guessing a name; an iterate prompt
@@ -204,7 +205,9 @@ export function datasetLines(datasets: NonNullable<ScenarioExpect['datasets']>):
 /**
  * One line per kind of structure row the exact-name scorer (`scoreGraph`)
  * checks and the seed does not already state: a lookup's target
- * (`lookup:<object>.<field>-><to>`), a single-choice field's minimum option
+ * (`lookup:<object>.<field>-><to>`; a row marked `masterDetail` gets its own
+ * master-detail line, since the inline-edit tag credits only a `master_detail`
+ * field), a single-choice field's minimum option
  * count (`select:<object>.<field>>=<n>opts`), a dashboard (`dashboard:<name>`)
  * and an app navigation target (`nav:<name>->exists`). On a card carrying
  * the select-options tag, one more line holds every single-choice field the
@@ -213,8 +216,17 @@ export function datasetLines(datasets: NonNullable<ScenarioExpect['datasets']>):
  */
 export function structureLines(rows: StructureRows, card: Card): string[] {
   const out: string[] = [];
-  if (rows.lookups?.length) {
-    out.push(`- Lookups, each referencing the object shown: ${rows.lookups.map((l) => `${code(`${l.object}.${l.field}`)} → ${code(l.to)}`).join(', ')}.`);
+  const relation = (l: NonNullable<StructureRows['lookups']>[number]) => `${code(`${l.object}.${l.field}`)} → ${code(l.to)}`;
+  const lookups = rows.lookups?.filter((l) => l.masterDetail !== true) ?? [];
+  const masterDetails = rows.lookups?.filter((l) => l.masterDetail === true) ?? [];
+  if (lookups.length) {
+    out.push(`- Lookups, each referencing the object shown: ${lookups.map(relation).join(', ')}.`);
+  }
+  if (masterDetails.length) {
+    out.push(
+      `- Master-detail relationships, each a \`master_detail\` field (not a \`lookup\`) on the detail object referencing its master, ` +
+        `the detail's rows entered inline on the master's form: ${masterDetails.map(relation).join(', ')}.`,
+    );
   }
   if (rows.selectFields?.length) {
     out.push(
@@ -321,9 +333,15 @@ function personaLine(card: Card, p: Persona): string {
     ...(p.hidden.objects ?? []).map((o) => `the object \`${o}\``),
     ...(p.hidden.fields ?? []).map((f) => `the field \`${f.object}.${f.field}\``),
   ];
+  const rollups = (p.withheldRollups ?? []).map((r) => `\`${r.object}.${r.field}\``);
   const scope = (p.scope ?? []).map((s) => `\`${s.object}\` rows whose \`${s.field}\` is ${JSON.stringify(s.value)}`);
   return (
     `- \`${permissionSetName(card, p.id)}\` for \`${p.id}\` (${p.role}): must not read ${hides.join(' or ')}` +
+    (rollups.length
+      ? rollups.length > 1
+        ? `; the roll-up fields ${rollups.join(' and ')} summarise what it must not read, so they are withheld too: its set must not read them either`
+        : `; the roll-up field ${rollups[0]} summarises what it must not read, so it is withheld too: its set must not read it either`
+      : '') +
     (scope.length ? `; sees only ${scope.join(' and ')}` : '') +
     '.'
   );

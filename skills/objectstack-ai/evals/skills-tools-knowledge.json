@@ -14,7 +14,7 @@
     {
       "id": 2,
       "prompt": "Our copilot should use Anthropic with a low temperature (0.3) and cap responses at 2000 tokens. Where do these settings go in the metadata?",
-      "expected_output": "Places sampling under the agent's `model` block (`AIModelConfigSchema`): `provider: 'anthropic'`, a free-string `model`, `temperature: 0.3` (0–2, outside is a parse error) and `maxTokens: 2000`. States that there is no top-level `temperature` / `maxTokens` on an agent and that the inline `provider` enum is `openai | azure_openai | anthropic | local`.",
+      "expected_output": "Places sampling under the agent's `model` block (`AIModelConfigSchema`): `provider: 'anthropic'`, `temperature: 0.3` (0–2, outside is a parse error) and `maxTokens: 2000`; a free-string `model` is optional (absent runs on the host's default model), so omitting it is correct. States that there is no top-level `temperature` / `maxTokens` on an agent and that the inline `provider` enum is `openai | azure_openai | anthropic | local`, with no default.",
       "files": [],
       "assertions": {
         "must_contain": ["provider", "anthropic", "temperature", "maxTokens"],
@@ -109,6 +109,16 @@
       "assertions": {
         "must_contain": ["opportunity", "related", "where", "stage", "body", "notes", "record-context"],
         "must_not_contain": ["filter:", "direction:", "aiReadable"]
+      }
+    },
+    {
+      "id": 12,
+      "prompt": "Our package ships a context pack named `policy_document` over the `policy` object. Add `src/skills/policy-inquiry.skill.ts`: a skill that answers questions about one policy from that pack, which an external agent can start from a policy record over MCP. None of the project's files are in this directory: write the file in your answer.",
+      "expected_output": "Emits a `defineSkill` with a snake_case `name`, `label`, non-blank `instructions`, `context: 'policy_document'` (the pack's bare name, not a face such as `acme-policy_document` and not the object name) and a `tools` list that binds `get_record_context`, by name or a wildcard matching it, since the parse refuses `context` without that binding. Says that over MCP the skill's prompt then takes an optional `recordId` where the pack resolves and the server serves `get_record_context` (`requires: ['record-context']`), and that the prompt asks the model to call that tool: the record is never inlined. The skill stays offered over MCP (no `mcpPrompt` opt-out), with no `permissions` key and no `*.agent.ts` file.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineSkill", "context:", "policy_document"],
+        "must_not_contain": ["permissions:", "defineAgent("]
       }
     }
   ]

@@ -234,7 +234,19 @@ const view = await client.meta.getItem('view', 'crm_lead.pipeline');
 const draft = await client.meta.getItem('object', 'account', { packageId: 'com.acme.crm', state: 'draft' });
 const draftItem = draft.item as { _diagnostics?: { valid: boolean } } | undefined;
 console.log(draftItem?._diagnostics?.valid);
-await client.meta.publishItem('object', 'account', { message: 'go live' });
+const published = await client.meta.publishItem('object', 'account', { message: 'go live' });
+// Pin what you publish (ADR-0008): `draftVersion` is the draft you mean, your own
+// draft save's receipt `version` (or the draft read's), never a fresh re-read;
+// `parentVersion` is the live row you mean to replace, here the one the publish
+// above wrote (`null`: no live row is stored). A draft or live row that moved
+// since is refused 409 METADATA_CONFLICT and nothing is published. An empty
+// string pins nothing.
+const saved = await client.meta.saveItem('object', 'account', { ...accountSchema, label: 'Customer' }, { mode: 'draft' });
+await client.meta.publishItem('object', 'account', {
+  message: 'rename',
+  draftVersion: saved.version,
+  parentVersion: published.version,
+});
 await client.meta.rollbackItem('object', 'account', 3);
 // The authoring trail, like getHistory and getAudit: without studio.access or manage_metadata → 403 FORBIDDEN (setup.access alone is refused)
 const diff = await client.meta.diffItem('object', 'account', { from: 2, to: 5 });

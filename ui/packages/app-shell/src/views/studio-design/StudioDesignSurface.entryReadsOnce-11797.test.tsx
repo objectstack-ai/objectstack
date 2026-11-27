@@ -161,9 +161,9 @@ describe('StudioDesignSurface — entry reads each question once (objectui#11797
       for (const h of held) h.release();
       await drain();
     });
-    // The writability gate's answer reaches the top bar: the package is served
-    // read-only, so Create app turns disabled. (The package switcher, the
-    // third reader, was removed by objectstack#36501.)
-    await waitFor(() => expect(screen.getByRole('button', { name: /Create app/ })).toBeDisabled());
+    // The writability gate's answer reaches the left column: the package is
+    // served read-only, so the package switcher draws its lock
+    // (objectstack#37456; the top bar's Create app, which said it before, is gone).
+    await waitFor(() => expect(screen.getByTestId('studio-pkg-readonly')).toBeInTheDocument());
   });
 });

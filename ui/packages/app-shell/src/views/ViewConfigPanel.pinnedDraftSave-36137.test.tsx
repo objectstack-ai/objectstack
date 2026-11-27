@@ -465,3 +465,74 @@ describe('the draft bar\'s Publish after a view settings save is pinned to that 
     cleanup();
   });
 });
+
+/**
+ * objectstack#37648 — a refused save resolved with "reload" re-reads the
+ * stored view into the panel; the draft that read found is the one the draft
+ * bar shows from then on, so the panel hands the bar that read's version
+ * (`reloadedSignal`, `reloadedDraftVersion`, `reloadedHasDraft`). Before, the
+ * bar kept the version from before the reload, and its Publish was refused
+ * until the panel was reopened.
+ */
+describe('after a conflict resolved with "reload", the draft bar takes the reloaded draft (objectstack#37648)', () => {
+  it('another writer\'s draft: the bar is handed its version', async () => {
+    const door = viewDoor();
+    const { outcomes } = mountPanel(door);
+    await loadedAndEdited();
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    await waitFor(() => expect(outcomes).toEqual(['saved']));
+    const mine = door.draftOf(VIEW_ID)!.version;
+    expect(bar.props?.reloadedSignal).toBe(0);
+
+    // Another writer's draft save moves the draft past the panel's receipt.
+    await persistRuntimeMetadata('view', VIEW_ID, buildViewConfigSaveBody(OBJECT, { id: VIEW_ID, label: 'Theirs', type: 'grid' }), {
+      metadataClient: door.client,
+    });
+    const theirs = door.draftOf(VIEW_ID)!.version;
+    expect(theirs).not.toBe(mine);
+
+    fireEvent.click(screen.getByTestId('mock-inspector-label'));
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    await waitFor(() => expect(screen.getByTestId('draft-conflict-dialog')).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('draft-conflict-reload'));
+    });
+    await waitFor(() => expect(outcomes).toEqual(['saved', 'reloaded']));
+    await waitFor(() => expect(bar.props?.reloadedSignal).toBe(1));
+    expect(bar.props?.reloadedDraftVersion).toBe(theirs);
+    expect(bar.props?.reloadedHasDraft).toBe(true);
+    // The landed-save signal is not moved by the reload.
+    expect(bar.props?.savedSignal).toBe(1);
+    cleanup();
+  });
+
+  it('a reload that finds no pending draft says so', async () => {
+    const door = viewDoor();
+    const { outcomes } = mountPanel(door);
+    await loadedAndEdited();
+    // Another writer's draft lands after the load: the save, pinned to "no draft", is refused.
+    await persistRuntimeMetadata('view', VIEW_ID, buildViewConfigSaveBody(OBJECT, { id: VIEW_ID, label: 'Theirs', type: 'grid' }), {
+      metadataClient: door.client,
+    });
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    await waitFor(() => expect(screen.getByTestId('draft-conflict-dialog')).toBeTruthy());
+    // The other draft is published before the author answers.
+    await door.client.publish('view', VIEW_ID);
+    expect(door.draftOf(VIEW_ID)).toBeUndefined();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('draft-conflict-reload'));
+    });
+    await waitFor(() => expect(outcomes).toEqual(['reloaded']));
+    await waitFor(() => expect(bar.props?.reloadedSignal).toBe(1));
+    expect(bar.props?.reloadedHasDraft).toBe(false);
+    expect(bar.props?.reloadedDraftVersion).toBeUndefined();
+    cleanup();
+  });
+});
+

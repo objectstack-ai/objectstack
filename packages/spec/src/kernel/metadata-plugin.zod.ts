@@ -983,7 +983,12 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   { type: 'report', label: 'Report', filePatterns: ['**/*.report.ts', '**/*.report.yml'], supportsOverlay: true, allowEnvironmentOverlay: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 60, domain: 'ui' },
   // ADR-0021: dataset is the analytics semantic layer that report/dashboard bind to.
   // loadOrder 55 < report/dashboard (60) so datasets register before their consumers.
-  { type: 'dataset', label: 'Dataset', description: 'Analytics semantic layer — dimensions & measures', filePatterns: ['**/*.dataset.ts', '**/*.dataset.yml', '**/*.dataset.json'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 55, domain: 'ui' },
+  // ADR-0084 (amended 2026-11-26, "Placements, and what moves to Setup"): a
+  // dataset is a `data` type — the semantic layer that charts and an AI's data
+  // questions both read — so its `domain` is `data` and Studio lists it under
+  // 数据 Data, directly after `object`. The row stays in this block because the
+  // overlay notes above name it, and its schema still lives in `ui/dataset.zod.ts`.
+  { type: 'dataset', label: 'Dataset', description: 'Analytics semantic layer — dimensions & measures', filePatterns: ['**/*.dataset.ts', '**/*.dataset.yml', '**/*.dataset.json'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 55, domain: 'data' },
 
   // Automation Protocol — flow is executionPinned (ADR-0009).
   // ADR-0019: there is no `approval` metadata type — approvals are Approval

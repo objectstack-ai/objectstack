@@ -17,8 +17,9 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { ErrorCode } from '@objectstack/spec/api';
 
 import { formatRefusal, loadScenarioFile, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
-import type { ScenarioTier } from '../../src/schema.js';
+import { PersonaSchema, type ScenarioTier } from '../../src/schema.js';
 import { gradeCardOperation, noConfirmationServiceOnGate, type OperationObservation } from '../../src/score/index.js';
+import { gradeRun, type RunTruth } from '../../src/score/scenario-run-grade.js';
 import type { PersonaAccount } from '../../src/runner/app.js';
 import { makeDriver, parseArgs } from '../../src/runner/cli.js';
 import {
@@ -688,6 +689,45 @@ describe('prompts, seed order, template manifest and change size', () => {
     expect(SEED_POSTURE).toMatch(/no record-triggered flow fires/);
   });
 
+  it('a persona line names the roll-ups the card withholds with the rows they summarise, and only on the cards that name them', () => {
+    const at = (file: string) => buildPrompt(namespacedScenario(load(resolve(HERE, '../../../../../docs/qa/scenarios', file))).card);
+    expect(at('project_with_tasks.json')).toContain(
+      '- `demoproject_client_viewer` for `client_viewer` (Client stakeholder who may not change tasks): must not read the object `demoproject_task`; ' +
+        'the roll-up fields `demoproject_project.task_count` and `demoproject_project.total_estimate` summarise what it must not read, so they are withheld too: its set must not read them either.',
+    );
+    expect(at('invoice_with_line_items.json')).toContain(
+      '(Warehouse staff who may read invoices but not change them): must not read the object `demoinvoice_account` or the field `demoinvoice_invoice_line.amount` or the field `demoinvoice_invoice_line.unit_price`; ' +
+        'the roll-up field `demoinvoice_invoice.total` summarises what it must not read, so it is withheld too: its set must not read it either.',
+    );
+    // The contractor's own total is already in its hidden, so its line is as it was.
+    expect(at('project_with_tasks.json')).toContain('`demoproject_contractor` for `contractor` (External contractor who logs, updates and removes their own tasks): must not read the field `demoproject_task.estimate_hours` or the field `demoproject_project.total_estimate`; sees only');
+    // A card that names no withheld roll-up keeps its persona lines byte for byte.
+    const crmPrompt = buildPrompt(namespacedScenario(crm).card);
+    expect(crmPrompt).toContain('`democrm_sdr` for `sdr` (Sales development representative who adds, updates and removes contacts): must not read the field `democrm_contact.email`; sees only');
+    expect(crmPrompt).not.toContain('roll-up field');
+  });
+
+  it('the schema refuses a withheld roll-up the persona\'s hidden already names or its allowedRollups allows', () => {
+    const base = { id: 'client', role: 'Client', hidden: { objects: ['task'] } };
+    expect(PersonaSchema.safeParse({ ...base, withheldRollups: [{ object: 'project', field: 'task_count' }] }).success).toBe(true);
+    const inHidden = PersonaSchema.safeParse({ ...base, withheldRollups: [{ object: 'task', field: 'estimate_hours' }] });
+    expect(inHidden.error!.issues.map((i) => i.path)).toEqual([['withheldRollups', 0]]);
+    const alsoAllowed = PersonaSchema.safeParse({ ...base, allowedRollups: [{ object: 'project', field: 'task_count' }], withheldRollups: [{ object: 'project', field: 'task_count' }] });
+    expect(alsoAllowed.error!.issues.map((i) => i.path)).toEqual([['withheldRollups', 0]]);
+  });
+
+  it('the loader refuses a withheld roll-up on a field no seed row carries', () => {
+    const file = resolve(HERE, '../../../../../docs/qa/scenarios/project_with_tasks.json');
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    raw.run.personas.find((p: { id: string }) => p.id === 'client_viewer').withheldRollups = [{ object: 'project', field: 'task_total' }];
+    const dir = mkdtempSync(join(tmpdir(), 'withheld-'));
+    writeFileSync(join(dir, 'project_with_tasks.json'), JSON.stringify(raw));
+    const { card, refusals } = loadScenarioFile(join(dir, 'project_with_tasks.json'), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    rmSync(dir, { recursive: true, force: true });
+    expect(card).toBeUndefined();
+    expect(refusals.map((r) => [r.path, r.message])).toEqual([['run.personas[1].withheldRollups[0].field', 'no seed row of `project` carries `task_total`']]);
+  });
+
   it('both authoring loops name the verify invocation the runner scores with, next to validate and build', () => {
     const card = namespacedScenario(crm).card;
     expect(verifyArgs(card)).toEqual(['verify', '--reference-shapes', '--rls']);
@@ -892,6 +932,44 @@ describe('namespace-relative cards', () => {
     expect(namespacedScenario(namespacedScenario(crm)).card).toEqual(n); // a name already carrying the prefix keeps it
     expect(citationLabels(crm)).toEqual({ democrm_account: ['account'], democrm_contact: ['contact'], democrm_opportunity: ['opportunity'] });
     expect(permissionSetName(crm.card, 'sdr')).toBe('democrm_sdr');
+  });
+
+  describe('a multi-word object is cited by its name as words, in a source line only (#37684)', () => {
+    const invoice = load(resolve(HERE, '../../../../../docs/qa/scenarios/invoice_with_line_items.json'));
+    const travel = load(resolve(HERE, '../../../../../docs/qa/scenarios/travel_expense.json'));
+    const cited = (labels: Record<string, string[]>, object: string, replyText: string) =>
+      gradeRun({ figures: [{ label: 'total', value: 4_210, object }], objectLabels: labels } satisfies RunTruth, {}, { replyText, toolCalls: [] }).cited;
+
+    it('labels each object by its card name and, when it has more than one word, by those words', () => {
+      expect(citationLabels(invoice)).toEqual({
+        demoinvoice_invoice: ['invoice'],
+        demoinvoice_invoice_line: ['invoice_line', 'invoice line'],
+        demoinvoice_account: ['account'],
+        demoinvoice_payment: ['payment'],
+      });
+      expect(citationLabels(travel).demotravel_expense_claim).toEqual(['expense_claim', 'expense claim']);
+    });
+
+    it("grades the card's three reply shapes cited, whatever the case", () => {
+      const inv = citationLabels(invoice);
+      const trv = citationLabels(travel);
+      expect(cited(inv, 'demoinvoice_invoice', 'Total billed: 4,210.\nSource: Invoice')).toBe(true);
+      expect(cited(inv, 'demoinvoice_invoice_line', 'Line total: 4,210.\nSource: Invoice Line')).toBe(true);
+      expect(cited(inv, 'demoinvoice_invoice_line', 'Line total: 4,210.\n来源：INVOICE LINES')).toBe(true);
+      expect(cited(trv, 'demotravel_expense_claim', 'Claimed: 4,210.\nSource: Expense Claim (demotravel_expense_claim)')).toBe(true);
+      expect(cited(trv, 'demotravel_expense_claim', 'Claimed: 4,210.\nSource: Expense Claim')).toBe(true);
+    });
+
+    it('⛔ a source line naming another object, or the words outside a source line, still cite nothing', () => {
+      const inv = citationLabels(invoice);
+      const trv = citationLabels(travel);
+      // Wrong object: the line names the invoice, the figure is the lines'.
+      expect(cited(inv, 'demoinvoice_invoice_line', 'Line total: 4,210.\nSource: Invoice')).toBe(false);
+      expect(cited(trv, 'demotravel_expense_claim', 'Claimed: 4,210.\nSource: Claim Line')).toBe(false);
+      // The right words, but in the reply's prose rather than a source line.
+      expect(cited(inv, 'demoinvoice_invoice_line', 'Every invoice line adds up to 4,210.')).toBe(false);
+      expect(cited(trv, 'demotravel_expense_claim', 'The expense claims total 4,210.\nSource: Trip Request')).toBe(false);
+    });
   });
 
   it('prefixes the expected dashboards and every nav target, not only objects', () => {

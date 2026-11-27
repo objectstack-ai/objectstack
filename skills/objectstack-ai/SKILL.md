@@ -43,9 +43,10 @@ metadata:
 |:---------|:--------|
 | `surface` | `'ask' \| 'build' \| 'both'` — which platform agent may bind this skill (default `'ask'`). Enforced in `resolveActiveSkills` at load: an incompatible binding is a **fast load error** (ADR-0063 §3) |
 | `description` | What the skill does — the agent reads it to decide when to use the skill |
-| `instructions` | Prompt guidance for this skill's context. **The one field the open edition serves**: `@objectstack/mcp` projects it onto the MCP `prompts` primitive, so a skill with blank `instructions` — or `active: false` — is not listed as a prompt at all |
+| `instructions` | Prompt guidance. On the open edition `@objectstack/mcp` projects it onto the MCP `prompts` primitive, so a skill with blank `instructions` — or `active: false` — is not listed |
 | `triggerConditions` | Programmatic activation rules (below) |
 | `active` | Enabled (default `true`) |
+| `context` | Bare name of the context pack the skill works from (**Context packs** below), resolved in the skill's package, then its dependency closure. Unless `tools` binds `get_record_context`, by name or wildcard, the parse refuses it |
 
 > A skill has **no `permissions` key** — removed in 17.0.0 because it gated
 > nothing. Gate at the **agent** (`access` / `permissions` on `defineAgent`,
@@ -91,8 +92,7 @@ export default defineSkill({
     - Set priority by customer tier: Enterprise → High, Pro → Medium, Free → Low.
     - Escalated cases must summarise the actions already taken.
   `,
-  // Every name resolves: two platform tools (rung 2) plus one action tool
-  // materialised from this stack's own `crm_escalate_case` Action (rung 3).
+  // Two platform tools (rung 2) and this stack's own Action (rung 3).
   tools: ['query_records', 'get_record', 'action_crm_escalate_case'],
   triggerConditions: [
     { field: 'objectName', operator: 'eq', value: 'support_case' },
@@ -105,7 +105,7 @@ export default defineSkill({
 
 Each condition is `{ field, operator, value }`, ANDed with its siblings. The
 shape of `value` is **coupled to `operator`** — a mismatch is a parse error, not
-a coercion (`packages/spec/src/ai/skill.zod.ts:37-51, 139-202`):
+a coercion (`packages/spec/src/ai/skill.zod.ts:38-52, 140-203`):
 
 | Operator | Meaning | `value` must be |
 |:---------|:--------|:----------------|
@@ -249,7 +249,8 @@ these tools, a client advertising form-mode `elicitation` is asked instead:
 A context pack (`aiContexts`, `*.ai-context.ts`) lists the fields, related
 lists and body of one record that `get_record_context` hands a model, read as
 the caller; `requires: ['record-context']` serves the tool. Keys, bounds, pack
-names, `os validate` rules: [references/context-packs.md](./references/context-packs.md).
+names, a skill's `context` over MCP, `os validate` rules:
+[references/context-packs.md](./references/context-packs.md).
 
 ---
 
@@ -360,16 +361,15 @@ live, but listing-only: carried onto the tool, never sent to the model).
 
 ## Model Configuration
 
-Sampling parameters live under an agent's `model` (`AIModelConfigSchema`) —
-there is **no top-level `temperature` / `maxTokens`** on an agent
-(`packages/spec/src/ai/agent.zod.ts:36-40`):
+Sampling lives under an agent's `model` (`AIModelConfigSchema`), **never a
+top-level `temperature` / `maxTokens`** (`packages/spec/src/ai/agent.zod.ts:37-45`):
 
 | Key | Contract |
 |:--|:--|
-| `provider` | Inline enum `openai` \| `azure_openai` \| `anthropic` \| `local` (default `openai`). **Model-registry** entries (`ModelProviderSchema`) accept a wider set: also `google`, `cohere`, `huggingface`, `custom` |
-| `model` | Free string — the provider's own model name |
+| `provider` | Optional, no default (the deployment's choice): inline enum `openai` \| `azure_openai` \| `anthropic` \| `local`. Model-registry entries (`ModelProviderSchema`) add `google`, `cohere`, `huggingface`, `custom` |
+| `model` | Optional free-string model name; absent = the host's default model for the environment |
 | `temperature` | `min(0).max(2)`, default `0.7`. **Outside 0–2 is a parse error** |
-| `maxTokens` / `topP` | Optional numbers, unbounded by the schema |
+| `maxTokens` / `topP` | Optional, schema-unbounded numbers |
 
 ---
 
@@ -444,10 +444,8 @@ name by that tool, a wildcard by any match, an `action_*` entry also by
 `run_action`. That covers the HTTP door and any host server that calls it; the
 plugin's own stdio transport lists every skill except one with
 `mcpPrompt: false`. That optional key is the owner's opt-out: `false` = written
-for the in-product agents only, never offered over MCP on any connection,
-whatever the binding; absent or `true` = the binding rule above. Bind a tool no
-MCP family serves (the MCP table above) and no filtering server offers the
-skill.
+for the in-product agents only, never offered over MCP on any connection;
+absent or `true` = the binding rule above.
 `visualize_data` is the only built-in that draws a chart (an inline `data-chart`
 part), auto-registered **only** when an analytics service (`IAnalyticsService`)
 is wired — `query_data` / `aggregate_data` return numbers, not charts.

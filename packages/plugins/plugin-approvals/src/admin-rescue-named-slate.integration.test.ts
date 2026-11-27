@@ -47,7 +47,12 @@ import {
 } from '@objectstack/core';
 import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
-import { NotificationTextRenderer } from '@objectstack/service-messaging';
+import {
+  NotificationTextRenderer,
+  assertNotificationTextKeys,
+  NOTIFICATION_LIST_PARAM_MAX_ITEMS,
+} from '@objectstack/service-messaging';
+import { APPROVAL_LIST_PARAM_MAX_ITEMS } from './approval-notification-text.js';
 import { ApprovalsTranslations } from './translations/index.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
@@ -657,7 +662,8 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
         { type: 'position', value: 'sales_manager' }, { type: 'position', value: 'treasury' },
       ]);
       const [notice] = told.filter((e) => e.source?.id === row.id);
-      expect(notice.keyedText.bodyKey).toBe('messages.approvalNoApproverHoldingSlots2');
+      // [#36853] The slate rides `{{who}}` as a list param, one keyed clause per slot.
+      expect(notice.keyedText.bodyKey).toBe('messages.approvalNoApproverHolding');
       expect(notice.payload.body).toBe(holding("position 'Sales Manager', position 'treasury'"));
       const renderer = new NotificationTextRenderer({ getData: () => undefined, getI18n: () => i18n as any });
       const zh = renderer.render(notice.keyedText, notice.payload, 'zh-CN').body;
@@ -667,6 +673,57 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
         .toContain('役職「Sales Manager」、役職「treasury」を担うメンバー');
       expect(renderer.render(notice.keyedText, notice.payload, 'en').body)
         .toBe(holding("position 'Sales Manager', position 'treasury'"));
+    });
+
+    // [#36853] A slate larger than the 2–8 slot sentences #36463 spelled: the
+    // real renderer reads every slot in zh-CN, no English approver type and no
+    // English separator, and the literal body is the English the row stores.
+    it('the submitter\'s notice: a slate of nine slots reads entirely in zh-CN through the real renderer', async () => {
+      const slate = [
+        { type: 'position', value: 'sales_manager' },
+        ...Array.from({ length: 4 }, (_, i) => ({ type: 'team', value: `团队${i + 1}` })),
+        ...Array.from({ length: 4 }, (_, i) => ({ type: 'department', value: `部门${i + 1}` })),
+      ];
+      const row = await openLabelled('none_notice_nine', slate);
+      const [notice] = told.filter((e) => e.source?.id === row.id);
+      expect(notice.keyedText.bodyKey).toBe('messages.approvalNoApproverHolding');
+      expect(notice.payload.body).toBe(holding([
+        "position 'Sales Manager'",
+        ...Array.from({ length: 4 }, (_, i) => `team '团队${i + 1}'`),
+        ...Array.from({ length: 4 }, (_, i) => `department '部门${i + 1}'`),
+      ].join(', ')));
+      const renderer = new NotificationTextRenderer({ getData: () => undefined, getI18n: () => i18n as any });
+      const zh = renderer.render(notice.keyedText, notice.payload, 'zh-CN').body;
+      expect(zh).toBe(holdingZh([
+        '岗位「销售经理」',
+        ...Array.from({ length: 4 }, (_, i) => `团队「团队${i + 1}」`),
+        ...Array.from({ length: 4 }, (_, i) => `部门「部门${i + 1}」`),
+      ].join('、')));
+      expect(zh).not.toMatch(/[A-Za-z]/);
+      expect(renderer.render(notice.keyedText, notice.payload, 'en').body).toBe(notice.payload.body);
+    });
+
+    // [#36853] The emit refuses a list param of more than
+    // NOTIFICATION_LIST_PARAM_MAX_ITEMS items and `notify` only logs it, so a
+    // slate past that is sent as one English `who`: the submitter is told.
+    it('the submitter\'s notice: a slate past the list cap is still sent, as the English clauses; at the cap it stays a list', async () => {
+      expect(APPROVAL_LIST_PARAM_MAX_ITEMS).toBe(NOTIFICATION_LIST_PARAM_MAX_ITEMS);
+      const slateOf = (n: number) => Array.from({ length: n }, (_, i) => ({ type: 'team', value: `t${i}` }));
+
+      const over = await openLabelled('none_notice_over_cap', slateOf(NOTIFICATION_LIST_PARAM_MAX_ITEMS + 1));
+      const [overNotice] = told.filter((e) => e.source?.id === over.id);
+      expect(overNotice.keyedText.bodyKey).toBe('messages.approvalNoApproverHolding');
+      expect(() => assertNotificationTextKeys(overNotice.keyedText)).not.toThrow();
+      const english = slateOf(NOTIFICATION_LIST_PARAM_MAX_ITEMS + 1).map((s) => `team '${s.value}'`).join(', ');
+      expect(overNotice.keyedText.params.who).toBe(english);
+      expect(overNotice.payload.body).toBe(holding(english));
+
+      const at = await openLabelled('none_notice_at_cap', slateOf(NOTIFICATION_LIST_PARAM_MAX_ITEMS));
+      const [atNotice] = told.filter((e) => e.source?.id === at.id);
+      expect(() => assertNotificationTextKeys(atNotice.keyedText)).not.toThrow();
+      expect(atNotice.keyedText.params.who.list).toHaveLength(NOTIFICATION_LIST_PARAM_MAX_ITEMS);
+      const renderer = new NotificationTextRenderer({ getData: () => undefined, getI18n: () => i18n as any });
+      expect(renderer.render(atNotice.keyedText, atNotice.payload, 'zh-CN').body).not.toMatch(/team/);
     });
 
     it('CONTROL: a note written before the slot was stored renders exactly as before', async () => {

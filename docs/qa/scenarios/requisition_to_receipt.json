@@ -45,7 +45,7 @@
       {"object": "purchase_order", "field": "requisition", "to": "purchase_requisition"},
       {"object": "purchase_order", "field": "supplier", "to": "supplier"},
       {"object": "purchase_order", "field": "buyer", "to": "employee"},
-      {"object": "po_line", "field": "purchase_order", "to": "purchase_order"},
+      {"object": "po_line", "field": "purchase_order", "to": "purchase_order", "masterDetail": true},
       {"object": "goods_receipt", "field": "po_line", "to": "po_line"},
       {"object": "goods_receipt", "field": "received_by", "to": "employee"}
     ],

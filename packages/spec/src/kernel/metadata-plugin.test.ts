@@ -544,5 +544,24 @@ describe('MetadataPluginProtocol', () => {
       expect(byDomain('ai')).toContain('tool');
       expect(byDomain('ai')).toContain('skill');
     });
+
+    // ADR-0084, amended 2026-11-26 ("Placements, and what moves to Setup"): a
+    // dataset is the semantic layer that charts and an AI's data questions both
+    // read, so it is registered `data`. One type changes domain; the two types
+    // that bind to it stay `ui`, and no seventh domain is made for analytics.
+    it('registers `dataset` under `data`, and leaves `dashboard` and `report` under `ui`', () => {
+      const domainOf = (type: string) => DEFAULT_METADATA_TYPE_REGISTRY.find(e => e.type === type)?.domain;
+
+      expect(domainOf('dataset')).toBe('data');
+      expect(domainOf('dashboard')).toBe('ui');
+      expect(domainOf('report')).toBe('ui');
+      expect(new Set(DEFAULT_METADATA_TYPE_REGISTRY.map(e => e.domain))).toEqual(
+        new Set(['data', 'ui', 'automation', 'system', 'security', 'ai']),
+      );
+      // The move changes where the type is listed and nothing about how it loads.
+      const dataset = DEFAULT_METADATA_TYPE_REGISTRY.find(e => e.type === 'dataset')!;
+      expect(dataset.loadOrder).toBe(55);
+      expect(dataset.loadOrder).toBeLessThan(DEFAULT_METADATA_TYPE_REGISTRY.find(e => e.type === 'report')!.loadOrder);
+    });
   });
 });
