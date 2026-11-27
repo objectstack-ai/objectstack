@@ -809,6 +809,39 @@ describe('field gate — the earlier title rule: searched only once the index is
       expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
     });
 
+    it('a source that needs the index proof is never searched without it: the round searches the adapter the proof was read from', async () => {
+      const { svc, adapter, currentHit } = proven();
+      const source = svc.getSource('s')!;
+      const unproven = makeAdapter();
+      unproven.searchSpy.mockImplementation(async () => [currentHit(source)]);
+      const readStatus = adapter.indexStatus!.getMockImplementation() as (ctx: AdapterContext) => Promise<AdapterIndexStatus>;
+      // Another instance takes the adapter id while the proof is being read.
+      adapter.indexStatus!.mockImplementation(async (ctx: AdapterContext) => {
+        svc.registerAdapter('memory', unproven);
+        return readStatus(ctx);
+      });
+      expect(await svc.search('q', { executionContext: MEMBER })).toEqual([currentHit(source)]);
+      expect(adapter.searchSpy).toHaveBeenCalledOnce();
+      expect(unproven.searchSpy).not.toHaveBeenCalled();
+    });
+
+    it('a source that needs the index proof is never searched without it: an adapter that resolves only after the plan is not searched', async () => {
+      const late = { ...objectSource('late', 'account', ['body']), adapter: 'late' } as KnowledgeSource;
+      const { svc, adapter } = proven({ sources: [late, objectSource('s', 'account', ['body'])] });
+      const lateAdapter = makeAdapter(true);
+      const readStatus = adapter.indexStatus!.getMockImplementation() as (ctx: AdapterContext) => Promise<AdapterIndexStatus>;
+      // The adapter `late` names registers after its source was planned, while another source's proof is read.
+      adapter.indexStatus!.mockImplementation(async (ctx: AdapterContext) => {
+        if (!svc.listAdapters().includes('late')) svc.registerAdapter('late', lateAdapter);
+        return readStatus(ctx);
+      });
+      const report = await svc.searchWithRefusals('q', { executionContext: MEMBER });
+      expect(ids(report.hits)).toEqual(['s']);
+      expect(report.refused).toEqual([expect.objectContaining({ sourceId: 'late', code: 'SERVICE_UNAVAILABLE', status: 503 })]);
+      expect(lateAdapter.searchSpy).not.toHaveBeenCalled();
+      expect(lateAdapter.indexStatus).not.toHaveBeenCalled();
+    });
+
     it('only a proven source is checked: a source searched without the proof is served as the store answered it', async () => {
       const { svc, adapter, currentHit } = setup({
         objects: [ACCOUNT, TICKET],

@@ -2291,9 +2291,10 @@ export class KnowledgeService implements IKnowledgeService {
   }
 
   /**
-   * Each admitted source paired with the fingerprint its search carries
-   * ({@link planIndex}); a source whose adapter is not registered carries none
-   * (the round skips it, as before).
+   * Each admitted source paired with the adapter it binds to, resolved here
+   * once for the whole search, and the fingerprint its search carries
+   * ({@link planIndex}); a source whose adapter does not resolve carries the
+   * coded refusal instead and is refused by the round, never searched.
    *
    * A source admitted with `proveIndex` ({@link admitSources}) is searched
    * only when its index is proven built under the current recipe
@@ -2313,10 +2314,18 @@ export class KnowledgeService implements IKnowledgeService {
     let target: Promise<number | undefined> | undefined;
     const chunkTarget = (): Promise<number | undefined> => (target ??= this.readChunkTarget());
     for (const { proveIndex, ...entry } of admitted) {
-      const adapterId = this.boundAdapterId(entry.source);
-      const adapter = adapterId === undefined ? undefined : this.adapters.get(adapterId);
-      if (!adapter) {
-        out.push(entry);
+      // The adapter is resolved here, once per search: the proof below is read
+      // from this instance and both rounds search this instance, so a source
+      // cannot change binding between the check and the use.
+      let adapterId: string;
+      let adapter: IKnowledgeAdapter;
+      try {
+        adapterId = this.adapterIdFor(entry.source);
+        adapter = this.getAdapter(adapterId);
+      } catch (err) {
+        // Refused like an adapter that cannot serve, as the round refuses it; a
+        // source that needs the index proof is never searched without it.
+        out.push({ ...entry, binding: { refusal: codedRefusalOf(err) } });
         continue;
       }
       const plan = await this.planIndex(entry.source, adapter, chunkTarget);
@@ -2340,7 +2349,12 @@ export class KnowledgeService implements IKnowledgeService {
           continue;
         }
       }
-      out.push({ ...entry, fingerprint: plan.index.fingerprint, ...(proveIndex === true ? { verifyHits: true as const } : {}) });
+      out.push({
+        ...entry,
+        binding: { adapterId, adapter },
+        fingerprint: plan.index.fingerprint,
+        ...(proveIndex === true ? { verifyHits: true as const } : {}),
+      });
     }
     return out;
   }
@@ -2444,21 +2458,17 @@ export class KnowledgeService implements IKnowledgeService {
     refused: KnowledgeSearchRefusal[],
   ): Promise<Map<string, { hits: KnowledgeHit[]; answered: number }>> {
     const out = new Map<string, { hits: KnowledgeHit[]; answered: number }>();
-    for (const { source, organizationIds, fingerprint, scope } of sources) {
+    for (const { source, organizationIds, fingerprint, scope, binding } of sources) {
       // Refused like an adapter that cannot serve: the caller is told which
       // source was not searched and why; the boot said so at `error`
-      // (`reportUnmountedAdapters`), so no line per search. A source that
-      // names no adapter is placed here, as everywhere (`adapterIdFor`).
-      let adapterId: string;
-      let adapter: IKnowledgeAdapter;
-      try {
-        adapterId = this.adapterIdFor(source);
-        adapter = this.getAdapter(adapterId);
-      } catch (err) {
-        const coded = codedRefusalOf(err);
-        if (coded !== undefined) refused.push({ sourceId: source.name, ...coded });
+      // (`reportUnmountedAdapters`), so no line per search. The adapter was
+      // resolved once for the whole search ({@link planSearches}); a round
+      // searches that instance and never looks it up again.
+      if ('refusal' in binding) {
+        if (binding.refusal !== undefined) refused.push({ sourceId: source.name, ...binding.refusal });
         continue;
       }
+      const { adapterId, adapter } = binding;
       try {
         const hits = await adapter.search(query, {
           source,
@@ -3275,6 +3285,12 @@ const INDEX_NOT_PROVEN_CODE = 'KNOWLEDGE_REBUILD_REQUIRED';
 
 interface SearchTarget {
   source: KnowledgeSource;
+  /**
+   * The adapter the source binds to, resolved once per search
+   * ({@link KnowledgeService.planSearches}), or the coded refusal its
+   * resolution answered (`undefined`: an uncoded failure, skipped unsearched).
+   */
+  binding: { adapterId: string; adapter: IKnowledgeAdapter } | { refusal: Omit<KnowledgeSearchRefusal, 'sourceId'> | undefined };
   organizationIds?: string[];
   fingerprint?: string;
   scope?: AdapterScopeTerm[];
