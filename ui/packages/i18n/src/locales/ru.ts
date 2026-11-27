@@ -2383,6 +2383,8 @@ const ru = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: "Сначала это приложение",
+        recentTitle: "Недавние разговоры",
+        recentEmpty: "Вопросы, заданные здесь, появятся здесь.",
       },
       renameConversation: "Переименовать диалог",
       deleteConversation: "Удалить диалог",

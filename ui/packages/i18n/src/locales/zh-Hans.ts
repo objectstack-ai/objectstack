@@ -2598,6 +2598,8 @@ const zh = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: '本应用优先',
+        recentTitle: '最近的对话',
+        recentEmpty: '在这里提的问题会显示在这里。',
       },
       renameConversation: '重命名对话',
       deleteConversation: '删除对话',

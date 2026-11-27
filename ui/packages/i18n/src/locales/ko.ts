@@ -2253,6 +2253,8 @@ const ko = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: "이 앱 우선",
+        recentTitle: "최근 대화",
+        recentEmpty: "여기서 한 질문이 여기에 표시됩니다.",
       },
       renameConversation: "대화 이름 변경",
       deleteConversation: "대화 삭제",

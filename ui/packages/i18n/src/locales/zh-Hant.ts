@@ -2598,6 +2598,8 @@ const zhHant = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: '本應用優先',
+        recentTitle: '最近的對話',
+        recentEmpty: '在這裡提的問題會顯示在這裡。',
       },
       renameConversation: '重新命名對話',
       deleteConversation: '刪除對話',
