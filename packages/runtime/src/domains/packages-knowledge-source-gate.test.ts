@@ -270,7 +270,7 @@ describe('/packages — duplicate admits each knowledge source it copies for the
         expect(unread.protocol.duplicatePackage).not.toHaveBeenCalled();
     });
 
-    it('CONTROL: admitted sources are copied; a package with none, and a host with no knowledge service, copy as before', async () => {
+    it('CONTROL: admitted sources are copied; a package with none copies as before', async () => {
         const admitted = withKnowledge({ items: [SOURCE_ITEM] }, () => ({ admitted: true }));
         expect((await call(admitted, DUPLICATE, authed(BOTH))).response?.status).not.toBe(403);
         expect(admitted.protocol.duplicatePackage).toHaveBeenCalled();
@@ -279,10 +279,31 @@ describe('/packages — duplicate admits each knowledge source it copies for the
         expect((await call(none, DUPLICATE, authed(METADATA_ONLY))).response?.status).not.toBe(403);
         expect(none.admitAuthoredSource).not.toHaveBeenCalled();
         expect(none.protocol.duplicatePackage).toHaveBeenCalled();
+    });
 
+    /**
+     * The duplicate saves each source again, for the caller, through the
+     * predicate the `/meta` save asks: on a deployment with no knowledge
+     * service the copy of a source would be kept and never served, so the
+     * duplicate is refused as the save is, naming the remedy.
+     */
+    it('a host with no knowledge service refuses a duplicate that copies a source 503, naming the remedy, and nothing is copied', async () => {
         const noService = make({ items: [SOURCE_ITEM] });
-        expect((await call(noService, DUPLICATE, authed(BOTH))).response?.status).not.toBe(403);
-        expect(noService.protocol.duplicatePackage).toHaveBeenCalled();
+        const r = await call(noService, DUPLICATE, authed(BOTH));
+        expect(r.response?.status).toBe(503);
+        expect(r.response?.body?.error?.code).toBe('SERVICE_UNAVAILABLE');
+        expect(r.response?.body?.error?.message).toContain('nothing was copied');
+        expect(r.response?.body?.error?.message).toContain('this deployment runs no knowledge service');
+        expect(r.response?.body?.error?.message).toContain("requires: ['knowledge']");
+        expect(noService.protocol.duplicatePackage).not.toHaveBeenCalled();
+
+        // A package with no source, and the engine's own call, copy as before.
+        const none = make({ items: [] });
+        expect((await call(none, DUPLICATE, authed(BOTH))).response?.status).not.toBe(503);
+        expect(none.protocol.duplicatePackage).toHaveBeenCalled();
+        const engine = make({ items: [SOURCE_ITEM] });
+        expect((await call(engine, DUPLICATE, system())).response?.status).not.toBe(503);
+        expect(engine.protocol.duplicatePackage).toHaveBeenCalled();
     });
 
     it('the engine\'s own call is not asked', async () => {

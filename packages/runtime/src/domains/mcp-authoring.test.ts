@@ -1048,7 +1048,25 @@ describe('[ADR-0161 K4] save_metadata_draft asks the knowledge service to admit 
     expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
   });
 
-  it('CONTROL: an admitted source is saved; another type is never asked about; no knowledge service judges nothing', async () => {
+  /**
+   * Ruled D: on a deployment that registers no knowledge service, nothing
+   * loads, indexes or searches a source, and nothing mounts the service while
+   * the server runs. So the human's draft save is refused, naming the reason
+   * and the remedy, instead of being kept and never served.
+   */
+  it('no knowledge service registered: the draft save is refused 503 SERVICE_UNAVAILABLE with the remedy, and nothing is written', async () => {
+    const none = await authorThroughDomain({ systemPermissions: BOTH });
+    const refused = await save(none.authoring);
+    expect(refused.isError).toBe(true);
+    expect(refused.body.error).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    expect(refused.body.error.message).toMatch(/^The knowledge source 'faq' was not saved: this deployment runs no knowledge service/);
+    expect(refused.body.error.message).toMatch(/requires: \['knowledge'\].*restart the server.*then save the source again/);
+    expect(none.served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
+    // Another type saves as before on the same deployment.
+    expect((await call(none.authoring, 'save_metadata_draft', { type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm' })).isError).toBe(false);
+  });
+
+  it('CONTROL: an admitted source is saved; another type is never asked about; a registered knowledge service that is not the platform\'s judges nothing', async () => {
     const admitAuthoredSource = vi.fn(async () => ({ admitted: true }));
     const { authoring, served } = await authorThroughDomain({ systemPermissions: BOTH, knowledge: { admitAuthoredSource } });
     expect((await save(authoring)).isError).toBe(false);
@@ -1056,8 +1074,8 @@ describe('[ADR-0161 K4] save_metadata_draft asks the knowledge service to admit 
     expect(admitAuthoredSource).toHaveBeenCalledTimes(1);
     expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem').map((c: any) => c[1].type)).toEqual(['knowledge_source', 'flow']);
 
-    const none = await authorThroughDomain({ systemPermissions: BOTH });
-    expect((await save(none.authoring)).isError).toBe(false);
+    const hostMounted = await authorThroughDomain({ systemPermissions: BOTH, knowledge: { search: async () => [] } });
+    expect((await save(hostMounted.authoring)).isError).toBe(false);
   });
 });
 
