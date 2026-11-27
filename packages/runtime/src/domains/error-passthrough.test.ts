@@ -25,6 +25,8 @@
  * underlying error on purpose, because the message could echo row contents.
  */
 
+// Paid at collection, not inside a clocked case (check-test-source-alias).
+import '@objectstack/metadata';
 import { describe, it, expect } from 'vitest';
 
 import { HttpDispatcher } from './../http-dispatcher.js';
