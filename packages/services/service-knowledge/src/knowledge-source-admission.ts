@@ -50,17 +50,19 @@
  *
  * A document indexed before the title became the display field carries the
  * value of a field named `title`, which the field gate no longer asks about
- * (it serves the display field, ADR-0161 K5). Such a document is gone once a
- * complete build under the current recipe has completed: the recipe hash
- * names the title rule (ADR-0161 K7), it was first recorded by code that
- * already read the display field, and a complete build rewrites every
- * document whose title changed (its `docHash` covers the title) and purges
- * the rest. So a source over which such a document could be served
- * ({@link mayServeEarlierRuleTitle}) is searched only once its adapter's
- * `indexStatus` reports the fingerprint and the recipe hash the service
- * computes now; until then it is refused `KNOWLEDGE_REBUILD_REQUIRED`
- * (`KnowledgeService.search`), never served through a gate that asks about
- * `title`.
+ * (it serves the display field, ADR-0161 K5). A complete build under the
+ * current recipe rewrites every such document it walks (its `docHash` covers
+ * the title), and removes the rest only when it purges: the recipe hash
+ * names the title rule (ADR-0161 K7) and was first recorded by code that
+ * already read the display field. So a source over which such a document
+ * could be served ({@link mayServeEarlierRuleTitle}) is searched only once
+ * its adapter's `indexStatus` reports the fingerprint and the recipe hash
+ * the service computes now, and only where the builds that record that hash
+ * purge: never for a source with `refresh.onRecordChange: false`, nor on an
+ * adapter with no `listDocuments`, no `completeBuild` or no `indexStatus`
+ * (`KnowledgeService.unprovenIndex`). Until then it is refused
+ * `KNOWLEDGE_REBUILD_REQUIRED` (`KnowledgeService.search`), never served
+ * through a gate that asks about `title`.
  *
  * The fields the source's `where` reads ({@link selectingFieldsOf}) are judged
  * by the same rule, at save and at search: the source selects its records by

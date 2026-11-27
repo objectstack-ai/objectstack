@@ -54,7 +54,7 @@ function hitFor(sourceId: string, recordId = 'rec_1'): KnowledgeHit {
  * current recipe. `'stateful'`: it holds what its writes and its last
  * `completeBuild` recorded, the way a generation-keeping adapter does.
  */
-type IndexHeld = true | 'no-recipe' | 'other-recipe' | 'other-fingerprint' | 'throws' | 'stateful';
+type IndexHeld = true | 'no-recipe' | 'other-recipe' | 'other-fingerprint' | 'throws' | 'stateful' | 'no-list' | 'no-complete';
 
 function makeAdapter(proven?: IndexHeld): IKnowledgeAdapter & {
   searchSpy: ReturnType<typeof vi.fn>;
@@ -67,7 +67,10 @@ function makeAdapter(proven?: IndexHeld): IKnowledgeAdapter & {
   const indexStatus = vi.fn(async (ctx: AdapterContext): Promise<AdapterIndexStatus> => {
     const index = ctx.index!;
     switch (proven) {
-      case true: return { fingerprint: index.fingerprint, recipeHash: index.recipeHash };
+      case true:
+      case 'no-list':
+      case 'no-complete':
+        return { fingerprint: index.fingerprint, recipeHash: index.recipeHash };
       case 'no-recipe': return { fingerprint: index.fingerprint };
       case 'other-recipe': return { fingerprint: index.fingerprint, recipeHash: 'rh1:earlier' };
       case 'other-fingerprint': return { fingerprint: 'fp1:earlier', recipeHash: index.recipeHash };
@@ -76,11 +79,16 @@ function makeAdapter(proven?: IndexHeld): IKnowledgeAdapter & {
       default: return recorded.recipeHash === undefined ? { fingerprint: index.fingerprint } : { ...recorded };
     }
   });
-  if (proven !== 'stateful') return { ...adapter, indexStatus };
+  // A store that lists its documents and records a complete build: what a proof needs besides the status.
+  const listDocuments = vi.fn(async () => ({ documents: [] }));
+  const completeBuildStub = vi.fn(async () => undefined);
+  if (proven === 'no-list') return { ...adapter, indexStatus, completeBuild: completeBuildStub };
+  if (proven === 'no-complete') return { ...adapter, indexStatus, listDocuments };
+  if (proven !== 'stateful') return { ...adapter, indexStatus, listDocuments, completeBuild: completeBuildStub };
   return {
     ...adapter,
     indexStatus,
-    listDocuments: vi.fn(async () => ({ documents: [] })),
+    listDocuments,
     beginBuild: vi.fn(async () => undefined),
     completeBuild: vi.fn(async (ctx: AdapterContext) => {
       recorded.fingerprint = ctx.index!.fingerprint;
@@ -477,12 +485,14 @@ describe('field gate — the earlier title rule: searched only once the index is
   });
 
   it.each([
-    ['an adapter with no indexStatus', undefined],
-    ['an index that records no recipe hash (no complete build completed)', 'no-recipe' as const],
-    ['an index last completed under another recipe', 'other-recipe' as const],
-    ['an index under another fingerprint', 'other-fingerprint' as const],
-    ['an indexStatus that throws', 'throws' as const],
-  ])('unproven (%s): refused KNOWLEDGE_REBUILD_REQUIRED / 409 for every non-system caller, never searched', async (_label, held) => {
+    ['an adapter with no indexStatus', undefined, 'never'],
+    ['an adapter with no completeBuild, whose status reads current', 'no-complete' as const, 'never'],
+    ['an adapter with no listDocuments, whose status reads current: its builds purge nothing', 'no-list' as const, 'never'],
+    ['an index that records no recipe hash (no complete build completed)', 'no-recipe' as const, 'rebuild'],
+    ['an index last completed under another recipe', 'other-recipe' as const, 'rebuild'],
+    ['an index under another fingerprint', 'other-fingerprint' as const, 'rebuild'],
+    ['an indexStatus that throws', 'throws' as const, 'unreadable'],
+  ])('unproven (%s): refused KNOWLEDGE_REBUILD_REQUIRED / 409 for every non-system caller, never searched', async (_label, held, ends) => {
     for (const security of [hideTitle, queryAll]) {
       const warn = vi.fn();
       const { svc, searched } = setup({
@@ -503,10 +513,37 @@ describe('field gate — the earlier title rule: searched only once the index is
         expect.objectContaining({ sourceId: 's', code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409 }),
       ]);
       expect(searched()).toEqual([]);
-      expect(String(warn.mock.calls[warn.mock.calls.length - 1]?.[0])).toContain("source 's' not searched (KNOWLEDGE_REBUILD_REQUIRED)");
+      const line = String(warn.mock.calls[warn.mock.calls.length - 1]?.[0]);
+      expect(line).toContain("source 's' not searched (KNOWLEDGE_REBUILD_REQUIRED)");
+      // A refusal no rebuild can end never promises one, to the caller or the operator.
+      const said = (thrown as { refused: Array<{ message: string }> }).refused[0].message;
+      if (ends === 'never') {
+        expect(said).toContain('No rebuild changes that');
+        expect(line).toContain('No rebuild can prove it');
+      } else {
+        expect(said).not.toContain('No rebuild');
+        expect(line).not.toContain('No rebuild');
+      }
       // Preservation: the system context bypasses every gate, this one too.
       expect(ids(await svc.search('q', { executionContext: SYSTEM }))).toEqual(['s']);
     }
+  });
+
+  it('a source with `refresh.onRecordChange: false` is never proven, whatever its status reads: its builds purge nothing', async () => {
+    const optedOut = objectSource('s', 'account', ['body']);
+    const source = { ...optedOut, refresh: { onRecordChange: false } } as KnowledgeSource;
+    const warn = vi.fn();
+    const { svc, adapter, searched } = setup({ objects: [ACCOUNT], sources: [source], security: queryAll, proven: true, logger: { warn, error: vi.fn() } });
+    const thrown = await svc.searchWithRefusals('q', { executionContext: MEMBER }).catch((err: unknown) => err);
+    expect(thrown).toMatchObject({ code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409 });
+    expect((thrown as { refused: Array<{ message: string }> }).refused[0].message).toContain('No rebuild changes that');
+    expect(String(warn.mock.calls[warn.mock.calls.length - 1]?.[0])).toContain('refresh.onRecordChange is false');
+    expect(adapter.indexStatus).not.toHaveBeenCalled();
+    expect(searched()).toEqual([]);
+    // Preservation: the system context bypasses it, and the same source synced by the service is proven.
+    expect(ids(await svc.search('q', { executionContext: SYSTEM }))).toEqual(['s']);
+    const synced = setup({ objects: [ACCOUNT], sources: [optedOut], security: queryAll, proven: true });
+    expect(ids(await synced.svc.search('q', { executionContext: MEMBER }))).toEqual(['s']);
   });
 
   it('beside a searchable source, the unproven one is named in `refused` and the other still answers', async () => {
@@ -542,9 +579,13 @@ describe('field gate — the earlier title rule: searched only once the index is
   });
 
   it('rebuilt: a source refused for want of proof is served once a complete build has completed', async () => {
-    const { svc, searched } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: hideTitle, proven: 'stateful' });
+    const { svc, adapter, searched } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: hideTitle, proven: 'stateful' });
     await expect(svc.search('q', { executionContext: MEMBER })).rejects.toMatchObject({ code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409 });
     expect(searched()).toEqual([]);
+    // A refused search starts no build and writes nothing.
+    for (const member of ['beginBuild', 'upsert', 'completeBuild'] as const) {
+      expect((adapter as unknown as Record<string, ReturnType<typeof vi.fn>>)[member]).not.toHaveBeenCalled();
+    }
     const record = await svc.rebuildSource('s', { trigger: 'operator' });
     expect(record.status).toBe('done');
     expect((await svc.readIndexState('s')).state).toBe('current');

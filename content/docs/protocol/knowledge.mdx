@@ -330,13 +330,21 @@ the object resolves no display field. A source over an object with no
 registered definition reads a field named `title`. Documents indexed
 before this rule carry the value of a field named `title` until a complete
 reindex writes them again. So a source over an object that declares a
-`title` field it does not serve is searched for a caller only once its
-adapter's index status reports the fingerprint and the recipe hash the
-service computes now (the recipe hash names the title rule, and is recorded
-only when a complete build completes); until then the search refuses it
-`KNOWLEDGE_REBUILD_REQUIRED` (409), and the boot's build pass or
-`os knowledge rebuild` builds it. An adapter that reports no index status
-cannot prove it, so such a source on it is refused until it can.
+`title` field the index may carry and the source does not serve (the display
+field is another field, none resolves, or the object's fields cannot be
+enumerated) is searched for a caller other than the system context only once
+its adapter's index status reports the fingerprint and the recipe hash the
+service computes now. The recipe hash names the title rule and is recorded
+only when a complete build completes, and only a build that purges removes
+the documents it did not walk. Until then the search refuses the source
+`KNOWLEDGE_REBUILD_REQUIRED` (409), and the boot's build pass, a source
+reload, the reconcile or `os knowledge rebuild` builds it. Under
+`buildAtBoot: false` (which also turns off the build on reload) nothing but
+the reconcile, where it runs, or `os knowledge rebuild` builds it. No build
+proves such a source, so it stays refused, when its
+`refresh.onRecordChange` is `false` (its builds purge nothing, and the boot
+pass and the reconcile leave it alone) or when its adapter has no
+`listDocuments`, no `completeBuild` or no index status.
 
 ### 3.3 `IKnowledgeService` (consumed by the ObjectOS AI runtime, REST, Console)
 

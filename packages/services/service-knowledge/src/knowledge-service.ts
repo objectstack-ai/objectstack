@@ -2070,8 +2070,10 @@ export class KnowledgeService implements IKnowledgeService {
    * only when its index is proven built under the current recipe
    * ({@link unprovenIndex}); otherwise it is not searched and is added to
    * `refused` as `KNOWLEDGE_REBUILD_REQUIRED` (409), the operator told why at
-   * `warn`. The boot's build pass, a reload and the operator's rebuild are
-   * what build it; a search never starts one.
+   * `warn`. Each says whether a rebuild ends the refusal: for a source no
+   * build can prove, neither promises one. The boot's build pass, a reload,
+   * the reconcile and the operator's rebuild are what build a source; a
+   * search never starts a build.
    */
   private async planSearches(
     admitted: Array<AdmittedSource & { scope?: AdapterScopeTerm[] }>,
@@ -2089,22 +2091,21 @@ export class KnowledgeService implements IKnowledgeService {
       }
       const plan = await this.planIndex(entry.source, adapter, chunkTarget);
       if (proveIndex === true) {
-        const why = await this.unprovenIndex(plan);
-        if (why !== undefined) {
+        const unproven = await this.unprovenIndex(plan);
+        if (unproven !== undefined) {
           const label = this.label(entry.source);
           refused.push({
             sourceId: entry.source.name,
             code: INDEX_NOT_PROVEN_CODE,
             status: 409,
-            message:
-              `Knowledge source '${label}' needs a rebuild: its index is not proven built under the current recipe, ` +
-              'so it is not searched. It answers again once a complete rebuild of the source has completed.',
+            message: `Knowledge source '${label}' is not searched: its index is not proven built under the current recipe. ` +
+              UNPROVEN_CALLER_TEXT[unproven.ends],
           });
           this.options.logger?.warn?.(
-            `[knowledge] source '${label}' not searched (${INDEX_NOT_PROVEN_CODE}): ${why} Its object declares a field ` +
-              "named 'title' the source does not serve, and a document indexed under the earlier title rule carries " +
-              "that field's value, so the source is searched only once a complete build under the current recipe has " +
-              'completed (os knowledge rebuild).',
+            `[knowledge] source '${label}' not searched (${INDEX_NOT_PROVEN_CODE}): ${unproven.why} Its object declares ` +
+              "a field named 'title' the source does not serve, and a document indexed under the earlier title rule " +
+              "carries that field's value, so the source is searched only once its index is proven built under the " +
+              `current recipe. ${UNPROVEN_OPERATOR_TEXT[unproven.ends]}`,
           );
           continue;
         }
@@ -2115,34 +2116,75 @@ export class KnowledgeService implements IKnowledgeService {
   }
 
   /**
-   * Why `plan`'s source is not proven built under the current recipe, or
-   * `undefined` when it is: its adapter's `indexStatus` reports the
-   * fingerprint AND the recipe hash {@link planIndex} computes now. The
-   * recipe hash names the title rule (ADR-0161 K7) and an adapter records it
-   * only at the end of a complete build, which rewrites every document whose
-   * title changed and purges the rest. Read on every search that needs it,
-   * never cached: another node may rebuild, or drop, the index. Fails
-   * closed: an adapter without `indexStatus`, or one that throws, is not
-   * proven.
+   * Why `plan`'s source is not proven built under the current recipe, and
+   * what ends it, or `undefined` when it is proven: its adapter's
+   * `indexStatus` reports the fingerprint AND the recipe hash
+   * {@link planIndex} computes now, and the builds that record that hash
+   * purge what they did not walk.
+   *
+   * The recipe hash names the title rule (ADR-0161 K7), and an adapter
+   * records it only at `completeBuild`, the end of a complete build. A
+   * complete build rewrites every document whose title changed (`docHash`
+   * covers the title) and, when it purges, removes every document it did not
+   * walk. It does not purge, and still records the hash, for a source with
+   * `refresh.onRecordChange: false` and on an adapter with no
+   * `listDocuments` ({@link walkObjectSource}): a document it did not walk,
+   * such as one whose row left the source's `where`, keeps what it was
+   * assembled with. So those two shapes are never proven, before any read,
+   * whatever the hash reads; nor is an adapter with no `indexStatus` (nothing
+   * to read) or no `completeBuild` (nothing ever records a hash).
+   *
+   * The proof covers what the last complete build walked and purged. Read on
+   * every search that needs it, never cached: another node may rebuild, or
+   * drop, the index. Fails closed: a status that throws is not proven.
    */
-  private async unprovenIndex(plan: IndexPlan): Promise<string | undefined> {
-    const { adapter, index } = plan;
+  private async unprovenIndex(plan: IndexPlan): Promise<{ why: string; ends: UnprovenEnd } | undefined> {
+    const { adapter, index, source } = plan;
+    if ((source.refresh?.onRecordChange ?? true) === false) {
+      return {
+        ends: 'never',
+        why:
+          'refresh.onRecordChange is false, so an external indexer owns its index: a build of it purges nothing, ' +
+          'so a recorded recipe hash does not prove the index holds no document assembled under an earlier recipe.',
+      };
+    }
     if (typeof adapter.indexStatus !== 'function') {
-      return `the adapter '${adapter.id}' reports no index status, so what its index was built under cannot be read.`;
+      return {
+        ends: 'never',
+        why: `the adapter '${adapter.id}' reports no index status (no indexStatus), so what its index was built under cannot be read.`,
+      };
+    }
+    if (typeof adapter.completeBuild !== 'function') {
+      return {
+        ends: 'never',
+        why: `the adapter '${adapter.id}' has no completeBuild, so no build records a recipe hash for its index.`,
+      };
+    }
+    if (typeof adapter.listDocuments !== 'function') {
+      return {
+        ends: 'never',
+        why:
+          `the adapter '${adapter.id}' does not list its documents (no listDocuments), so a complete build cannot purge a ` +
+          'document it did not walk, and a recorded recipe hash does not prove the index holds none assembled under an ' +
+          'earlier recipe.',
+      };
     }
     let held: AdapterIndexStatus;
     try {
       held = await adapter.indexStatus(plan.context('search'));
     } catch (err) {
-      return `the adapter's index status could not be read (${operatorText(err)}).`;
+      return { ends: 'unreadable', why: `the adapter's index status could not be read (${operatorText(err)}).` };
     }
     if (held?.fingerprint !== index.fingerprint) {
-      return 'the index holds no complete build under the current fingerprint.';
+      return { ends: 'rebuild', why: 'the index holds no complete build under the current fingerprint.' };
     }
     if (held.recipeHash !== index.recipeHash) {
-      return held.recipeHash === undefined
-        ? 'the index records no recipe hash: no complete build of it has completed.'
-        : "the index was last completed under another recipe (the source's where, metadataFields, title rule or withheld fields).";
+      return {
+        ends: 'rebuild',
+        why: held.recipeHash === undefined
+          ? 'the index records no recipe hash: no complete build of it has completed.'
+          : "the index was last completed under another recipe (the source's where, metadataFields, title rule or withheld fields).",
+      };
     }
     return undefined;
   }
@@ -2955,6 +2997,26 @@ interface AdmittedSource {
   /** Searched only once its index is proven built under the current recipe (`mayServeEarlierRuleTitle`). */
   proveIndex?: true;
 }
+
+/** What ends a refusal for want of a proof ({@link KnowledgeService.unprovenIndex}). */
+type UnprovenEnd = 'rebuild' | 'never' | 'unreadable';
+
+/** The second sentence of the caller's refusal, by what ends it. */
+const UNPROVEN_CALLER_TEXT: Readonly<Record<UnprovenEnd, string>> = {
+  rebuild: 'It answers again once a complete rebuild of the source has completed.',
+  never: 'No rebuild changes that for this source; an administrator can say why.',
+  unreadable: 'What its index holds could not be read; it is asked again on the next search.',
+};
+
+/** The last sentence of the operator's `warn` line, by what ends the refusal. */
+const UNPROVEN_OPERATOR_TEXT: Readonly<Record<UnprovenEnd, string>> = {
+  rebuild:
+    'The boot pass, a source reload or the reconcile builds it where they run; os knowledge rebuild builds it now.',
+  never:
+    'No rebuild can prove it for this source as it is configured, so nothing is rebuilt for it; it stays refused to ' +
+    'every caller but the system context.',
+  unreadable: 'It is asked again on the next search.',
+};
 
 /**
  * The code of a source refused because its index is not proven built under
