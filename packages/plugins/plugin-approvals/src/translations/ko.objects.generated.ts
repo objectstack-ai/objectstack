@@ -105,6 +105,18 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "플로 노드",
         help: "이 요청을 연 플로 안의 승인 노드 ID입니다."
       },
+      root_run_id: {
+        label: "루트 실행",
+        help: "이 요청이 속한 승인이 시작된 자동화 실행입니다."
+      },
+      root_run_started_at: {
+        label: "루트 실행 시작 시각",
+        help: "이 요청이 속한 승인이 시작된 실행의 시작 시각입니다."
+      },
+      record_run_id: {
+        label: "레코드 실행",
+        help: "이 요청이 걸린 레코드를 담고 있는 자동화 실행입니다."
+      },
       node_config_json: {
         label: "노드 구성",
         help: "노드 기반 요청의 승인 노드 구성(승인자/동작) 스냅숏입니다."

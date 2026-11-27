@@ -121,6 +121,10 @@ export type { FlowPrecedenceWinner } from './flow-precedence.js';
 // packages hold is filed under (`PACKAGE/NAME`).
 export { qualifiedFlowKey } from './flow-slots.js';
 export type { FlowSlot } from './flow-slots.js';
+// [ADR-0162 Execution item 7] The root run and the record run every run of a
+// tree is handed (`AutomationEngine.rootRunOf` / `recordRunOf`), for a node
+// executor that records them.
+export type { RecordRun, RootRun } from './root-run.js';
 
 // Per-run summary (#4354): the fold that turns a run's step log into
 // "selected N, acted M, skipped K by <gate>". Exported so a host building its

@@ -118,7 +118,7 @@ export const SysApprovalRequest = ObjectSchema.create({
   searchableFields: [
     'process_name', 'process_package', 'process_label', 'object_name', 'record_id', 'submitter_comment', 'status',
     'cancel_reason', 'current_step', 'current_step_label', 'pending_approvers', 'pending_approver_labels',
-    'flow_run_id', 'flow_node_id', 'node_config_json',
+    'flow_run_id', 'flow_node_id', 'root_run_id', 'record_run_id', 'node_config_json',
   ],
 
   // Curated built-in list views — render as segmented tabs in the console.
@@ -514,6 +514,46 @@ export const SysApprovalRequest = ObjectSchema.create({
       group: 'State',
     }),
 
+    // [ADR-0162 Execution item 7] The request's approval: the root run of the
+    // run that opened it, the run its tree of runs (a `subflow` body, a `map`
+    // item, at any depth) was started on, as the automation service hands it.
+    // In columns of their own, not the config snapshot, so the store can be
+    // asked for every request of one approval. Engine-written at open and
+    // never re-derived; null on a request opened before requests recorded
+    // their root run, and on a process-driven request.
+    root_run_id: Field.text({
+      label: 'Root Run',
+      required: false,
+      maxLength: 100,
+      readonly: true,
+      description: 'Automation run the approval this request belongs to was started on.',
+      group: 'State',
+    }),
+
+    root_run_started_at: Field.datetime({
+      label: 'Root Run Started At',
+      required: false,
+      readonly: true,
+      description: 'When the run the approval this request belongs to was started on began.',
+      group: 'State',
+    }),
+
+    // [ADR-0162 Execution item 7] The run that carries this request's record:
+    // the highest run, from the one that opened the request up, over which the
+    // record does not change. The root run, or the `map` item run whose item
+    // is this record; a `subflow` child inherits its parent's. One approval
+    // can carry a record per `map` item, and this column tells them apart,
+    // where `root_run_id` cannot. Engine-written at open and never re-derived;
+    // null where `root_run_id` is.
+    record_run_id: Field.text({
+      label: 'Record Run',
+      required: false,
+      maxLength: 100,
+      readonly: true,
+      description: 'Automation run that carries the record this request is on.',
+      group: 'State',
+    }),
+
     node_config_json: Field.textarea({
       label: 'Node Config',
       required: false,
@@ -577,6 +617,11 @@ export const SysApprovalRequest = ObjectSchema.create({
     // human-readable CSV source of truth only.
     { fields: ['status', 'updated_at'] },
     { fields: ['submitter_id', 'status'] },
+    // [ADR-0162 Execution item 7] Every request of one approval, and of one
+    // approval on one record.
+    { fields: ['root_run_id', 'object_name', 'record_id'] },
+    // Every request on the record one run carries.
+    { fields: ['record_run_id'] },
   ],
 
   // Server-declared decision actions (objectui#2678 P2-4). The console's
