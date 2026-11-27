@@ -25,7 +25,8 @@ const objects = [
     },
   },
   { name: 'private_note', enable: { apiEnabled: false }, fields: { body: { type: 'text' } } },
-  { name: 'listed_only', enable: { apiMethods: ['get', 'list'] }, fields: { body: { type: 'text' } } },
+  { name: 'get_only', enable: { apiMethods: ['get'] }, fields: { body: { type: 'text' } } },
+  { name: 'unsearchable', enable: { apiMethods: ['get', 'list'], searchable: false }, fields: { body: { type: 'text' } } },
   { name: 'sys_audit_note', fields: { body: { type: 'text' } } },
   { name: 'sys_help_topic', enable: { aiReadable: true }, fields: { body: { type: 'text' } } },
 ];
@@ -61,7 +62,8 @@ const FAMILIES: ReadonlyArray<[string, Record<string, unknown>, string, 'error' 
   ['a missing content field', kbSource({ content: ['title', 'bdy'] }), KNOWLEDGE_SOURCE_FIELD_UNKNOWN, 'error', 'knowledgeSources[0].source.content[1]', "'bdy'"],
   ['a missing metadata field', kbSource({ metadataFields: ['stage'] }), KNOWLEDGE_SOURCE_FIELD_UNKNOWN, 'error', 'knowledgeSources[0].source.metadataFields[0]', "'stage'"],
   ['an object with apiEnabled: false', kbSource({ object: 'private_note', content: ['body'], metadataFields: [] }), KNOWLEDGE_SOURCE_OBJECT_NOT_SEARCHABLE, 'error', 'knowledgeSources[0].source.object', "'private_note'"],
-  ['an object whose apiMethods omit search', kbSource({ object: 'listed_only', content: ['body'], metadataFields: [] }), KNOWLEDGE_SOURCE_OBJECT_NOT_SEARCHABLE, 'error', 'knowledgeSources[0].source.object', "'listed_only'"],
+  ['an object whose apiMethods do not grant search', kbSource({ object: 'get_only', content: ['body'], metadataFields: [] }), KNOWLEDGE_SOURCE_OBJECT_NOT_SEARCHABLE, 'error', 'knowledgeSources[0].source.object', "'get_only'"],
+  ['an object that lists but declares searchable: false', kbSource({ object: 'unsearchable', content: ['body'], metadataFields: [] }), KNOWLEDGE_SOURCE_OBJECT_NOT_SEARCHABLE, 'error', 'knowledgeSources[0].source.object', "'unsearchable'"],
   ['a sys_ object without enable.aiReadable', kbSource({ object: 'sys_audit_note', content: ['body'], metadataFields: [] }), KNOWLEDGE_SOURCE_SYSTEM_OBJECT_NOT_AI_READABLE, 'error', 'knowledgeSources[0].source.object', "'sys_audit_note'"],
   ['a credential-class content field', kbSource({ content: ['title', 'api_token'] }), KNOWLEDGE_SOURCE_FIELD_NEVER_INDEXED, 'warning', 'knowledgeSources[0].source.content[1]', "'api_token'"],
   ['an internal metadata field', kbSource({ metadataFields: ['triage_note'] }), KNOWLEDGE_SOURCE_FIELD_NEVER_INDEXED, 'warning', 'knowledgeSources[0].source.metadataFields[0]', "'triage_note'"],
@@ -79,6 +81,12 @@ describe('validateKnowledgeSource in os validate (ADR-0161 K4, row 4)', () => {
 
   it('a clean source prints nothing', () => {
     expect(atValidate(kbSource())).toEqual([]);
+  });
+
+  it('an apiMethods list that grants list grants search, as the exposure decision derives it', () => {
+    const withList = [...objects, { name: 'listed', enable: { apiMethods: ['get', 'list'] }, fields: { body: { type: 'text' } } }];
+    const stack = { objects: withList, knowledgeSources: [kbSource({ object: 'listed', content: ['body'], metadataFields: [] })] };
+    expect(validateKnowledgeSource(stack)).toEqual([]);
   });
 
   it('a sys_ object that declares enable.aiReadable: true passes the system-object gate', () => {

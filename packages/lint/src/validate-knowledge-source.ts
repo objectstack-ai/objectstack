@@ -37,8 +37,9 @@
  *   exposure refuses `search` — `canServeApiOperation(enable, 'search')`, the
  *   decision and operation the knowledge service's admission asks
  *   (`knowledge-source-admission.ts` in `@objectstack/service-knowledge`,
- *   gate 2): `enable.apiEnabled: false`, or an `enable.apiMethods` list
- *   without `search`.
+ *   gate 2): `enable.apiEnabled: false`, an `enable.apiMethods` list that
+ *   grants neither `search` nor `list` (which grants it), or
+ *   `enable.searchable: false`.
  * - `knowledge-source-system-object-not-ai-readable` (`error`): a system
  *   object (a `sys_` name, the admission's gate 3) that does not opt into AI
  *   reads — `isAiReadExposed`, the spec's one reading of
@@ -210,8 +211,9 @@ export function validateKnowledgeSource(
         where,
         path: objectPath,
         message:
-          `the API does not serve object '${objectName}' for \`search\` (\`enable.apiEnabled\` is false, or its ` +
-          '`enable.apiMethods` list does not include `search`), so the knowledge service never searches this source.',
+          `the API does not serve object '${objectName}' for \`search\` (\`enable.apiEnabled\` is false, its ` +
+          '`enable.apiMethods` list grants neither `search` nor `list`, or `enable.searchable` is false), so the ' +
+          'knowledge service never searches this source.',
         hint: `Serve '${objectName}' for \`search\`, or index another object`,
       });
     }

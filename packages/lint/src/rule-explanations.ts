@@ -6194,7 +6194,7 @@ const KNOWLEDGE_SOURCE_DOORS =
 
 const KNOWLEDGE_SOURCE_OBJECT_UNKNOWN_EXPLANATION: RuleExplanation = {
   rule: 'knowledge-source-object-unknown',
-  covers: 'why a knowledge source must name an object that exists',
+  covers: 'why a knowledge source must name an existing object',
   paragraphs: [
     'A knowledge source (`knowledgeSources`, ADR-0161 K4) indexes the records of one object, `source.object`. ' +
       'An object nothing defines has no records, so the source is built empty and every search over it ' +
@@ -6212,7 +6212,7 @@ const KNOWLEDGE_SOURCE_OBJECT_UNKNOWN_EXPLANATION: RuleExplanation = {
 
 const KNOWLEDGE_SOURCE_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
   rule: 'knowledge-source-field-unknown',
-  covers: 'why each field a knowledge source lists must exist on its object',
+  covers: 'why each listed field must exist on the object',
   paragraphs: [
     'A source lists the fields whose text becomes each document (`source.content`) and the fields projected ' +
       'into a hit\'s metadata (`source.metadataFields`). A name the object does not define reads nothing on ' +
@@ -6227,12 +6227,13 @@ const KNOWLEDGE_SOURCE_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
 
 const KNOWLEDGE_SOURCE_OBJECT_NOT_SEARCHABLE_EXPLANATION: RuleExplanation = {
   rule: 'knowledge-source-object-not-searchable',
-  covers: 'why a knowledge source needs an object the API serves for search',
+  covers: 'why the API must serve the object for search',
   paragraphs: [
     'A knowledge search is a search over the object\'s records, so the knowledge service searches a source ' +
       'only when the API exposure serves its object for `search`: the decision `canServeApiOperation` in ' +
       '`@objectstack/spec/data` answers, the one every door serving object rows asks. `enable.apiEnabled: ' +
-      'false`, and an `enable.apiMethods` list that does not include `search`, both refuse it.',
+      'false` refuses it; so does an `enable.apiMethods` list that grants neither `search` nor `list` (a ' +
+      'list grants search), and `enable.searchable: false`.',
     'This gate needs no caller, so it is judged here. The gates that need one (the object\'s package is not ' +
       'disabled, and the author may query every field the source serves) are asked when the source is saved, ' +
       'as its author.',
@@ -6242,7 +6243,7 @@ const KNOWLEDGE_SOURCE_OBJECT_NOT_SEARCHABLE_EXPLANATION: RuleExplanation = {
 
 const KNOWLEDGE_SOURCE_SYSTEM_OBJECT_NOT_AI_READABLE_EXPLANATION: RuleExplanation = {
   rule: 'knowledge-source-system-object-not-ai-readable',
-  covers: 'why a knowledge source over a system object needs enable.aiReadable',
+  covers: 'why a system object source must opt into AI reads',
   paragraphs: [
     'A system object (a `sys_` name) is indexed and searched only when its own definition opts into AI reads ' +
       'with `enable.aiReadable: true`, the posture the MCP record tools take (`isAiReadExposed` in ' +
@@ -6256,7 +6257,7 @@ const KNOWLEDGE_SOURCE_SYSTEM_OBJECT_NOT_AI_READABLE_EXPLANATION: RuleExplanatio
 
 const KNOWLEDGE_SOURCE_FIELD_NEVER_INDEXED_EXPLANATION: RuleExplanation = {
   rule: 'knowledge-source-field-never-indexed',
-  covers: 'why a credential-class or internal field in a knowledge source is skipped',
+  covers: 'why a credential-class or internal field is skipped',
   paragraphs: [
     'Embedding is egress: the text of every listed field is sent to the embedding provider and kept in an ' +
       'index outside the row store. So the index never carries a credential-class field (a `secret`, or a ' +
