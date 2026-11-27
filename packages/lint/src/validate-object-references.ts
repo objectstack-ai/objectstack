@@ -51,6 +51,11 @@
  *     views belong to. `getViewsByObject()` indexes views by exactly this key,
  *     so a container bound to a name nothing registers is dead at runtime —
  *     none of its views is ever found — while authoring stayed green.
+ *   - [#35143] the object a seed dataset, a flow CRUD / object-form screen
+ *     node or a standalone action is bound to — `data[].object`,
+ *     `config.objectName`, `actions[].objectName`. A miss is work that never
+ *     happens: the seed loads nothing, the step fails every run, the action is
+ *     carried by no page. An object the stack extends resolves at these three.
  *
  * ── Severity ladder (the point of the rule) ──────────────────────────────
  *
@@ -87,7 +92,22 @@ import {
 import { referenceCarrierOf, referenceTargetOf } from '@objectstack/spec/data';
 
 import { closureDependencyRemedy, packagesOf, recordsOf, suggestName } from './object-graph.js';
+import { walkFlowNodes } from './flow-walk.js';
 import type { UserTextParams } from './finding-user-text.js';
+
+/**
+ * [#35143] The flow node types whose `config.objectName` names the object the
+ * step reads, writes or renders — the four CRUD executors (`crud-nodes.ts`,
+ * `@objectstack/service-automation`) and an object-form `screen`. Each takes the
+ * name as written and asks the engine for it at run time.
+ */
+const OBJECT_BOUND_FLOW_NODE_TYPES: ReadonlySet<string> = new Set([
+  'get_record',
+  'create_record',
+  'update_record',
+  'delete_record',
+  'screen',
+]);
 
 /** Materialized once for the repeated edit-distance scans in `suggestName`. */
 const PLATFORM_NAMES: readonly string[] = [...PLATFORM_PROVIDED_OBJECT_NAMES];
@@ -205,10 +225,20 @@ function artifactProvidedObjectNames(stack: AnyRec): string[] {
  *   it: the gate dispatches this rule on `flow` and `dataset` writes, a flow
  *   body carries none of this rule's sites, and the differential cancels what
  *   the context collections already hold.
+ * @param options.wholeCollection [#35143] `true` when `stack.objects` is the
+ *   whole collection a runtime host serves (a gated write that names no
+ *   package), as the list-view member reads it (#24668). It decides only the
+ *   flow-node site's severity: with neither it nor a closure — the CLI — a
+ *   flow node bound to a name this stack does not define is advised, not
+ *   refused, because a dependency package may define it and a build cannot
+ *   see that package (`flow-trigger-unknown-object`'s split, #24669).
  */
 export function validateObjectReferences(
   stack: AnyRec,
-  options: { packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] } } = {},
+  options: {
+    packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] };
+    wholeCollection?: boolean;
+  } = {},
 ): ObjectRefFinding[] {
   const findings: ObjectRefFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
@@ -262,6 +292,7 @@ export function validateObjectReferences(
     subject: string,
     remedy = '',
     userTextOf?: UserTextParams,
+    advisory = false,
   ) => {
     const name = strName(target);
     if (!name) return;
@@ -294,6 +325,25 @@ export function validateObjectReferences(
 
     // ② Unprefixed and unresolved — a stack's own objects are namespace-
     // prefixed and present here, so there is no legitimate elsewhere.
+    // [#35143] Except where the caller says this stack cannot know (a flow
+    // node judged with no closure and no whole collection): a dependency
+    // package may define the name, so the miss is advised with that hedge.
+    if (advisory) {
+      findings.push({
+        severity: 'warning',
+        rule: OBJECT_REFERENCE_UNKNOWN,
+        where,
+        path,
+        message:
+          `${subject} "${name}" is not defined by this stack. If no installed package defines it, ` +
+          'the step fails the run every time it executes.' +
+          suggestName(name, resolvable),
+        hint:
+          'Point it at an object this stack defines, or declare the package that defines it in the manifest\'s ' +
+          '`dependencies`; ignore this if a declared dependency does',
+      });
+      return;
+    }
     findings.push({
       severity: 'error',
       rule: OBJECT_REFERENCE_UNKNOWN,
@@ -540,6 +590,97 @@ export function validateObjectReferences(
       'dataset base object',
       '',
       { dataset: dsName },
+    );
+  }
+
+  // ── [#35143] Seeds, flow nodes and actions → the object they are bound to ──
+  // Three bindings that name the object a write lands on, so a miss is not a
+  // degraded control but work that never happens:
+  //
+  //  - a seed dataset's `object`. `defineStack` refuses an unprefixed miss
+  //    already, but answers a platform-prefixed name by its prefix alone
+  //    (`isPlatformObjectName`), so `sys_nothing_here` built clean. The seed
+  //    load looks the object up, finds none and loads no record of it. This
+  //    site is the CLI's: at the runtime `seed` door the save door's own
+  //    refusal (#34864) answers it, so the member does not run there.
+  //  - a flow node's `config.objectName` — `get_record`, `create_record`,
+  //    `update_record`, `delete_record`, and a `screen` that renders an
+  //    object's form. Nothing resolved it at all: when no installed package
+  //    defines the name either, the step reaches the engine with a name no
+  //    object carries and fails the run every time it executes. Advised on
+  //    the CLI, refused at the door (`flowNodeAdvisory` below). The
+  //    START node's `objectName` is `flow-trigger-unknown-object`'s subject
+  //    (`validate-flow-trigger-readiness.ts`) and is not read here.
+  //  - a standalone action's `objectName`, the object `defineStack` folds it
+  //    into and the runtime keys its dispatch by. `defineStack` refuses a miss
+  //    on the CLI; at the runtime `action` publish door nothing did, and the
+  //    action registered against no object, so no list or record page carries
+  //    it and its object route answers 404.
+  //
+  // The same ladder as every site above, with one addition: an object this
+  // stack EXTENDS (`objectExtensions[].extend`) resolves, because the stack's
+  // own metadata says the object exists in another package — the exemption
+  // `defineStack` already grants an action's `objectName` for the same reason.
+  // An embedded action (`objects[].actions[]`) is bound by the object it is
+  // written on and is not read.
+  const extended = new Set<string>();
+  for (const ext of recordsOf(stack.objectExtensions)) {
+    const n = strName(ext.extend);
+    if (n) extended.add(n);
+  }
+  // An empty object set with no closure in force is not a verdict, as at the
+  // list-view member (#24668): no deployment serves zero objects, so a runtime
+  // host that hands none over supplied no universe, and an app that declares
+  // none binds objects its dependencies own. Under a stated closure an empty
+  // set is still a verdict (#24563): every binding is then outside it.
+  const noUniverse = resolvable.size === 0 && !closure;
+  const checkBound = (target: string | undefined, where: string, path: string, subject: string, advisory = false) => {
+    if (noUniverse) return;
+    const name = strName(target);
+    if (name && extended.has(name)) return;
+    check(name, where, path, subject, '', undefined, advisory);
+  };
+  // [#35143] A flow node's miss is refused only where this stack is enough to
+  // know: under a stated closure, or against the whole served collection. On
+  // the CLI a dependency package the build cannot see may define the name,
+  // so it is advised there — `flow-trigger-unknown-object`'s split (#24669).
+  // The seed and action sites keep the error: `defineStack` refuses the same
+  // misses on the CLI already.
+  const flowNodeAdvisory = !closure && options.wholeCollection !== true;
+
+  const seeds = Array.isArray(stack.data) ? (stack.data as unknown[]) : [];
+  for (let si = 0; si < seeds.length; si++) {
+    const seed = seeds[si];
+    if (!seed || typeof seed !== 'object') continue;
+    checkBound(strName((seed as AnyRec).object), `seed #${si}`, `data[${si}].object`, 'seed object');
+  }
+
+  const flows = recordsOf(stack.flows);
+  for (let fi = 0; fi < flows.length; fi++) {
+    const flow = flows[fi];
+    const flowName = strName(flow.name) ?? `#${fi}`;
+    for (const { node, path } of walkFlowNodes(flow, `flows[${fi}]`)) {
+      if (typeof node.type !== 'string' || !OBJECT_BOUND_FLOW_NODE_TYPES.has(node.type)) continue;
+      const config = node.config;
+      if (!config || typeof config !== 'object' || Array.isArray(config)) continue;
+      checkBound(
+        strName((config as AnyRec).objectName),
+        `flow "${flowName}" · node "${strName(node.label) ?? strName(node.id) ?? '?'}"`,
+        `${path}.config.objectName`,
+        `${node.type} object`,
+        flowNodeAdvisory,
+      );
+    }
+  }
+
+  for (let ai = 0; ai < globalActions.length; ai++) {
+    const action = globalActions[ai];
+    if (!action || typeof action !== 'object') continue;
+    checkBound(
+      strName(action.objectName),
+      `action "${strName(action.name) ?? `#${ai}`}"`,
+      `actions[${ai}].objectName`,
+      'action object',
     );
   }
 

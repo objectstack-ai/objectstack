@@ -1143,6 +1143,12 @@ export {
   judgeBodyCompile,
   ACTION_BODY_DOES_NOT_COMPILE,
 } from './validate-action-body-compiles.js';
+// [#35143] The Seeds and actions family's two new rule ids, exported so
+// `os explain` can carry an entry for each (the explanation table holds an
+// entry only for an id the barrel exports). The rules themselves run through
+// the registry and are not exported.
+export { ACTION_BODY_WRITE_CAPABILITY_UNDECLARED } from './validate-action-body-capabilities.js';
+export { SEED_RECORD_UNKNOWN_FIELD } from './validate-seed-record-keys.js';
 export type {
   ActionBodyCompileFinding,
   HostCompileFailure,

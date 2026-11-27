@@ -1659,6 +1659,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ロックしたユーザー",
         helpText: "ビューの設定をロックしたユーザー"
       },
+      requiredPermissions: {
+        label: "必要な権限",
+        helpText: "このビューを見られる人：閲覧者が保持する必要のあるケイパビリティで、列挙したものはすべて必要です。ケイパビリティは権限セットが付与し、ポジションはその権限セットが付与するものを引き継ぎます。空にすると、リストを見られる全員がこのビューを見られます。複数のグループに見せるには、ケイパビリティを 1 つ選び、各グループの権限セットに付与してください。サーバーが強制します：それ以外の人にはリストにこのビューが表示されず、直接開いても拒否されます。これはあなた自身にも適用されます：保持していないケイパビリティや綴りを誤ったケイパビリティを指定すると、あなたもこのビューを開けなくなります。"
+      },
       object: {
         label: "オブジェクト"
       }
@@ -1874,6 +1878,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "フィルター",
         description: "ウィジェット全体に適用する既定およびグローバルフィルター。"
       },
+      access: {
+        label: "アクセス",
+        description: "このダッシュボードを見られる人。"
+      },
       advanced: {
         label: "詳細",
         description: "アクセシビリティとパフォーマンス調整。"
@@ -2054,6 +2062,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "globalFilters.targetWidgets": {
         label: "対象ウィジェット"
+      },
+      requiredPermissions: {
+        label: "必要な権限",
+        helpText: "このダッシュボードを見られる人：閲覧者が保持する必要のあるケイパビリティで、列挙したものはすべて必要です。ケイパビリティは権限セットが付与し、ポジションはその権限セットが付与するものを引き継ぎます。空にすると、全員がこのダッシュボードを見られます。複数のグループに見せるには、ケイパビリティを 1 つ選び、各グループの権限セットに付与してください。サーバーが強制します：それ以外の人にはリストにこのダッシュボードが表示されず、直接開いても拒否されます。これはあなた自身にも適用されます：保持していないケイパビリティや綴りを誤ったケイパビリティを指定すると、あなたもこのダッシュボードを開けなくなります。"
       }
     }
   },

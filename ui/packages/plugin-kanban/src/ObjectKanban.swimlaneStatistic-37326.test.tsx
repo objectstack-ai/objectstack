@@ -20,7 +20,11 @@
  *       row's count (no read groups by it) is marked `+`;
  *   (d) CONTROL: the same board handed every record writes every count bare;
  *   (e) a refused read marks the column counts `+` too;
- *   (f) CONTROL: a board with no statistic draws no foot row.
+ *   (f) CONTROL: a board with no statistic draws no foot row;
+ *   (g) avg, min and max read the same grouped read as sum (objectstack#37718);
+ *   (h) a swimlane board handed one page draws no column that only has
+ *       records past the page, while the flat board CONTROL draws it
+ *       (the `!flatLanes` gate on `extraLaneIds`, objectstack#37718).
  */
 
 import React from 'react';
@@ -102,7 +106,15 @@ function groupHeadersOver(rows: Row[]) {
       const out: Row = { [key]: k };
       for (const agg of query.aggregations) {
         const values = members.map((m) => m[agg.field]) as number[];
-        out[agg.alias] = agg.function === 'count' ? members.length : values.reduce((a, b) => a + b, 0);
+        out[agg.alias] = agg.function === 'count'
+          ? members.length
+          : agg.function === 'min'
+            ? Math.min(...values)
+            : agg.function === 'max'
+              ? Math.max(...values)
+              : agg.function === 'avg'
+                ? values.reduce((a, b) => a + b, 0) / values.length
+                : values.reduce((a, b) => a + b, 0);
       }
       return out;
     });
@@ -208,5 +220,87 @@ describe('a swimlane board draws the view\'s lane statistic (objectstack#37326)'
     const { container } = mount(adapter(ROWS), undefined);
     await waitFor(() => expect(swimlaneCounts(container)).toEqual(['12', '12']));
     expect(footRow(container)).toBeNull();
+  });
+
+  // 20 open deals (amounts 0 … 19), 4 won (0 … 3).
+  it.each([
+    ['avg', 'Avg', ['9.5', '1.5']],
+    ['min', 'Min', ['0', '0']],
+    ['max', 'Max', ['19', '3']],
+  ])('(g) draws each column\'s whole %s at the foot, from the one grouped read', async (type, word, figures) => {
+    const source = adapter(ROWS);
+    const { container } = mount(source, { type, field: 'amount' });
+    await waitFor(() => expect(footFigures(container)).toEqual(figures));
+    expect(footRow(container)!.textContent).toContain(`${word} · Amount`);
+    expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1);
+    expect(source.queryGroupHeaders.mock.calls[0][1].groupBy).toEqual(['stage']);
+  });
+});
+
+describe('a swimlane board handed one page draws no column past the page (objectstack#37718)', () => {
+  const ACCOUNT_DEF = {
+    ...DEF,
+    fields: { ...DEF.fields, account: { type: 'lookup', reference: 'account', label: 'Account' } },
+  };
+  const ACCOUNTS = [
+    { id: 'a1', name: 'Acme' },
+    { id: 'a2', name: 'Globex' },
+    { id: 'a3', name: 'Initech' },
+  ];
+  // The query: two deals at each account. The page: Acme's and Globex's only,
+  // so Initech's lane exists past the page alone.
+  const QUERY = ACCOUNTS.flatMap((account) => [0, 1].map((i) => ({
+    id: `${account.id}-${i}`,
+    name: `${account.name} ${i}`,
+    stage: 'open',
+    amount: i,
+    region: i === 0 ? 'north' : 'south',
+    account: account.id,
+  })));
+  const PAGE = QUERY.filter((row) => row.account !== 'a3');
+
+  function accountSource() {
+    const groupHeaders = groupHeadersOver(QUERY);
+    return {
+      find: vi.fn(async (object: string, params: any) =>
+        new ValueDataSource<Row>({ items: object === 'account' ? ACCOUNTS : QUERY }).find(object, params)),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => ACCOUNT_DEF),
+      queryGroupHeaders: groupHeaders,
+    } as any;
+  }
+
+  function mountPage(source: any, layout: Record<string, unknown>) {
+    return render(
+      <SchemaRendererProvider dataSource={source}>
+        <ObjectKanban
+          schema={{ type: 'object-kanban', objectName: OBJECT, groupBy: 'account', cardFields: ['amount'], ...layout } as any}
+          dataSource={source}
+          data={PAGE}
+          laneStatisticQuery={{ search: '', reloadKey: '0' }}
+        />
+      </SchemaRendererProvider>,
+    );
+  }
+
+  it('in swimlanes: the columns are the page\'s two, and no title read is asked for a later lane', async () => {
+    const source = accountSource();
+    const { container } = mountPage(source, SWIMLANES);
+    await waitFor(() => expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(columnCounts(container)).toEqual(['2', '2']));
+    const titleRow = container.querySelector<HTMLElement>('[data-swimlane-scroll-row]')!;
+    expect(titleRow.textContent).not.toContain('Initech');
+    expect(titleRow.textContent).not.toContain('a3');
+    expect(source.find).not.toHaveBeenCalledWith('account', expect.anything());
+  });
+
+  it('CONTROL: the flat board draws the lane past the page, titled by its account', async () => {
+    const source = accountSource();
+    const { container } = mountPage(source, {});
+    await waitFor(() => expect(container.textContent).toContain('Initech'));
+    expect(source.find).toHaveBeenCalledWith('account', expect.objectContaining({ $filter: { id: { $in: ['a3'] } } }));
   });
 });

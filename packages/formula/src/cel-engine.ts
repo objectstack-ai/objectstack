@@ -1427,8 +1427,8 @@ export function firstTypeMismatch(
     // against a number — `record.due_date + 1` faults on the field's text on
     // every run exactly as `due_date + 1` does. Either names the read as
     // written (`root`). The date-text family reaches the roots through
-    // `validate.ts`'s record-root pass (#34662), which stands down on the
-    // date-arith shape answered here ({@link recordRootReadsFaultDateArith}).
+    // `validate.ts`'s record-root pass (#34662), asked only where this answers
+    // null (#36377).
     if (scope !== 'flattened' || !RECORD_ROOT_READ_RE.test(source)) return null;
     const rootTyped = unsoundOverload(buildTypedEnv(bareTypes, 'flattened', 'timestamp', fieldCelTypes));
     if (rootTyped && isDateArith(rootTyped)) {
@@ -1601,38 +1601,6 @@ export function firstDateTextVerdict(
   } catch {
     // A parse/other fault is the syntax checker's job (celEngine.compile).
     return null;
-  }
-}
-
-/**
- * [#34662] Whether the FIRST operator fault the Timestamp typing of a flattened
- * condition's `record.<field>` / `previous.<field>` reads meets (every bare
- * name `dyn`) is date/duration arithmetic against a number ({@link isDateArith})
- * — `record.due_date + 1`. That shape is the `date-arithmetic` family's, and it
- * is exactly where the bare name's own order stops: {@link firstTypeMismatch}
- * answers `date-arith` there (for the root read too, #34946) and the date-text
- * check is never asked. Any other
- * Timestamp-typing fault — `record.end_date - record.start_date > 3` (a Duration
- * ordered against a number), `record.d >= "2026-01-01"` (the text ordering the
- * runtime answers) — leaves the bare name's mismatch check at null and the
- * date-text check asked, so it does not stand the record-root pass down
- * either. `false` when the source does not parse.
- */
-export function recordRootReadsFaultDateArith(
-  source: string,
-  recordRootTypes: Readonly<Record<string, FieldCelType>>,
-): boolean {
-  if (typeof source !== 'string' || !source.trim()) return false;
-  try {
-    const result = buildTypedEnv({}, 'flattened', 'timestamp', recordRootTypes)
-      .parse(rewriteNullableTernary(rewriteIndexedHas(source))).check?.() as
-      | { valid?: boolean; error?: { message?: string } }
-      | undefined;
-    if (result?.valid !== false) return false;
-    const m = UNSOUND_OVERLOAD_RE.exec(result.error?.message ?? '');
-    return m !== null && isDateArith(m);
-  } catch {
-    return false;
   }
 }
 

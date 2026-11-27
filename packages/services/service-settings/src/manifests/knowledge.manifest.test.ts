@@ -12,29 +12,39 @@ describe('knowledgeSettingsManifest', () => {
     expect(() => SettingsManifestSchema.parse(knowledgeSettingsManifest)).not.toThrow();
   });
 
-  it('declares namespace=knowledge, scope=global, version=3 (chunk_overlap, then the ragflow option and its keys, retired)', () => {
+  it('declares namespace=knowledge, scope=global, version=4 (chunk_overlap, the ragflow option, then adapter, over_fetch and enforce_rls, retired)', () => {
     const parsed = SettingsManifestSchema.parse(knowledgeSettingsManifest);
     expect(parsed.namespace).toBe('knowledge');
     expect(parsed.scope).toBe('global');
-    expect(parsed.version).toBe(3);
+    expect(parsed.version).toBe(4);
     const keys = parsed.specifiers.map((sp: any) => sp.key).filter(Boolean);
-    expect(keys).toContain('chunk_target');
-    expect(keys).not.toContain('chunk_overlap');
-    // Non-vacuity for the absence below: the other adapter's keys are there.
-    expect(keys).toContain('turso_url');
-    for (const key of ['ragflow_base_url', 'ragflow_api_key', 'ragflow_default_dataset']) {
+    // Every key left has a named reader (#37104): `turso_url` and
+    // `turso_auth_token` by @objectstack/knowledge-turso, `chunk_target` by the
+    // knowledge service's splitter. A key added here owes its reader first.
+    expect(keys).toEqual(['turso_url', 'turso_auth_token', 'chunk_target']);
+    for (const key of [
+      'chunk_overlap',
+      'ragflow_base_url', 'ragflow_api_key', 'ragflow_default_dataset',
+      'adapter', 'over_fetch', 'enforce_rls',
+    ]) {
       expect(keys, key).not.toContain(key);
     }
-    expect(parsed.specifiers.some((sp: any) => sp.type === 'group' && sp.id === 'ragflow')).toBe(false);
+    const groups = parsed.specifiers.filter((sp: any) => sp.type === 'group').map((sp: any) => sp.id);
+    expect(groups).toEqual(['turso', 'indexing']);
   });
 
-  it('exposes adapter select with memory + turso, and no retired ragflow option', () => {
-    const f = (knowledgeSettingsManifest.specifiers as any[]).find(
-      (s) => s.key === 'adapter' && s.type === 'select',
-    );
-    expect(f).toBeDefined();
-    expect(f.default).toBe('memory');
-    expect(f.options.map((o: any) => o.value).sort()).toEqual(['memory', 'turso']);
+  it('gates nothing on the retired adapter: no specifier declares a visibility predicate', () => {
+    const specs = knowledgeSettingsManifest.specifiers as any[];
+    // Non-vacuity: the specifiers are there to inspect.
+    expect(specs.length).toBeGreaterThan(3);
+    for (const s of specs) expect(s.visible, s.key ?? s.id).toBeUndefined();
+    expect(JSON.stringify(knowledgeSettingsManifest)).not.toContain('data.adapter');
+  });
+
+  it('says on the Turso group when its fields are read, and when they are not', () => {
+    const group = (knowledgeSettingsManifest.specifiers as any[]).find((s) => s.type === 'group' && s.id === 'turso');
+    expect(group.description).toMatch(/not PostgreSQL/);
+    expect(group.description).toMatch(/not read/);
   });
 
   it('marks every secret field as encrypted password', () => {
@@ -45,12 +55,6 @@ describe('knowledgeSettingsManifest', () => {
       expect(f.type).toBe('password');
       expect(f.encrypted).toBe(true);
     }
-  });
-
-  it('defaults enforce_rls to true (security-critical)', () => {
-    const f = (knowledgeSettingsManifest.specifiers as any[]).find((s) => s.key === 'enforce_rls');
-    expect(f).toBeDefined();
-    expect(f.default).toBe(true);
   });
 
   it('exposes a test action wired to /api/settings/knowledge/test', () => {
@@ -66,45 +70,24 @@ describe('knowledgeSettingsManifest', () => {
   });
 });
 
-describe('knowledgeSettingsManifest — both warnings are info_banner rows', () => {
-  const specs = knowledgeSettingsManifest.specifiers as any[];
-  const sectionOf = (i: number) => specs.slice(0, i + 1).reverse().find((s) => s.type === 'group')?.id;
-
-  it('declares exactly the two warning-severity banners, each with an id, a title and a body', () => {
-    const banners = specs.filter((s) => s.type === 'info_banner');
-    expect(banners.map((b) => [b.id, b.bannerSeverity])).toEqual([
-      ['adapter_switch_warning', 'warning'],
-      ['enforce_rls_warning', 'warning'],
-    ]);
-    for (const b of banners) {
-      expect(typeof b.label, `${b.id} label`).toBe('string');
-      expect(b.label.length, `${b.id} label`).toBeGreaterThan(0);
-      expect(b.bannerText.length, `${b.id} bannerText`).toBeGreaterThan(0);
-    }
+describe('knowledgeSettingsManifest — no banner outlives the key it warned about', () => {
+  // The page carried two warning banners, one under the adapter select and one
+  // under the RLS toggle. Both keys are retired (#37104), so both banners went
+  // with them: a warning about a switch that is not on the page is noise.
+  it('declares no info_banner', () => {
+    const specs = knowledgeSettingsManifest.specifiers as any[];
+    expect(specs.filter((s) => s.type === 'info_banner')).toEqual([]);
+    expect(specs.some((s) => s.id === 'adapter_switch_warning' || s.id === 'enforce_rls_warning')).toBe(false);
   });
 
-  it('places each banner in the section it concerns, directly under the field it warns about', () => {
-    const at = (id: string) => specs.findIndex((s) => s.id === id);
-    expect(sectionOf(at('adapter_switch_warning'))).toBe('adapter');
-    expect(specs[at('adapter_switch_warning') - 1].key).toBe('adapter');
-    expect(sectionOf(at('enforce_rls_warning'))).toBe('permissions');
-    expect(specs[at('enforce_rls_warning') - 1].key).toBe('enforce_rls');
-  });
-
-  it('carries the warning glyph nowhere — the banner severity is the only warning marker', () => {
+  it('carries the warning glyph nowhere', () => {
     expect(JSON.stringify(knowledgeSettingsManifest)).not.toContain('⚠');
   });
 });
 
 describe('knowledgeTestActionHandler', () => {
-  it('warns for memory adapter (no service to probe)', async () => {
-    const r = await knowledgeTestActionHandler({ values: { adapter: 'memory' } } as any);
-    expect(r.ok).toBe(true);
-    expect(r.severity).toBe('warning');
-  });
-
-  it('accepts turso with no URL (the plugin defaults to its own file)', async () => {
-    const r = await knowledgeTestActionHandler({ values: { adapter: 'turso' } } as any);
+  it('accepts no URL (the plugin defaults to its own file)', async () => {
+    const r = await knowledgeTestActionHandler({ values: {} } as any);
     expect(r.ok).toBe(true);
     expect(r.severity).toBe('info');
     // The plugin opens a file of its own, never the platform's database (#37107).
@@ -112,16 +95,16 @@ describe('knowledgeTestActionHandler', () => {
     expect(r.message).not.toMatch(/reuse the tenant/);
   });
 
-  it('accepts turso with local file URL', async () => {
+  it('accepts a local file URL', async () => {
     const r = await knowledgeTestActionHandler({
-      values: { adapter: 'turso', turso_url: 'file:./knowledge.db' },
+      values: { turso_url: 'file:./knowledge.db' },
     } as any);
     expect(r.ok).toBe(true);
   });
 
   it('rejects managed turso URL without auth token', async () => {
     const r = await knowledgeTestActionHandler({
-      values: { adapter: 'turso', turso_url: 'libsql://x.turso.io' },
+      values: { turso_url: 'libsql://x.turso.io' },
     } as any);
     expect(r.ok).toBe(false);
     expect(r.severity).toBe('error');
@@ -129,11 +112,7 @@ describe('knowledgeTestActionHandler', () => {
 
   it('accepts managed turso URL with auth token', async () => {
     const r = await knowledgeTestActionHandler({
-      values: {
-        adapter: 'turso',
-        turso_url: 'libsql://x.turso.io',
-        turso_auth_token: 't',
-      },
+      values: { turso_url: 'libsql://x.turso.io', turso_auth_token: 't' },
     } as any);
     expect(r.ok).toBe(true);
   });
@@ -144,7 +123,7 @@ describe('knowledgeTestActionHandler', () => {
   // the wording can be improved without the guard going stale.
   it('turso live-call hint names the package and how it is registered, not an outside origin', async () => {
     const r = await knowledgeTestActionHandler({
-      values: { adapter: 'turso', turso_url: 'file:./knowledge.db' },
+      values: { turso_url: 'file:./knowledge.db' },
     } as any);
     expect(r.ok).toBe(true);
     const message = String(r.message);
@@ -155,19 +134,18 @@ describe('knowledgeTestActionHandler', () => {
     expect(message).not.toMatch(/Mount @objectstack\/knowledge-turso to exercise live calls/);
   });
 
-  // #24769 — "Test connection" is now answered (the handler is in the plugin's
+  // #24769 — "Test connection" is answered (the handler is in the plugin's
   // default map), and what it answers is a form check: no package in this repo
-  // reads this namespace or registers `knowledge/test`, so nothing replaces it
-  // with a live probe. Every green answer on a remote adapter must say no
-  // connection was attempted, and none may promise that mounting a package
-  // makes this button live — no package does.
-  it('every green answer on a remote adapter says no connection was attempted', async () => {
-    const remote: Array<[string, Record<string, unknown>]> = [
-      ['turso, no URL', { adapter: 'turso' }],
-      ['turso, local file', { adapter: 'turso', turso_url: 'file:./knowledge.db' }],
-      ['turso, managed', { adapter: 'turso', turso_url: 'libsql://x.turso.io', turso_auth_token: 't' }],
+  // registers `knowledge/test`, so nothing replaces it with a live probe. Every
+  // green answer must say no connection was attempted, and none may promise
+  // that mounting a package makes this button live — no package does.
+  it('every green answer says no connection was attempted', async () => {
+    const forms: Array<[string, Record<string, unknown>]> = [
+      ['no URL', {}],
+      ['local file', { turso_url: 'file:./knowledge.db' }],
+      ['managed', { turso_url: 'libsql://x.turso.io', turso_auth_token: 't' }],
     ];
-    for (const [label, values] of remote) {
+    for (const [label, values] of forms) {
       const r = await knowledgeTestActionHandler({ values } as any);
       expect(r.ok, label).toBe(true);
       const message = String(r.message);
@@ -176,27 +154,28 @@ describe('knowledgeTestActionHandler', () => {
     }
   });
 
-  // The ragflow adapter was retired with its package. A deployment that saved
-  // it before keeps `adapter = ragflow` stored, with its old keys beside it; the
-  // button must answer that as a failure, never as a configured adapter.
-  it('answers a stored retired adapter (ragflow) as a failure, complete old keys or not', async () => {
-    const stored: Array<Record<string, unknown>> = [
-      { adapter: 'ragflow' },
-      { adapter: 'ragflow', ragflow_base_url: 'http://localhost:9380', ragflow_api_key: 'k' },
-    ];
-    for (const values of stored) {
-      const r = await knowledgeTestActionHandler({ values } as any);
-      expect(r.ok).toBe(false);
-      expect(r.severity).toBe('error');
+  // `adapter` is retired (#37104): a value saved before, or a stale form still
+  // sending one, is not read. The answer is the one the same Turso fields get
+  // with no adapter at all — never "Unknown adapter", never the in-memory
+  // warning the retired `memory` option answered.
+  it('reads no adapter: a stale one in the values or the payload changes nothing', async () => {
+    const fields = { turso_url: 'libsql://x.turso.io', turso_auth_token: 't' };
+    const baseline = await knowledgeTestActionHandler({ values: fields } as any);
+    expect(baseline.ok).toBe(true);
+    for (const adapter of ['memory', 'turso', 'ragflow', 'pgvector']) {
+      const fromValues = await knowledgeTestActionHandler({ values: { ...fields, adapter } } as any);
+      const fromPayload = await knowledgeTestActionHandler({ values: fields, payload: { values: { adapter } } } as any);
+      expect(fromValues, adapter).toEqual(baseline);
+      expect(fromPayload, adapter).toEqual(baseline);
     }
-    // Non-vacuity: the same call on an offered adapter passes.
-    expect((await knowledgeTestActionHandler({ values: { adapter: 'turso' } } as any)).ok).toBe(true);
+    // Non-vacuity: the fields it does read change the answer.
+    expect((await knowledgeTestActionHandler({ values: { turso_url: 'libsql://x.turso.io' } } as any)).ok).toBe(false);
   });
 
   it('prefers payload.values over persisted values', async () => {
     const r = await knowledgeTestActionHandler({
-      values: { adapter: 'memory' },
-      payload: { values: { adapter: 'turso', turso_url: 'file:foo.db' } },
+      values: { turso_url: 'libsql://x.turso.io' },
+      payload: { values: { turso_url: 'file:foo.db' } },
     } as any);
     expect(r.ok).toBe(true);
     expect(r.message).toMatch(/file:foo\.db/);

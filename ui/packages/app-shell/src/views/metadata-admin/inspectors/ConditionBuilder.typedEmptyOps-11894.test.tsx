@@ -121,7 +121,7 @@ function mountBenchmark(subject: string, fields: ReadonlyArray<CatalogRow> = TYP
 /** The same on a LIST subject, whose stored second row is membership: a list is
  *  not offered `==`, so `S == 'x'` would open in the raw editor (objectstack#36167). */
 function mountListBenchmark(subject: string) {
-  return render(<Harness initial={`record.status == 'done' && (${subject} != null && 'x' in ${subject})`} fields={TYPED_FIELDS} />);
+  return render(<Harness initial={`record.status == 'done' && (has(${subject}) && ${subject} != null && 'x' in ${subject})`} fields={TYPED_FIELDS} />);
 }
 
 describe('the benchmark rule on a DATE field evaluates both ways (objectui#11894)', () => {
