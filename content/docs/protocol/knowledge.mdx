@@ -198,11 +198,15 @@ starts and follows the type from then on, with no restart:
   the adapter's `dropSource` (§3.4). Over an adapter without that member the
   index is kept, and the service says so once in its log, naming the source.
 
-A deployment that holds a `knowledge_source` item but mounts no knowledge
-service says so once at boot, naming the items: nothing loads, indexes or
-searches them until `KnowledgeServicePlugin` and an adapter are mounted. Such
-an item is one the stack does not ship — saved at run time or installed in a
-package after the boot — since a shipped one mounts the service.
+A source is saved only on a deployment that mounts the knowledge service
+(see [Who may author one](#who-may-author-one)). A deployment that holds a
+`knowledge_source` item but mounts no knowledge service says so once at boot,
+naming the items: nothing loads, indexes or searches them until the service is
+mounted, by `requires: ['knowledge']` in the stack and a restart (or, on a host
+that composes its own kernel, `KnowledgeServicePlugin` and a store). Such an
+item is one the stack does not ship, since a shipped one mounts the service:
+one a package install, a seed or a migration wrote after the boot, or one
+saved before saves were refused there.
 
 #### Who may author one
 
@@ -235,6 +239,17 @@ and the MCP draft door:
    `metadataFields`, the title field) and the ones its `where` reads. A
    verdict that cannot be reached, or a knowledge service that is registered
    and cannot be resolved, refuses `503`; nothing is written.
+
+**A deployment with no knowledge service saves no source.** Nothing there
+would load, index or search it, and the service is mounted when the server
+starts, never while it runs; a source saved at run time is not one the stack
+ships, so it does not mount the service either. So on such a deployment every
+door above refuses an author's save `503 SERVICE_UNAVAILABLE`, and a duplicate
+that would copy a source is refused the same way; nothing is written. The
+refusal names the fix: add `requires: ['knowledge']` to the stack, restart,
+then save the source. The engine's own writes (a package install, a seed, a
+migration) are not refused, and a knowledge service a host mounts itself
+answers for its own sources.
 
 #### One name, one source
 
