@@ -19,6 +19,9 @@ import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+// Paid at collection, not inside a clocked case: the picker's closure and the
+// CEL authoring helpers load it lazily (check:test-source-alias).
+import '@objectstack/lint';
 
 const h = vi.hoisted(() => {
   const NAME = 'repairs_repair_ticket';
