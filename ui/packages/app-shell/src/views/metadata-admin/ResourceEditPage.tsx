@@ -111,6 +111,7 @@ import {
   conditionSubjectsForMetadataType,
 } from './conditionScope.js';
 import { mapLoaded, usePickerLoad } from './loadState.js';
+import { useCapabilityAudienceLoad } from './useCapabilityAudienceLoad.js';
 import {
   useMetadataClient,
   useMetadataTypes,
@@ -1398,6 +1399,16 @@ function MetadataResourceEditPageImpl({
     ),
   );
 
+  // objectstack#34908 — the audience catalog for the `ref-multi:capability`
+  // picker (a list view's or a dashboard's `requiredPermissions`): the
+  // capabilities the environment knows, the permission sets granting each and
+  // the positions holding them. Loaded only when the form on screen declares
+  // that widget, as the permission-set catalog above is.
+  const capabilityAudienceState = useCapabilityAudienceLoad(
+    client,
+    formDeclaresWidget(createMode && config.createSchema ? undefined : entry?.form, 'ref-multi:capability'),
+  );
+
   // Component ids placed on the page being edited — fuels the `ref:component`
   // picker so a page variable's `source` (the component that writes it) is
   // chosen from the real canvas components, not a free-text id. Derived from
@@ -1456,8 +1467,9 @@ function MetadataResourceEditPageImpl({
       objectViews: objectViewsState,
       componentIds,
       permissionSets: permissionSetsState,
+      capabilityAudience: capabilityAudienceState,
     }),
-    [type, objectsState, objectCatalogState, objectViewsState, componentIds, permissionSetsState],
+    [type, objectsState, objectCatalogState, objectViewsState, componentIds, permissionSetsState, capabilityAudienceState],
   );
 
   // Load layered view + initial draft.

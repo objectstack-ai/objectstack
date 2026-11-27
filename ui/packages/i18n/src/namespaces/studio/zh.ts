@@ -1644,6 +1644,13 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.form.addPermissionSetPlain': '添加权限集',
   'engine.form.addPermissionSet': '添加权限集…',
   'engine.form.allPermissionSetsAdded': '已添加全部权限集',
+  'engine.form.addCapabilityPlain': '添加能力',
+  'engine.form.addCapability': '添加能力…',
+  'engine.form.allCapabilitiesAdded': '已添加全部能力',
+  'engine.form.audienceEveryone': '未选能力：能看到该列表的人都能看到。',
+  'engine.form.audiencePositions': '会看到的岗位：{positions}。',
+  'engine.form.audienceNoPosition': '没有岗位同时持有所选的全部能力：只有被直接授予这些能力的人和对象编辑者能看到。',
+  'engine.form.audiencePositionsUnread': '读取不到岗位，无法显示谁会看到。',
   'engine.form.noObjectFields': '没有对象字段（{error}）。',
   // objectui#10862, slice 4.
   'engine.form.objectNotFound': '未找到对象',

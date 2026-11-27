@@ -54,9 +54,11 @@ import { toast } from 'sonner';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { createAuthenticatedFetch } from '@object-ui/auth';
 import { useMetadataLocale, t, tFormat } from './i18n.js';
+import type { SupportedLocale } from './i18n.js';
 import { fieldHistoryChoiceOf, fieldHistoryOptions, fieldHistoryValueOf } from './fieldHistoryChoice.js';
 import { isKnownViewType, viewTypeLabel } from './viewTypeLabels.js';
 import type { FormFieldSpec, FormViewSpec, VisibilityPredicate } from './form-spec.js';
+import { positionsReached, type CapabilityAudience } from '../capabilityAudience.js';
 import { usePredicateScope } from '@object-ui/react';
 import { buildPredicateCtx, visibleOptions, type PredicateCtx } from './predicate.js';
 import { foldFilterGroupToSpecRules, FILTER_FOLD_REFUSAL_KEYS } from '../viewFilterFold.js';
@@ -75,6 +77,7 @@ import {
   isLoading,
   loadErrorOf,
   loadedData,
+  mapLoaded,
   NOT_ASKED,
   offeredOptions,
   usePickerLoad,
@@ -320,6 +323,13 @@ export interface WidgetContext {
    * does for a completed load that found no permission sets.
    */
   permissionSets?: LoadState<RegistryItemOption[]>;
+  /**
+   * The capabilities the environment knows, joined with the permission sets
+   * granting each and the positions holding them — fuels the
+   * `ref-multi:capability` picker of an audience gate (`requiredPermissions`
+   * on a list view or a dashboard). Absent reads as {@link NOT_ASKED}.
+   */
+  capabilityAudience?: LoadState<CapabilityAudience>;
 }
 
 /* Stable empties for the arms that have no catalog to offer yet — `idle` and
@@ -842,6 +852,8 @@ interface RefMultiRegistry {
   addPlaceholderKey: string;
   /** The add picker's placeholder once every declared item is picked. */
   allAddedKey: string;
+  /** What the picked names mean, drawn under the list (the capability picker's position preview). */
+  footer?: (selected: readonly string[], context: WidgetContext | undefined, locale: SupportedLocale) => React.ReactNode;
 }
 
 /**
@@ -988,6 +1000,7 @@ function RefMultiWidget({
         ) : (
           freeform
         ))}
+      {registry.footer?.(selected, context, locale)}
     </div>
   );
 }
@@ -1003,6 +1016,64 @@ const PERMISSION_REGISTRY: RefMultiRegistry = {
 
 function RefMultiPermissionWidget(props: WidgetProps) {
   return <RefMultiWidget {...props} registry={PERMISSION_REGISTRY} />;
+}
+
+/**
+ * Who an audience gate lets in through a position: the positions whose
+ * permission sets grant every picked capability, read off the same catalog
+ * the picker offers. Advisory — the server's read gate is the authority.
+ */
+function CapabilityAudienceFooter({
+  selected,
+  context,
+  locale,
+}: {
+  selected: readonly string[];
+  context: WidgetContext | undefined;
+  locale: SupportedLocale;
+}) {
+  const state = context?.capabilityAudience ?? NOT_ASKED;
+  if (state.status !== 'loaded') return null;
+  const positions = state.data.positions;
+  let text: string;
+  if (selected.length === 0) text = t('engine.form.audienceEveryone', locale);
+  else if (positions === null) text = t('engine.form.audiencePositionsUnread', locale);
+  else {
+    const reached = positionsReached(selected, positions) ?? [];
+    text = reached.length === 0
+      ? t('engine.form.audienceNoPosition', locale)
+      : tFormat('engine.form.audiencePositions', locale, { positions: reached.map((p) => p.label ?? p.name).join(', ') });
+  }
+  return (
+    <p className="text-xs text-muted-foreground" data-testid="ref-multi-capability-audience">
+      {text}
+    </p>
+  );
+}
+
+/**
+ * The `ref-multi:capability` registration: the capabilities the environment
+ * knows (declared, or granted by a permission set), each offered with the
+ * permission sets granting it, and the positions the picked set reaches.
+ */
+const CAPABILITY_REGISTRY: RefMultiRegistry = {
+  type: 'capability',
+  catalog: (context) =>
+    context?.capabilityAudience
+      ? mapLoaded(context.capabilityAudience, (audience) =>
+          audience.capabilities.map((c) => ({ name: c.name, label: c.label })),
+        )
+      : undefined,
+  addLabelKey: 'engine.form.addCapabilityPlain',
+  addPlaceholderKey: 'engine.form.addCapability',
+  allAddedKey: 'engine.form.allCapabilitiesAdded',
+  footer: (selected, context, locale) => (
+    <CapabilityAudienceFooter selected={selected} context={context} locale={locale} />
+  ),
+};
+
+function RefMultiCapabilityWidget(props: WidgetProps) {
+  return <RefMultiWidget {...props} registry={CAPABILITY_REGISTRY} />;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -3665,6 +3736,7 @@ export const WIDGETS = {
   'ref:component': RefComponentWidget,
   'ref:dataset': RefDatasetWidget,
   'ref-multi:permission': RefMultiPermissionWidget,
+  'ref-multi:capability': RefMultiCapabilityWidget,
   'filter-mode': FilterModeWidget,
   'object-selector': ObjectSelectorWidget,
   'field-selector': FieldSelectorWidget,
@@ -3779,6 +3851,7 @@ export const WIDGET_LABELLING: Record<RegisteredWidgetKey, WidgetLabelling> = {
   'ref:component': 'control',
   'ref:dataset': 'control',
   'ref-multi:permission': 'group',
+  'ref-multi:capability': 'group',
   'filter-mode': 'group',
   'object-selector': 'control',
   'field-selector': 'control',
