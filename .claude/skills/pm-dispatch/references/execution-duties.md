@@ -39,7 +39,7 @@
 - 排队卡含他车道项 ⇒ 发现席自拆:新卡无 `domain:*`,首行 `carries item k of #N; #N keeps items …`。
 - 分诊首触定域可改判;拆出卡 ⛔ 不承父卡域(承域只及本车道 sub-issue),父卡余项照 `Fixes`。
 - `ui/**` 余项照常自派不拆(同仓同 worktree、门禁、合并队列),⛔ 不作 UI 跳过,非他车道项。
-- 派 `ui/**` 余项前,在飞求交加读 `domain:ui` 认领文件面;相交 ⇒ 照重叠检查排队或让行。
+- 派 `ui/**` 余项前,在飞求交加读 `domain:ui` 认领文件面,现读 `check-handover.mjs --inflight`;相交 ⇒ 照重叠检查排队或让行。
 - 自在飞派发升级出的卡首行一句:本卡承哪一半、父卡留哪一半;缺此行不入队不入箱。
 - 分诊预见的后续工作是一张卡,触发条件落地时立卡;⛔ 分诊一句话永不授权无卡编辑。
 - 阻塞项无主 ⇒ 被挡席认领做掉,不限大小;在该卡走完整认领、尊重其热文件串行队。
@@ -47,7 +47,7 @@
 - 定「等 #N」即同笔写卡 `Blocked-by: #N`+`pm:blocked`;⛔ 只记记忆或评论,无读者即漏派。
 - 标签序 = NORTH-STAR「Priority」第 3 条(无级殿后),本车道开放卡现读 `card-pick.mjs --order <序>`。
 - 开放 = 未派发(无 `pm:dispatched`、无 assignee);在飞的 P0/P1 不挡任何候选,只余取卡全序。
-- `card-pick.mjs` 仍印每行 `domain:*` 与 lane ownership 页脚,脚本行为未改:`domain:*` 读作文件归属,cloud 与安全卡照旧不认领。
+- `card-pick.mjs` 每行印 `domain:*`,读作文件归属;cloud 与安全卡照旧不认领。
 - 取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/domains/spec.md`)> 标签序。
 - 云车道同按专题派,⛔ 不按 `cloud/ROADMAP.md` 行序;细则照 `lanes/cloud.md` 所指的 cloud 仓文件。
 - 全序每级现读/现算,零逐卡维护;无级/无 area/无 type 轮报记分诊缺口。

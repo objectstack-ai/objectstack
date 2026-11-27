@@ -1808,6 +1808,79 @@
           "ref": "#35212"
         }
       ]
+    },
+    {
+      "id": "ai.chat-question-card",
+      "title": "When the AI ends its turn on a clarifying question, a clickable question card takes the composer's place: one click answers with the next message, Skip gives the composer back with its draft, and the conversation shows the question collapsed",
+      "since": "v19",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), signed in through the form, in the AI chat"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an AI service that serves an agent with a model and the ask_which tool, so an ambiguous question ends the turn on a question (service-ai is a Cloud/EE package: ai.open-edition-honest-degradation)",
+          "an ambiguous question, e.g. 'how much revenue this quarter' where the agent can read more than one revenue figure"
+        ],
+        "knownGaps": [
+          "BLOCKED(environment): the open tree registers no AI service, so no turn ends on a question. When the card shows, what an answer sends and the skip mark are pinned (automated.ref)"
+        ]
+      },
+      "steps": [
+        "type a few words in the composer without sending them, then ask an ambiguous question; wait for the turn to end",
+        "read the composer area and the last assistant message; check that the reply's Regenerate button is absent",
+        "click Skip; read the composer and its draft; reload the conversation and check the card does not come back",
+        "ask another ambiguous question and click one option; read the next user message"
+      ],
+      "acceptance": [
+        {
+          "clause": "the card takes the composer's place once the turn ends on a question, and the conversation shows the question without its options",
+          "oracle": "dom",
+          "verify": "the question card is shown where the input was, the input is hidden but still in the DOM, and the last assistant message reads 'AI asks: QUESTION' (ui/packages/plugin-chatbot/src/chat/pendingQuestion.ts#findPendingQuestion)",
+          "evidence": "a screenshot of the composer area and the message"
+        },
+        {
+          "clause": "Skip gives the composer back with the draft typed before the question, and the card stays away after a reload on this device",
+          "oracle": "dom",
+          "verify": "the input holds the typed words, the question shows collapsed with its options inside, and localStorage holds objectstack:ai-chat-question-skip:CONVERSATION_ID (ui/packages/plugin-chatbot/src/chat/questionSkip.ts#QUESTION_SKIP_STORAGE_PREFIX)",
+          "evidence": "the input value, the message DOM and the storage entry"
+        },
+        {
+          "clause": "one click on an option sends its label as the next user message",
+          "oracle": "network",
+          "verify": "the chat request after the click carries the option label as the user message",
+          "evidence": "the request body"
+        }
+      ],
+      "negative": [
+        "a card that shows while the turn still streams, a draft lost after Skip, or an answer sent twice is a FAIL"
+      ],
+      "blocked": {
+        "by": "environment",
+        "ref": "service-ai is Cloud/EE: no open-tree AI service answers the chat (FOLLOW-UPS §18c, ai.console-ai-surface-gating)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/plugin-chatbot/src/__tests__/pendingQuestion-37874.test.ts, ui/packages/plugin-chatbot/src/__tests__/ChatbotEnhanced.questionCard-37874.test.tsx"
+      },
+      "source": [
+        "ui/packages/plugin-chatbot/src/chat/pendingQuestion.ts#findPendingQuestion",
+        "ui/packages/plugin-chatbot/src/chat/composerGate.tsx#ComposerGate",
+        "ui/packages/plugin-chatbot/src/chat/questionSkip.ts#QUESTION_SKIP_STORAGE_PREFIX",
+        "packages/spec/src/ai/ask-question.zod.ts#parseAskQuestionEnvelope"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-27",
+          "change": "initial — the question card wired into the AI chat (question-card topic #37871, Q2b). Blocked(environment): no open-tree AI service; no live run made",
+          "ref": "#37874"
+        }
+      ]
     }
   ]
 }

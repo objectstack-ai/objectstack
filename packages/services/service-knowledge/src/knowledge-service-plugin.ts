@@ -32,6 +32,7 @@ import {
 } from './knowledge-build.js';
 import type { KnowledgeFieldSecurity } from './knowledge-source-admission.js';
 import { createKnowledgeReapGuard, guardedObjectsFor } from './knowledge-reap-guard.js';
+import { KnowledgeRecordHooks, recordHookEngineOf } from './knowledge-record-hooks.js';
 import { KnowledgeSourceLoader } from './knowledge-source-loader.js';
 import { KNOWLEDGE_SOURCE_TYPE } from './knowledge-source-registry.js';
 import { contributeKnowledgeSettings } from './knowledge-settings-contribution.js';
@@ -330,11 +331,16 @@ export interface KnowledgeServicePluginOptions {
    */
   sources?: KnowledgeSource[];
   /**
-   * Subscribe to ObjectQL `data.record.created` / `data.record.updated` /
+   * Keep `object` sources in step with record writes. Defaults to `true`. Set
+   * to `false` to disable event sync (e.g. when an external indexer drives
+   * upserts). With a `realtime` service composed, the plugin subscribes to
+   * ObjectQL `data.record.created` / `data.record.updated` /
    * `data.record.restored` / `data.record.deleted` events from
-   * `IRealtimeService` for `object` sources. Defaults to `true`. Set to
-   * `false` to disable inline event sync (e.g. when an external indexer drives
-   * upserts).
+   * `IRealtimeService`; without one, it registers the data engine's
+   * `afterInsert` / `afterUpdate` / `afterDelete` hooks on every indexed
+   * object instead, and each sync starts once the write's unit of work
+   * commits, off the write's response (`KnowledgeRecordHooks`). One of the
+   * two, never both: each write is synced once.
    *
    * A created, updated or restored row is re-read against each source's
    * `where` (with a data engine bound): a matching row is indexed from the
@@ -392,8 +398,9 @@ export interface KnowledgeServicePluginOptions {
 /**
  * `KnowledgeServicePlugin` — registers `IKnowledgeService` with the
  * kernel, binds it to `IDataEngine` for RLS-aware permission filtering,
- * and (optionally) subscribes to `IRealtimeService` so ObjectQL record
- * mutations automatically propagate to adapter backends.
+ * and (optionally) subscribes to `IRealtimeService` — or, on a kernel with no
+ * `realtime` service, to the data engine's after-write hooks — so ObjectQL
+ * record mutations automatically propagate to adapter backends.
  *
  * @example
  * ```ts
@@ -443,6 +450,12 @@ export class KnowledgeServicePlugin implements Plugin {
    */
   private realtime: IRealtimeService | undefined;
   private logger: KnowledgeLogger | undefined;
+  /**
+   * The record sync's after-write hooks, when the kernel composes no
+   * `realtime` service (`KnowledgeRecordHooks`); `undefined` while the realtime
+   * subscription is the trigger, or before `kernel:ready`.
+   */
+  private recordHooks: KnowledgeRecordHooks | undefined;
   /** The loader of the published `knowledge_source` items (`knowledge-source-loader.ts`). */
   private loader: KnowledgeSourceLoader | undefined;
   /** Dropped at destroy: the protocol's mutation signal and the service's source-change signal. */
@@ -631,6 +644,8 @@ export class KnowledgeServicePlugin implements Plugin {
     // source registered or loaded after boot for an object no source indexed
     // before gets its guard when it arrives.
     this.unsubscribes.push(service.onSourcesChanged(() => this.syncReapGuards(ctx, service)));
+    // The after-write hooks follow the sources the same way, once started.
+    this.unsubscribes.push(service.onSourcesChanged(() => this.syncRecordHooks(ctx)));
 
     ctx.hook('kernel:ready', async () => {
       // Reap-path de-indexing first: it is independent of the realtime service,
@@ -641,11 +656,13 @@ export class KnowledgeServicePlugin implements Plugin {
       try {
         realtime = ctx.getService<IRealtimeService>('realtime');
       } catch {
-        // realtime service not available — sync becomes opt-in via
-        // explicit handleRecordUpsert / handleRecordDelete calls.
+        // No realtime service, so the engine publishes no `data.record.*`
+        // event (the ObjectQL plugin bridges this same service to it): the
+        // data engine's after-write hooks are the trigger instead.
+        if (this.startRecordHooks(ctx, service)) return;
         ctx.logger.warn?.(
-          'KnowledgeServicePlugin: IRealtimeService unavailable — event sync disabled. ' +
-            'Adapters can still be driven manually via the service API.',
+          'KnowledgeServicePlugin: IRealtimeService unavailable and no data engine takes after-write hooks — ' +
+            'event sync disabled. Adapters can still be driven manually via the service API.',
         );
         return;
       }
@@ -1024,6 +1041,41 @@ export class KnowledgeServicePlugin implements Plugin {
     ctx.logger.info?.(
       `KnowledgeServicePlugin: reap guards registered with the lifecycle service for [${objects.join(', ')}] — ` +
         'rows are de-indexed before the retention sweep deletes them.',
+    );
+  }
+
+  /**
+   * Start the record sync on the data engine's after-write hooks
+   * (`KnowledgeRecordHooks`) — the trigger on a kernel with no `realtime`
+   * service. `false` when the `objectql` service takes no hooks.
+   */
+  private startRecordHooks(ctx: PluginContext, service: KnowledgeService): boolean {
+    let engine: unknown;
+    try {
+      engine = ctx.getService<unknown>('objectql');
+    } catch {
+      return false;
+    }
+    const hookEngine = recordHookEngineOf(engine);
+    if (!hookEngine) return false;
+    const hooks = new KnowledgeRecordHooks(hookEngine, service, this.logger);
+    this.recordHooks = hooks;
+    this.unsubscribes.push(() => hooks.stop());
+    const objects = hooks.sync();
+    ctx.logger.info?.(
+      'KnowledgeServicePlugin: no realtime service — record sync runs on the data engine\'s after-write hooks' +
+        `${objects.length > 0 ? ` for [${objects.join(', ')}]` : ''}; each sync starts once the write's unit of work ` +
+        'commits, off the write\'s response.',
+    );
+    return true;
+  }
+
+  /** Register the after-write hooks for the objects a source added since ({@link startRecordHooks}). */
+  private syncRecordHooks(ctx: PluginContext): void {
+    const objects = this.recordHooks?.sync() ?? [];
+    if (objects.length === 0) return;
+    ctx.logger.info?.(
+      `KnowledgeServicePlugin: record-sync after-write hooks registered for [${objects.join(', ')}].`,
     );
   }
 

@@ -44,7 +44,7 @@
     {
       "id": 5,
       "prompt": "Create `src/ai/support-bot.agent.ts` with defineAgent({ name: 'crm_support_bot', tools: ['query_records', 'action_crm_close_case'], knowledge: ['support_kb'] }) and register it under agents. None of the project's files are in this directory: answer from what is stated here.",
-      "expected_output": "Refuses the agent: the `agent` type is closed to third parties (a stack-authored agent is filtered out, refused by `loadAgent()` and 404s on chat), and `agent.tools` / `agent.knowledge` are protocol-17 tombstones. Re-declares the two tools in a `defineSkill` (registered under `skills`) with a `surface`, and restricts retrieval at the knowledge-source level (`aiExposed`, `where`) rather than on an agent. The in-app `ask` assistant picks the skill up by surface (`ask` or `both`) for the app the user is in, and a tool the skill names outside the allow-set is dropped with a diagnostic.",
+      "expected_output": "Refuses the agent: the `agent` type is closed to third parties (a stack-authored agent is filtered out, refused by `loadAgent()` and 404s on chat), and `agent.tools` / `agent.knowledge` were removed in protocol 17: the strict schema refuses each as an unknown key, naming https://objectstack.ai/docs/protocol-upgrade. Re-declares the two tools in a `defineSkill` (registered under `skills`) with a `surface`, and restricts retrieval at the knowledge-source level (`aiExposed`, `where`) rather than on an agent. The in-app `ask` assistant picks the skill up by surface (`ask` or `both`) for the app the user is in, and a tool the skill names outside the allow-set is dropped with a diagnostic.",
       "files": [],
       "assertions": {
         "must_contain": ["defineSkill", "skills", "surface", "aiExposed"],

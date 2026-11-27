@@ -22,7 +22,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 // `@object-ui/plugin-chatbot` is already a static member of this package's
 // barrel closure (`index.ts` re-exports `AiChatPage`, which imports it), so
 // this adds no package edge and no eager bundle weight.
-import { detectPendingApproval, storedAnswerParts } from '@object-ui/plugin-chatbot/core';
+import { detectPendingApproval, QUESTION_SKIP_STORAGE_PREFIX, storedAnswerParts } from '@object-ui/plugin-chatbot/core';
 import type { StoredAnswerData } from '@object-ui/plugin-chatbot/core';
 // Type-only, so it is erased and pulls no barrel closure into the hook.
 import type { AnswerSource } from '@object-ui/plugin-chatbot';
@@ -282,7 +282,8 @@ function messageCacheKey(conversationId: string): string {
 
 /**
  * Security — clear ALL cached AI-chat state from localStorage (per-user
- * conversation-id pointers AND per-conversation message bodies). Conversation
+ * conversation-id pointers, per-conversation message bodies, and the question
+ * card's per-conversation skip marks). Conversation
  * content + tool payloads are cached in plaintext (keyed by `objectstack:
  * ai-chat-*`); without this, on a shared machine the next profile user could
  * read the previous user's AI threads (which may contain data surfaced by the
@@ -294,7 +295,12 @@ export function purgeChatCaches(): void {
     const doomed: string[] = [];
     for (let i = 0; i < localStorage.length; i += 1) {
       const key = localStorage.key(i);
-      if (key && (key.startsWith(CACHE_PREFIX) || key.startsWith(MESSAGE_CACHE_PREFIX))) {
+      if (
+        key &&
+        (key.startsWith(CACHE_PREFIX) ||
+          key.startsWith(MESSAGE_CACHE_PREFIX) ||
+          key.startsWith(QUESTION_SKIP_STORAGE_PREFIX))
+      ) {
         doomed.push(key);
       }
     }
