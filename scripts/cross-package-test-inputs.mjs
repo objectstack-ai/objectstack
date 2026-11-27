@@ -465,8 +465,9 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // The `examples/` globs are the showcase modules two i18n tests import LIVE
     // across the workspace boundary, each named per file because the two read
     // DIFFERENT namespaces and are not interchangeable:
-    //   test/i18n-section-coverage.test.ts dynamically imports `contact.view`
-    //     and `semantic-zoo.object` and asserts `toEqual` over an exhaustive
+    //   test/i18n-section-coverage.test.ts dynamically imports `contact.view`,
+    //     `contact.object` (whose `fieldGroups` lay out the contact's forms
+    //     since #36553) and `semantic-zoo.object` and asserts `toEqual` over an exhaustive
     //     hardcoded `_sections` key list, so any newly NAMED section in either
     //     module goes red -- this is what PR #8742 broke in queue build
     //     31825946401, where the merge queue was the first signal.
@@ -576,6 +577,7 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/services/service-cluster/src/**',
       'packages/connectors/connector-mcp/src/connector-mcp-plugin.ts',
       'examples/app-showcase/src/ui/views/contact.view.ts',
+      'examples/app-showcase/src/data/objects/contact.object.ts',
       'examples/app-showcase/src/data/objects/semantic-zoo.object.ts',
       'examples/app-showcase/src/ui/pages/task-triage.page.ts',
       'content/docs/deployment/cli.mdx',

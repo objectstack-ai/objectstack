@@ -46,26 +46,6 @@ export const OpportunityViews = defineView({
       },
     },
   },
-  // The default form. Since #36425 the Console's create and edit surfaces lay
-  // the record out by the object's fieldGroups and no longer load it, so it is
-  // inert there (lint: form-view-internal-not-loaded).
-  form: {
-    type: 'simple',
-    data: { provider: 'object', object: 'crm_opportunity' },
-    sections: [
-      {
-        name: 'opportunity',
-        label: 'Opportunity',
-        columns: 2,
-        fields: [
-          { field: 'name', required: true },
-          { field: 'account', required: true },
-          { field: 'stage', required: true },
-          { field: 'amount' },
-          { field: 'probability' },
-          { field: 'close_date' },
-        ],
-      },
-    ],
-  },
+  // No form here: the create and edit forms lay an opportunity out by the
+  // object's `fieldGroups` (objects/opportunity.object.ts).
 });
