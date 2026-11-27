@@ -12,7 +12,7 @@ is refused at validate and publish (`action-no-object-binding`; set it, or
 that returns or assigns values writes nothing
 (`action-record-write-discarded`): it calls `ctx.api.object(...).update(...)`
 in `language: 'js'` (an `expression` body has no I/O) with
-`capabilities: ['api.write']`; without the grant a write is refused too
+`capabilities: ['api.write']`; without that grant, a write is refused too
 (`action-body-write-capability-undeclared`).
 
 ## Where Actions Appear (`locations`)
