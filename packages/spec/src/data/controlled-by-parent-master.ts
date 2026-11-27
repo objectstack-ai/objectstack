@@ -116,11 +116,12 @@ export type ControlledByParentMasterShape =
  * that ships in `dist` is the published face, door or no door). It has no
  * `status` of its own, and it is NOT in the `message`. Where a reader can see
  * it: on the zod issue itself (any `ObjectSchema` / `ObjectStackDefinitionSchema`
- * `safeParse`, which is the Studio tab's path), and on `defineStack`'s
- * `STACK_SCHEMA_INVALID` refusal, whose `issues` are the raw zod issues. Where
- * it is not: the metadata save door's `422 INVALID_METADATA` — its `issues[]`
- * entries (`zodIssuesToMetadataIssues`, `@objectstack/metadata-protocol`) carry
- * `path`, `message` and zod's own issue `code` (`'custom'`), never `params`.
+ * `safeParse`, which is the Studio tab's path), on `defineStack`'s
+ * `STACK_SCHEMA_INVALID` refusal, whose `issues` are the raw zod issues, and on
+ * the metadata save door's `422 INVALID_METADATA`, whose `issues[]` entries
+ * (`zodIssuesToMetadataIssues`, `@objectstack/metadata-protocol`) carry the
+ * issue's `params` beside `path`, `message` and zod's own issue `code`
+ * (`'custom'`): read the code there from `params.code`.
  */
 export const CONTROLLED_BY_PARENT_MASTER_INVALID = 'CONTROLLED_BY_PARENT_MASTER_INVALID' as const;
 
