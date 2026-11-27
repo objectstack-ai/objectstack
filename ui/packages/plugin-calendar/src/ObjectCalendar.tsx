@@ -416,6 +416,7 @@ interface QuickCreateFieldDef {
   type?: unknown;
   required?: unknown;
   readonly?: unknown;
+  uiReadonly?: unknown;
   system?: unknown;
   defaultValue?: unknown;
   options?: unknown;
@@ -488,9 +489,31 @@ function requiredFieldsQuickCreateCannotFill(fieldsMeta: unknown, provided: Read
   for (const [name, def] of quickCreateFieldEntries(fieldsMeta)) {
     if (!name || provided.has(name) || !def?.required) continue;
     if (def.readonly === true || def.system === true || def.type === 'autonumber') continue;
+    // A field read-only by hand (`uiReadonly`) is left out of the write, as
+    // the create dialog leaves it out (objectstack#37448): the server applies
+    // its `defaultValue`, and without one the write would be refused for it.
+    if (fieldStaticallyReadOnlyByHand(def)) {
+      if (def.defaultValue === undefined || def.defaultValue === null) unfillable.push(name);
+      continue;
+    }
     if (!quickCreateFill(def)) unfillable.push(name);
   }
   return unfillable;
+}
+
+/**
+ * The fields the quick-create dialog writes itself — the title field and the
+ * date fields — that are read-only by hand on every record (`readonly` or
+ * `uiReadonly`, the static half of `fieldStaticallyReadOnlyByHand`; a create
+ * is judged by the static half only, objectstack#37448). The dialog cannot
+ * leave them out of its own write, so where one is locked the gesture goes to
+ * the host's full create form, which leaves it off.
+ */
+function quickCreateLockedOwnFields(config: ObjectCalendarConfig, fieldsMeta: unknown): string[] {
+  const defs = new Map(quickCreateFieldEntries(fieldsMeta));
+  return [config.titleField || 'name', config.startDateField, config.endDateField]
+    .filter((key): key is string => !!key)
+    .filter((key) => fieldStaticallyReadOnlyByHand(defs.get(key)));
 }
 
 /**
@@ -1458,7 +1481,8 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
         ),
       )
     : [];
-  const quickCreateCanSucceed = quickCreateUnfillable.length === 0;
+  const quickCreateLockedOwn = calendarConfig ? quickCreateLockedOwnFields(calendarConfig, objectSchema?.fields) : [];
+  const quickCreateCanSucceed = quickCreateUnfillable.length === 0 && quickCreateLockedOwn.length === 0;
 
   // …and where it cannot, the same gesture opens the host's FULL create form
   // with the day it was made on (the triage direction on objectui#12291): a
@@ -1468,7 +1492,10 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
   const handOffToCreateForm = useCallback((start: Date, end?: Date) => {
     if (!calendarConfig || !schema.objectName || !onEdit) return;
     const fieldDefs = objectSchema?.fields as Record<string, { type?: unknown } | undefined> | undefined;
-    onEdit(quickCreateDateValues(calendarConfig, fieldDefs, start, end));
+    // A date field read-only by hand is not prefilled: the form leaves it off.
+    const locked = new Set(quickCreateLockedOwnFields(calendarConfig, objectSchema?.fields));
+    const values = quickCreateDateValues(calendarConfig, fieldDefs, start, end);
+    onEdit(Object.fromEntries(Object.entries(values).filter(([key]) => !locked.has(key))));
   }, [calendarConfig, schema.objectName, onEdit, objectSchema]);
 
   // The two quick-create gestures (an empty-day click, a week / day range
@@ -1507,6 +1534,8 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
     // an object with any other one hands the gesture to the host's full form.
     for (const [name, def] of quickCreateFieldEntries(objectSchema?.fields)) {
       if (!name || name in payload || !def?.required) continue;
+      // Read-only by hand: left out, so the server applies its default.
+      if (fieldStaticallyReadOnlyByHand(def)) continue;
       const fill = quickCreateFill(def);
       if (fill) payload[name] = fill.value;
     }

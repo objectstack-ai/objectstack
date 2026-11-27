@@ -122,6 +122,9 @@ export const GANTT_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // provider-less fallback and say exactly what the `en` pack says.
   'list.loadErrorForbiddenTitle': 'You don’t have access',
   'list.loadErrorForbiddenMessage': 'You don’t have permission to view these records. Contact your administrator if you think you should have access.',
+  // The reason a write the field hand lock refuses carries (objectstack#37448),
+  // the grid's own sentence for a read-only cell.
+  'grid.readOnlyReason.readonly': 'This field is read-only.',
 };
 
 /** The defaults are English, so English plural rules pick a family's row. */

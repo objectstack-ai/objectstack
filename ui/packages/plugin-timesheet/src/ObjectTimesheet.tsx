@@ -49,6 +49,7 @@ import {
   useResolvedFilter,
   useSafeFieldLabel,
   useSettledSchema,
+  usePredicateScope,
   notifyDataChanged,
   NonGridRowCeilingNote,
 } from '@object-ui/react';
@@ -70,6 +71,8 @@ import { usePermissions } from '@object-ui/permissions';
 import {
   applyNonGridRowCeiling,
   buildExpandFields,
+  fieldReadOnlyByHand,
+  fieldStaticallyReadOnlyByHand,
   mergeFilterNodes,
   nonGridRowCeilingQuery,
   resolveAffordance,
@@ -310,9 +313,27 @@ function TimesheetGridView({ schema, objectName, binding, dataSource, className,
   // who may create, and a write the caller may not make is refused with a
   // message before it goes out. With no permission provider every row reads
   // open.
+  //
+  // objectstack#37448 — and each is an edit by hand, so the field hand lock
+  // holds (`@object-ui/core`'s one verdict, never `readonly` alone). A create
+  // writes the row fields, the date field and the value field, judged by the
+  // static half as the create dialog judges a create: one of them read-only by
+  // hand on every record (`readonly`, `uiReadonly`) leaves no create. Retyping
+  // or clearing a one-record cell edits that record's value field, judged over
+  // the stored record (`readonlyWhen` and `uiReadonlyWhen` included).
   const writeSource = { objectSchema: (objectSchema ?? null) as SchemaLike | null, objectName, perms };
+  const predicateScope = usePredicateScope();
+  const lockDefs = objectSchema?.fields as Record<string, Record<string, unknown> | undefined> | undefined;
+  const createLockedByHand = [...binding.rowFields, binding.dateField, binding.valueField].some((f) =>
+    fieldStaticallyReadOnlyByHand(lockDefs?.[f]),
+  );
+  const valueLockedByHand = (record: Record<string, unknown>): boolean =>
+    fieldReadOnlyByHand(lockDefs?.[binding.valueField], record, {
+      scope: predicateScope,
+      fieldContext: `field '${binding.valueField}'`,
+    });
   const grants: CellWriteGrants = {
-    create: resolveAffordance('gridAddRow', writeSource).allowed,
+    create: resolveAffordance('gridAddRow', writeSource).allowed && !createLockedByHand,
     update:
       resolveAffordance('listInlineEdit', writeSource).allowed &&
       resolveFieldAffordance('listInlineEdit', perms, objectName, binding.valueField),
@@ -327,7 +348,10 @@ function TimesheetGridView({ schema, objectName, binding, dataSource, className,
       return;
     }
     const write = planCellWrite(binding, row, day, cell, parsed, fieldDef(binding.dateField)?.type);
-    if (write.kind === 'none' || write.kind === 'readonly' || !dataSource) {
+    // The cell drew its input before this record was locked: judged again at
+    // the commit, over the record the write changes.
+    const lockedNow = (write.kind === 'update' || write.kind === 'delete') && valueLockedByHand(cell.records[0]);
+    if (write.kind === 'none' || write.kind === 'readonly' || lockedNow || !dataSource) {
       setDrafts(({ [id]: _dropped, ...rest }) => rest);
       return;
     }
@@ -458,7 +482,7 @@ function TimesheetGridView({ schema, objectName, binding, dataSource, className,
                     const cell = row.cells[day];
                     const id = cellId(row.key, day);
                     const label = t('timesheet.cellLabel', { row: name, day: dayHeading.format(fromDayKey(day)) });
-                    if (!cellEditable(cell, grants)) {
+                    if (!cellEditable(cell, grants, valueLockedByHand)) {
                       const shown = cell.records.length > 0 ? numberFormat.format(cell.sum) : '';
                       return (
                         <td key={day} className="px-2 py-1 text-right">
