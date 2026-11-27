@@ -549,6 +549,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Advisory: credential literals in a flow — an `http` node's headers or url query, a node's `connectorConfig.input` (`flow-credential-literal`, #20698) | ✓ | ✓ | ✓ | ✓ᶠ |
 | Advisory: credential literals in a connector — its header and environment maps, and a stdio MCP credential route (`connector-credential-literal`, #29424) | ✓ | ✓ | ✓ | ✓ᶜ |
 | `views[]` and page-component conditional-visibility predicates — CEL syntax, parse budget, bare identifiers, binding-root layer; schema path refs on `views[]` only (ADR-0089 D3b, #7010; page components at the save door #24491); an app navigation entry's `visible` at the save door (#28663) | ✓ | ✓ | ✓ | ✓ᵛᵖᵃ |
+| Gated book claims — a book whose `audience` is `{ permissionSet }` or `{ systemPermission }` claiming docs by `include: '*'`, which also takes every doc bound to no package away from readers outside the audience (`book-gated-catch-all-include`, ADR-0046 §6.7) | ✓ | ✓ | ✓ | ✓ᵇ |
 | Advisory: record titles, semantic field pointers (ADR-0085), action placement, seed replay/state safety, capability references | ✓ | ✓ | ✓ | — |
 | Advisory: form-section layout | ✓ | ✓ | ✓ | ✓ᵛ |
 | Advisory: liveness | ✓ | ✓ | ✓ | ✓ᵉᵐᵈˢ |
@@ -869,7 +870,7 @@ A clean run walks the registry and reports timing:
   Config: /path/to/support-desk/objectstack.config.ts
   Load time: 21ms
   → Validating against ObjectStack Protocol...
-  → Running author-time rules (85)...
+  → Running author-time rules (86)...
   → Checking that every required capability has a provider installable in this edition...
   → Checking package docs (ADR-0046)...
 

@@ -1,0 +1,23 @@
+{
+  "card": "order_to_cash",
+  "cardSha256": "fb53e5cf4475cc59b6d54c76b63a538f347780b56acc3269de8da099bdff7e02",
+  "build": "order_to_cash.json",
+  "sha256": "5d1696c818d542480819ddb67b970337e01ee94c224c99479f8cc9319797fcea",
+  "runner": "b620c4b2",
+  "packages": "workspace @ b620c4b2 (unreleased; the working tree also held this PR's docs and test edits, none of them in a packed file)",
+  "built": "2026-11-27",
+  "author": {
+    "driver": "claude-code-cli 2.1.332",
+    "login": "oauth_token",
+    "model": "opus",
+    "servedModel": "claude-opus-5-5",
+    "effort": "high",
+    "prompt": "detailed",
+    "lang": "en"
+  },
+  "verified": {
+    "build": "174/174",
+    "seed": "619/619",
+    "how": "the scratch run's dist/objectstack.json after its Build half (before the iterate turn), byte for byte: a poller copied the file each time its content changed, and this is the last copy before the iterate turn rewrote it. Re-scored against the card (`scoreCardArtifact` + `rollupSourceCharges`), it reads Build 174/174 with no roll-up charge, the run record's Build half, and `changeSize` from it to the post-iterate build equals the record's iterate change (12 items), which the copy before it (also 174/174) does not; Seed is the run record's, on this build"
+  }
+}

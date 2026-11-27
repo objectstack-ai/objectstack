@@ -708,7 +708,8 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
    *
    * Only the build this adapter began completes, and only the generation it
    * began: a build whose builder lock is gone (let go after its idle time, or
-   * its session ended), or whose generation is no longer the one under this
+   * its session ended), whose generation was dropped (`dropSource`, in any
+   * process), or whose generation is no longer the one under this
    * fingerprint, is refused `LOCK_CONFLICT` (409) and switches, records and
    * deletes nothing — another process may have taken the source up since.
    */
@@ -723,11 +724,14 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       await this.inTransaction(async (client) => {
         const { active, building } = await this.generations(sourceId, client, true);
         const t = qualified(this.schema, GENERATION_TABLE);
+        // The generation this build began is gone (the source was dropped) or
+        // is no longer the one under this fingerprint (another build replaced it).
+        if (active?.generation !== mine && building?.generation !== mine) throw buildEnded(sourceId);
         const target =
           building !== undefined && building.fingerprint === index.fingerprint
             ? building
             : active !== undefined && active.fingerprint === index.fingerprint ? active : undefined;
-        if (target !== undefined && target.generation !== mine) throw generationReplaced(sourceId);
+        if (target !== undefined && target.generation !== mine) throw buildEnded(sourceId);
         if (building !== undefined && building.fingerprint === index.fingerprint) {
           // The switch: one statement retires the old generation, the next
           // makes the new one active (one active row per source at a time).
@@ -776,6 +780,16 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
    * source is let go. A source it holds nothing for is no error. A drop that
    * stops after the commit leaves retired generations: never searched, and
    * deleted by the next drop or the next build of that key.
+   *
+   * A build of the source running in another process, holding its builder
+   * lock, does not hold the drop back: its generation is retired with the
+   * rest, and its next write, listing or completion is refused
+   * `LOCK_CONFLICT` and ends it (see `writeTarget`), so it never brings the
+   * source back. The drop first locks the source's generation rows, waiting
+   * for a transaction that holds them (a build opening or switching a
+   * generation); the retirement is then one statement of its own, so it also
+   * retires a generation that transaction opened, which the locking read
+   * could not see.
    */
   async dropSource(ctx: AdapterContext): Promise<void> {
     this.requirePool();
@@ -783,10 +797,11 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     const sourceId = ctx.source.name;
     try {
       await this.inTransaction(async (client) => {
-        const { active, building } = await this.generations(sourceId, client, true);
-        for (const g of [active, building]) {
-          if (g !== undefined) await this.retire(client, sourceId, g.generation);
-        }
+        await this.generations(sourceId, client, true);
+        await client.query(
+          `UPDATE ${qualified(this.schema, GENERATION_TABLE)} SET state = 'retired' WHERE source_id = $1 AND state <> 'retired'`,
+          [sourceId],
+        );
       });
       await this.sweepRetired(sourceId);
     } finally {
@@ -1039,6 +1054,13 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
    * when it holds it (or none is carried); refused when neither does, or when
    * the embedder's width is not the generation's. A source that holds nothing
    * gets its first generation (`create`), or none.
+   *
+   * A call of a build this adapter began (`ctx.reason === 'reindex'`) goes to
+   * the generation that build began and to no other: when it is no longer
+   * active or under construction — the source was dropped, by this process or
+   * another, or another build replaced it — the build is ended and the call
+   * refused `LOCK_CONFLICT`, so a build never opens a generation and never
+   * brings a dropped source back.
    */
   private async writeTarget(
     ctx: AdapterContext,
@@ -1052,6 +1074,17 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       if (embedder.dimensions !== g.dim) throw rebuildRequired(sourceId, false);
       return g;
     };
+    const build = ctx.reason === 'reindex' ? this.builds.get(sourceId) : undefined;
+    if (build !== undefined) {
+      const mine = [building, active].find((g) => g !== undefined && g.generation === build);
+      if (mine === undefined) {
+        this.builds.delete(sourceId);
+        await this.releaseBuilderLock(sourceId);
+        throw buildEnded(sourceId);
+      }
+      if (fingerprint !== undefined && mine.fingerprint !== fingerprint) throw rebuildRequired(sourceId, false);
+      return checked(mine);
+    }
     if (building !== undefined && fingerprint !== undefined && building.fingerprint === fingerprint) return checked(building);
     if (active === undefined) {
       if (!create) return undefined;
@@ -1297,16 +1330,21 @@ function builderLost(sourceId: string): Error {
   );
 }
 
-/** A completion refused because the generation the build began is no longer the one under its fingerprint. */
-function generationReplaced(sourceId: string): Error {
+/**
+ * A build's write, listing or completion refused because the generation the
+ * build began is gone: the source was dropped, or another build replaced it.
+ */
+function buildEnded(sourceId: string): Error {
   return Object.assign(
     new Error(
-      `The index this build of knowledge source '${sourceId}' began was replaced by another build; this one completes nothing.`,
+      `The index this build of knowledge source '${sourceId}' began was dropped or replaced while it ran; this build writes and completes nothing more.`,
     ),
     {
       code: LOCK_CONFLICT,
       status: 409,
-      remedy: 'Another build took the source up after this one lost its builder lock. Start a reindex again if none is running.',
+      remedy:
+        'The source was removed (its index dropped), or another build took the source up after this one lost its builder ' +
+        'lock. Start a reindex again if the source is still served and no build of it is running.',
     },
   );
 }

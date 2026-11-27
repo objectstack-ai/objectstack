@@ -2,17 +2,15 @@
 
 Declaring how long an object's data lives and how its space is
 reclaimed (ADR-0057). Distinct from
-**lifecycle hooks** (`beforeInsert` / `afterUpdate` …), which run logic on
-writes.
+**lifecycle hooks**, which run logic on writes.
 
 ## Why This Exists
 
 Every object without a `lifecycle` block is **immortal**: rows are never
-deleted, and on SQLite the file never shrinks. That's correct for business
-records — and a guaranteed disk leak for anything append-only.
+deleted, and on SQLite the file never shrinks.
 
-**Rule: any append-only, high-write-rate object (event log, run history,
-delivery outbox, ephemeral tokens) MUST declare a `lifecycle` block.**
+**Rule: any append-only, high-write-rate object MUST declare a `lifecycle`
+block.**
 The platform LifecycleService sweeps declared policies hourly, deletes
 expired rows under a system context, and reclaims driver space.
 
@@ -96,7 +94,7 @@ Duration literals: `<n>` + `h` / `d` / `w` / `y`.
 ## Validation Rules (rejected at parse time)
 
 ```typescript
-// ❌ Non-record class with no bounding policy — grows forever, exactly the bug
+// ❌ Non-record class with no bounding policy
 lifecycle: { class: 'telemetry' }
 
 // ❌ archive.after must equal retention.maxAge
@@ -113,17 +111,15 @@ lifecycle: {
 
 ## Safety Semantics
 
-- **Archive-then-delete is atomic-ish and safe by default**: an object
-  declaring `archive` is never hot-deleted before the copy to the archive
-  datasource succeeded. If no datasource is registered under the `archive.to`
-  name, rows are simply retained.
-- **Rotation** physically time-shards the table on SQLite (writes hit the
+- **Archive-then-delete**: an object declaring `archive` is never
+  hot-deleted before the copy to the archive datasource succeeded. If no
+  datasource is registered under the `archive.to` name, rows are retained.
+- **Rotation** time-shards the table on SQLite (writes hit the
   current shard, reads go through a view under the object's name, expired
   shards are DROPped). Other dialects enforce the same window with an
   age-based reap.
 - **Separation**: registering a datasource named `telemetry` moves every
-  `telemetry`/`event`/`audit` object onto it — telemetry bloat can't touch
-  the business DB.
+  `telemetry`/`event`/`audit` object onto it.
 
 ## Sealing (`seal`)
 
@@ -161,16 +157,21 @@ text `tenant_id` outside `valueFields` (or `chainField: 'organization_id'`),
 and beside `seal` any `onlyWhen`, a `ttl` not on `created_at`, or rotation
 `storage`. Unsealed, `error` hourly: no declared `id`; a `password`,
 `secret`, `formula`, `summary`, `image`, `file`, `avatar`, `video` or `audio`
-column; no `cryptoProvider` on `AuditPlugin`. Not built yet (ADR-0154): a
-verifier, so a break is recorded but not reported; expiry (P4), so the sweeper
-still deletes sealed rows, which then read as missing.
+column; no `cryptoProvider` on `AuditPlugin`.
+
+Signed expiry covers objects whose lifecycle is declared in packaged metadata:
+their sealed rows leave only by whole checkpoints and read as `expired`. On
+such an object with no `archive`, a retention override below the declared
+window is rejected and the declared window applies; to keep rows for less
+time, shorten the declared window. On any other sealed object (one created at
+runtime) the sweeper still deletes sealed rows, which then read as missing.
 
 ## Operations
 
 | Knob | Where | Effect |
 |:-----|:------|:-------|
 | `enabled` | `lifecycle` settings namespace | Runtime master switch |
-| `retention_overrides` | settings, **tenant-scoped** | Per-object window overrides — a regulated tenant sets `'2y'` while dev keeps days |
+| `retention_overrides` | settings, **tenant-scoped** | Per-object window overrides — a regulated tenant sets `'2y'` while dev keeps days; sealed objects: see § Sealing |
 | `quotas` / `quota_defaults` | settings | Row ceilings; breaches ALERT (never delete beyond declared policy) |
 | `growth_alert_rows` | settings | Per-sweep growth spike alert |
 | `OS_LIFECYCLE_DISABLED=1` | env | Disables sweeping entirely |

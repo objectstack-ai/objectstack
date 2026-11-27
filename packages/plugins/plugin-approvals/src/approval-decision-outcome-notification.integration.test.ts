@@ -39,7 +39,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { AutomationEngine, registerLogicNodes } from '@objectstack/service-automation';
+import { AutomationEngine, InMemorySuspendedRunStore, installBuiltinNodes, registerLogicNodes } from '@objectstack/service-automation';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
@@ -346,5 +346,219 @@ describe('the decision that ends an approval tells its submitter (approval.appro
     const human = await submit('sla_told', 'sla_human');
     await svc.decide(human.id, { decision: 'approve', actorId: 'u_alice' }, asUser('u_alice'));
     expect(outcomesAbout(human.id).map((e) => [e.topic, e.audience])).toEqual([['approval.approved', ['u_sub']]]);
+  });
+});
+
+/**
+ * An approval whose steps span runs (#37806). The probe that tells "a step" from
+ * "the outcome" used to ask for a pending request on the decided request's own
+ * run only. A step decided inside a `subflow` child, whose parent then opens the
+ * next step under the parent's run id, found none, so the submitter was told
+ * "approved" while a further step was open. "Over" is judged for the record the
+ * request is on (ADR-0162 Execution item 7): the probe asks across the run that
+ * carries it, `record_run_id`, which a `subflow` child inherits from its parent
+ * and a `map` item whose item is a record holds for itself.
+ */
+describe('an approval whose steps span runs tells its submitter only when the approval of the record is over', () => {
+  let engine: ObjectQL;
+  let automation: AutomationEngine;
+  let svc: ApprovalService;
+  let now = Date.parse('2026-11-27T12:00:00.000Z');
+  const emits: Emitted[] = [];
+
+  const step = (id: string, approver: string) =>
+    ({ id, type: 'approval', label: id, config: { approvers: [user(approver)] } });
+
+  /** One manager step, the body the parent and the batch below run as a child. */
+  const MGR_ONLY = {
+    name: 'deal_mgr_only', label: 'Deal Manager Only', type: 'autolaunched',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start' },
+      step('mgr', 'u_mgr'),
+      { id: 'ok', type: 'end', label: 'Approved' },
+      { id: 'no', type: 'end', label: 'Rejected' },
+    ],
+    edges: [
+      { id: 'e1', source: 'start', target: 'mgr' },
+      { id: 'e2', source: 'mgr', target: 'ok', label: 'approve' },
+      { id: 'e3', source: 'mgr', target: 'no', label: 'reject' },
+    ],
+  };
+  /** The first step in a `subflow` child, the second in the parent, under the parent's run id. */
+  const SPANNING = {
+    name: 'deal_spanning', label: 'Deal Spanning', type: 'autolaunched',
+    nodes: [
+      { id: 'pstart', type: 'start', label: 'Start' },
+      { id: 'sub', type: 'subflow', label: 'Manager step', config: { flowName: 'deal_mgr_only' } },
+      step('exec', 'u_exec'),
+      { id: 'pok', type: 'end', label: 'Approved' },
+      { id: 'pno', type: 'end', label: 'Rejected' },
+    ],
+    edges: [
+      { id: 'p1', source: 'pstart', target: 'sub' },
+      { id: 'p2', source: 'sub', target: 'exec' },
+      { id: 'p3', source: 'exec', target: 'pok', label: 'approve' },
+      { id: 'p4', source: 'exec', target: 'pno', label: 'reject' },
+    ],
+  };
+  /** CONTROL: the same two steps on one run. */
+  const SINGLE_RUN = {
+    name: 'deal_single_run', label: 'Deal Single Run', type: 'autolaunched',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start' },
+      step('mgr', 'u_mgr'),
+      step('exec', 'u_exec'),
+      { id: 'ok', type: 'end', label: 'Approved' },
+      { id: 'no', type: 'end', label: 'Rejected' },
+    ],
+    edges: [
+      { id: 'e1', source: 'start', target: 'mgr' },
+      { id: 'e2', source: 'mgr', target: 'exec', label: 'approve' },
+      { id: 'e3', source: 'mgr', target: 'no', label: 'reject' },
+      { id: 'e4', source: 'exec', target: 'ok', label: 'approve' },
+      { id: 'e5', source: 'exec', target: 'no', label: 'reject' },
+    ],
+  };
+  /** A batch with no record of its own: each deal is approved in its own `map` item run. */
+  const BATCH = {
+    name: 'deal_batch_outcome', label: 'Deal Batch', type: 'autolaunched',
+    variables: [{ name: 'items', type: 'list', isInput: true }],
+    nodes: [
+      { id: 'bstart', type: 'start', label: 'Start' },
+      { id: 'each', type: 'map', label: 'Each deal', config: { collection: { dialect: 'cel', source: 'items' }, flowName: 'deal_mgr_only', itemObject: 'crm_deal' } },
+      { id: 'bend', type: 'end', label: 'End' },
+    ],
+    edges: [
+      { id: 'b1', source: 'bstart', target: 'each' },
+      { id: 'b2', source: 'each', target: 'bend' },
+    ],
+  };
+
+  const newDeal = async (key: string): Promise<any> => {
+    const record = { id: `D_${key}`, title: key, amount: 5000, organization_id: ORG };
+    await engine.insert('crm_deal', record, { context: SYSTEM } as any);
+    return record;
+  };
+  const submit = async (flow: string, key: string): Promise<any> => {
+    const record = await newDeal(key);
+    const run = await automation.execute(flow, { object: 'crm_deal', record, userId: 'u_sub' } as any);
+    expect(run.status, `${flow} on D_${key} paused on its first step`).toBe('paused');
+    return pendingOn(`D_${key}`);
+  };
+  const pendingOn = async (recordId: string): Promise<any> => {
+    const rows: any[] = await engine.find('sys_approval_request', {
+      where: { record_id: recordId, status: 'pending' }, context: SYSTEM,
+    } satisfies EngineQueryOptions);
+    expect(rows.length, `at most one pending request on ${recordId}`).toBeLessThanOrEqual(1);
+    return rows[0];
+  };
+  const stored = async (requestId: string): Promise<any> =>
+    engine.findOne('sys_approval_request', { where: { id: requestId } }, { context: SYSTEM });
+  const outcomesAbout = (requestId: string) =>
+    emits.filter((e) => OUTCOME_TOPICS.includes(e.topic) && e.source?.id === requestId)
+      .map((e) => [e.topic, e.audience]);
+  const approve = (req: any, decider: string) =>
+    svc.decide(req.id, { decision: 'approve', actorId: decider }, asUser(decider));
+
+  beforeAll(async () => {
+    engine = new ObjectQL();
+    engine.registerDriver(new SqlDriver({
+      client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true,
+    }), true);
+    await engine.init();
+    for (const def of [sysUser, deal, ...(await packageObjects())]) {
+      engine.registry.registerObject(def as any, 'approvals-test', 'approvals-test');
+    }
+    await engine.syncSchemas();
+    await installDefaultOrganization(engine);
+    for (const u of USERS) await engine.insert('sys_user', u, { context: SYSTEM } as any);
+
+    automation = new AutomationEngine(silent, new InMemorySuspendedRunStore());
+    // `subflow` and `map` are built-ins the automation plugin seeds; a bare engine starts without them.
+    installBuiltinNodes(automation, { logger: silent, getService() { throw new Error('none'); } } as any);
+    svc = new ApprovalService({
+      engine: engine as any,
+      clock: { now: () => new Date(now += 1000) },
+      logger: silent,
+    });
+    svc.attachAutomation(automation as any);
+    svc.attachMessaging({ async emit(input) { emits.push(input as Emitted); } });
+    registerApprovalNode(automation as any, svc, silent);
+    for (const flow of [MGR_ONLY, SPANNING, SINGLE_RUN, BATCH]) automation.registerFlow(flow.name, flow as any);
+  });
+
+  afterAll(async () => {
+    try { await engine?.destroy(); } catch { /* noop */ }
+  });
+
+  it('a step decided in a subflow child, whose parent opens the next step, tells no one; the step that ends the approval does', async () => {
+    const step1 = await submit('deal_spanning', 'spanning');
+    expect(step1.flow_node_id).toBe('mgr');
+    const out = await approve(step1, 'u_mgr');
+    expect([out.finalized, out.resumed, (await stored(step1.id)).status]).toEqual([true, true, 'approved']);
+
+    // The scene: the parent opened the executive step under ITS run id, not the child's.
+    const step2 = await pendingOn('D_spanning');
+    expect(step2?.flow_node_id).toBe('exec');
+    expect(step2.flow_run_id).not.toBe(step1.flow_run_id);
+    expect(step2.record_run_id, 'the child inherits the parent\'s record, so both steps name one record run')
+      .toBe(step1.record_run_id);
+
+    // A further step is open, so the manager's approval was a step, not the outcome.
+    expect(outcomesAbout(step1.id)).toEqual([]);
+
+    // Control in the same scene: the executive's decision ends the approval and tells the submitter.
+    await approve(step2, 'u_exec');
+    expect(await pendingOn('D_spanning')).toBeUndefined();
+    expect(outcomesAbout(step2.id)).toEqual([['approval.approved', ['u_sub']]]);
+    expect(outcomesAbout(step1.id)).toEqual([]);
+  });
+
+  it('CONTROL: the same two steps on one run — the first tells no one, the last tells the submitter', async () => {
+    const step1 = await submit('deal_single_run', 'single');
+    await approve(step1, 'u_mgr');
+    const step2 = await pendingOn('D_single');
+    expect([step2?.flow_node_id, step2?.flow_run_id]).toEqual(['exec', step1.flow_run_id]);
+    expect(outcomesAbout(step1.id)).toEqual([]);
+
+    await approve(step2, 'u_exec');
+    expect(outcomesAbout(step2.id)).toEqual([['approval.approved', ['u_sub']]]);
+  });
+
+  it('a request opened before requests recorded their record run falls back to its own run', async () => {
+    const step1 = await submit('deal_single_run', 'legacy');
+    expect(step1.record_run_id, 'the scene: the request recorded its record run').toBe(step1.flow_run_id);
+    // The shape a request opened before ADR-0162 item 7 has.
+    await engine.update('sys_approval_request', { id: step1.id, root_run_id: null, root_run_started_at: null, record_run_id: null }, { context: SYSTEM } as any);
+    await approve(step1, 'u_mgr');
+    const step2 = await pendingOn('D_legacy');
+    expect([step2?.flow_node_id, step2?.flow_run_id]).toEqual(['exec', step1.flow_run_id]);
+    // Its own run still shows the further step, so the first decision tells no one.
+    expect(outcomesAbout(step1.id)).toEqual([]);
+    await approve(step2, 'u_exec');
+    expect(outcomesAbout(step2.id)).toEqual([['approval.approved', ['u_sub']]]);
+  });
+
+  it('a map item that is a record is told its own outcome while the next item of the same approval is pending', async () => {
+    const items = [await newDeal('item1'), await newDeal('item2')];
+    const run = await automation.execute('deal_batch_outcome', { params: { items }, userId: 'u_sub' } as any);
+    expect(run.status, 'the batch parked on its first item').toBe('paused');
+    const first = await pendingOn('D_item1');
+    expect(first).toBeDefined();
+
+    await approve(first, 'u_mgr');
+    // The scene: the batch moved on to the second item, under the same root run
+    // (one approval) and its own item run (another record).
+    const second = await pendingOn('D_item2');
+    expect(second?.flow_node_id).toBe('mgr');
+    expect(second.root_run_id).toBe(first.root_run_id);
+    expect(second.record_run_id).not.toBe(first.record_run_id);
+
+    // The first deal has no further step, so its approval is over although the batch's is not.
+    expect(outcomesAbout(first.id)).toEqual([['approval.approved', ['u_sub']]]);
+    expect(outcomesAbout(second.id)).toEqual([]);
+
+    await approve(second, 'u_mgr');
+    expect(outcomesAbout(second.id)).toEqual([['approval.approved', ['u_sub']]]);
   });
 });

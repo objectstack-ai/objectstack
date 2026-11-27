@@ -298,7 +298,10 @@ describe('#4437 fold-sensitivity: the two insensitive compute sites stay insensi
  */
 describe('#4437 source net: the five casts do not come back', () => {
   const PAGE = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'AiChatPage.tsx');
-  const source = readFileSync(PAGE, 'utf8');
+  // objectstack#37730 — `ChatPane` was split out of the page move-only, so the
+  // guarded text is the page plus that module, read as one.
+  const PANE = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'ChatPane.tsx');
+  const source = [PAGE, PANE].map((file) => readFileSync(file, 'utf8')).join('\n');
   const codeOnly = source
     .split('\n')
     .filter((line) => !/^\s*(\/\/|\/\*|\*)/.test(line))
