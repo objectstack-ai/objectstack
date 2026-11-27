@@ -3259,8 +3259,8 @@ const en = {
         expand: 'Expand',
         restore: 'Restore side panel',
         open: 'Open assistant',
-        // objectui#11666 — the launchers' marker while a proposed plan awaits approval.
-        planAwaitingApproval: 'A proposed plan is waiting for your approval',
+        // objectui#11666 — the launchers' marker while a proposed write awaits approval.
+        planAwaitingApproval: 'An action is waiting for your approval',
         close: 'Close',
         more: 'More actions',
       },
@@ -5568,6 +5568,7 @@ const en = {
       add_field: 'Add a field',
       apply_blueprint: 'Build the app from the plan',
       apply_edit: 'Apply the change',
+      ask_which: 'Clarify the question',
       create_metadata: 'Create a metadata item',
       create_object: 'Create an object',
       create_package: 'Create a package',

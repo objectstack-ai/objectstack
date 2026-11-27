@@ -3,6 +3,8 @@
 '@object-ui/i18n': patch
 ---
 
+**Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+
 feat(studio): a package's 概览 Overview page, with its Info and Pending tabs, and the package's ⋯ menu in its header
 
 Clause-②: no

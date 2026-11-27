@@ -343,16 +343,26 @@ append-only ledger on another datasource (an object whose `lifecycle.class` is
 `audit`, `telemetry` or `event`): it is written outside the unit and survives
 the rollback. Keep the objects a `before*` hook
 writes on the default datasource; on MongoDB, run it as a replica set, which
-any unit needs.
+any unit needs. On a standalone MongoDB server every write the unit carries is
+refused, the hook's own `ctx.api` write first, even when nothing in the write
+fails: the server answers "This MongoDB deployment does not support retryable
+writes", and adding `retryWrites=false` to the connection string does not
+change that answer. Writes to an object that opens no unit are unaffected.
 
-On PostgreSQL a statement that fails at the database aborts the whole unit
-(`25P02`, "current transaction is aborted"), and the unit takes no savepoint
-around a hook's `ctx.api` write. A `before*` hook whose `ctx.api` statement
-fails there therefore refuses the write it belongs to, even when the hook body
-catches the error, `onError: 'log'` swallows it, or its `retryPolicy` re-runs
-it. Check the condition before writing, or make that write from an `after*`
-hook with `async: true` (not yet measured on PostgreSQL; tracked in
-[#34563](https://github.com/objectstack-ai/objectstack/issues/34563)).
+On PostgreSQL and on a MongoDB replica set, a statement that fails at the
+database aborts the whole unit, and the unit takes no savepoint around a
+hook's `ctx.api` write. A `before*` hook whose `ctx.api` statement fails there
+(a unique constraint, a type error) therefore refuses the write it belongs to,
+even when the hook body catches the error, `onError: 'log'` swallows it, or
+its `retryPolicy` re-runs it: every later statement in the unit, a retry's
+included, is refused too. The outer write is refused with the database's own
+error, not a refusal code: `25P02` "current transaction is aborted, commands
+ignored until end of transaction block" on PostgreSQL, code `251` "Transaction
+… has been aborted" on MongoDB. Neither the row nor the hook's writes are
+stored. On SQLite the failed statement leaves the unit usable, so a caught or
+swallowed failure lets the write through and a retry can succeed. Check the
+condition before writing, or make that write from an `after*` hook with
+`async: true`.
 
 <Callout type="info">
 For a blocking hook this is a deliberate, ruled semantics ([#7477](https://github.com/objectstack-ai/objectstack/issues/7477)),

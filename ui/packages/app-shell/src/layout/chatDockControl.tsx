@@ -22,7 +22,11 @@ export interface ChatDockControl {
   expanded: boolean;
   /** True while the drawer fills the window (maximized in place). */
   fullWindow: boolean;
-  /** Open the drawer if closed, close it if open — the top-bar robot. */
+  /**
+   * Open the drawer if closed, close it if open — the assistant's entry (the
+   * top-bar 「Ask AI」 button, the keyboard toggle). Closing is the user's
+   * close; opening is {@link openEntry}'s (ui ADR-0057 Amendment A5).
+   */
   toggle: () => void;
   /**
    * Open the drawer on `target`: absent, on whatever it shows now; `null`, on
@@ -30,6 +34,16 @@ export interface ChatDockControl {
    * target thread's first message.
    */
   open: (target?: ChatDockTarget | null, handoff?: BuilderHandoffState) => void;
+  /**
+   * ui ADR-0057 Amendment A5 — open the drawer from the assistant's entry: a
+   * new conversation after the user's own close (or the first time in the
+   * tab), the same one after the console closed the phone sheet, the one shown
+   * at the close while a write in it awaits approval; a build thread as it
+   * was. `agent` is the agent the entry asks (Home's 「Ask AI」: `ask`).
+   * Nothing happens while the drawer is open. Absent on a handle that is not
+   * the console's (a test's, Studio's): such a caller opens with {@link open}.
+   */
+  openEntry?: (agent?: string) => void;
   /**
    * ui ADR-0057 Amendment A4 — the app's AI inquiry page is the active route:
    * the drawer's triggers are hidden there (the top-bar robot draws nothing)

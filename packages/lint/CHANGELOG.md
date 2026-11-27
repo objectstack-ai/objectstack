@@ -1,5 +1,358 @@
 # @objectstack/lint
 
+## 19.0.0-next.1
+
+### Major Changes
+
+- eb683b8: feat(security)!: View All and Modify All stop opening fields; `viewAllFields` is the one "every field" bit
+  
+  **BREAKING** (19.0.0): View All (`viewAllRecords`) and Modify All (`modifyAllRecords`) widen records only. They no longer cast a field vote, so a field that a permission set hides (`readable: false`) or locks (`editable: false`) stays hidden or locked for their holders. Reading every field of an object is `viewAllFields: true` on that object's entry; it votes read, never edit.
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: registered permission-view-all-fields-beside-record-bypass -->
+  
+  FROM → TO:
+  
+  - `objects.<name>: { viewAllRecords: true }` read every field of the object another set hides → it reads none of them. TO keep that read: `{ viewAllRecords: true, viewAllFields: true }`.
+  - `objects.<name>: { modifyAllRecords: true }` read and edited every field, the set's own rows included → it reads and edits only what the field rows allow. TO keep the read: `{ modifyAllRecords: true, viewAllFields: true }`, except a field the set's own `readable: false` row hides: that row now hides the field from the set's holders even with the bit, so delete it where they should still read the field. The edit is not restored by any bit, for a field another set locks or a field the set's own field row names without `editable: true` (an omitted `editable` is `false`): grant it with an explicit `editable: true` row in the set that should edit it.
+  - The same holds on a `'*'` entry.
+  
+  **Check your permission sets in one step.** A permission set is affected when one of its `objects` entries, the `'*'` entry included, has `viewAllRecords: true` or `modifyAllRecords: true` and does not have `viewAllFields: true`. For each such entry, add `viewAllFields: true` to it if the set should still read every field of that object. Beside View All that is all the read needs: with the bit, the set reads what View All read before. Beside Modify All it is not: the set's own `readable: false` rows now bind (before, Modify All overrode them), so a field such a row hides stays hidden from the set's holders until you delete the row. For the edit, Modify All no longer grants one: where its holders must still edit a field another set locks, or a field the set's own field row names without `editable: true`, add an explicit `editable: true` row in the set that should edit it.
+  
+  - Sets in your source: `os migrate meta --from 18 --write` adds `viewAllFields: true` beside every such bit (ADR-0087 conversion `permission-view-all-fields-beside-record-bypass`).
+  - Sets saved in a running deployment (Studio-saved, stored in `sys_metadata`): they are **not** rewritten on upgrade, and from 19 they are read with the new meaning. Studio's permission matrix has no control for `viewAllFields` today (it keeps the key when it saves a set that already carries it), so add it to the set's entry through the metadata API. No command lists the affected stored sets yet; a review list is follow-up #37375.
+  
+  The protocol-19 upgrade guide carries the same check as the semantic entry `permission-view-all-modify-all-cast-no-field-vote`.
+  
+  The error direction is safe: an unconverted set sees **fewer** fields after the upgrade, never more. No field that was hidden opens. A set whose object has no field row in any set changes nothing at all, because a field no set names already follows the object grant.
+  
+  Also in this change:
+  
+  - The built-in admin sets (`admin_full_access`, `organization_admin`) already carry `viewAllFields: true` on their `'*'` entry, so they still read every field. They no longer edit a field that another set they hold locks.
+  - Explain no longer reports a row-conditioned field lock as "superseded by the Modify All Data field vote": the lock binds per row for every caller.
+  - `@objectstack/lint`: the warning `security-superuser-field-mask-inert` is retired, since a set's own field rows now bind beside its own View All or Modify All. `security-cross-set-field-reopen` now reports only a field one set hides that another set's `viewAllFields` re-opens. `security-controlled-by-parent-master-reference-hidden` and the roll-up source-visibility rules now judge a mask beside Modify All like any other mask.
+  - `@objectstack/spec` and `@objectstack/metadata-core`: the conversion is a default flip, retired from the load path from day one. Only `os migrate meta --from 18` replays it: the authoring funnel skips it (it is retired from the load path), and the artifact-ingestion door (`DEFAULT_FLIPS_NOT_REPLAYED_HERE`) and every stored-row read (`applyConversionsToStoredItem`, `os migrate meta --stored` included) refuse it by id, so an artifact or stored set is read with the 19 meaning and never handed a field read its author did not write.
+  - `@objectstack/core`: `superuserFieldVote` is replaced by `viewAllFieldsReadVote(sets, object, field)`, which answers whether a set's `viewAllFields` reads the field. `holdsSuperuserBypass` is unchanged and answers the record bypass only.
+  - `@objectstack/scenarios`: the persona-grant scoring no longer treats Modify All as overriding a field lock.
+  - `@objectstack/cli` and `@objectstack/service-automation`: test comments only, restated for the 19 meaning.
+
+### Minor Changes
+
+- d9bc148: **Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(lint)!: four publish-time checks for data-model metadata that saves and does not work — two refuse the publish, two warn
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37529
+  
+  <!-- adr-0087: registered publish-refuses-data-model-fields-that-save-and-do-not-work -->
+  
+  **BREAKING** for the publish of an object that carries one of the two errors below: it was accepted before and is refused now, with the fix named in the finding. The schema is unchanged and stored objects are not rewritten or refused at boot; the refusal comes at the next publish, and from `os validate` / `lint` / `compile` / `build`.
+  
+  Two errors, run by the runtime publish gate and the CLI:
+  
+  - `rollup/child-without-parent-reference`: a `summary` field whose child object has no `lookup` / `master_detail` field referencing the parent, or whose `summaryOperations.relationshipField` names no field of the child. With no foreign key the engine's summary index skips the summary with nothing logged; with a `relationshipField` that names no child field the summary is indexed and never recomputed. Either way the field reads 0 or empty on every parent while every child write reports success. Judged once the child resolves (a child the stack does not hold is still not judged), against the child's fields as served (an object extension may add the foreign key) and its injected columns (`owner_id`, `created_by` back to `sys_user`). Reported by `lintSummaryRollups`, beside its aggregand checks.
+  - `field/reference-on-non-reference-type`: `reference` on a field type that reads none — anything but `lookup`, `master_detail`, `user`, `tree` and `summary`. It links no record, and the record page edits a text, number or date field carrying it with a record picker that writes a record id into it. Judged on objects and on object extensions.
+  
+  Two warnings, which refuse nothing and make `os validate --strict` exit 1 as any warning does:
+  
+  - `field/count-named-lookup`: a `lookup` / `master_detail` field named like a count or a total (`contact_count`, `total_amount`); a relationship stores the id of one record, never a number.
+  - `approval-detail-editable-while-pending`: an approval step that locks its record (`lockRecord`, default `true`) on an object whose record page draws a `lookup` child as a table in its own body (`relatedList: 'primary'`); the approval lock covers `master_detail` children only, so those rows stay editable while the record waits. Reported by `validateApprovalApprovers`.
+  
+  A formula reading a summary that has no configuration stays covered by `field/summary-without-operations`, which refuses the summary itself.
+  
+  ## FROM → TO
+  
+  - `summaryOperations: { object: 'order_line', function: 'count' }` over an `order_line` with no field pointing at `order` → add `order: { type: 'master_detail', reference: 'order' }` to `order_line`.
+  - `summaryOperations: { ..., relationshipField: 'order_ref' }` naming no field of the child → name the child field that holds the parent id.
+  - `account: { type: 'text', reference: 'account' }` → `account: { type: 'lookup', reference: 'account' }`, or drop `reference`.
+  
+  No new exports. `@objectstack/spec` adds only the upgrade-guide entry `publish-refuses-data-model-fields-that-save-and-do-not-work`.
+- c42a045: fix(lint)!: three publish-time checks for seeds, flow nodes and actions that save and do not work
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37814
+  
+  <!-- adr-0087: registered publish-refuses-seeds-and-actions-that-save-and-do-not-work -->
+  
+  **BREAKING** for the publish of a seed, a flow, an action or an object that carries one of the errors below: it was accepted before and is refused now, with the fix named in the finding. The schema is unchanged and stored metadata is not rewritten or refused at boot; the refusal comes at the next publish, and from `os validate` / `lint` / `compile` / `build`.
+  
+  - `seed-record-unknown-field`: a seed record key, or a seed `columns` key, that the engine's insert door would refuse: a key that names no field of the dataset's object, no system column the platform injects on it (`owner_id`, the tenant and audit columns, unless the object opts out), and none of the columns every table carries (`id`, `created_at`, `updated_at`). The seed load writes each record through that insert, so such a record is dropped while the rest load. An object with no field map is not judged, as the engine's door does not judge it. `defineSeed` already refused such a key when it ran; a plain `data: [{ object, records }]` entry and a `seed` saved at the runtime publish door are now judged too. A field an object extension adds counts. Runs on the runtime `seed` door.
+  - `object-reference-unknown` (and the warning `object-reference-unregistered-platform` for a platform-prefixed name no known package registers), at three more bindings: a seed dataset's `object`, a flow `get_record` / `create_record` / `update_record` / `delete_record` / object-form `screen` node's `config.objectName`, and a standalone action's `objectName`. A seed over a missing object loads nothing, and an action bound to one is carried by no page. A flow node is split as `flow-trigger-unknown-object` is: on `os validate` / `lint` / `build` an unprefixed name the stack does not define is a warning, because a package the stack declares in `dependencies` may define it and a build cannot see that package; at the runtime publish door it is an error, judged against the written package's closure, or against every object the deployment serves for a write that names no package, where a step bound to a missing object fails the run every time it executes. An object the stack extends resolves at these three. At the runtime publish door the seed binding stays with the save door's own refusal of a seed over an unknown object (#34864), which accepts a draft of the object in the same package; the rule now also runs on the runtime `action` door, so an `action` write is therefore also judged for its params' `reference` / `objectOverride` objects, as `os validate` already judged them, and an action saved into a package (`?package=`) is judged against that package's closure, as a flow saved there already was: an object another package owns resolves only when the manifest declares that package in `dependencies`.
+  - `action-body-write-capability-undeclared`: an L2 action body that calls a `ctx.api` write (`insert`, `update`, `delete`, `updateMany`, `deleteMany`, `upsert`) without `api.write` in its `body.capabilities`. The sandbox refuses the call with `403 INSUFFICIENT_PRIVILEGES` every time the action reaches it. Runs on the runtime `action` and `object` doors.
+  
+  `os build` now infers `api.write` for every handler write shape the new check reads: a lone `updateMany` or `deleteMany`, `?.` before the leaf, an `.object(…)` argument holding a call, and a handle bound to `.object(…)` (`const repo = ctx.api.object('x'); repo.update(…)`). Before, such a handler was lowered with no grant and refused at every call.
+  
+  ## FROM → TO
+  
+  - `data: [{ object: 'task', records: [{ name: 'a', stauts: 'open' }] }]` → `status: 'open'`, or declare `stauts` on `task`, or drop the key.
+  - `{ type: 'create_record', config: { objectName: 'invoce', … } }` → `objectName: 'invoice'` (the object's full, namespaced name).
+  - `body: { language: 'js', source: "await ctx.api.object('task').update(…)", capabilities: [] }` → `capabilities: ['api.write']`.
+  
+  `@objectstack/lint` exports two rule id constants, `SEED_RECORD_UNKNOWN_FIELD` and `ACTION_BODY_WRITE_CAPABILITY_UNDECLARED`, so `os explain` carries an entry for each; the rules themselves are not exported. `@objectstack/spec` adds only the upgrade-guide entry `publish-refuses-seeds-and-actions-that-save-and-do-not-work`.
+- 81c68b3: feat(spec): a book audience can name a capability, so the Setup and Studio docs open only for callers who can open those apps
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: none — no `skills/` page teaches the book audience forms; `content/docs/ui/doc-pages.mdx` documents the new form in this change
+  
+  A book's `audience` (ADR-0046 §6.7) takes a fourth form, `{ systemPermission: 'TOKEN' }`: the book's pages are read by a signed-in caller who holds that capability through any permission set, the same caller an app with `requiredPermissions: ['TOKEN']` opens for. `{ permissionSet }` names one set, so it could not gate a manual on a capability several sets grant (`setup.access` comes with `organization_admin`, `admin_full_access` and any delegated-admin set an application authors).
+  
+  - **`@objectstack/spec`.** `BookAudienceSchema` and `BookAudience` gain the arm. It is strict, so `{ systemPermission, label }` is refused at parse, and an object that also carries `permissionSet` is refused too: an audience names one gate. `BookAudience` is a wider union now: TypeScript code that reads `.permissionSet` after a bare `typeof audience === 'object'` check narrows by key instead (`'permissionSet' in audience`). `AudienceCaller` gains `systemPermissions`, and `audienceAllows` admits the arm only when that list holds the token; an absent list denies (fail closed). Every other form answers as before.
+  - **`@objectstack/rest`.** The docs audience reads the caller's own `systemPermissions` (the list every `requiredPermissions` arm of the `/meta` read gate reads) when some book carries the new form, on `GET /meta/doc` (with and without `?include=content`), `GET /meta/doc/:name`, `GET /meta/book`, `GET /meta/book/:name/tree` and the app-nav `doc` entries. New: `anySystemPermissionAudience`, and the optional `resolveAudienceSystemPermissions` port on `MetaReadGateAudienceSources` for a transport whose audience reads someone else's holdings.
+  - **`@objectstack/runtime`.** The MCP docs tools (`search_package_docs`, `read_package_doc`) gate on the same form; on an OAuth grant they read the delegating person's own capabilities, never the token's ceiling.
+  - **`@objectstack/setup`, `@objectstack/studio`.** Each package now ships a manual (`setup_manual`, `studio_manual`) claiming its package's doc namespace (`setup_*`, `studio_*`), gated on `setup.access` / `studio.access`. Before, those docs were claimed by no book, so they fell back to `org`: listed to administrators only by the Console's docs index, but readable at their address, and through `?include=content`, by every signed-in member. Now a member who cannot open Setup gets `setup_overview` in neither list and a `403 PERMISSION_DENIED` on its read; an administrator reads it as before. The docs' Console address now names the manual (`/apps/com.objectstack.setup/docs/setup/setup_overview`) in place of the package's implicit one; the flat `/docs/setup_overview` permalink still finds it.
+  - **`@objectstack/lint`.** `capability-reference-unknown` also resolves a book's `audience.systemPermission`, so a misspelled capability (which hides the manual from everyone) warns.
+  - **`@object-ui/app-shell`, `@object-ui/i18n`.** Studio's book preview shows a capability-gated book as "Capability: TOKEN" instead of "Org", and the book form round-trips the new form.
+  
+  Nothing to migrate: the manuals claim by name, so a stored doc bound to no package (which a package-scoped `include: '*'` would also have claimed) keeps the audience it had. Only docs named under those prefixes change audience: on `main` that is `setup_overview` and `studio_overview`.
+- c3a4a30: fix(lint)!: a `_relatedLists` translation key over a list the `.custom` arrangement hides or re-states without a label is refused, as nothing reads it
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37620
+  
+  <!-- adr-0087: registered translation-related-list-key-under-arrangement-refused -->
+  
+  **BREAKING** for a translation bundle that carries `objects.<object>._relatedLists.<list>` over a list the object's owner labels but the paired `.custom` package's `relatedLists` (ADR-0146 D10) re-states. `objectstack validate` and the other doors that run `translation-target-unknown` now report such a key as an error, where 18.x accepted it. Drop the key, or re-state the arrangement's entry with the owner's own `label` (`{ list, label }`) and keep it: an object read translates a label only while it still equals the packaged one.
+  
+  **Why.** The registry applies the `.custom` arrangement after the owner's tab list and every `place` entry, and each arrangement entry replaces every entry it covers: the same list, or, for a bare child name, every list of that child (`relatedListNameCovers`). An entry `{ list, hidden: true }` leaves no tab, and a bare name or an entry with no `label` leaves the tab titled by the child lookup field's `relatedListTitle`. In both cases the served object has no `label` on that list for the key to translate. The rule judged the owner's label first and accepted the key before it looked at the arrangement, and it never saw the arrangement's bare names.
+  
+  **What changes in `@objectstack/lint`.**
+  
+  - The rule folds the arrangement's entries after the owner's entries and every placement, as the registry does. A list the arrangement labels resolves. A list it hides, names bare or names without a label does not resolve, whatever label the owner or a placement gave it; a labelled bare child such as `{ list: 'event', label }` covers the owner's `event.related_to` too. Lists the arrangement does not cover keep what they had. Each arrangement is read in two passes, as the registry reads it, so one entry never strips the label a sibling entry of the same arrangement gives (`[{ list: 'event.related_to', label }, 'event']` resolves in either order).
+  - A key over a list the arrangement hides gets the "hidden by the `.custom` arrangement" message, now also when a bare child name such as `{ list: 'event', hidden: true }` hides a dotted list such as `event.related_to`. A key over an owner-labelled list the arrangement re-states without a label names the arrangement too, and its hint points at the owner's `label`.
+  - `VisibleObjectExtension` (`object-graph.ts`, internal) carries the extension's `relatedLists` as written, bare names included, as `relatedListArrangement`.
+  
+  Measured first-party exposure: none. No example or first-party package ships a `.custom` arrangement that re-states an owner-labelled list together with a key for it.
+- adb65d1: feat(spec)!: `form` is a metadata type of its own — `defineForm`, `*.form.ts` and a stack's `forms:` — and the anonymous form doors read a form over both types (ADR-0159 card ②)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  ADR-0159 makes a public form a `form` item: `name` (`OBJECT.KEY`, the name it is served under), `object` (its one binding) and a form view's body at the top level, its keys taken from `FormViewSchema` by reference. A stack lists them under `forms:`, one per `*.form.ts` module built with `defineForm`. The three old `view` shapes that carry a form (a container's `form`, a `formViews` entry, a `viewKind: 'form'` item) keep loading and serving exactly as before: one projection reads them as `form` items, under the names they are served as today, and nothing an author wrote stops loading.
+  
+  `@objectstack/platform-objects` ships the `form` type's display label in its metadata-form bundles, translated in every bundled locale.
+  
+  <!-- adr-0087: registered form-type-define-form-and-packageless-list-at-form-name -->
+  
+  **BREAKING** (the protocol is narrowed, and a published export changes meaning):
+  
+  - **The export.** `defineForm` on `@objectstack/spec` and `@objectstack/spec/ui` builds a `form` item. FROM: (since the previous change) no `defineForm`; before that, the Studio metadata-form helper. TO: `defineForm({ name: 'crm_lead.web_to_lead', object: 'crm_lead', sections, sharing })`. The fix for a Studio form: `defineMetadataForm`, as the rename's own entry says; the compiler names every call (a Studio body is refused by `FormSchema`: it has no `name` and `object`).
+  - **The refusal.** A package-less `view` write that would store a LIST at a name a read-only package authors as a `form` item is refused with `400 VALIDATION_ERROR`, naming the package — on the save, on the publish of a draft saved before the gate, and on a rollback or revert that restores such a body. Items and container expansions alike. Saves admitted today that it refuses: a list at a name several packages ship; a list at a name whose base has no pair; a re-save of a row the base's pair already holds; a container that overlays the package's own. The door that remains: save the list under another key, or into an app of the environment's own. It bites for a name only from the release in which a package authors it as a `form` item.
+  
+  What lands with the type:
+  
+  - `@objectstack/spec`: `FormSchema`, `defineForm`, the registry row (`*.form.ts|yml|json`, overlay-capable, no environment overlay), `form` in the customization package's listed types, the stack's `forms` collection, the `forms` translation family (`forms.NAME` first, the `_views.KEY` title and thank-you tails as the fallback, `_views.KEY.label` never read; a form's own section copy at `forms.NAME.sections.SECTION`, with `objects.OBJECT._sections.SECTION` as its object-level default), the projection `projectViewForms`, the intake layer `formIntakeLayer` / `openFormAt`, and the error code `FORM_ADDRESS_TAKEN`.
+  - `@objectstack/metadata-protocol`: the effective `form` read resolves a form over both types in the one served-row order (a stored `view` row over a package's form keeps replacing it when the package moves to `forms:`); a `form` save, reset or delete at a package removes, in the same transaction, only that package's old-shape row that carries that same form — named as the `form` read serves it (form content only: a list of the name, and a container member served under another name, are untouched); an undo puts back the rows the publish moved, for the revert of a package commit and for a refused package publish on a runtime that cannot roll back alike, and when one view row a commit edited cannot be put back, every form item of that commit is kept as published and each is listed in `failed[]`; a `form` left open on a public address another form holds is refused with `409 FORM_ADDRESS_TAKEN`, naming both, on the save, on the publish of a draft whose address another form took after it was saved, and on a rollback to a version open on a held address (a switched-off form that keeps its link still holds the address; a write that leaves the form closed is never refused); the override gate accepts a `form` override over a base that ships the form as an old shape; a stored body whose form content cannot be read closes the links it names and is reported once per process, at `error`, the first time the form doors read it, naming the row, the links it closes and the repair save; and after a refused or undone publish the doors and the meta reads answer only committed state.
+  - `@objectstack/rest`: `GET /forms/:slug` and its submit read candidates from the effective `form` read and judge withdrawal across `form` and `view`, effective and per-package, old shapes projected first — narrowing only, in both directions; a body that cannot be read closes the links it names. `/meta/form/NAME` refuses whom `/meta/view/NAME` refuses. `GET /meta/view` answers as before.
+  - `@objectstack/lint`: `form-public-address-taken` (gating), `form-consumer-less` (advisory, never for an `overrides` item), `form-object-outside-closure` / `form-object-unknown`; the i18n walk emits `forms.NAME.*` keys and no `_views` tail for a `form` item, a form's section copy at `forms.NAME.sections.SECTION` with `objects.OBJECT._sections.SECTION` as the address it falls back to; the translation reference lint judges a `forms.NAME.sections` key against the form's named sections and their entries. No new advisory for an old shape.
+  - `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/objectql`, `@objectstack/runtime`, `@objectstack/cli`: the `forms` collection is loaded, typed, registered and counted for i18n coverage like every other; in `@objectstack/cli` a key translated at the address the walk names as its fallback is covered, and `os i18n extract` scaffolds no translated-locale value over one.
+- ddd5941: feat(ai): a skill names the context pack it works from (`context`), and its MCP prompt takes a record id
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  ADR-0160 D8. A skill can now name a context pack (`ai_context`) by its bare name:
+  
+  ```ts
+  defineSkill({
+    name: 'policy_inquiry',
+    label: 'Policy inquiry',
+    instructions: 'Answer the question about this policy, citing its sections.',
+    tools: ['get_record_context'],
+    context: 'policy_document',
+  });
+  ```
+  
+  - **`@objectstack/spec`.** `SkillSchema.context?: string` (snake_case, the pack's machine name; a face such as `NS-NAME` is refused). A skill that declares it must bind `get_record_context` in `tools`, by name or by a wildcard that matches it (`get_record*`, `get_*`); without the binding it is refused at parse, located on `tools`. `skillBindsRecordContextTool(tools)` answers that binding. The skill form gains a `context` control.
+  - **`@objectstack/mcp`.** When a skill's `context` resolves to a pack, its prompt lists one optional argument, `recordId`. The name resolves by ADR-0150 D3 from the skill's own package (its own pack, else the one holder in its dependency closure), or as for a caller with no package for an environment skill; a name that resolves to no pack adds no argument. Given a record id, the prompt's one message is the skill's instructions, one fixed line telling the model to call `get_record_context` with the arguments that follow, and those arguments as one JSON object: `objectName` (the pack's root), `recordId`, and `context` (the pack's face). The record id only ever appears as that JSON string value, and the pack is never inlined. Without the argument the prompt is byte-identical to the same skill's prompt without `context`. A blank record id is refused (`-32602`). Both the per-request HTTP prompt surface and the long-lived stdio server serve it; the stdio server, which applies no tool-binding filter, offers the argument only where it registers `get_record_context` (its data tools are now bridged before its prompts). `McpSkillBridge` gains two optional members, `listContextPacks` and `packageResolutionClosure`; `MCPServerRuntime.bridgePrompts` takes the closure as an optional fourth argument.
+  - **`@objectstack/lint`.** Two warnings where skills are validated (`os validate`): `ai-skill-context-unknown`, for a `context` that names no pack the stack's own `aiContexts` define (a pack a dependency package ships resolves at run time and is not read here), and `ai-skill-context-omitted`, for a skill that binds `get_record_context` without `context` while an object has more than one pack (its call there without a pack name is refused).
+  - **`@objectstack/runtime`.** The `/mcp` route's bridge hands the skill prompt surface the same pack listing `get_record_context` selects from, and the skill's package closure.
+  - **`@objectstack/platform-objects`.** The generated metadata-form translation bundles carry the skill form's new `context` control (label and help text, translated in every shipped locale).
+- 39fafc0: fix(spec)!: a book audience names one gate, and a gated book claims its pages by name
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no `skills/` page teaches the book audience forms; `content/docs/ui/doc-pages.mdx` documents both refusals in this change
+  
+  <!-- adr-0087: registered book-audience-two-gates-and-catch-all-claim-refused -->
+  
+  **BREAKING** for two book shapes (ADR-0046 §6.7) that were accepted and meant less than they said. Stored books are not rewritten or refused at boot; the next save or publish of such a book is refused with the fix named.
+  
+  - **`@objectstack/spec`.** `BookAudienceSchema` refuses an `audience` naming both `permissionSet` and `systemPermission`. The older `{ permissionSet }` arm is a plain object, so the pair used to parse as the set form with the capability stripped: the author believed the book was gated on a capability, and it was gated on one set. `defineStack`, `os validate` and the `/meta` save now refuse it, and the message says which key to keep. Only the second gate key is refused: every other shape that parsed before still parses the same way.
+  - **`@objectstack/lint`.** New error `book-gated-catch-all-include` (`validateBookAudienceClaims`): a book whose `audience` is `{ permissionSet }` or `{ systemPermission }` with a group claiming docs by `include: '*'`. A package scope leaves out only a doc stamped with another package, so a stored doc bound to no package is in every scope, and the catch-all claimed it too and hid it from every reader outside the audience. It runs on `os validate`, `os build` and `os lint`, and at the runtime publish gate on a book write (Studio, REST `/meta`, MCP).
+  
+  ## FROM → TO
+  
+  - `audience: { permissionSet: 'crm_admin', systemPermission: 'setup.access' }` → `audience: { systemPermission: 'setup.access' }` (everyone holding the capability through any set) or `audience: { permissionSet: 'crm_admin' }` (the holders of that one set).
+  - `audience: { systemPermission: 'crm.runbook' }` with `groups: [{ key: 'all', label: 'All', include: '*' }]` → `include: 'crm_runbook_*'` (the package's doc namespace), a tag include `{ tag: 'runbook' }`, or pinned `pages`.
+- 709a087: fix(lint,core)!: a lookup `dependsOn` entry whose filter key names a formula of the referenced object is refused at authoring; an import lookup none of whose scoped reads answered is never reported as out of scope
+  
+  Clause-②: yes (narrowing) — a lookup, master_detail or user field whose `dependsOn` filter key names a field of the referenced object computed on read (a `formula`) publishes today and is now refused at `error` by `object-field-ref-unknown`
+  Metadata-protocol: narrowed — a `dependsOn` filter key naming a field of the referenced object computed on read is refused at authoring
+  Skills-docs: none — no published skill page teaches a `dependsOn` filter key on a formula
+  
+  <!-- adr-0087: registered lookup-depends-on-param-computed-field-refused -->
+  
+  **BREAKING** for the publish of an object with such a `dependsOn` entry: it was accepted before and is refused now, by `objectstack validate` / `lint` / `compile` / `build` and by the runtime publish gate, with the field and the fix named in the finding. The schema is unchanged, and stored objects are not rewritten or refused at boot; the refusal comes at the next publish.
+  
+  **Why.** The record picker filters its candidates, and the importer scopes a lookup cell, by the entry's filter key on the referenced object (`param` in `{ field, param }`, else the bare name or `field`). The engine refuses every filter on a field computed on read, so such an entry published clean, then every picker query it scoped was refused and every import of the column failed its lookup. The finding names the referenced field and why it cannot be filtered on, for example `fields.task.dependsOn[0].param "project_label" is a formula field of "oos_task", computed on read: no record-picker query or import lookup can filter on it.`
+  
+  ## FROM → TO
+  
+  - `dependsOn: [{ field: 'project', param: 'project_label' }]`, where `project_label` is a formula of the referenced object → `dependsOn: [{ field: 'project', param: 'project' }]`, naming the stored field of the referenced object that holds the same value; or drop the entry.
+  - `dependsOn: ['region']`, where `region` is a formula on the referenced object → `dependsOn: [{ field: 'region', param: 'region_code' }]` with `region_code` a stored field of the referenced object.
+  
+  A formula on the OWNING object stays a legal gate (`dependsOn[i].field`): the form reads it from the record being edited.
+  
+  **`@objectstack/core`, the importer.** A scoped lookup none of whose reads answered (every read refused, for example because the row's master cell is a value the scoping field's type cannot take) is no longer asked again without the scope. It keeps `reference_not_found` and the plain `no record matches` sentence, and never answers `reference_out_of_scope`, which it could before when the value matched a record outside the scope. `RefMatch` gains the optional member `scopeUnanswered`, which a resolver sets for such a lookup.
+  
+  Measured first-party exposure: none. Every `dependsOn` in `examples/` and in the packaged objects names a stored field on the referenced side, or sits on a field type with no picker.
+  
+  `@objectstack/spec` adds only the upgrade-guide entry `lookup-depends-on-param-computed-field-refused`.
+
+### Patch Changes
+
+- dedc16c: feat(spec): a Studio metadata form's select choices are translatable — `metadataForms.<type>.fields.<path>.options.<value>`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **Translation slot.** A `metadataForms.<type>.fields.<path>` entry accepts `options`, a map from option `value` to its translated name — the shape `objects.<object>.fields.<field>.options` already uses. `choices` and `values` are refused there, as on the object-field face, and the refusal names `options` as the key to write.
+  - **Served forms.** `resolveMetadataFormLabels` (what `/api/v1/meta/types` localizes forms with) now overlays each option's `label` with the translation keyed by its `value`; an option with no translation keeps its own label. Before this, a select on a Studio metadata form (sharing model, ownership, field type, delete behaviour, default period, …) showed English choice names in every locale while the label and help text around it were translated.
+  - **Extraction.** `os i18n extract` and `pnpm check:i18n` emit the new `options.<value>` keys for every form row that lists `options`.
+  - **Shipped locales.** The ten translated metadata-forms packs of `@objectstack/platform-objects` name all 185 choices (38 select rows across nine forms). The Default Period choices reuse the wording of the console's period chip.
+- adb65d1: refactor(spec)!: the Studio metadata-form helper `defineForm` is renamed `defineMetadataForm`, and its modules move from `*.form.ts` to `*.metadata-form.ts`, so the name and the suffix are free for the `form` metadata type (ADR-0159)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  ADR-0159 makes `form` a metadata type of its own, and the maintainer ruled that its factory is `defineForm` (question 1, option A). The helper that held the name builds something else: a schema-bound form for Studio's metadata editors (`data.provider: 'schema'`). It is renamed after the translation family its forms feed (`metadataForms`), with the same argument and the same result, and its 18 modules under `packages/spec/src` are renamed with it. `defineForm` is absent from `@objectstack/spec` until the `form` type lands with it, in the same major; it never has two meanings. Nothing a metadata author writes changes: no stack, no stored row and no spec key names the helper, which is why the protocol line is `none`.
+  
+  <!-- adr-0087: registered define-form-studio-helper-renamed-define-metadata-form -->
+  
+  **BREAKING** (a published export is renamed), shipped as `patch`: the change is not to the metadata protocol (`Metadata-protocol: none`).
+  
+  - **FROM:** `import { defineForm } from '@objectstack/spec'` (or `@objectstack/spec/ui`), `defineForm({ schemaId, … })` in a `NAME.form.ts` module.
+  - **TO:** `import { defineMetadataForm } from '@objectstack/spec'` (or `@objectstack/spec/ui`), `defineMetadataForm({ schemaId, … })` in a `NAME.metadata-form.ts` module.
+  - **The fix:** rename the import and the call; rename a module that builds one to `*.metadata-form.ts`. The compiler names every call site (`TS2305` / `TS2724`).
+  - **Outside use, read before the rename:** no import or call of `defineForm` in any public repository of the organization, nor in the cloud repository.
+  - `@objectstack/lint`: the explanation of `visibility-root-mislayered` and the `data`-root message of the field-rule check name the Studio modules by their new suffix (`*.metadata-form.ts`); what each rule reports is unchanged.
+  - `@objectstack/cli`, `@objectstack/metadata-protocol`, `@objectstack/platform-objects`: comments and docblocks that cite the Studio modules name them by their new file names; no behaviour changes.
+- 302cfda: fix(lint): a context pack is warned when it reads an injected column with no storage on an external object
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A new advisory rule, `ai-context-field-unprovisioned` (a `warning`), reports a context pack (`ai_context`) that names a system column the platform injects (`owner_id`, `created_at`, `created_by`, …) on an ADR-0015 `external` object. The name resolves, so `ai-context-field-unknown` stays silent, but the remote database owns the table and the platform provisions no column behind it. The rule judges the names in the root's `fields`, `body.field`, and each `related` entry's `fields`, `where`, `orderBy` and link field. Its message names the cost for each position: an empty value on every record, no body, no rows, or an arbitrary order. A column the author declares on the external object is never reported. The provenance answer is the spec's `unprovisionedInjectedColumns`, which every other unprovisioned-anchor rule reads too. `os explain ai-context-field-unprovisioned` states the cause and the remedy, and `os explain ai-context-field-unknown` now says that injected columns count as defined.
+- 54d6726: **Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(lint): `field-no-consumers` credits a related list's columns to the child object it lists
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - An object-form `relatedLists` entry (`{ list, label?, columns? }`) is now read against the child object its `list` names (`child`, or `child.field`), not against the object that declares the list. Its `columns` are the child's field names, so each one counts as a display of the child's field.
+  - Before, a column was credited to the declaring object's field of the same name. A parent field that nothing displayed stayed silent whenever a child's related-list column had the same name (the blank starter's company lists its contacts with a `phone` column, which kept an undisplayed `company.phone` quiet), and the child's own column did not count for the child.
+  - What you may see: `os validate` and `os lint` can now report a parent field that only a child's related-list column used to cover. Place the field (a field group, `highlightFields`, a view column) or remove it. A child field that only a related list draws is no longer reported. A column of a child this stack does not declare credits no object. The rule stays a warning.
+  - `child.field` in `list` now also counts as a read of that relationship field on the child: the list joins on it.
+- ddc96d8: docs(lint): `os explain flow-condition-option-label` describes every place the rule reads — the start condition, edge and decision conditions, and the `get_record` / `update_record` / `delete_record` and time-relative sweep filters — and names the CEL value envelope as the way to filter on a label on purpose
+  
+  Clause-②: no (explanation text only)
+- 9b99640: feat(spec,plugin-audit): an activity milestone's timeline row reads in the reader's language — `objects.<object>._milestones.<field>.<value>.summary`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37585
+  
+  - **Translation slot.** An object translation accepts `_milestones`, keyed by an `activityMilestones` entry's watched `field` and then the `value` it fires on, each carrying `summary`: the milestone's template in that language, with the same `{field}` tokens. `milestones` and `activityMilestones` are refused, and the refusal names `_milestones` as the key to write. `resolveObjectMilestoneSummary` (`@objectstack/spec/system`) reads it along the locale chain.
+  - **Timeline rows.** A fired milestone's `sys_activity` row now stores a summary code (`metadata.summary_message`, `key: 'activityMilestone'`): the pair, and each interpolated token's value with the select option it matched. On a read whose caller has a locale, a language that translates the milestone serves the row's `summary` composed from its template, a select token named by the option label in that language. The stored `summary` is unchanged — the authored sentence — and a language with no entry, a read with no locale, and every row written before this change read it as stored. A tenant that reworded a packaged milestone's `summary` keeps its words. The field redaction still judges the composed text by the fields the row was composed from.
+  - **Extraction and references.** `os i18n extract` scaffolds the key for each milestone pair (the first entry of a repeated pair, the one that fires), and the translation-reference rule flags a `_milestones` key over a pair no milestone of the object declares.
+  - **Docs.** `content/docs/ui/translations.mdx` and the i18n standard's reference table name the key.
+- 520cf3f: fix(lint): a skill's `context` naming a pack a declared dependency in the artifact ships no longer warns `ai-skill-context-unknown`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `ai-skill-context-unknown` judged a skill's `context` against the stack's own `aiContexts` only, so `os validate`, `os build` and `os lint` warned in their per-package pass about a pack that a package the skill's package depends on ships, though the MCP skill prompt resolves that pack. The rule now resolves `context` by the one ADR-0150 D3 rule the prompt uses, over the stack's own packs and the packs of the artifact's other packages, in the skill's package closure (its declared dependencies plus every `sys` package). A pack a declared dependency in the artifact ships gets no warning. A pack that only a sibling package outside the closure ships still warns, naming the holder and saying to declare the dependency. A pack two packages in reach both ship warns, naming both. A pack no package in the artifact ships warns as before.
+  
+  `@objectstack/metadata-core` now exports the ADR-0150 D3 resolution rule, `resolvePackageScopedHolders`, with its holder source, refusal, refusal error class and vocabulary (`packageScopedHolderSource`, `PackageScopedNameRefusedError`, `PACKAGE_SCOPED_TYPES`, `BARE_NAME_ONE_HOLDER_TYPES` and the rest of that module). They moved there from `@objectstack/core` so lint, which depends on metadata-core and never on a runtime, can call the same rule. `@objectstack/core` re-exports every name under the same spelling, and each value is the very object metadata-core exports, so `instanceof PackageScopedNameRefusedError` holds whichever package a caller imports it from.
+  
+  Nothing to migrate: every `@objectstack/core` import of these names keeps working unchanged.
+- 4b8aca2: fix(lint): the `ai-skill-context-unknown` fix for two holders names no package when the stack has none
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A stack with no `manifest.id` whose skill `context` names a pack two packages of the artifact ship is refused by ADR-0150 D3 as `ambiguous-in-environment`. Its hint said "Keep one pack of that name in reach of this package", though the stack names no package. It now says "Keep one pack of that name across the artifact's packages, or name another pack". The rule id, the severity, the message and the hint of every other arm are unchanged.
+- 3ed97b7: fix(lint): saving a permission set through Studio, REST `/meta` or the MCP authoring door now warns when the set reads a roll-up over child data it cannot read
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `validateRollupSourceVisibility` (`security-rollup-source-unreadable`, `security-rollup-source-row-scoped`) ran only in `os validate`, `os build` and `os lint`. It now also runs at the runtime authoring door on `permission` writes, at advisory tier, so an author who never runs the CLI (an AI agent saving drafts through `save_metadata_draft`, a Studio admin) is told when a set reads a summary column such as `project.task_count` while it cannot read the `task` rows, or the child field, the column aggregates.
+  
+  What changes for a caller:
+  
+  - A `permission` save or publish that grants such a pair **still succeeds** and returns the finding in `advisories[]` (the draft verdict's `advisories` for a draft save), with the same `message` and `hint` `os lint` prints. `path` is the name-keyed `permissions.<set>.fields["<object>.<field>"]`.
+  - **Never a refusal.** The rule stays advisory; nothing that saved before is refused.
+  - A set's finding is charged only to a write of that set, never to a write of another set or of the objects. A child object the save cannot see (another package outside the written package's closure) is left unjudged, as the rule already left it in the CLI.
+  - **`object` writes are unchanged.** An advisory object rule stays off that door until its finding volume is decided separately.
+  - **The CLI commands are unchanged**: same rule, same positional `permissions[i]…` path.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [0196476]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+  - @objectstack/formula@19.0.0-next.1
+  - @objectstack/sdui-parser@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

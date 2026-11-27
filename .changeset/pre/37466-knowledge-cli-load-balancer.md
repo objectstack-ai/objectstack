@@ -2,6 +2,8 @@
 '@objectstack/cli': patch
 ---
 
+**Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+
 fix(cli): `os knowledge rebuild` and `os knowledge status` give the right answer behind a load balancer
 
 Clause-②: yes (widening)
