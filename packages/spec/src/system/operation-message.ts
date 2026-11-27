@@ -332,7 +332,10 @@ export function operationMessageTranslationKey(messageKey: string): string {
  *     catalog is the only source of their text.
  *   - `Accept-Language` is read by its top tag only
  *     (`preferredLocaleFromHeader`, no q-value negotiation), the platform's
- *     existing reading; a top tag the catalog lacks answers English.
+ *     existing reading. The tag is matched to a catalog locale by language
+ *     (`resolveBundleLocale`): `es-MX` reads `es-ES`, `zh` and `zh-TW` read
+ *     `zh-CN`, `ja` reads `ja-JP`. Only a language the catalog holds no
+ *     locale of (`fr`, `de`, …) answers English.
  *   - The server fault log records the thrown error's own message. Only a
  *     throw with an EMPTY message puts the localized sentence into the log line
  *     in its place (`serverFaultLogMessage`'s fallback); every other throw logs
@@ -377,8 +380,9 @@ export function operationMessageTranslationKey(messageKey: string): string {
  * (`automation-hooks.ts`), which are not own-door bridges: each sentence is
  * whole, with its slot, member and package names written in, never
  * translated. Each door reads them as the bridge does: by the request's top
- * `Accept-Language` tag (`requestLocaleOf`, `own-door-bridge.ts`), a top tag
- * the catalog lacks answering English, and with no `i18n` service, so no
+ * `Accept-Language` tag (`requestLocaleOf`, `own-door-bridge.ts`), matched to
+ * a catalog locale by language as the print door's is (a language the catalog
+ * holds no locale of answering English), and with no `i18n` service, so no
  * `errors.comment_doors_*`, `errors.webhook_redeliver_*`,
  * `errors.approvals_act_*` or `errors.automation_hooks_*` override is
  * consulted. Their English is byte-identical to the fixed sentences the doors
@@ -632,9 +636,9 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     approvals_act_member_missing:
       '承認アクションページは利用できません。登録されている approvals サービスは handleActionPage を実装していません。',
     automation_hooks_service_unregistered:
-      '受信オートメーションフックは利用できません。trigger-api サービスが登録されていません。受信フックトリガー（@objectstack/trigger-api）がこのサービスを通じてこのルートを提供します。フローを所有する環境に組み込んでください。',
+      '受信自動化フックは利用できません。trigger-api サービスが登録されていません。受信フックトリガー（@objectstack/trigger-api）がこのサービスを通じてこのルートを提供します。フローを所有する環境に組み込んでください。',
     automation_hooks_member_missing:
-      '受信オートメーションフックは利用できません。登録されている trigger-api サービスは handleInboundHook を実装していません。',
+      '受信自動化フックは利用できません。登録されている trigger-api サービスは handleInboundHook を実装していません。',
   },
   'es-ES': {
     permission_denied:
