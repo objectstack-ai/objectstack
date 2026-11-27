@@ -161,7 +161,8 @@ export const dashboardForm = defineForm({
             + 'grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and '
             + 'everyone sees this dashboard. To show it to several groups, pick one capability and grant it to each '
             + 'group\'s permission set. The server enforces it: anyone else does not find the dashboard in the list and '
-            + 'is refused if they open it directly.',
+            + 'is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or '
+            + 'misspell one, and you can no longer open this dashboard either.',
         },
       ],
     },
