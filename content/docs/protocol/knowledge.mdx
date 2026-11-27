@@ -954,7 +954,7 @@ leaves the index agreeing with the database.
 Where the kernel composes a durable `queue` service — the platform's
 `QueueServicePlugin` over a data engine, whose database adapter keeps messages
 in `sys_job_queue` — and a data engine is bound, the sync runs through that
-queue (ADR-0161 K1). The standard runtime always mounts `queue`.
+queue (ADR-0161 K1). The standard runtime mounts `queue` on every preset but `minimal`.
 
 - **A save publishes; it does not sync.** For each source that indexes the
   written object on record change, either trigger (the realtime subscription,

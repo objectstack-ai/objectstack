@@ -27,8 +27,8 @@ writes or removes its document. The save does not wait for the embedder. A
 failed sync is retried (`recordSyncRetry`, eight attempts over about six and a
 half minutes by default), then kept as a dead letter (`listFailed`) that the
 reconcile repairs. This needs a durable `queue` service — the platform's
-`QueueServicePlugin` over the ObjectQL engine, which the standard runtime always
-mounts; with only the kernel's in-memory fallback the sync runs inline, as the
+`QueueServicePlugin` over the ObjectQL engine, which the standard runtime mounts
+on every preset but `minimal`; with only the kernel's in-memory fallback the sync runs inline, as the
 boot says once at `warn`. A host that mounts the service by hand adds:
 
 ```ts

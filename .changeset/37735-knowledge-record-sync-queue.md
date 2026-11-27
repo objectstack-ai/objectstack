@@ -9,7 +9,7 @@ Metadata-protocol: none
 
 A save of a record a knowledge source indexes used to sync its document inside the write: with a realtime service composed, the save waited for the re-read, the split, the embedding call and the store write, all before the write's unit of work committed. A failed sync was one `warn` line and was never retried, and a write that then rolled back could leave a document built from a row that never committed, or delete the document of a row that still matched.
 
-Where the kernel composes a durable `queue` service (the platform's `QueueServicePlugin` over a data engine, which the standard runtime always mounts) and a data engine is bound, the sync now runs through the `knowledge-record-sync` queue:
+Where the kernel composes a durable `queue` service (the platform's `QueueServicePlugin` over a data engine, which the standard runtime mounts on every preset but `minimal`) and a data engine is bound, the sync now runs through the `knowledge-record-sync` queue:
 
 - **A save publishes and returns.** Either trigger — the realtime subscription, or the after-write hooks on a kernel without one — publishes one message per source that indexes the object on record change: the source's index key, the object, the record id and the reason (`event`, or `freshness` for the repair a search starts). Never a field value. The save does not wait for the embedder.
 - **After the commit, and never for a rollback.** The message is published through the engine's `runAfterOpenUnitsCommit`, once the write's own unit or a caller's `engine.transaction()` commits, and not at all when it rolls back. So nothing is processed before the write commits, and after a rollback the index equals the committed database.
