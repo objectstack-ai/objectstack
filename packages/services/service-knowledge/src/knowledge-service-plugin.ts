@@ -351,6 +351,17 @@ export interface KnowledgeServicePluginOptions {
    * @default true
    */
   buildAtBoot?: boolean;
+  /**
+   * [ADR-0161 K4 ◆] The deployment's adapter: the id of the store the runtime
+   * mounts beside this plugin for the `knowledge` capability. Set by the
+   * runtime's capability composition (`resolveCapabilityArgument` in
+   * `@objectstack/core`, read by `os serve` and `@objectstack/verify`), which
+   * constructs this plugin and the store together; a host that mounts the
+   * plugin itself leaves it unset. A source that names no `adapter` binds to
+   * it (`KnowledgeServiceOptions.deploymentAdapter`). A service option, never
+   * an adapter-contract member.
+   */
+  deploymentAdapter?: string;
 }
 
 /**
@@ -447,6 +458,7 @@ export class KnowledgeServicePlugin implements Plugin {
       dataEngine: engine,
       logger,
       defaultTopK: this.options.defaultTopK,
+      ...(this.options.deploymentAdapter === undefined ? {} : { deploymentAdapter: this.options.deploymentAdapter }),
       // The field gate's `security` service, resolved per search so plugin
       // order is free (plugin-security registers it in its own start()).
       // Only a GENUINE absence reads as "no security service" (the contract's

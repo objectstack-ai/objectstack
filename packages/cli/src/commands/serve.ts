@@ -47,6 +47,7 @@ import {
   resolveServedCapabilities,
   resolveCapabilityArgument,
   resolveCapabilityExtras,
+  stackItemCapabilities,
   type CapabilityDatabase,
   materializeStackPlugin,
   STACK_TIER_PRESETS,
@@ -3129,7 +3130,14 @@ export default class Serve extends Command {
       const hostDefaults: string[] = [];
       if (isMcpServerEnabled()) hostDefaults.push('mcp');
       if (stampSearchPinyinEnabled((config as any).i18n)) hostDefaults.push('pinyin-search');
-      const served = resolveServedCapabilities(stackDeclaredCapabilities(config), { preset: presetName, hostDefaults });
+      // [ADR-0161 K8 item 12] A stack that ships a `knowledge_source` is
+      // served the knowledge service and the deployment's store as if it
+      // listed `requires: ['knowledge']` (`stackItemCapabilities`).
+      const served = resolveServedCapabilities(stackDeclaredCapabilities(config), {
+        preset: presetName,
+        hostDefaults,
+        itemTokens: stackItemCapabilities(config),
+      });
       const requires: string[] = [...served.tokens];
       const declaredRequires: ReadonlySet<string> = served.declared;
       // Capability → tier: any capability that is gated by a tier
@@ -5588,11 +5596,15 @@ export default class Serve extends Command {
           // transport can deliver through (#5087, #5132, #5713) — the catch
           // below turns that into the boot failure / loud error it should be,
           // never a log transport substituted behind the operator's back.
+          // `database` too: the `knowledge` service is told which store is the
+          // deployment's (`deploymentAdapter`), by the choice the extras below
+          // read, so the two agree (ADR-0161 K4).
           const resolved = resolveCapabilityArgument(cap, {
             stack: config,
             packageRoot: path.dirname(absolutePath),
             providerModule: mod,
             env: process.env,
+            database: capabilityDatabase,
           });
           const arg: any = resolved.argument;
           if (resolved.localStorageRoot && !isDev) {
