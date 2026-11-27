@@ -167,7 +167,7 @@ describe('AuditPlugin — signed expiry covers objects whose lifecycle is declar
   });
 
   it('an object owned under a package id no installed code or marketplace package answers takes no floor and no expiry', async () => {
-    // The reload door's shape: a loader-chain body stamped with a package and package provenance.
+    // An owner under a package id no installed code or marketplace package answers takes no floor and no expiry.
     const unplaced = { ...retained('30d'), fields: FIELDS, _provenance: 'package', _packageId: 'app.unknown' } as never;
     const rig = sweepRig([unplaced], { app_ledger: { maxAge: '1d' } });
     const { requests } = await rig.start();

@@ -316,8 +316,7 @@ describe('LifecycleService — a sealed object expires only through the sealed e
   });
 
   it('a sealed object the registry cannot place in an installed code or marketplace package keeps the row-cutoff sweep', async () => {
-    // The reload door's shape (`ObjectQLPlugin`): a loader-chain body registered under its own `_packageId`, or
-    // `metadata-service`, with whatever provenance it carries. Only a positive answer takes the signed expiry.
+    // An owner under a package id no installed code or marketplace package answers keeps the row-cutoff sweep.
     const FIELDS = { created_at: { type: 'datetime' }, tenant_id: { type: 'lookup' }, new_value: { type: 'textarea' } };
     const sweepOver = async (install?: 'code' | 'marketplace' | 'authored', body: Record<string, unknown> = { _packageId: 'app.ledger', _provenance: 'package' }) => {
       const registry = new SchemaRegistry() as any;
