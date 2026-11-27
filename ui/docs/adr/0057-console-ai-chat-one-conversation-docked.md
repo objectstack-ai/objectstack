@@ -21,6 +21,9 @@ the drawer (objectstack#34608). It supersedes §3's focus mode, A2's maximize
 clause and open questions 2 and 5, and, for building, ADR-0037's split-view
 presentation and its `LiveCanvas` host: the app shows in the main area
 (objectstack#34610).
+Amendment A4 (2026-11-27) — an app may place one AI inquiry page (`ai:chat`
+menu entry); the top-bar robot is hidden on that page and the drawer stays
+the container everywhere else (objectstack#37788).
 **Author**: ObjectUI app-shell / Studio team
 **Consumers**: `@object-ui/app-shell`
 (`console/ai/AiChatPage.tsx`, `layout/ConsoleFloatingChatbot.tsx`,
