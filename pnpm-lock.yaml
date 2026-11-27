@@ -20,6 +20,7 @@ overrides:
   minimatch@<4.0.0: ^3.1.4
   minimatch@>=4.0.0 <6.0.0: ^5.1.8
   minimatch@>=6.0.0 <11.0.0: ^10.2.3
+  '@microsoft/api-extractor>minimatch': ^11.0.9
   tar@>=2.0.0 <8.0.0: ^7.5.11
   form-data@<5.0.0: '>=4.0.6'
   undici@>=7.23.0 <8.0.0: ^7.30.1
@@ -12406,10 +12407,6 @@ packages:
   mingo@7.2.4:
     resolution: {integrity: sha512-KrxHKzMMguL+G1lBC6YbU5UTXdw2viwVHNTPzNYVfEQfSAoetC3M1a7rlveOksn/96oNy+QwBlIXvx/q6rWyxQ==}
 
-  minimatch@10.2.6:
-    resolution: {integrity: sha512-vpLQEs+VLCr1nU0BXS07maYoFwlDAH0gngQuuttxIwutDFEMHq2blX+8vpgxDdK3J1PwjCJiep77OitTZ4Ll1A==}
-    engines: {node: 18 || 20 || >=22}
-
   minimatch@11.0.3:
     resolution: {integrity: sha512-iny/40PEGkNJQ5/Pv6z3nm6FbRAby32GeZRjCUJk2WnNDbgPSTcdI+DDvLqsgBdD4cD5sMtMheqPPnehCCa8Nw==}
     engines: {node: 18 || 20 || >=22}
@@ -15852,7 +15849,7 @@ snapshots:
       '@rushstack/ts-command-line': 5.3.5(@types/node@26.6.5)
       diff: 8.0.4
       lodash: 4.18.1
-      minimatch: 10.2.6
+      minimatch: 11.0.9
       resolve: 1.22.13
       semver: 7.5.4
       source-map: 0.6.1
@@ -20848,11 +20845,6 @@ snapshots:
   min-indent@1.0.1: {}
 
   mingo@7.2.4: {}
-
-  minimatch@10.2.6:
-    dependencies:
-      brace-expansion: 5.0.12
-    optional: true
 
   minimatch@11.0.3:
     dependencies:
