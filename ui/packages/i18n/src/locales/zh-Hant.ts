@@ -3676,7 +3676,7 @@ const zhHant = {
       newItemPendingDraft: '這個名稱下已有一份未釋出的草稿，請再試一次。',
       newItemLeft: '新建的儀表盤「{{name}}」沒能刪除，請在 Studio 裡刪除它。',
       aiChatName: 'AI 問詢',
-      aiChatDefaults: '留空的項目顯示頁面的預設內容。',
+      aiChatDefaults: '留空的項顯示頁面的預設內容。',
       aiChatTitle: '歡迎標題',
       aiChatSubtitle: '副標題',
       aiChatPlaceholder: '輸入框提示',
