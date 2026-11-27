@@ -1044,9 +1044,13 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
           /* field absent on target object — try the next candidate */
         }
       }
-      // Any other refusal (no read grant on the target, a driver fault) keeps the
-      // plain miss: nothing says the scope column was the cause.
-      if (scope && !asked && scopeUnfilterable && !match.scopeDenied) match = { scopeUnqueryable: true };
+      // Any other refusal (no read grant on the target, a driver fault, a scope
+      // cell the field's type cannot take) keeps the plain sentence: nothing says
+      // the scope column was the cause. [#37717] It is still a lookup that asked
+      // nothing, so it is marked as one and never probed without the scope.
+      if (scope && !asked && !match.scopeDenied) {
+        match = scopeUnfilterable ? { scopeUnqueryable: true } : { scopeUnanswered: true };
+      }
       return match;
     };
     let match = await lookup();

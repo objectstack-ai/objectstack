@@ -2372,10 +2372,18 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         </div>
       );
     }
+    // The loading face draws inside the SAME root element the loaded table
+    // draws in (the final return below: same type, same place, same ref), so
+    // React keeps that element across the swap and `gridRoot` — and the list
+    // page's scope answer read off it — is already known when the rows first
+    // render: a list page's rows draw once, without row-end controls
+    // (objectstack#37575).
     return (
-      <div className="p-4 sm:p-8 text-center">
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-foreground"></div>
-        <p className="mt-2 text-sm text-muted-foreground">{t('grid.loading')}</p>
+      <div ref={setRootRef} className="relative h-full flex flex-col" data-object-grid-root="">
+        <div className="p-4 sm:p-8 text-center">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-foreground"></div>
+          <p className="mt-2 text-sm text-muted-foreground">{t('grid.loading')}</p>
+        </div>
       </div>
     );
   }

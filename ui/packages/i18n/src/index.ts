@@ -46,6 +46,7 @@ export {
 export {
   I18nProvider,
   useObjectTranslation,
+  useAppContentLanguages,
   useI18nContext,
   // Language-preference persistence: the key the provider writes, and the
   // reader apps that bring their own i18next instance need to honour it.
