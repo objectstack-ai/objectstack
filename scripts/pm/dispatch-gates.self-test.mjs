@@ -5855,9 +5855,12 @@ export function selfTest({ tier = 'full' } = {}) {
   t(`⭐ LIVE census: the reader's FieldSchema key set (${liveFieldKeys.length}, the spread expanded, no other spread) equals the driver's classification table (${liveStorage.length}), which its own test holds equal to the schema`,
     liveFieldKeys.length > 50 && liveFieldKeys.every((k) => !k.startsWith('...')) && JSON.stringify(liveFieldKeys) === JSON.stringify(liveStorage));
   const liveObjectKeys = liveExpanded('object').filter((k) => k !== 'fields');
-  const liveObjectTable = declaredKeySet(readFileSync(nodePath.join(ROOT, 'packages/metadata-core/src/object-schema-fls-references.ts'), 'utf8'),
-    { declares: 'OBJECT_REFERENCE_POSITIONS', call: null, argument: 0 }) ?? [];
-  t(`⭐ LIVE census: the reader's ObjectSchema key set less \`fields\` (${liveObjectKeys.length}) equals metadata-core's reference table (${liveObjectTable.length}), which its own test holds equal to the schema`,
+  // The table spreads its own envelope table, as the schema spreads the protection fields: expanded the same way.
+  const FLS_TABLES = readFileSync(nodePath.join(ROOT, 'packages/metadata-core/src/object-schema-fls-references.ts'), 'utf8');
+  const liveEnvelope = declaredKeySet(FLS_TABLES, { declares: 'PROTECTION_ENVELOPE', call: null, argument: 0 }) ?? [];
+  const liveObjectTable = (declaredKeySet(FLS_TABLES, { declares: 'OBJECT_REFERENCE_POSITIONS', call: null, argument: 0 }) ?? [])
+    .flatMap((k) => (k === '...PROTECTION_ENVELOPE' ? liveEnvelope : [k])).sort();
+  t(`⭐ LIVE census: the reader's ObjectSchema key set less \`fields\` (${liveObjectKeys.length}) equals metadata-core's reference table, its envelope spread expanded (${liveObjectTable.length}), which its own test holds equal to the schema`,
     liveObjectKeys.length > 30 && JSON.stringify(liveObjectKeys) === JSON.stringify(liveObjectTable));
   const REPORT_PIN = readFileSync(nodePath.join(ROOT, 'ui/packages/app-shell/src/views/metadata-admin/inspectors/ReportDefaultInspector.joinedClearsRefused-29195.test.tsx'), 'utf8');
   const liveMaximal = declaredKeySet(REPORT_PIN, { declares: 'MAXIMAL', call: null, argument: 0 }) ?? [];
