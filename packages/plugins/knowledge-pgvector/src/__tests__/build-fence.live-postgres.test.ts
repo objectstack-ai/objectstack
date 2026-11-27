@@ -13,14 +13,20 @@
  * - a kept lock is re-checked at the next `beginBuild`: a session that ended
  *   is not taken for a lock still held;
  * - a building generation is retired at `beginBuild` when the fingerprint
- *   went back to the active one's.
+ *   went back to the active one's;
+ * - `dropSource` in one process while another process builds the source and
+ *   holds its builder lock (ADR-0161 K8, item 4: every generation, "the one
+ *   under construction included"): nothing of the source is left, and the
+ *   other build's later writes and its completion are refused
+ *   `LOCK_CONFLICT`, never bringing the source back.
  */
 
 import { afterAll, describe, expect, it } from 'vitest';
+import pg from 'pg';
 import type { KnowledgeDocument, KnowledgeSource } from '@objectstack/spec/ai';
 import type { AdapterContext } from '@objectstack/spec/contracts';
 import { KnowledgeService } from '@objectstack/service-knowledge';
-import type { PgPoolLike, PgvectorKnowledgeAdapter } from '../index.js';
+import { poolFromPg, type PgPoolLike, type PgvectorKnowledgeAdapter, type PgvectorKnowledgeAdapterOptions } from '../index.js';
 import { FakeEmbedder, PG_URL, liveStore, requireLiveCell } from './live-pg.testkit.js';
 
 requireLiveCell('knowledge-pgvector build fence');
@@ -82,9 +88,91 @@ function rowsEngine(rows: Array<Record<string, unknown>>) {
   } as never;
 }
 
+/** The pools of the other processes this file makes; ended after the adapters on them are closed. */
+const otherPools: pg.Pool[] = [];
+
 afterAll(async () => {
   await store.dropAll();
+  for (const pool of otherPools.splice(0)) await pool.end();
 });
+
+/** A pool of its own, as another process has: its own connections to the same database. */
+function processPool(): pg.Pool {
+  const pool = new pg.Pool({ connectionString: PG_URL, max: 4 });
+  otherPools.push(pool);
+  return pool;
+}
+
+/** An adapter in another process over the same store: its own pool, its own builder locks. */
+function otherProcess(schema: string, opts: Partial<PgvectorKnowledgeAdapterOptions> = {}): PgvectorKnowledgeAdapter {
+  return store.adapter({ schema, pool: poolFromPg(processPool()), ...opts });
+}
+
+/** A pool whose next transaction can be held at its `COMMIT` until the test lets it go. */
+function commitGatedPool(): { pool: PgPoolLike; holdNextCommit(): { entered: Promise<void>; release: () => void } } {
+  const base = poolFromPg(processPool());
+  let gate: { entered: () => void; released: Promise<void> } | undefined;
+  return {
+    pool: {
+      query: (text, params) => base.query(text, params),
+      connectSession: () => base.connectSession!(),
+      connect: async () => {
+        const client = await base.connect();
+        return {
+          query: async (text, params) => {
+            if (text === 'COMMIT' && gate !== undefined) {
+              const held = gate;
+              gate = undefined;
+              held.entered();
+              await held.released;
+            }
+            return client.query(text, params);
+          },
+          release: (err) => client.release(err),
+        };
+      },
+    },
+    holdNextCommit() {
+      let release!: () => void;
+      let entered!: () => void;
+      const released = new Promise<void>((r) => (release = r));
+      const enteredP = new Promise<void>((r) => (entered = r));
+      gate = { entered, released };
+      return { entered: enteredP, release };
+    },
+  };
+}
+
+/** Wait until a statement on the store's schema waits on a row lock another transaction holds. */
+async function waitForLockWait(schema: string): Promise<void> {
+  for (let i = 0; i < 400; i++) {
+    const waiting = await store.pool().query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND position($1 in query) > 0`,
+      [`"${schema}"`],
+    );
+    if (Number(waiting.rows[0].n) > 0) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error('no statement on the schema waited on the held transaction');
+}
+
+/** Everything the store holds for a source: its generation rows, and its passage rows of every width. */
+async function heldFor(schema: string, sourceId: string): Promise<{ generations: string[]; passages: number }> {
+  const generations = (await generationRows(schema, sourceId)).map((g) => `${g.generation}:${g.fingerprint}:${g.state}`);
+  const tables = await store.pool().query<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name ~ '^knowledge_vec_d[0-9]+$'`,
+    [schema],
+  );
+  let passages = 0;
+  for (const { table_name } of tables.rows) {
+    const n = await store.pool().query<{ n: number }>(`SELECT count(*)::int AS n FROM "${schema}"."${table_name}" WHERE source_id = $1`, [sourceId]);
+    passages += Number(n.rows[0].n);
+  }
+  return { generations, passages };
+}
+
+const NOTHING = { generations: [], passages: 0 };
+const dropCtx = (s: KnowledgeSource): AdapterContext => ({ source: s, reason: 'manual' });
 
 describe.skipIf(!PG_URL)('knowledge-pgvector build fence on a LIVE PostgreSQL', () => {
   it('a build whose lock session ends mid-walk embeds no further page and completes nothing', async () => {
@@ -210,3 +298,143 @@ describe.skipIf(!PG_URL)('knowledge-pgvector build fence on a LIVE PostgreSQL', 
     expect(await adapter.indexStatus(ctx(s))).toEqual({ fingerprint: FP_A.fingerprint, recipeHash: FP_A.recipeHash });
   });
 });
+
+/** A {@link FakeEmbedder} whose next `embed` call can be held until the test lets it go. */
+class GatedFakeEmbedder extends FakeEmbedder {
+  private gate?: { entered: () => void; released: Promise<void> };
+
+  /** Hold the next `embed` call: `entered` resolves when it starts, `release` lets it run. */
+  holdNext(): { entered: Promise<void>; release: () => void } {
+    let release!: () => void;
+    let entered!: () => void;
+    const released = new Promise<void>((r) => (release = r));
+    const enteredP = new Promise<void>((r) => (entered = r));
+    this.gate = { entered, released };
+    return { entered: enteredP, release };
+  }
+
+  override async embed(texts: string[]): Promise<number[][]> {
+    const gate = this.gate;
+    this.gate = undefined;
+    if (gate) {
+      gate.entered();
+      await gate.released;
+    }
+    return super.embed(texts);
+  }
+}
+
+describe.skipIf(!PG_URL)('knowledge-pgvector dropSource while another process builds the source, on a LIVE PostgreSQL', () => {
+  it('a build beside the active generation: the drop removes both, and the build writes and completes nothing after it', async () => {
+    const a = store.adapter();
+    const schema = schemaOf(a);
+    const b = otherProcess(schema);
+    const s = source('drop_beside_build');
+    await a.upsert([doc(s, '1', 'granite quarry'), doc(s, '2', 'marble quarry')], ctx(s, FP_A, 'manual'));
+    await a.beginBuild(ctx(s, FP_B));
+    await a.upsert([doc(s, '1', 'granite quarry')], ctx(s, FP_B));
+
+    // Another process drops the source while this one holds its builder lock.
+    await b.dropSource(dropCtx(s));
+    expect(await heldFor(schema, s.name)).toEqual(NOTHING);
+
+    // The build's next page and its completion are refused, and bring nothing back.
+    await expect(a.upsert([doc(s, '2', 'marble quarry')], ctx(s, FP_B))).rejects.toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
+    await expect(a.completeBuild(ctx(s, FP_B))).rejects.toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
+    expect(await heldFor(schema, s.name)).toEqual(NOTHING);
+    expect(await b.indexStatus(dropCtx(s))).toEqual({});
+
+    // The refused build let go of the lock: the source is built again, from nothing.
+    await b.beginBuild(ctx(s, FP_B));
+    expect(await b.listDocuments(ctx(s, FP_B), { limit: 10 })).toEqual({ documents: [] });
+    await b.completeBuild(ctx(s, FP_B));
+  });
+
+  it('a rebuild inside the active generation: the drop removes it, and the build writes and completes nothing after it', async () => {
+    const a = store.adapter();
+    const schema = schemaOf(a);
+    const b = otherProcess(schema);
+    const s = source('drop_inside_build');
+    await a.upsert([doc(s, '1', 'granite quarry')], ctx(s, FP_A, 'manual'));
+    await a.beginBuild(ctx(s, FP_A));
+
+    await b.dropSource(dropCtx(s));
+    expect(await heldFor(schema, s.name)).toEqual(NOTHING);
+
+    await expect(a.upsert([doc(s, '2', 'marble quarry')], ctx(s, FP_A))).rejects.toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
+    await expect(a.completeBuild(ctx(s, FP_A))).rejects.toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
+    expect(await heldFor(schema, s.name)).toEqual(NOTHING);
+    expect(await b.indexStatus(dropCtx(s))).toEqual({});
+  });
+
+  it("a build's page whose embedding is under way when the drop commits is not written anywhere", async () => {
+    const embedder = new GatedFakeEmbedder();
+    const a = store.adapter({ embedder });
+    const schema = schemaOf(a);
+    const b = otherProcess(schema);
+    const s = source('drop_page_in_flight');
+    await a.upsert([doc(s, '1', 'granite quarry')], ctx(s, FP_A, 'manual'));
+    await a.beginBuild(ctx(s, FP_B));
+
+    const gate = embedder.holdNext();
+    const page = a.upsert([doc(s, '1', 'granite quarry')], ctx(s, FP_B));
+    await gate.entered;
+    // The page read its generation; the drop commits before the page writes.
+    await b.dropSource(dropCtx(s));
+    gate.release();
+    await expect(page).rejects.toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
+    await expect(a.completeBuild(ctx(s, FP_B))).rejects.toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
+    expect(await heldFor(schema, s.name)).toEqual(NOTHING);
+  });
+
+  it("a drop that waits on another process's beginBuild transaction removes the generation that transaction opened", async () => {
+    const gated = commitGatedPool();
+    const a = store.adapter({ pool: gated.pool });
+    const schema = schemaOf(a);
+    const b = otherProcess(schema);
+    const s = source('drop_during_begin');
+    await a.upsert([doc(s, '1', 'granite quarry')], ctx(s, FP_A, 'manual'));
+
+    // The build's opening transaction has locked the active generation and
+    // opened one beside it, and has not committed yet.
+    const commit = gated.holdNextCommit();
+    const begun = a.beginBuild(ctx(s, FP_B));
+    await commit.entered;
+    const dropped = b.dropSource(dropCtx(s));
+    await waitForLockWait(schema);
+    commit.release();
+    await begun;
+    await dropped;
+    expect(await heldFor(schema, s.name)).toEqual(NOTHING);
+
+    await expect(a.upsert([doc(s, '1', 'granite quarry')], ctx(s, FP_B))).rejects.toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
+    await expect(a.completeBuild(ctx(s, FP_B))).rejects.toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
+    expect(await heldFor(schema, s.name)).toEqual(NOTHING);
+  });
+
+  it("through KnowledgeService: a walk whose source another process drops mid-walk stops, and leaves nothing", async () => {
+    const a = store.adapter({ embedder: new FakeEmbedder(384, 'model-drop-walk') });
+    const schema = schemaOf(a);
+    const b = otherProcess(schema, { embedder: new FakeEmbedder(384, 'model-drop-walk') });
+    const s = source('drop_mid_walk');
+    const rows = Array.from({ length: 250 }, (_, i) => ({ id: `r${String(i + 1).padStart(4, '0')}`, body: `granite ${i + 1}` }));
+    const service = new KnowledgeService({ dataEngine: rowsEngine(rows) });
+    const upsert = a.upsert.bind(a);
+    let pages = 0;
+    a.upsert = async (batch, c) => {
+      await upsert(batch, c);
+      pages += 1;
+      if (pages === 1) await b.dropSource(dropCtx(s));
+    };
+    service.registerAdapter('under_test', a);
+    service.registerSource(s);
+
+    const result = await service.reindexSource(s.name);
+
+    expect(result).toMatchObject({ ok: false, indexed: 100 });
+    expect(pages).toBe(1);
+    expect(await heldFor(schema, s.name)).toEqual(NOTHING);
+    expect(await b.indexStatus(dropCtx(s))).toEqual({});
+  });
+});
+
