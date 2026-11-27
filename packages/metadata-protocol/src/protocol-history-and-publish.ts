@@ -876,15 +876,19 @@ export class ProtocolHistoryAndPublishFacet {
                 if (address.kind === 'none' && address.into !== null && others.length > 0) {
                     addressRefusal = packagelessPublishNoDraftRefusal(request.type, request.name, address.into, others);
                 }
-                // [ADR-0150 D3, the 2026-11-26 note] …and the holders, where a
-                // package-unbound row or draft is stored for the name, as the
-                // draft save naming no package judges them
-                // ({@link packagelessHolderRefusal}, its disabled-holders
-                // judgment only): of a name only disabled packages hold, that
-                // row or draft is their customization, hidden with them, and
-                // the promotion wrote the active row the next enable serves.
-                // Refused with the enable as the remedy, nothing written.
-                if (addressRefusal === undefined) {
+                // [ADR-0150 D3, the 2026-11-26 note] …and the holders, where
+                // the promotion reads the package-unbound draft or writes the
+                // package-unbound active row, as the draft save naming no
+                // package judges them ({@link packagelessHolderRefusal}, its
+                // disabled-holders judgment only): of a name only disabled
+                // packages hold, that draft and that row are their
+                // customization, hidden with them, and the promotion wrote the
+                // active row the next enable serves. Refused with the enable
+                // as the remedy, nothing written. A promotion of a package's
+                // own draft into its own row (`key` and `into` that package)
+                // touches no package-less row and is not asked; nor is a
+                // publish with no draft, which keeps its `NO_DRAFT`.
+                if (addressRefusal === undefined && address.kind === 'draft' && (address.key === null || address.into === null)) {
                     const active = await host.packagelessAddress(singularType, request.name, request.member, 'active');
                     if (active.unbound || address.drafts.unbound) {
                         addressRefusal = packagelessHolderRefusal(host, 'publish', request.type, singularType, request.name, request.member, {
