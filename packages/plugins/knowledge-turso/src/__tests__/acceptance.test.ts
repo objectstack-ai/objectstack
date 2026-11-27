@@ -1058,7 +1058,7 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       // Every passage but the two best in scope: 18 or more of the 2 × 10 candidates are left, 4 × topK
       // and more, so the candidates answer, without the exact scan.
       from = over.sql.length;
-      const allButBest = tiers.map((d) => d.sourceRecordId).filter((id) => !id.startsWith('best_'));
+      const allButBest = tiers.flatMap((d) => d.sourceRecordId ?? []).filter((id) => !id.startsWith('best_'));
       const wide = await over.adapter.search(QUERY, { source: t, topK: 2, scope: [{ kind: 'record', ids: allButBest }] });
       expect(wide).toHaveLength(2);
       for (const hit of wide) expect(hit.sourceRecordId).toMatch(/^second_/);
@@ -1216,7 +1216,7 @@ describe('knowledge-turso approximate vector index: recall and options', () => {
     let x = 17;
     const next = () => ((x = (x * 1103515245 + 12345) % 2147483648) / 2147483648);
     for (const share of [0.1, 0.05, 0.03]) {
-      const ids = docs.map((d) => d.sourceRecordId).filter(() => next() < share);
+      const ids = docs.flatMap((d) => d.sourceRecordId ?? []).filter(() => next() < share);
       const scope = [{ kind: 'record' as const, ids }];
       let found = 0;
       let wanted = 0;
