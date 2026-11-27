@@ -9289,7 +9289,13 @@ export class AutomationEngine implements IAutomationService {
      *  before `traverseNext` and {@link forgetSuspendedRun} is untouched —
      *  the #13937 shape-4 ruling (maintainer 2026-09-01) keeps that order, for
      *  exactly-once across a crash. This changes only WHICH suspension is
-     *  read, never when it is consumed. */
+     *  read, never when it is consumed.
+     *
+     *  A run read out of {@link suspendedRuns} (no store, or a run the store
+     *  never accepted) is handed out as a store hands a row: the same record
+     *  with its own copy of `variables`. So a resume that writes into its
+     *  values changes neither the held pause nor a value the parked run
+     *  shares (the trigger's record, the paused log entry). */
     private loadSuspendedRunStrict(runId: string): Promise<SuspendedRun | null> {
         // The body lives in ./run-resume.ts (#25222).
         const readStore = () => this.store;
@@ -11651,12 +11657,19 @@ export class AutomationEngine implements IAutomationService {
      * ## No variable key reaches a prototype
      *
      * Every container the builder creates has no prototype, and a key with a
-     * `__proto__` segment binds nothing here — skipped, not refused (a dotted
-     * tail whose head names a value the run holds is still written into that
-     * value);
+     * `__proto__` segment binds nothing here — skipped, not refused;
      * `./scope-key-segments.ts` states the rule and why `constructor` and
-     * `prototype` stay ordinary keys. The text-hole scope
+     * `prototype` stay ordinary keys in the scope (the doors refuse them as
+     * names a flow or a resume signal writes). The text-hole scope
      * (`textTemplateScope`) follows the same rule.
+     *
+     * ## No variable key writes into a value the run holds
+     *
+     * A dotted tail whose head names a value the run holds (`cfg.mode` over a
+     * declared `cfg`, `record.x` over the trigger record) is written into a
+     * copy the scope owns, never into the value: the expression reads the
+     * write, and the value — a flow's default, the trigger's record, the
+     * object `record` and `$record` share — keeps what it was.
      *
      * ## `current_user` — the run's user, or `null` (#19939)
      *
@@ -12075,6 +12088,11 @@ export class AutomationEngine implements IAutomationService {
      * bind it, and "declared means bound" would otherwise hold for half the
      * declarations. A declaration with no `defaultValue` behaves exactly as
      * before — existing flows are untouched.
+     *
+     * Each run binds its OWN copy of an object or list default (arrays and
+     * plain objects copied at every depth): the default is the registered
+     * flow's, and a run that changed it in place would change it for the flow
+     * and for every later run in the process.
      *
      * Seeding happens BEFORE the trigger record is flattened to top-level
      * names, and that flattening skips names already present. So a declared

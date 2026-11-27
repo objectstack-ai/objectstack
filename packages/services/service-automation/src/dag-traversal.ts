@@ -68,7 +68,7 @@ import { readPartialSteps } from './partial-steps.js';
 import { isRegionSuspensionRefusal, refuseRegionSuspension } from './region-suspension-refusal.js';
 import { stampFlowRunSlot } from './flow-slots.js';
 import { stampRootRun } from './root-run.js';
-import { isSkippedScopeKey, scopeContainer } from './scope-key-segments.js';
+import { copyForScopeDescent, copyHeldValue, isSkippedScopeKey, scopeContainer } from './scope-key-segments.js';
 
 /**
  * The value the flow CEL scope binds as `current_user` for a run (#19939 —
@@ -1052,17 +1052,28 @@ export function celScope(
 ): { extra: Record<string, unknown> } {
     // No variable key reaches a prototype (`./scope-key-segments.ts`):
     // prototype-free containers, and a key with a skipped segment binds
-    // nothing. A dotted tail whose head names a value the run holds is still
-    // written into that value.
+    // nothing. And no key writes into a value the run holds: a dotted tail
+    // whose head names one descends into a copy the scope owns
+    // (`copyForScopeDescent`), so the scope reads the write and the held
+    // value — a flow's default, the trigger's record, a value `$record`
+    // shares — keeps what it was.
     const vars = scopeContainer();
+    const owned = new WeakSet<object>([vars]);
     for (const [key, value] of variables) {
         // Convert "step.result" keys into nested object paths.
         const segs = key.split('.');
         if (isSkippedScopeKey(segs)) continue;
         let cursor = vars;
         for (let i = 0; i < segs.length - 1; i++) {
-            if (typeof cursor[segs[i]] !== 'object' || cursor[segs[i]] === null) {
-                cursor[segs[i]] = scopeContainer();
+            const next = cursor[segs[i]];
+            if (typeof next !== 'object' || next === null) {
+                const container = scopeContainer();
+                owned.add(container);
+                cursor[segs[i]] = container;
+            } else if (!owned.has(next)) {
+                const copy = copyForScopeDescent(next);
+                owned.add(copy);
+                cursor[segs[i]] = copy;
             }
             cursor = cursor[segs[i]] as Record<string, unknown>;
         }
@@ -1262,7 +1273,10 @@ export function seedDeclaredVariables(
         if (supplied !== undefined) {
             variables.set(v.name, supplied);
         } else if (v.defaultValue !== undefined) {
-            variables.set(v.name, v.defaultValue);
+            // The default is the registered flow's; the run gets its own copy
+            // (`copyHeldValue`), so nothing one run does to it — a node that
+            // changes it in place included — reaches the flow or the next run.
+            variables.set(v.name, copyHeldValue(v.defaultValue));
         }
     }
     return variables;

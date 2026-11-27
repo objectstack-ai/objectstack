@@ -15,10 +15,13 @@
  *     value is a plain object, such as `record`): that object keeps its
  *     prototype, and `__proto__` is the one segment that names it.
  *
- * What the rule does NOT say: that a key only ever lands in a container the
- * builder made. The CEL scope walk still writes a dotted key's tail into a
- * value the run holds when the key's head names that value; it never reaches a
- * prototype doing so. (`textTemplateScope` writes into fresh containers only.)
+ * And a third, for a walk that meets a value the run holds:
+ *
+ *  3. **No key writes into a value the run holds.** When a dotted key's head
+ *     names one (a declared variable's object, the trigger record), the CEL
+ *     scope walk descends into a copy it owns ({@link copyForScopeDescent}),
+ *     so the scope reads the write and the held value keeps what it was.
+ *     (`textTemplateScope` writes into fresh containers only.)
  *
  * **Why `__proto__` alone here.** `constructor` and `prototype` cannot reach a
  * prototype under these two halves: in a container the builder made they are
@@ -77,4 +80,39 @@ export const RESERVED_VARIABLE_KEY_REFUSAL =
 /** Whether a key, split on `.`, has a segment {@link RESERVED_VARIABLE_KEY_SEGMENTS} names. */
 export function hasReservedVariableKeySegment(key: string): boolean {
     return key.split('.').some((segment) => RESERVED_VARIABLE_KEY_SEGMENTS.has(segment));
+}
+
+/**
+ * The copy the CEL scope walk descends into when a dotted key's head names a
+ * value the run holds (rule 3 above): one level, so a deeper descent copies
+ * the next level the same way. A list stays a list (an index or `length`
+ * write lands in the copy); any other object becomes a prototype-free
+ * container holding the same own keys.
+ */
+export function copyForScopeDescent(value: object): Record<string, unknown> {
+    if (Array.isArray(value)) return value.slice() as unknown as Record<string, unknown>;
+    return Object.assign(scopeContainer(), value);
+}
+
+/**
+ * A run's own copy of a value it is seeded with from somewhere it must not
+ * write back to (a flow variable's declared default): arrays and plain objects
+ * (`Object.prototype` or `null` prototype) copied at every depth, every other
+ * value — a string, a number, a `Date`, a class instance — as it is, the rule
+ * `copyLiteral` (`./builtin/value-slot-map.ts`) follows for a node's config.
+ * Each key is DEFINED on the copy, never assigned, so an own key named
+ * `__proto__` stays an own key.
+ */
+export function copyHeldValue(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(copyHeldValue);
+    if (value !== null && typeof value === 'object') {
+        const proto = Object.getPrototypeOf(value);
+        if (proto !== Object.prototype && proto !== null) return value;
+        const out: Record<string, unknown> = proto === null ? scopeContainer() : {};
+        for (const [key, entry] of Object.entries(value)) {
+            Object.defineProperty(out, key, { value: copyHeldValue(entry), enumerable: true, writable: true, configurable: true });
+        }
+        return out;
+    }
+    return value;
 }
