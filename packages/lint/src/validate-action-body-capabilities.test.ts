@@ -150,8 +150,9 @@ describe('validateActionBodyCapabilities at the runtime publish door (#35143)', 
       item: { ...TASK, actions: [action("await ctx.api.object('pr_task').insert({ name: 'x' });", [])] },
       context: { objects: [] },
     });
+    // The object door locates an object write by name.
     expect(result.errors.filter((e) => e.rule === ACTION_BODY_WRITE_CAPABILITY_UNDECLARED).map((e) => e.path)).toEqual([
-      'objects[0].actions[0].body.capabilities',
+      'objects.pr_task.actions[0].body.capabilities',
     ]);
   });
 });

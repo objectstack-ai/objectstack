@@ -10,6 +10,7 @@ import { runAuthoringRules, splitBySeverity } from './authoring-rules.js';
 import { PLATFORM_OBJECT_PREFIXES } from '@objectstack/spec/system';
 import { defineStack } from '@objectstack/spec';
 import { explainRule } from './rule-explanations.js';
+import { runRuntimeAuthoringRules } from './runtime-gate.js';
 
 // [#22161] Each `object-reference-unregistered-platform` finding is one
 // verdict sentence; the reasoning it used to carry is
@@ -526,6 +527,54 @@ describe('[#35143] validateObjectReferences — the object a seed, a flow node o
     expect(findings.map((f) => [f.rule, f.path, f.where])).toEqual([
       [OBJECT_REFERENCE_UNKNOWN, 'actions[1].objectName', 'action "bad"'],
     ]);
+  });
+
+  describe('at the runtime publish doors', () => {
+    const objects = baseStack().objects.map((o) => ({ ...o, sharingModel: 'private' }));
+    const objectRefErrors = (r: { errors: Array<{ rule: string; path: string }> }) =>
+      r.errors.filter((e) => e.rule === OBJECT_REFERENCE_UNKNOWN).map((e) => e.path);
+
+    it('a `seed` write over an object the deployment does not serve is refused; over a served one it passes', () => {
+      const refused = runRuntimeAuthoringRules({
+        type: 'seed',
+        name: 's',
+        item: { object: 'crm_led', externalId: 'name', records: [{ name: 'a' }] },
+        context: { objects },
+      });
+      expect(objectRefErrors(refused)).toEqual(['data[0].object']);
+      const passed = runRuntimeAuthoringRules({
+        type: 'seed',
+        name: 's',
+        item: { object: 'crm_lead', externalId: 'name', records: [{ name: 'a' }] },
+        context: { objects },
+      });
+      expect(passed.errors).toEqual([]);
+      expect(passed.rulesRun).toContain('validateReferenceIntegrity');
+    });
+
+    it('an `action` write bound to an object the deployment does not serve is refused; bound to a served one it passes', () => {
+      const write = (objectName: string) =>
+        runRuntimeAuthoringRules({
+          type: 'action',
+          name: 'go',
+          item: { name: 'go', label: 'Go', objectName, type: 'script', locations: ['record_header'], body: { language: 'js', source: 'return 1;' } },
+          context: { objects },
+        });
+      expect(objectRefErrors(write('crm_laed'))).toEqual(['actions[0].objectName']);
+      expect(write('crm_lead').errors).toEqual([]);
+    });
+
+    it('a `flow` write whose create_record node names an object the deployment does not serve is refused', () => {
+      const write = (objectName: string) =>
+        runRuntimeAuthoringRules({
+          type: 'flow',
+          name: 'crm_flow',
+          item: flow([{ id: 'c', type: 'create_record', label: 'Make', config: { objectName, fields: { name: 'x' } } }]),
+          context: { objects },
+        });
+      expect(objectRefErrors(write('crm_nope'))).toEqual(['flows[0].nodes[1].config.objectName']);
+      expect(objectRefErrors(write('crm_lead'))).toEqual([]);
+    });
   });
 
   it('resolves an object the stack extends at the three bindings', () => {

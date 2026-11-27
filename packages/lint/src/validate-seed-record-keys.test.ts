@@ -33,7 +33,7 @@ describe('validateSeedRecordKeys (#35143)', () => {
       where: 'seed "pr_task" · records[0]',
     });
     expect(findings[0].message).toContain('"dnoe" is not a field of "pr_task"');
-    expect(findings[0].hint).toContain('"done"');
+    expect(findings[0].hint).toContain("'done'");
   });
 
   it('reports a key once per dataset, at the first record that carries it', () => {
