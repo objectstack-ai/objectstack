@@ -46,6 +46,7 @@ import type { ExprValidationCode } from '@objectstack/formula';
 // refuses to register is refused at publish, in the same words.
 import { findUndeclaredFlowCycle } from '@objectstack/metadata-core';
 import type { AutomationEngine } from './engine.js';
+import { RESERVED_VARIABLE_KEY_REFUSAL, hasReservedVariableKeySegment } from './scope-key-segments.js';
 
 /**
  * The slice of a descriptor's JSON-Schema `configSchema` that the undeclared-key
@@ -227,6 +228,10 @@ export function registrationChecks(
         // so the author learns at the save rather than at the first trigger.
         // A plain function, not an engine member: it reads no engine state.
         (flowName, flow) => validateStartNode(flowName, flow),
+        // No variable key the flow names — declared, assigned or bound by a
+        // node — has a reserved segment (`./scope-key-segments.ts`). A plain
+        // function: it reads no engine state.
+        (flowName, flow) => validateVariableKeySegments(flowName, flow),
         // #4277 — config keys the node's descriptor does not declare (the
         // tightened #4059 warning; a `visibleIf` typo used to register in
         // silence), with per-key prescriptions: see validateNodeConfigKeys
@@ -320,6 +325,69 @@ export function validateStartNode(flowName: string, flow: FlowParsed): Registrat
             from: JSON.stringify(types),
             detail: `the flow at nodes: ${why}`,
         }],
+    };
+}
+
+/**
+ * Refuse a flow that names a variable key with a reserved segment — the
+ * authoring door of {@link RESERVED_VARIABLE_KEY_SEGMENTS}
+ * (`./scope-key-segments.ts`). Judged, in every graph the flow holds: each
+ * declared variable's `name`; each `assignment` node's targets, in the shape
+ * the executor binds (the `assignments` map's keys, the legacy array's
+ * `variable` / `name` / `key`, or, with no `assignments`, the config's own
+ * keys); each node's `outputVariable` / `iteratorVariable` / `indexVariable` /
+ * `errorVariable`; and each `screen` field's `name`, the key its submission
+ * binds. Every site is listed, so one save names them all.
+ */
+export function validateVariableKeySegments(flowName: string, flow: FlowParsed): RegistrationCheckRefusal | undefined {
+    const sites: RegistrationCheckSite[] = [];
+    const judge = (key: unknown, path: string): void => {
+        if (typeof key !== 'string' || !hasReservedVariableKeySegment(key)) return;
+        sites.push({ path, from: JSON.stringify(key), detail: `the variable key \`${key}\` at ${path}` });
+    };
+    const declared = (flow as { variables?: unknown }).variables;
+    if (Array.isArray(declared)) {
+        declared.forEach((v, i) => {
+            if (v && typeof v === 'object') judge((v as { name?: unknown }).name, `${STORED_FLOW_PATH}.variables[${i}].name`);
+        });
+    }
+    for (const graph of collectFlowGraphs(flow)) {
+        graph.nodes.forEach((node, index) => {
+            if (!node || typeof node !== 'object') return;
+            const config = node.config;
+            if (!config || typeof config !== 'object' || Array.isArray(config)) return;
+            const cfg = config as Record<string, unknown>;
+            const at = `${storedGraphMemberPath(graph, 'nodes', index)}.config`;
+            for (const key of VARIABLE_NAME_CONFIG_KEYS) judge(cfg[key], `${at}.${key}`);
+            if (node.type === 'assignment') {
+                const raw = cfg.assignments;
+                if (Array.isArray(raw)) {
+                    raw.forEach((item, i) => {
+                        if (!item || typeof item !== 'object') return;
+                        const entry = item as Record<string, unknown>;
+                        const nameKey = ASSIGNMENT_ENTRY_NAME_KEYS.find((k) => typeof entry[k] === 'string' && entry[k]);
+                        if (nameKey) judge(entry[nameKey], `${at}.assignments[${i}].${nameKey}`);
+                    });
+                } else if (raw && typeof raw === 'object') {
+                    for (const key of Object.keys(raw)) judge(key, `${at}.assignments[${JSON.stringify(key)}]`);
+                } else {
+                    for (const key of Object.keys(cfg)) judge(key, `${at}[${JSON.stringify(key)}]`);
+                }
+            }
+            if (node.type === 'screen' && Array.isArray(cfg.fields)) {
+                cfg.fields.forEach((field, i) => {
+                    if (field && typeof field === 'object') judge((field as { name?: unknown }).name, `${at}.fields[${i}].name`);
+                });
+            }
+        });
+    }
+    if (sites.length === 0) return undefined;
+    const why =
+        `${RESERVED_VARIABLE_KEY_REFUSAL} Found: ${sites.map((s) => s.detail).join('; ')}. ` +
+        'Rename each one (for example `constructor` to `constructor_name`); a name that only contains one of the three words is fine.';
+    return {
+        message: `Flow '${flowName}' rejected: ${why}`,
+        sites: sites.map((site) => ({ ...site, detail: `${RESERVED_VARIABLE_KEY_REFUSAL} Rename ${site.detail}.` })),
     };
 }
 

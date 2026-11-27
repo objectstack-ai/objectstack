@@ -28,10 +28,11 @@ import { carriedRefusalOfResult, readCarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
 import { dropEventsOf, foldDropEvents } from './run-dropped-fields.js';
 import { noteTenantCurrencyReadFault } from './builtin/template.js';
+import { RESERVED_VARIABLE_KEY_REFUSAL } from './scope-key-segments.js';
 import { mapItemCancelledVariable, type MapItemCancelledMarker } from './builtin/map-node.js';
 // The values below (`buildRunTrigger`, `FlowRefusalSignal`, `isRefusalSignal`,
 // `isSuspendSignal`, `isRetryableResumeRefusal`, `carriesSubflowChildOutput`,
-// `applyResumeSignal`, `engineBuilt`, `activeMsAtPause` and `waitOfPausedRun`) are read only inside the function bodies, at call
+// `applyResumeSignal`, `reservedResumeSignalKeys`, `engineBuilt`, `activeMsAtPause` and `waitOfPausedRun`) are read only inside the function bodies, at call
 // time, never while a module is evaluating, so the import cycle with
 // ./engine.js is safe under ESM live bindings; the tsup bundle is one file and
 // has no cycle.
@@ -44,6 +45,7 @@ import {
     isRetryableResumeRefusal,
     carriesSubflowChildOutput,
     applyResumeSignal,
+    reservedResumeSignalKeys,
     engineBuilt,
     waitOfPausedRun,
     type AutomationEngine,
@@ -1692,6 +1694,28 @@ export async function resumeInternal(
         // other resume refusals and BEFORE the suspension is consumed — so
         // a rejected bag leaves the pause live and the legitimate
         // submission still lands.
+        //
+        // Asked FIRST, before the screen contract below reads the submitted
+        // values: no signal key with a reserved segment
+        // (`./scope-key-segments.ts`) reaches anything, a `visibleWhen`
+        // evaluated over the bag included. Refused here, the pause stays
+        // live, exactly as for the refusals below.
+        const reservedKeys = reservedResumeSignalKeys(signal);
+        if (reservedKeys.length) {
+            // The keys are the CALLER's (nothing constrains them against
+            // newlines), so they ride the structured slot, never the log
+            // message. FUNCTIONAL — `warn`, like the refusals below.
+            this.logger.warn(
+                `[automation] refused resume of run '${runId}': the signal names a variable key with a reserved ` +
+                    `segment — the refused keys are in this record's meta.`,
+                { rejected: reservedKeys },
+            );
+            return {
+                success: false,
+                code: 'INVALID_SIGNAL',
+                error: `${RESERVED_VARIABLE_KEY_REFUSAL} Refused key(s): ${reservedKeys.join(', ')}. Nothing was applied.`,
+            };
+        }
         const screenRefusal = this.refuseInvalidScreenInput(run, runId, signal);
         if (screenRefusal) return screenRefusal;
 

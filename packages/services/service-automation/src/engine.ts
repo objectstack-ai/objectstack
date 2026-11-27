@@ -65,6 +65,7 @@ export const DEFAULT_BRANCH_LABEL = 'default';
 
 import { runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
 import { flowContentChecksum } from './flow-identity.js';
+import { hasReservedVariableKeySegment } from './scope-key-segments.js';
 import { carriedRefusalOfResult, readCarriedRefusal, type CarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
 import { withDroppedFields } from './run-dropped-fields.js';
@@ -1727,6 +1728,31 @@ function isEngineVariable(name: string): boolean {
 }
 
 /**
+ * The keys of a resume signal with a reserved segment — the resume door of
+ * {@link RESERVED_VARIABLE_KEY_SEGMENTS} (`./scope-key-segments.ts`): each
+ * key of `output` and of `variables` (a screen's submitted inputs), as the
+ * caller spelled it, `output` keys prefixed `output.`. Every signal is judged,
+ * an engine-built one included: its keys are the author's names, which the
+ * authoring door already holds to the same rule.
+ *
+ * `resume` asks this FIRST — before the screen contract reads the submitted
+ * values (a `visibleWhen` is evaluated over them) and before
+ * {@link applyResumeSignal} folds anything — so a refused signal folds
+ * nothing and the pause stays live. {@link applyResumeSignal} refuses the same
+ * keys too, so no caller of the chokepoint can fold one.
+ */
+export function reservedResumeSignalKeys(signal: ResumeSignal): string[] {
+    const keys: string[] = [];
+    for (const key of Object.keys(signal.output ?? {})) {
+        if (hasReservedVariableKeySegment(key)) keys.push(`output.${key}`);
+    }
+    for (const key of Object.keys(signal.variables ?? {})) {
+        if (hasReservedVariableKeySegment(key)) keys.push(key);
+    }
+    return keys;
+}
+
+/**
  * Fold a resume signal into a run's variable map — **the one place a signal
  * reaches those variables** (#3853 follow-up).
  *
@@ -1769,6 +1795,9 @@ export function applyResumeSignal(
     for (const [name] of writes) {
         if (!trusted && isEngineVariable(name)) rejected.push(name);
     }
+    // No key with a reserved segment, from any signal (see
+    // {@link reservedResumeSignalKeys}, which `resume` asks first).
+    rejected.push(...reservedResumeSignalKeys(signal));
     // Reject as a whole — never a partial application.
     if (rejected.length) return rejected;
 
