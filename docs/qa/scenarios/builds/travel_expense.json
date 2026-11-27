@@ -809,6 +809,12 @@
           "collapse": "none"
         },
         {
+          "key": "lines",
+          "label": "Expense Lines",
+          "collapse": "none",
+          "relatedList": "demotravel_claim_line"
+        },
+        {
           "key": "status",
           "label": "Status & Payment",
           "collapse": "none"

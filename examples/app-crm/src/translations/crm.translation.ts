@@ -91,6 +91,10 @@ export const CrmTranslationBundle = defineTranslationBundle({
   },
 
   'zh-CN': {
+    // The package's own name, keyed by its manifest id (objectstack#35513).
+    packages: {
+      'com.example.crm': { name: 'CRM（最小示例）', description: '框架用来端到端验证元数据加载流程的最小 CRM 工作区。' },
+    },
     objects: {
       // The inline product grid's heading on the opportunity form. The field
       // lives on the line item, so the key is the line item's.

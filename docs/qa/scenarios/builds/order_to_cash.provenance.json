@@ -19,5 +19,10 @@
     "build": "174/174",
     "seed": "619/619",
     "how": "the scratch run's dist/objectstack.json after its Build half (before the iterate turn), byte for byte: a poller copied the file each time its content changed, and this is the last copy before the iterate turn rewrote it. Re-scored against the card (`scoreCardArtifact` + `rollupSourceCharges`), it reads Build 174/174 with no roll-up charge, the run record's Build half, and `changeSize` from it to the post-iterate build equals the record's iterate change (12 items), which the copy before it (also 174/174) does not; Seed is the run record's, on this build"
+  },
+  "scored": {
+    "runner": "30a8047b",
+    "on": "2026-11-27",
+    "build": "174/174"
   }
 }

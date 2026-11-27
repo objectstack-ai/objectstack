@@ -42,7 +42,7 @@ On a file the store sets WAL and a busy timeout: without them a second process w
 - `knowledge_generation` — one row per source and generation: the index fingerprint it was built under, the recipe hash, the vector width, the model, and whether it is active or being built. At most one of each per source, by a unique index. It does not refuse a second builder: a second build under the same fingerprint joins the one under way, and one under another fingerprint replaces it, after which the first builder's writes are refused `KNOWLEDGE_REBUILD_REQUIRED`. No generation mixes two fingerprints.
 - `knowledge_<source>_g<n>` — the passages of one generation of one source, with an `F32_BLOB(<width>)` vector column sized for that generation.
 
-`<source>` is the source's index key: its name, or for a source a package ships, the knowledge service's spelling of that package and name (so two packages' sources of one name are two tables). When a source stops being served (its metadata item was removed, or a package now holds its name), the knowledge service calls `dropSource`: the source's generation tables and rows are dropped in one transaction.
+`<source>` is the source's index key: its name, or for a source a package ships, the knowledge service's spelling of that package and name (so two packages' sources of one name are two tables). When a source stops being served (its metadata item was removed, or a package now holds its name), the knowledge service calls `dropSource`: the source's generation tables and rows are dropped in one transaction. A table the store did not make under one of those names (an object's table, in a database shared with object tables) is never dropped: the call is refused `SERVICE_UNAVAILABLE`, naming the table, and nothing of the source is removed.
 
 ## Search
 
@@ -52,11 +52,11 @@ An exact scan by cosine distance (`vector_distance_cos`). The organization filte
 
 Every source's index is built under one index fingerprint (the embedding model and dimensions, the split, the content list — ADR-0161 K7). A write or a search under another fingerprint is refused `KNOWLEDGE_REBUILD_REQUIRED` (409) and never served from the stored vectors. A complete reindex under a new fingerprint builds a new generation table beside the active one (the old one keeps answering its own fingerprint meanwhile) and switches to it when the reindex completes; the old table is then dropped. A passage whose text is unchanged is not embedded again within a generation.
 
-A table written by this package's earlier releases (`knowledge_<source>`, from the cloud repository) is never served: a search answers "reindex needed", and the table is dropped when the first complete reindex finishes. It is recognised by its exact columns: a table of any other shape under a store's table name, one the store did not make in a shared database, is never served and never dropped.
+A table written by this package's earlier releases (`knowledge_<source>`, from the cloud repository) is never served: a search answers "reindex needed", and the table is dropped when the first complete reindex finishes. It is recognised by its exact columns: a table of any other shape under a store's table name, one the store did not make in a shared database, is never served and never dropped: a rebuild that would replace it, like a `dropSource`, is refused `SERVICE_UNAVAILABLE`, naming the table.
 
 ## When it cannot run
 
-When the database cannot be opened, or `@libsql/client` has no native build for the platform (there is none for Windows on ARM), the plugin still registers and boot goes on: it warns with the reason, `healthCheck` answers `ok: false`, and every call answers `SERVICE_UNAVAILABLE` (one sentence; the reason travels in the error's `remedy`, for the operator).
+When the database cannot be opened, or `@libsql/client` has no native build for the platform (there is none for Windows on ARM), the plugin still registers and boot goes on: it warns with the reason, `healthCheck` answers `ok: false`, and every call answers `SERVICE_UNAVAILABLE` (one sentence; the reason travels in the error's `remedy`, for the operator). So does a database holding a table named `knowledge_generation` that is not the store's (its columns are not the generation table's): the store is not ready, the reason names that table, and the table is left as it is.
 
 ## What it stores
 

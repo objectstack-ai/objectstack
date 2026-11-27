@@ -321,3 +321,35 @@ export function selectBundles(catalog: SkillEvalCatalog, names: readonly string[
   if (noCases.length && !(competing && picked.some((c) => c.shouldTrigger !== undefined))) throw new Error(`--skills names ${noCases.map((n) => `\`${n}\``).join(', ')}, a bundle with no ${kind} under ${catalog.root}`);
   return picked;
 }
+
+/** A `--case` key's shape: `BUNDLE/FILE_STEM#ID`, the key the summary and every record print. */
+export const CASE_KEY_SHAPE = /^[^/#\s]+\/[^\s]+#[^\s]+$/;
+
+/**
+ * Narrow a selection (`selectBundles`' answer) to the cases `--case` names by
+ * key, kept in catalog order. A key that names no case of the selection is
+ * refused, never dropped, and the refusal says where it stopped matching: a
+ * bundle the catalog lacks, a bundle `--skills` leaves out, an eval file the
+ * bundle lacks, or an id that file does not hold. A misspelt case would
+ * otherwise plan nothing for it and read as a clean round. Pure.
+ */
+export function selectCases(catalog: SkillEvalCatalog, selection: readonly SkillEvalCase[], keys: readonly string[], skills?: readonly string[]): SkillEvalCase[] {
+  const list = (xs: readonly string[]) => xs.map((x) => `\`${x}\``).join(', ') || 'none';
+  for (const key of keys) {
+    if (selection.some((c) => c.key === key)) continue;
+    const slash = key.indexOf('/');
+    const hash = key.lastIndexOf('#');
+    const bundle = key.slice(0, slash);
+    const stem = key.slice(slash + 1, hash);
+    const id = key.slice(hash + 1);
+    if (!catalog.bundles.includes(bundle)) throw new Error(`--case names \`${key}\`: \`${bundle}\` is not a bundle under ${catalog.root} (bundles: ${catalog.bundles.join(', ')})`);
+    if (skills?.length && !skills.includes(bundle)) throw new Error(`--case names \`${key}\`, a case of \`${bundle}\`, which --skills leaves out (--skills: ${skills.join(', ')})`);
+    const inBundle = catalog.cases.filter((c) => c.bundle === bundle);
+    const stems = [...new Set(inBundle.map((c) => c.file.replace(/\.json$/, '')))];
+    if (!stems.includes(stem)) throw new Error(`--case names \`${key}\`: ${bundle}/evals/ holds no eval file \`${stem}.json\` with a case (files: ${list(stems.map((s) => `${s}.json`))})`);
+    const ids = inBundle.filter((c) => c.file.replace(/\.json$/, '') === stem).map((c) => String(c.id));
+    throw new Error(`--case names \`${key}\`: ${bundle}/evals/${stem}.json holds no case with id \`${id}\` (ids: ${ids.join(', ')})`);
+  }
+  const wanted = new Set(keys);
+  return selection.filter((c) => wanted.has(c.key));
+}

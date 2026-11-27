@@ -178,11 +178,13 @@ describe('useObjectLabel identity (objectui#5564)', () => {
     // taking it to 29. objectstack#28879 added `actionCancelText` (the dismiss
     // label of an action's confirm and param dialogs), taking it to 30.
     // objectstack#31937 added `actionPreflight` (the bundle labels of an
-    // action's preflight panel rows), taking it to 31. A new resolver must land
+    // action's preflight panel rows), taking it to 31. objectstack#35513 added
+    // `packageName` and `packageDescription` (a package's name and description
+    // in the reader's language), taking it to 33. A new resolver must land
     // on both paths at once, because there is only one path — and a retired one
     // leaves both at once for the same reason, which is what the equality above
     // measures and this count anchors to an absolute.
-    expect(Object.keys(unbound.seen[0])).toHaveLength(31);
+    expect(Object.keys(unbound.seen[0])).toHaveLength(33);
     expect(Object.keys(unbound.seen[0])).not.toContain('widgetSubCaption');
     expect(typeof unbound.seen[0].objectLabel).toBe('function');
     expect(unbound.seen[0].objectLabel({ name: 'lead', label: 'Lead' })).toBe('Lead');

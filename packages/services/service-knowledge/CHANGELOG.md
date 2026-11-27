@@ -1,5 +1,137 @@
 # @objectstack/service-knowledge
 
+## 19.0.0-next.1
+
+### Minor Changes
+
+- 87af66e: feat(core): `requires: ['knowledge']` mounts the knowledge service and one vector store
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: follow-up #37310
+  
+  ADR-0161, #37102.
+  
+  - **New capability token `knowledge`** (`PLATFORM_CAPABILITY_TOKENS`, provider `@objectstack/service-knowledge`, edition `open`). `os serve` and `@objectstack/verify` mount `KnowledgeServicePlugin` plus exactly one store, picked from the primary database: PostgreSQL gets `KnowledgePgvectorPlugin` (adapter `pgvector`, on the same database URL); any other database gets `KnowledgeTursoPlugin` (adapter `turso`) on a local libSQL file, `knowledge.db` in the directory of the default database: `.objectstack/data/`, or `<OS_HOME>/data/` when `OS_HOME` is set (`os start --home` sets it). An in-memory database gets an in-memory turso store. The in-memory adapter (`knowledge-memory`) is never mounted by the token.
+  - No token: no knowledge service and no knowledge settings page, as before. A host that mounts `KnowledgeServicePlugin` itself keeps its own and gets no store from the runtime; a host that mounts only the store the token would choose keeps that store and gets the service.
+  - New core exports: `resolveCapabilityExtras`, `resolveKnowledgeStore`, `KNOWLEDGE_STORE_PROVIDERS` and the `CapabilityDatabase` / `CapabilityExtra` / `KnowledgeStoreSpec` types. `constructServedProviders` (`@objectstack/verify`) takes an optional `database` (default: in-memory SQLite).
+  - `os serve` now warns when a capability's extra plugin cannot be imported or constructed, instead of skipping it silently.
+  - **A source whose adapter is not mounted** no longer fails silently. The service still mounts and boot does not fail; after boot the service logs one `error` per such source naming the mounted adapters, and indexing or searching that source answers `SERVICE_UNAVAILABLE` (503) with the same message. A search across several sources names the refused one beside the hits of the others. Before, indexing threw an uncoded error and search skipped the source with a warning.
+  - **The turso store reads its URL from settings under the token.** `KnowledgeTursoPlugin` gains `urlFromSettings`: with no `url` option it reads the saved `knowledge.turso_url` / `turso_auth_token`. It reads them when the boot completes (`kernel:bootstrapped`), the first moment the settings service answers a saved value; the adapter is mounted from `start()` and answers `SERVICE_UNAVAILABLE` until the store has opened. A saved `file:` URL must resolve, after symlinks, inside that data directory; a URL that leaves it, names the platform database, or carries a NUL byte or another control character, written out or percent-encoded (`%00`, `%0a`), is refused before the libSQL client sees it (the client decodes the path, and a NUL byte in it kills the process inside the native library). New option `stateDir` (the token passes `OS_HOME`); new exports: `resolveSettingsStoreUrl`, `dataDirectoryOf`. `resolveStoreUrl` refuses control characters too, in both spellings. An auth token carrying a control character (a pasted line break, a NUL byte), saved or given as the `authToken` option, is refused the same way, read as written: the store answers `SERVICE_UNAVAILABLE` with a reason that never quotes the token.
+  - **`@objectstack/knowledge-turso` is an optional dependency of `@objectstack/cli` and `@objectstack/verify`**, not a hard one: its libSQL client is a native module with an `os` / `cpu` list, and a hard dependency would refuse the whole install outside that list. Where it is absent `os serve` warns that the store was not mounted and boots on, `@objectstack/verify` does the same, and a source naming `turso` answers `SERVICE_UNAVAILABLE`. `KNOWLEDGE_STORE_PROVIDERS.turso` and the extra `resolveCapabilityExtras` answers for it carry `optional: true`.
+  - The `turso_url` setting's example path now reads `file:./.objectstack/data/knowledge.db` in every locale.
+- d58bf7a: feat(spec)!: a knowledge source is a governed metadata type, `knowledge_source`, loaded by the knowledge service
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37310. Here only the enumeration row: `skills/objectstack-platform/SKILL.md` lists the new top-level key `knowledgeSources`, and `skills/objectstack-ai/SKILL.md`'s compiled `supportKb` example writes `name` and `content`, because the 18 spelling no longer parses.
+  
+  <!-- adr-0087: registered knowledge-source-id-to-name, knowledge-source-content-fields-to-content, knowledge-source-inert-keys-removed, knowledge-source-content-lists-fields, knowledge-source-file-http-kinds-retired, knowledge-source-inert-keys-retired, knowledge-source-registration-governed -->
+  
+  ADR-0161 K4, K5, K6 and K8 item 4 (#37304).
+  
+  **BREAKING.** A knowledge source written for 18 is refused at parse until it is moved. `os migrate meta --from 18` lists every edit and `--write` applies the ones it can prove.
+  
+  | Wrote (18) | Write instead (19) |
+  |:--|:--|
+  | `id: 'support_kb'` | `name: 'support_kb'` (the value is unchanged, so the index is found again and nothing is rebuilt) |
+  | `source.contentFields: ['title', 'body']` | `source.content: ['title', 'body']` |
+  | `contentFields: ['*']` | `content` with every field named (a hand edit: only the author knows which fields may leave the row store) |
+  | `embedding`, `vectorStore`, `adapterConfig`, `refresh.cron` | delete the key: nothing read it |
+  | `source.kind: 'file'` or `'http'`, with `prefix`, `mimeTypes`, `urls`, `userAgent` | a source indexes the records of one object (`kind: 'object'`); a file or URL source has no replacement |
+  | `knowledge.indexDocument(…)`, `knowledge.deleteDocument(…)` | no call: the service builds every document from the records a source selects; `reindexSource` rebuilds a source |
+  | `KnowledgeServicePlugin({ sources: [{ id, … }] })`, `registerSource({ id, … })` | the same call with the 19 shape, or the source shipped as metadata in the stack's `knowledgeSources` |
+  
+  What changes:
+  
+  - **The type.** `knowledge_source` is registered in the metadata type registry with the one schema `KnowledgeSourceSchema`; a stack carries its sources in the new top-level collection `knowledgeSources`, in `*.knowledge-source.ts` or `.yml` files. An item can be created and changed at run time (Studio, MCP); it takes no environment overlay. Studio's menu lists the type, and the metadata form bundles carry its label in every locale. Two packages may each ship a source of one name (ADR-0150, addendum of 2026-11-25): each has its own index, and `search_knowledge` lists a package's source as `NAMESPACE-NAME` and takes that spelling in `sourceIds`.
+  - **The schema is strict.** An undeclared key is refused, never dropped. `content` is a non-empty list of field names; an empty-string member is refused, and `'*'` is refused with the instruction to list the fields: embedding is egress, and the wildcard sent every text field of a record to the embedder, including one added to the object later. Credential-class and `internal` fields stay unindexed even when named.
+  - **The loader.** `KnowledgeServicePlugin` reads the published items when it starts and follows the type while it runs: an added source is registered and built when a build is due; a changed one is registered again, and a changed `where` or `metadataFields` rebuilds inside the generation while a changed `content` or `split` builds a new one; a removed one is unregistered and its index dropped. The reap guard now follows the sources, so a retention delete on an object first indexed by a source added after boot de-indexes the row. A deployment that holds an item and mounts no knowledge service says so once at boot, naming the items.
+  - **`IKnowledgeAdapter.dropSource?(ctx)`** removes everything an adapter holds for a source: every generation, the one under construction included, and what it recorded about the index. `knowledge-memory`, `knowledge-pgvector` and `knowledge-turso` implement it, and the contract suite (`@objectstack/service-knowledge/testing`) takes a new `implements.dropSource` declaration. Over an adapter without it, a removed source's index is kept and the service says so once. An adapter is handed the source's index key as `ctx.source.name` (it was `ctx.source.id`): the bare name for a source no package holds, so an existing index is found under the same key.
+  - **A capability of its own.** New platform capability `manage_knowledge_sources`: a write of a `knowledge_source` through `/meta` (REST and the dispatcher: save, publish, rollback, delete) and through the MCP draft door needs it beside `manage_metadata`. Platform administrators hold it by default; a grant on the indexed object's records does not imply it. A caller without it is refused `403 PERMISSION_DENIED`, naming the capability. The package doors ask it too: every write to an existing package that holds a knowledge source (an item, a pending draft, or for the commit revert and the rollback a commit that touched one) needs the capability: enable, disable, publish, publish-drafts, discard-drafts, the commit revert, rollback, revert, adopt-orphans, duplicate, the manifest update and delete. A package that holds none is written as before. The install door is not asked, and neither is ensure-customization, which writes nothing of the base and creates an empty pair. For a caller without the capability the doors read the package's holding before their own request checks, so such a caller hears this `403` ahead of a `400`, `404` or `422` the door would have answered for the same request; a holding that cannot be read refuses `503` and changes nothing (a host with no metadata store holds none). A duplicate also admits each knowledge source it copies for the caller (source admission, below), and refuses the whole copy when one is refused.
+  - **Source admission at save.** Those same doors save a source only when its author may themselves search what it would index: an object of a disabled package, an object the API does not serve for `search`, a system object without `enable.aiReadable`, or a field the author may not query refuses the save `403`, naming the object or the field; a verdict that cannot be reached, or a knowledge service that is registered and cannot be resolved, refuses `503`. The fields judged are the ones the source serves and the ones its `where` reads, at save and at search: a source whose `where` reads a field a caller may not query is not searched for that caller. Over MCP it is the human who is judged. Where no knowledge service is mounted there is nothing to ask, and the save goes on.
+  - **One name, one source.** `KnowledgeServicePlugin({ sources })` and `registerSource` stay a door for the same schema and parse with it: a retired key is refused with its prescription (`400 VALIDATION_ERROR`), not converted. A source registered in code belongs to no package. It shares one slot with an environment-authored item of the same name, and the second of the two to arrive is refused `409 RESOURCE_CONFLICT`, naming both doors; a metadata item reloading its own earlier version is not a second arrival.
+  - **The push door leaves.** `IKnowledgeService.indexDocument` and `deleteDocument` are removed, with the `file` / `http` branches that served them. They are runtime-interface-only members with no metadata form, so the compiler reports each call (`TS2339`).
+  - **Removed exports**, twelve, all from `@objectstack/spec/ai`. The whole `embedding` module leaves with `embedding` and `vectorStore`, because the knowledge source was its only composer: `EmbeddingModelSchema`, `VectorStoreSchema`, `VectorStoreProviderSchema` and the types `EmbeddingModel`, `VectorStore`, `VectorStoreProvider`. The source kinds leave with `file` and `http`: `FileKnowledgeSourceSchema`, `HttpKnowledgeSourceSchema`, `KnowledgeSourceKindSchema` and the types `FileKnowledgeSource`, `HttpKnowledgeSource`, `KnowledgeSourceKind`. None has a replacement; an import of one is a compile error.
+  - **CLI.** `os knowledge status` prints the package that holds a source and no longer prints a source kind.
+
+### Patch Changes
+
+- 9ed54cb: fix(service-knowledge, knowledge-pgvector): a build that loses its lease stops at the next page, and a build that stalls is cancelled
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **A build that loses its cluster lease stops.** Before each page, a build checks that it still holds its cluster lease. The lease counts as lost when the lock says so, or when no renewal has succeeded within the 60-second lease (the lock store is unreachable, or a renewal hangs). The build then stops before reading or embedding another page. It neither purges nor completes, and its record (`buildRecord`, `os knowledge status`) reads the new status `lease-lost`. Before this change the build only logged a warning and went on, so a second node could build the same source and the embedding spend doubled.
+  - **A build that stalls is cancelled.** A build that finishes no page for 15 minutes (a fixed ceiling, not a setting) is cancelled, for example when an embedding call never answers. The walk stops waiting on that call and the lease is released. The record reads the new status `timed-out`, and a new rebuild can usually start without a restart; a purge deletion that never answers is the exception, since the store still lists that document and every later build waits on it in its purge until the deletion answers or the process restarts. The limit applies to the time between two pages (or two purge deletions), not to the whole build, so a large source that keeps making progress is never cut short. The completion (on pgvector, the switch to the new index and the removal of the replaced one) is not bounded: once it has begun the build waits for it, so a switch that began before the limit passed still commits and the record reads `done` or `failed`, and no other build of the source starts on that node until it settles.
+  - **pgvector: a build that lost its builder lock writes and completes nothing.** Each write and removal of a build checks, on the lock's own session, that the source's session advisory lock is still held. Once the lock is gone (freed after `buildLockIdleMs`, or its session ended), the write is refused `LOCK_CONFLICT` (409) before anything is embedded. `completeBuild` completes only the build this adapter began, and only the generation that build began. Otherwise it is refused `LOCK_CONFLICT` and switches, records and deletes nothing, so a build that lost its lock can no longer switch a generation another build has taken up since. A lock kept from an earlier build is re-checked at the next `beginBuild`, so a session that ended is never taken for a lock that is still held. **Behind a transaction-mode connection pooler** (PgBouncer transaction pooling, or a hosted provider's pooled URL), a deployment the store already did not support, the advisory lock does not stay with the session that took it. The check therefore reads a held lock as lost, and every complete build is now refused `LOCK_CONFLICT` at its first page, where before it ran with a release warning. Point the store's `url` at a direct or session-mode endpoint; the refusal's remedy says so.
+  - **pgvector: a search whose source's index was switched under it three times** is now refused `CONCURRENT_MODIFICATION` (409) instead of throwing an error with no code.
+  
+  Widening: the exported `KnowledgeBuildRecord.status` type gains `lease-lost` and `timed-out`. A consumer that switches over it should handle both the way it handles `failed`. No other export changes: the fence and its 15-minute limit are internal to the service.
+  
+  `os knowledge rebuild` and `os knowledge status` know the two new statuses: a followed rebuild that ends `lease-lost` or `timed-out` exits 1 with the build's message, as a `failed` one does.
+- 1490855: fix(service-knowledge): a build checks its lease before `beginBuild` and before each purge deletion
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **A build cancelled or lease-lost while it waits its turn no longer begins.** A build queued behind another walk of the same source used to call the adapter's `beginBuild` once that walk ended, even when the build had meanwhile been cancelled (`timed-out`) or had lost its cluster lease. On pgvector that call takes the store's builder lock, which then stayed held until it went idle. The build now checks its lease first: it calls neither `beginBuild` nor anything after it, writes nothing, and its record ends `timed-out` or `lease-lost` as before, with a message that says it stopped before its build began.
+  - **A build that loses its lease during its purge stops at the next deletion.** Before, a lost lease was noticed only once the whole purge had run, just before the completion. Each purge deletion now checks the lease first, so the purge stops before the next one, nothing is completed, and the record reads `lease-lost` with the number of deletions made. A build cancelled during its purge likewise deletes nothing further once the deletion it stopped waiting on answers.
+  
+  No export or adapter contract changes.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [9f9db81]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [ff63b02]
+- Updated dependencies [5d37374]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/service-settings@19.0.0-next.1
+  - @objectstack/embedder-openai@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Patch Changes

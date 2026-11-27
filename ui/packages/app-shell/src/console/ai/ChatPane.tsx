@@ -11,6 +11,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useObjectTranslation } from '@object-ui/i18n';
+import { useAuth } from '@object-ui/auth';
 import { translateMetadataType } from '../../views/metadata-admin/i18n.js';
 import {
   Select,
@@ -47,6 +48,8 @@ import {
 } from '@object-ui/plugin-chatbot/core';
 
 import { useOpenAssistant } from '../../layout/chatDockControl.js';
+import { publishPlanApprovalPending } from '../../assistant/assistantBus.js';
+import { countWritesAwaitingApproval } from '../../assistant/writeApprovalPending.js';
 import type { ChatSurfaceContext } from '../../layout/chatSurfaceContext.js';
 import { buildFocusContext, type ConversationFocus } from '../../layout/chatFocus.js';
 import { ChatFocusRow } from './ChatFocusRow.js';
@@ -422,6 +425,23 @@ export function ChatPane({
     },
   });
 
+  // ui ADR-0057 Amendment A5, row 3 — a write the AI proposed that still waits
+  // for this user's approval is published per conversation to the assistant
+  // bus, where it outlives this pane: the drawer's host reads it when the
+  // drawer is next opened from the entry, and reopens this conversation.
+  const { user } = useAuth();
+  const approvalOwner = user?.id;
+  const writesAwaiting = countWritesAwaitingApproval(runtimeMessages, hitl.decisions);
+  useEffect(() => {
+    if (!conversationId) return;
+    publishPlanApprovalPending({
+      userId: approvalOwner,
+      conversationId,
+      pending: writesAwaiting > 0,
+      count: writesAwaiting,
+    });
+  }, [approvalOwner, conversationId, writesAwaiting]);
+
   // The real send, shared by a normal submit and by the deferred-first-message
   // replay below (resetSuppression → send → onSent, in that order).
   //
@@ -772,6 +792,8 @@ export function ChatPane({
         // area, in flow above the input.
         promptHeaderSlot={focusRow ?? undefined}
         messages={shownMessages}
+        // Keys the question card's skip marks to this conversation.
+        conversationId={conversationId}
         placeholder={
           activeAgent
             ? agentRouteName(activeAgent) === 'ask'
