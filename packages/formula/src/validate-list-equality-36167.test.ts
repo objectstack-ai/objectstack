@@ -20,7 +20,7 @@ import { describe, it, expect } from 'vitest';
 import { celEngine } from './cel-engine';
 import { compileCelToFilter } from './cel-to-filter';
 import { matchesFilterCondition } from './matches-filter';
-import { validateExpression, type ExprSchemaHint } from './validate';
+import { listMembershipSource, validateExpression, type ExprSchemaHint } from './validate';
 
 const MULTI_TYPES = ['multiselect', 'checkboxes', 'tags'] as const;
 const CAPABLE_TYPES = ['select', 'lookup', 'user'] as const;
@@ -414,4 +414,27 @@ describe('list-equality — a flattened site with no proven row binding gets no 
       expect(refusalsOf(source, hintFor('tags', false, 'flattened')).map((e) => e.code)).toContain('list-equality');
     }
   });
+});
+
+describe('listMembershipSource — the published prescription is the refusal\'s rewrite, unparenthesised', () => {
+  const rewriteOf = (source: string, hint: ExprSchemaHint): string => {
+    const [e] = refusalsOf(source, hint).filter((x) => x.code === 'list-equality');
+    if (e?.code !== 'list-equality') throw new Error(`no list-equality refusal for ${source}`);
+    return e.params.rewrite;
+  };
+  const SITES = [
+    ['a `record.` read', 'record.f', false, hintFor('tags'), false],
+    ['a `previous.` read', 'previous.f', false, hintFor('tags'), false],
+    ['a bare name at a flattened site', 'f', true, hintFor('tags', false, 'flattened'), false],
+    ['a query-filter site', 'record.f', false, { ...hintFor('tags'), filterCompiled: true }, true],
+  ] as const;
+  for (const [site, reference, bare, hint, filterCompiled] of SITES) {
+    for (const op of ['==', '!='] as const) {
+      it(`${site}, \`${op}\``, () => {
+        expect(rewriteOf(`${reference} ${op} 'a'`, hint)).toBe(
+          `(${listMembershipSource({ reference, bare }, '"a"', op === '==', filterCompiled)})`,
+        );
+      });
+    }
+  }
 });

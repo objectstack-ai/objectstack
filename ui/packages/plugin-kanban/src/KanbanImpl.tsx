@@ -283,7 +283,11 @@ export interface KanbanBoardProps {
    * (`readLaneCounts`). Absent: the board counts its cards, as before. `null`:
    * the read has not answered or cannot (no door, a refusal, a partial
    * answer), so a lane writes its page count marked `+` (`laneCountLabel`).
-   * Drawn on the flat layout only. A PROP, never a schema key.
+   * Drawn on both layouts: a flat lane's header, and a swimlane board's column
+   * title row and foot statistic (objectstack#37326), where it is the column's
+   * across every swimlane (`swimlaneColumnCount`). A swimlane row's own count
+   * stays the cards drawn; this only decides whether it is marked `+`
+   * (`swimlaneCountIsWhole`). A PROP, never a schema key.
    */
   laneCounts?: Readonly<Record<string, number>> | null
   /**
@@ -986,9 +990,10 @@ function LaneTotal({
  * WITHOUT its query (rows handed in whole) is a `sum` added up here, and the
  * other three draw nothing there. objectstack#37326 — a board drawn in
  * swimlanes (a view with grouping, or `swimlaneField`) draws it once per
- * column, in a foot row under every swimlane (`SwimlaneFootRow`): the figure
- * is the column's across every swimlane, the one the flat board draws. No
- * read groups by the swimlane field, so no cell draws one of its own.
+ * column, in a foot row under every swimlane (the swimlane layout's
+ * `data-kanban-swimlane-foot` row): the figure is the column's across every
+ * swimlane, the one the flat board draws. No read groups by the swimlane
+ * field, so no cell draws one of its own.
  * Renders nothing without the statistic, or while the figure is pending or
  * unknowable.
  */

@@ -387,6 +387,17 @@ export function operationMessageTranslationKey(messageKey: string): string {
  * `errors.approvals_act_*` or `errors.automation_hooks_*` override is
  * consulted. Their English is byte-identical to the fixed sentences the doors
  * answered before they were localized.
+ *
+ * The keys from `auth_service_unavailable` to `share_links_unconfigured` are
+ * the remaining `501`s of the dispatcher's domain modules (`auth.ts`,
+ * `i18n.ts`, `mcp.ts`, `meta.ts`, `packages.ts`, `automation.ts`,
+ * `actions.ts`, `catalog-activation.ts`, `permission-set-clone.ts`,
+ * `security.ts`, `share-links.ts`, #37811), read the same way: by the
+ * request's top `Accept-Language` tag, with no `errors.*` override consulted.
+ * Their English is byte-identical to the fixed sentences they replace.
+ * `{{member}}`, `{{table}}`, `{{name}}` and `{{packageId}}` are code, table,
+ * item and package names, never translated; `{{noun}}` is one of the
+ * `catalog_activation_noun_*` keys, rendered in the same locale.
  */
 export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> = {
   en: {
@@ -483,6 +494,56 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'Inbound automation hooks are not available: no trigger-api service is registered. The inbound-hook trigger (@objectstack/trigger-api) serves this route through that service; compose it on the environment that owns the flow.',
     automation_hooks_member_missing:
       'Inbound automation hooks are not available: the registered trigger-api service does not implement handleInboundHook.',
+    auth_service_unavailable: 'Auth service not available — register @objectstack/plugin-auth to enable authentication',
+    i18n_service_unavailable: 'i18n service not available',
+    mcp_server_unavailable: 'MCP server is not available',
+    meta_layered_view_unsupported: 'Layered metadata view not supported by protocol implementation',
+    meta_save_conditions_unsupported:
+      'This host has no protocol saveMetaItem, so it cannot honour If-Match, If-None-Match or ?mode=draft on a save. Send the save without them, or save through a host whose protocol implements saveMetaItem.',
+    meta_save_unsupported: 'Save not supported',
+    meta_draft_listing_unsupported: 'Draft listing not supported',
+    meta_stored_migration_unsupported: 'Stored-metadata migration not supported',
+    packages_draft_publish_unsupported: 'Draft publishing not supported',
+    packages_draft_discard_unsupported: 'Draft discarding not supported',
+    packages_commit_history_unsupported: 'Commit history not supported',
+    packages_commit_revert_unsupported: 'Commit revert not supported',
+    packages_commit_rollback_unsupported: 'Commit rollback not supported',
+    packages_orphan_adoption_unsupported: 'Orphan adoption not supported',
+    packages_duplication_unsupported: 'Package duplication not supported',
+    packages_customization_ensure_unsupported: 'Customization package ensure not supported',
+    automation_connector_credentials_unsupported:
+      'Connector credentials are not supported by the automation service this deployment mounts — it does not implement `{{member}}`, an optional member of `IAutomationService`. Nothing was read or changed.',
+    automation_connector_connections_unsupported:
+      'Connector connections are not supported by the automation service this deployment mounts — it does not implement `{{member}}`, an optional member of `IAutomationService`. Nothing was read or changed.',
+    automation_flow_clone_unsupported:
+      'Flow clone not supported: a copy lands in a package, and this deployment has no metadata protocol that can ensure a customization package and save a flow into it.',
+    automation_resume_unsupported: 'Resume not supported',
+    automation_run_cancel_unsupported:
+      'Cancelling a run is not supported by the automation service this deployment mounts — it does not implement `cancelRun`, an optional member of `IAutomationService`. No run was cancelled.',
+    automation_run_restore_unsupported:
+      'Restoring a consumed suspension is not supported by the automation service this deployment mounts — it does not implement `restoreConsumedSuspension`, an optional member of `IAutomationService`. No suspension was restored.',
+    automation_screen_lookup_unsupported: 'Screen lookup not supported',
+    automation_runs_list_unsupported:
+      'Listing the runs of a flow is not supported by the automation service this deployment mounts — it does not implement `listRunsPage`, an optional member of `IAutomationService`. No runs were listed.',
+    action_activation_ledger_unsupported:
+      "This deployment's data engine does not implement the packaged-metadata activation ledger (ADR-0126 §8), so a packaged action cannot be switched off here.",
+    catalog_activation_ledger_missing_on:
+      "This deployment does not carry the activation ledger ({{table}}, ADR-0126 §4), so {{noun}} '{{name}}' cannot be switched on here.",
+    catalog_activation_ledger_missing_off:
+      "This deployment does not carry the activation ledger ({{table}}, ADR-0126 §4), so {{noun}} '{{name}}' cannot be switched off here.",
+    catalog_activation_noun_position: 'position',
+    catalog_activation_noun_permission: 'permission set',
+    catalog_activation_noun_sharing_rule: 'declared sharing rule',
+    catalog_activation_noun_webhook: 'declared webhook',
+    catalog_activation_noun_queue: 'declared queue',
+    catalog_activation_noun_assignment_rule: 'declared assignment rule',
+    permission_set_clone_pair_unsupported:
+      "Permission set '{{name}}' is shipped by read-only package '{{packageId}}', so its copy belongs in that package's paired customization package, and this deployment's metadata protocol cannot ensure one.",
+    permission_set_clone_no_protocol:
+      'This deployment has no metadata protocol to save the copy through, so a permission set cannot be cloned here.',
+    security_audience_reopen_unsupported:
+      "This deployment's security service does not implement re-opening a dismissed audience-binding suggestion, so the dismissal stands.",
+    share_links_unconfigured: 'Sharing is not configured',
   },
   'zh-CN': {
     permission_denied: '您没有执行此操作的权限，如需访问请联系管理员。',
@@ -549,6 +610,48 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     automation_hooks_service_unregistered:
       '入站自动化钩子不可用：未注册 trigger-api 服务。入站钩子触发器（@objectstack/trigger-api）通过该服务提供此路由；请在拥有该流程的环境上组合它。',
     automation_hooks_member_missing: '入站自动化钩子不可用：已注册的 trigger-api 服务未实现 handleInboundHook。',
+    auth_service_unavailable: '认证服务不可用：请注册 @objectstack/plugin-auth 以启用认证。',
+    i18n_service_unavailable: 'i18n 服务不可用。',
+    mcp_server_unavailable: 'MCP 服务器不可用。',
+    meta_layered_view_unsupported: '不支持分层元数据视图：当前的协议实现未提供该功能。',
+    meta_save_conditions_unsupported:
+      '此主机的协议未提供 saveMetaItem，因此保存时无法遵循 If-Match、If-None-Match 或 ?mode=draft。请去掉这些条件后再保存，或通过协议实现了 saveMetaItem 的主机保存。',
+    meta_save_unsupported: '不支持保存。',
+    meta_draft_listing_unsupported: '不支持列出草稿。',
+    meta_stored_migration_unsupported: '不支持迁移已存储的元数据。',
+    packages_draft_publish_unsupported: '不支持发布草稿。',
+    packages_draft_discard_unsupported: '不支持丢弃草稿。',
+    packages_commit_history_unsupported: '不支持查看提交历史。',
+    packages_commit_revert_unsupported: '不支持撤销提交。',
+    packages_commit_rollback_unsupported: '不支持回滚到某次提交。',
+    packages_orphan_adoption_unsupported: '不支持认领孤立的元数据。',
+    packages_duplication_unsupported: '不支持复制软件包。',
+    packages_customization_ensure_unsupported: '不支持确保定制软件包存在。',
+    automation_connector_credentials_unsupported:
+      '此部署挂载的自动化服务不支持连接器凭据：它未实现 `IAutomationService` 的可选成员 `{{member}}`。未读取或更改任何内容。',
+    automation_connector_connections_unsupported:
+      '此部署挂载的自动化服务不支持连接器连接：它未实现 `IAutomationService` 的可选成员 `{{member}}`。未读取或更改任何内容。',
+    automation_flow_clone_unsupported: '不支持复制流程：副本要存入一个软件包，而此部署没有能够确保定制软件包存在并将流程保存进去的元数据协议。',
+    automation_resume_unsupported: '不支持恢复运行。',
+    automation_run_cancel_unsupported: '此部署挂载的自动化服务不支持取消运行：它未实现 `IAutomationService` 的可选成员 `cancelRun`。没有取消任何运行。',
+    automation_run_restore_unsupported:
+      '此部署挂载的自动化服务不支持恢复已消费的挂起：它未实现 `IAutomationService` 的可选成员 `restoreConsumedSuspension`。没有恢复任何挂起。',
+    automation_screen_lookup_unsupported: '不支持查询屏幕。',
+    automation_runs_list_unsupported: '此部署挂载的自动化服务不支持列出流程的运行：它未实现 `IAutomationService` 的可选成员 `listRunsPage`。没有列出任何运行。',
+    action_activation_ledger_unsupported: '此部署的数据引擎未实现软件包元数据的启用台账（ADR-0126 §8），因此无法在这里停用软件包中的动作。',
+    catalog_activation_ledger_missing_on: "此部署没有启用台账（{{table}}，ADR-0126 §4），因此无法在这里启用{{noun}} '{{name}}'。",
+    catalog_activation_ledger_missing_off: "此部署没有启用台账（{{table}}，ADR-0126 §4），因此无法在这里停用{{noun}} '{{name}}'。",
+    catalog_activation_noun_position: '岗位',
+    catalog_activation_noun_permission: '权限集',
+    catalog_activation_noun_sharing_rule: '声明的共享规则',
+    catalog_activation_noun_webhook: '声明的 webhook',
+    catalog_activation_noun_queue: '声明的队列',
+    catalog_activation_noun_assignment_rule: '声明的分配规则',
+    permission_set_clone_pair_unsupported:
+      "权限集 '{{name}}' 由只读软件包 '{{packageId}}' 提供，因此它的副本应存入该软件包配对的定制软件包，而此部署的元数据协议无法确保该定制软件包存在。",
+    permission_set_clone_no_protocol: '此部署没有可用于保存副本的元数据协议，因此无法在这里复制权限集。',
+    security_audience_reopen_unsupported: '此部署的安全服务未实现重新打开已忽略的受众绑定建议，因此该忽略保持有效。',
+    share_links_unconfigured: '未配置共享。',
   },
   'ja-JP': {
     permission_denied: 'この操作を実行する権限がありません。アクセスが必要な場合は管理者にお問い合わせください。',
@@ -639,6 +742,54 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       '受信自動化フックは利用できません。trigger-api サービスが登録されていません。受信フックトリガー（@objectstack/trigger-api）がこのサービスを通じてこのルートを提供します。フローを所有する環境に組み込んでください。',
     automation_hooks_member_missing:
       '受信自動化フックは利用できません。登録されている trigger-api サービスは handleInboundHook を実装していません。',
+    auth_service_unavailable: '認証サービスは利用できません。認証を有効にするには @objectstack/plugin-auth を登録してください。',
+    i18n_service_unavailable: 'i18n サービスは利用できません。',
+    mcp_server_unavailable: 'MCP サーバーは利用できません。',
+    meta_layered_view_unsupported: 'レイヤー化されたメタデータビューはサポートされていません。プロトコル実装がこの機能を提供していません。',
+    meta_save_conditions_unsupported:
+      'このホストのプロトコルには saveMetaItem がないため、保存時に If-Match、If-None-Match、?mode=draft を適用できません。これらを付けずに保存するか、プロトコルが saveMetaItem を実装しているホストを通じて保存してください。',
+    meta_save_unsupported: '保存はサポートされていません。',
+    meta_draft_listing_unsupported: '下書きの一覧表示はサポートされていません。',
+    meta_stored_migration_unsupported: '保存済みメタデータの移行はサポートされていません。',
+    packages_draft_publish_unsupported: '下書きの公開はサポートされていません。',
+    packages_draft_discard_unsupported: '下書きの破棄はサポートされていません。',
+    packages_commit_history_unsupported: 'コミット履歴はサポートされていません。',
+    packages_commit_revert_unsupported: 'コミットの取り消しはサポートされていません。',
+    packages_commit_rollback_unsupported: 'コミットへのロールバックはサポートされていません。',
+    packages_orphan_adoption_unsupported: '孤立したメタデータの引き取りはサポートされていません。',
+    packages_duplication_unsupported: 'パッケージの複製はサポートされていません。',
+    packages_customization_ensure_unsupported: 'カスタマイズパッケージの確保はサポートされていません。',
+    automation_connector_credentials_unsupported:
+      'このデプロイメントに組み込まれた自動化サービスはコネクタ資格情報をサポートしていません。`IAutomationService` の任意メンバー `{{member}}` を実装していません。何も読み取り・変更されていません。',
+    automation_connector_connections_unsupported:
+      'このデプロイメントに組み込まれた自動化サービスはコネクタ接続をサポートしていません。`IAutomationService` の任意メンバー `{{member}}` を実装していません。何も読み取り・変更されていません。',
+    automation_flow_clone_unsupported:
+      'フローの複製はサポートされていません。コピーはパッケージに保存されますが、このデプロイメントにはカスタマイズパッケージを確保してフローを保存できるメタデータプロトコルがありません。',
+    automation_resume_unsupported: '再開はサポートされていません。',
+    automation_run_cancel_unsupported:
+      'このデプロイメントに組み込まれた自動化サービスは実行のキャンセルをサポートしていません。`IAutomationService` の任意メンバー `cancelRun` を実装していません。実行はキャンセルされていません。',
+    automation_run_restore_unsupported:
+      'このデプロイメントに組み込まれた自動化サービスは消費済みの一時停止の復元をサポートしていません。`IAutomationService` の任意メンバー `restoreConsumedSuspension` を実装していません。一時停止は復元されていません。',
+    automation_screen_lookup_unsupported: '画面の参照はサポートされていません。',
+    automation_runs_list_unsupported:
+      'このデプロイメントに組み込まれた自動化サービスはフローの実行一覧をサポートしていません。`IAutomationService` の任意メンバー `listRunsPage` を実装していません。実行は一覧表示されていません。',
+    action_activation_ledger_unsupported:
+      'このデプロイメントのデータエンジンはパッケージ化されたメタデータの有効化台帳（ADR-0126 §8）を実装していないため、ここではパッケージ化されたアクションを無効にできません。',
+    catalog_activation_ledger_missing_on:
+      "このデプロイメントには有効化台帳（{{table}}、ADR-0126 §4）がないため、ここでは{{noun}} '{{name}}' を有効にできません。",
+    catalog_activation_ledger_missing_off:
+      "このデプロイメントには有効化台帳（{{table}}、ADR-0126 §4）がないため、ここでは{{noun}} '{{name}}' を無効にできません。",
+    catalog_activation_noun_position: '役職',
+    catalog_activation_noun_permission: '権限セット',
+    catalog_activation_noun_sharing_rule: '宣言された共有ルール',
+    catalog_activation_noun_webhook: '宣言された Webhook',
+    catalog_activation_noun_queue: '宣言されたキュー',
+    catalog_activation_noun_assignment_rule: '宣言された割り当てルール',
+    permission_set_clone_pair_unsupported:
+      "権限セット '{{name}}' は読み取り専用パッケージ '{{packageId}}' が提供しているため、そのコピーはこのパッケージと対になるカスタマイズパッケージに属しますが、このデプロイメントのメタデータプロトコルはそれを確保できません。",
+    permission_set_clone_no_protocol: 'このデプロイメントにはコピーを保存するためのメタデータプロトコルがないため、ここでは権限セットを複製できません。',
+    security_audience_reopen_unsupported: 'このデプロイメントのセキュリティサービスは却下された対象者バインドの提案を再度開く機能を実装していないため、却下はそのまま有効です。',
+    share_links_unconfigured: '共有が構成されていません。',
   },
   'es-ES': {
     permission_denied:
@@ -734,6 +885,58 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'Los ganchos de automatización entrantes no están disponibles: no hay ningún servicio trigger-api registrado. El disparador de ganchos entrantes (@objectstack/trigger-api) sirve esta ruta a través de ese servicio; compóngalo en el entorno al que pertenece el flujo.',
     automation_hooks_member_missing:
       'Los ganchos de automatización entrantes no están disponibles: el servicio trigger-api registrado no implementa handleInboundHook.',
+    auth_service_unavailable:
+      'El servicio de autenticación no está disponible: registre @objectstack/plugin-auth para habilitar la autenticación.',
+    i18n_service_unavailable: 'El servicio i18n no está disponible.',
+    mcp_server_unavailable: 'El servidor MCP no está disponible.',
+    meta_layered_view_unsupported:
+      'La vista de metadatos por capas no está disponible: la implementación del protocolo no la admite.',
+    meta_save_conditions_unsupported:
+      'Este host no tiene saveMetaItem en su protocolo, por lo que no puede respetar If-Match, If-None-Match ni ?mode=draft al guardar. Guarde sin ellos o guarde a través de un host cuyo protocolo implemente saveMetaItem.',
+    meta_save_unsupported: 'No se admite guardar.',
+    meta_draft_listing_unsupported: 'No se admite listar borradores.',
+    meta_stored_migration_unsupported: 'No se admite migrar los metadatos almacenados.',
+    packages_draft_publish_unsupported: 'No se admite publicar borradores.',
+    packages_draft_discard_unsupported: 'No se admite descartar borradores.',
+    packages_commit_history_unsupported: 'No se admite el historial de confirmaciones.',
+    packages_commit_revert_unsupported: 'No se admite revertir una confirmación.',
+    packages_commit_rollback_unsupported: 'No se admite restaurar una confirmación anterior.',
+    packages_orphan_adoption_unsupported: 'No se admite adoptar metadatos huérfanos.',
+    packages_duplication_unsupported: 'No se admite duplicar paquetes.',
+    packages_customization_ensure_unsupported: 'No se admite asegurar el paquete de personalización.',
+    automation_connector_credentials_unsupported:
+      'El servicio de automatización que monta esta implementación no admite credenciales de conector: no implementa `{{member}}`, un miembro opcional de `IAutomationService`. No se leyó ni cambió nada.',
+    automation_connector_connections_unsupported:
+      'El servicio de automatización que monta esta implementación no admite conexiones de conector: no implementa `{{member}}`, un miembro opcional de `IAutomationService`. No se leyó ni cambió nada.',
+    automation_flow_clone_unsupported:
+      'No se admite clonar flujos: la copia se guarda en un paquete, y esta implementación no tiene un protocolo de metadatos que pueda asegurar un paquete de personalización y guardar en él un flujo.',
+    automation_resume_unsupported: 'No se admite reanudar.',
+    automation_run_cancel_unsupported:
+      'El servicio de automatización que monta esta implementación no admite cancelar una ejecución: no implementa `cancelRun`, un miembro opcional de `IAutomationService`. No se canceló ninguna ejecución.',
+    automation_run_restore_unsupported:
+      'El servicio de automatización que monta esta implementación no admite restaurar una suspensión consumida: no implementa `restoreConsumedSuspension`, un miembro opcional de `IAutomationService`. No se restauró ninguna suspensión.',
+    automation_screen_lookup_unsupported: 'No se admite consultar la pantalla.',
+    automation_runs_list_unsupported:
+      'El servicio de automatización que monta esta implementación no admite listar las ejecuciones de un flujo: no implementa `listRunsPage`, un miembro opcional de `IAutomationService`. No se listó ninguna ejecución.',
+    action_activation_ledger_unsupported:
+      'El motor de datos de esta implementación no implementa el registro de activación de metadatos empaquetados (ADR-0126 §8), por lo que aquí no se puede desactivar una acción empaquetada.',
+    catalog_activation_ledger_missing_on:
+      "Esta implementación no tiene el registro de activación ({{table}}, ADR-0126 §4), por lo que aquí no se puede activar {{noun}} '{{name}}'.",
+    catalog_activation_ledger_missing_off:
+      "Esta implementación no tiene el registro de activación ({{table}}, ADR-0126 §4), por lo que aquí no se puede desactivar {{noun}} '{{name}}'.",
+    catalog_activation_noun_position: 'el puesto',
+    catalog_activation_noun_permission: 'el conjunto de permisos',
+    catalog_activation_noun_sharing_rule: 'la regla de uso compartido declarada',
+    catalog_activation_noun_webhook: 'el webhook declarado',
+    catalog_activation_noun_queue: 'la cola declarada',
+    catalog_activation_noun_assignment_rule: 'la regla de asignación declarada',
+    permission_set_clone_pair_unsupported:
+      "El conjunto de permisos '{{name}}' lo proporciona el paquete de solo lectura '{{packageId}}', así que su copia pertenece al paquete de personalización emparejado con ese paquete, y el protocolo de metadatos de esta implementación no puede asegurarlo.",
+    permission_set_clone_no_protocol:
+      'Esta implementación no tiene un protocolo de metadatos con el que guardar la copia, por lo que aquí no se puede clonar un conjunto de permisos.',
+    security_audience_reopen_unsupported:
+      'El servicio de seguridad de esta implementación no implementa reabrir una sugerencia de vinculación de audiencia descartada, por lo que el descarte se mantiene.',
+    share_links_unconfigured: 'El uso compartido no está configurado.',
   },
 };
 
