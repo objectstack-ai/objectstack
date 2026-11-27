@@ -2029,12 +2029,41 @@ export function translateAction<T extends ActionLike>(
  * needed exactly that and kept a hand-copied `TRANSLATABLE_META_TYPES` set
  * under a "keep in sync with the type dispatch" comment; it is now derived from
  * {@link TRANSLATABLE_METADATA_TYPES} instead, so adding a translator here
- * reaches the REST boundary with nothing else to remember (#3786).
+ * reaches the REST boundary with nothing else to remember (#3786) — beyond its
+ * name in {@link TRANSLATED_METADATA_TYPE_NAMES}, which the type check asks for.
  */
-const METADATA_DOCUMENT_TRANSLATORS: Record<
-  string,
-  (doc: any, bundle: TranslationBundle | undefined, opts?: TranslateDocumentOptions) => any
-> = {
+type MetadataDocumentTranslator = (
+  doc: any,
+  bundle: TranslationBundle | undefined,
+  opts?: TranslateDocumentOptions,
+) => any;
+
+/**
+ * The metadata types the dispatch table below translates, as data that names
+ * no translator. {@link TRANSLATABLE_METADATA_TYPES} is built from THIS list,
+ * not from the table's keys: a reader of the set (the console asks it before
+ * every metadata read) would otherwise reach every translator and every schema
+ * they read, and keep them all in its bundle. The table `satisfies` a record
+ * keyed by exactly these names, so a translator added there without its name
+ * here, or a name here with no translator, fails the type check.
+ */
+const TRANSLATED_METADATA_TYPE_NAMES = [
+  'view',
+  'action',
+  'object',
+  'app',
+  'dashboard',
+  'dataset',
+  'page',
+  'picklist',
+  'position',
+  'permission',
+  'report',
+  'book',
+  'mapping',
+] as const;
+
+const METADATA_DOCUMENT_TRANSLATORS: Readonly<Record<string, MetadataDocumentTranslator>> = {
   view: translateView,
   action: translateAction,
   object: translateObject,
@@ -2063,15 +2092,14 @@ const METADATA_DOCUMENT_TRANSLATORS: Record<
   // mapping by label from `GET /meta/mapping`, so registering here is the
   // whole wiring.
   mapping: translateMapping,
-};
+} satisfies Record<(typeof TRANSLATED_METADATA_TYPE_NAMES)[number], MetadataDocumentTranslator>;
 
 /**
  * Metadata types whose user-facing labels {@link translateMetadataDocument}
- * localizes. Derived from the dispatch table — never restate it.
+ * localizes. Equal to the dispatch table's keys — the type check above holds
+ * the two together — never restate it.
  */
-export const TRANSLATABLE_METADATA_TYPES: ReadonlySet<string> = new Set(
-  Object.keys(METADATA_DOCUMENT_TRANSLATORS),
-);
+export const TRANSLATABLE_METADATA_TYPES: ReadonlySet<string> = new Set<string>(TRANSLATED_METADATA_TYPE_NAMES);
 
 /**
  * Generic metadata translator: dispatches to `translateView` /
