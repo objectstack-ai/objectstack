@@ -2295,10 +2295,14 @@ function walkPackages(config: any, out: ExpectedEntry[]): void {
   const manifests: unknown[] = [config?.manifest];
   const packages: unknown[] = Array.isArray(config?.packages) ? config.packages : [];
   for (const entry of packages) manifests.push((entry as any)?.manifest);
+  // A composed stack restates one package's manifest at its top level and again
+  // in `packages[]`: one package, one name, walked once.
+  const seen = new Set<string>();
   for (const manifest of manifests) {
     if (!manifest || typeof manifest !== 'object') continue;
     const id = (manifest as any).id;
-    if (typeof id !== 'string' || id.length === 0) continue;
+    if (typeof id !== 'string' || id.length === 0 || seen.has(id)) continue;
+    seen.add(id);
     pushOptional(out, ['packages', id, 'name'], (manifest as any).name, 'package');
     pushOptional(out, ['packages', id, 'description'], (manifest as any).description, 'package');
   }
