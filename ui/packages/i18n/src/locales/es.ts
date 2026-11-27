@@ -4041,6 +4041,8 @@ const es = {
     bulkDeleteSuccess_many: "{{count}} de registros de {{label}} eliminados",
     bulkDeleteSuccess_other: "{{count}} registros de {{label}} eliminados",
     bulkDeletePartial: "{{succeeded}} eliminados, {{failed}} fallidos",
+    bulkDeleteRefusedNamed: "{{names}}: {{reason}}",
+    bulkDeleteMoreReasons: "Y {{more}} más",
   },
   objectViewActions: {
     renameFailed: "No se pudo renombrar la vista",

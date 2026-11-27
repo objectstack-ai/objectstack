@@ -3953,6 +3953,8 @@ const de = {
     bulkDeleteSuccess_one: "{{count}} {{label}}-Datensatz gelöscht",
     bulkDeleteSuccess_other: "{{count}} {{label}}-Datensätze gelöscht",
     bulkDeletePartial: "{{succeeded}} gelöscht, {{failed}} fehlgeschlagen",
+    bulkDeleteRefusedNamed: "{{names}}: {{reason}}",
+    bulkDeleteMoreReasons: "Und {{more}} weitere",
   },
   objectViewActions: {
     renameFailed: "Ansicht konnte nicht umbenannt werden",

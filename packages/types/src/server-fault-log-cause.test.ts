@@ -12,6 +12,9 @@
  * it twice), and the wire (which carries none of it).
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { describe, it, expect, vi } from 'vitest';
 
 import { logServerFault, faultCauseChain, FAULT_CAUSE_DEPTH_LIMIT, SERVER_FAULT_LOG_PREFIX } from './server-fault-log.js';
@@ -111,6 +114,21 @@ describe('faultCauseChain — bounded both ways', () => {
         expect(faultCauseChain(withCause('w', { code: 'ECONNRESET' }))).toEqual([{ message: '{"code":"ECONNRESET"}' }]);
     });
 
+    it('a non-Error object cause that carries its own cause continues the chain through it', () => {
+        expect(faultCauseChain(withCause('w', { code: 'E4', cause: new Error(ROOT) }))).toEqual([
+            { message: '{"code":"E4","cause":{}}' },
+            { message: `Error: ${ROOT}`, stack: expect.stringContaining(ROOT) },
+        ]);
+    });
+
+    it('an Error cause with an empty stack prints its message and no stack field', () => {
+        const stackless = new Error(ROOT);
+        stackless.stack = '';
+        const chain = faultCauseChain(withCause('w', stackless));
+        expect(chain).toEqual([{ message: `Error: ${ROOT}` }]);
+        expect(chain[0]).not.toHaveProperty('stack');
+    });
+
     it('a throwing cause getter ends the chain rather than costing the line', () => {
         const hostile = new Error('w');
         Object.defineProperty(hostile, 'cause', { get() { throw new Error('getter'); } });
@@ -135,6 +153,47 @@ describe('faultCauseChain — bounded both ways', () => {
         } finally {
             spy.mockRestore();
         }
+    });
+});
+
+/**
+ * The two redact word lists, read off `server-fault-log.ts` itself. The copies
+ * in `@objectstack/core` (`logger.ts`) and `@objectstack/observability`
+ * (`loggers.ts`) are pinned to the same two lists by their own tests, so a word
+ * added to, or dropped from, any one copy reds that copy's package.
+ */
+const DEFAULT_WORDS = ['password', 'token', 'secret', 'key'];
+const GLUED_QUALIFIERS = [
+    'access', 'account', 'admin', 'api', 'app', 'auth', 'bearer', 'client', 'csrf', 'db', 'database',
+    'encryption', 'id', 'jwt', 'master', 'oauth', 'private', 'public', 'refresh', 'root', 'secret',
+    'service', 'session', 'shared', 'sign', 'signing', 'ssh', 'token', 'user', 'webhook', 'xsrf',
+];
+
+/** The quoted words of the one list literal `declaration` captures in `source`. */
+function declaredWords(source: string, declaration: RegExp): string[] {
+    const matches = [...source.matchAll(declaration)];
+    expect(matches).toHaveLength(1);
+    return [...matches[0][1].matchAll(/'([^']*)'/g)].map((match) => match[1]).sort();
+}
+
+describe('the redact word lists equal the fixture, in both directions', () => {
+    const source = readFileSync(join(__dirname, 'server-fault-log.ts'), 'utf8');
+
+    it('DEFAULT_REDACTED_WORDS', () => {
+        expect(declaredWords(source, /const DEFAULT_REDACTED_WORDS = \[([^\]]*)\]/g)).toEqual([...DEFAULT_WORDS].sort());
+    });
+
+    it('CONCATENATED_SECRET_QUALIFIERS', () => {
+        expect(declaredWords(source, /const CONCATENATED_SECRET_QUALIFIERS = new Set\(\[([^\]]*)\]\)/g)).toEqual(
+            [...GLUED_QUALIFIERS].sort(),
+        );
+    });
+
+    it('CONTROL — the glued fixture is withheld field by field, so each qualifier is live', () => {
+        const [line] = faultCauseChain(withCause('w', Object.fromEntries(GLUED_QUALIFIERS.map((q) => [`${q}key`, 'x']))));
+        const parsed = JSON.parse(line.message) as Record<string, string>;
+        expect(Object.keys(parsed)).toHaveLength(GLUED_QUALIFIERS.length);
+        expect(Object.values(parsed).every((value) => value === '***REDACTED***')).toBe(true);
     });
 });
 

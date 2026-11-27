@@ -96,7 +96,7 @@ import { evalRowPredicate, isMultiValueRelationship, resolveAffordance, type Act
 import { actionRendersAt, type ActionLocation } from '@object-ui/types';
 import { usePermissions } from '@object-ui/permissions';
 import { relatedCreateSeedOf } from '@object-ui/plugin-detail/core';
-import { createKeepsField } from '@object-ui/plugin-form';
+import { createKeepsField } from '@object-ui/plugin-form/core';
 import { servesRecordRead, type RecordReadPrincipal } from '../utils/recordReadServed.js';
 import { RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM, RECORD_TRAIL_PARAM, appendRecordTrail } from '../urlParams.js';
 import { documentHref } from './documentHref.js';

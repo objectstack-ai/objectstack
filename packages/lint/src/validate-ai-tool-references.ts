@@ -323,6 +323,11 @@ function skillContextResolver(
  * of the artifact ships, held only outside the skill's package closure, or held
  * by two holders the rule cannot pick between. One line each (#22161); the
  * rule's own refusal sentence (`packageScopedRefusalMessage`) is the long form.
+ *
+ * The fix for two holders names the caller the rule judged for. A stack with a
+ * package (`ambiguous-in-closure`) is told to keep one pack in reach of it; a
+ * stack that names none (`ambiguous-in-environment`) has no package to be in
+ * reach of, so its fix names the artifact's packages, which hold the two.
  */
 function contextRefusalFinding(
   context: string,
@@ -332,13 +337,16 @@ function contextRefusalFinding(
     .map((c) => (c.kind === 'package' ? `"${c.packageId}"` : c.kind === 'environment' ? 'the stack' : c.kind))
     .join(', ');
   const outside = refusal.reason === 'outside-closure';
+  const noCallerPackage = refusal.reason === 'ambiguous-in-environment';
   return {
     message:
       `\`context\` pack "${context}" is held ${outside ? 'only outside this package\'s dependency closure' : 'by more than one holder in reach'} ` +
       `(${holders}): the MCP prompt takes no record and ${GET_RECORD_CONTEXT_TOOL_NAME} is refused.`,
     hint: outside
       ? 'Declare a dependency on the package that ships the pack (ADR-0141), or name a pack the stack defines'
-      : 'Keep one pack of that name in reach of this package, or name another pack',
+      : noCallerPackage
+        ? 'Keep one pack of that name across the artifact\'s packages, or name another pack'
+        : 'Keep one pack of that name in reach of this package, or name another pack',
   };
 }
 
@@ -348,7 +356,7 @@ function contextRefusalFinding(
  * (`stack.aiContexts`). Two verdicts, each a `warning`:
  *
  * - {@link AI_SKILL_CONTEXT_UNKNOWN}: `context` resolves to no pack by the
- *   rule the MCP skill prompt resolves it with ({@link skillContextResolution}:
+ *   rule the MCP skill prompt resolves it with ({@link skillContextResolver}:
  *   ADR-0150 D3 over the stack's own packs and those of the artifact's
  *   `packages[]`, in the skill's package closure). Where no holder has it, the
  *   prompt lists no record argument; no other pack is substituted (D8).

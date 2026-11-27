@@ -4037,6 +4037,8 @@ const fr = {
     bulkDeleteSuccess_many: "{{count}} d'enregistrements {{label}} supprimés",
     bulkDeleteSuccess_other: "{{count}} enregistrements {{label}} supprimés",
     bulkDeletePartial: "{{succeeded}} supprimé(s), {{failed}} échoué(s)",
+    bulkDeleteRefusedNamed: "{{names}} : {{reason}}",
+    bulkDeleteMoreReasons: "Et {{more}} de plus",
   },
   objectViewActions: {
     renameFailed: "Impossible de renommer la vue",

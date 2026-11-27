@@ -4291,6 +4291,8 @@ const zh = {
     bulkDeleteSuccess_one: '已删除 {{count}} 条 {{label}} 记录',
     bulkDeleteSuccess_other: '已删除 {{count}} 条 {{label}} 记录',
     bulkDeletePartial: '成功 {{succeeded}} 条，失败 {{failed}} 条',
+    bulkDeleteRefusedNamed: '{{names}}：{{reason}}',
+    bulkDeleteMoreReasons: '另有 {{more}} 个原因',
   },
   objectViewActions: {
     renameFailed: '重命名视图失败',
