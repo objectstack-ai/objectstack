@@ -46,7 +46,8 @@ const LazyMarkdownContent = recoverableLazy(() => import('./MarkdownContent.js')
  * pipeline the field type reads through.
  *
  * - `document` — a full-size display (the record page, a readonly form field):
- *   headings keep their heading elements and the typography scale's sizes.
+ *   headings keep their heading elements, one step smaller than the
+ *   typography scale draws them (objectstack#37801).
  * - `cell` — one cell of a grid column, whose row is one line of the cell's own
  *   text (objectstack#36344, objectstack#36452). A heading is drawn as a bold
  *   line at the cell's text size, not as a heading element, and the body
@@ -55,11 +56,33 @@ const LazyMarkdownContent = recoverableLazy(() => import('./MarkdownContent.js')
  */
 export type RichTextFace = 'document' | 'cell';
 
-/** The document face: the typography scale at its own sizes. */
-export const RICH_TEXT_DOCUMENT_CLASS = 'prose prose-sm max-w-none dark:prose-invert break-words';
+/** The typography both faces are drawn with. */
+const RICH_TEXT_FACE_BASE_CLASS = 'prose prose-sm max-w-none dark:prose-invert break-words';
 
-/** The cell face: the same typography, at the size and line height of the cell around it. */
-export const RICH_TEXT_CELL_FACE_CLASS = `${RICH_TEXT_DOCUMENT_CLASS} text-[length:inherit] leading-[inherit]`;
+/**
+ * The document face: the typography scale, its top three heading levels one
+ * step smaller (objectstack#37801).
+ *
+ * `prose-sm` sets a body of 14 px under an `h1` of 30 px, an `h2` of 20 px and
+ * an `h3` of 18 px: a document's scale, drawn here inside one field of a
+ * record page whose own group titles are 14 px. The modifiers set `h1` 18 px,
+ * `h2` 16 px and `h3` 14 px (still semibold), so a body's outline still reads
+ * in order and no field's heading outshouts the page around it.
+ *
+ * Only the SIZE moves. The elements stay `h1`–`h6`: a `?section=` link finds a
+ * cited section by its heading element (`recordSectionAnchor.ts`), and the cell
+ * face below is the one that draws no heading element (objectstack#36344). The
+ * markdown and the html / richtext pipelines read this one constant, so the
+ * two draw a heading at the same size.
+ */
+export const RICH_TEXT_DOCUMENT_CLASS = `${RICH_TEXT_FACE_BASE_CLASS} prose-h1:text-lg prose-h2:text-base prose-h3:text-sm`;
+
+/**
+ * The cell face: the same typography, at the size and line height of the cell
+ * around it. Built on the shared base, not on the document face, so the
+ * document face's heading sizes never reach a grid cell.
+ */
+export const RICH_TEXT_CELL_FACE_CLASS = `${RICH_TEXT_FACE_BASE_CLASS} text-[length:inherit] leading-[inherit]`;
 
 type HeadingTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
 type CellHeadingComponent = (props: { children?: React.ReactNode }) => React.ReactElement;
@@ -145,7 +168,7 @@ function richTextSource(value: unknown): string | undefined {
  * (objectstack#36344): a heading is a bold line at the cell's own text size,
  * so a value that starts with `# Heading` does not grow its row. Every other
  * caller — the record page, a readonly form field — keeps the `document`
- * face and its heading sizes.
+ * face and its heading elements, at the face's sizes (objectstack#37801).
  */
 export function MarkdownCellRenderer({ value, inGridColumn }: CellRendererProps): React.ReactElement {
   const text = richTextSource(value);
@@ -185,7 +208,8 @@ export function MarkdownCellRenderer({ value, inGridColumn }: CellRendererProps)
  * not grow its row. The face changes only which elements the SANITIZED tree
  * is drawn with; what the sanitiser keeps and drops is the same in both
  * faces. Every other caller — the record page, a readonly form field — keeps
- * the `document` face and its heading sizes.
+ * the `document` face and its heading elements, at the face's sizes
+ * (objectstack#37801).
  *
  * The parse is memoised on the text and the face for cost only (a grid
  * renders many cells); nothing depends on the identity of the memoised value.
