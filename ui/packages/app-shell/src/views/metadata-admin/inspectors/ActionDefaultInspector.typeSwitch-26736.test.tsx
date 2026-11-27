@@ -32,6 +32,9 @@ const state = vi.hoisted(() => ({
 vi.mock('../useMetadata', () => ({ useMetadataClient: () => state.metadataClient }));
 
 import { ActionDefaultInspector, TYPE_SCOPED_KEYS } from './ActionDefaultInspector';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 afterEach(cleanup);
 

@@ -14,6 +14,8 @@
  *     stored.
  */
 import { describe, expect, it } from 'vitest';
+// Paid during collection, not inside a clocked case: the diagnostics `import()` it in a function body (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/lint';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
