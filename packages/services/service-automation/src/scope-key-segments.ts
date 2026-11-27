@@ -95,24 +95,49 @@ export function copyForScopeDescent(value: object): Record<string, unknown> {
 }
 
 /**
+ * Thrown by {@link copyHeldValue} for a value that contains itself: a copy at
+ * every depth of such a value has no end, so it is refused by name instead of
+ * recursing until the stack overflows (an overflow reads as any other failure
+ * of the caller, an unreachable store included).
+ */
+export class HeldValueCycleError extends Error {
+    constructor() {
+        super('A flow run value contains itself (a list or object that holds itself at some depth), so the run cannot take its own copy of it.');
+        this.name = 'HeldValueCycleError';
+    }
+}
+
+/**
  * A run's own copy of a value it is seeded with from somewhere it must not
- * write back to (a flow variable's declared default): arrays and plain objects
- * (`Object.prototype` or `null` prototype) copied at every depth, every other
- * value — a string, a number, a `Date`, a class instance — as it is, the rule
- * `copyLiteral` (`./builtin/value-slot-map.ts`) follows for a node's config.
- * Each key is DEFINED on the copy, never assigned, so an own key named
- * `__proto__` stays an own key.
+ * write back to (a flow variable's declared default, the trigger record, a
+ * paused run's held variables): arrays and plain objects (`Object.prototype`
+ * or `null` prototype) copied at every depth, every other value — a string, a
+ * number, a `Date`, a class instance — as it is, the rule `copyLiteral`
+ * (`./builtin/value-slot-map.ts`) follows for a node's config. Each key is
+ * DEFINED on the copy, never assigned, so an own key named `__proto__` stays
+ * an own key. A value that contains itself throws {@link HeldValueCycleError}
+ * (a value reached twice without containing itself is copied twice).
  */
 export function copyHeldValue(value: unknown): unknown {
-    if (Array.isArray(value)) return value.map(copyHeldValue);
-    if (value !== null && typeof value === 'object') {
+    return copyHeldValueWithin(value, new WeakMap<object, true>());
+}
+
+function copyHeldValueWithin(value: unknown, open: WeakMap<object, true>): unknown {
+    if (value === null || typeof value !== 'object') return value;
+    if (!Array.isArray(value)) {
         const proto = Object.getPrototypeOf(value);
         if (proto !== Object.prototype && proto !== null) return value;
-        const out: Record<string, unknown> = proto === null ? scopeContainer() : {};
+    }
+    if (open.has(value)) throw new HeldValueCycleError();
+    open.set(value, true);
+    try {
+        if (Array.isArray(value)) return value.map((entry) => copyHeldValueWithin(entry, open));
+        const out: Record<string, unknown> = Object.getPrototypeOf(value) === null ? scopeContainer() : {};
         for (const [key, entry] of Object.entries(value)) {
-            Object.defineProperty(out, key, { value: copyHeldValue(entry), enumerable: true, writable: true, configurable: true });
+            Object.defineProperty(out, key, { value: copyHeldValueWithin(entry, open), enumerable: true, writable: true, configurable: true });
         }
         return out;
+    } finally {
+        open.delete(value);
     }
-    return value;
 }

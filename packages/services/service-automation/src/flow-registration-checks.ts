@@ -329,36 +329,71 @@ export function validateStartNode(flowName: string, flow: FlowParsed): Registrat
 }
 
 /**
+ * The positions at which {@link validateVariableKeySegments} judges a variable
+ * key: the spec's binding positions (`FLOW_BINDING_KEYS` in
+ * `@objectstack/spec`'s `flow-bound-variable-name.ts`, held equal by
+ * `variable-key-reserved-segments.test.ts`) plus `nodeId`, because a node's id
+ * heads every key its output is stored under.
+ */
+export const VARIABLE_KEY_POSITIONS = [
+    'nodeId',
+    'variableName',
+    'outputVariable',
+    'errorVariable',
+    'iteratorVariable',
+    'indexVariable',
+    'idVariable',
+    'screenFieldName',
+    'assignmentTarget',
+] as const;
+
+export type VariableKeyPosition = (typeof VARIABLE_KEY_POSITIONS)[number];
+
+/** The node config keys whose value names a variable the node binds, with the position each is. */
+const NODE_BINDING_CONFIG_KEYS: ReadonlyArray<[string, VariableKeyPosition]> = [
+    ['outputVariable', 'outputVariable'],
+    ['errorVariable', 'errorVariable'],
+    ['iteratorVariable', 'iteratorVariable'],
+    ['indexVariable', 'indexVariable'],
+    ['idVariable', 'idVariable'],
+];
+
+/**
  * Refuse a flow that names a variable key with a reserved segment — the
  * authoring door of {@link RESERVED_VARIABLE_KEY_SEGMENTS}
- * (`./scope-key-segments.ts`). Judged, in every graph the flow holds: each
- * declared variable's `name`; each `assignment` node's targets, in the shape
- * the executor binds (the `assignments` map's keys, the legacy array's
- * `variable` / `name` / `key`, or, with no `assignments`, the config's own
- * keys); each node's `outputVariable` / `iteratorVariable` / `indexVariable` /
- * `errorVariable`; and each `screen` field's `name`, the key its submission
- * binds. Every site is listed, so one save names them all.
+ * (`./scope-key-segments.ts`). Judged at every {@link VARIABLE_KEY_POSITIONS}
+ * position, in every graph the flow holds (region graphs included): each
+ * node's `id`; each declared variable's `name`; each `assignment` node's
+ * targets, in the shape the executor binds (the `assignments` map's keys, the
+ * legacy array's `variable` / `name` / `key`, or, with no `assignments`, the
+ * config's own keys); each node's `outputVariable` / `errorVariable` /
+ * `iteratorVariable` / `indexVariable` / `idVariable`; and each `screen`
+ * field's `name`. A name is judged TRIMMED, because executors trim some of
+ * them before binding (`script`'s `outputVariable`, `screen`'s `idVariable`).
+ * Every site is listed, so one save names them all.
  */
 export function validateVariableKeySegments(flowName: string, flow: FlowParsed): RegistrationCheckRefusal | undefined {
     const sites: RegistrationCheckSite[] = [];
-    const judge = (key: unknown, path: string): void => {
-        if (typeof key !== 'string' || !hasReservedVariableKeySegment(key)) return;
-        sites.push({ path, from: JSON.stringify(key), detail: `the variable key \`${key}\` at ${path}` });
+    const judge = (key: unknown, path: string, position: VariableKeyPosition): void => {
+        if (typeof key !== 'string' || !hasReservedVariableKeySegment(key.trim())) return;
+        sites.push({ path, from: JSON.stringify(key), detail: `the variable key \`${key}\` (${position}) at ${path}` });
     };
     const declared = (flow as { variables?: unknown }).variables;
     if (Array.isArray(declared)) {
         declared.forEach((v, i) => {
-            if (v && typeof v === 'object') judge((v as { name?: unknown }).name, `${STORED_FLOW_PATH}.variables[${i}].name`);
+            if (v && typeof v === 'object') judge((v as { name?: unknown }).name, `${STORED_FLOW_PATH}.variables[${i}].name`, 'variableName');
         });
     }
     for (const graph of collectFlowGraphs(flow)) {
         graph.nodes.forEach((node, index) => {
             if (!node || typeof node !== 'object') return;
+            const nodePath = storedGraphMemberPath(graph, 'nodes', index);
+            judge(node.id, `${nodePath}.id`, 'nodeId');
             const config = node.config;
             if (!config || typeof config !== 'object' || Array.isArray(config)) return;
             const cfg = config as Record<string, unknown>;
-            const at = `${storedGraphMemberPath(graph, 'nodes', index)}.config`;
-            for (const key of VARIABLE_NAME_CONFIG_KEYS) judge(cfg[key], `${at}.${key}`);
+            const at = `${nodePath}.config`;
+            for (const [key, position] of NODE_BINDING_CONFIG_KEYS) judge(cfg[key], `${at}.${key}`, position);
             if (node.type === 'assignment') {
                 const raw = cfg.assignments;
                 if (Array.isArray(raw)) {
@@ -366,17 +401,17 @@ export function validateVariableKeySegments(flowName: string, flow: FlowParsed):
                         if (!item || typeof item !== 'object') return;
                         const entry = item as Record<string, unknown>;
                         const nameKey = ASSIGNMENT_ENTRY_NAME_KEYS.find((k) => typeof entry[k] === 'string' && entry[k]);
-                        if (nameKey) judge(entry[nameKey], `${at}.assignments[${i}].${nameKey}`);
+                        if (nameKey) judge(entry[nameKey], `${at}.assignments[${i}].${nameKey}`, 'assignmentTarget');
                     });
                 } else if (raw && typeof raw === 'object') {
-                    for (const key of Object.keys(raw)) judge(key, `${at}.assignments[${JSON.stringify(key)}]`);
+                    for (const key of Object.keys(raw)) judge(key, `${at}.assignments[${JSON.stringify(key)}]`, 'assignmentTarget');
                 } else {
-                    for (const key of Object.keys(cfg)) judge(key, `${at}[${JSON.stringify(key)}]`);
+                    for (const key of Object.keys(cfg)) judge(key, `${at}[${JSON.stringify(key)}]`, 'assignmentTarget');
                 }
             }
             if (node.type === 'screen' && Array.isArray(cfg.fields)) {
                 cfg.fields.forEach((field, i) => {
-                    if (field && typeof field === 'object') judge((field as { name?: unknown }).name, `${at}.fields[${i}].name`);
+                    if (field && typeof field === 'object') judge((field as { name?: unknown }).name, `${at}.fields[${i}].name`, 'screenFieldName');
                 });
             }
         });

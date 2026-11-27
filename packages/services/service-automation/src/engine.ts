@@ -1731,9 +1731,11 @@ function isEngineVariable(name: string): boolean {
  * The keys of a resume signal with a reserved segment — the resume door of
  * {@link RESERVED_VARIABLE_KEY_SEGMENTS} (`./scope-key-segments.ts`): each
  * key of `output` and of `variables` (a screen's submitted inputs), as the
- * caller spelled it, `output` keys prefixed `output.`. Every signal is judged,
- * an engine-built one included: its keys are the author's names, which the
- * authoring door already holds to the same rule.
+ * caller spelled it, `output` keys prefixed `output.`. A CALLER's signal only:
+ * a signal the engine built itself ({@link ENGINE_BUILT_SIGNAL} — the `map`
+ * item handoff, the cancelled-item continuation, the subflow up-bubble) is
+ * exempt, as it is from the `$` rule, so a run parked before this rule, or
+ * under a key the door did not judge then, still completes.
  *
  * `resume` asks this FIRST — before the screen contract reads the submitted
  * values (a `visibleWhen` is evaluated over them) and before
@@ -1742,6 +1744,7 @@ function isEngineVariable(name: string): boolean {
  * keys too, so no caller of the chokepoint can fold one.
  */
 export function reservedResumeSignalKeys(signal: ResumeSignal): string[] {
+    if ((signal as Record<symbol, unknown>)[ENGINE_BUILT_SIGNAL] === true) return [];
     const keys: string[] = [];
     for (const key of Object.keys(signal.output ?? {})) {
         if (hasReservedVariableKeySegment(key)) keys.push(`output.${key}`);
@@ -1795,7 +1798,7 @@ export function applyResumeSignal(
     for (const [name] of writes) {
         if (!trusted && isEngineVariable(name)) rejected.push(name);
     }
-    // No key with a reserved segment, from any signal (see
+    // No key with a reserved segment from a caller's signal (see
     // {@link reservedResumeSignalKeys}, which `resume` asks first).
     rejected.push(...reservedResumeSignalKeys(signal));
     // Reject as a whole — never a partial application.
@@ -9304,6 +9307,7 @@ export class AutomationEngine implements IAutomationService {
             suspendedRuns: this.suspendedRuns,
             cacheOnlySuspensions: this.cacheOnlySuspensions,
             evictConsumedSuspension: (...a) => this.evictConsumedSuspension(...a),
+            logger: this.logger,
         };
         return loadSuspendedRunStrict.call(host, runId);
     }
@@ -12124,7 +12128,9 @@ export class AutomationEngine implements IAutomationService {
      *     `{record.title}` / `record.status`, plus the record's own fields
      *     flattened to top-level names so bare references (`status`, `budget`)
      *     resolve in start conditions and edge predicates — WITHOUT clobbering
-     *     anything already bound;
+     *     anything already bound. All three read the run's OWN copy of the
+     *     record (arrays and plain objects at every depth), so nothing the run
+     *     does to it reaches the object the trigger handed over;
      *  3. `previous`, bound ALWAYS — to `null` on the create/insert leg, since
      *     there is no prior row — so a start condition can DISCRIMINATE create
      *     from update on a `record-after-write` flow: `previous == null` is the

@@ -26,6 +26,7 @@ import { AutomationEngine } from './engine.js';
 import { installBuiltinNodes } from './builtin/index.js';
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
 import type { SuspendedRunStore } from './engine.js';
+import { HeldValueCycleError, copyHeldValue } from './scope-key-segments.js';
 
 function silentLogger(): any {
     return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } };
@@ -50,6 +51,17 @@ function makeEngine(store?: SuspendedRunStore): AutomationEngine {
             const target = variables.get(node.config?.target as string) as Record<string, unknown> | unknown[];
             if (Array.isArray(target)) target.push('touched');
             else if (target && typeof target === 'object') (target as Record<string, unknown>).mode = 'touched';
+            return { success: true };
+        },
+    } as never);
+    // A plugin node that binds a value containing itself.
+    engine.registerNodeExecutor({
+        type: 'loopback',
+        descriptor: defineActionDescriptor({ type: 'loopback', version: '1.0.0', name: 'loopback' }),
+        async execute(_node: any, variables: Map<string, unknown>) {
+            const ring: Record<string, unknown> = { label: 'ring' };
+            ring.self = ring;
+            variables.set('ring', ring);
             return { success: true };
         },
     } as never);
@@ -174,5 +186,51 @@ describe('a paused run\'s resume works on its own values', () => {
         expect(done.success, JSON.stringify(done)).toBe(true);
         expect((done.output as any).seen).toBe('touched');
         expect(trigger).toEqual({ mode: 'a' });
+    });
+});
+
+describe('the trigger record is the run\'s own copy', () => {
+    it('a node before any pause that changes the record in place leaves the trigger\'s object as handed', async () => {
+        const engine = makeEngine();
+        engine.registerFlow('iso_prepause', chain('iso_prepause', [
+            { type: 'touch', config: { target: 'record' } },
+            assign({ seen: cel('record.mode'), seen_trigger: cel("vars['$record'].mode") }),
+        ], [{ name: 'seen', type: 'text', isOutput: true }, { name: 'seen_trigger', type: 'text', isOutput: true }]));
+        const trigger = { mode: 'a', nested: { n: 1 } };
+        const run = await engine.execute('iso_prepause', { record: trigger } as any);
+        expect(run.success, JSON.stringify(run)).toBe(true);
+        expect(run.output).toMatchObject({ seen: 'touched', seen_trigger: 'touched' });
+        expect(trigger).toEqual({ mode: 'a', nested: { n: 1 } });
+    });
+});
+
+describe('a value that contains itself', () => {
+    it('is refused by the copy with a named error', () => {
+        const ring: Record<string, unknown> = { label: 'ring' };
+        ring.self = ring;
+        let thrown: unknown;
+        try { copyHeldValue({ wrap: [ring] }); } catch (err) { thrown = err; }
+        expect(thrown).toBeInstanceOf(HeldValueCycleError);
+        expect((thrown as Error).name).toBe('HeldValueCycleError');
+        // A value reached twice without containing itself is copied, not refused.
+        const shared = { n: 1 };
+        const copy = copyHeldValue({ a: shared, b: shared }) as any;
+        expect(copy).toEqual({ a: { n: 1 }, b: { n: 1 } });
+        expect(copy.a).not.toBe(shared);
+    });
+
+    it('held by a paused run with no store: the resume still completes, never answered as an unreachable store', async () => {
+        const engine = makeEngine();
+        engine.registerFlow('iso_ring', chain('iso_ring', [
+            { type: 'loopback' },
+            { type: 'hold' },
+            assign({ seen: cel('ring.label') }),
+        ], [{ name: 'seen', type: 'text', isOutput: true }]));
+        const paused = await engine.execute('iso_ring');
+        expect(paused.status).toBe('paused');
+        const done = await engine.resume(paused.runId!, { output: { decision: 'approved' } });
+        expect(done.code).not.toBe('STORE_UNAVAILABLE');
+        expect(done.success, JSON.stringify({ code: done.code, error: done.error })).toBe(true);
+        expect((done.output as any).seen).toBe('ring');
     });
 });

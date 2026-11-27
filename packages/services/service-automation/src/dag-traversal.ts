@@ -1292,9 +1292,13 @@ export function seedRunVariables(
 ): Map<string, unknown> {
     const variables = this.seedDeclaredVariables(flow, context);
     if (context?.record) {
-        variables.set('$record', context.record);
-        variables.set('record', context.record);
-        for (const [k, v] of Object.entries(context.record)) {
+        // The run's own copy of the record it was handed (`copyHeldValue`):
+        // nothing the run does to `record` / `$record` — a node that changes
+        // it in place included — reaches the trigger's object.
+        const record = copyHeldValue(context.record) as Record<string, unknown>;
+        variables.set('$record', record);
+        variables.set('record', record);
+        for (const [k, v] of Object.entries(record)) {
             if (!variables.has(k)) variables.set(k, v);
         }
     }

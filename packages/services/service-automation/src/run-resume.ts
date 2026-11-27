@@ -28,7 +28,7 @@ import { carriedRefusalOfResult, readCarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
 import { dropEventsOf, foldDropEvents } from './run-dropped-fields.js';
 import { noteTenantCurrencyReadFault } from './builtin/template.js';
-import { RESERVED_VARIABLE_KEY_REFUSAL, copyHeldValue } from './scope-key-segments.js';
+import { HeldValueCycleError, RESERVED_VARIABLE_KEY_REFUSAL, copyHeldValue } from './scope-key-segments.js';
 import { mapItemCancelledVariable, type MapItemCancelledMarker } from './builtin/map-node.js';
 // The values below (`buildRunTrigger`, `FlowRefusalSignal`, `isRefusalSignal`,
 // `isSuspendSignal`, `isRetryableResumeRefusal`, `carriesSubflowChildOutput`,
@@ -810,19 +810,33 @@ export async function loadSuspendedRun(this: Pick<RunResumeHost, 'loadSuspendedR
  * same record with its own copy of `variables` (arrays and plain objects at
  * every depth, `copyHeldValue`). `null` for no entry.
  */
-function heldSuspensionCopy(run: SuspendedRun | undefined): SuspendedRun | null {
+function heldSuspensionCopy(run: SuspendedRun | undefined, logger: RunResumeHost['logger']): SuspendedRun | null {
     if (!run) return null;
-    return { ...run, variables: copyHeldValue(run.variables) as SuspendedRun['variables'] };
+    try {
+        return { ...run, variables: copyHeldValue(run.variables) as SuspendedRun['variables'] };
+    } catch (err) {
+        if (!(err instanceof HeldValueCycleError)) throw err;
+        // A held value that contains itself has no copy. The run is still
+        // here, so it is handed out as held — never read as an unreachable
+        // store — and the one cost is said: this run's values are shared with
+        // the held pause for this read. (A durable store could not have held
+        // such a run at all.)
+        logger.error(
+            `[automation] suspended run '${run.runId}': ${err.message} It is handed out as held, so what this ` +
+                `read writes into its values also changes the held pause.`,
+        );
+        return run;
+    }
 }
 
 /** The body of {@link AutomationEngine.loadSuspendedRunStrict}, moved unedited; that method's docblock is its contract. */
-export async function loadSuspendedRunStrict(this: Pick<RunResumeHost, 'store' | 'suspendedRuns' | 'cacheOnlySuspensions' | 'evictConsumedSuspension'>, runId: string): Promise<SuspendedRun | null> {
+export async function loadSuspendedRunStrict(this: Pick<RunResumeHost, 'store' | 'suspendedRuns' | 'cacheOnlySuspensions' | 'evictConsumedSuspension' | 'logger'>, runId: string): Promise<SuspendedRun | null> {
     // With no durable answer the in-memory entry IS the run, and it is handed
     // out as a store hands a row: with variables of its own
     // (`heldSuspensionCopy`), so a resume — or any reader — that writes into
     // them changes neither the held pause nor a value it shares with the run
     // that parked (the trigger's record, the paused log entry).
-    if (!this.store) return heldSuspensionCopy(this.suspendedRuns.get(runId));
+    if (!this.store) return heldSuspensionCopy(this.suspendedRuns.get(runId), this.logger);
     const stored = await this.store.load(runId);
     if (stored) return stored;
     // The store has no row. For every run it ever accepted that IS the
@@ -832,7 +846,7 @@ export async function loadSuspendedRunStrict(this: Pick<RunResumeHost, 'store' |
     // so its silence says nothing about it, and `persistSuspendedRun`
     // deliberately keeps such a run resumable in-process (it reports the
     // lost durability at `error`).
-    if (this.cacheOnlySuspensions.has(runId)) return heldSuspensionCopy(this.suspendedRuns.get(runId));
+    if (this.cacheOnlySuspensions.has(runId)) return heldSuspensionCopy(this.suspendedRuns.get(runId), this.logger);
     // [#15832] The store ANSWERED, and the answer is "no row". Any entry
     // this process still holds for that run is a run it parked and another
     // replica consumed — the phantom the two listings hand back. This is
