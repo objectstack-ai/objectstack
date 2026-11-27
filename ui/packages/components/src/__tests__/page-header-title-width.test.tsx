@@ -43,9 +43,9 @@ function PageHeader({ schema }: { schema: any }) {
 
 /** The Field Zoo shape from the report: three labelled record-header actions. */
 const WIDE_ACTIONS = [
-  { name: 'gallery', locations: ['record_header'], label: 'Action Param Gallery' },
-  { name: 'lookup_first', locations: ['record_header'], label: 'Lookup == first of many' },
-  { name: 'assign_me', locations: ['record_header'], label: 'Assign to me (owner_id)' },
+  { name: 'gallery', locations: ['record_page'], label: 'Action Param Gallery' },
+  { name: 'lookup_first', locations: ['record_page'], label: 'Lookup == first of many' },
+  { name: 'assign_me', locations: ['record_page'], label: 'Assign to me (owner_id)' },
 ];
 
 function renderRecordHeader(actions: any[] = WIDE_ACTIONS) {
@@ -136,7 +136,7 @@ describe('PageHeaderRenderer — record title width arbitration (#7244)', () => 
     // unconditional, so a header that already fits is unaffected at runtime —
     // 192px floor + 16px gap + a ~136px tail leaves the row uncrowded.
     const { header, titleColumn } = renderRecordHeader([
-      { name: 'edit', locations: ['record_header'], label: 'Edit' },
+      { name: 'edit', locations: ['record_page'], label: 'Edit' },
     ]);
     expect(header.className).toContain('sm:flex-wrap');
     expect(titleColumn.className).toMatch(/\bsm:min-w-(?!0\b)\S+/);

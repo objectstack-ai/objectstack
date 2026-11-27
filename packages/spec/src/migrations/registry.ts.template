@@ -3731,7 +3731,11 @@ const step19: MigrationStep = {
     + 'serves an agent is the deployment\'s choice, so the key is deleted and the model name stays. '
     + 'View All and Modify All stop casting a field vote: `viewAllFields: true` is written beside them '
     + 'in every permission set entry of a source that predates the switch, so the migrated source keeps '
-    + 'the field reads those bits cast; the semantic entry names what it does not keep.',
+    + 'the field reads those bits cast; the semantic entry names what it does not keep. '
+    + 'Action locations say what an action acts on: `list_toolbar` becomes `list`, `record_header` and '
+    + '`record_more` become `record_page`, `list_item` becomes `record_row`, and an action on both a row and '
+    + 'the record page becomes `record`; an action that sat in the record page\'s ⋯ menu only keeps that fold '
+    + 'with `component: \'action:menu\'`, so every action is drawn where it was.',
   // Derived, not listed, as step 18's are: every major-19 conversion graduates
   // into this step in the order `CONVERSIONS_BY_MAJOR[19]` applies them. Add a
   // conversion there, never here.

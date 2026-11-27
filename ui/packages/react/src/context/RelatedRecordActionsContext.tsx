@@ -106,7 +106,7 @@ export interface RelatedRecordHandlers {
   /** Execute one of {@link rowActions} against a specific child row. */
   onRowAction?: (action: RelatedRowActionDef, record: unknown) => void | Promise<void>;
   /**
-   * Child object list-level actions (`locations: ['list_toolbar']`),
+   * Child object list-level actions (`locations: ['list']`),
    * localized — rendered as header buttons on the related list (e.g.
    * `invite_user` on an organization's Invitations list). Same bridge
    * contract as {@link rowActions}, minus the row context.

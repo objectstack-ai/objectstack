@@ -157,14 +157,14 @@ const OWNER = {
     objects: [{
         name: 'ba_org', label: 'Org',
         fields: { name: { name: 'name', type: 'text', label: 'Name' } },
-        actions: [{ name: 'own_action', label: 'Own', type: 'url', target: 'https://example.com/own', locations: ['record_header'] }],
+        actions: [{ name: 'own_action', label: 'Own', type: 'url', target: 'https://example.com/own', locations: ['record_page'] }],
     }],
 };
 
 /** The bound action another package declares for the owner's object. */
 const BOUND = {
     name: 'rename_org', label: 'Rename', objectName: 'ba_org', type: 'url',
-    target: 'https://example.com/rename', locations: ['record_header'],
+    target: 'https://example.com/rename', locations: ['record_page'],
     requiredPermissions: ['org_admin'],
 };
 
@@ -235,7 +235,7 @@ describe('a bound top-level action reaches another package\'s object as served',
         const stack = defineStack({
             manifest: { id: 'com.test.same', name: 'same', version: '1.0.0', type: 'app' },
             objects: [{ name: 'ba_same', label: 'Same', fields: { name: { name: 'name', type: 'text', label: 'Name' } } }],
-            actions: [{ name: 'same_action', label: 'Same', objectName: 'ba_same', type: 'url', target: 'https://example.com', locations: ['record_header'] }],
+            actions: [{ name: 'same_action', label: 'Same', objectName: 'ba_same', type: 'url', target: 'https://example.com', locations: ['record_page'] }],
         } as any);
         const { protocol } = await hostWith([{ ...stack, ...stack.manifest }]);
         const served: any = await protocol.getMetaItem({ type: 'object', name: 'ba_same' } as any);
@@ -436,7 +436,7 @@ describe('a bound action saved at runtime through the metadata door reaches its 
     /** The standalone action an author saves for the owner's object — no package ships it. */
     const RUNTIME = {
         name: 'rt_action', label: 'Runtime', objectName: 'ba_org', type: 'url',
-        target: 'https://example.com/rt', locations: ['record_header'],
+        target: 'https://example.com/rt', locations: ['record_page'],
     };
     const save = (protocol: ObjectStackProtocolImplementation, item: any, extra: Record<string, unknown> = {}) =>
         protocol.saveMetaItem({ type: 'action', name: item.name, item: structuredClone(item), ...extra } as any);
@@ -553,28 +553,28 @@ const LAUNCHER = {
         fields: { name: { name: 'name', type: 'text', label: 'Name' } },
         // An inline action, as the same-stack merge leaves a bound one: in the
         // object's own `actions`, not in the standalone collection.
-        actions: [{ name: 'inline_enroll', label: 'Enroll', type: 'flow', target: 'mk_enroll', locations: ['record_header'] }],
+        actions: [{ name: 'inline_enroll', label: 'Enroll', type: 'flow', target: 'mk_enroll', locations: ['record_page'] }],
     }],
     flows: [{ name: 'app_flow', label: 'App flow', type: 'autolaunched', nodes: [], edges: [] }],
     actions: [
         // Withheld once the module is disabled: the flow only the module ships.
-        { name: 'bound_enroll', label: 'Enroll', objectName: 'mk_lead', type: 'flow', target: 'mk_enroll', locations: ['record_header'] },
+        { name: 'bound_enroll', label: 'Enroll', objectName: 'mk_lead', type: 'flow', target: 'mk_enroll', locations: ['record_page'] },
         // Withheld: a param backed by the module's object.
         {
             name: 'bound_override', label: 'Add to campaign', objectName: 'mk_lead', type: 'flow', target: 'app_flow',
-            locations: ['record_header'],
+            locations: ['record_page'],
             params: [{ name: 'campaignId', field: 'mk_campaign', objectOverride: 'mk_member', label: 'Campaign', required: true }],
         },
         // Controls: an enabled flow, and a field param on the action's own object.
-        { name: 'bound_app_flow', label: 'Run', objectName: 'mk_lead', type: 'flow', target: 'app_flow', locations: ['record_header'] },
+        { name: 'bound_app_flow', label: 'Run', objectName: 'mk_lead', type: 'flow', target: 'app_flow', locations: ['record_page'] },
         {
             name: 'bound_field_param', label: 'Note', objectName: 'mk_lead', type: 'flow', target: 'app_flow',
-            locations: ['record_header'], params: [{ name: 'note', field: 'name', label: 'Note' }],
+            locations: ['record_page'], params: [{ name: 'note', field: 'name', label: 'Note' }],
         },
         // Control: a URL action that names the module's object only in its text.
-        { name: 'bound_url_mention', label: 'Docs', objectName: 'mk_lead', type: 'url', target: 'https://example.com/mk_member', locations: ['record_header'] },
+        { name: 'bound_url_mention', label: 'Docs', objectName: 'mk_lead', type: 'url', target: 'https://example.com/mk_member', locations: ['record_page'] },
         // Withheld from GET /meta/action: bound to the module's object, whose own read is refused.
-        { name: 'bound_to_member', label: 'Member', objectName: 'mk_member', type: 'url', target: 'https://example.com/m', locations: ['record_header'] },
+        { name: 'bound_to_member', label: 'Member', objectName: 'mk_member', type: 'url', target: 'https://example.com/m', locations: ['record_page'] },
     ],
 };
 

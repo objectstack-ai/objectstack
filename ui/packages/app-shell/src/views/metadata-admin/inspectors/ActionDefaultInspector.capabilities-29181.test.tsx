@@ -52,7 +52,7 @@ const NEW_ACTION: Draft = {
   name: 'invoice_action_1',
   label: 'New action',
   objectName: 'invoice',
-  locations: ['record_header'],
+  locations: ['record_page'],
   operation: 'update',
   patch: {},
 };
@@ -62,7 +62,7 @@ const STORED_JS: Draft = {
   name: 'invoice_stamp',
   label: 'Stamp',
   objectName: 'invoice',
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   type: 'script',
   body: { language: 'js', source: 'return { ok: true };' },
 };

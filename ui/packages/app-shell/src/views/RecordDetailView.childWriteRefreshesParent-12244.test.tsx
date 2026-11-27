@@ -415,7 +415,7 @@ describe('RecordDetailView — a header action with `refreshAfter` refreshes the
         type: 'api',
         target: '/api/v1/quotes/add-line',
         recordIdParam: 'quoteId',
-        locations: ['record_header'],
+        locations: ['record_page'],
         refreshAfter: true,
       },
     ],

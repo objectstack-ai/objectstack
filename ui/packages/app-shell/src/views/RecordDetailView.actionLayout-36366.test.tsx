@@ -52,10 +52,10 @@ import { DesignModeProvider } from '../layout/designMode';
 
 const RECORD_ID = 'rec-1';
 
-const CONVERT = { name: 'convert', label: 'Convert', type: 'url', target: 'https://example.com/c', locations: ['record_header'], order: 1 };
-const MARK_WON = { name: 'mark_won', label: 'Mark Won', type: 'url', target: 'https://example.com/w', locations: ['record_header'], order: 2 };
-const SHARE = { name: 'share', label: 'Share', type: 'url', target: 'https://example.com/s', locations: ['record_header'], order: 3 };
-const LOG_CALL = { name: 'log_call', label: 'Log Call', type: 'url', target: 'https://example.com/l', locations: ['record_more'], order: 4 };
+const CONVERT = { name: 'convert', label: 'Convert', type: 'url', target: 'https://example.com/c', locations: ['record_page'], order: 1 };
+const MARK_WON = { name: 'mark_won', label: 'Mark Won', type: 'url', target: 'https://example.com/w', locations: ['record_page'], order: 2 };
+const SHARE = { name: 'share', label: 'Share', type: 'url', target: 'https://example.com/s', locations: ['record_page'], order: 3 };
+const LOG_CALL = { name: 'log_call', label: 'Log Call', type: 'url', target: 'https://example.com/l', locations: ['record_page'], component: 'action:menu', order: 4 };
 const ACTIONS = [CONVERT, MARK_WON, SHARE, LOG_CALL];
 const LABELS = ACTIONS.map((a) => a.label);
 

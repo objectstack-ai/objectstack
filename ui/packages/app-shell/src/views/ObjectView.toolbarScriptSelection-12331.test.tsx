@@ -320,7 +320,7 @@ const HOTCRM_CREATE_CAMPAIGN = {
   label: 'Add to Campaign',
   objectName: 'crm_lead',
   type: 'script',
-  locations: ['list_toolbar', 'list_item'],
+  locations: ['list', 'record_row'],
   successMessage: 'Leads added to campaign!',
   refreshAfter: true,
   params: [{ field: 'crm_campaign', objectOverride: 'crm_campaign_member', label: 'Campaign', required: true }],

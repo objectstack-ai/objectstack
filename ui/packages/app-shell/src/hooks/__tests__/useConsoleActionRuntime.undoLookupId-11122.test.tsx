@@ -144,7 +144,7 @@ async function runOnGridRow(action: Record<string, unknown>) {
                 type: 'object-grid',
                 objectName: OBJECT,
                 columns: ['name', 'account'],
-                rowActionDefs: [{ locations: ['list_item'], successMessage: MESSAGE, ...action }],
+                rowActionDefs: [{ locations: ['record_row'], successMessage: MESSAGE, ...action }],
               } as never}
               dataSource={dataSource as never}
             />

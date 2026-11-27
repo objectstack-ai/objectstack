@@ -137,7 +137,7 @@ export function useObjectViewHeaderChrome({
     const importShown = identityImportEnabled || (objectCanImport && importVisible);
     const foldedMenuBar: ActionBarSchema = {
         type: 'action:bar',
-        location: 'list_toolbar',
+        location: 'list',
         actions: [
             ...(objectSettingsPath ? [{
                 name: 'object_view_object_settings',

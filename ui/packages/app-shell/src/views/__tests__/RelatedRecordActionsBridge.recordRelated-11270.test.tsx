@@ -63,10 +63,10 @@ const CHILD_NAME = 'task';
  * `archive` declares both, so it must render once.
  */
 const CHILD_ACTIONS = [
-  { name: 'send_reminder', label: 'Send Reminder', type: 'api', target: '/api/remind', locations: ['list_item'] },
+  { name: 'send_reminder', label: 'Send Reminder', type: 'api', target: '/api/remind', locations: ['record_row'] },
   { name: 'log_time', label: 'Log Time', type: 'form', target: 'task.edit', locations: ['record_related'] },
-  { name: 'archive', label: 'Archive', type: 'api', target: '/api/archive', locations: ['list_item', 'record_related'] },
-  { name: 'header_only', label: 'Header Only', type: 'api', target: '/api/h', locations: ['record_header'] },
+  { name: 'archive', label: 'Archive', type: 'api', target: '/api/archive', locations: ['record_row', 'record_related'] },
+  { name: 'header_only', label: 'Header Only', type: 'api', target: '/api/h', locations: ['record_page'] },
 ];
 
 const CHILD = {

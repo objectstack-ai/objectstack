@@ -152,7 +152,7 @@ const headerAction = (name: string, visible: unknown) => ({
   label: name,
   type: 'api',
   target: '/api/v1/noop',
-  locations: ['record_header'],
+  locations: ['record_page'],
   visible,
 });
 

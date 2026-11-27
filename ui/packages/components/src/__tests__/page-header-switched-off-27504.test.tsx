@@ -35,8 +35,8 @@ const served = (switchedOff: string[]) =>
     {
       name: 'showcase_task',
       actions: [
-        { name: 'showcase_mark_done', label: 'Mark Done', type: 'script', locations: ['record_header'] },
-        { name: 'showcase_log_time', label: 'Log Time', type: 'script', locations: ['record_header'] },
+        { name: 'showcase_mark_done', label: 'Mark Done', type: 'script', locations: ['record_page'] },
+        { name: 'showcase_log_time', label: 'Log Time', type: 'script', locations: ['record_page'] },
       ],
     },
     switchedOff,
@@ -49,7 +49,7 @@ const markDone = () => screen.queryByRole('button', { name: /Mark Done/i });
 
 describe.each([
   ['page:header', (actions: any[]) => ({ type: 'page:header', title: 'Task', actions })],
-  ['action:bar', (actions: any[]) => ({ type: 'action:bar', location: 'record_header', actions })],
+  ['action:bar', (actions: any[]) => ({ type: 'action:bar', location: 'record_page', actions })],
 ])('%s — switched-off packaged action (objectstack#27504)', (_type, schemaOf) => {
   it('does not offer an action the platform served as switched off', () => {
     renderIn(schemaOf(served(['showcase_mark_done'])));

@@ -2484,7 +2484,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // to mean "show here", which made this header the one surface where an
     // action nobody placed still appeared; `RecordDetailView` pre-filters the
     // same actions strictly, and the synthesizer's own contract already says
-    // "must include `locations: ['record_header']` to render"
+    // "must include `locations: ['record_page']` to render"
     // (buildDefaultPageSchema.ts), so the leniency contradicted both.
     const placedOnHeader = (a: any): boolean =>
       actionRendersAt(a, 'record_header') || actionRendersAt(a, 'record_more');

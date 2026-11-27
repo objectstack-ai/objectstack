@@ -31,7 +31,7 @@ describe('ActionEngine', () => {
     it('registers with locations', () => {
       engine.registerAction(
         { name: 'delete', type: 'api' },
-        { locations: ['record_header', 'list_item'] }
+        { locations: ['record'] }
       );
       expect(engine.getActionsForLocation('record_header')).toHaveLength(1);
       expect(engine.getActionsForLocation('list_toolbar')).toHaveLength(0);
@@ -84,9 +84,9 @@ describe('ActionEngine', () => {
 
   describe('getActionsForLocation', () => {
     it('returns actions sorted by priority', () => {
-      engine.registerAction({ name: 'delete', type: 'api' }, { locations: ['list_toolbar'], priority: 200 });
-      engine.registerAction({ name: 'create', type: 'modal' }, { locations: ['list_toolbar'], priority: 10 });
-      engine.registerAction({ name: 'export', type: 'api' }, { locations: ['list_toolbar'], priority: 100 });
+      engine.registerAction({ name: 'delete', type: 'api' }, { locations: ['list'], priority: 200 });
+      engine.registerAction({ name: 'create', type: 'modal' }, { locations: ['list'], priority: 10 });
+      engine.registerAction({ name: 'export', type: 'api' }, { locations: ['list'], priority: 100 });
 
       const actions = engine.getActionsForLocation('list_toolbar');
       expect(actions).toHaveLength(3);

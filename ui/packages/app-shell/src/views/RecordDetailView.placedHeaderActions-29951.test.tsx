@@ -71,14 +71,14 @@ import { FavoritesProvider } from '../context/FavoritesProvider';
 const RECORD_ID = 'rec-1';
 
 // The platform's own header actions, as `sys_user` places them.
-const BAN_USER = { name: 'ban_user', label: 'Ban User', type: 'api', target: '/api/v1/x', locations: ['list_item', 'record_header'] };
-const IMPERSONATE = { name: 'impersonate_user', label: 'Impersonate User', type: 'api', target: '/api/v1/y', locations: ['record_more'] };
+const BAN_USER = { name: 'ban_user', label: 'Ban User', type: 'api', target: '/api/v1/x', locations: ['record'] };
+const IMPERSONATE = { name: 'impersonate_user', label: 'Impersonate User', type: 'api', target: '/api/v1/y', locations: ['record_page'], component: 'action:menu' };
 // Placed elsewhere: never a header action.
-const LIST_ONLY = { name: 'export_users', label: 'Export Users', type: 'api', target: '/api/v1/z', locations: ['list_toolbar'] };
+const LIST_ONLY = { name: 'export_users', label: 'Export Users', type: 'api', target: '/api/v1/z', locations: ['list'] };
 const SECTION_ONLY = { name: 'reset_mfa', label: 'Reset MFA', type: 'api', target: '/api/v1/w', locations: ['record_section'] };
 // What another package adds to `sys_user` (the folded registry appends it).
-const PACKAGED_URL = { name: 'qa_open_profile', label: 'Open Profile', type: 'url', target: 'https://example.com/u', locations: ['record_header'], _packageId: 'com.qa.hdr' };
-const PACKAGED_MORE = { name: 'qa_profile_link', label: 'Copy Profile Link', type: 'url', target: 'https://example.com/l', locations: ['record_more'], _packageId: 'com.qa.hdr' };
+const PACKAGED_URL = { name: 'qa_open_profile', label: 'Open Profile', type: 'url', target: 'https://example.com/u', locations: ['record_page'], _packageId: 'com.qa.hdr' };
+const PACKAGED_MORE = { name: 'qa_profile_link', label: 'Copy Profile Link', type: 'url', target: 'https://example.com/l', locations: ['record_page'], component: 'action:menu', _packageId: 'com.qa.hdr' };
 
 const ACTIONS = [BAN_USER, IMPERSONATE, LIST_ONLY, SECTION_ONLY, PACKAGED_URL, PACKAGED_MORE];
 

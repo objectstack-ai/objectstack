@@ -39,7 +39,7 @@ import { onSuccessBesideUpdateOperationRefusal } from './action-on-success-execu
  *     is no `patch` and no non-empty `params`, refused at `patch`. On a page
  *     action row it is no `name`, refused at `name`: the row runs the declared
  *     action its `name` names, and the route writes THAT action's `patch`.
- *  5. A `list_toolbar` location is refused: no current record there.
+ *  5. A `list` location is refused: no current record there.
  *
  * Deliberately NOT judged here: `objectName`. `ActionSchema` parses an action
  * embedded on an object (object implicit) and a standalone one in
@@ -248,13 +248,13 @@ export function refuseDeclarativeUpdateContradictions(surface: DeclarativeUpdate
 
     if (Array.isArray(data.locations)) {
       data.locations.forEach((location, index) => {
-        if (location !== 'list_toolbar') return;
+        if (location !== 'list') return;
         ctx.addIssue({
           code: 'custom',
           path: ['locations', index],
           message:
-            "`list_toolbar` has no current record — an `operation: 'update'` action writes ONE record, the one it "
-            + 'runs on. Use a record location (`list_item`, `record_header`, `record_more`, `record_section`) or, '
+            "`list` has no current record — an `operation: 'update'` action writes ONE record, the one it "
+            + 'runs on. Use a record location (`record`, `record_page`, `record_row`, `record_section`) or, '
             + "for the selection bar, a `bulkActionDefs` entry on the list view (`{ operation: 'update', patch }`).",
         });
       });

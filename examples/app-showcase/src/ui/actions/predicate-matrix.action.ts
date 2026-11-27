@@ -312,7 +312,7 @@ export const ZooToolbarGateAction = defineAction({
   body: echo,
   successMessage: 'Toolbar gate passed.',
   visible: 'os.user.id != null',
-  locations: ['list_toolbar'],
+  locations: ['list'],
   refreshAfter: false,
 });
 
@@ -372,7 +372,7 @@ export const ZooDisabledAction = defineAction({
   type: 'script',
   body: echo,
   disabled: 'has(record.f_rating) && record.f_rating != null && record.f_rating < 4',
-  locations: ['record_header', 'record_section'],
+  locations: ['record_page', 'record_section'],
   refreshAfter: false,
 });
 
@@ -485,7 +485,7 @@ const zooTypeGate = (name: string, label: string, visible: string) =>
     type: 'script',
     body: echo,
     visible,
-    locations: ['record_more'],
+    locations: ['record_page'], component: 'action:menu',
     refreshAfter: false,
   });
 

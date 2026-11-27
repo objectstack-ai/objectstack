@@ -135,7 +135,7 @@ describe('ActionEngine.getActionsForLocation — visibility filter', () => {
     const engine = makeEngine(ctx);
     engine.registerAction(
       { name: 'in_header_self', type: 'api', visible: 'record.id == ctx.user.id' } as any,
-      { locations: ['record_header'] }
+      { locations: ['record_page'] }
     );
     engine.registerAction(
       { name: 'in_section_self', type: 'api', visible: 'record.id == ctx.user.id' } as any,

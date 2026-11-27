@@ -244,7 +244,7 @@ describe('#19542 — the `action` door (validateStackExpressions)', () => {
         label: 'Convert Lead',
         objectName: 'crm_lead',
         icon: 'ArrowRightCircle',
-        locations: ['list_item', 'record_header', 'record_more'],
+        locations: ['record'],
         type: 'flow',
         target: 'crm_convert_lead_wizard',
         refreshAfter: false,

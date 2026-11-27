@@ -31,11 +31,11 @@ const ARCHIVE = {
   name: 'showcase_archive_task',
   label: 'Archive',
   type: 'script',
-  locations: ['record_header'],
+  locations: ['record_page'],
   disabled: DONE_GATE,
   disabledReason: DECLARED_EN,
 };
-const ARCHIVE_MORE = { ...ARCHIVE, name: 'showcase_archive_more', label: 'Archive later', locations: ['record_more'] };
+const ARCHIVE_MORE = { ...ARCHIVE, name: 'showcase_archive_more', label: 'Archive later', locations: ['record_page'], component: 'action:menu' };
 const { disabledReason: _none, ...ARCHIVE_UNDECLARED } = ARCHIVE;
 
 function PageHeader({ schema }: { schema: any }) {

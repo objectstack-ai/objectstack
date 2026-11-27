@@ -184,7 +184,7 @@ const APPLY_TO_PEOPLE = {
   objectName: OBJECT_NAME,
   type: 'script',
   label: 'Apply to people',
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 
 /** The same declaration as the app that found this ships it: capability-gated. */
@@ -276,7 +276,7 @@ describe('objectui#7234 — object-declared actions reach the list toolbar', () 
   });
 
   it('C (control): the same action at record_header only is not on this toolbar', async () => {
-    renderList(objectsWithActions([{ ...APPLY_TO_PEOPLE, locations: ['record_header'] }]));
+    renderList(objectsWithActions([{ ...APPLY_TO_PEOPLE, locations: ['record_page'] }]));
     await settle();
     expect(toolbarButton()).toBeNull();
   });

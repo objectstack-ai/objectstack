@@ -14,7 +14,7 @@
  * NAME in the runner's `type` slot — `{ type: 'convert_lead' }`. That matches
  * no built-in type and no registered handler, so it fell through the runner's
  * schema fallback: zero requests, then a green "Action completed successfully"
- * toast. And because an object action declaring `locations: ['list_item']`
+ * toast. And because an object action declaring `locations: ['record_row']`
  * also injects its own (working) entry, the same action could render twice —
  * one live, one dead.
  *
@@ -58,7 +58,7 @@ const CONVERT_LEAD = {
   label: 'Convert to Account',
   type: 'api',
   target: '/api/v1/leads/convert',
-  locations: ['record_header'],
+  locations: ['record_page'],
 };
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -150,10 +150,10 @@ describe('legacy string rowActions dispatch (objectui#2960)', () => {
   });
 
   it('does not render a dead duplicate of a list_item action', async () => {
-    const listItemDef = { ...CONVERT_LEAD, locations: ['list_item'], label: 'Convert' };
+    const listItemDef = { ...CONVERT_LEAD, locations: ['record_row'], label: 'Convert' };
     await openRowMenu({
       objectActions: [listItemDef],
-      // The app-shell derives `rowActionDefs` from `locations: ['list_item']`;
+      // The app-shell derives `rowActionDefs` from `locations: ['record_row']`;
       // a view that ALSO names the action in legacy `rowActions` used to get
       // both a working entry and a dead twin.
       schema: { rowActions: ['convert_lead'], rowActionDefs: [listItemDef] },

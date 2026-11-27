@@ -31,7 +31,7 @@ import { RecordQuickActionsRenderer } from '../record-quick-actions';
 
 const LABEL = 'Open';
 /** `locations` is not defaulted — `getActionsForLocation` requires the match. */
-const OPEN = { name: 'open', label: LABEL, type: 'script', locations: ['record_header'] };
+const OPEN = { name: 'open', label: LABEL, type: 'script', locations: ['record_page'] };
 
 function mount(action: Record<string, unknown>) {
   return render(

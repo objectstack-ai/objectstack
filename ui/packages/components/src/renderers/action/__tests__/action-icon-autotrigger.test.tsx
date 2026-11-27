@@ -68,7 +68,7 @@ const ICON = {
   type: 'api',
   icon: 'plus',
   component: 'action:icon',
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 
 /** The same declaration rendered by the default member renderer — the control. */
@@ -76,7 +76,7 @@ const BUTTON = {
   name: 'create_button',
   label: 'Create button',
   type: 'api',
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 
 /** A declared, evaluable predicate that is false, so the gate really runs. */
@@ -106,7 +106,7 @@ function Bar({ actions }: { actions: Member[] }) {
   return (
     // eslint-disable-next-line react-hooks/static-components -- ComponentRegistry.get returns a registered renderer (stable reference), not a component created during render
     <C
-      schema={{ type: 'action:bar', location: 'list_toolbar', maxVisible: 10, mobileMaxVisible: 10, actions }}
+      schema={{ type: 'action:bar', location: 'list', maxVisible: 10, mobileMaxVisible: 10, actions }}
     />
   );
 }

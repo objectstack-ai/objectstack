@@ -68,7 +68,7 @@ const RECORD_ID = 'rec-1';
 const AUTHORED_MARK = 'Authored page block';
 const SLOT_MARK = 'Slotted alert';
 
-const MORE_ACTION = { name: 'qa_recalc', label: 'Recalculate', type: 'api', target: '/api/v1/x', locations: ['record_section', 'record_more'] };
+const MORE_ACTION = { name: 'qa_recalc', label: 'Recalculate', type: 'api', target: '/api/v1/x', locations: ['record_section', 'record_page'], component: 'action:menu' };
 
 function objectDef(name: string) {
   return {

@@ -71,7 +71,7 @@ const both = (row: 'record_related' | 'list_item') => ['list_toolbar', row];
  */
 const ROW_ONLY_BLANK = '     ';
 const CHILD_ACTIONS = [
-  { name: 'send_reminder', label: 'Send Reminder', type: 'api', target: '/api/remind', locations: ['list_item'] },
+  { name: 'send_reminder', label: 'Send Reminder', type: 'api', target: '/api/remind', locations: ['record_row'] },
   { name: 'blank_rr', label: 'Blank RR', type: 'api', target: '/api/b1', locations: both('record_related'), visible: '   ' },
   { name: 'blank_li', label: 'Blank LI', type: 'api', target: '/api/b2', locations: both('list_item'), visible: '   ' },
   { name: 'empty_rr', label: 'Empty RR', type: 'api', target: '/api/e1', locations: both('record_related'), visible: '' },

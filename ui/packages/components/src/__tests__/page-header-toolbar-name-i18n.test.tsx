@@ -39,8 +39,8 @@ const schema = {
   type: 'page:header',
   title: 'Acme Corp',
   actions: [
-    { name: 'convert', locations: ['record_header'], label: 'Convert', type: 'flow' },
-    { name: 'clone', locations: ['record_header'], label: 'Clone', type: 'flow' },
+    { name: 'convert', locations: ['record_page'], label: 'Convert', type: 'flow' },
+    { name: 'clone', locations: ['record_page'], label: 'Clone', type: 'flow' },
   ],
 };
 

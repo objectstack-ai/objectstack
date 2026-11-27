@@ -129,7 +129,7 @@ const ACTION = {
   label: 'Sync datasource',
   type: 'api',
   target: '/api/v1/datasources/${ctx.recordId}/sync',
-  locations: ['record_header'],
+  locations: ['record_page'],
   params: PARAMS,
 };
 

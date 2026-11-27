@@ -32,10 +32,10 @@ const gated = {
   name: 'set_parallel_positions',
   label: 'Set parallel reviewers',
   type: 'api' as const,
-  locations: ['record_header'],
+  locations: ['record_page'],
   requiredPermissions: ['ehr_probe_capability'],
 };
-const ungated = { name: 'print', label: 'Print', type: 'api' as const, locations: ['record_header'] };
+const ungated = { name: 'print', label: 'Print', type: 'api' as const, locations: ['record_page'] };
 
 /** The shape a record surface really mounts: provider seeds the user, the
  *  renderer passes only record-scoped keys. */

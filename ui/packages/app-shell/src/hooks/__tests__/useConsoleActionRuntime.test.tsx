@@ -687,7 +687,7 @@ describe('flowHandler — list_toolbar selection fallback', () => {
       res = await result.current.flowHandler(
         {
           type: 'flow', name: 'showcase_bulk_reassign', target: 'showcase_reassign_wizard',
-          locations: ['list_item', 'list_toolbar'],
+          locations: ['record_row', 'list'],
         } as any,
         { selectedRecords: [] } as any,
       );
@@ -707,7 +707,7 @@ describe('flowHandler — list_toolbar selection fallback', () => {
     let res: any;
     await act(async () => {
       res = await result.current.flowHandler(
-        { type: 'flow', name: 'monthly_close', target: 'monthly_close', locations: ['list_toolbar'] } as any,
+        { type: 'flow', name: 'monthly_close', target: 'monthly_close', locations: ['list'] } as any,
         { selectedRecords: [] } as any,
       );
     });
@@ -739,8 +739,8 @@ describe('flowHandler — list_toolbar selection fallback', () => {
   // The same action shape and selection reach both handlers here, and each
   // answer must be the rule's own.
   it.each([
-    ['several rows', { locations: ['list_toolbar'] }, [{ id: 'a' }, { id: 'b' }]],
-    ['zero rows on a record-scoped action', { locations: ['list_item', 'list_toolbar'] }, []],
+    ['several rows', { locations: ['list'] }, [{ id: 'a' }, { id: 'b' }]],
+    ['zero rows on a record-scoped action', { locations: ['record_row', 'list'] }, []],
   ])('refuses %s with the same answer as the script launcher (objectui#12331)', async (_label, shape, rows) => {
     const { result } = renderHook(() =>
       useConsoleActionRuntime({ dataSource: {}, objects: [], objectName: 'inv' }),
@@ -778,7 +778,7 @@ describe('flowHandler — list_toolbar selection fallback', () => {
       res = await result.current.flowHandler(
         {
           type: 'flow', name: 'bulk_close', target: 'bulk_close_flow',
-          locations: ['list_item', 'list_toolbar'],
+          locations: ['record_row', 'list'],
           params: { _selectedIds: ['a', 'b'] },
         } as any,
         { selectedRecords: [{ id: 'a' }, { id: 'b' }] } as any,
@@ -1140,7 +1140,7 @@ describe('serverActionHandler — list_toolbar selection fallback', () => {
     let res: any;
     await act(async () => {
       res = await result.current.serverActionHandler(
-        { type: 'script', name: 'archive', locations: ['list_item', 'list_toolbar'] } as any,
+        { type: 'script', name: 'archive', locations: ['record_row', 'list'] } as any,
         { selectedRecords: [] } as any,
       );
     });
@@ -1159,7 +1159,7 @@ describe('serverActionHandler — list_toolbar selection fallback', () => {
     let res: any;
     await act(async () => {
       res = await result.current.serverActionHandler(
-        { type: 'script', name: 'export_all', locations: ['list_toolbar'] } as any,
+        { type: 'script', name: 'export_all', locations: ['list'] } as any,
         { selectedRecords: [] } as any,
       );
     });
@@ -1180,7 +1180,7 @@ describe('serverActionHandler — list_toolbar selection fallback', () => {
         {
           type: 'script',
           name: 'generate_qr_zip',
-          locations: ['list_item', 'list_toolbar'],
+          locations: ['record_row', 'list'],
           params: { _selectedIds: ['a', 'b'], format: 'png' },
         } as any,
         // Multi-select would block a single-record dispatch — the injected

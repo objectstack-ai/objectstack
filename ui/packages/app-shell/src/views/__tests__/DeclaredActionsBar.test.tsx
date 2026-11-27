@@ -118,7 +118,7 @@ const ACTIONS = [
   {
     name: 'approval_bulk', type: 'api', label: 'Bulk',
     target: '/api/v1/approvals/bulk',
-    locations: ['list_toolbar'],
+    locations: ['list'],
   },
 ];
 

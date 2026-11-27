@@ -19,7 +19,7 @@ describe('useActionEngine', () => {
       name: 'mark_complete',
       type: 'script',
       target: 'true',
-      locations: ['list_toolbar', 'record_header'],
+      locations: ['list', 'record_page'],
       // @ts-expect-error `bulkEnabled` is a retired key on `ActionDef`, kept
       // here as the only input that can prove `getBulkActions()` does not
       // harvest it (see the inverse test below). The directive is
@@ -30,13 +30,13 @@ describe('useActionEngine', () => {
       name: 'delete_record',
       type: 'api',
       endpoint: '/api/delete',
-      locations: ['record_more'],
+      locations: ['record_page'], component: 'action:menu',
     },
     {
       name: 'view_details',
       type: 'url',
       target: '/details',
-      locations: ['list_item'],
+      locations: ['record_row'],
       // @ts-expect-error `shortcut` is retired on `ActionDef` too, and for the
       // same reason as `bulkEnabled` above: the inverse test needs metadata
       // that still declares one. On its OWN entry rather than beside

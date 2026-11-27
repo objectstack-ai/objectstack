@@ -12,7 +12,7 @@
  * selection bar AND that is record-scoped.
  *
  * Measured on HotCRM's Leads list: `create_campaign` ("Add to Campaign",
- * `locations: ['list_toolbar', 'list_item']`) is wired by the `all_leads`
+ * `locations: ['list', 'record_row']`) is wired by the `all_leads`
  * view's `bulkActions`, so the selection bar already carried it with rows
  * ticked while the header also drew it at every selection. The selection bar is
  * the list toolbar in its selection mode, so the action stays at its declared
@@ -93,7 +93,7 @@ const CREATE_CAMPAIGN = {
   label: 'Add to Campaign',
   objectName: 'crm_lead',
   type: 'script',
-  locations: ['list_toolbar', 'list_item'],
+  locations: ['list', 'record_row'],
   params: [{ name: 'campaign', type: 'text', label: 'Campaign', required: true }],
 };
 
@@ -103,7 +103,7 @@ const REFRESH_SCORES = {
   label: 'Refresh Scores',
   objectName: 'crm_lead',
   type: 'script',
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 
 const LIST_VIEWS = {

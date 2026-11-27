@@ -299,7 +299,7 @@ const ACTION_FIXTURES: readonly Fixture[] = [
     state.held = ['a.b', 'c.d'];
     mountAction(lang, {
       name: 'a2', type: 'api', method: 'PATCH', variant: 'secondary', component: 'action:icon', mode: 'edit',
-      locations: ['record_header'], requiredPermissions: ['a.b', 'c.d'],
+      locations: ['record_page'], requiredPermissions: ['a.b', 'c.d'],
     });
   },
   // A bound flow action with a field-backed input.
@@ -307,16 +307,16 @@ const ACTION_FIXTURES: readonly Fixture[] = [
     state.fields = [{ name: 'amount', label: 'Amount' }];
     mountAction(lang, {
       name: 'a3', type: 'flow', objectName: 'account', variant: 'danger', component: 'action:menu', mode: 'delete',
-      params: [{ field: 'amount' }], locations: ['list_item'],
+      params: [{ field: 'amount' }], locations: ['record_row'],
     });
   },
-  (lang) => mountAction(lang, { name: 'a4', type: 'modal', variant: 'ghost', component: 'action:group', mode: 'custom', locations: ['record_more'] }),
-  (lang) => mountAction(lang, { name: 'a5', type: 'form', variant: 'link', locations: ['record_more'] }),
-  (lang) => mountAction(lang, { name: 'a6', type: 'url', locations: ['record_more'] }),
-  (lang) => mountAction(lang, { name: 'a7', type: 'script', body: { language: 'js' }, locations: ['record_more'] }),
+  (lang) => mountAction(lang, { name: 'a4', type: 'modal', variant: 'ghost', component: 'action:group', mode: 'custom', locations: ['record_page'], component: 'action:menu' }),
+  (lang) => mountAction(lang, { name: 'a5', type: 'form', variant: 'link', locations: ['record_page'], component: 'action:menu' }),
+  (lang) => mountAction(lang, { name: 'a6', type: 'url', locations: ['record_page'], component: 'action:menu' }),
+  (lang) => mountAction(lang, { name: 'a7', type: 'script', body: { language: 'js' }, locations: ['record_page'], component: 'action:menu' }),
   // The declarative single-record write, empty and with one row.
-  (lang) => mountAction(lang, { name: 'a8', type: 'script', operation: 'update', patch: {}, locations: ['record_more'] }),
-  (lang) => mountAction(lang, { name: 'a9', type: 'script', operation: 'update', patch: { status: 'done' }, locations: ['record_more'] }),
+  (lang) => mountAction(lang, { name: 'a8', type: 'script', operation: 'update', patch: {}, locations: ['record_page'], component: 'action:menu' }),
+  (lang) => mountAction(lang, { name: 'a9', type: 'script', operation: 'update', patch: { status: 'done' }, locations: ['record_page'], component: 'action:menu' }),
 ];
 
 /** The pre-fix English the action fixtures render. */

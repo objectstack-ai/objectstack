@@ -1382,7 +1382,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
    *     `rowActionDefs` — which is why this read is a cast in the first place.
    *
    * The AUTHORED way to put an action on a row is unchanged and stays declared:
-   * `locations: ['list_item']` on the object's own action, plus the legacy
+   * `locations: ['record_row']` on the object's own action, plus the legacy
    * `rowActions` name list (`GRID_QUERY_INPUTS`, `index.tsx:190`) that the fold
    * below resolves against the object. Both halves — unlisted here, rejected
    * there — are pinned by `__tests__/gridNonAuthorKeys.test.tsx`, together with

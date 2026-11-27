@@ -6834,7 +6834,7 @@ function validateCrossReferences(
  * - The sort is STABLE (`Array.prototype.sort` is stable since ES2019), so
  *   actions that tie on `order` — including the overwhelmingly common case where
  *   NOBODY sets `order` — keep their original registration order. This is what
- *   lets `order` promote a `record_header` action into the primary-button slot
+ *   lets `order` promote a record page action into the primary-button slot
  *   without disturbing everything else.
  * - Returns the SAME array reference untouched when no action opts in, so callers
  *   pay zero allocation on the common path and can cheaply detect "unchanged".
@@ -6880,7 +6880,7 @@ function sortActionsByOrder<T extends { order?: number }>(actions: T[]): T[] {
  * `actions`) is stable-sorted by `order` via {@link sortActionsByOrder}. Because
  * that sort is a no-op unless an author sets `order`, this is fully backward
  * compatible — arrays with no `order` keep their exact registration order and
- * reference. Renderers that pick a single primary action from `record_header`
+ * reference. Renderers that pick a single primary action from the record page header
  * (objectui) therefore see approve/reject-style actions in their declared
  * priority rather than in fragile cross-file registration order.
  *

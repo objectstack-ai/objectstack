@@ -47,7 +47,7 @@ export const CompleteTaskAction = defineAction({
   icon: 'check-circle',
   type: 'script',
   target: 'completeTask',           // resolved to the handler registered below
-  locations: ['record_header', 'list_item'],
+  locations: ['record'],
   successMessage: 'Task marked as complete!',
   refreshAfter: true,
   ai: {
@@ -95,7 +95,7 @@ export const MarkDoneAction = defineAction({
   },
   successMessage: 'Task marked done.',
   visible: 'has(record.done) && record.done != true',
-  locations: ['list_item', 'record_header', 'record_section'],
+  locations: ['record', 'record_section'],
   refreshAfter: true,
 });
 ```

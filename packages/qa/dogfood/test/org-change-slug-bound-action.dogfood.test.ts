@@ -57,7 +57,7 @@ const cloudShaped = defineStack({
       icon: 'edit-3',
       variant: 'secondary',
       mode: 'custom',
-      locations: ['record_header'],
+      locations: ['record_page'],
       type: 'api',
       target: TARGET,
       method: 'POST',
@@ -113,7 +113,7 @@ describe('a cloud-shaped composition binds change_slug to sys_organization, and 
   it('serves change_slug once, with the orchestrator target, its location and its one slug param', () => {
     const served = actions.filter((a) => a.name === 'change_slug');
     expect(served).toHaveLength(1);
-    expect(served[0]).toMatchObject({ type: 'api', target: TARGET, method: 'POST', locations: ['record_header'] });
+    expect(served[0]).toMatchObject({ type: 'api', target: TARGET, method: 'POST', locations: ['record_page'] });
     expect(served[0].params).toEqual([{ field: 'slug', required: true, defaultFromRow: true }]);
   });
 

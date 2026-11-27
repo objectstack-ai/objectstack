@@ -132,7 +132,7 @@ const ACTION_API = {
   variant: 'primary',
   refreshAfter: true,
   ai: { exposed: false },
-  locations: ['record_header', 'list_toolbar', 'list_item', 'record_section', 'record_more'],
+  locations: ['record', 'list', 'record_section'],
   requiredPermissions: ['account.sync'],
   visible: "record.status == 'open'",
   disabled: 'record.locked == true',

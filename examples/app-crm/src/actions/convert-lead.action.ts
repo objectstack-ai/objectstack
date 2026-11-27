@@ -13,7 +13,7 @@ export const ConvertLeadAction = defineAction({
   objectName: 'crm_lead',
   type: 'flow',
   target: 'crm_convert_lead_wizard',
-  locations: ['list_item', 'record_header', 'record_more'],
+  locations: ['record'],
   recordIdParam: 'recordId',
   // Conditional visibility (CEL): hide the action once the lead is already
   // converted — so the button disappears rather than the user clicking it and

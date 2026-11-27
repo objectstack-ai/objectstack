@@ -73,9 +73,9 @@ const CHILD = 'sys_member';
  * `list_item` row action.
  */
 const CHILD_ACTIONS = [
-  { name: 'invite_user', label: 'Invite user', type: 'api', target: '/api/v1/org/invite', locations: ['list_toolbar'] },
+  { name: 'invite_user', label: 'Invite user', type: 'api', target: '/api/v1/org/invite', locations: ['list'] },
   { name: 'change_role', label: 'Change role', type: 'api', target: '/api/v1/members/{id}/role', locations: ['record_related'] },
-  { name: 'remove', label: 'Remove', type: 'api', target: '/api/v1/members/{id}/remove', locations: ['list_item'] },
+  { name: 'remove', label: 'Remove', type: 'api', target: '/api/v1/members/{id}/remove', locations: ['record_row'] },
 ];
 
 const OBJECTS = [

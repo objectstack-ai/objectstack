@@ -167,7 +167,7 @@ const PROBE_OBJECT_SCHEMA = {
       name: PROBE_ACTION,
       label: 'Probe Action',
       type: 'url',
-      locations: ['record_header'],
+      locations: ['record_page'],
       visible: "record.stage == 'qualified'",
     },
   ],
@@ -286,7 +286,7 @@ const SAMPLE_BY_INPUT: Readonly<Record<string, unknown>> = {
   //     other two) point the bar at a location with no actions.
   relationshipValueField: 'id',
   showHeader: false,
-  location: 'record_header',
+  location: 'record_page',
   align: 'end',
   variant: 'default',
   size: 'sm',

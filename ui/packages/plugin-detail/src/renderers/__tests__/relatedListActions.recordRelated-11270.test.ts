@@ -25,10 +25,10 @@ import {
 
 const REGISTERED = [
   { name: 'log_time', locations: ['record_related'] },
-  { name: 'send_reminder', locations: ['list_item'] },
-  { name: 'archive', locations: ['list_item', 'record_related'] },
-  { name: 'invite', locations: ['list_toolbar'] },
-  { name: 'header_only', locations: ['record_header'] },
+  { name: 'send_reminder', locations: ['record_row'] },
+  { name: 'archive', locations: ['record_row', 'record_related'] },
+  { name: 'invite', locations: ['list'] },
+  { name: 'header_only', locations: ['record_page'] },
 ];
 
 const names = (actions: ReadonlyArray<{ name?: unknown }>) => actions.map((a) => a.name);

@@ -1172,7 +1172,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
     if (!injected) {
       mapped.push({
         type: 'action:bar',
-        location: 'record_header',
+        location: 'record_page',
         systemActions,
       } as unknown as SchemaNode);
     }

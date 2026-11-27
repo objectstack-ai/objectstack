@@ -24,17 +24,17 @@ const HELPFUL = {
   name: 'mark_article_helpful',
   label: 'Helpful',
   type: 'script',
-  locations: ['record_header'],
+  locations: ['record_page'],
   pressed: "has(record.viewer) && record.viewer.vote == 'helpful'",
 };
 const NOT_HELPFUL = {
   name: 'mark_article_not_helpful',
   label: 'Not helpful',
   type: 'script',
-  locations: ['record_header'],
+  locations: ['record_page'],
   pressed: { dialect: 'cel', source: "has(record.viewer) && record.viewer.vote == 'not_helpful'" },
 };
-const SHARE = { name: 'share_article', label: 'Share', type: 'script', locations: ['record_header'] };
+const SHARE = { name: 'share_article', label: 'Share', type: 'script', locations: ['record_page'] };
 
 function PageHeader({ schema }: { schema: any }) {
   const Component = ComponentRegistry.get('page:header');

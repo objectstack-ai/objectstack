@@ -23,7 +23,7 @@
  *     registered under that name) fell through to the runner's schema fallback
  *     — zero requests, then a green "Action completed successfully" toast
  *     (objectui#2960). Worse, when the same action ALSO declared
- *     `locations: ['list_item']`, the menu showed a working entry and a dead
+ *     `locations: ['record_row']`, the menu showed a working entry and a dead
  *     duplicate of it side by side.
  *
  * Resolving each legacy name against the object's declared actions collapses
@@ -56,7 +56,7 @@ export function resolveLegacyRowActions(opts: {
    * `'delete'` entries (those route to `onEdit` / `onDelete`, not the runner).
    */
   rowActions?: readonly string[] | null;
-  /** Row-context defs the view resolved from `locations: ['list_item']`. */
+  /** Row-context defs the view resolved from `locations: ['record_row']`. */
   rowActionDefs?: readonly NamedActionDef[] | null;
   /** Every action declared on the object (`objectDef.actions`). */
   objectActions?: readonly NamedActionDef[] | null;

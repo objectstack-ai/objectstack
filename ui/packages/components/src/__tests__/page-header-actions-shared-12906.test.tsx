@@ -24,15 +24,15 @@ import { PageHeaderActions } from '../index';
 const RECORD = { id: 'lead-1', name: 'Ada', status: 'open' };
 const OBJECT_SCHEMA = { name: 'lead', label: 'Lead' };
 const DECLARED = [
-  { name: 'convert', label: 'Convert Lead', type: 'flow', locations: ['record_header'] },
-  { name: 'qualify', label: 'Qualify', type: 'flow', locations: ['record_header'], visible: 'record.status == "open"' },
-  { name: 'archive', label: 'Archive', type: 'flow', locations: ['record_more'] },
-  { name: 'hidden_one', label: 'Never', type: 'flow', locations: ['record_header'], visible: false },
-  { name: 'list_only', label: 'List Only', type: 'flow', locations: ['list_item'] },
+  { name: 'convert', label: 'Convert Lead', type: 'flow', locations: ['record_page'] },
+  { name: 'qualify', label: 'Qualify', type: 'flow', locations: ['record_page'], visible: 'record.status == "open"' },
+  { name: 'archive', label: 'Archive', type: 'flow', locations: ['record_page'], component: 'action:menu' },
+  { name: 'hidden_one', label: 'Never', type: 'flow', locations: ['record_page'], visible: false },
+  { name: 'list_only', label: 'List Only', type: 'flow', locations: ['record_row'] },
 ];
 const SYSTEM = [
-  { name: 'sys_edit', label: 'Edit', type: 'script', locations: ['record_header'], order: 100, onClick: () => {} },
-  { name: 'sys_delete', label: 'Delete', type: 'script', locations: ['record_header'], order: 120, component: 'action:menu', onClick: () => {} },
+  { name: 'sys_edit', label: 'Edit', type: 'script', locations: ['record_page'], order: 100, onClick: () => {} },
+  { name: 'sys_delete', label: 'Delete', type: 'script', locations: ['record_page'], order: 120, component: 'action:menu', onClick: () => {} },
 ];
 
 function inRecord(node: React.ReactNode, headerSystemActions: unknown[] = SYSTEM) {

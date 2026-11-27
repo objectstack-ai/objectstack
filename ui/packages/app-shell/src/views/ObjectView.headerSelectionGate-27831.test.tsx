@@ -98,7 +98,7 @@ const REASSIGN = {
   objectName: 'showcase_task',
   type: 'flow',
   target: 'showcase_reassign_wizard',
-  locations: ['list_item', 'list_toolbar'],
+  locations: ['record_row', 'list'],
   refreshAfter: true,
 };
 
@@ -108,7 +108,7 @@ const EXPORT_TASKS = {
   label: 'Export Tasks',
   objectName: 'showcase_task',
   type: 'script',
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 
 const REASSIGN_URL = '/api/v1/actions/showcase_task/showcase_bulk_reassign';

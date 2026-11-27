@@ -277,7 +277,7 @@ describe('buildDefaultPageSchema', () => {
     it('embeds headerActions into page:header.actions instead of a separate quick_actions node', () => {
       const page = buildDefaultPageSchema(leadDef, {
         headerActions: [
-          { name: 'edit', label: 'Edit', locations: ['record_header'] },
+          { name: 'edit', label: 'Edit', locations: ['record_page'] },
         ],
       });
       const types = page.regions[0].components.map((c: any) => c.type);

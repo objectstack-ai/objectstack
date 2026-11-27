@@ -52,7 +52,7 @@ async function rejection(promise: Promise<unknown>): Promise<any> {
     throw new Error('expected the save to be rejected, but it resolved');
 }
 
-const act = (name: string, label: string) => ({ name, label, type: 'script', target: 'noop', locations: ['record_header'] });
+const act = (name: string, label: string) => ({ name, label, type: 'script', target: 'noop', locations: ['record_page'] });
 
 const itemWith = (actions: unknown[]) => ({
     name: 'dup_item',

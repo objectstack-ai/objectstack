@@ -74,11 +74,11 @@ beforeAll(() => {
  * echoing the registry.
  */
 const CHILD_ACTIONS = [
-  { name: 'send_welcome', label: 'Send Welcome', type: 'api', locations: ['list_item'] },
-  { name: 'deactivate', label: 'Deactivate', type: 'api', locations: ['list_item'] },
-  { name: 'invite', label: 'Invite', type: 'api', locations: ['list_toolbar'] },
-  { name: 'export_csv', label: 'Export CSV', type: 'api', locations: ['list_toolbar'] },
-  { name: 'header_only', label: 'Header Only', type: 'api', locations: ['record_header'] },
+  { name: 'send_welcome', label: 'Send Welcome', type: 'api', locations: ['record_row'] },
+  { name: 'deactivate', label: 'Deactivate', type: 'api', locations: ['record_row'] },
+  { name: 'invite', label: 'Invite', type: 'api', locations: ['list'] },
+  { name: 'export_csv', label: 'Export CSV', type: 'api', locations: ['list'] },
+  { name: 'header_only', label: 'Header Only', type: 'api', locations: ['record_page'] },
 ];
 const CHILD = { name: 'contact', label: 'Contact', actions: CHILD_ACTIONS };
 
@@ -326,7 +326,7 @@ describe('record:related_list.actions — an id that cannot be placed is REFUSED
   });
 
   it('an array that is not all action ids is refused whole, and draws none of its entries', async () => {
-    mount([{ name: 'invite', label: 'Invite', locations: ['list_toolbar'] }]);
+    mount([{ name: 'invite', label: 'Invite', locations: ['list'] }]);
     await waitForRow();
     await waitFor(() => expect(refusal()).not.toBeNull());
     expect(refusal()).toHaveAttribute('role', 'status');

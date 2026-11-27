@@ -61,14 +61,14 @@ beforeAll(() => {
 });
 
 const ACTIONS: Record<string, any> = {
-  convert: { name: 'convert', label: 'Convert Lead', type: 'flow', locations: ['record_header'] },
-  qualify: { name: 'qualify', label: 'Qualify', type: 'api', locations: ['record_header'] },
-  list_only: { name: 'list_only', label: 'List Only', type: 'api', locations: ['list_item'] },
+  convert: { name: 'convert', label: 'Convert Lead', type: 'flow', locations: ['record_page'] },
+  qualify: { name: 'qualify', label: 'Qualify', type: 'api', locations: ['record_page'] },
+  list_only: { name: 'list_only', label: 'List Only', type: 'api', locations: ['record_row'] },
   gated: {
     name: 'gated',
     label: 'Gated Action',
     type: 'api',
-    locations: ['record_header'],
+    locations: ['record_page'],
     requiredPermissions: ['nobody_holds_this'],
   },
 };
@@ -109,7 +109,7 @@ function mount(type: 'page:header' | 'record:quick_actions', actions: unknown[])
   const schema =
     type === 'page:header'
       ? { type, title: 'Lead', actions }
-      : { type, location: 'record_header', actions };
+      : { type, location: 'record_page', actions };
   return render(
     <MetadataCtx.Provider value={METADATA}>
       <ActionProvider context={{ user: USER } as any}>

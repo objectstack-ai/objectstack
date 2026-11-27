@@ -79,7 +79,7 @@ const NEW_UPDATE_ACTION: Draft = {
   name: 'invoice_action_2',
   label: 'New action',
   objectName: 'invoice',
-  locations: ['record_header'],
+  locations: ['record_page'],
   operation: 'update',
   patch: {},
 };

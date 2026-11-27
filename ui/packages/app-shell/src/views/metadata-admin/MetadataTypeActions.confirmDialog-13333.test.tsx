@@ -41,7 +41,7 @@ const PURGE = {
   type: 'api' as const,
   target: '/api/v1/datasources/${ctx.recordId}/purge',
   confirmText: 'Every cached row of this datasource is dropped.',
-  locations: ['record_header', 'list_toolbar'],
+  locations: ['record_page', 'list'],
 };
 
 const nativeConfirm = vi.fn(() => true);

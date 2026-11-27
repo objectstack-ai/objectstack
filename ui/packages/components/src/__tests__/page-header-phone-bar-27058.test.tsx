@@ -46,9 +46,9 @@ const HOST_ACTIONS = [
   { name: 'sys_delete', label: 'Delete' },
 ];
 
-const convert = { name: 'convert', locations: ['record_header'], label: 'Convert Lead', type: 'flow' };
-const assign = { name: 'assign', locations: ['record_header'], label: 'Assign', type: 'flow' };
-const ret = { name: 'return_to_pool', locations: ['record_header'], label: 'Return', type: 'flow' };
+const convert = { name: 'convert', locations: ['record_page'], label: 'Convert Lead', type: 'flow' };
+const assign = { name: 'assign', locations: ['record_page'], label: 'Assign', type: 'flow' };
+const ret = { name: 'return_to_pool', locations: ['record_page'], label: 'Return', type: 'flow' };
 
 /** A host that owns a bottom bar and hands it to the header, as the console's record page does. */
 function PhoneHost({
@@ -198,10 +198,10 @@ describe('a record header on a phone draws its actions into the host\'s bottom b
  * of the `⋯`. The bar is now Edit, the primary action, then the `⋯`.
  */
 describe('the phone bar keeps Edit visible on an editable record (objectstack#34595)', () => {
-  const clone = { name: 'clone_opportunity', locations: ['record_header'], label: 'Clone Opportunity', type: 'flow' };
+  const clone = { name: 'clone_opportunity', locations: ['record_page'], label: 'Clone Opportunity', type: 'flow' };
   // Declared second, so the primary is picked by its `variant`, not by position.
-  const quote = { name: 'generate_quote', locations: ['record_header'], label: 'Generate Quote', type: 'flow', variant: 'primary' };
-  const report = { name: 'print_report', locations: ['record_header'], label: 'Print', type: 'flow' };
+  const quote = { name: 'generate_quote', locations: ['record_page'], label: 'Generate Quote', type: 'flow', variant: 'primary' };
+  const report = { name: 'print_report', locations: ['record_page'], label: 'Print', type: 'flow' };
   const OPPORTUNITY = { type: 'page:header', actions: [clone, quote, report] };
 
   it('draws [Edit][primary][⋯]: the primary is the action declaring variant primary, the rest fold', async () => {

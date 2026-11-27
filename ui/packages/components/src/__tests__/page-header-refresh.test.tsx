@@ -136,10 +136,10 @@ describe('page:header — 1 primary + 2 secondary + ⋯, refresh first in the �
     renderHeader({
       refresh: vi.fn(),
       actions: [
-        { name: 'start', locations: ['record_header'], label: 'Start' },
-        { name: 'expedite', locations: ['record_header'], label: 'Expedite' },
-        { name: 'report', locations: ['record_header'], label: 'Report' },
-        { name: 'archive', locations: ['record_header'], label: 'Archive' },
+        { name: 'start', locations: ['record_page'], label: 'Start' },
+        { name: 'expedite', locations: ['record_page'], label: 'Expedite' },
+        { name: 'report', locations: ['record_page'], label: 'Report' },
+        { name: 'archive', locations: ['record_page'], label: 'Archive' },
       ],
     });
 
@@ -157,8 +157,8 @@ describe('page:header — 1 primary + 2 secondary + ⋯, refresh first in the �
     renderHeader({
       refresh: vi.fn(),
       actions: [
-        { name: 'start', locations: ['record_header'], label: 'Start' },
-        { name: 'clone', locations: ['record_more'], label: 'Clone' },
+        { name: 'start', locations: ['record_page'], label: 'Start' },
+        { name: 'clone', locations: ['record_page'], component: 'action:menu', label: 'Clone' },
       ],
     });
 

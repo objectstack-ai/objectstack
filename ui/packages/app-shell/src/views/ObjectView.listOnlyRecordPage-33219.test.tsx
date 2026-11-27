@@ -107,7 +107,7 @@ const OBJECTS = [
         objectName: OBJECT_NAME,
         type: 'script',
         target: 'revoke_credential',
-        locations: ['list_item', 'record_header'],
+        locations: ['record'],
       },
     ],
     listViews: {

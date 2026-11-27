@@ -94,7 +94,7 @@ export function useObjectViewHeaderToolbar({
     // off-screen.
     const toolbarBar: ActionBarSchema = {
         type: 'action:bar',
-        location: 'list_toolbar',
+        location: 'list',
         actions: toolbarActionsWithDeepLink,
         size: 'sm',
         variant: 'outline',

@@ -456,7 +456,7 @@ export function ObjectActionsPanel({
       name,
       label: t('engine.studio.actions.newLabel', locale),
       objectName,
-      locations: ['record_header'],
+      locations: ['record_page'],
       operation: 'update',
       patch: {},
     };
@@ -502,7 +502,7 @@ export function ObjectActionsPanel({
       name,
       label: t('engine.studio.actions.newLabel', locale),
       objectName,
-      locations: ['record_header'],
+      locations: ['record_page'],
       ...plan.keys,
     };
     if (heldInputKey(fresh) === null) {

@@ -39,8 +39,8 @@ const schema = {
   type: 'page:header',
   title: 'Invoice',
   actions: [
-    { name: 'gated', locations: ['record_header'], label: 'Set Parallel Reviewers', type: 'api', requiredPermissions: ['ehr_probe_capability'] },
-    { name: 'plain', locations: ['record_header'], label: 'Print', type: 'api' },
+    { name: 'gated', locations: ['record_page'], label: 'Set Parallel Reviewers', type: 'api', requiredPermissions: ['ehr_probe_capability'] },
+    { name: 'plain', locations: ['record_page'], label: 'Print', type: 'api' },
   ],
 };
 
@@ -71,7 +71,7 @@ describe('page:header — ADR-0066 D4 capability gate (#3923)', () => {
           schema={{
             type: 'page:header',
             title: 'Invoice',
-            actions: [{ name: 'both', locations: ['record_header'], label: 'Needs Both', type: 'api', requiredPermissions: ['a', 'b'] }],
+            actions: [{ name: 'both', locations: ['record_page'], label: 'Needs Both', type: 'api', requiredPermissions: ['a', 'b'] }],
           }}
         />
       </ActionProvider>,

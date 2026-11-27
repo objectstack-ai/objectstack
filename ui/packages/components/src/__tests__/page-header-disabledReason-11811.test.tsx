@@ -48,16 +48,16 @@ const ARCHIVE = {
   name: 'showcase_archive_task',
   label: 'Archive',
   type: 'script',
-  locations: ['record_header'],
+  locations: ['record_page'],
   disabled: DONE_GATE,
 };
 /** A `record_more`-only action: always drawn in the ⋯ overflow. */
-const ARCHIVE_MORE = { ...ARCHIVE, name: 'showcase_archive_more', label: 'Archive later', locations: ['record_more'] };
+const ARCHIVE_MORE = { ...ARCHIVE, name: 'showcase_archive_more', label: 'Archive later', locations: ['record_page'], component: 'action:menu' };
 
 /** The host's chrome, as `RecordDetailView` injects it: a host-computed boolean `disabled`. */
-const HOST_EDIT = { name: 'sys_edit', label: 'Edit', type: 'script', locations: ['record_header'], disabled: true, onClick: () => {} };
+const HOST_EDIT = { name: 'sys_edit', label: 'Edit', type: 'script', locations: ['record_page'], disabled: true, onClick: () => {} };
 const HOST_DELETE = {
-  name: 'sys_delete', label: 'Delete', type: 'script', locations: ['record_header'],
+  name: 'sys_delete', label: 'Delete', type: 'script', locations: ['record_page'],
   component: 'action:menu', disabled: true, onClick: () => {},
 };
 

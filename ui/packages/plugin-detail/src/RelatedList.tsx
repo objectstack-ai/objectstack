@@ -206,7 +206,7 @@ export interface RelatedListProps {
   /** Execute one of {@link rowActions} against the clicked row. */
   onRowAction?: (action: RelatedRowActionDef, row: any) => void | Promise<void>;
   /**
-   * Child-object list actions (`locations: ['list_toolbar']`), already
+   * Child-object list actions (`locations: ['list']`), already
    * localized by the host. Rendered as header buttons next to Add/New —
    * e.g. `invite_user` on an organization's Invitations list.
    */

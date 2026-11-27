@@ -92,7 +92,7 @@ export const MarkDoneAction = defineAction({
   visible: 'has(record.done) && record.done != true',
   // No `record_section`: the Task Detail header already draws it, and its
   // quick-actions bar carries only what the header does not (one action row).
-  locations: ['list_item', 'record_header'],
+  locations: ['record'],
   refreshAfter: true,
 });
 
@@ -125,7 +125,7 @@ export const ReopenTaskAction = defineAction({
   // `test/record-action-location-hosts.test.ts` holds that list equal to the
   // task's `record_header` / `record_more` set, so adding `record_header` here
   // means adding the id to that header too.
-  locations: ['list_item'],
+  locations: ['record_row'],
   refreshAfter: true,
 });
 
@@ -137,7 +137,7 @@ export const OpenDocsAction = defineAction({
   objectName: task,
   type: 'url',
   target: 'https://objectstack.ai',
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   refreshAfter: false,
 });
 
@@ -154,7 +154,7 @@ export const BulkReassignAction = defineAction({
   objectName: task,
   type: 'flow',
   target: 'showcase_reassign_wizard',
-  locations: ['list_item', 'list_toolbar'],
+  locations: ['record_row', 'list'],
   refreshAfter: true,
 });
 
@@ -166,7 +166,7 @@ export const QuickViewAction = defineAction({
   objectName: task,
   type: 'modal',
   target: 'showcase_component_gallery',
-  locations: ['list_item'],
+  locations: ['record_row'],
   refreshAfter: false,
 });
 
@@ -197,7 +197,7 @@ export const RecalcEstimateAction = defineAction({
   // ⋯ overflow is where the action is found there. The authored header lists
   // its action ids and leaves this one out, so the full page still draws it
   // once, in the bar.
-  locations: ['record_section', 'record_more'],
+  locations: ['record_section', 'record_page'], component: 'action:menu',
   // The endpoint is record-scoped and rejects a body without an id. On a
   // record surface the page supplies it; invoked from a LIST ROW (see the
   // `legacy_row_actions` view) nothing else can, so name the body key the
@@ -258,7 +258,7 @@ export const RecalcSelectionAction = defineAction({
   // `result`, never the selection. So it names the record it ran against, and
   // says "the whole selection" only when no record is bound.
   successMessage: "Estimates recalculated for {{ record.title | default:'the whole selection' }}.",
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   recordIdParam: 'recordId',
   refreshAfter: true,
 });
@@ -275,7 +275,7 @@ export const LogTimeAction = defineAction({
   // implicitly claims the `default` key), so pointing a form action there opens
   // a list as a form — now a build error (#2554).
   target: 'showcase_task.form',
-  locations: ['record_header', 'record_related'],
+  locations: ['record_page', 'record_related'],
   refreshAfter: true,
 });
 
@@ -291,7 +291,7 @@ export const AskAboutTaskAction = defineAction({
   icon: 'sparkles',
   objectName: task,
   type: 'ask_ai',
-  locations: ['record_header'],
+  locations: ['record_page'],
 });
 
 /**
@@ -369,7 +369,7 @@ export const SubmitForSignoffAction = defineAction({
   // `!=` against a literal never faults on a projected NULL, so `has()` alone
   // is the whole guard.
   visible: "has(record.status) && record.status != 'sent'",
-  locations: ['list_item', 'record_header'],
+  locations: ['record'],
   refreshAfter: true,
 });
 
@@ -413,7 +413,7 @@ export const GenerateInvoicePdfAction = defineAction({
   recordIdParam: 'recordId',
   bodyExtra: { app: 'com.example.showcase', object: invoice, page: 'showcase_invoice_document' },
   successMessage: 'The PDF is attached to the invoice.',
-  locations: ['list_item', 'record_header'],
+  locations: ['record'],
   refreshAfter: true,
 });
 
@@ -484,7 +484,7 @@ export const ActionParamGalleryAction = defineAction({
     capabilities: [],
   },
   successMessage: 'Params received — every widget type rendered through the shared field-widget map.',
-  locations: ['record_header', 'list_item'],
+  locations: ['record'],
   refreshAfter: false,
 });
 
@@ -522,7 +522,7 @@ export const ArchiveTaskAction = defineAction({
   // "Not available for this record", which names neither. Display only; it
   // never gates the dispatch.
   disabledReason: 'Mark the task done first.',
-  locations: ['record_header'],
+  locations: ['record_page'],
   refreshAfter: false,
 });
 

@@ -529,7 +529,7 @@ describe('ActionSchema', () => {
         name: 'toolbar_action',
         label: 'Toolbar Action',
         target: 'noop',
-        locations: ['list_toolbar'],
+        locations: ['list'],
       };
 
       expect(() => ActionSchema.parse(action)).not.toThrow();
@@ -729,7 +729,7 @@ describe('ActionSchema', () => {
         label: 'Approve',
         icon: 'check-circle',
         type: 'script',
-        locations: ['record_header', 'record_more'],
+        locations: ['record_page'],
         target: 'approveOpportunity',
         confirmText: 'Are you sure you want to approve this opportunity?',
         successMessage: 'Opportunity approved successfully!',
@@ -747,7 +747,7 @@ describe('ActionSchema', () => {
         icon: 'arrow-right',
         type: 'modal',
         target: 'transfer_case_modal',
-        locations: ['record_more'],
+        locations: ['record_page'], component: 'action:menu',
         params: [
           {
             name: 'new_owner',
@@ -783,7 +783,7 @@ describe('ActionSchema', () => {
         icon: 'mail',
         type: 'flow',
         target: 'send_quote_flow',
-        locations: ['record_header', 'list_item'],
+        locations: ['record'],
         params: [
           {
             name: 'recipient',
@@ -815,7 +815,7 @@ describe('ActionSchema', () => {
         icon: 'file-spreadsheet',
         type: 'api',
         target: '/api/export/excel',
-        locations: ['list_toolbar'],
+        locations: ['list'],
         successMessage: 'Export started. You will receive an email when ready.',
       };
 
@@ -828,7 +828,7 @@ describe('ActionSchema', () => {
         label: 'Delete',
         icon: 'trash',
         type: 'script',
-        locations: ['record_more'],
+        locations: ['record_page'], component: 'action:menu',
         target: 'deleteRecord',
         confirmText: 'Are you sure you want to delete this record? This action cannot be undone.',
         successMessage: 'Record deleted successfully!',
@@ -845,7 +845,7 @@ describe('ActionSchema', () => {
         label: 'Clone',
         icon: 'copy',
         type: 'script',
-        locations: ['record_more', 'list_item'],
+        locations: ['record'], component: 'action:menu',
         target: 'cloneRecord',
         params: [
           {
@@ -1116,7 +1116,7 @@ describe('ActionSchema - ai block (ADR-0011)', () => {
         label: 'Hint',
         target: 'noop',
         objectName: 'task',
-        locations: ['record_header'],
+        locations: ['record_page'],
         ai: { exposed: true, description: longDescription, paramHints: { recordId: { description: 'The task id.' } } },
       }),
     ).not.toThrow();
@@ -1249,7 +1249,7 @@ describe('ActionSchema - order', () => {
       name: 'approve',
       label: 'Approve',
       target: 'approve_handler',
-      locations: ['record_header', 'record_more'],
+      locations: ['record_page'],
       variant: 'primary',
       order: -10,
     });

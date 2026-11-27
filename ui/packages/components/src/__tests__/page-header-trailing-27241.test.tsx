@@ -23,8 +23,8 @@ import { PageHeaderActions, PageHeaderTrailingContext } from '../index';
 
 const RECORD = { id: 'lead-1', name: 'Ada' };
 const SYSTEM = [
-  { name: 'sys_edit', label: 'Edit', type: 'script', locations: ['record_header'], order: 100, onClick: () => {} },
-  { name: 'sys_delete', label: 'Delete', type: 'script', locations: ['record_header'], order: 120, component: 'action:menu', onClick: () => {} },
+  { name: 'sys_edit', label: 'Edit', type: 'script', locations: ['record_page'], order: 100, onClick: () => {} },
+  { name: 'sys_delete', label: 'Delete', type: 'script', locations: ['record_page'], order: 120, component: 'action:menu', onClick: () => {} },
 ];
 
 function inRecord(node: React.ReactNode, headerSystemActions: unknown[] = SYSTEM) {

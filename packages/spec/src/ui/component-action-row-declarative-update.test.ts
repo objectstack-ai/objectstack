@@ -145,9 +145,9 @@ const MEMBERS: readonly Member[] = [
   },
   {
     title: "5. `operation: 'update'` + a `list_toolbar` location",
-    keys: () => ({ ...UPDATE, locations: ['record_header', 'list_toolbar'] }),
+    keys: () => ({ ...UPDATE, locations: ['record_page', 'list'] }),
     at: () => ['locations', 1],
-    control: () => ({ ...UPDATE, locations: ['record_header'] }),
+    control: () => ({ ...UPDATE, locations: ['record_page'] }),
   },
 ];
 

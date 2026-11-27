@@ -47,7 +47,7 @@ const FLOW_ACTION = {
     type: 'flow',
     target: 'schedule_followup',
     ai: { exposed: true },
-    locations: ['record_header'],
+    locations: ['record_page'],
 };
 
 /**
@@ -145,7 +145,7 @@ describe('summarizeActionParams / summarizeAction fall back to the flow (#15705)
     });
 
     it('CONTROL — a non-flow action handed a flow is unchanged (the caller resolves none)', () => {
-        const script = { name: 'close_case', type: 'script', target: 'closeCase', locations: ['record_header'] };
+        const script = { name: 'close_case', type: 'script', target: 'closeCase', locations: ['record_page'] };
         expect(summarizeActionParams(NO_DEPS, script, undefined)).toEqual([]);
         expect(summarizeAction(NO_DEPS, script, undefined, 'crm_case')).not.toHaveProperty('params');
     });

@@ -98,7 +98,7 @@ const GATED = {
   type: 'script',
   objectName: 'duly_catalog_item',
   target: 'true',
-  locations: ['list_toolbar'],
+  locations: ['list'],
   requiredPermissions: ['duly.catalog.apply'],
 };
 

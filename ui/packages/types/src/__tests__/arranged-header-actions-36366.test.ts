@@ -13,16 +13,16 @@ import { describe, expect, it } from 'vitest';
 import { arrangedHeaderActions } from '../ui-action';
 
 const RECORD = [
-  { name: 'edit', locations: ['record_header'], order: 1 },
-  { name: 'clone', locations: ['record_more'] },
-  { name: 'mark_won', locations: ['record_header'], order: 5 },
-  { name: 'archive', locations: ['record_header', 'record_more'], component: 'action:menu' },
+  { name: 'edit', locations: ['record_page'], order: 1 },
+  { name: 'clone', locations: ['record_page'], component: 'action:menu' },
+  { name: 'mark_won', locations: ['record_page'], order: 5 },
+  { name: 'archive', locations: ['record_page'], component: 'action:menu' },
 ];
 
 const LIST = [
-  { name: 'new_lead', locations: ['list_toolbar'] },
-  { name: 'mass_assign', locations: ['list_toolbar'], order: 3 },
-  { name: 'import_csv', locations: ['list_toolbar'], component: 'action:menu' },
+  { name: 'new_lead', locations: ['list'] },
+  { name: 'mass_assign', locations: ['list'], order: 3 },
+  { name: 'import_csv', locations: ['list'], component: 'action:menu' },
 ];
 
 const names = (actions: readonly { name?: unknown }[]) => actions.map((a) => a.name);

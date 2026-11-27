@@ -73,7 +73,7 @@ const NEW_ACTION: Draft = {
   name: 'invoice_action_1',
   label: 'New action',
   objectName: 'invoice',
-  locations: ['record_header'],
+  locations: ['record_page'],
   operation: 'update',
   patch: {},
 };
@@ -177,7 +177,7 @@ describe('scriptBodyPin — the switch to "Run a script" seeds the language (obj
       name: 'invoice_send',
       label: 'Send',
       objectName: 'invoice',
-      locations: ['record_more'],
+      locations: ['record_page'], component: 'action:menu',
       type: 'script',
       body: { language: 'js', source: 'return { ok: true }' },
     });
@@ -194,7 +194,7 @@ describe('scriptBodyPin — the switch to "Run a script" seeds the language (obj
 
   it('a script action whose stored body names no language: the first keystroke seeds it and parses', () => {
     // The shape the Type control, or an older draft, leaves: a script with no body.
-    const seen = mountHost({ name: 'invoice_go', label: 'Go', objectName: 'invoice', locations: ['record_more'], type: 'script' });
+    const seen = mountHost({ name: 'invoice_go', label: 'Go', objectName: 'invoice', locations: ['record_page'], component: 'action:menu', type: 'script' });
     expect(refusals(seen.draft)).toEqual(['body:custom']);
 
     type('x');
@@ -217,7 +217,7 @@ describe('scriptBodyPin — a language change writes the new language’s shape 
     name: 'invoice_stamp',
     label: 'Stamp',
     objectName: 'invoice',
-    locations: ['record_more'],
+    locations: ['record_page'], component: 'action:menu',
     type: 'script',
     // The spec's own L2 example shape: a grant and a limit beside the source.
     body: { language: 'js', source: 'return 1', capabilities: ['api.read'], timeoutMs: 250 },
@@ -252,7 +252,7 @@ describe('scriptBodyPin — controls: the other writes (objectui#11921)', () => 
       name: 'invoice_send',
       label: 'Send',
       objectName: 'invoice',
-      locations: ['record_more'],
+      locations: ['record_page'], component: 'action:menu',
       type: 'script',
       body: { language: 'expression', source: 'true' },
     });
@@ -284,7 +284,7 @@ describe('scriptBodyPin — controls: the other writes (objectui#11921)', () => 
       ['form', 'Form — open a FormView'],
       ['url', 'URL — navigate to a link'],
     ] as const) {
-      const seen = mountHost({ name: 'invoice_go', label: 'Go', objectName: 'invoice', locations: ['record_more'], type: 'script' });
+      const seen = mountHost({ name: 'invoice_go', label: 'Go', objectName: 'invoice', locations: ['record_page'], component: 'action:menu', type: 'script' });
       await pick('Type', option);
       expect(seen.writes, value).toStrictEqual([{ type: value }]);
       cleanup();

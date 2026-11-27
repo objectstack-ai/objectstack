@@ -560,7 +560,7 @@ export default ${toCamelCase(name)}Action;
   // 'record_section', 'list_item' (not 'list_toolbar': an update needs the
   // record it writes). An action meant only for REST / MCP / AI callers says
   // so with an empty list.
-  locations: ['record_header'],
+  locations: ['record_page'],
 ${footer}`;
       }
       return `${header}
@@ -570,7 +570,7 @@ ${footer}`;
   // Where the button is drawn: the record's header. Others: 'record_more',
   // 'record_section', 'list_item', 'list_toolbar'. An action meant only for
   // REST / MCP / AI callers says so with an empty list.
-  locations: ['record_header'],
+  locations: ['record_page'],
 ${footer}`;
     },
   },

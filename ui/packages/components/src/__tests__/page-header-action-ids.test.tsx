@@ -49,30 +49,30 @@ import type { MetadataContextValue } from '@object-ui/react';
 const BODY_MARKER = 'OS6252_HANDLER_BODY_MARKER';
 
 const ACTIONS: Record<string, any> = {
-  convert: { name: 'convert', label: 'Convert Lead', type: 'flow', locations: ['record_header'], order: 2 },
-  qualify: { name: 'qualify', label: 'Qualify', type: 'api', locations: ['record_header'], order: 1 },
+  convert: { name: 'convert', label: 'Convert Lead', type: 'flow', locations: ['record_page'], order: 2 },
+  qualify: { name: 'qualify', label: 'Qualify', type: 'api', locations: ['record_page'], order: 1 },
   scripted: {
     name: 'scripted',
     label: 'Run Script',
     type: 'script',
-    locations: ['record_header'],
+    locations: ['record_page'],
     order: 3,
     body: { language: 'js', source: `return { marker: '${BODY_MARKER}' };` },
   },
-  archive: { name: 'archive', label: 'Archive', type: 'api', locations: ['record_more'] },
-  list_only: { name: 'list_only', label: 'List Only', type: 'api', locations: ['list_item'] },
+  archive: { name: 'archive', label: 'Archive', type: 'api', locations: ['record_page'], component: 'action:menu' },
+  list_only: { name: 'list_only', label: 'List Only', type: 'api', locations: ['record_row'] },
   gated: {
     name: 'gated',
     label: 'Gated Action',
     type: 'api',
-    locations: ['record_header'],
+    locations: ['record_page'],
     requiredPermissions: ['nobody_holds_this'],
   },
   closed_only: {
     name: 'closed_only',
     label: 'Closed Only',
     type: 'api',
-    locations: ['record_header'],
+    locations: ['record_page'],
     visible: 'record.status == "closed"',
   },
 };
@@ -269,8 +269,8 @@ describe('page:header — declared action-id lookup (objectui#6252)', () => {
       type: 'page:header',
       title: 'Lead',
       actions: [
-        { name: 'adhoc', label: 'Ad Hoc', type: 'api', locations: ['record_header'] },
-        { name: 'other', label: 'Other', type: 'api', locations: ['record_header'] },
+        { name: 'adhoc', label: 'Ad Hoc', type: 'api', locations: ['record_page'] },
+        { name: 'other', label: 'Other', type: 'api', locations: ['record_page'] },
       ],
     });
     expect(buttonNames(container)).toEqual(['Ad Hoc', 'Other']);
@@ -287,7 +287,7 @@ describe('page:header — declared action-id lookup (objectui#6252)', () => {
   it('refuses a mixed id/object array — nothing authored renders, and the console names the offending index', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      const adhoc = { name: 'adhoc', label: 'Ad Hoc', type: 'api', locations: ['record_header'] };
+      const adhoc = { name: 'adhoc', label: 'Ad Hoc', type: 'api', locations: ['record_page'] };
       // Live controls FIRST: each half renders on its own, so the refusal below
       // is about the MIX and not about either element.
       const idsOnly = mount({ type: 'page:header', title: 'Lead', actions: ['convert'] });

@@ -38,7 +38,7 @@
  * ```tsx
  * <SchemaRenderer schema={{
  *   type: 'action:bar',
- *   location: 'record_header',
+ *   location: 'record_page',
  *   actions: [
  *     { name: 'mark_complete', label: 'Mark Complete', type: 'script', icon: 'check', component: 'action:button' },
  *     { name: 'delete', label: 'Delete', type: 'api', icon: 'trash', variant: 'danger', component: 'action:button' },

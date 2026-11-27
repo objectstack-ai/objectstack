@@ -105,7 +105,7 @@ const OBJECTS = [
         type: 'api',
         method: 'POST',
         target: SUBMIT_TARGET,
-        locations: ['record_header'],
+        locations: ['record_page'],
       },
     ],
   },
