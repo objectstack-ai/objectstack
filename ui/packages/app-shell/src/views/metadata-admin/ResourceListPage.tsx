@@ -1297,8 +1297,11 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       const value = info.row.item[c.key];
       const cell = c.render ? c.render(value, info.row.item) : defaultCell(valueAtPath(info.row.item, c.key));
       // objectstack#27356 — two lines at most, so a row stays a row on a
-      // phone; the whole text on hover.
-      return (inSetup || studioList) && c.key === 'description' && typeof value === 'string' && value !== '' ? (
+      // phone; the whole text on hover. Not in the Studio list
+      // (objectstack#37918): its rows stay one line, and the grid's own
+      // one-line truncation ends a long description with an ellipsis, which
+      // a clamp inside that no-wrap cell would cut off mid-glyph.
+      return inSetup && c.key === 'description' && typeof value === 'string' && value !== '' ? (
         <span className="line-clamp-2" title={value}>
           {cell}
         </span>

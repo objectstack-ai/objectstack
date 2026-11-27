@@ -270,6 +270,14 @@ describe('decision 7 — the table (objectstack#37918)', () => {
     expect(screen.queryByText('Contacts')).toBeNull();
   });
 
+  it('a description stays in the grid cell one line long, with no two-line clamp inside it', async () => {
+    mount(WRITABLE);
+    await settled();
+    const text = within(rowOf('crm_account')).getByText('Companies');
+    expect(text.closest('.line-clamp-2')).toBeNull();
+    expect(text.closest('[data-slot="cell-display"]')).toHaveClass('truncate');
+  });
+
   it('CONTROL — Setup still draws the plural label column', async () => {
     mount(null);
     await screen.findByTestId('metadata-row-crm_account');
