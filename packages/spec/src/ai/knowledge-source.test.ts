@@ -19,6 +19,7 @@
 // is the last case here.
 
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '../kernel/metadata-plugin.zod';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 import { ObjectStackDefinitionSchema } from '../stack.zod';
@@ -200,6 +201,19 @@ describe('KnowledgeSourceSchema — `content` lists fields (ADR-0161 K5)', () =>
     expect(issuesOf({ ...SOURCE, source: withoutContent }).map(([c, p]) => [c, p])).toEqual([
       ['invalid_type', 'source.content'],
     ]);
+  });
+
+  it('refuses an empty-string member at its own path: it names no field and would index nothing', () => {
+    const issues = issuesOf({ ...SOURCE, source: { ...SOURCE.source, content: ['title', ''] } });
+    expect(issues).toHaveLength(1);
+    const [code, at, message] = issues[0]!;
+    expect([code, at]).toEqual(['too_small', 'source.content.1']);
+    expect(message).toContain('an empty string names no field');
+    // The published JSON Schema refuses it too: the constraint is a length, not a refinement.
+    const published = z.toJSONSchema(KnowledgeSourceSchema, { io: 'input', unrepresentable: 'any' }) as unknown as {
+      properties: { source: { properties: { content: { items: { minLength?: number } } } } };
+    };
+    expect(published.properties.source.properties.content.items.minLength).toBe(1);
   });
 
   it("a field whose name merely contains `*` is not the wildcard — only the bare `'*'` member is refused here", () => {

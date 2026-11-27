@@ -141,10 +141,16 @@ export const ObjectKnowledgeSourceSchema = lazySchema(() => strictObject(
      * fields are never indexed, even when named.
      */
     content: z.array(
-      // A pattern, not a `.refine()`: the published JSON Schema then refuses
-      // the member too, so a document validated against the file is not
-      // refused a release later by the parse.
-      z.string().regex(/^(?!\*$)/, {
+      // A length and a pattern, not a `.refine()`: the published JSON Schema
+      // then refuses the member too, so a document validated against the file
+      // is not refused a release later by the parse. The length refuses the
+      // empty string, which names no field and indexed nothing.
+      z.string().min(1, {
+        message:
+          '`knowledge_source.source.content` lists field names: an empty string names no field, so nothing is '
+          + 'indexed for that member. Remove the member, or write the name of the field whose text should be '
+          + 'indexed, for example `content: [\'title\', \'body\']`.',
+      }).regex(/^(?!\*$)/, {
         message:
           '`knowledge_source.source.content` lists field names: the `\'*\'` member was removed in @objectstack/spec '
           + '19.0.0 (ADR-0161 K5) — embedding is egress, and `\'*\'` sent every text field of the record to the '
