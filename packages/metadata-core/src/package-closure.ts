@@ -13,7 +13,8 @@
  *  - Studio's object pickers, which offer what the gate admits
  *    ({@link resolvePackageClosure} over the served package list);
  *  - the package-scoped resolution rule (`resolvePackageScopedHolders` in
- *    `@objectstack/core`, ADR-0150 D3 step 2), which resolves a bare name in
+ *    `./package-scoped-resolution.ts` beside this file, ADR-0150 D3 step 2;
+ *    `@objectstack/core` re-exports it), which resolves a bare name in
  *    P's closure plus the `sys` packages ({@link packageResolutionClosure}).
  *
  * ## Why it lives here (epic #31527, child R2)

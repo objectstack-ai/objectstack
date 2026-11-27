@@ -29,8 +29,8 @@ import { useSearchParams } from 'react-router-dom';
  * entries that open one object (data slices, named views), so the Interfaces
  * pillar adds the entry beside it. A KEY OF ITS OWN, not a `nav:<id>` value of
  * `?surface=`: every reader of that param parses it as `<type>:<name>` (each
- * pillar's restore, the app→Studio bridge in `utils/appRoute.ts`, the
- * copilot's surface context in `StudioAiCopilot`), and a second value grammar
+ * pillar's restore, the app→Studio bridge in `utils/appRoute.ts`), and a
+ * second value grammar
  * would hand each of them a `nav` "type". With a separate key, `?surface=`
  * keeps meaning what it meant to all of them, and a link without `nav` — every
  * link produced before this key existed — resolves exactly as it did.

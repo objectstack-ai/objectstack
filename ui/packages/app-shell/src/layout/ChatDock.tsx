@@ -39,7 +39,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@object-ui/components';
-import { Bug, History, Maximize2, MessagesSquare, Minimize2, MoreHorizontal, Share2, X } from 'lucide-react';
+import { History, Maximize2, MessagesSquare, Minimize2, MoreHorizontal, Share2, X } from 'lucide-react';
 import { formatNumber, useObjectTranslation } from '@object-ui/i18n';
 import { useAgents } from '@object-ui/plugin-chatbot/core';
 import { resolveApiBase } from '../console/ai/resolveApiBase.js';
@@ -53,7 +53,6 @@ import {
   readStoredDockFullWindow,
   writeStoredDockFullWindow,
   type ChatDockConversationActions,
-  type ChatDockHandoff,
   type ChatDockTarget,
 } from './chatDockTarget.js';
 import {
@@ -238,20 +237,18 @@ interface ChatDockMenuProps {
   /** What the body reported for its thread; absent with a `children` body or before the body loads. */
   actions: ChatDockConversationActions | undefined;
   onShare: () => void;
-  onDebug: () => void;
   /** The rail and the full window offer filling the window (or going back); the phone sheet does not. */
   fill?: { full: boolean; onToggle: () => void };
 }
 
 /**
- * objectstack#35445 — the drawer's 「···」 menu: AI usage, Share, filling the
- * window and the Build Doctor, which used to stand as icons across two header
- * rows. The usage reading is the one {@link AiUsageIndicator} draws (the same
- * hook and the same words); while the pool is running low the trigger carries a
- * marker, so the warning is still seen before a send hits the limit. The Build
- * Doctor is listed only when the body says so (a user who may build).
+ * objectstack#35445 — the drawer's 「···」 menu: AI usage, Share and filling
+ * the window, which used to stand as icons across two header rows. The usage
+ * reading is the one {@link AiUsageIndicator} draws (the same hook and the
+ * same words); while the pool is running low the trigger carries a marker, so
+ * the warning is still seen before a send hits the limit.
  */
-function ChatDockMenu({ apiBase, actions, onShare, onDebug, fill }: ChatDockMenuProps) {
+function ChatDockMenu({ apiBase, actions, onShare, fill }: ChatDockMenuProps) {
   const { t, language } = useObjectTranslation();
   // Same gate as the indicator: no usage read until the catalog lists an agent.
   const { agents } = useAgents({ apiBase });
@@ -350,41 +347,27 @@ function ChatDockMenu({ apiBase, actions, onShare, onDebug, fill }: ChatDockMenu
             {fillLabel}
           </DropdownMenuItem>
         ) : null}
-        {actions?.showDebug ? (
-          <DropdownMenuItem
-            disabled={!conversationId}
-            onSelect={onDebug}
-            title={conversationId ? t('console.ai.buildDoctorTitle') : t('console.ai.buildDoctorDisabledTitle')}
-            data-testid="chat-dock-build-doctor"
-          >
-            <Bug className="mr-2 h-3.5 w-3.5" />
-            {t('console.ai.buildDoctor', { defaultValue: 'Build Doctor' })}
-          </DropdownMenuItem>
-        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
 /**
- * The body's Share / Build Doctor state, lifted to the chrome that offers them
- * in its menu (objectstack#35445). The dialogs themselves stay in the body.
+ * The body's Share state, lifted to the chrome that offers it in its menu
+ * (objectstack#35445). The dialog itself stays in the body.
  */
 function useDockBodyActions() {
   const [actions, setActions] = React.useState<ChatDockConversationActions | undefined>(undefined);
   const [shareOpen, setShareOpen] = React.useState(false);
-  const [debugOpen, setDebugOpen] = React.useState(false);
-  return { actions, setActions, shareOpen, setShareOpen, debugOpen, setDebugOpen };
+  return { actions, setActions, shareOpen, setShareOpen };
 }
 
-/** objectstack#34608 — what the drawer shows, and the handoff it seeds (see `chatDockTarget.ts`). */
+/** objectstack#34608 — what the drawer shows (see `chatDockTarget.ts`). */
 export interface ChatDockThreadProps {
   /** Absent → the ambient thread (see {@link ChatDockConversation}). */
   target?: ChatDockTarget;
-  /** Replaces the target in place: a history row, a minted fresh thread, a binding. */
+  /** Replaces the target in place: a history row or a minted fresh thread. */
   onTargetChange?: (target: ChatDockTarget | undefined) => void;
-  /** A Builder handoff to seed once as the build thread's first message. */
-  handoff?: ChatDockHandoff;
 }
 
 export interface ChatDockPanelProps extends ChatDockThreadProps {
@@ -395,9 +378,9 @@ export interface ChatDockPanelProps extends ChatDockThreadProps {
   /** `app.defaultAgent` for the default body's resolver. Unused with `children`. */
   defaultAgent?: string;
   /**
-   * objectui#10926 — the current app's owning package, for the default body's
-   * build-thread binding (see {@link ChatDockConversation}). Unused with
-   * `children`.
+   * objectstack#30043 — the current app's owning package, sent by the default
+   * body as the turn's `context.activeApp` (see {@link ChatDockConversation}).
+   * Unused with `children`.
    */
   appPackageId?: string;
   /**
@@ -440,7 +423,6 @@ export function ChatDockPanel({
   title,
   target,
   onTargetChange,
-  handoff,
   children,
 }: ChatDockPanelProps) {
   const { t } = useObjectTranslation();
@@ -477,7 +459,7 @@ export function ChatDockPanel({
         />
       )}
       {/* objectstack#35445 — ONE title row: History, 「···」, Close. Usage,
-          Share, filling the window and the Build Doctor are in the menu; the
+          Share and filling the window are in the menu; the
           close is the drawer's 「×」 in both presentations, and the
           conversation is kept for the next open. */}
       <div className="flex h-11 shrink-0 items-center justify-between border-b px-3" data-testid="chat-dock-header">
@@ -508,7 +490,6 @@ export function ChatDockPanel({
             apiBase={apiBase}
             actions={children ? undefined : body.actions}
             onShare={() => body.setShareOpen(true)}
-            onDebug={() => body.setDebugOpen(true)}
             fill={{
               full,
               onToggle: () => {
@@ -547,15 +528,12 @@ export function ChatDockPanel({
               surfaceArtifactLabel={surfaceArtifactLabel}
               target={target}
               onTargetChange={onTargetChange}
-              handoff={handoff}
               presentation={full ? 'full' : 'rail'}
               historyOpen={historyOpen}
               onHistoryOpenChange={setHistoryOpen}
               onActionsChange={body.setActions}
               shareOpen={body.shareOpen}
               onShareOpenChange={body.setShareOpen}
-              debugOpen={body.debugOpen}
-              onDebugOpenChange={body.setDebugOpen}
             />
           </React.Suspense>
         )}
@@ -608,7 +586,6 @@ export function ChatDockMobileSheet({
   title,
   target,
   onTargetChange,
-  handoff,
   children,
 }: ChatDockMobileSheetProps) {
   const { t } = useObjectTranslation();
@@ -653,7 +630,6 @@ export function ChatDockMobileSheet({
               apiBase={apiBase}
               actions={children ? undefined : body.actions}
               onShare={() => body.setShareOpen(true)}
-              onDebug={() => body.setDebugOpen(true)}
             />
           </div>
           <SheetDescription className="sr-only">
@@ -673,15 +649,12 @@ export function ChatDockMobileSheet({
                 surfaceArtifactLabel={surfaceArtifactLabel}
                 target={target}
                 onTargetChange={onTargetChange}
-                handoff={handoff}
                 presentation="sheet"
                 historyOpen={historyOpen}
                 onHistoryOpenChange={setHistoryOpen}
                 onActionsChange={body.setActions}
                 shareOpen={body.shareOpen}
                 onShareOpenChange={body.setShareOpen}
-                debugOpen={body.debugOpen}
-                onDebugOpenChange={body.setDebugOpen}
               />
             </React.Suspense>
           )}

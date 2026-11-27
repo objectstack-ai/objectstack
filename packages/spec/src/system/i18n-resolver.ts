@@ -2141,52 +2141,83 @@ export function translateAction<T extends ActionLike>(
  * needed exactly that and kept a hand-copied `TRANSLATABLE_META_TYPES` set
  * under a "keep in sync with the type dispatch" comment; it is now derived from
  * {@link TRANSLATABLE_METADATA_TYPES} instead, so adding a translator here
- * reaches the REST boundary with nothing else to remember (#3786).
+ * reaches the REST boundary with nothing else to remember (#3786) — beyond its
+ * name in {@link TRANSLATED_METADATA_TYPE_NAMES}, which the type check asks for.
  */
-const METADATA_DOCUMENT_TRANSLATORS: Record<
-  string,
-  (doc: any, bundle: TranslationBundle | undefined, opts?: TranslateDocumentOptions) => any
-> = {
+type MetadataDocumentTranslator = (
+  doc: any,
+  bundle: TranslationBundle | undefined,
+  opts?: TranslateDocumentOptions,
+) => any;
+
+/**
+ * The metadata types the dispatch table below translates, as data that names
+ * no translator. {@link TRANSLATABLE_METADATA_TYPES} is built from THIS list,
+ * not from the table's keys: a reader of the set (the console asks it before
+ * every metadata read) would otherwise reach every translator and every schema
+ * they read, and keep them all in its bundle. The table `satisfies` a record
+ * keyed by exactly these names, so a translator added there without its name
+ * here, or a name here with no translator, fails the type check.
+ */
+const TRANSLATED_METADATA_TYPE_NAMES = [
+  'view',
+  'action',
+  'object',
+  'app',
+  'dashboard',
+  'dataset',
+  'page',
+  'picklist',
+  'position',
+  'permission',
+  'report',
+  'book',
+  'mapping',
+  'form',
+] as const;
+
+const METADATA_DOCUMENT_TRANSLATORS: Readonly<Record<string, MetadataDocumentTranslator>> = {
   view: translateView,
   action: translateAction,
   object: translateObject,
   app: translateApp,
   dashboard: translateDashboard,
   // A dataset's measure labels are drawn on the dashboard, under every metric
-  // tile and on every chart axis (#14253). Registering it HERE is the whole
-  // wiring — `TRANSLATABLE_METADATA_TYPES` is derived below, and
-  // `@objectstack/rest` reads the derived set.
+  // tile and on every chart axis (#14253). Registering it HERE, with its name
+  // in `TRANSLATED_METADATA_TYPE_NAMES` (the type check asks for both), is the
+  // whole wiring — `TRANSLATABLE_METADATA_TYPES` is built from that list, and
+  // `@objectstack/rest` reads the set.
   dataset: translateDataset,
   page: translatePage,
   picklist: translatePicklist,
   // The security catalog's two display surfaces: the console's `position-ref`
   // and `permission-ref` pickers list `GET /meta/position` and
-  // `GET /meta/permission`, so registering here is the whole wiring.
+  // `GET /meta/permission`, so registering here (and in the name list) is the
+  // whole wiring.
   position: translatePosition,
   permission: translatePermissionSet,
   // The console's report index and report page both read `GET /meta/report`,
-  // so registering here is the whole wiring.
+  // so registering here (and in the name list) is the whole wiring.
   report: translateReport,
   // A doc book's title and section titles: the console's docs portal builds
   // its sidebar from `GET /meta/book`, and the tree route translates the book
   // it resolves through this same table (`createMetaBookTreeAnswer`).
   book: translateBook,
   // A named import mapping's label: the console's import wizard offers each
-  // mapping by label from `GET /meta/mapping`, so registering here is the
-  // whole wiring.
+  // mapping by label from `GET /meta/mapping`, so registering here (and in
+  // the name list) is the whole wiring.
   mapping: translateMapping,
   // [ADR-0159 D8] A `form` item: `forms.<name>` first, its old-shape `_views`
   // tails as the declared fallback.
   form: translateForm,
-};
+} satisfies Record<(typeof TRANSLATED_METADATA_TYPE_NAMES)[number], MetadataDocumentTranslator>;
 
 /**
  * Metadata types whose user-facing labels {@link translateMetadataDocument}
- * localizes. Derived from the dispatch table — never restate it.
+ * localizes. Equal to the dispatch table's keys — the type check above holds
+ * the two together — never restate it.
  */
-export const TRANSLATABLE_METADATA_TYPES: ReadonlySet<string> = new Set(
-  Object.keys(METADATA_DOCUMENT_TRANSLATORS),
-);
+export const TRANSLATABLE_METADATA_TYPES: ReadonlySet<string> = new Set<string>(TRANSLATED_METADATA_TYPE_NAMES);
 
 /**
  * Generic metadata translator: dispatches to `translateView` /
@@ -2860,10 +2891,11 @@ function translateDatasetMembers(
  * Chinese tile titles with `Untouched > 14 days` directly beneath them
  * (#14253).
  *
- * Registering the translator in {@link METADATA_DOCUMENT_TRANSLATORS} is the
- * whole wiring: `TRANSLATABLE_METADATA_TYPES` is DERIVED from that table, and
- * `@objectstack/rest` reads the derived set, so the REST boundary follows with
- * nothing else to remember (#3786).
+ * Registering the translator in {@link METADATA_DOCUMENT_TRANSLATORS}, with
+ * its name in {@link TRANSLATED_METADATA_TYPE_NAMES} (the type check refuses
+ * one without the other), is the whole wiring: `TRANSLATABLE_METADATA_TYPES`
+ * is built from that list, and `@objectstack/rest` reads the set, so the REST
+ * boundary follows with nothing else to remember (#3786).
  *
  * ## Writes only where the bundle answered
  *
@@ -5052,8 +5084,10 @@ function builtinSystemFieldLabel(
 }
 
 /**
- * [#8284] Whether one of an object document's three scalars has been
- * EXPLICITLY set — i.e. it no longer carries the value the package shipped.
+ * [#8284] Whether a document scalar has been EXPLICITLY set — i.e. it no
+ * longer carries the value the package shipped. The scalars asked about are an
+ * object's three (`label`, `pluralLabel`, `description`), a validation rule's
+ * `message` and an activity milestone's `summary` (each section below).
  *
  * This is comparison-based provenance, and it is the whole mechanism: no flag
  * is carried through the fold, nothing is stamped on the document, and the
@@ -5119,7 +5153,8 @@ export function scalarOverridesPackagedBase(
 /**
  * [#20680] The ONE comparison behind {@link scalarOverridesPackagedBase},
  * keyed by any attribute name — the exported predicate's key union names the
- * object scalars its two callers ask about, and the dashboard translator
+ * scalars its callers ask about (an object's three, a validation rule's
+ * `message`, an activity milestone's `summary`), and the dashboard translator
  * ({@link translateDashboard}) asks the same question of `title`, which that
  * union does not carry; the view translator ({@link translateView}, #20731)
  * asks it of a bulk-action def's `confirmText`, its params' `help`, a form

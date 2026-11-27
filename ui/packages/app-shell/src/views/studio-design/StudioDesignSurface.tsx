@@ -233,10 +233,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
 
   const {
     isMobile,
-    setSurfaceLabel,
     slotHost,
     slotOpen,
-    slotHasContent,
+    slotHasProps,
     slotHandle,
     titleRowAssistant,
     rightSlot,
@@ -313,7 +312,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       isMobile={isMobile}
       slotHost={slotHost}
       slotOpen={slotOpen}
-      slotHasContent={slotHasContent}
+      slotHasProps={slotHasProps}
       slotHandle={slotHandle}
       titleRowAssistant={titleRowAssistant}
       rightSlot={rightSlot}
@@ -356,7 +355,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
         doPublish={doPublish}
         packageApp={packageApp}
         publishedApps={publishedApps}
-        setSurfaceLabel={setSurfaceLabel}
         locale={locale}
         shellNavigate={shellNavigate}
         notFoundExit={notFoundExit}

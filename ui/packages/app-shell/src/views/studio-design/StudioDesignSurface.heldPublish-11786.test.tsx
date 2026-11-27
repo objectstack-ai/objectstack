@@ -77,7 +77,6 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 vi.mock('../../preview/DraftChangesPanel', () => ({
   DraftChangesPanel: (props: Record<string, unknown>) => {

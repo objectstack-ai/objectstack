@@ -1,33 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectui#12725 — Studio's one right slot, the maintainer's 「按「右栏二选一」定稿」:
- * the slot shows the properties OR the AI copilot, never both, and never beside
- * a second right-hand panel.
- *
- *  - With nothing selected the slot shows the copilot, and no properties.
- *  - Selecting a canvas element switches it to that element's properties, the
- *    copilot folded to a strip at the slot's foot; Esc, or a click on empty
- *    canvas, returns to the item's own properties.
- *  - `⌘.` / `Ctrl+.` switches the two; the right-most icon of the page's title
- *    row (the top bar's, before objectstack#37455) hides the slot, remembered
- *    under the Studio key, never the console's.
- *  - The canvas has no 画布 / 源码 / 属性 tabs: one status line, and the item's
- *    definition opens from its ⋯ menu.
- *  - The pillar names are visible from 1024 px (`lg`), icons below.
- *  - CONTROLS: a page that claims nothing (the sharing overview) gets the copilot alone; no
- *    copilot served → the properties alone; an injected `aiSlot` (the cloud
- *    seam) keeps the classic layout with no slot.
- *
- * The copilot is a stub reporting what `StudioChatDock` reports (its own pins
- * live beside `StudioAiCopilot.tsx`); the canvas is a stub dashboard designer
- * whose one button selects a block, as `onSelectionChange` reports it.
+ * objectui#12725 — Studio's one right slot holds the open item's properties,
+ * never beside a second right-hand panel. A page that claims nothing (the
+ * sharing overview) keeps the slot closed, and the pillars' host says so.
+ * The selection cases live in `pillarsClaimSlot-12725`.
  */
 
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const PACKAGE_ID = 'com.acme.app';
@@ -74,17 +57,6 @@ vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPan
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
-/** What the copilot stub reports, per test. */
-const copilot = vi.hoisted(() => ({ available: true, planPendingCount: 0 }));
-vi.mock('./StudioAiCopilot', () => ({
-  StudioChatDock: ({ onStatusChange }: { onStatusChange?: (s: { available: boolean; planPendingCount: number }) => void }) => {
-    React.useEffect(() => {
-      onStatusChange?.({ available: copilot.available, planPendingCount: copilot.planPendingCount });
-    }, [onStatusChange]);
-    return copilot.available ? <div data-testid="copilot-body">conversation</div> : null;
-  },
-}));
-
 // The source loads `@objectstack/lint` lazily; paid here, at collection, not
 // inside a case's clock (check:test-source-alias).
 import '@objectstack/lint';
@@ -93,10 +65,8 @@ import '@objectstack/lint';
 import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { StudioPillarRedirect } from './StudioPillarRedirect';
-import { t } from '../metadata-admin/i18n';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
-import { DOCK_EXPANDED_STORAGE_KEY, DOCK_STUDIO_EXPANDED_STORAGE_KEY } from '../../layout/chatDockState';
 
 function StubInspector(): React.ReactElement {
   return (
@@ -121,8 +91,6 @@ registerMetadataInspector('dashboard', StubInspector as never);
 const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
 
 beforeEach(() => {
-  copilot.available = true;
-  copilot.planPendingCount = 0;
   window.sessionStorage.clear();
   vi.stubGlobal(
     'fetch',
@@ -162,91 +130,10 @@ function renderAt(tab: string, props: { aiSlot?: React.ReactNode } = {}) {
 
 const slot = () => screen.getByTestId('studio-right-slot');
 
-describe('Studio right slot — controls (objectui#12725)', () => {
-  it('the slot remembers a hide under the Studio key only: the console dock\'s flag never hides it', async () => {
-    window.sessionStorage.setItem(DOCK_EXPANDED_STORAGE_KEY, '0');
-    renderAt('data');
-    await waitFor(() => expect(slot()).toBeVisible());
-    cleanup();
-
-    window.sessionStorage.setItem(DOCK_STUDIO_EXPANDED_STORAGE_KEY, '0');
-    renderAt('data');
-    await screen.findByTestId('topbar-ai-assistant');
-    expect(slot()).not.toBeVisible();
-    expect(screen.getByTestId('topbar-ai-assistant')).toHaveAttribute('aria-pressed', 'false');
-  });
-
-  // objectui#12725 phase 2 — Data and Automations now claim the slot, so the
-  // page that claims nothing was Access; objectstack#36905 — it is the sharing
-  // overview's own page now (one table in the main column, no properties
-  // aside). The Data pillar with nothing selected claims nothing either:
-  // `pillarsClaimSlot-12725`.
-  it('a page that claims nothing gets the copilot alone: a title, no switch, no strip', async () => {
-    renderAt('owd');
-    await waitFor(() => expect(slot()).toHaveAttribute('data-mode', 'copilot'));
-    expect(within(slot()).queryAllByRole('tab')).toHaveLength(0);
-    expect(within(slot()).getByTestId('studio-slot-title')).toHaveTextContent(t('engine.studio.aiCopilot', 'en'));
-    // ⌘. has nothing to switch to.
-    fireEvent.keyDown(document, { key: '.', metaKey: true });
-    expect(slot()).toHaveAttribute('data-mode', 'copilot');
-  });
-
-  // objectui#12725 phase 2 — re-pointed from Data to Access, for the reason above.
-
-});
-
-// objectstack#37455 — the slot's control left the top bar for the end of the
-// open page's title row: the item header's, and the list page's.
-describe('Studio right slot — its control ends the page\'s title row (objectstack#37455)', () => {
-  it('the sharing overview: the AI assistant ends its item header behind a hairline, not the left column, and hides and shows the slot', async () => {
-    renderAt('owd');
-    await waitFor(() => expect(slot()).toHaveAttribute('data-mode', 'copilot'));
-    const itemHeader = screen.getByTestId('owd-item-header');
-    const ai = await within(itemHeader).findByTestId('topbar-ai-assistant');
-    // objectstack#37456 — there is no top bar to hold a second one, and the
-    // left column holds none.
-    expect(screen.queryByTestId('studio-shell-header')).toBeNull();
-    expect(within(screen.getByTestId('studio-top-left')).queryByTestId('topbar-ai-assistant')).toBeNull();
-    expect(screen.getAllByTestId('topbar-ai-assistant')).toHaveLength(1);
-    // The last control of the header's action slot, the hairline right before it.
-    const actionSlot = ai.parentElement as HTMLElement;
-    expect(actionSlot.lastElementChild).toBe(ai);
-    expect(ai.previousElementSibling).toHaveAttribute('data-testid', 'studio-title-row-divider');
-    expect(within(actionSlot).getByTestId('access-explain')).toBeInTheDocument();
-
-    expect(slot()).toBeVisible();
-    expect(ai).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(ai);
-    expect(slot()).not.toBeVisible();
-    expect(within(itemHeader).getByTestId('topbar-ai-assistant')).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(within(itemHeader).getByTestId('topbar-ai-assistant'));
-    expect(slot()).toBeVisible();
-    expect(slot()).toHaveAttribute('data-mode', 'copilot');
-  });
-
-  it('a list page: the AI assistant ends the list\'s title row, inside the page, not the left column', async () => {
-    renderAt('data');
-    // objectstack#37456 — while the list loads it has no title row, and the
-    // pane's fallback holds the control (`StudioTitleRowFallback`); once the
-    // list's title row is drawn the control is there, and only there.
-    await waitFor(
-      () => expect(screen.getByTestId('topbar-ai-assistant').closest('[data-slot="studio-title-row-end"]')).not.toBeNull(),
-      { timeout: 4000 },
-    );
-    const ai = screen.getByTestId('topbar-ai-assistant');
-    expect(within(screen.getByTestId('studio-top-left')).queryByTestId('topbar-ai-assistant')).toBeNull();
-    expect(screen.getByTestId('studio-pillars-host')).toContainElement(ai);
-    expect(ai.closest('[data-slot="studio-title-row-end"]')).not.toBeNull();
-    expect(screen.getAllByTestId('topbar-ai-assistant')).toHaveLength(1);
-  });
-});
-
 // objectstack#35061 item 1 — the pillars' host is what every rail's narrow form
 // measures, and it says whether the slot squeezes it.
 describe('Studio right slot — the rails read whether it squeezes the pillars (objectstack#35061)', () => {
-
-  it('a page with no slot to show (the sharing overview, no copilot) keeps its host closed', async () => {
-    copilot.available = false;
+  it('a page with no slot to show (the sharing overview) keeps its host closed', async () => {
     renderAt('owd');
     await screen.findByTestId('owd-item-header');
     await act(async () => {});

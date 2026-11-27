@@ -86,7 +86,6 @@ vi.mock('./useMetadata', async (importOriginal) => {
 vi.mock('./AssignedUsersSection', () => ({ AssignedUsersSection: () => null }));
 vi.mock('./AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
-vi.mock('../studio-design/StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 import '../../services/builtinComponents.js';
 import { MetadataResourceEditPage } from './ResourceEditPage';

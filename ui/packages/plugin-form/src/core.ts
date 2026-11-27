@@ -38,5 +38,11 @@ export type { FieldDefaultsSchemaLike, OptionListFieldLike } from './schemaDefau
 export { resolveSectionGroupReferences } from './sectionGroups';
 export type { ResolveSectionGroupsOptions } from './sectionGroups';
 export { useInitialFieldFocus } from './initialFieldFocus';
+/**
+ * Whether a create form would save a field it opened holding a value: the
+ * console's related-list bridge asks it before offering + New pre-linked to its
+ * parent. Its closure is the form's outbound filter and write gate, both pure.
+ */
+export { createKeepsField } from './createKeepsField';
 export { FormOwnerLineContext } from './formOwnerLineContext';
 export type { FormOwnerActionTarget, FormOwnerLineHost } from './formOwnerLineContext';

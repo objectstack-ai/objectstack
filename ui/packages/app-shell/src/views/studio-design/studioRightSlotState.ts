@@ -11,37 +11,31 @@
 import * as React from 'react';
 import { DOCK_CONTENT_MIN_WIDTH, DOCK_KEYBOARD_STEP } from '../../layout/chatDockState.js';
 
-export type StudioSlotMode = 'props' | 'copilot';
-
 /**
  * objectstack#34725 — the slot's width, resizable from its left edge and
- * remembered per browser under the slot's own keys, so a width dragged here
- * never moves the console drawer's. objectstack#35061 — each pane keeps its
- * own width (properties 360 px, the copilot 420 px by default, `STUDIO_SLOT_DEFAULT_WIDTHS`),
- * within the slot's range (`clampStudioSlotWidth`), never so wide that the
- * canvas drops under `DOCK_CONTENT_MIN_WIDTH`. The widened copilot is the one
- * other width (`wideWidth`), outside that range.
+ * remembered per browser under the slot's own key, so a width dragged here
+ * never moves the console drawer's. objectstack#35061 — 360 px by default
+ * (`STUDIO_SLOT_DEFAULT_WIDTH`), within the slot's range
+ * (`clampStudioSlotWidth`), never so wide that the canvas drops under
+ * `DOCK_CONTENT_MIN_WIDTH`.
  */
-export const STUDIO_SLOT_WIDTH_STORAGE_KEYS: Readonly<Record<StudioSlotMode, string>> = {
-  props: 'studio-right-slot-width-props',
-  copilot: 'studio-right-slot-width-copilot',
-};
+export const STUDIO_SLOT_WIDTH_STORAGE_KEY = 'studio-right-slot-width-props';
 
 /**
- * The one width both panes shared before each kept its own. Not read: it is
- * removed on first use, and each pane starts from its default.
+ * The width keys the slot used before it held the properties alone. Not read:
+ * each is removed on first use.
  */
-export const STUDIO_SLOT_SHARED_WIDTH_STORAGE_KEY = 'studio-right-slot-width';
+export const STUDIO_SLOT_RETIRED_WIDTH_STORAGE_KEYS: readonly string[] = [
+  'studio-right-slot-width',
+  'studio-right-slot-width-copilot',
+];
 
-/** objectstack#35061 — each pane's width until the author drags it. */
-export const STUDIO_SLOT_DEFAULT_WIDTHS: Readonly<Record<StudioSlotMode, number>> = {
-  props: 360,
-  copilot: 420,
-};
+/** objectstack#35061 — the slot's width until the author drags it. */
+export const STUDIO_SLOT_DEFAULT_WIDTH = 360;
 
 /** objectstack#35061 — the slot is never narrower than this. */
 export const STUDIO_SLOT_MIN_WIDTH = 320;
-/** objectstack#35061 — the slot is never wider than this (the in-place widen aside). */
+/** objectstack#35061 — the slot is never wider than this. */
 export const STUDIO_SLOT_MAX_WIDTH = 560;
 
 /**
@@ -57,53 +51,41 @@ export function clampStudioSlotWidth(desired: number, viewportWidth: number): nu
   return Math.min(Math.max(desired, STUDIO_SLOT_MIN_WIDTH), upper);
 }
 
-type StudioSlotWidths = Record<StudioSlotMode, number>;
-
-function readStoredSlotWidth(mode: StudioSlotMode): number {
+function readStoredSlotWidth(): number {
   try {
-    const raw = window.localStorage.getItem(STUDIO_SLOT_WIDTH_STORAGE_KEYS[mode]);
+    for (const key of STUDIO_SLOT_RETIRED_WIDTH_STORAGE_KEYS) window.localStorage.removeItem(key);
+    const raw = window.localStorage.getItem(STUDIO_SLOT_WIDTH_STORAGE_KEY);
     const n = raw ? Number.parseInt(raw, 10) : NaN;
-    return Number.isFinite(n) && n > 0 ? n : STUDIO_SLOT_DEFAULT_WIDTHS[mode];
+    return Number.isFinite(n) && n > 0 ? n : STUDIO_SLOT_DEFAULT_WIDTH;
   } catch {
-    return STUDIO_SLOT_DEFAULT_WIDTHS[mode];
+    return STUDIO_SLOT_DEFAULT_WIDTH;
   }
 }
 
-function readStoredSlotWidths(): StudioSlotWidths {
+function writeStoredSlotWidth(width: number): void {
   try {
-    window.localStorage.removeItem(STUDIO_SLOT_SHARED_WIDTH_STORAGE_KEY);
-  } catch {
-    /* private mode: nothing was stored */
-  }
-  return { props: readStoredSlotWidth('props'), copilot: readStoredSlotWidth('copilot') };
-}
-
-function writeStoredSlotWidth(mode: StudioSlotMode, width: number): void {
-  try {
-    window.localStorage.setItem(STUDIO_SLOT_WIDTH_STORAGE_KEYS[mode], String(Math.round(width)));
+    window.localStorage.setItem(STUDIO_SLOT_WIDTH_STORAGE_KEY, String(Math.round(width)));
   } catch {
     /* private mode: the width just is not remembered */
   }
 }
 
 export interface StudioSlotWidth {
-  /** The shown pane's width to draw, already clamped to the window. */
+  /** The slot's width to draw, already clamped to the window. */
   width: number;
   dragging: boolean;
-  /** Pointer-down on the left-edge handle: dragging left widens the shown pane. */
+  /** Pointer-down on the left-edge handle: dragging left widens the slot. */
   onResizePointerDown: (e: React.PointerEvent) => void;
   /** Arrow keys on the focused handle: Left widens, Right narrows. */
   onResizeKeyDown: (e: React.KeyboardEvent) => void;
 }
 
 /**
- * The slot's resizable width for the pane it shows; see
- * {@link STUDIO_SLOT_WIDTH_STORAGE_KEYS}. A resize moves only that pane's width.
+ * The slot's resizable width; see {@link STUDIO_SLOT_WIDTH_STORAGE_KEY}.
  */
-export function useStudioSlotWidth(mode: StudioSlotMode): StudioSlotWidth {
-  const [stored, setStored] = React.useState<StudioSlotWidths>(readStoredSlotWidths);
+export function useStudioSlotWidth(): StudioSlotWidth {
+  const [current, setCurrent] = React.useState<number>(readStoredSlotWidth);
   const [dragging, setDragging] = React.useState(false);
-  const current = stored[mode];
   const onResizePointerDown = React.useCallback(
     (e: React.PointerEvent) => {
       e.preventDefault();
@@ -112,13 +94,12 @@ export function useStudioSlotWidth(mode: StudioSlotMode): StudioSlotWidth {
       const widthAt = (x: number) => clampStudioSlotWidth(startWidth + (startX - x), window.innerWidth);
       setDragging(true);
       const onMove = (ev: PointerEvent) => {
-        const next = widthAt(ev.clientX);
-        setStored((prev) => ({ ...prev, [mode]: next }));
+        setCurrent(widthAt(ev.clientX));
       };
       const onUp = (ev: PointerEvent) => {
         const final = widthAt(ev.clientX);
-        setStored((prev) => ({ ...prev, [mode]: final }));
-        writeStoredSlotWidth(mode, final);
+        setCurrent(final);
+        writeStoredSlotWidth(final);
         setDragging(false);
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
@@ -126,7 +107,7 @@ export function useStudioSlotWidth(mode: StudioSlotMode): StudioSlotWidth {
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
     },
-    [current, mode],
+    [current],
   );
   const onResizeKeyDown = React.useCallback(
     (e: React.KeyboardEvent) => {
@@ -134,10 +115,10 @@ export function useStudioSlotWidth(mode: StudioSlotMode): StudioSlotWidth {
       e.preventDefault();
       const step = e.key === 'ArrowLeft' ? DOCK_KEYBOARD_STEP : -DOCK_KEYBOARD_STEP;
       const next = clampStudioSlotWidth(clampStudioSlotWidth(current, window.innerWidth) + step, window.innerWidth);
-      setStored((prev) => ({ ...prev, [mode]: next }));
-      writeStoredSlotWidth(mode, next);
+      setCurrent(next);
+      writeStoredSlotWidth(next);
     },
-    [current, mode],
+    [current],
   );
   const width = typeof window === 'undefined' ? current : clampStudioSlotWidth(current, window.innerWidth);
   return { width, dragging, onResizePointerDown, onResizeKeyDown };
@@ -146,9 +127,7 @@ export function useStudioSlotWidth(mode: StudioSlotMode): StudioSlotWidth {
 export interface StudioRightSlotHandle {
   /** The element a pillar portals its properties into; `null` until mounted. */
   propsTarget: HTMLElement | null;
-  /** The mode the slot SHOWS (a missing copilot reads as `props`). */
-  mode: StudioSlotMode;
-  /** Claim the properties half of the slot; returns the release. */
+  /** Claim the slot for the properties; returns the release. */
   claimProps: () => () => void;
   /** An element was selected: show its properties. */
   showProps: () => void;
@@ -162,7 +141,7 @@ export function useStudioRightSlot(): StudioRightSlotHandle | null {
 }
 
 /**
- * Match a keydown to the slot's mode toggle — `⌘.` (macOS) / `Ctrl+.`, no Shift,
+ * Match a keydown to the slot's toggle — `⌘.` (macOS) / `Ctrl+.`, no Shift,
  * no Alt. Measured free in the console at objectui `4b3d6ed`: the bound chords
  * are ⌘K, ⌘B, ⌘⇧H, ⌘⇧I, ⌘⇧M, ⌘⇧O, ⌘⇧S, ⌘S and `?`. Pure + exported for tests.
  */

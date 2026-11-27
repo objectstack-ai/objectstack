@@ -8,7 +8,7 @@ import type {
   QueueHandler,
 } from '@objectstack/spec/contracts';
 import { SysJobQueue } from '@objectstack/platform-objects/audit';
-import { DispatchLoop, DEFAULT_MAX_IDLE_INTERVAL_MS } from '@objectstack/core';
+import { DispatchLoop, DEFAULT_MAX_IDLE_INTERVAL_MS, wakeAfterOpenUnitsCommit } from '@objectstack/core';
 import {
   SYSTEM_CTX,
   uid,
@@ -429,7 +429,8 @@ export class DbQueueAdapter implements IQueueService {
     // read, no tick now — so it goes out on time even with a minutes-long
     // ceiling, rather than up to a backed-off interval late.
     const untilDueMs = Date.parse(scheduledFor) - now.getTime();
-    if (untilDueMs <= 0) this.wake();
+    // [#37705] A row written in a unit is visible to the tick once that unit commits.
+    if (untilDueMs <= 0) wakeAfterOpenUnitsCommit(this.engine, () => this.wake());
     else this.loop?.wakeAt(Date.now() + untilDueMs);
 
     return id;
@@ -507,7 +508,7 @@ export class DbQueueAdapter implements IQueueService {
     }, { context: SYSTEM_CTX });
     // [#17612] `replay` re-arms the row for RIGHT NOW, so it wakes the loop
     // unconditionally — there is no deferred case here to discriminate.
-    this.wake();
+    wakeAfterOpenUnitsCommit(this.engine, () => this.wake());
   }
 
   async purgeFailed(messageId: string): Promise<void> {

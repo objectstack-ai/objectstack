@@ -2838,9 +2838,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.bannerPair': 'This app’s and {package}’s objects · live on save',
   // objectstack#35018 — the open set's origin in the builder's words (the Studio title note).
   'engine.studio.access.origin.app': 'Included with the app',
-  // objectstack#35018 — the word before the open item's label on the copilot's "Viewing" line.
-  'engine.studio.copilot.subject.access': 'Access',
-  'engine.studio.copilot.subject.flow': 'Flow',
   'engine.studio.access.bannerTitlePair':
     'This permission set is part of the customization of {package}, so {package}’s objects are listed as well as this app’s, and saving changes only these grants — grants from other apps stay as they are. Changes go live when you press Save in the page header.',
   // objectui#11781 — a read-only package saves no draft; objectui#12453 makes this the header link's title.
@@ -3523,18 +3520,11 @@ const STUDIO_EN: Record<string, string> = {
   // principal who may enter Studio may open (objectstack#37565).
   'engine.studio.notFound.allMetadata': 'Open organization flows',
   'engine.studio.notFound.pillar': 'This page does not exist. Studio has no "{pillar}" section; pick Data, Automations, Interfaces, Access or All metadata above.',
-  'engine.studio.aiCopilot': 'AI Assistant',
-  // objectui#12725 — the Studio right slot: properties OR the copilot.
+  // objectui#12725 — the Studio right slot (the properties panel).
   'engine.studio.slot.label': 'Right panel',
-  'engine.studio.slot.switchHint': 'Switch with ⌘. (Ctrl+.)',
   'engine.studio.slot.collapse': 'Hide the right panel',
   'engine.studio.slot.expand': 'Show the right panel',
-  'engine.studio.slot.backToChat': 'Back to the conversation',
-  'engine.studio.slot.planPending': 'a plan awaits your approval',
-  'engine.studio.slot.pendingCount': '{count} awaiting your approval',
-  'engine.studio.slot.openFullPage': 'Open full page',
-  // objectstack#34725 — the slot header's History button and its resize handle.
-  'engine.studio.slot.history': 'History',
+  // objectstack#34725 — the slot's resize handle.
   'engine.studio.slot.resize': 'Resize the right panel',
   // objectstack#34725 — the line over the Data canvas while the AI assistant's drafts are on it.
   'engine.studio.copilotChanges.lineOne': 'The AI assistant just made {count} change',

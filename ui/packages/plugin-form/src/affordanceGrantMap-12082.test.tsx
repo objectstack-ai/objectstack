@@ -662,7 +662,6 @@ const LIST_VIEW = 'packages/plugin-list/src/ListView.tsx';
 const RECORD_PANEL = 'packages/plugin-detail/src/RecordDetailPanel.tsx';
 const OBJECT_GANTT = 'packages/plugin-gantt/src/ObjectGantt.tsx';
 const MASTER_DETAIL = 'packages/plugin-form/src/MasterDetailForm.tsx';
-const EXCEL_IMPORT_BAR = 'packages/app-shell/src/console/ai/ExcelImportBar.tsx';
 const RELATED_LIST = 'packages/plugin-detail/src/RelatedList.tsx';
 const RELATED_LIST_BLOCK = 'packages/plugin-detail/src/renderers/record-related-list.tsx';
 // Setup's holders sections: each reads its own rows, so every mount (the
@@ -902,8 +901,8 @@ const WRITE_SITES: Record<string, WriteSite> = {
   'packages/plugin-gantt/src/ObjectGantt.tsx :: ObjectGantt > renderRecordOverlay :: delete': mapped(['recordDelete'], DETAIL_VIEW),
   // ── plugin-grid ──
   'packages/plugin-grid/src/ImportWizard.tsx :: ImportWizard > legacyImport :: create': {
-    ...mapped(['listImport'], CONSOLE_LIST, 'packages/app-shell/src/views/importTargetFields.ts', EXCEL_IMPORT_BAR),
-    note: "one site, two mounts: the console list's Import and the AI build panel's spreadsheet import (`ExcelImportBar`) each read the row where they offer Import; HOST_GATED below holds every mount of the wizard to this list",
+    ...mapped(['listImport'], CONSOLE_LIST, 'packages/app-shell/src/views/importTargetFields.ts'),
+    note: "the console list's Import reads the row where it offers Import; HOST_GATED below holds every mount of the wizard to this list",
   } as WriteSite,
   // The inline-edit saves (objectui#12292): `defaultRowSave` and
   // `defaultBatchSave` both write through `writeRowGuarded`, the `If-Match`
@@ -1236,6 +1235,6 @@ describe('the write census: every write call site sits behind a map row, or says
     // A derivation that found nothing would pass the pin above over every
     // tree; this is the site the hand-written list it replaced held.
     expect(hostGatedSites(mountsBy).map(([component]) => component)).toEqual(expect.arrayContaining(['ImportWizard']));
-    expect([...(mountsBy.get('ImportWizard') ?? [])]).toEqual(expect.arrayContaining([CONSOLE_LIST, EXCEL_IMPORT_BAR]));
+    expect([...(mountsBy.get('ImportWizard') ?? [])]).toEqual(expect.arrayContaining([CONSOLE_LIST]));
   });
 });

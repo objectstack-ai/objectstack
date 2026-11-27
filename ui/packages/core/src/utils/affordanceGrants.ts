@@ -145,12 +145,7 @@ export const AFFORDANCE_GRANTS = {
    * "+", and the `object-view` node's toolbar button (`@object-ui/plugin-view`).
    */
   listNew: { crud: 'create', grant: 'create' },
-  /**
-   * An object list's Import, and the import wizard's writable target fields —
-   * and the AI build panel's spreadsheet import (`ExcelImportBar` in
-   * `@object-ui/app-shell`), the wizard's second mount, asked of the object it
-   * imports into.
-   */
+  /** An object list's Import, and the import wizard's writable target fields. */
   listImport: { crud: 'import', grant: 'create', field: 'create' },
   /** The import wizard's template download — its endpoint answers 403 without the create grant. */
   importTemplate: { crud: null, grant: 'create' },

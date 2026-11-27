@@ -25,7 +25,6 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { extractDraftBody, formatMetadataError, readDraftChanges, type DraftChange } from '@object-ui/data-objectstack';
 import type { MetadataClient } from '@object-ui/data-objectstack';
-import { type StudioSurfaceLabel } from './StudioAiCopilot.js';
 import { isSlotEscapeExempt, useStudioRightSlot } from './studioRightSlotState.js';
 import { AUTOMATIONS_CONFIG_FOLD_WIDTH, useIsNarrowerThan } from './wideViewport.js';
 import { STUDIO_FOLD_LABEL } from './studio-tokens.js';
@@ -183,7 +182,6 @@ export function AutomationsPillar({
   readOnly: packageReadOnly = false,
   customization = null,
   onHeldEditChange,
-  onSurfaceLabelChange,
 }: {
   /**
    * The package whose flow this is, or `null` for the package-less scope
@@ -201,11 +199,6 @@ export function AutomationsPillar({
   customization?: StudioBaseCustomization | null;
   /** objectui#11786 — the clause of the edit the autosave holds unsent, for the surface's Publish. */
   onHeldEditChange?: (clause: string | null) => void;
-  /**
-   * objectstack#35018 — the open flow's label for the copilot's chip:
-   * 「正在看：流程 · 新会议提醒」, never the type word and machine name.
-   */
-  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
 }): React.ReactElement {
   const client = useMetadataClient();
   const locale = useMetadataLocale();
@@ -345,30 +338,6 @@ export function AutomationsPillar({
   const [selection, setSelection] = React.useState<MetadataSelection | null>(null);
   // The package's translations of the flow label and its approval-step labels (flow-label-translations.tsx).
   const flowLabels = useFlowLabelTranslations(current?.name ?? '');
-  // objectstack#35018 — lift the open flow's label to the copilot's chip, the
-  // pillar's word first: 「正在看：流程 · 新会议提醒」 — the label the canvas
-  // header reads. Keyed on primitives, the callback read through a ref.
-  const onSurfaceLabelChangeRef = React.useRef(onSurfaceLabelChange);
-  React.useEffect(() => {
-    onSurfaceLabelChangeRef.current = onSurfaceLabelChange;
-  });
-  const currentFlowType = current?.type;
-  const currentFlowName = current?.name;
-  const currentFlowLabel = current ? flowLabels?.flowLabel || current.label : undefined;
-  const flowSubject = t('engine.studio.copilot.subject.flow', locale);
-  React.useEffect(() => {
-    onSurfaceLabelChangeRef.current?.(
-      currentFlowType && currentFlowName && currentFlowLabel
-        ? { type: currentFlowType, name: currentFlowName, label: `${flowSubject} · ${currentFlowLabel}` }
-        : null,
-    );
-  }, [currentFlowType, currentFlowName, currentFlowLabel, flowSubject]);
-  React.useEffect(
-    () => () => {
-      onSurfaceLabelChangeRef.current?.(null);
-    },
-    [],
-  );
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState<false | 'draft' | 'publish'>(false);
   const [hasDraft, setHasDraft] = React.useState(false);
