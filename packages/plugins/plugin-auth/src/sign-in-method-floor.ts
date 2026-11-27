@@ -805,7 +805,10 @@ export function signInMethodFloorPredicate(deps: SignInMethodFloorDeps, read: Au
     // email and password counts for nothing there, whatever this save sets it to.
     const localOffered = pageOffersLocalSignIn(config);
     if (!localOffered && key === 'email_password_enabled') return undefined;
-    const emailPasswordAfter = localOffered && (Object.prototype.hasOwnProperty.call(batch, 'email_password_enabled')
+    // Held off by the host, email and password stays off whatever the batch
+    // says (the settings pass does not apply it), so it is no way in after it.
+    const emailPasswordAfter = localOffered && !emailPasswordHeldOffByHost(deps)
+      && (Object.prototype.hasOwnProperty.call(batch, 'email_password_enabled')
       ? readToggle(
         await valueAfter(read, input, batch, 'email_password_enabled'),
         deps.declaredEmailPasswordEnabled?.() ?? true,

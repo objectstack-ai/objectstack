@@ -65,7 +65,8 @@
  *      (measured before the fix: `true`), said once at `error`; a save that
  *      turns it on is refused at the save door (400 `SETTINGS_VALIDATION`, in
  *      the caller's language), and turning it off or clearing it passes;
- *      the `OS_AUTH_EMAIL_PASSWORD_ENABLED` declaration still applies;
+ *      the `OS_AUTH_EMAIL_PASSWORD_ENABLED` declaration still applies; a
+ *      Google change does not count email and password as a way in there;
  *      CONTROLS: self-hosted with the same declaration, and managed with
  *      email and password declared on, keep the toggle as before.
  */
@@ -1047,7 +1048,7 @@ describe('a cloud-managed runtime keeps email and password off when its deployme
   });
 
   const makeSettings = (env: Record<string, string | undefined> = {}) => {
-    const settings = new SettingsService({ env });
+    const settings = new SettingsService({ env, crypto: new ConfidentialTestAdapter() });
     settings.registerManifest(builtinSettingsManifests.find((m) => m.namespace === 'auth')!);
     return settings;
   };
@@ -1182,6 +1183,23 @@ describe('a cloud-managed runtime keeps email and password off when its deployme
     await settings.setMany('auth', { email_password_enabled: null });
     expect(await settings.get('auth', 'email_password_enabled')).toMatchObject({ source: 'default' });
     await settle();
+    expect(passwordOn(manager)).toBe(false);
+  });
+
+  it('email and password counts as no way in for a Google change in the same save', async () => {
+    const { settings, manager } = await boot();
+    await settings.setMany('auth', GOOGLE);
+    await vi.waitFor(() => expect(
+      manager.getPublicConfig().socialProviders.some((p: { id: string }) => p.id === 'google'),
+    ).toBe(true));
+    // `true` is the resolved default here, so no predicate is asked at that key;
+    // the Google key must not read it as a way in the runtime will offer.
+    const refusal = await refusalOf(settings.setMany('auth', { email_password_enabled: true, google_enabled: false }));
+    expect(refusal.code).toBe('SETTINGS_VALIDATION');
+    expect(refusal.fields).toEqual([
+      expect.objectContaining({ field: 'google_enabled', code: 'invalid_value', constraint: { lastSignInMethod: 'google' } }),
+    ]);
+    expect(await settings.get('auth', 'google_enabled')).toMatchObject({ value: true });
     expect(passwordOn(manager)).toBe(false);
   });
 
