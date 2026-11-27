@@ -320,3 +320,62 @@ describe('Action.refusals — a listed reason is refused at save where the body 
     );
   });
 });
+
+// The hook door's reading, at the action door: a code or reason is literal only
+// when its quoted value closes the value (a property's by `,` or `}`, an
+// assignment's by `;`, `,`, `}`, `)`, the source's end or a line end that does
+// not continue the expression); one built from a literal is computed, the
+// run-time refusal's.
+describe('Action.refusals — a literal code or reason closes its value; one built from a literal is computed', () => {
+  const refusals = {
+    OVER_LIMIT: { message: 'Over the limit.', reasons: { too_high: { message: 'The amount is too high.' } } },
+  };
+  const DECLARED = ['OVER_LIMIT'];
+
+  const LITERAL_CODE = [
+    ['a property closed by `}`', "throw { code: 'OVER' };"],
+    ['a property closed by `,`', "throw { code: 'OVER', reason: 'too_high' };"],
+    ['a property in Object.assign', "throw Object.assign(new Error('x'), { code: 'OVER' });"],
+    ['an assignment closed by `;`', "const e = new Error('x'); e.code = 'OVER'; throw e;"],
+    ['an assignment closed by a line end', "const e = new Error('x')\ne.code = 'OVER'\nthrow e"],
+  ] as const;
+
+  it.each(LITERAL_CODE)('lit: refuses an undeclared literal code written as %s, at body.source', (_shape, source) => {
+    const r = ActionSchema.safeParse({ ...base, body: body(source), refusals });
+    expect(r.success).toBe(false);
+    const issue = issuesOf(r).find((i) => i.path.join('.') === 'body.source');
+    expect(issue?.message).toBe(undeclaredActionRefusalCodeAtSave('OVER', DECLARED));
+  });
+
+  const COMPUTED_CODE = [
+    ['a property concatenation', "throw { code: 'OVER' + suffix };"],
+    ['a property member access', "throw { code: 'OVER'.concat(suffix) };"],
+    ['an assignment concatenation', "const e = new Error('x'); e.code = 'OVER' + suffix; throw e;"],
+    ['an assignment concatenation on the next line', "const e = new Error('x');\ne.code = 'OVER'\n  + suffix\nthrow e;"],
+  ] as const;
+
+  it.each(COMPUTED_CODE)('dark: passes the save for a code built from a literal by %s (the run-time refusal decides it)', (_shape, source) => {
+    expect(ActionSchema.safeParse({ ...base, body: body(`const suffix = '_LIMIT';\n${source}`), refusals }).success).toBe(true);
+  });
+
+  const LITERAL_REASON = [
+    ['a property closed by `}`', "throw { code: 'OVER_LIMIT', reason: 'too' };"],
+    ['an assignment closed by `;`', "const e = new Error('x'); e.code = 'OVER_LIMIT'; e.reason = 'too'; throw e;"],
+  ] as const;
+
+  it.each(LITERAL_REASON)('lit: refuses an undeclared literal reason written as %s, at body.source', (_shape, source) => {
+    const r = ActionSchema.safeParse({ ...base, body: body(source), refusals });
+    expect(r.success).toBe(false);
+    const issue = issuesOf(r).find((i) => i.path.join('.') === 'body.source');
+    expect(issue?.message).toBe(undeclaredActionRefusalReasonAtSave('OVER_LIMIT', 'too', ['too_high']));
+  });
+
+  const COMPUTED_REASON = [
+    ['a property concatenation', "throw { code: 'OVER_LIMIT', reason: 'too' + suffix };"],
+    ['an assignment concatenation', "const e = new Error('x'); e.code = 'OVER_LIMIT'; e.reason = 'too' + suffix; throw e;"],
+  ] as const;
+
+  it.each(COMPUTED_REASON)('dark: passes the save for a reason built from a literal by %s (the run-time refusal decides it)', (_shape, source) => {
+    expect(ActionSchema.safeParse({ ...base, body: body(`const suffix = '_high';\n${source}`), refusals }).success).toBe(true);
+  });
+});
