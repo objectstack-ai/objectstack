@@ -169,6 +169,27 @@ function hostPlugin(file: string, realtime: IRealtimeService | undefined): Plugi
   } as unknown as Plugin;
 }
 
+/**
+ * A `single` install's Default Organization, as a real boot seeds it: a system
+ * write of a fresh object derives it (ADR-0131 D9), and the NOT NULL tenant
+ * column requires one. Seeded through the driver, so no write under test sees it.
+ */
+async function installDefaultOrganization(ql: ObjectQL): Promise<void> {
+  if (!ql.getSchema('sys_organization')) {
+    ql.registry.registerObject(
+      { name: 'sys_organization', label: 'Organization', managedBy: 'better-auth', fields: { name: { type: 'text', label: 'Name' } } } as never,
+      'test.knowledge-queue-host',
+    );
+  }
+  await ql.syncSchemas();
+  const driver = ql.getDriverForObject('sys_organization') as unknown as {
+    create(o: string, d: Row): Promise<unknown>;
+    findOne(o: string, q: unknown): Promise<unknown>;
+  };
+  if (await driver.findOne('sys_organization', { where: { id: 'org_default' } })) return;
+  await driver.create('sys_organization', { id: 'org_default', name: 'Default' });
+}
+
 const kernels: ObjectKernel[] = [];
 let dir: string | undefined;
 
@@ -221,6 +242,7 @@ async function boot(opts: BootOptions = {}) {
   await kernel.bootstrap();
 
   const ql = kernel.getService<ObjectQL>('objectql');
+  await installDefaultOrganization(ql);
   const service = kernel.getService<KnowledgeService>('knowledge');
   const memory = makeAdapter();
   service.registerAdapter('memory', memory.adapter);
