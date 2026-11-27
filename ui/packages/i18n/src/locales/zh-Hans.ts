@@ -3716,7 +3716,6 @@ const zh = {
   },
   topbar: {
     aiAssistant: 'AI 助手',
-    askAi: '问 AI',
     designInStudio: '在应用搭建中设计',
     designLayout: '设计布局',
     editApp: '编辑应用',

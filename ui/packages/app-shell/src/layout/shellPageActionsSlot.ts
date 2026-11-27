@@ -29,7 +29,7 @@ export interface ShellPageActionsSlotProps {
   comments?: React.ReactNode;
   /**
    * objectstack#37858 — the header measured that its own content no longer
-   * fits beside the 「问 AI」 button's words: the button draws its icon
+   * fits beside the Ask AI button's words: the button draws its icon
    * alone. The words yield first, before the page's own actions fold.
    */
   assistantIconOnly?: boolean;

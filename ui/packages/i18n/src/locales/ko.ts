@@ -3598,7 +3598,6 @@ const ko = {
       tooltip: "이 플랫폼은 미리보기 단계입니다 — 기능이 변경될 수 있습니다.",
     },
     aiAssistant: "AI 어시스턴트",
-    askAi: "AI에게 질문",
     designInStudio: "App Studio에서 디자인",
     designLayout: "레이아웃 디자인",
     editApp: "앱 편집",

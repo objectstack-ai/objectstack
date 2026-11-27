@@ -3716,7 +3716,6 @@ const zhHant = {
   },
   topbar: {
     aiAssistant: 'AI 助手',
-    askAi: '問 AI',
     designInStudio: '在應用搭建中設計',
     designLayout: '設計佈局',
     editApp: '編輯應用',

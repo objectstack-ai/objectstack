@@ -12,10 +12,12 @@
  *    of the plan's state clears it, never opening the chat.
  *
  * objectstack#37858 — the entry is an outlined button that says what it does,
- * 「问 AI」 (`topbar.askAi`), beside a chat-bubble icon, on every page: the
+ * 「Ask AI」, beside a chat-bubble icon, on every page: the
  * page header's button group, the record page's navigation row, the phone's
  * top bar, Home's bar, and the corner button of a route with no shell header.
- * The words are the platform's: no app renames them. Two faces:
+ * The words are the platform's — no app renames them — and they are Home's
+ * 「Ask AI」 string (`home.askAI`): Home's button opens the same entry
+ * (`useAskAiEntry`), so the one entry has one string in every pack. Two faces:
  *  - with its text, the text is the accessible name (no `aria-label`);
  *  - icon only — a phone (a 44 px target), or a header that ran out of room
  *    and asked for it (`iconOnly`) — `aria-label` carries the same words.
@@ -52,7 +54,7 @@ export function isMacPlatform(): boolean {
 }
 
 /**
- * The 「问 AI」 entry's opening half, shared by every button that asks the
+ * The Ask AI entry's opening half, shared by every button that asks the
  * assistant from a page — this one when the drawer is closed, and Home's
  * 「Ask AI」 — so what opening means is decided in one place. Absent a target
  * it opens the drawer on whatever it shows now, exactly as the drawer's own
@@ -92,7 +94,7 @@ export function AssistantTopBarButton({ className, iconOnly = false }: Assistant
   const phone = usePhoneViewport();
   const mac = React.useMemo(isMacPlatform, []);
   const markerId = React.useId();
-  const label = t('topbar.askAi', { defaultValue: 'Ask AI' });
+  const label = t('home.askAI', { defaultValue: 'Ask AI' });
   const iconAlone = iconOnly || phone;
   // `aria-hidden` keeps the marker's words out of the name a text face takes
   // from its content; the button still reads them as its description, which

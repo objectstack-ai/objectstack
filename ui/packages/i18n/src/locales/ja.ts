@@ -3600,7 +3600,6 @@ const ja = {
       tooltip: "このプラットフォームはプレビュー版です — 機能は変更される可能性があります。",
     },
     aiAssistant: "AI アシスタント",
-    askAi: "AI に質問",
     designInStudio: "App Studio でデザイン",
     designLayout: "レイアウトをデザイン",
     editApp: "アプリを編集",

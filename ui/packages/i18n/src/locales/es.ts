@@ -3678,7 +3678,6 @@ const es = {
       tooltip: "Esta plataforma está en versión preliminar — las funciones pueden cambiar.",
     },
     aiAssistant: "Asistente de IA",
-    askAi: "Preguntar a la IA",
     designInStudio: "Diseñar en App Studio",
     designLayout: "Diseñar la disposición",
     editApp: "Editar aplicación",

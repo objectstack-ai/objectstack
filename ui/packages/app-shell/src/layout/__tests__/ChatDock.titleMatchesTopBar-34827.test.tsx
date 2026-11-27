@@ -8,7 +8,8 @@
  * ## While objectstack#37858 lands before objectstack#37860
  *
  * objectstack#37858 renamed the page's standing entry to 「Ask AI」
- * (`topbar.askAi`, an action, not a name for the drawer). The drawer keeps its
+ * (`home.askAI`, the string Home's 「Ask AI」 already carries: an action, not
+ * a name for the drawer). The drawer keeps its
  * title, `console.ai.dock.title`, which every pack still holds equal to
  * `topbar.aiAssistant` — the name the record pane's assistant entry still
  * carries. objectstack#37860 replaces the title with the conversation's own
@@ -129,8 +130,8 @@ describe('the AI drawer is titled with the top-bar button name (objectstack#3482
       expect(typeof button, `${lang} topbar.aiAssistant`).toBe('string');
       expect(at(pack, 'console.ai.dock.title'), lang).toBe(button);
       // objectstack#37858 — the standing entry's words are their own string.
-      const entry = at(pack, 'topbar.askAi');
-      expect(typeof entry, `${lang} topbar.askAi`).toBe('string');
+      const entry = at(pack, 'home.askAI');
+      expect(typeof entry, `${lang} home.askAI`).toBe('string');
       expect(entry, lang).not.toBe(button);
     }
   });

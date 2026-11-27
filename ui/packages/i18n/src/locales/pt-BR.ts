@@ -3673,7 +3673,6 @@ const pt = {
       tooltip: "Esta plataforma está em pré-visualização — os recursos podem mudar.",
     },
     aiAssistant: "Assistente de IA",
-    askAi: "Perguntar à IA",
     designInStudio: "Projetar no App Studio",
     designLayout: "Projetar layout",
     editApp: "Editar aplicativo",

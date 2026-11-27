@@ -3763,7 +3763,6 @@ const ru = {
       tooltip: "Платформа в предварительной версии — функции могут измениться.",
     },
     aiAssistant: "ИИ-ассистент",
-    askAi: "Спросить ИИ",
     designInStudio: "Дизайн в App Studio",
     designLayout: "Дизайн макета",
     editApp: "Редактировать приложение",

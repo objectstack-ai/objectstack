@@ -302,7 +302,7 @@ function ShellPageActionsGroup({ comments, assistantIconOnly }: ShellPageActions
     <div className="flex shrink-0 items-center gap-0.5" data-testid="shell-page-actions">
       {comments}
       <HelpMenu inApp appPackageId={appPackageId} triggerClassName="h-8 w-8 shrink-0" triggerTestId="shell-page-actions-help" />
-      {/* objectstack#37858 — 「问 AI」 ends the group, so it ends the header's row. */}
+      {/* objectstack#37858 — Ask AI ends the group, so it ends the header's row. */}
       {aiEnabled && <AssistantTopBarButton iconOnly={assistantIconOnly} className="ml-1" />}
     </div>
   );
