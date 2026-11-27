@@ -3598,6 +3598,7 @@ const de = {
       tooltip: "Diese Plattform befindet sich in der Vorschau — Funktionen können sich ändern.",
     },
     aiAssistant: "KI-Assistent",
+    askAi: "KI fragen",
     designInStudio: "Im App Studio gestalten",
     designLayout: "Layout gestalten",
     editApp: "App bearbeiten",

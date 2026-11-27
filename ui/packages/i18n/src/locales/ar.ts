@@ -3913,6 +3913,7 @@ const ar = {
       tooltip: "هذه المنصة في مرحلة المعاينة — وقد تتغير الميزات.",
     },
     aiAssistant: "مساعد الذكاء الاصطناعي",
+    askAi: "اسأل الذكاء الاصطناعي",
     designInStudio: "التصميم في App Studio",
     designLayout: "تصميم التخطيط",
     editApp: "تعديل التطبيق",

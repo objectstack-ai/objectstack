@@ -4297,6 +4297,7 @@ const en = {
   },
   topbar: {
     aiAssistant: 'AI Assistant',
+    askAi: 'Ask AI',
     designInStudio: 'Design in App Studio',
     designLayout: 'Design layout',
     editApp: 'Edit app',

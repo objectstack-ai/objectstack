@@ -3674,6 +3674,7 @@ const fr = {
       tooltip: "Cette plateforme est en avant-première — les fonctionnalités peuvent changer.",
     },
     aiAssistant: "Assistant IA",
+    askAi: "Demander à l'IA",
     designInStudio: "Concevoir dans App Studio",
     designLayout: "Concevoir la mise en page",
     editApp: "Modifier l'application",

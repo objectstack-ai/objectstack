@@ -31,7 +31,7 @@ import { useLastApp } from '../context/LastAppProvider.js';
 import { rememberAppReturnPage } from '../utils/appReturnPage.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { appAddressSegment } from '../utils/appRoute.js';
-import { ShellPageActionsScope, ShellSidebarExpandFallback } from './ShellPageActions.js';
+import { ShellAssistantFallback, ShellPageActionsScope, ShellSidebarExpandFallback } from './ShellPageActions.js';
 import { ChromeBannerHost } from './chromeBannerHost.js';
 import { ConnectionBanner } from './ConnectionBanner.js';
 import { useGoHomeShortcut } from '../chrome/goHomeShortcut.js';
@@ -417,6 +417,9 @@ export function ConsoleLayout({
           )}
         >
         <ShellSidebarExpandFallback />
+        {/* objectstack#37858 — a route whose page draws no button group gets
+            the assistant's entry at its top-right corner. */}
+        <ShellAssistantFallback />
         {children}
         </div>
         </ShellPageActionsScope>

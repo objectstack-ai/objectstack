@@ -1,9 +1,21 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#34827 — the AI drawer is titled with the top-bar button's own
+ * objectstack#34827 — the AI drawer is titled with the assistant entry's own
  * name, in the rail, in the window-filling form and on the phone sheet, in
  * every language.
+ *
+ * ## While objectstack#37858 lands before objectstack#37860
+ *
+ * objectstack#37858 renamed the page's standing entry to 「Ask AI」
+ * (`topbar.askAi`, an action, not a name for the drawer). The drawer keeps its
+ * title, `console.ai.dock.title`, which every pack still holds equal to
+ * `topbar.aiAssistant` — the name the record pane's assistant entry still
+ * carries. objectstack#37860 replaces the title with the conversation's own
+ * (「新会话」 before the first send) and rewrites this pin to that. Until then
+ * the pin holds both halves: the drawer title stays the pack's assistant
+ * name, and the standing entry reads 「Ask AI」 next to it, so a change to
+ * either is seen here.
  *
  * ## Real subjects
  *
@@ -69,9 +81,9 @@ afterEach(() => cleanup());
 
 describe('the AI drawer is titled with the top-bar button name (objectstack#34827)', () => {
   it.each([
-    ['zh', 'AI 助手', '调整对话宽度'],
-    ['en', 'AI Assistant', 'Resize chat'],
-  ])('%s: the rail and the full window read the button name', async (lang, name, resizeControl) => {
+    ['zh', 'AI 助手', '问 AI', '调整对话宽度'],
+    ['en', 'AI Assistant', 'Ask AI', 'Resize chat'],
+  ])('%s: the rail and the full window read the assistant name; the entry asks', async (lang, name, entry, resizeControl) => {
     inLanguage(lang, (
       <>
         <AssistantTopBarButton />
@@ -81,7 +93,8 @@ describe('the AI drawer is titled with the top-bar button name (objectstack#3482
       </>
     ));
     const button = await screen.findByTestId('topbar-ai-assistant');
-    expect(button).toHaveAccessibleName(name);
+    // objectstack#37858 — the standing entry says what it does.
+    expect(button).toHaveAccessibleName(entry);
     // Control: the neighbouring dock string comes from the same pack.
     expect(screen.getByRole('separator')).toHaveAccessibleName(resizeControl);
     const rail = screen.getByTestId('chat-dock-panel');
@@ -108,13 +121,17 @@ describe('the AI drawer is titled with the top-bar button name (objectstack#3482
     expect(within(sheet).getByRole('heading', { name: 'AI 助手' })).toBeInTheDocument();
   });
 
-  it('every built-in pack titles the drawer with its own top-bar button name', async () => {
+  it('every built-in pack titles the drawer with its own assistant name, and names the entry apart', async () => {
     expect(BUILT_IN_LANGUAGE_CODES.length).toBeGreaterThan(1);
     for (const lang of BUILT_IN_LANGUAGE_CODES) {
       const pack = await loadBuiltInLocale(lang);
       const button = at(pack, 'topbar.aiAssistant');
       expect(typeof button, `${lang} topbar.aiAssistant`).toBe('string');
       expect(at(pack, 'console.ai.dock.title'), lang).toBe(button);
+      // objectstack#37858 — the standing entry's words are their own string.
+      const entry = at(pack, 'topbar.askAi');
+      expect(typeof entry, `${lang} topbar.askAi`).toBe('string');
+      expect(entry, lang).not.toBe(button);
     }
   });
 });

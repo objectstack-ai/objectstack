@@ -2,65 +2,168 @@
  * ObjectUI
  * Copyright (c) 2024-present ObjectStack Inc.
  *
- * objectstack#34608 (ui ADR-0057 as amended) — the top-bar robot, the AI
- * assistant's ONE standing entry: it opens and closes the right-side drawer
- * without leaving the page. The floating bottom-right button it replaces is
- * gone; what that button carried moved here:
+ * objectstack#34608 (ui ADR-0057 as amended) — the AI assistant's ONE standing
+ * entry: it opens and closes the right-side drawer without leaving the page.
+ * The floating bottom-right button it replaces is gone; what that button
+ * carried moved here:
  *  - objectui#11666 — while a proposed plan awaits the user's approval the
- *    robot carries a marker, so a user who closed the chat still sees the
+ *    entry carries a marker, so a user who closed the chat still sees the
  *    assistant is waiting on them. Read off the assistant bus; only a change
  *    of the plan's state clears it, never opening the chat.
+ *
+ * objectstack#37858 — the entry is an outlined button that says what it does,
+ * 「问 AI」 (`topbar.askAi`), beside a chat-bubble icon, on every page: the
+ * page header's button group, the record page's navigation row, the phone's
+ * top bar, Home's bar, and the corner button of a route with no shell header.
+ * The words are the platform's: no app renames them. Two faces:
+ *  - with its text, the text is the accessible name (no `aria-label`);
+ *  - icon only — a phone (a 44 px target), or a header that ran out of room
+ *    and asked for it (`iconOnly`) — `aria-label` carries the same words.
+ * The tooltip names the ⌘⇧I shortcut on a Mac only: on other platforms
+ * Ctrl+Shift+I opens the browser's developer tools first, so no shortcut is
+ * advertised there and `aria-keyshortcuts` is not set.
  *
  * Under a layout with no drawer it is a link to the pre-drawer address, which
  * the console routes back into the drawer.
  */
 import * as React from 'react';
 import { Link } from 'react-router-dom';
-import { Bot } from 'lucide-react';
-import { Button, cn } from '@object-ui/components';
+import { MessageCircle } from 'lucide-react';
+import { Button, Kbd, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { usePlanApprovalPending } from '../assistant/assistantBus.js';
-import { useChatDockControl } from './chatDockControl.js';
+import { useChatDockControl, useOpenAssistant } from './chatDockControl.js';
+import type { ChatDockTarget } from './chatDockTarget.js';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 
-export function AssistantTopBarButton({ className }: { className?: string }) {
+/** The drawer's shortcut in `aria-keyshortcuts` syntax; advertised on a Mac only. */
+export const ASK_AI_MAC_KEY_SHORTCUTS = 'Meta+Shift+I';
+/** The same shortcut as the tooltip's keycaps. */
+const ASK_AI_MAC_KEYCAPS = ['⌘', '⇧', 'I'] as const;
+
+/** Whether this browser runs on a Mac, where ⌘⇧I is free for the drawer. */
+export function isMacPlatform(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const platform =
+    (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ??
+    navigator.platform ??
+    '';
+  return /mac/i.test(platform);
+}
+
+/**
+ * The 「问 AI」 entry's opening half, shared by every button that asks the
+ * assistant from a page — this one when the drawer is closed, and Home's
+ * 「Ask AI」 — so what opening means is decided in one place. Absent a target
+ * it opens the drawer on whatever it shows now, exactly as the drawer's own
+ * toggle does (a handoff it still holds is kept); with one, on that target.
+ * Under no drawer host it goes to the pre-drawer address.
+ */
+export function useAskAiEntry(): (target?: ChatDockTarget) => void {
+  const control = useChatDockControl();
+  const openAssistant = useOpenAssistant();
+  return React.useCallback(
+    (target?: ChatDockTarget) => {
+      if (control && target === undefined) {
+        if (!control.expanded) control.toggle();
+        return;
+      }
+      openAssistant(target);
+    },
+    [control, openAssistant],
+  );
+}
+
+export interface AssistantTopBarButtonProps {
+  className?: string;
+  /**
+   * Draw the icon alone, named by `aria-label`: the header placing the button
+   * measured that its own content no longer fits beside the words. A phone
+   * draws the icon alone whatever this says.
+   */
+  iconOnly?: boolean;
+}
+
+export function AssistantTopBarButton({ className, iconOnly = false }: AssistantTopBarButtonProps) {
   const { t } = useObjectTranslation();
   const control = useChatDockControl();
+  const askAi = useAskAiEntry();
   const planPending = usePlanApprovalPending();
+  const phone = usePhoneViewport();
+  const mac = React.useMemo(isMacPlatform, []);
   const markerId = React.useId();
-  const label = t('topbar.aiAssistant', { defaultValue: 'AI Assistant' });
+  const label = t('topbar.askAi', { defaultValue: 'Ask AI' });
+  const iconAlone = iconOnly || phone;
+  // `aria-hidden` keeps the marker's words out of the name a text face takes
+  // from its content; the button still reads them as its description, which
+  // names the marker by id.
   const marker = planPending ? (
-    <span className="absolute right-1 top-1 flex size-2.5" data-testid="topbar-ai-assistant-plan-pending">
-      <span aria-hidden="true" className="size-2.5 rounded-full bg-amber-500 ring-2 ring-background" />
+    <span aria-hidden="true" className="absolute right-1 top-1 flex size-2.5" data-testid="topbar-ai-assistant-plan-pending">
+      <span className="size-2.5 rounded-full bg-amber-500 ring-2 ring-background" />
       <span id={markerId} className="sr-only">
         {t('console.ai.dock.planAwaitingApproval')}
       </span>
     </span>
   ) : null;
-  const classes = cn('relative h-8 w-8 max-md:size-11 shrink-0', className);
-  if (!control) {
-    return (
-      <Button variant="ghost" size="icon" className={classes} asChild aria-label={label}>
-        <Link to="/ai" data-testid="topbar-ai-assistant" aria-describedby={planPending ? markerId : undefined}>
-          <Bot className="h-4 w-4" />
-          {marker}
-        </Link>
-      </Button>
-    );
-  }
-  return (
+  const face = (
+    <>
+      <MessageCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+      {!iconAlone && (
+        <span className="whitespace-nowrap" data-testid="topbar-ai-assistant-text">
+          {label}
+        </span>
+      )}
+      {marker}
+    </>
+  );
+  const shared = {
+    variant: 'outline' as const,
+    size: 'sm' as const,
+    className: cn(
+      'relative shrink-0',
+      phone ? 'size-11 p-0' : iconAlone ? 'size-8 p-0' : 'h-8 gap-1.5 px-2.5',
+      control?.expanded && 'bg-accent text-accent-foreground',
+      className,
+    ),
+    'aria-label': iconAlone ? label : undefined,
+    'aria-keyshortcuts': mac ? ASK_AI_MAC_KEY_SHORTCUTS : undefined,
+    'data-icon-only': iconAlone ? 'true' : 'false',
+  };
+  const button = control ? (
     <Button
-      variant="ghost"
-      size="icon"
-      className={cn(classes, control.expanded && 'bg-accent text-accent-foreground')}
-      onClick={control.toggle}
-      aria-label={label}
-      title={label}
+      {...shared}
+      onClick={control.expanded ? control.toggle : () => askAi()}
       aria-pressed={control.expanded}
       aria-describedby={planPending ? markerId : undefined}
       data-testid="topbar-ai-assistant"
     >
-      <Bot className="h-4 w-4" />
-      {marker}
+      {face}
     </Button>
+  ) : (
+    <Button {...shared} asChild>
+      <Link to="/ai" data-testid="topbar-ai-assistant" aria-describedby={planPending ? markerId : undefined}>
+        {face}
+      </Link>
+    </Button>
+  );
+  // The tooltip adds what the face does not show: the words, when the icon
+  // stands alone, and the shortcut, on a Mac. With neither there is none.
+  if (!iconAlone && !mac) return button;
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipContent side="bottom" className="flex items-center gap-2" data-testid="topbar-ai-assistant-tooltip">
+          <span>{label}</span>
+          {mac && (
+            <span className="inline-flex items-center gap-1" data-testid="topbar-ai-assistant-shortcut">
+              {ASK_AI_MAC_KEYCAPS.map((cap) => (
+                <Kbd key={cap}>{cap}</Kbd>
+              ))}
+            </span>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
