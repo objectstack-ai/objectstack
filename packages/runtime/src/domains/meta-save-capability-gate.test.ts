@@ -364,13 +364,6 @@ describe('ADR-0161 K4 — dispatcher PUT asks the knowledge service to admit the
         expect(none.saveMetaItem).not.toHaveBeenCalled();
     });
 
-    it('with no knowledge service registered, the engine\'s own write is not refused', async () => {
-        const stack = bootOnKernel('never-registered');
-        const res = await stack.dispatcher.handleMetadata('/knowledge_source/faq', ctx({ isSystem: true }), 'PUT', copy(SOURCE));
-        expect(res.response?.status).toBe(200);
-        expect(stack.saveMetaItem).toHaveBeenCalledTimes(1);
-    });
-
     it('CONTROL: an admitted source is saved; a registered knowledge service that is not the platform\'s (no admitAuthoredSource) lets the save go on', async () => {
         const admitted = bootWith(() => ({ admitted: true }));
         expect((await put(admitted, AUTHOR)).response?.status).toBe(200);

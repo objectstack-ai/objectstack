@@ -992,7 +992,11 @@ describe('[ADR-0161 K4] a knowledge_source draft needs the human to hold manage_
   });
 
   it('CONTROL: a human holding both saves and discards; the same human still saves another type', async () => {
-    const { authoring, served } = await authorThroughDomain({ systemPermissions: ['manage_metadata', 'manage_knowledge_sources'] });
+    // A deployment that mounts a knowledge service admitting the source (on one with none, ruled D refuses the save).
+    const { authoring, served } = await authorThroughDomain({
+      systemPermissions: ['manage_metadata', 'manage_knowledge_sources'],
+      knowledge: { admitAuthoredSource: async () => ({ admitted: true }) },
+    });
     expect((await save(authoring)).isError).toBe(false);
     expect((await discard(authoring)).body).toEqual({ discarded: { type: 'knowledge_source', name: 'faq', package: 'com.acme.crm' } });
     expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem').map((c: any) => c[1].type)).toEqual(['knowledge_source']);

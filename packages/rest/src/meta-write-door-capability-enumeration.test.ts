@@ -66,7 +66,7 @@
 import '@objectstack/objectql';
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_STATUS, serviceNotRegisteredError } from '@objectstack/core';
+import { ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
 import { RestServer } from './rest-server.js';
 import { securityDefaultPermissionSets } from '@objectstack/plugin-security';
 
@@ -713,23 +713,29 @@ describe('ADR-0161 K4 — the save door asks the knowledge service to admit the 
      * reason and the remedy, instead of being kept and never served.
      */
     it('no knowledge service registered: an author\'s save is refused 503 SERVICE_UNAVAILABLE with the remedy, and nothing is saved', async () => {
-        // The kernel's own "never registered" miss, and a server built with no kernel provider at all.
+        // The kernel registry's branded "never registered" miss (`isServiceNotRegisteredError`),
+        // and a server built with no kernel provider at all. The engine's own write is held at the
+        // predicate (`knowledge-source-save-admission.test.ts`): inbound HTTP never carries `isSystem`.
         const unregistered = boot(AUTHOR);
-        (unregistered.rest as any).kernelServiceProvider = async (name: string) => { throw serviceNotRegisteredError(name); };
+        (unregistered.rest as any).kernelServiceProvider = async (name: string) => {
+            throw Object.assign(new Error(`Service '${name}' not found`), {
+                __objectstackServiceNotRegistered: true, code: 'SERVICE_NOT_REGISTERED', serviceName: name,
+            });
+        };
         for (const stack of [unregistered, boot(AUTHOR)]) {
             const out = await stack.knock(asSource(SAVE));
             expect(out.status).toBe(503);
-            expect(out.body.error.code).toBe('SERVICE_UNAVAILABLE');
-            expect(out.body.error.message).toMatch(/^The knowledge source 'faq' was not saved: this deployment runs no knowledge service/);
-            expect(out.body.error.message).toMatch(/requires: \['knowledge'\].*restart the server.*then save the source again/);
+            expect(out.body).toMatchObject({
+                error: {
+                    code: 'SERVICE_UNAVAILABLE',
+                    message: expect.stringMatching(/^The knowledge source 'faq' was not saved: this deployment runs no knowledge service/),
+                },
+            });
+            expect(out.body).toMatchObject({
+                error: { message: expect.stringMatching(/requires: \['knowledge'\].*restart the server.*then save the source again/) },
+            });
             expect(stack.calls.saveMetaItem).toBe(0);
         }
-    });
-
-    it('no knowledge service registered: the engine\'s own write is not refused', async () => {
-        const stack = boot({ isSystem: true });
-        expect((await stack.knock(asSource(SAVE))).status).not.toBe(503);
-        expect(stack.calls.saveMetaItem).toBe(1);
     });
 
     it('CONTROL: an admitted source is saved; a registered knowledge service that is not the platform\'s (no admitAuthoredSource) lets the save go on', async () => {

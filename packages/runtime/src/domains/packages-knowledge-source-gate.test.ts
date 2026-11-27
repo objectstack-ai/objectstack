@@ -148,7 +148,9 @@ describe('/packages — a package that holds a knowledge source is written by a 
         });
 
         it(`${door.name}: a holder of both capabilities goes on, and the capability gate reads no draft listing for it`, async () => {
-            const s = make({ items: [SOURCE_ITEM], drafts: [SOURCE_DRAFT] });
+            // A host that mounts a knowledge service admitting each source: the duplicate copies them as the caller,
+            // and on a host with none a duplicate that copies one is refused (ruled D, pinned below).
+            const s = make({ items: [SOURCE_ITEM], drafts: [SOURCE_DRAFT] }, { admitAuthoredSource: async () => ({ admitted: true }) });
             const r = await call(s, door, authed(BOTH, door.tenantId));
             expect(r.response?.status).not.toBe(403);
             expect(door.target(s)).toHaveBeenCalled();
