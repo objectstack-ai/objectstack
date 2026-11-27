@@ -21,8 +21,8 @@
 // authors in step 2 of the README loop, and the README disclosed the empty
 // Console instead. The maintainer's card #32152 (2026-11-10, filed on
 // 「立卡处理」) reversed that: a newcomer who opens the Console the dev banner
-// points to must see their own project, so the template now ships the starter
-// app `src/apps/main.app.ts` and the sample object's list view
+// points to must see their own project, so the template then shipped the
+// starter app `src/apps/main.app.ts` and the sample object's list view
 // `src/views/note.view.ts` — the files `objectstack generate app main --object
 // note` and `objectstack generate view note` write, with the object referenced
 // as `Note.name` because scaffolding renames it. The README keeps the rule
