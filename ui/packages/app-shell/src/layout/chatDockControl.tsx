@@ -30,6 +30,12 @@ export interface ChatDockControl {
    * target thread's first message.
    */
   open: (target?: ChatDockTarget | null, handoff?: BuilderHandoffState) => void;
+  /**
+   * ui ADR-0057 Amendment A4 — the app's AI inquiry page is the active route:
+   * the drawer's triggers are hidden there (the top-bar robot draws nothing)
+   * and `open` opens only a build hand-off. Absent = false.
+   */
+  askPageActive?: boolean;
 }
 
 const ChatDockControlContext = React.createContext<ChatDockControl | null>(null);
