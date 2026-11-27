@@ -26,6 +26,9 @@ export const salesUser = definePermissionSet({
   `viewAllRecords` / `modifyAllRecords` (super-user, bypass sharing) widen
   which records the caller reaches; from v19 they open no field (use
   `viewAllFields`). Fields: § Field visibility.
+- `allowDelete` removes only rows the caller created (`owner_only_deletes`). On a `private`
+  object owning the row, `writeScope: 'org'` or `modifyAllRecords` widens it, an `edit`
+  share never; elsewhere only an authored `delete` row policy does.
 - **`isDefault: true` = the `everyone` baseline (ADR-0090 D5).** A published package
   declares **exactly one**, anchor-safe: `describeAnchorForbiddenBits(set, 'everyone')`
   (`@objectstack/spec/security`) returns `null`, else lint
@@ -117,9 +120,8 @@ traversal or subqueries — those are a compile error (ADR-0055), never silently
 | `current_user.queues` | the ownership queues the caller sits in (ADR-0142 D3) |
 | `current_user.KEY` | the set an object's `membershipKeys.KEY` declares |
 
-- Prefer the built-in `member_default` owner scoping (`owner_only_writes` /
-  `owner_only_deletes`) and the object's `sharingModel` (ADR-0056 D1) over
-  hand-written policies for the common cases.
+- Prefer `member_default` owner scoping (`owner_only_writes`) and the object's
+  `sharingModel` (ADR-0056 D1) over hand-written policies.
 
 ## Membership keys — a `current_user.KEY` set the roster object declares
 

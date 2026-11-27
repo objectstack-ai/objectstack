@@ -3025,21 +3025,7 @@ const en = {
     },
     ai: {
       pendingDrafts: {
-        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
-        publishFromBar: '{{count}} unpublished changes. Publish them from the draft bar at the top.',
-        publishFromBar_one: '{{count}} unpublished change. Publish it from the draft bar at the top.',
-        publishFromBar_other: '{{count}} unpublished changes. Publish them from the draft bar at the top.',
-        showDraftToPublish: '{{count}} unpublished changes. Show the draft to review and publish them.',
-        showDraftToPublish_one: '{{count}} unpublished change. Show the draft to review and publish it.',
-        showDraftToPublish_other: '{{count}} unpublished changes. Show the draft to review and publish them.',
-        showDraft: 'Show draft',
-        receipt: 'Published. Your changes are live.',
-        dismissReceipt: 'Dismiss',
         count: '{{count}} change(s) are not published yet — users cannot see them.',
-        publish: 'Publish',
-        published: 'All pending changes are live.',
-        failed: 'Publish failed.',
-        publishedWithFindings: 'Published, but the runtime probes reported problems: {{detail}}',
       },
       usage: {
         title: 'AI usage',
@@ -3074,38 +3060,6 @@ const en = {
       share: 'Share',
       shareTitle: 'Share this conversation',
       shareDisabledTitle: 'Start chatting to enable sharing',
-      // The build conversation's Build Doctor button (its accessible name,
-      // and its tooltip enabled / before the first message) and the drawer
-      // title it opens (objectui#10900).
-      buildDoctor: 'Build Doctor',
-      buildDoctorTitle: 'Build Doctor — what actually landed?',
-      buildDoctorDisabledTitle: 'Send a message first',
-      // The Build Doctor drawer's body (objectui#10969): its description, the
-      // loading and not-found states, the summary line, the verdict, and each
-      // section's title and hint. What the report itself carries (tool, artifact
-      // and status names, timeline text) is data and stays verbatim.
-      buildDoctorDrawer: {
-        description: 'What the agent claimed vs what is actually live. Read-only diagnostic.',
-        reconciling: 'Reconciling…',
-        notAvailable: 'Not available — the conversation was not found or you are not authorized.',
-        untitled: '(untitled)',
-        summary: '{{turns}} turn(s) · {{messages}} msgs · {{tokens}} tok · {{seconds}}s LLM',
-        allLive: 'All {{count}} attempted change(s) are live — nothing evaporated.',
-        discrepancies: "{{count}} discrepancy(ies) — what the chat said doesn't match what's live.",
-        orphanedTitle: 'Proposed but never applied',
-        orphanedHint: 'A confirm card the agent proposed but no later turn applied — the change silently evaporated.',
-        missingTitle: 'Claimed but missing',
-        missingHint: "A tool result said it was applied, but the artifact isn't live in sys_metadata.",
-        toolErrorsTitle: 'Tool errors',
-        toolErrorsHint: 'Tool calls that returned an error during the build.',
-        verifyTitle: 'Build check (verify_build)',
-        yourApp: 'Your app:',
-        noIssues: '0 issues',
-        issueCount: '{{count}} issue(s)',
-        platformNoise: '{{count}} platform sys_* finding(s) hidden',
-        pendingActions: 'Pending actions',
-        timeline: 'Timeline ({{count}})',
-      },
       newChat: 'New',
       searchChats: 'Search chats…',
       noChatsYet: 'No chats yet',
@@ -3129,53 +3083,15 @@ const en = {
       liveCanvasLive: 'Live app — {{app}}',
       loadingAgents: 'Loading agents…',
       askAnything: 'Ask anything…',
-      askOrChangeApp: 'Ask about your data, or ask me to change this app…',
-      describeAppToBuild: 'Describe the app you want to build, or what to change…',
       emptyTitle: 'Start a conversation',
       emptyDescription: 'Ask anything — the assistant has access to your current app context.',
       switchAssistant: 'Switch assistant',
       chooseAgent: 'Choose assistant…',
-      // objectui#8329 — the maker's empty-state prose, and the FIRST sentence a
-      // new user reads on the build surface (it sits above the start chips).
-      // Same ADR-0112 v1 boundary the chips answer to (cloud#1984 /
-      // objectui#7709 for the starters, cloud#2022 for the model's own closing
-      // suggestions): these two descriptions are the product PROMISING, so they
-      // may only name what v1 BUILDS — objects, fields, views, pages,
-      // dashboards, sample data, apps and navigation. `build.description` used
-      // to offer "an app or workflow … objects, screens and automations" and
-      // `editApp.description` "… view or automation"; v1 has no flows, actions
-      // or schedules, so a user who took either at its word was refused
-      // outright — the worst possible answer to the first line on the page.
-      //
-      // NOT the same thing as the platform's manual automation surfaces, which
-      // are real and stay as they are: `home.build.subtitle` (that card opens
-      // Studio, which does author flows), `packagedAutomation.*` and the
-      // marketplace `automation` category. The boundary is v1 AI AUTHORING, not
-      // the word "automation".
-      //
-      // REVERT both sentences when ADR-0112 v2 re-adds flows and actions — same
-      // line of the version roadmap as the chips. Every pack's wording is
-      // guarded, in its own script, by
-      // `packages/i18n/src/__tests__/makerEmptyState-v1-scope-8329.test.ts`.
       empty: {
-        build: {
-          title: 'Build with AI',
-          description:
-            'Describe an app in plain language — I draft the objects, screens and sample data, then you review and publish.',
-        },
         ask: {
           title: 'Ask your data',
           description:
             'Ask questions about your records — counts, lists, and summaries across the data you can access.',
-        },
-        editApp: {
-          title: 'Editing “{{app}}”',
-          titleGeneric: 'Edit this app',
-          description:
-            'What would you like to change? I’ll modify this app in place — add a field, object, view or dashboard, or adjust what’s already there.',
-          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
-          askOrChangeDescription:
-            'Ask about this app’s data — counts, lists and summaries — or tell me what to change, and I’ll modify the app in place: a field, an object, a view or a dashboard.',
         },
       },
       clearConversation: 'Clear',
@@ -3192,9 +3108,6 @@ const en = {
       // "Open in Builder" handoff card. The card's Approve / Reject buttons
       // borrow `aiApprovals.approveAndExecute` / `aiApprovals.reject`.
       toolDenyReason: 'Operator rejected from chat',
-      builderHandoffTitle: 'Build this in the Builder',
-      builderHandoffOpen: 'Open in Builder →',
-      builderHandoffSuperseded: 'A newer request is available',
       // cloud#3565 — the record-write card: ONE record the chat proposes and the user confirms (确认 / 打开完整表单 / 取消).
       recordWriteCreateTitle: 'New {{object}}',
       recordWriteUpdateTitle: 'Change {{object}}',
@@ -3242,39 +3155,10 @@ const en = {
       stopResponse: 'Stop response',
       trace: 'trace',
       viewTrace: 'View trace',
-      // Build-flow draft + "Proposed plan" confirm-gate card (AiChatPage /ai/build).
-      // Mirror the ConsoleFloatingChatbot locale object so both AI surfaces match.
-      nextSteps: "What's next",
-      publishDrafts: 'Publish',
-      publishOk: 'Published — objects are now live.',
-      seedWarn: 'Published, but some sample data failed to load.',
-      openBuiltApp: 'Open app',
-      viewBuiltAppInStudio: 'View in Studio',
-      previewDraft: 'Preview',
       previewApp: 'Preview app',
       resizeSplit: 'Resize chat and preview',
       hideChats: 'Hide chats',
       showChats: 'Show chats',
-      planTitle: 'Proposed plan',
-      planQuestions: 'Confirm before building',
-      planAssumptions: 'Assumptions',
-      planApproveHint: 'Reply to approve or adjust this plan.',
-      planApprove: 'Build it',
-      planAdjust: 'Adjust',
-      planApproveMessage: 'Looks good — build it as proposed.',
-      planApproveDefaultsMessage:
-        'Build it with your best assumptions; use sensible defaults for the open questions.',
-      planAnswerMessage: 'For "{{question}}", go with: {{option}}.',
-      planExtendExistingMessage: 'Keep improving "{{app}}" instead of building a new app.',
-      planBuildNewAppMessage: 'Build a separate, new app.',
-      changesTitle: 'Confirm changes',
-      changesConfirmed: 'Confirmed',
-      changesConfirm: 'Confirm',
-      changesConfirmHint: 'Reply to confirm or adjust this change.',
-      changesApplying: 'Applying…',
-      changesApplied: 'Applied',
-      changesDrafted: 'Saved as draft',
-      changesFailed: 'Not applied',
       discussing: 'Viewing: {{target}}',
       // objectstack#36999 — the conversation focus: the record the chat is pinned to.
       focus: {
@@ -3285,32 +3169,14 @@ const en = {
         switchAccept: 'Switch',
         switchDecline: 'Keep',
       },
-      // Wording is load-bearing: this is SENT to the agent and must satisfy the
-      // cloud confirm gate's English clause `apply (this|the) change`
-      // (service-ai-studio confirm-gate.ts APPROVAL_RE). "apply what you just
-      // proposed" did NOT match, so the button was inert. Singular "the change"
-      // so it still matches if the gate ever adds a word boundary.
-      changesConfirmMessage: 'Confirm — apply the change you just proposed.',
-      changeVerb: {
-        createObject: 'Create object',
-        addField: 'Add field',
-        modifyField: 'Modify field',
-        deleteField: 'Delete field',
-        createMetadata: 'Create',
-        updateMetadata: 'Modify',
-        createSeed: 'Generate sample data',
-        createPackage: 'Create app package',
-      },
       justNow: 'just now',
       minutesAgo: '{{count}}m ago',
       hoursAgo: '{{count}}h ago',
       daysAgo: '{{count}}d ago',
       agentLabels: {
         ask: 'Ask',
-        build: 'Build',
         // Legacy keys kept for back-compat with any external overrides.
         dataChat: 'Assistant',
-        metadataAssistant: 'Metadata Assistant',
       },
       suggestions: {
         dataChat: {
@@ -3318,41 +3184,10 @@ const en = {
           recentRecords: 'List the 5 most recently created records.',
           recordCounts: 'Count records for each object.',
         },
-        // cloud#1984 — these five chips are the maker's own recommendations, so
-        // they may only ask for what ADR-0112 v1 BUILDS: objects, fields, views
-        // (grid/kanban/calendar/gallery), pages, dashboards and sample data. No
-        // wording that promises autonomous behaviour (alert / remind / notify /
-        // automate / status workflow) — v1 has no flows, actions or schedules, and
-        // the model silently degrades such a request into a board or a filtered
-        // view, so the chip would promise an alert and deliver a page. REVERT to
-        // the automation wording when ADR-0112 v2 re-adds flows and actions.
-        metadataAssistant: {
-          buildCrm: 'Build a sales CRM — customers, contacts, and deals with a stage field, plus a dashboard that totals deal value by stage.',
-          buildApp: 'Create a project tracker — projects, tasks with owners and due dates, a board grouped by status, and a calendar of due dates.',
-          buildFlow: 'Design a support desk — tickets with priority and status fields, a board grouped by status, and links to customers.',
-          buildInventory: 'Build an inventory app — products, stock levels, suppliers, and a view that filters the items below their reorder point.',
-          buildRecruiting: 'Make an applicant tracker — candidates, open roles, an interview-stage field, and a board grouped by stage.',
-        },
         generic: {
           help: 'What can you help me with?',
           availableObjects: 'List the available data objects.',
           recentActivity: 'Summarize my recent activity.',
-        },
-        // objectui#7709 — the edit-mode starters, shown when the maker is bound
-        // to an EXISTING app (`?package=`). Same rule as the five above: they
-        // may only ask for what ADR-0112 v1 BUILDS. The fourth chip used to be
-        // `addAutomation` ("an approval, a status flow, or a notification") and
-        // every capability it named is refused by v1 (cloud#1956 / PR #1970), so
-        // it now asks for sample data — `seed` IS on v1's whitelist, and having
-        // no data is what an existing app most often lacks. REVERT: when
-        // ADR-0112 v2 re-adds flows and actions, THIS chip's automation wording
-        // comes back as `addAutomation`; the retired string is pinned for every
-        // pack in `packages/i18n/src/__tests__/makerEditChips-v1-scope-7709.test.ts`.
-        editApp: {
-          addField: 'Add a field to one of the objects.',
-          addObject: 'Add a new object and relate it to an existing one.',
-          addDashboard: 'Add a dashboard for the key metrics.',
-          addSampleData: 'Fill the existing objects with realistic sample records so I can demo the app.',
         },
       },
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
@@ -3361,31 +3196,9 @@ const en = {
       // `console.ai.group.${key}` (ConversationsSidebar), enumerated from the
       // ConversationGroupKey union — all five members, no wildcard.
       collapseToDock: 'Collapse to side panel',
-      switchApp: 'Switch app',
-      switchAppLabel: 'Build conversations by app',
-      newApp: 'New app',
       connectionWaiting: 'Waiting for server…',
       connectionStalled: 'Still working…',
       connectionOffline: 'Connection lost — reconnecting…',
-      designingPlan: 'Designing your app…',
-      designingPlanHint: {
-        data: 'Mapping out the data you’ll track…',
-        objects: 'Shaping objects and their fields…',
-        relations: 'Connecting related records…',
-        lookups: 'Setting up relationships and lookups…',
-        views: 'Planning the screens and views…',
-        forms: 'Laying out forms and lists…',
-        defaults: 'Adding sensible defaults and validations…',
-        dashboard: 'Sketching a dashboard to track it…',
-        review: 'Double-checking the structure hangs together…',
-        finalize: 'Pulling the plan together…',
-      },
-      planBuilding: 'Building…',
-      planBuilt: 'Built',
-      planDeferred: 'Not yet built',
-      planReady: 'The plan is ready. Build it now, or tell me what to adjust.',
-      published: 'Published',
-      publishFailed: 'Publish failed',
       unavailableTitle: 'AI assistant unavailable',
       unavailableDescription: "This deployment doesn't have an AI assistant enabled. Everything else works as usual.",
       unavailableError: "Couldn't reach the AI service. It may be temporarily offline — try again, or head back home.",
@@ -5473,18 +5286,6 @@ const en = {
       derivedAiAccess: 'AI access turned on',
     },
   },
-  excelImport: {
-    noImportableFields: 'That object has no importable fields.',
-    schemaReadFailed: 'Could not read the object schema.',
-    imported: 'Imported {{count}} row(s) into {{object}}.',
-    imported_one: 'Imported {{count}} row into {{object}}.',
-    imported_other: 'Imported {{count}} rows into {{object}}.',
-    importFrom: 'Import the real rows from',
-    into: 'into',
-    opening: 'Opening…',
-    importAction: 'Import',
-    dismiss: 'Dismiss',
-  },
   // `cloud:workspace-timezone-notice` — the Cloud welcome page's line naming the
   // timezone a workspace was seeded with at creation (objectui#11930). `{{zone}}`
   // is the seed, an IANA id printed verbatim.
@@ -5736,122 +5537,17 @@ const en = {
       failed: 'Failed',
     },
     phase: {
-      build: 'Build',
-      design: 'Design the plan',
       stepCount: '{{count}} steps',
       stepCount_one: '{{count}} step',
       stepCount_other: '{{count}} steps',
       expand: 'Show steps',
       collapse: 'Hide steps',
     },
-    plan: {
-      countObjects: '{{count}} objects',
-      countObjects_one: '{{count}} object',
-      countObjects_other: '{{count}} objects',
-      countViews: '{{count}} views',
-      countViews_one: '{{count}} view',
-      countViews_other: '{{count}} views',
-      countDashboards: '{{count}} dashboards',
-      countDashboards_one: '{{count}} dashboard',
-      countDashboards_other: '{{count}} dashboards',
-      countSeedData: 'sample data',
-      extendTarget: 'Adding to existing app: {{app}}',
-      awaitingConfirm: 'Awaiting confirmation',
-      // objectstack#32984 — the plan card's build states.
-      confirmed: 'Confirmed',
-      buildFailed: 'Not built — nothing was created',
-      iterateOrNew: {
-        question: 'This overlaps "{{app}}", an app you already have. Keep improving it, or build a separate app?',
-        questionUnnamed: 'This overlaps an app you already have. Keep improving that app, or build a separate one?',
-        extend: 'Keep improving "{{app}}"',
-        buildNew: 'Build a separate app',
-        replyHint: 'Reply to say which.',
-      },
-      objectsAndFields: 'Objects and fields',
-      views: 'Views',
-      suggestedField: 'suggested',
-      suggestedFieldLegend: 'Fields marked “{{mark}}” were added by the AI; you didn’t ask for them.',
-      nameField: 'Name: {{field}}',
-    },
     build: {
-      building: 'Building {{app}}…',
-      built: 'Built {{app}}',
-      builtAndLive: 'Built and live · {{app}}',
-      appFallback: 'your app',
-      addingSampleData: 'adding sample data',
-      group: {
-        object: 'Objects',
-        view: 'Views',
-        dashboard: 'Dashboards',
-        app: 'App',
-        seed: 'Sample data',
-        dataset: 'Datasets',
-        permission: 'Permissions',
-        other: 'Other',
-      },
-      moreArtifacts: '+{{n}} more',
-      verifying: 'Checking the change…',
-      verifyStep: 'step {{n}}',
-      verified: 'Checked the change',
-      // objectstack#32984 — the build card's issues line, in the customer's words.
-      issuesCount: '{{count}} to fix',
       issuesSummary: 'Some parts of this build need fixing before it is ready. Reply "fix the problems" and the assistant will repair them.',
-      warningsSummary: 'The build is ready, with a few things worth checking. Ask the assistant what they are if you want to improve them.',
-      issuesDetails: 'Technical details',
-      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
-      needsAttention: '{{count}} need attention',
-      needsAttention_one: '{{count}} needs attention',
-      needsAttention_other: '{{count}} need attention',
       // objectstack#32984 — the publish-health line under a Published badge, which was English in every locale.
       health: {
-        sampleRowsLive: '{{count}} sample rows live',
-        sampleRowsLive_one: '{{count}} sample row live',
-        sampleRowsLive_other: '{{count}} sample rows live',
-        views: '{{count}} views',
-        views_one: '{{count}} view',
-        views_other: '{{count}} views',
-        widgets: '{{count}} widgets',
-        widgets_one: '{{count}} widget',
-        widgets_other: '{{count}} widgets',
-        seeds: '{{count}} sample data sets',
-        seeds_one: '{{count}} sample data set',
-        seeds_other: '{{count}} sample data sets',
-        verified: '{{checks}} verified',
         seedFailed: 'Sample data failed to load.',
-      },
-      unknownPhase: 'Unknown build phase',
-      nextStepsLead: 'Next, you can say: {{steps}}',
-      nextStepQuote: '“{{step}}”',
-      draftPosture: 'Later changes are saved as drafts; click Publish here in the chat to make them live.',
-      checksPassed: 'Checks passed {{passed}}/{{total}}',
-    },
-    changes: {
-      planTitle: 'Change plan · {{count}} changes',
-      planTitle_one: 'Change plan · {{count}} change',
-      planTitle_other: 'Change plan · {{count}} changes',
-      saveDraft: 'Save as draft',
-      reviewAndPublish: 'Review changes and publish',
-      undo: 'Undo',
-      undoWithOthers: 'Undo (and {{count}} other drafts)',
-      undoWithOthers_one: 'Undo (and {{count}} other draft)',
-      undoWithOthers_other: 'Undo (and {{count}} other drafts)',
-      undoConfirm: 'Undo discards all {{total}} unpublished drafts of this package, including {{count}} that are not part of this change.',
-      undoConfirm_one: 'Undo discards all {{total}} unpublished drafts of this package, including {{count}} that is not part of this change.',
-      undoConfirm_other: 'Undo discards all {{total}} unpublished drafts of this package, including {{count}} that are not part of this change.',
-      undoConfirmUnknown: 'Undo discards every unpublished draft of this package, not only this change.',
-      undoConfirmAction: 'Undo all',
-      undoCancel: 'Cancel',
-      undoing: 'Undoing…',
-      undone: 'Undone',
-      undoFailed: 'Undo failed',
-      kind: {
-        field: 'Field',
-        object: 'Object',
-        view: 'View',
-        dashboard: 'Dashboard',
-        app: 'App',
-        seed: 'Sample data',
-        package: 'App package',
       },
     },
   },

@@ -46,7 +46,7 @@ export { AI_USAGE_REFRESH_EVENT, emitAiUsageRefresh } from './aiUsageEvents';
 
 // ADR-0038 L3 — the publish-health parse every publish-drafts host shares.
 export { publishHealthFromResponse } from './publishHealth';
-export type { PublishHealth, PublishOutcome } from './publishHealth';
+export type { PublishHealth } from './publishHealth';
 
 // The pending-approval envelope parse the app-shell hydration mapper shares
 // with the live one (objectui#8442). `toolResultParsers` holds only an

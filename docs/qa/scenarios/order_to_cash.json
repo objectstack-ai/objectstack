@@ -36,7 +36,7 @@
       {"object": "sales_order", "field": "account", "to": "account"},
       {"object": "sales_order", "field": "owner", "to": "employee"},
       {"object": "sales_order", "field": "approver", "to": "employee"},
-      {"object": "order_line", "field": "order", "to": "sales_order"},
+      {"object": "order_line", "field": "order", "to": "sales_order", "masterDetail": true},
       {"object": "order_line", "field": "product", "to": "product"},
       {"object": "invoice", "field": "order", "to": "sales_order"},
       {"object": "invoice", "field": "account", "to": "account"},

@@ -29,9 +29,6 @@ export declare const CONVERSION_CASES: ReadonlyArray<readonly [string, string]>;
 /** The pinned cases the converter does not answer as pinned. */
 export declare function conversionFailures(): Array<{ input: string; expected: string; actual: string }>;
 
-/** The `console.ai.*` outbound leaves the generated pack does not carry. */
-export declare const GATE_ONLY_KEYS: ReadonlyArray<string>;
-
 /** The header the generated pack opens with. */
 export declare const GENERATED_HEADER: string;
 

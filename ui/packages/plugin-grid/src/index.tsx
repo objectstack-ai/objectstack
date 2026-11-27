@@ -394,7 +394,7 @@ ComponentRegistry.register('grid', ObjectGridRenderer, {
  * the seat's ruling on that card, by the objectui#10393 / objectui#8760 route).
  * The React export stays (the ruling's words): `ImportWizard` is still exported
  * from this package, and app-shell mounts it directly (`ObjectView`'s import
- * flow, `ExcelImportBar`).
+ * flow).
  *
  * ## What was here, and why it went
  *

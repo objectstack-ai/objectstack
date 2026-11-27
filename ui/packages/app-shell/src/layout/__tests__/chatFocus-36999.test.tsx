@@ -19,6 +19,9 @@
  * exposes the send).
  */
 
+// AiChatPage reads a dropped spreadsheet through `import('@object-ui/plugin-grid')`; load it
+// here so collection pays that transform, not a clocked case (check-test-source-alias).
+import '@object-ui/plugin-grid';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -81,7 +84,6 @@ vi.mock('../../providers/AdapterProvider', async (importOriginal) => ({
 }));
 vi.mock('../../hooks/useCanAuthorMetadata', () => ({ useCanAuthorMetadata: () => false }));
 vi.mock('../../console/ai/ConversationsSidebar', () => ({ ConversationsSidebar: () => null }));
-vi.mock('../../console/ai/PendingDraftsBar', () => ({ PendingDraftsBar: () => null }));
 
 import { I18nProvider } from '@object-ui/i18n';
 import { AiChatPage } from '../../console/ai/AiChatPage';

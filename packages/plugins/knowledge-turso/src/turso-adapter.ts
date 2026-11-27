@@ -76,6 +76,9 @@ const UPSERT_ATTEMPTS = 3;
 /** How many times {@link TursoKnowledgeAdapter.search} runs again when the active generation was switched under it. */
 const SEARCH_ATTEMPTS = 3;
 
+/** The standard ADR-0112 code of a search whose source's index was switched under it on every attempt. */
+const CONCURRENT_MODIFICATION = 'CONCURRENT_MODIFICATION';
+
 /** A generation row: one index of one source under one fingerprint. */
 interface GenerationRow {
   generation: number;
@@ -564,7 +567,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     if (result === undefined) {
       // Switched while the query was embedded: searched again, a bounded number of times.
       if (attempt >= SEARCH_ATTEMPTS) {
-        throw notReady(
+        throw switchedDuringSearch(
           "its source's index was switched while it searched",
           `The active generation of source '${opts.source.name}' changed ${SEARCH_ATTEMPTS} times during one search; retry it.`,
         );
@@ -950,6 +953,19 @@ function rebuildRequired(sourceId: string, building: boolean): Error {
     remedy:
       'Run a complete reindex of the source. The store builds the new index beside the old one and switches to it ' +
       'when the reindex completes; the old index is then dropped.',
+  });
+}
+
+/**
+ * A search whose source's index was switched under it on every attempt: the
+ * store is ready, the search lost a race with a rebuild, and the same search
+ * run again answers. The same coded answer as the pgvector store's; the
+ * message names the source and says to retry, as a search caller reads it.
+ */
+function switchedDuringSearch(diagnosis: string, detail: string): Error {
+  return Object.assign(new Error(`The knowledge search was not answered: ${diagnosis}. ${detail}`), {
+    code: CONCURRENT_MODIFICATION,
+    status: 409,
   });
 }
 

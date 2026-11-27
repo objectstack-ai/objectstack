@@ -1391,7 +1391,16 @@ export const CEILINGS = new Map([
   // 16272 bytes (4068 tokens, headroom 0); the LANDED file is 17168 bytes ->
   // 4292 tokens, ceiling +224, pinned AT the measurement, zero headroom.
   //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(17168 / 4)
-  ['skills/objectstack-data/rules/security.md', 4292],
+  // 4292 -> 4340 (objectstack#37762, from cloud#5080 item F): the Three axes list gains
+  // that `allowDelete` removes only rows the caller created (`owner_only_deletes`) and what
+  // widens it on a `private` object, which no line taught (two door builds lost the check).
+  // Same standing ruling, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」
+  // (record 6513306068). PAID DOWN FIRST, 59 bytes: the "Prefer `member_default`" bullet's
+  // `owner_only_deletes` (now taught above), "the built-in" and "for the common cases".
+  // The bullet adds 248 bytes, the cut removes 59: 17168 -> 17357 bytes -> 4340 tokens,
+  // headroom 0 before, ceiling +48, the measured remainder only, pinned AT the measurement.
+  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(17357 / 4)
+  ['skills/objectstack-data/rules/security.md', 4340],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a
@@ -1590,7 +1599,16 @@ export const CEILINGS = new Map([
   // before, ceiling +169, the measured remainder only, pinned AT the measurement. Same ruling
   // (2026-10-27, tap A): 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
   //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(15519 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 3880],
+  // 3880 -> 3890 (objectstack#37762, from cloud#5080 item D): the `confirmText` bullet says it
+  // gates no AI call and an `ai.exposed` action also sets `ai.requiresConfirmation: true` (three
+  // door builds set `confirmText` alone and lost the confirm-gated check). PAID DOWN FIRST by 43
+  // bytes of restatement: the intro's "A parameterized bulk mutation is `script`." (the bulk
+  // bullet and the `crm_create_campaign` example show it). The text adds 84 bytes, the cut
+  // removes 43: 15518 -> 15559 bytes -> 3890 tokens, headroom 0 before, ceiling +10, the
+  // measured remainder only. Same ruling (2026-10-27, tap A): 「A:先削重复,余额按实测提高」
+  // (ruling record 6513306068, letter B).
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(15559 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 3890],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling

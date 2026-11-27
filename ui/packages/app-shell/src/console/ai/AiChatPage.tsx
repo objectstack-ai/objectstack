@@ -14,27 +14,12 @@
  */
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
-import { toast } from 'sonner';
-import { Package as PackageIcon, Sparkles as SparklesIcon } from 'lucide-react';
-import { useAdapter } from '../../providers/AdapterProvider.js';
 import { CONSOLE_FULL_HEIGHT } from '../../layout/chromeBannerHost.js';
-import { isPlatformBuiltinApp } from '../../utils/platformApp.js';
-import { useMetadata } from '../../providers/MetadataProvider.js';
-import { formatPublishFailures, type PublishFailure } from '../../views/studio-design/metadataError.js';
-import { useMetadataClient } from '../../views/metadata-admin/useMetadata.js';
 import { translateMetadataType } from '../../views/metadata-admin/i18n.js';
-import { useMetadataLocale } from '../../views/metadata-admin/i18n.js';
-import { fieldTypeName } from '../../views/metadata-admin/previews/fieldTypeName.js';
-import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
-import { resolveKeyedI18nLabel } from '../../utils/index.js';
 import { resolvePublicShareBase } from '../organizations/resolveHomeUrl.js';
-import { ExcelImportBar } from './ExcelImportBar.js';
-import { useChangeCardLabels } from './changeCardLabels.js';
-import { PendingDraftsBar } from './PendingDraftsBar.js';
 import {
   Select,
   SelectContent,
@@ -51,33 +36,19 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   cn,
 } from '@object-ui/components';
-import { Bug, Check, ChevronDown, PanelLeft, PanelLeftClose, PanelLeftOpen, PanelRightOpen, Share2 } from 'lucide-react';
+import { PanelLeft, PanelLeftClose, PanelLeftOpen, PanelRightOpen, Share2 } from 'lucide-react';
 import {
   ChatbotEnhanced,
   useObjectChat,
   useAiModels,
   useHitlInChat,
-  detectDraftResult,
-  detectProposedPlan,
-  detectBuilderHandoff,
   detectRecordHandoff,
   detectRecordWrite,
   detectAnswerSource,
   detectSampleDataCleanup,
   detectPackageRemoval,
-  detectProposedChanges,
-  detectReplayOutcome,
-  detectAuthoringVerdict,
-  detectBuiltAppPackage,
-  buildProgressFromDraftReview,
   storedAnswerData,
   // The authoring/honest -> runtime message seam (objectui#4399 / PR #4416),
   // consumed here one hop up from the plugin's own renderers (objectui#4437).
@@ -85,7 +56,7 @@ import {
   toRuntimeMessages,
   type ChatbotEnhancedToolInvocation,
   // The ENHANCED message shape — the one `<ChatbotEnhanced>` renders and the
-  // one this file actually produces (`toolInvocations`, `buildProgress`).
+  // one this file actually produces (`toolInvocations`, `charts`).
   //
   // `ChatbotEnhancedMessage` is the plugin's one name for its RUNTIME
   // chat-message contract, not an alias of anything. The plugin root publishes
@@ -109,18 +80,14 @@ import {
   agentRouteName,
   resolveAgentParam,
   isBuiltinAgentName,
-  isBuildAgent,
   agentHasCapability,
   isAskAgent,
-  publishHealthFromResponse,
   detectPendingApproval,
   type AgentDescriptor,
 } from '@object-ui/plugin-chatbot/core';
 
 import { AppHeader } from '../../layout/AppHeader.js';
-import { readBuilderHandoffState, type BuilderHandoffState } from '../../layout/chatDockTarget.js';
-import { useChatDockControl, useOpenAssistant } from '../../layout/chatDockControl.js';
-import { markPreviewExit, usePreviewDrafts } from '../../preview/PreviewModeContext.js';
+import { useOpenAssistant } from '../../layout/chatDockControl.js';
 import { CONSOLE_TOP_BAR } from '../../layout/consoleTopBar.js';
 import { armChatDockExpanded, readDockReturnLocation } from '../../layout/chatDockState.js';
 import type { ChatSurfaceContext } from '../../layout/chatSurfaceContext.js';
@@ -131,18 +98,7 @@ import {
   type AdvertisedShortcut,
   type ShortcutLabelTranslate,
 } from '../../chrome/advertisedShortcuts.js';
-import { fetchPendingDraftCount } from '../../preview/draftStatus.js';
-import { appPackageOf } from '../../preview/usePendingDrafts.js';
-import { draftPreviewPath } from '../../preview/draftSurface.js';
-import {
-  emitCanvasInvalidate,
-  emitMetadataRefresh,
-  publishPlanApprovalPending,
-  subscribeMetadataRefresh,
-} from '../../assistant/assistantBus.js';
-import { getRuntimeConfig, getUpgradeUrl, isAiStudioEnabled } from '../../runtime-config.js';
-import { makerConvergedOnBuild, makerVisibleAgents } from '../../hooks/surfaceAgent.js';
-import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
+import { getUpgradeUrl } from '../../runtime-config.js';
 import { useHomePath } from '../../hooks/useHomePath.js';
 import { cloudConsoleUrl } from '../marketplace/marketplaceApi.js';
 import { useNavigationContext } from '../../context/NavigationContext.js';
@@ -158,17 +114,8 @@ import { useReconcileOnError } from '../../hooks/useReconcileOnError.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { chatConversationScope, chatProductOfAgent } from '../../hooks/chatScope.js';
 import { ConversationsSidebar } from './ConversationsSidebar.js';
-import { mainAreaDraftMove, type MainAreaDraftTarget } from './mainAreaDraft.js';
-import { artifactStudioPath } from './artifactStudioPath.js';
-import { studioChangesReviewTarget } from '../../views/studio-design/studioChangesLink.js';
-import { BuildDebugDrawer } from './BuildDebugDrawer.js';
 import { isConversationZh } from './conversationLanguage.js';
-import {
-  resolveAttachmentNoteText,
-  resolveOutboundAgentText,
-  type AttachmentNoteKey,
-  type OutboundAgentTextKey,
-} from './outboundAgentText.js';
+import { resolveAttachmentNoteText, type AttachmentNoteKey } from './outboundAgentText.js';
 import { resolveApiBase } from './resolveApiBase.js';
 import { appOfObject } from './appOfObject.js';
 import { RECORD_SECTION_OPENED_STATE, RECORD_SECTION_PARAM } from '../../urlParams.js';
@@ -176,7 +123,6 @@ import { AiUnavailable } from './AiUnavailable.js';
 import { recordWriteFormTarget } from '../../utils/recordFormAiDraft.js';
 import { useUpload } from '@object-ui/fields';
 import { isSpreadsheetAttachment, uploadChatAttachments, chatAttachmentNotes } from './chatAttachments.js';
-import { studioHomePath } from '../../views/studio-design/studioAddress.js';
 
 /**
  * objectstack#31869 — the console address of the list a chat list link names:
@@ -257,7 +203,7 @@ function partToolState(part: HydratedUIMessagePart): ChatbotEnhancedToolInvocati
     // Hydrated history is never a live stream: the turn that drove these
     // tools has ENDED, so a dangling mid-stream state means the terminal
     // state was never snapshotted server-side — promote to Completed or a
-    // reloaded build conversation shows every tool "Running" forever (the
+    // reloaded conversation shows every tool "Running" forever (the
     // same incident mapMessages fixed for the floating-chat path).
     case 'input-streaming':
     case 'input-available':
@@ -283,7 +229,6 @@ function partToolState(part: HydratedUIMessagePart): ChatbotEnhancedToolInvocati
 export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): ChatMessage[] {
   return messages.map((message) => {
     const toolInvocations: ChatbotEnhancedToolInvocation[] = [];
-    let buildProgress: ReturnType<typeof buildProgressFromDraftReview>;
     const content = message.parts
       .filter((part) => part.type === 'text')
       .map((part) => part.text ?? '')
@@ -296,24 +241,12 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
         const toolCallId = partString(part, 'toolCallId') ?? `${message.id}-${toolName}`;
         const state = partToolState(part);
         // The tool RESULT (merged onto the call part by toUIMessages from the
-        // separate `tool` row) carries the ADR-0033 draft envelope. Rebuild
-        // `draftReview` so the publish / preview / review affordances return,
-        // and synthesize the "Built X" panel so the blueprint summary survives
-        // a refresh (the live progress bar is transient and not persisted).
+        // separate `tool` row) carries the structured envelopes the cards read.
+        // Each is lifted here as the live floating-chat mapper
+        // (extractToolInvocations) lifts it, so a card survives a reload or a
+        // cache restore.
         const result =
           (part as { output?: unknown }).output ?? (part as { result?: unknown }).result;
-        const draftReview = detectDraftResult(result);
-        // The pre-build PLAN (propose_blueprint → blueprint_proposed) rides the
-        // same merged tool result; lift it so the "Proposed plan" review card
-        // survives a reload on this surface, not just in the floating chat.
-        const proposedPlan = detectProposedPlan(result);
-        // The ask-agent's structured decline (suggest_builder → build_handoff)
-        // and the confirm-before-change preview (changes_proposed) ride the same
-        // merged tool result. Lift both so the "Open in Builder →" handoff card
-        // and the "确认修改" changes card survive a reload / cache restore — the
-        // live floating-chat mapper (extractToolInvocations) already lifts all
-        // four; this is its hydration counterpart.
-        const builderHandoff = detectBuilderHandoff(result);
         const recordHandoff = detectRecordHandoff(result);
         // cloud#3565 — the record-write card rides the pending approval the
         // id below is lifted from; it must survive a reload like the rest.
@@ -324,18 +257,6 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
         const answerSource = detectAnswerSource(result);
         const sampleDataCleanup = detectSampleDataCleanup(result);
         const packageRemoval = detectPackageRemoval(result);
-        const proposedChanges = detectProposedChanges(result);
-        // objectui#5695 — a confirm-replay result becomes a terminal state on
-        // the original 确认修改 card; it must never rehydrate as an ordinary
-        // draft card (a rolled-back publish would get a live Publish button).
-        // Mirrors the live mapper's suppression exactly, its one exception
-        // included: a drafted whole-app build has no confirm card and keeps
-        // its review, so the thread binds to the package it built
-        // (objectstack#25887, mapMessages `replayedBuildReview`).
-        const replayOutcome = detectReplayOutcome(toolCallId, result);
-        const keepsDraftReview =
-          !replayOutcome ||
-          (replayOutcome.kind === 'drafted' && Boolean(detectBuiltAppPackage(result)));
         // objectui#8442 — the two halves of an actionable approval, dropped
         // here until now, and they arrive from DIFFERENT places:
         //   * the AI SDK's `approval` envelope rides the persisted PART (the
@@ -354,8 +275,8 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
         // SERVER path the id exists only inside the result, so `??` never
         // reaches its right-hand side and this line behaves exactly as
         // objectui#8442 left it. The fallback exists for the CACHE path, where
-        // `output` holds one envelope and a turn carrying both a draft and a
-        // pending approval has to put its draft there — leaving the part key as
+        // `output` holds one envelope and a turn carrying both another envelope
+        // and a pending approval has to put that envelope there — leaving the part key as
         // the only place the id can ride. `sanitizeChatMessagesForCache` is the
         // only writer of that key.
         const pendingActionId =
@@ -367,22 +288,13 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
           ...(result !== undefined ? { result } : {}),
           ...(approval ? { approval } : {}),
           ...(pendingActionId ? { pendingActionId } : {}),
-          ...(draftReview && keepsDraftReview ? { draftReview } : {}),
-          ...(proposedPlan ? { proposedPlan } : {}),
-          ...(builderHandoff ? { builderHandoff } : {}),
           ...(recordHandoff ? { recordHandoff } : {}),
           ...(recordWrite ? { recordWrite } : {}),
           ...(answerSource ? { answerSource } : {}),
           ...(sampleDataCleanup ? { sampleDataCleanup } : {}),
           ...(packageRemoval ? { packageRemoval } : {}),
-          ...(proposedChanges ? { proposedChanges } : {}),
-          ...(replayOutcome ? { replayOutcome } : {}),
           ...(part.errorText ? { errorText: String(part.errorText) } : {}),
         });
-        if (!buildProgress) {
-          const synthesized = buildProgressFromDraftReview(draftReview);
-          if (synthesized) buildProgress = synthesized;
-        }
       }
     }
 
@@ -402,112 +314,10 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
       role: message.role,
       content,
       ...(toolInvocations.length > 0 ? { toolInvocations } : {}),
-      ...(buildProgress ? { buildProgress } : {}),
       ...(charts ? { charts } : {}),
       ...(recordCitations ? { recordCitations } : {}),
     };
   });
-}
-
-/**
- * #2458 / ADR-0057 Amendment A1.a — the package a build conversation is bound to:
- * the explicit `?package=` edit target (ADR-0070) if present, else the most
- * recent package a build/draft in THIS thread produced (`draftReview` /
- * `builderHandoff` tool results, newest wins). `undefined` = not-yet-bound —
- * the magic-flow "New app" draft, which binds the moment its build mints a
- * package. Exported for unit testing.
- */
-interface PackageBearingMessage {
-  toolInvocations?: ReadonlyArray<{
-    draftReview?: { packageId?: string };
-    builderHandoff?: { packageId?: string };
-  }>;
-}
-/**
- * objectstack#34610 — what the LAST turn drafted, read off its own tool
- * results: the newest draft review after the last user message, or null when
- * the turn drafted nothing. `items` are what it drafted; `packageId` is the
- * review's (absent when the producer named none); `materialized` is
- * ADR-0045's in-turn build. Exported for tests.
- */
-export function turnDraftPackage(
-  messages: readonly {
-    role?: string;
-    toolInvocations?: ReadonlyArray<{
-      draftReview?: { packageId?: string; materialized?: boolean; items?: ReadonlyArray<{ type: string; name: string }> };
-    }>;
-  }[],
-): { packageId?: string; materialized?: boolean; items: ReadonlyArray<{ type: string; name: string }> } | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (message.role === 'user') return null;
-    const tools = message.toolInvocations ?? [];
-    for (let j = tools.length - 1; j >= 0; j--) {
-      const dr = tools[j].draftReview;
-      if (dr?.items && dr.items.length > 0) {
-        return {
-          items: dr.items,
-          ...(dr.packageId ? { packageId: dr.packageId } : {}),
-          ...(dr.materialized ? { materialized: true } : {}),
-        };
-      }
-    }
-  }
-  return null;
-}
-
-export function deriveBoundPackageId(
-  messages: readonly PackageBearingMessage[],
-  editPackageId: string | undefined,
-): string | undefined {
-  if (editPackageId) return editPackageId;
-  let latest: string | undefined;
-  for (const message of messages) {
-    for (const tool of message.toolInvocations ?? []) {
-      const pkg = tool.draftReview?.packageId || tool.builderHandoff?.packageId;
-      if (pkg) latest = pkg;
-    }
-  }
-  return latest;
-}
-
-/**
- * ADR-0057 Amendment A1.b migration read — is a product-only (legacy-scope)
- * build thread bound to `packageId` by its OWN history (the latest
- * draft/handoff package)? The adopt predicate every `app:X:build` surface
- * that runs the migration read hands `useChatConversation`: the full page's
- * `?package=` entry and the console dock bound to the current app
- * (objectui#10926). One predicate, so whichever surface resolves first adopts
- * the same thread. Exported for that second caller.
- */
-export function isThreadBoundToPackage(
-  messages: HydratedUIMessage[],
-  packageId: string,
-): boolean {
-  return (
-    deriveBoundPackageId(
-      hydratedMessagesToChatMessages(messages) as unknown as readonly PackageBearingMessage[],
-      undefined,
-    ) === packageId
-  );
-}
-
-// #2466 / ADR-0057 Amendment A1.b — the switcher lists only authorable
-// packages. Which apps are code-loaded platform built-ins is one criterion,
-// shared with the first-run checklist (`utils/platformApp.ts`); re-exported
-// here for the importers that already read it from this module.
-export { isPlatformBuiltinApp };
-
-/**
- * The app-metadata fields this surface reads. `useMetadata().apps` is loosely
- * typed and the provider grafts `_packageId` onto each app; narrowing to this
- * shape ONCE at the hook boundary lets the call sites read `.name` /
- * `.label` / `._packageId` without per-access `as` casts.
- */
-interface MetadataAppItem {
-  name: string;
-  label?: Parameters<typeof resolveKeyedI18nLabel>[0];
-  _packageId?: string;
 }
 
 function firstUserMessageText(messages: HydratedUIMessage[]): string | undefined {
@@ -524,7 +334,6 @@ function firstUserMessageText(messages: HydratedUIMessage[]): string | undefined
 // id, and the route segment all localize to the same label.
 const PLATFORM_AGENT_LABEL_KEYS: Record<string, { key: string; defaultValue: string }> = {
   ask: { key: 'console.ai.agentLabels.ask', defaultValue: 'Ask' },
-  build: { key: 'console.ai.agentLabels.build', defaultValue: 'Build' },
 };
 
 function localizeAgentLabel(
@@ -538,47 +347,14 @@ function localizeAgentLabel(
 }
 
 /**
- * Per-surface empty-state branding. The split gives each assistant its own
- * identity: the Build surface reads as authoring ("describe an app"), the Ask
- * surface as data Q&A ("ask about your records"). Keyed by friendly name; falls
- * back to the generic empty state for custom agents.
+ * Per-surface empty-state branding: the Ask surface reads as data Q&A ("ask
+ * about your records"). Keyed by friendly name; falls back to the generic
+ * empty state for custom agents.
  */
 export function agentEmptyState(
   t: (key: string, options?: Record<string, unknown>) => string,
   agentName: string | undefined,
-  // ADR-0057 A1.b — when the build surface is opened to EDIT an existing app
-  // (`?package=`), the empty-state guidance switches from "describe an app to
-  // build" (magic flow) to "what do you want to change in <app>". `appLabel` is
-  // the resolved app name, or undefined until metadata loads (never a raw
-  // package id — see the caller).
-  editContext?: { appLabel?: string },
 ): { title: string; description: string } {
-  if (isBuildAgent(agentName)) {
-    if (editContext) {
-      return {
-        title: editContext.appLabel
-          ? t('console.ai.empty.editApp.title', {
-              defaultValue: 'Editing “{{app}}”',
-              app: editContext.appLabel,
-            })
-          : t('console.ai.empty.editApp.titleGeneric', { defaultValue: 'Edit this app' }),
-        // objectstack#34608 item 4 — the maker's one composer answers data
-        // questions too (build is a data superset, cloud#1673), so the empty
-        // state offers both: asking about the app's data, and changing it.
-        description: t('console.ai.empty.editApp.askOrChangeDescription', {
-          defaultValue:
-            'Ask about this app’s data — counts, lists and summaries — or tell me what to change, and I’ll modify the app in place: a field, an object, a view or a dashboard.',
-        }),
-      };
-    }
-    return {
-      title: t('console.ai.empty.build.title', { defaultValue: 'Build with AI' }),
-      description: t('console.ai.empty.build.description', {
-        defaultValue:
-          'Describe an app in plain language — I draft the objects, screens and sample data, then you review and publish.',
-      }),
-    };
-  }
   if (isAskAgent(agentName)) {
     return {
       title: t('console.ai.empty.ask.title', { defaultValue: 'Ask your data' }),
@@ -1078,26 +854,6 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
   // existing conversation, and the flag is stripped once the fresh id is
   // mirrored into the URL.
   const forceNewConversation = searchParams.get('new') !== null;
-  // ADR-0070 "Edit with AI": the package the user opened to edit (from the app
-  // list's per-app action). Forwarded to the build agent as `context.packageId`
-  // so its metadata reads scope to that app and edits bind to it from the first
-  // message (the agent seeds it as the conversation's active package).
-  const editPackageId = searchParams.get('package')?.trim() || undefined;
-  // ADR-0057 P4 — a build prompt handed off from the `ask` surface's
-  // "Open in Builder →" (suggest_builder), carried as NAVIGATION STATE
-  // (objectui#12493): the URL is never read for it, so no link can put a message
-  // in the user's mouth. Seeded as the build surface's first message below, and
-  // consumed from the history entry as it is seeded, so a reload never re-sends.
-  const location = useLocation();
-  const builderHandoff = useMemo(() => readBuilderHandoffState(location.state), [location.state]);
-  const handoffPrompt = builderHandoff.handoffPrompt;
-  // ADR-0057 P4 / cloud#817 — the source `ask` conversation id handed off to the
-  // Builder alongside the prompt (same navigation state). Forwarded to ChatPane →
-  // useObjectChat, which sends it as `context.parentConversationId` on the build
-  // surface's FIRST turn so the agent starts with the ask thread as context
-  // (never a cold start). The URL-mirror below navigates without state once the
-  // build conversation id is minted, which drops it.
-  const handoffParentConversationId = builderHandoff.parentConversationId;
   const navigate = useNavigate();
   // objectui#7373 — both exits out of this page (the "no agent here" screen's
   // Home button, and the collapse-to-dock landing on a cold deep link) follow
@@ -1139,24 +895,13 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
   // here, then stripped as the route is canonicalized to `/ai/:agent`.
   const legacyAgentParam = !agentSegment ? searchParams.get('agent') ?? undefined : undefined;
 
-  // cloud#1674 maker convergence — the ONE predicate for this page's ask→build
-  // collapse (shared with ChatPane's launcher filter via surfaceAgent.ts).
-  const canAuthorMetadata = useCanAuthorMetadata();
-  const makerConverged = makerConvergedOnBuild(agents, canAuthorMetadata, isAiStudioEnabled());
-
   // App/platform default — used for a bare `/ai` (respecting the legacy
   // `?agent=`), and as the endpoint while a legacy bare-id link is being
   // redirected to its real agent surface.
-  const fallbackAgent = useMemo(() => {
-    const resolved = resolveDefaultAgentName(agents, legacyAgentParam ?? defaultAgentProp ?? envDefaultAgent);
-    // cloud#1674 — a maker's bare `/ai` (or an ask-preferring `?agent=` link)
-    // lands on the converged build composer: ask is no longer a start surface
-    // for principals who can author. Custom-agent preferences pass through.
-    if (makerConverged && isAskAgent(resolved)) {
-      return resolveAgentParam('build', catalogNames) ?? resolved;
-    }
-    return resolved;
-  }, [agents, legacyAgentParam, defaultAgentProp, envDefaultAgent, makerConverged, catalogNames]);
+  const fallbackAgent = useMemo(
+    () => resolveDefaultAgentName(agents, legacyAgentParam ?? defaultAgentProp ?? envDefaultAgent),
+    [agents, legacyAgentParam, defaultAgentProp, envDefaultAgent],
+  );
 
   // Resolved backend agent name for this surface (route agent wins; else default).
   const activeAgent = useMemo(() => {
@@ -1186,32 +931,11 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     : undefined;
 
   // ADR-0057: key the conversation on `(user, app, product)`, not on surface.
-  // When this full-page surface was deep-linked to edit a package
-  // (`/ai/build?package=X`, the ADR-0070 "Edit with AI" entry), it shares the
-  // Studio copilot's `app:X:build` thread instead of forking a separate one; a
-  // generic `/ai/:agent` visit (no `?package=`) degrades to the product alone,
-  // unchanged from before. `undefined` while the agent is still resolving.
+  // The full page names no app, so its scope is the product alone.
+  // `undefined` while the agent is still resolving.
   const chatScope = activeAgent
-    ? chatConversationScope({ appId: editPackageId, product: chatProductOfAgent(activeAgent) })
+    ? chatConversationScope({ product: chatProductOfAgent(activeAgent) })
     : undefined;
-
-  // A1.b migration read: an "Edit with AI" entry (`?package=X`) whose
-  // `app:X:build` scope has never been cached may still have its thread under
-  // the product-only key — a build conversation from before bind-on-create
-  // shipped (or whose re-key never ran in this browser). Offer that thread to
-  // the resolve; adopt it only if its own history is actually bound to X
-  // (latest draft/handoff package), so an unrelated product-scoped thread
-  // never gets hijacked into an app scope.
-  const activeProduct = activeAgent ? chatProductOfAgent(activeAgent) : undefined;
-  const legacyBuildScope =
-    editPackageId && activeProduct === 'build' && chatScope !== activeProduct
-      ? activeProduct
-      : undefined;
-  const adoptLegacyBuildThread = useCallback(
-    (messages: HydratedUIMessage[]) =>
-      editPackageId !== undefined && isThreadBoundToPackage(messages, editPackageId),
-    [editPackageId],
-  );
 
   // The user the conversation resolves for (none until the agent is known).
   const conversationUserId = activeAgent ? userId : undefined;
@@ -1219,7 +943,6 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     conversationId,
     conversationScope,
     initialMessages,
-    rekeyScope,
     ensureConversation,
     createError: conversationCreateError,
   } = useChatConversation({
@@ -1233,16 +956,14 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     apiBase,
     activeId: urlConversationId ?? legacyConversationId,
     forceNew: forceNewConversation,
-    legacyScope: legacyBuildScope,
-    adoptLegacy: legacyBuildScope ? adoptLegacyBuildThread : undefined,
   });
 
   // #2450 — feed <ChatPane> ONLY a scope-matched conversation. Right after a
-  // launcher/handoff switch (ask→build), `conversationId` still holds the OLD
+  // launcher switch between agents, `conversationId` still holds the OLD
   // scope's id until the hook re-resolves — the same stale window the
   // URL-mirror below already guards. A pane mounted on that stale id is DOOMED
   // (it remounts the moment the id re-resolves), and the deferred first-send
-  // replay could consume the handoff stash into it, where the send dies with
+  // replay could consume the held first message into it, where the send dies with
   // the unmount before reaching the wire (the observed zero-POST). Handing the
   // pane `undefined` during the window makes it mount as `…:pending`, hold the
   // stash, and replay exactly once in the correctly-scoped pane.
@@ -1272,65 +993,10 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     if (conversationUserId) markFocusSending();
     return ensureConversation();
   }, [conversationUserId, markFocusSending, ensureConversation]);
-  // Bumped whenever the pending ref is set OUT OF BAND (the handoff seed below).
-  // ChatPane's deferred-send replay lists this in its deps, so it re-runs and
-  // fires the seed even when the conversation id was ALREADY minted. Without it a
-  // seed that lands after the id resolves is never replayed — the swallow (the
-  // replay otherwise only re-runs on id / doSend changes).
-  const [pendingFirstMessageSeq, setPendingFirstMessageSeq] = useState(0);
-  const stashPendingFirstMessage = useCallback((m: PendingFirstMessage) => {
-    pendingFirstMessageRef.current = m;
-    setPendingFirstMessageSeq((s) => s + 1);
-  }, []);
-
-  // ADR-0057 P4 — seed the handed-off build prompt as this surface's first
-  // message; `useDeferredFirstSend` (in ChatPane) replays it once the id lands.
-  // Gate on the ROUTE (`agentSegment`), known synchronously — NOT on the
-  // async-resolved `activeAgent`, which can settle AFTER the id is minted and so
-  // seed too late for the replay to see it (the swallow race, cloud#817 P4
-  // follow-up #1). Arm once per history entry (`location.key`), so a SECOND
-  // handoff re-seeds into the singleton build conversation (#2) even with the
-  // same text.
-  //
-  // objectui#12493 — the prompt is CONSUMED from the history entry as it is
-  // seeded: the entry's state is replaced by one without `handoffPrompt` (the
-  // parent conversation id stays until the URL-mirror drops it). Browser
-  // history keeps state across a reload, so without this a reload would send
-  // the prompt again. Declared BEFORE the canonicalization and URL-mirror
-  // effects so that, in a shared effect flush, their later navigations win
-  // over this same-URL replace.
-  const lastSeededHandoffKeyRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!handoffPrompt || agentSegment !== 'build') return;
-    if (lastSeededHandoffKeyRef.current === location.key) return;
-    lastSeededHandoffKeyRef.current = location.key;
-    // Target the stash at the BUILD pane (#2450): mid ask→build transition a
-    // doomed pane (stale conversation id, about to remount) must not consume it.
-    stashPendingFirstMessage({ content: handoffPrompt, targetAgentRoute: 'build' });
-    const remaining: BuilderHandoffState | null = handoffParentConversationId
-      ? { parentConversationId: handoffParentConversationId }
-      : null;
-    navigate(
-      { pathname: location.pathname, search: location.search, hash: location.hash },
-      { replace: true, state: remaining },
-    );
-  }, [
-    handoffPrompt,
-    handoffParentConversationId,
-    agentSegment,
-    location.key,
-    location.pathname,
-    location.search,
-    location.hash,
-    navigate,
-    stashPendingFirstMessage,
-  ]);
-
   // ── Route canonicalization ──────────────────────────────────────────────
   // Back-compat redirects (the agent is now in the path): bare `/ai` → the
   // default agent surface (or the `?agent=` deep-link target); a legacy built-in
-  // id in the agent slot (`/ai/metadata_assistant`) → its friendly form
-  // (`/ai/build`). Custom agents already route by their own name and no-op here.
+  // id in the agent slot → its friendly form. Custom agents already route by their own name and no-op here.
   // The `?new=1` intent is preserved; the consumed legacy `agent` param is
   // stripped so it doesn't linger in the canonical URL.
   useEffect(() => {
@@ -1354,20 +1020,11 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
       navigate(`/ai/${friendly}${tail}${preservedQuery}`, { replace: true });
       return;
     }
-    // cloud#1674 — a maker landing on BARE `/ai/ask` (no conversation) is
-    // redirected to the converged build composer; ask stopped being a start
-    // surface for authoring principals. WITH a conversation id the link keeps
-    // working, so existing ask threads (sidebar rows, old deep links) still
-    // open and render.
-    if (makerConverged && segmentIsAgent && isAskAgent(activeAgent) && !urlConversationId) {
-      navigate(`/ai/build${preservedQuery}`, { replace: true });
-      return;
-    }
     if (segmentIsAgent && agentSegment !== friendly) {
       const tail = urlConversationId ? `/${encodeURIComponent(urlConversationId)}` : '';
       navigate(`/ai/${friendly}${tail}${preservedQuery}`, { replace: true });
     }
-  }, [agents.length, activeAgent, agentSegment, segmentIsAgent, unavailableKnownAgent, makerConverged, urlConversationId, searchString, navigate]);
+  }, [agents.length, activeAgent, agentSegment, segmentIsAgent, unavailableKnownAgent, urlConversationId, searchString, navigate]);
 
   // ── Legacy `/ai/:conversationId` (bare id) ──────────────────────────────
   // Resolve the conversation's own agent and 301 to `/ai/:agent/:conversationId`
@@ -1396,7 +1053,6 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
   const [refreshKey, setRefreshKey] = useState(0);
   const [titleHints, setTitleHints] = useState<Record<string, string>>({});
   const [shareOpen, setShareOpen] = useState(false);
-  const [debugOpen, setDebugOpen] = useState(false);
   const [mobileChatsOpen, setMobileChatsOpen] = useState(false);
   const { collapsed: chatsCollapsed, toggle: toggleChatsCollapsed } = useCollapsibleChatsList();
   // Keyboard shortcuts (ChatGPT/Claude parity): ⌘⇧O new chat, ⌘⇧S toggle list.
@@ -1455,54 +1111,9 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     // until the hook re-resolves under the new one. Mirroring it would write
     // it onto the new agent's URL and resume the wrong chat.
     if (conversationScope !== chatScope) return;
-    // Preserve the `?package=` binding (ADR-0070 "Edit with AI") across the
-    // mirror. Without it the rewrite to `/ai/:agent/:conversationId` drops the
-    // query, so `editPackageId` goes undefined and the conversation scope falls
-    // back from `app:${package}:${product}` to the product alone (ADR-0057) —
-    // which would then let a bare `/ai/build` visit resume this package-scoped
-    // thread. The consumed `agent`/`new` params stay stripped as before.
-    const pkgQuery = editPackageId ? `?package=${encodeURIComponent(editPackageId)}` : '';
-    navigate(`/ai/${activeAgentRoute}/${conversationId}${pkgQuery}`, { replace: true });
-  }, [segmentIsAgent, urlConversationId, conversationId, conversationScope, chatScope, activeAgentRoute, editPackageId, navigate]);
-
-  // ── A1.b bind-on-create ─────────────────────────────────────────────────
-  // The pane's build just minted (or its hydrated history reveals) package
-  // `pkg` while this conversation is keyed product-only: re-key it to
-  // `app:${pkg}:build` so a later "Edit with AI" entry for that app resumes
-  // THIS thread (the untitled-document idiom — named on first save), then put
-  // `?package=` on the URL so the scope survives a reload. Order matters:
-  // `rekeyScope` flips `conversationScope` synchronously BEFORE the navigate
-  // re-render recomputes `chatScope`, so the #2450 scope gate stays matched
-  // and the mounted pane (and any in-flight stream) is never remounted.
-  // Only fires with the conversation id already in the URL (post-mirror) —
-  // the single-navigator rule: the URL-mirror effect above is dormant once
-  // `urlConversationId` is set, so the two can never fight over the URL from
-  // stale closures. Idempotent under StrictMode double-effects.
-  const handlePackageBound = useCallback(
-    (pkg: string) => {
-      if (!pkg || editPackageId || activeProduct !== 'build' || !activeAgentRoute) return;
-      // Re-key only a settled, scope-matched, product-only conversation whose
-      // id already reached the URL.
-      if (chatScope !== activeProduct || conversationScope !== chatScope) return;
-      if (!conversationId || urlConversationId !== conversationId) return;
-      rekeyScope(chatConversationScope({ appId: pkg, product: activeProduct }));
-      navigate(
-        `/ai/${activeAgentRoute}/${encodeURIComponent(conversationId)}?package=${encodeURIComponent(pkg)}`,
-        { replace: true },
-      );
-    },
-    [
-      editPackageId,
-      activeProduct,
-      activeAgentRoute,
-      chatScope,
-      conversationScope,
-      conversationId,
-      urlConversationId,
-      rekeyScope,
-      navigate,
-    ],
-  );
+    // The consumed `agent`/`new` params are stripped by the rewrite.
+    navigate(`/ai/${activeAgentRoute}/${conversationId}`, { replace: true });
+  }, [segmentIsAgent, urlConversationId, conversationId, conversationScope, chatScope, activeAgentRoute, navigate]);
 
   const titledRef = useRef<Set<string>>(new Set());
 
@@ -1623,7 +1234,6 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
             userId={userId}
             apiBase={apiBase}
             activeAgent={activeAgent}
-            includeAskConversations={makerConverged}
             refreshKey={refreshKey}
             titleHints={titleHints}
             className="h-full border-r-0"
@@ -1642,14 +1252,6 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
           publicBaseUrl={publicShareBase}
         />
       )}
-      {conversationId && agentHasCapability(agents, activeAgent, 'debug') && (
-        <BuildDebugDrawer
-          apiBase={apiBase}
-          conversationId={conversationId}
-          open={debugOpen}
-          onOpenChange={setDebugOpen}
-        />
-      )}
       {/* Uniform `bg-background` across the chat area: the centered chat column
           is `bg-background`, so a `bg-muted` backdrop here produced a hard
           seam between the column and its side gutters (read as accidental). The
@@ -1666,7 +1268,6 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
               userId={userId}
               apiBase={apiBase}
               activeAgent={activeAgent}
-              includeAskConversations={makerConverged}
               refreshKey={refreshKey}
               titleHints={titleHints}
               className="w-72 min-h-0 flex-1 border-r-0"
@@ -1707,21 +1308,14 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
             conversationId={paneConversationId}
             requestedConversationId={urlConversationId ?? legacyConversationId}
             conversationFocus={conversationFocus}
-            editPackageId={editPackageId}
-            onPackageBound={handlePackageBound}
-            canBind={Boolean(urlConversationId)}
-            parentHandoffConversationId={handoffParentConversationId}
             initialMessages={paneInitialMessages}
             pendingFirstMessageRef={pendingFirstMessageRef}
-            pendingFirstMessageSeq={pendingFirstMessageSeq}
             ensureConversation={ensureConversationForSend}
             conversationCreateError={conversationCreateError}
             selectedModelId={selectedModelId}
             onSelectedModelChange={setSelectedModelId}
             onSent={handleSent}
             onShare={() => setShareOpen(true)}
-            onDebug={() => setDebugOpen(true)}
-            showDebug={agentHasCapability(agents, activeAgent, 'debug')}
           />
         </main>
       </div>
@@ -1772,36 +1366,16 @@ interface ChatPaneProps {
    *  none. A draft typed before this pane knew its id is carried into the
    *  replacing pane only while this is unchanged. See {@link useComposerDraftHandoff}. */
   requestedConversationId?: string;
-  /** ADR-0070 "Edit with AI": the package the user opened to edit (from `?package=`),
-   *  forwarded to the build agent as `context.packageId` to scope it to that app. */
-  editPackageId?: string;
   /**
    * objectstack#30043 — the app the user has selected, by its package: the
    * console app the dock sits in, whichever agent it runs. Sent as
-   * `context.activeApp`; absent, `editPackageId` (the app picked for editing)
-   * is the selection, and with neither the key is omitted, never a placeholder.
+   * `context.activeApp`; absent, the key is omitted, never a placeholder.
    */
   activeAppPackageId?: string;
-  /** A1.b bind-on-create: fired when this pane's build history binds to a package
-   *  while the surface has no `?package=` — the page re-keys the conversation to
-   *  `app:${pkg}:build` and writes `?package=` onto the URL. */
-  onPackageBound?: (pkg: string) => void;
-  /** A1.b — true once the conversation id is mirrored into the URL. Binding is
-   *  deferred until then (single-navigator rule vs the page's URL-mirror effect);
-   *  keeping it in the bind effect's deps re-fires the notification when the
-   *  mirror lands, covering a hydrated bound thread opened via bare `/ai/build`. */
-  canBind?: boolean;
-  /** ADR-0057 P4 / cloud#817 — source `ask` conversation id (from the handoff's navigation state),
-   *  forwarded to the build agent's FIRST turn as `context.parentConversationId` so it
-   *  starts with the ask thread as context. Undefined outside a handoff. */
-  parentHandoffConversationId?: string;
   initialMessages: HydratedUIMessage[];
   /** Page-owned stash for a first message sent before the conversation id resolved
    *  (survives this pane's id-keyed remount). See {@link useDeferredFirstSend}. */
   pendingFirstMessageRef: React.MutableRefObject<PendingFirstMessage | null>;
-  /** Bumps when the page seeds `pendingFirstMessageRef` out of band (handoff), so
-   *  the deferred-send replay re-runs. See {@link useDeferredFirstSend}. */
-  pendingFirstMessageSeq?: number;
   /** objectstack#32031 — creates the conversation on the first send (the host's
    *  `useChatConversation().ensureConversation`); no row exists before it.
    *  See {@link useDeferredFirstSend}. */
@@ -1822,22 +1396,17 @@ interface ChatPaneProps {
   onSelectedModelChange?: (modelId: string) => void;
   onSent: (firstUserMessage?: string) => void;
   onShare: () => void;
-  /** Opens the Build Doctor drawer (build agent only). */
-  onDebug?: () => void;
-  /** Show the Build Doctor button — true only for build-agent conversations. */
-  showDebug?: boolean;
   /**
-   * objectstack#34725 — the host draws the panel's one title bar itself (the
-   * Studio right slot: 属性 | AI 助手, History, widen, Close), so the pane
-   * omits its own header row: the agent switcher, the app chip, Share and the
-   * Build Doctor button. The host then offers Share where it chooses.
+   * objectstack#34725 — the host draws the panel's one title bar itself, so
+   * the pane omits its own header row: the agent switcher and Share. The host
+   * then offers Share where it chooses.
    * @default false
    */
   hideHeader?: boolean;
   /**
-   * objectstack#35445 — the host offers Share and the Build Doctor in its own
-   * title bar (the console drawer's 「···」 menu), so the pane's header row
-   * draws neither. The rest of the row (the agent switcher, the app chip) stays.
+   * objectstack#35445 — the host offers Share in its own title bar (the
+   * console drawer's 「···」 menu), so the pane's header row does not draw it.
+   * The rest of the row (the agent switcher) stays.
    * @default false
    */
   actionsInHost?: boolean;
@@ -1852,74 +1421,30 @@ export function ChatPane({
   apiBase,
   conversationId,
   requestedConversationId,
-  editPackageId,
   activeAppPackageId,
   surfaceContext,
   surfaceArtifactLabel,
   conversationFocus,
-  onPackageBound,
-  canBind,
-  parentHandoffConversationId,
   initialMessages,
   pendingFirstMessageRef,
-  pendingFirstMessageSeq,
   ensureConversation,
   conversationCreateError,
   selectedModelId: hostSelectedModelId,
   onSelectedModelChange,
   onSent,
   onShare,
-  onDebug,
-  showDebug,
   hideHeader = false,
   actionsInHost = false,
 }: ChatPaneProps) {
   const { t, language } = useObjectTranslation();
   const navigate = useNavigate();
-  // The advisory seam for this pane's draft-card publish. `useMetadataClient`
-  // is the layer that hands the console's advisory toast renderer to the
-  // client, so taking the client from here — rather than firing the route by
-  // hand — is what makes the runtime authoring gate's per-draft findings reach
-  // the author at all (objectui#10039).
-  const metadataClient = useMetadataClient();
   // The agent dropdown is a LAUNCHER now (not an in-surface mode toggle): it
   // navigates to `/ai/:agent`, so it naturally lists custom agents and can stay
   // always-available. Shown only when there's more than one agent to switch to.
-  //
-  // cloud#1674 maker convergence: for an authoring-capable principal the
-  // built-in `ask` leaves the launcher — build subsumes it (data superset since
-  // cloud#1673), so Ask/Build stop being peer modes and the maker gets ONE
-  // composer. Computed INSIDE ChatPane so every host (full `/ai` page, Studio
-  // copilot, console dock) converges identically. Custom agents stay listed;
-  // ask conversations stay openable — only the "start here" affordance goes.
-  const canAuthorMetadata = useCanAuthorMetadata();
-  const launcherAgents = makerVisibleAgents(agents, canAuthorMetadata, isAiStudioEnabled());
-  const showAgentLauncher = launcherAgents.length > 1;
-
-  // ADR-0057 P4 — the `ask` agent declined an authoring request (suggest_builder).
-  // Open the full-page BUILD surface seeded with the handoff prompt, sent on
-  // arrival because the user's click on the card is the action (ADR-0063
-  // decline-and-redirect — an explicit, user-initiated switch, never a silent
-  // re-route). The prompt rides NAVIGATION STATE, never the URL
-  // (objectui#12493): only this in-app call can set it, so no link can make the
-  // build agent receive a message the user did not send. Prefer the handoff's
-  // own packageId, else this surface's edit package (`?package=` only scopes the
-  // surface; it sends nothing). cloud#817: also carry THIS (ask) thread's id so
-  // the Builder's first turn starts with the ask conversation as context.
-  //
-  // objectstack#34608 — inside the console's drawer this retargets the drawer
-  // in place; under no drawer host it navigates to `/ai/build` as before.
+  // objectstack#34608 — inside the console's drawer a pick retargets the
+  // drawer in place; under no drawer host it navigates.
+  const showAgentLauncher = agents.length > 1;
   const openAssistant = useOpenAssistant();
-  const openBuilder = useCallback(
-    (handoff: { prompt: string; packageId?: string }) => {
-      const pkg = handoff.packageId || editPackageId;
-      const state: BuilderHandoffState = {};
-      if (handoff.prompt) state.handoffPrompt = handoff.prompt;
-      if (conversationId) state.parentConversationId = conversationId;
-      openAssistant({ agent: 'build', packageId: pkg }, state);
-    },
-    [openAssistant, editPackageId, conversationId],
-  );
 
   // cloud#1658 — land the user on the record an `open_record` hand-off names.
   // The payload has objectName + recordId but the canonical record route needs
@@ -1984,52 +1509,6 @@ export function ChatPane({
     [navigate],
   );
 
-  // objectui#12894 — 查看变更并发布 on the applied card of a change the copilot
-  // saved as a draft (cloud#2924): open Studio's 变更 drawer for the package
-  // through its one declared way in, `?changes=review` (`studioChangesLink.ts`).
-  // Inside that package's Studio (the copilot) the param goes onto the current
-  // location, so the surface stays mounted; anywhere else (this full page, the
-  // console dock) the link opens the package's Studio with the drawer open.
-  const location = useLocation();
-  const reviewDrafts = useCallback(
-    (packageId: string) => {
-      const target = studioChangesReviewTarget(packageId, location);
-      navigate(target.to, { replace: target.replace });
-    },
-    [navigate, location],
-  );
-
-  // cloud#797 Excel→App: the attached spreadsheet the user can load real rows
-  // from (into a built object) via ExcelImportBar. Set when a sheet is sent,
-  // cleared on import/dismiss. `dataSource` drives the wizard's schema + import.
-  const dataSource = useAdapter();
-  // objectui#12894 — 撤销 on the same applied card: `POST
-  // /packages/:id/discard-drafts`, which drops EVERY pending draft of the
-  // package (the card asks first when others are pending). Through the SDK
-  // client the console's adapter holds — `packages.discardDrafts`, typed by the
-  // spec's `DiscardPackageDraftsResponse` — rather than a second bare fetch of
-  // the route. A draft the server could not drop is a failure the card shows,
-  // with the server's reason. Either way every pending-drafts surface re-reads
-  // on the assistant bus's pulse, Studio's 变更 badge among them.
-  const discardDrafts = useCallback(
-    async (packageId: string): Promise<{ ok: boolean; error?: string }> => {
-      if (!dataSource) return { ok: false };
-      try {
-        const result = await dataSource.getClient().packages.discardDrafts(packageId);
-        if (!result.success || result.failedCount > 0) {
-          const reasons = result.failed.map((f) => `${f.type}/${f.name}: ${f.error}`).join('\n');
-          return { ok: false, ...(reasons ? { error: reasons } : {}) };
-        }
-        return { ok: true };
-      } catch (e) {
-        return { ok: false, ...(e instanceof Error && e.message ? { error: e.message } : {}) };
-      } finally {
-        emitMetadataRefresh();
-      }
-    },
-    [dataSource],
-  );
-  const [pendingSheet, setPendingSheet] = useState<File | null>(null);
   // The pane's root, measured by the composer-draft handoff below.
   const paneRef = useRef<HTMLDivElement | null>(null);
   // objectstack#33674 — what is typed into the composer before this pane knows
@@ -2075,7 +1554,7 @@ export function ChatPane({
   });
   const allowanceUsedFraction =
     aiUsage && !aiUsage.pool.unmetered && aiUsage.pool.fraction !== null ? aiUsage.pool.fraction : undefined;
-  const selectedApp = activeAppPackageId || editPackageId || undefined;
+  const selectedApp = activeAppPackageId || undefined;
   // The pick outlives this pane only when the host holds it (see the props).
   const [paneSelectedModelId, setPaneSelectedModelId] = useState<string | undefined>(undefined);
   const hostHoldsModel = onSelectedModelChange !== undefined;
@@ -2100,9 +1579,6 @@ export function ChatPane({
   } = useObjectChat({
     api: chatApi,
     conversationId,
-    // ADR-0057 P4 / cloud#817 — on a handoff, carry the ask thread as the build
-    // agent's first-turn context (consumed once inside useObjectChat).
-    parentConversationId: parentHandoffConversationId,
     // ADR-0028: the user's picked model (or the env default) rides each request.
     model: effectiveModelId,
     onError: handleChatError,
@@ -2113,12 +1589,6 @@ export function ChatPane({
         // when nothing is selected.
         ...(selectedApp ? { activeApp: selectedApp } : {}),
         agentName: activeAgent,
-        // Tell the agent the environment's publish posture so its narration
-        // matches reality (an auto-published build is live, not "to publish").
-        autoPublishAiBuilds: getRuntimeConfig().features.autoPublishAiBuilds,
-        // ADR-0070 "Edit with AI": scope the build agent to the app the user
-        // opened to edit. Cloud seeds it as the conversation's active package.
-        ...(editPackageId ? { packageId: editPackageId } : {}),
         // cloud#1610 — what the user is currently discussing (advisory; the
         // transport reads the body per send, so this stays fresh per turn).
         // The console dock sends the page in view too (objectstack#30043).
@@ -2159,7 +1629,7 @@ export function ChatPane({
   // (`renderer.tsx`, objectui#4399), with each narrowing decision named and
   // tested in `chatMessageAdapter.ts`: `'tool'` renders as an assistant bubble,
   // legacy tool states map to their v6 equivalents, and every render-only key
-  // (`buildProgress`, `draftReview`, `pendingActionId`, …) is spread through.
+  // (`charts`, `recordCitations`, `pendingActionId`, …) is spread through.
   // Memoized on `messages` exactly as those renderers do, so this array's
   // identity is neither more nor less stable than the hook's own output.
   //
@@ -2177,9 +1647,9 @@ export function ChatPane({
   //     validator then rejects, so the message vanished on a cache-fallback
   //     reload. Folded, it restores as the assistant bubble it renders as.
   //   - sanitize gates tool serialization on `role === 'assistant'`, so that
-  //     message's tool invocations — including the re-serialized draft envelope
-  //     behind "Review N changes / Publish" — were dropped from the cache
-  //     entirely. Folded, they survive the reload they exist to survive.
+  //     message's tool invocations — including the pending approval a card
+  //     acts on — were dropped from the cache entirely. Folded, they survive
+  //     the reload they exist to survive.
   // Not reachable from this page's own paths today (hydration and `mapMessages`
   // both produce runtime roles and v6 states already), so nothing on screen
   // moves; this closes the hole ahead of a value that can reach it.
@@ -2190,63 +1660,10 @@ export function ChatPane({
     );
   }, [conversationId, runtimeMessages]);
 
-  // #772 — the confirm-card SEND messages must match the CONVERSATION's
-  // language, not the console UI locale: a Chinese thread under an English UI
-  // was sending "Looks good — build it as proposed." into its own chat. The
-  // gate (service-ai-studio) accepts both languages, so this is a cosmetic —
-  // but jarring — mismatch. Button LABELS stay on the UI locale.
-  //
-  // That last clause is load-bearing: `planBuildingLabel` had drifted into this
-  // gate (#2632) and shipped the plan card's only Chinese word to English-UI
-  // readers while making the zh pack's `console.ai.planBuilding` unreachable for
-  // zh conversations (#3837). Nothing but OUTBOUND message text belongs below —
-  // a pin in `packages/i18n/src/__tests__/console-namespace-3546.test.tsx` fails
-  // if a `*Label` rejoins the gate.
-  //
-  // #3896 — the OTHER half of that rule. These sites used to read
-  // `convZh ? '<Chinese>' : t(key)`, and `t()` is the UI pack, so a zh console
-  // holding an English conversation sent Chinese into an English thread, and the
-  // ungated `planAnswerMessage` sent the UI locale in both directions.
-  // `outboundAgentText` resolves all four from the `zh`/`en` packs by
-  // conversation language and never consults the UI pack.
-  // Fold-insensitive, measured: the probe reads `role === 'user'` and the text,
-  // and the fold only maps `'tool'` -> `'assistant'` — it can neither create nor
-  // destroy a user turn, and it leaves `content`/`parts` untouched.
-  const convZh = useMemo(
-    () => isConversationZh(runtimeMessages) || isConversationZh(initialMessages),
-    [runtimeMessages, initialMessages],
-  );
-  const outboundText = useCallback(
-    (key: OutboundAgentTextKey, vars?: Readonly<Record<string, string>>) =>
-      resolveOutboundAgentText(convZh, key, vars),
-    [convZh],
-  );
   // The thread so far, read when a turn is prepared (objectstack#34461)
   // without making the send callbacks change identity on every message.
   const threadMessagesRef = useRef({ runtimeMessages, initialMessages });
   threadMessagesRef.current = { runtimeMessages, initialMessages };
-  const planApproveMessage = outboundText('planApproveMessage');
-  const planApproveDefaultsMessage = outboundText('planApproveDefaultsMessage');
-  // Same rule for the granular change-confirm card. It used to send a hard-coded
-  // Chinese sentence regardless of the conversation, so an English user clicking
-  // Confirm flipped the agent into Chinese for the rest of the thread (#2884).
-  const changesConfirmMessage = outboundText('changesConfirmMessage');
-  // Verb column of the change rows. Unlike the message above these are LABELS,
-  // so they follow the UI locale like every other label on the card.
-  const changeVerbLabels = useMemo(
-    () => ({
-      create_object: t('console.ai.changeVerb.createObject', { defaultValue: 'Create object' }),
-      add_field: t('console.ai.changeVerb.addField', { defaultValue: 'Add field' }),
-      modify_field: t('console.ai.changeVerb.modifyField', { defaultValue: 'Modify field' }),
-      delete_field: t('console.ai.changeVerb.deleteField', { defaultValue: 'Delete field' }),
-      create_metadata: t('console.ai.changeVerb.createMetadata', { defaultValue: 'Create' }),
-      update_metadata: t('console.ai.changeVerb.updateMetadata', { defaultValue: 'Modify' }),
-      create_seed: t('console.ai.changeVerb.createSeed', { defaultValue: 'Generate sample data' }),
-      create_package: t('console.ai.changeVerb.createPackage', { defaultValue: 'Create app package' }),
-    }),
-    [t],
-  );
-
   const hitl = useHitlInChat({
     messages: runtimeMessages,
     apiBase,
@@ -2350,11 +1767,6 @@ export function ChatPane({
         onSent(content);
         return;
       }
-      // Retain the first sheet so ExcelImportBar can load its REAL rows into a
-      // built object (cloud#797) — the agent got a brief; the user gets an
-      // import affordance without re-picking the file.
-      const firstSheet = attached.find(isSpreadsheetAttachment);
-      if (firstSheet) setPendingSheet(firstSheet);
       preparingCountRef.current += 1;
       setPreparingTurn(true);
       // The reading starts now, so two turns' uploads overlap; the send waits
@@ -2379,7 +1791,7 @@ export function ChatPane({
         });
       sendChainRef.current = turn;
     },
-    [resetSuppression, sendMessage, onSent, prepareTurn, setPendingSheet],
+    [resetSuppression, sendMessage, onSent, prepareTurn],
   );
 
   // Guards the empty-state first send against the conversation-id remount race:
@@ -2392,9 +1804,8 @@ export function ChatPane({
     conversationId,
     pendingRef: pendingFirstMessageRef,
     doSend,
-    pendingSignal: pendingFirstMessageSeq,
     // #2450 — this pane's agent surface; a stash targeted at another surface
-    // (the handoff seed → 'build') is held, never consumed here.
+    // is held, never consumed here.
     agentRoute: activeAgent ? agentRouteName(activeAgent) : undefined,
     ensureConversation,
     onHeldChange: setHeldFirstMessage,
@@ -2416,398 +1827,19 @@ export function ChatPane({
     [runtimeMessages, heldFirstMessage],
   );
 
-  // #2458 / ADR-0057 Amendment A1.a — the package this build conversation is
-  // bound to, surfaced as a header chip so the edit blast-radius is always
-  // visible (the Claude-Code-shows-the-repo idiom). The magic flow starts
-  // unbound ("New app") and binds the moment its build mints a package.
-  const isBuildSurface = activeAgent ? agentRouteName(activeAgent) === 'build' : false;
-  const metadata = useMetadata();
-  const { apps } = metadata;
-  // Narrow the loosely-typed provider apps once (see MetadataAppItem) so the
-  // derivations below read fields without per-access casts.
-  const metadataApps = apps as MetadataAppItem[] | undefined;
-  const { appLabel } = useServedAppLabel();
-  // Fold-insensitive, measured: this walks every message irrespective of role
-  // and reads `draftReview`/`builderHandoff`, which the adapter spreads through.
-  const boundPackageId = useMemo(
-    () => deriveBoundPackageId(runtimeMessages, editPackageId),
-    [runtimeMessages, editPackageId],
+  const suggestions = useMemo<string[] | undefined>(
+    () => (hydrated.length > 0 ? undefined : buildAgentSuggestions(activeAgent, activeAgentLabel, t)),
+    [hydrated.length, activeAgent, activeAgentLabel, t],
   );
-  // objectui#12965 — is this pane on one of its bound package's own Studio
-  // pillars, i.e. hosted by that package's Studio copilot? The same reading the
-  // applied card's review door makes (`reviewDrafts` above): the target
-  // replaces the entry exactly when the location is already on that package's
-  // Studio pillar. The full-page chat (`/ai/...`) and the console dock
-  // (`/apps/...`) are never on one.
-  const onBoundPackageStudio = boundPackageId
-    ? studioChangesReviewTarget(boundPackageId, location).replace
-    : false;
-  const boundPackageLabel = useMemo(() => {
-    if (!boundPackageId) return undefined;
-    const app = (metadataApps ?? []).find(
-      (a) => a._packageId === boundPackageId,
-    );
-    return app ? appLabel(app) : boundPackageId;
-  }, [boundPackageId, metadataApps, appLabel, t]);
-
-  // ADR-0057 A1.b edit mode — the resolved name of the app being EDITED
-  // (`?package=`). Returns undefined until the app is found in metadata, so the
-  // empty-state title falls back to a generic label rather than flashing a raw
-  // package id (`app.xadv`) while metadata loads.
-  const editAppLabel = useMemo(() => {
-    if (!editPackageId) return undefined;
-    const app = (metadataApps ?? []).find(
-      (a) => a._packageId === editPackageId,
-    );
-    return app ? appLabel(app) : undefined;
-  }, [editPackageId, metadataApps, appLabel, t]);
-
-  // objectui#11658 — the plan card's extend-mode scope chip names the existing
-  // app it would add to by that app's label; the plan carries its machine name.
-  // An app not (yet) in metadata answers undefined and the chip shows the name.
-  const resolveAppLabel = useCallback(
-    (appName: string) => {
-      const app = (metadataApps ?? []).find((a) => a.name === appName);
-      return app ? appLabel(app) : undefined;
-    },
-    [metadataApps, appLabel, t],
-  );
-
-  // objectstack#32984 — the change card names objects, fields and field types
-  // by their labels (the producer sends machine names only: 「字段
-  // b6bl_quote_item · line_total · currency」). A name the published registry
-  // does not know is read from the draft overlay (`useChangeCardLabels`); one
-  // the change is about to create answers undefined, and the card then shows
-  // the name as given. The revision moves when a message lands or a turn
-  // starts or ends, which is when a change may have drafted a new name.
-  const { resolveObjectLabel, resolveFieldLabel } = useChangeCardLabels(
-    metadata,
-    metadataClient,
-    `${shownMessages.length}:${isLoading ? 'turn' : 'idle'}`,
-  );
-  const metadataLocale = useMetadataLocale();
-  const resolveFieldTypeLabel = useCallback(
-    (type: string) => {
-      const name = fieldTypeName(type, metadataLocale);
-      return name === type ? undefined : name;
-    },
-    [metadataLocale],
-  );
-
-  // Per-surface empty-state branding (Build = authoring, Ask = data Q&A). On the
-  // build surface, `?package=` flips it to edit mode: "what do you want to
-  // change in <app>" + change-oriented starters, instead of the from-scratch
-  // magic-flow guidance. Computed here (not earlier) so it can read the app name.
-  const editing = isBuildSurface && Boolean(editPackageId);
-  // objectstack#34608 item 4 — bound to an app, the maker's starters lead with
-  // two data questions before the change-oriented ones.
-  const suggestions = useMemo<string[] | undefined>(() => {
-    if (hydrated.length > 0) return undefined;
-    const starters = buildAgentSuggestions(activeAgent, activeAgentLabel, t, editing);
-    return editing ? [...editAppDataSuggestions(t), ...starters] : starters;
-  }, [hydrated.length, activeAgent, activeAgentLabel, t, editing]);
-  const emptyState = useMemo(
-    () => agentEmptyState(t, activeAgent, editing ? { appLabel: editAppLabel } : undefined),
-    [t, activeAgent, editing, editAppLabel],
-  );
-
-  // A1.b bind-on-create: report the binding to the page (which re-keys the
-  // conversation and puts `?package=` on the URL). Deferred behind `canBind`
-  // (the conversation id must be in the URL first — see ChatPaneProps) AND
-  // behind the turn being idle: the binding draft lands mid-stream, but
-  // re-keying then races the live stream (the scope-change refetch reads the
-  // conversation BEFORE the server persists the turn, and a stream hiccup's
-  // reconcile can then replace the live thread with that not-yet-persisted
-  // EMPTY history — the blanked-pane failure seen live). Waiting for
-  // `isLoading` to drop means the turn is fully persisted server-side, so
-  // every post-bind read returns the real history; the chip binding a moment
-  // after the build lands also matches the "named on first save" idiom. The
-  // deps re-fire the notification on each gate opening (mirror landed, stream
-  // ended, hydrated reload of a bound thread missing `?package=`).
-  useEffect(() => {
-    if (!isBuildSurface || !canBind || !boundPackageId || editPackageId || isLoading) return;
-    onPackageBound?.(boundPackageId);
-  }, [isBuildSurface, canBind, boundPackageId, editPackageId, isLoading, onPackageBound]);
-
-  // ── objectstack#34610 — the draft is the main area ─────────────────────────
-  // The build runs in the console's drawer, and what it builds shows in the
-  // page beside it (ADR-0057 Amendment A3, ADR-0037 as amended): no nested
-  // preview. Under a drawer host (`useChatDockControl`, the console and Home
-  // shells) the main area moves to the app, in the regime the build is in
-  // (ADR-0045): the real unpublished app for a materialized build or an app
-  // not published yet, `?preview=draft` for changes to a published app. With
-  // no drawer host (the Studio copilot, whose design surface already shows
-  // the drafts) nothing moves; only the per-artifact refresh below runs.
-  const dockControl = useChatDockControl();
-  const showsMainArea = dockControl !== null;
-  const mainAreaInPreview = usePreviewDrafts();
-  // An app the registry lists as materialized-but-unpublished (ADR-0045)
-  // takes no draft overlay: its changes materialize into it directly, and in
-  // preview mode its own Publish bar would yield to an empty draft bar.
-  const unpublishedApp = useCallback(
-    (segment: string) =>
-      (metadataApps ?? []).some(
-        (a) => (a._packageId === segment || a.name === segment) && (a as { _unpublished?: unknown })._unpublished === true,
-      ),
-    [metadataApps],
-  );
-  // Only a turn THIS pane streamed moves the main area. The chat reports a
-  // reopened conversation's drafts and materialized builds on mount too, and
-  // opening an old thread from the history must not navigate the page.
-  const liveTurnRef = useRef(false);
-  useEffect(() => {
-    if (isLoading) liveTurnRef.current = true;
-  }, [isLoading]);
-  // Keyed by the conversation: another conversation is another build session,
-  // and its target (none yet) is not this one's.
-  const [mainAreaState, setMainAreaState] = useState<{
-    conversationId: string | undefined;
-    target: MainAreaDraftTarget;
-  } | null>(null);
-  const mainAreaTarget =
-    mainAreaState && mainAreaState.conversationId === conversationId ? mainAreaState.target : null;
-  const shownTargetRef = useRef<MainAreaDraftTarget | null>(null);
-  // Move the main area to the latest target. Entering draft mode on the page
-  // the user is on is a query change and happens at once; a move to another
-  // page waits for the turn to end (A1: the main area keeps its page until
-  // the build binds, and the bind lands when the turn does), so a stream in
-  // flight is never cut by a shell switch.
-  useEffect(() => {
-    if (!showsMainArea || !mainAreaTarget || shownTargetRef.current === mainAreaTarget) return;
-    const move = mainAreaDraftMove(mainAreaTarget, location, mainAreaTarget.segment === activeAppPackageId);
-    if (move && !move.replace && isLoading) return;
-    shownTargetRef.current = mainAreaTarget;
-    if (!move) return;
-    if (move.leavesPreview) markPreviewExit();
-    navigate(move.to, { replace: move.replace });
-  }, [showsMainArea, mainAreaTarget, location, activeAppPackageId, isLoading, navigate]);
-  const showAppInMainArea = useCallback(
-    (packageId: string, opts: { materialized?: boolean; path?: string } = {}) => {
-      // An edit to a code-shipped app is drafted into its customization pair
-      // (ADR-0146): the app it shows in is the pair's base.
-      const segment = appPackageOf(packageId);
-      const materialized = opts.materialized === true || unpublishedApp(segment);
-      setMainAreaState({
-        conversationId,
-        target: {
-          segment,
-          ...(materialized ? { materialized: true } : {}),
-          ...(opts.path && !materialized ? { path: opts.path } : {}),
-        },
-      });
-    },
-    [unpublishedApp, conversationId],
-  );
-  // ADR-0037 Phase 2 — refresh in place per artifact: each drafted artifact is
-  // announced on the assistant bus, and every metadata tree in preview mode
-  // (the main area's) refetches that type. Coalesced (~200 ms) by type, so a
-  // whole-app build is not an invalidation storm.
-  const invalidateTimerRef = useRef<number | null>(null);
-  const pendingInvalidationsRef = useRef<Map<string, { type: string; name: string }>>(new Map());
-  useEffect(
-    () => () => {
-      if (invalidateTimerRef.current) window.clearTimeout(invalidateTimerRef.current);
-    },
-    [],
-  );
-  const queueInvalidations = useCallback((artifacts: ReadonlyArray<{ type: string; name: string }>) => {
-    for (const a of artifacts) {
-      if (!pendingInvalidationsRef.current.has(a.type)) pendingInvalidationsRef.current.set(a.type, a);
-    }
-    if (invalidateTimerRef.current) window.clearTimeout(invalidateTimerRef.current);
-    invalidateTimerRef.current = window.setTimeout(() => {
-      const batch = [...pendingInvalidationsRef.current.values()];
-      pendingInvalidationsRef.current.clear();
-      for (const inv of batch) emitCanvasInvalidate(inv);
-    }, 200);
-  }, []);
-  const handleDraftArtifacts = useCallback(
-    (artifacts: Array<{ type: string; name: string }>, appSegment?: string) => {
-      queueInvalidations(artifacts);
-      // The app the draft belongs to: the drafted set's own package, else the
-      // package this conversation is bound to (an edit drafts no `app`).
-      // Unbound (a new build before its package exists), the page stays.
-      const segment = appSegment ?? boundPackageId;
-      if (liveTurnRef.current && segment) showAppInMainArea(segment);
-    },
-    [boundPackageId, showAppInMainArea, queueInvalidations],
-  );
-  // ADR-0045: the build materialized — the real, unlisted app.
-  const handleBuildMaterialized = useCallback(
-    (appName: string, opts?: { appSegment?: string }) => {
-      if (liveTurnRef.current) showAppInMainArea(opts?.appSegment ?? appName, { materialized: true });
-    },
-    [showAppInMainArea],
-  );
-  // A finished turn refreshes the main area once more (and every pending
-  // count): an incremental edit can land without growing the drafted set, so
-  // the per-artifact signal above does not always fire for it.
-  //
-  // objectstack#34610 — for the same reason a finished turn that drafted
-  // shows its app in the main area itself: an edit that re-drafts an artifact
-  // the conversation already listed (the object a build made, edited in the
-  // next turn) never reaches `handleDraftArtifacts`, and read live it left the
-  // main area out of draft mode with the edit pending.
-  const prevLoadingRef = useRef(false);
-  useEffect(() => {
-    const ended = prevLoadingRef.current && !isLoading;
-    prevLoadingRef.current = isLoading;
-    if (!ended) return;
-    if (liveTurnRef.current) {
-      const drafted = turnDraftPackage(messages);
-      const segment = drafted?.packageId ?? (drafted ? boundPackageId : undefined);
-      if (drafted && segment) {
-        showAppInMainArea(segment, drafted.materialized ? { materialized: true } : {});
-        // …and refreshes what it drafted, once the main area is in draft
-        // mode (the coalescing delay outlasts the move).
-        queueInvalidations(drafted.items);
-      }
-    }
-    if (shownTargetRef.current) emitMetadataRefresh();
-    // Re-runs on the other deps find no turn end (`prevLoadingRef` already
-    // holds the current value), so only the end of a turn acts.
-  }, [isLoading, messages, boundPackageId, showAppInMainArea, queueInvalidations]);
-
-  // objectui#12724 — a finished build STAYS on the conversation. The
-  // built-moment transition (objectui#5799) used to move the thread into the
-  // Studio workbench the moment a whole-app build existed, and objectui#11658
-  // pointed it at the running app; the maintainer's AiBuild ruling retires
-  // both: the result card's 打开应用 / 在 Studio 中查看 buttons are the only
-  // ways out, and the user picks one. What stays is the binding: the build's
-  // package re-keys this conversation to `app:<pkg>:build` (A1.b), the key the
-  // Studio dock resolves, so 在 Studio 中查看 resumes THIS thread. Derived from
-  // the persisted envelopes (#2623 lesson: never canvasApp runtime state), so a
-  // REOPENED built conversation binds too.
-  const builtPackageId = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      for (const tool of messages[i].toolInvocations ?? []) {
-        // Posture-independent: read the raw envelope, not draftReview — an
-        // auto-publish env rewrites the build envelope to status:'published'
-        // and the drafted-only lift never fires there.
-        const pkg = detectBuiltAppPackage(tool.result);
-        if (pkg) return pkg;
-        // objectui#10109 — an INCREMENTAL edit's draft review can list the `app`
-        // it re-staged; the producer's `kind: 'edit'` says it is not a build.
-        const dr = tool.draftReview;
-        if (dr?.packageId && dr.kind !== 'edit' && dr.items?.some((it) => it.type === 'app')) {
-          return dr.packageId;
-        }
-      }
-    }
-    return undefined;
-  }, [messages]);
-  useEffect(() => {
-    if (!isBuildSurface || isLoading || !canBind || !builtPackageId) return;
-    // Idempotent: the page's handler re-keys a product-only thread once and
-    // ignores every later call.
-    onPackageBound?.(builtPackageId);
-  }, [isBuildSurface, isLoading, canBind, builtPackageId, onPackageBound]);
-
-  // objectui#5801 — when a tool STAGES or PUBLISHES something, announce it on
-  // the bus so every pending-drafts surface (Studio topbar, home banner, the
-  // bar above this pane) converges immediately — previously an agent-staged
-  // draft lit only the chat bar (its own idle refetch) while the Studio topbar
-  // count stayed dark until a manual draft save. Precise on purpose: only tool
-  // results that carry an authoring envelope emit (a drafted result's
-  // `draftReview`, or a confirm-replay's `replayOutcome`), so an ordinary Q&A
-  // turn does not trigger an env-wide registry refetch.
-  //
-  // objectui#12725 — announced the moment each result LANDS, not when its turn
-  // ends. The draft is written before the tool answers (the envelope's own
-  // `draftState` is read after that write), so the Studio 变更 badge can
-  // count it while the agent is still narrating; waiting for the stream to
-  // finish left the badge behind the chat card by the whole narration. Each
-  // result is announced once, keyed by its message and its position in that
-  // message: a streamed message is re-mapped on every chunk, and a tool part
-  // without a `toolCallId` is given a fresh random one each time. The results
-  // already in the thread when this pane mounts are history, not a landing.
-  //
-  // A `status: 'published'` result that is not a confirm-replay carries
-  // neither: the chat lifts `draftReview` for `drafted` only and
-  // `replayOutcome` for `replay_` ids only. Cloud's `maybeAutoPublish`
-  // publishes in the turn and rewrites the tool's envelope to it, promoting
-  // EVERY pending draft of the package, so the badge must re-read on it too
-  // (objectui#12725). `detectAuthoringVerdict` is the chat package's one
-  // reader of the authoring envelope, whatever its posture.
-  const announcedAuthoringRef = useRef<Set<string> | null>(null);
-  useEffect(() => {
-    const authored: string[] = [];
-    for (const message of messages) {
-      (message.toolInvocations ?? []).forEach((tool, index) => {
-        if (tool.draftReview || tool.replayOutcome || detectAuthoringVerdict(tool.result)) {
-          authored.push(`${message.id}#${index}`);
-        }
-      });
-    }
-    const announced = announcedAuthoringRef.current;
-    if (announced === null) {
-      announcedAuthoringRef.current = new Set(authored);
-      return;
-    }
-    let landed = false;
-    for (const key of authored) {
-      if (announced.has(key)) continue;
-      announced.add(key);
-      landed = true;
-    }
-    if (landed) emitMetadataRefresh();
-  }, [messages]);
-
-  // objectui#11666 — the launchers (console FAB, ChatDock edge launcher) show
-  // a marker while a proposed plan awaits the user's approval, and they are on
-  // screen only while this pane is NOT mounted. So the chat's own reading —
-  // `ChatbotEnhanced` reports it from the producer its plan card renders — is
-  // published on the assistant bus, per conversation and per user, and outlives
-  // this pane's unmount. `undefined` until the chat has reported once, so a
-  // mount never announces a reading it has not taken. Nothing here clears it on
-  // open: an open re-reads the same thread and reports the same state.
-  const { user: planApprovalUser } = useAuth();
-  const planApprovalUserId = planApprovalUser?.id;
-  // objectstack#25943 — the reading carries the count of items awaiting
-  // confirmation too (Studio's right slot shows 「N 项待确认」).
-  const [planApprovalPending, setPlanApprovalPending] = useState<boolean | undefined>(undefined);
-  const [planApprovalCount, setPlanApprovalCount] = useState(0);
-  const onPlanApprovalPendingChange = useCallback((pending: boolean, count: number) => {
-    setPlanApprovalPending(pending);
-    setPlanApprovalCount(count);
-  }, []);
-  useEffect(() => {
-    if (!conversationId || planApprovalPending === undefined) return;
-    publishPlanApprovalPending({
-      userId: planApprovalUserId,
-      conversationId,
-      pending: planApprovalPending,
-      count: planApprovalCount,
-    });
-  }, [planApprovalUserId, conversationId, planApprovalPending, planApprovalCount]);
-
-  // A1.b switcher menu: every published app with a package identity, deduped
-  // by package (apps sharing a package share the build thread — the scope is
-  // per-package). Selecting one navigates to its Edit-with-AI surface, which
-  // resumes (or mints) that app's own build conversation.
-  const switchablePackages = useMemo(() => {
-    const byPackage = new Map<string, string>();
-    for (const app of metadataApps ?? []) {
-      const pkg = app._packageId;
-      // Skip platform built-ins (setup / account …): they're code-delivered
-      // packages the build agent can't author, so they must not appear as
-      // switch targets — A1.b lists authorable packages only.
-      if (!pkg || byPackage.has(pkg) || isPlatformBuiltinApp(app)) {
-        continue;
-      }
-      byPackage.set(pkg, appLabel(app));
-    }
-    return Array.from(byPackage, ([id, label]) => ({ id, label }));
-  }, [metadataApps, appLabel, t]);
+  const emptyState = useMemo(() => agentEmptyState(t, activeAgent), [t, activeAgent]);
 
   // objectstack#37146 — with one launchable agent there is nothing to switch,
   // so the row names no agent (it read only 「提问」 once the in-app build
-  // entry closed). Where the host lifts Share and the Build Doctor into its
-  // own title bar (the drawer, objectstack#35445) and nothing else is left —
-  // no switcher, no build package chip, no offline note — the row is not
-  // drawn at all, so no empty band or border remains.
-  const headerHasContent =
-    showAgentLauncher || isBuildSurface || !actionsInHost || Boolean(agentsError);
+  // entry closed). Where the host lifts Share into its own title bar (the
+  // drawer, objectstack#35445) and nothing else is left — no switcher, no
+  // offline note — the row is not drawn at all, so no empty band or border
+  // remains.
+  const headerHasContent = showAgentLauncher || !actionsInHost || Boolean(agentsError);
 
   const headerSlot = (
     <div
@@ -2815,7 +1847,7 @@ export function ChatPane({
       className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 px-4 pb-2 pt-3 sm:px-6">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {showAgentLauncher ? (
-          launcherAgents.length <= 3 ? (
+          agents.length <= 3 ? (
             // Claude-Code-style segmented switcher (mirrors the floating
             // assistant) so Ask/Build read as visible peer modes, not a hidden
             // dropdown. Each tab navigates to that agent's surface. Falls back
@@ -2829,7 +1861,7 @@ export function ChatPane({
                 data-testid="ai-chat-agent-picker"
                 aria-label={t('console.ai.switchAssistant', { defaultValue: 'Switch assistant' })}
               >
-                {launcherAgents.map((agent) => (
+                {agents.map((agent) => (
                   <TabsTrigger
                     key={agent.name}
                     value={agent.name}
@@ -2856,7 +1888,7 @@ export function ChatPane({
                 <SelectValue placeholder={t('console.ai.chooseAgent', { defaultValue: 'Choose assistant…' })} />
               </SelectTrigger>
               <SelectContent align="start">
-                {launcherAgents.map((agent) => (
+                {agents.map((agent) => (
                   <SelectItem key={agent.name} value={agent.name} className="text-xs">
                     <span className="font-medium">
                       {localizeAgentLabel(t, agent.name, agent.label)}
@@ -2872,85 +1904,9 @@ export function ChatPane({
             </Select>
           )
         ) : null}
-        {isBuildSurface ? (
-          // A1.b — the binding chip is a SWITCHER now: each app gets its own
-          // build conversation (the scope is per-package), so picking one here
-          // switches threads via its Edit-with-AI entry; "New app" opens a
-          // fresh unbound draft (`?new=1` mints a separate thread).
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              data-testid="ai-build-package-chip"
-              title={boundPackageId}
-              aria-label={t('console.ai.switchApp', { defaultValue: 'Switch app' })}
-              className={cn(
-                'inline-flex min-w-0 items-center gap-1 rounded-md border px-2 py-0.5 text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border/80',
-                boundPackageId
-                  ? 'bg-muted/40 text-foreground/80'
-                  : 'border-dashed text-muted-foreground',
-              )}
-            >
-              {boundPackageId ? (
-                <>
-                  <PackageIcon className="size-3 shrink-0" />
-                  <span className="max-w-[10rem] truncate">{boundPackageLabel}</span>
-                </>
-              ) : (
-                <>
-                  <SparklesIcon className="size-3 shrink-0" />
-                  {t('console.ai.newApp', { defaultValue: 'New app' })}
-                </>
-              )}
-              <ChevronDown className="size-3 shrink-0 opacity-60" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="max-h-72 w-56 overflow-y-auto">
-              <DropdownMenuLabel className="text-xs text-muted-foreground">
-                {t('console.ai.switchAppLabel', { defaultValue: 'Build conversations by app' })}
-              </DropdownMenuLabel>
-              {switchablePackages.map((pkg) => (
-                <DropdownMenuItem
-                  key={pkg.id}
-                  data-testid={`ai-build-package-option-${pkg.id}`}
-                  className="text-xs"
-                  onSelect={() => {
-                    if (pkg.id !== boundPackageId) {
-                      openAssistant({ agent: 'build', packageId: pkg.id });
-                    }
-                  }}
-                >
-                  <PackageIcon className="size-3 shrink-0" />
-                  <span className="min-w-0 flex-1 truncate">{pkg.label}</span>
-                  {pkg.id === boundPackageId ? <Check className="size-3 shrink-0" /> : null}
-                </DropdownMenuItem>
-              ))}
-              {switchablePackages.length > 0 ? <DropdownMenuSeparator /> : null}
-              <DropdownMenuItem
-                data-testid="ai-build-package-option-new"
-                className="text-xs"
-                onSelect={() => openAssistant({ agent: 'build', fresh: true })}
-              >
-                <SparklesIcon className="size-3 shrink-0" />
-                {t('console.ai.newApp', { defaultValue: 'New app' })}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
       </div>
       {actionsInHost ? null : (
       <div className="flex shrink-0 items-center gap-1">
-        {showDebug && onDebug ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            onClick={onDebug}
-            disabled={!conversationId}
-            aria-label={t('console.ai.buildDoctor')}
-            data-testid="ai-chat-debug-button"
-            title={conversationId ? t('console.ai.buildDoctorTitle') : t('console.ai.buildDoctorDisabledTitle')}
-          >
-            <Bug className="h-3.5 w-3.5" />
-          </Button>
-        ) : null}
         <Button
           variant="ghost"
           size="icon"
@@ -2976,25 +1932,6 @@ export function ChatPane({
     </div>
   );
 
-  // objectui#5694 — the standing unpublished-changes line: shown while the
-  // bound package has pending drafts, so it survives scrolling. It renders
-  // nothing when the count is 0 or the conversation is unbound.
-  // objectui#12965 — not drawn in the package's own Studio: there the Studio
-  // top bar's 变更 and 发布 and the applied card's 查看变更并发布 are the ways
-  // to review and publish (objectui#12725's ruled artboard draws no bar).
-  // objectstack#34610 — it publishes nothing: it points to the shell's draft
-  // bar, offers to show the draft when the main area is elsewhere, and shows
-  // the receipt of a publish from that bar.
-  const pendingDraftsBar =
-    isBuildSurface && !onBoundPackageStudio ? (
-      <PendingDraftsBar
-        packageId={boundPackageId}
-        idle={!isLoading}
-        draftBarShown={mainAreaInPreview && Boolean(boundPackageId && appPackageOf(boundPackageId) === activeAppPackageId)}
-        onShowDraft={showsMainArea && boundPackageId ? () => showAppInMainArea(boundPackageId) : undefined}
-      />
-    ) : null;
-
   // objectui#8219 / objectui#7254 — the page chip READS the artifact's display
   // label when the host has one, and keeps the internal `type · name` pair
   // REACHABLE on its tooltip. No label → the pair, as before.
@@ -3019,30 +1956,9 @@ export function ChatPane({
         surfaceTitle={surfaceChipTitle}
       />
     ) : null;
-  const composerContextRow =
-    focusRow && pendingDraftsBar ? (
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        {focusRow}
-        {pendingDraftsBar}
-      </div>
-    ) : (focusRow ?? pendingDraftsBar ?? undefined);
 
   return (
     <div ref={paneRef} className="relative flex min-h-0 flex-1 px-0">
-      {/* Excel→App (cloud#797): float the real-data import affordance above the
-          chat when a spreadsheet was attached. Absolute so it doesn't disturb
-          the chat/canvas flex layout; the ImportWizard it opens is a modal. */}
-      {pendingSheet && dataSource ? (
-        <div className="pointer-events-none absolute top-2 left-0 right-0 z-20 flex justify-center px-4">
-          <div className="pointer-events-auto w-full max-w-3xl">
-            <ExcelImportBar
-              file={pendingSheet}
-              dataSource={dataSource}
-              onDone={() => setPendingSheet(null)}
-            />
-          </div>
-        </div>
-      ) : null}
       {/* objectui#12725 — `min-w-0`: the column is a flex item, and a flex
           item's automatic minimum width is its content's min-content width.
           A tool card's one-line summary (`truncate`, nowrap) contributes its
@@ -3066,13 +1982,7 @@ export function ChatPane({
             ? () => window.open(getUpgradeUrl() ?? cloudConsoleUrl(), '_blank', 'noopener,noreferrer')
             : undefined
         }
-        onOpenBuilder={openBuilder}
         onInputChange={noteComposerInput}
-        // objectui#11667 — the ADR-0057 P4 handoff card's three strings. Left
-        // unset, the component's English defaults rendered in every locale.
-        builderHandoffTitleLabel={t('console.ai.builderHandoffTitle')}
-        builderHandoffOpenLabel={t('console.ai.builderHandoffOpen')}
-        builderHandoffSupersededTitle={t('console.ai.builderHandoffSuperseded')}
         onOpenRecord={openRecord}
         onOpenList={openList}
         // cloud#3565 — the record-write card's three buttons and its states.
@@ -3108,14 +2018,9 @@ export function ChatPane({
         surface="plain"
         maxHeight="100%"
         headerSlot={hideHeader || !headerHasContent ? undefined : headerSlot}
-        // objectui#12978 — the drafts line (`pendingDraftsBar` above) is a row
-        // of the composer's own area, in
-        // flow above the input. The bar used to float (`absolute bottom-20`)
-        // over the chat, and on the full-page chat that put it over the
-        // input's first line, hiding the placeholder and the first typed line;
-        // in flow, the conversation gives up the room instead, at every width,
-        // here and in the console dock, which mounts this same pane.
-        promptHeaderSlot={composerContextRow}
+        // objectstack#36999 — the focus row is a row of the composer's own
+        // area, in flow above the input.
+        promptHeaderSlot={focusRow ?? undefined}
         messages={shownMessages}
         placeholder={
           activeAgent
@@ -3123,17 +2028,7 @@ export function ChatPane({
               // The generic "Ask {agent}…" doubles to "Ask Ask…" for the data-query
               // agent whose label IS "Ask". Use its purpose-built placeholder instead.
               ? t('console.ai.askAnything')
-              // The build agent's composer names what the user can do, never
-              // the agent ("Ask Build…" read as「向 构建 提问…」). Inside an app
-              // (the build agent scoped to a package: the console dock in a
-              // running app, the Studio dock, `/ai/build?package=`) that is
-              // asking or changing the app (objectui#11658); outside one it is
-              // describing the app to build (objectui#12724).
-              : isBuildSurface
-                ? editing
-                  ? t('console.ai.askOrChangeApp')
-                  : t('console.ai.describeAppToBuild')
-                : t('console.ai.askAgent', { agent: activeAgentLabel })
+              : t('console.ai.askAgent', { agent: activeAgentLabel })
             : agentsLoading
               ? t('console.ai.loadingAgents')
               : t('console.ai.askAnything')
@@ -3153,23 +2048,6 @@ export function ChatPane({
           connectionWaiting: t('console.ai.connectionWaiting', { defaultValue: 'Waiting for server…' }),
           connectionStalledLabel: t('console.ai.connectionStalled', { defaultValue: 'Still working…' }),
           connectionOfflineLabel: t('console.ai.connectionOffline', { defaultValue: 'Connection lost — reconnecting…' }),
-          // Friendly in-progress feedback for the long, atomic propose_blueprint
-          // call — a lead-in plus rotating hints so the wait reads as deliberate
-          // design work, not a hang. Each hint is translated individually (the
-          // established per-string pattern; avoids an i18n returnObjects array).
-          designingPlanLabel: t('console.ai.designingPlan', { defaultValue: 'Designing your app…' }),
-          designingPlanHints: [
-            t('console.ai.designingPlanHint.data', { defaultValue: 'Mapping out the data you’ll track…' }),
-            t('console.ai.designingPlanHint.objects', { defaultValue: 'Shaping objects and their fields…' }),
-            t('console.ai.designingPlanHint.relations', { defaultValue: 'Connecting related records…' }),
-            t('console.ai.designingPlanHint.lookups', { defaultValue: 'Setting up relationships and lookups…' }),
-            t('console.ai.designingPlanHint.views', { defaultValue: 'Planning the screens and views…' }),
-            t('console.ai.designingPlanHint.forms', { defaultValue: 'Laying out forms and lists…' }),
-            t('console.ai.designingPlanHint.defaults', { defaultValue: 'Adding sensible defaults and validations…' }),
-            t('console.ai.designingPlanHint.dashboard', { defaultValue: 'Sketching a dashboard to track it…' }),
-            t('console.ai.designingPlanHint.review', { defaultValue: 'Double-checking the structure hangs together…' }),
-            t('console.ai.designingPlanHint.finalize', { defaultValue: 'Pulling the plan together…' }),
-          ],
           toolDetailsHidden: t('console.ai.toolDetailsHidden'),
           copy: t('console.ai.copy'),
           copied: t('console.ai.copied'),
@@ -3229,220 +2107,10 @@ export function ChatPane({
         // free text in any language into the same field) and by the model on
         // its next turn. No code parses it, so it follows the UI locale.
         toolDenyReason={t('console.ai.toolDenyReason')}
-        // objectui#12724 — the finished build card's PRIMARY action: an in-app
-        // navigation into the app the agent just built, which lands on its
-        // first navigation item (`/apps/<app>`'s declared landing).
-        onOpenBuiltApp={(appName, appSegment) =>
-          navigate(`/apps/${encodeURIComponent(appSegment ?? appName)}`)}
-        openBuiltAppLabel={t('console.ai.openBuiltApp', { defaultValue: 'Open app' })}
-        // The secondary door (在 Studio 中查看): Studio is the built app's
-        // iteration home (direct edit + the same copilot conversation in the
-        // dock, which the build's binding resumes). The package id is the
-        // canvas segment (one package = one app). objectstack#36502 — it opens
-        // the package's Studio home; the app's interfaces are designed in the
-        // running app, which the primary door opens.
-        onDesignBuiltApp={(_appName, appSegment) => {
-          const pkg = appSegment ?? boundPackageId;
-          if (!pkg) return;
-          navigate(studioHomePath(pkg));
-        }}
-        designBuiltAppLabel={t('console.ai.viewBuiltAppInStudio', { defaultValue: 'View in Studio' })}
-        // Artifact deep links: every artifact the agent built gets a one-click
-        // path to where it can be edited BY HAND (object → Data, flow →
-        // Automations, dashboard/page/view/app → its All metadata item page). Returns null for
-        // types with no direct-edit home (seed/dataset) → rendered as text.
-        getArtifactAction={(artifact, appSegment) => {
-          const path = artifactStudioPath(appSegment ?? boundPackageId, artifact);
-          return path ? () => navigate(path) : null;
-        }}
-        // Live lifecycle truth for draft cards: the server's pending count per
-        // package, so reloaded conversations show Published/Publish honestly.
-        fetchPendingDraftCount={fetchPendingDraftCount}
-        subscribeMetadataRefresh={subscribeMetadataRefresh}
-        onPublishDrafts={async (packageId) => {
-          // Promote the conversation's staged drafts to live (ADR-0033 gate —
-          // the human still clicks). Same call as the floating chat + PackagesPage.
-          //
-          // objectui#10039 — through `MetadataClient`, not a bare `fetch`. The
-          // route answers the runtime authoring gate's per-draft advisories on
-          // each `published[]` element (objectstack#9343), and the client is
-          // the seam that reports them: one advisory event per advised item,
-          // into the same sink, renderer and wording every other write door
-          // uses. A bare fetch had nothing to report THROUGH — so on the one
-          // surface where the author never sees the metadata they are
-          // publishing, the gate's findings were the thing that vanished.
-          // Same move PR objectui#10038 made for the two
-          // sibling call sites.
-          try {
-            const payload = (await metadataClient.publishPackageDrafts(packageId)) as
-              | (Record<string, unknown> & {
-                  success?: boolean;
-                  outcome?: string;
-                  error?: { message?: string };
-                  failedCount?: number;
-                  failed?: PublishFailure[];
-                  seedApplied?: { success?: boolean; error?: string; errors?: unknown[] };
-                })
-              | null;
-            // A non-2xx now throws inside the client with the server's own
-            // message, caught below like any other failure. What is left here
-            // is the 2xx batch verdict.
-            // objectstack#33277 — `published_unregistered` answers `success:
-            // false` over drafts that DID land (the registry refused an object,
-            // whose warning the client has already reported): not a failure
-            // here, as it was not while the server answered `published`.
-            if (payload?.success === false && payload?.outcome !== 'published_unregistered') {
-              // The status is no longer in hand — a non-2xx threw above — so
-              // the last rung is a sentence rather than "HTTP 200".
-              throw new Error(
-                readEnvelopeFailureText(payload) ||
-                  t('console.ai.publishFailed', { defaultValue: 'Publish failed' }),
-              );
-            }
-            // One spelling for `failedCount` / `failed[]` / `seedApplied`: the
-            // client unwraps the dispatcher's `{ success, data }` for this
-            // route (the one route whose spec declaration says it arrives
-            // inside one), so the enveloped and unenveloped compositions are
-            // already reconciled before they get here.
-            const failedCount = payload?.failedCount ?? 0;
-            if (failedCount) {
-              // framework 15.1+ (ADR-0067 D2): a failed batch is ALL-OR-NOTHING
-              // (rolled back, nothing landed); `failed[]` carries the causal
-              // item plus batch_aborted markers. Surface the reason — the old
-              // `String(failedCount)` produced a toast that read just "3".
-              const failedList = (payload?.failed ?? []) as PublishFailure[];
-              throw new Error(
-                failedList.length > 0 ? formatPublishFailures(failedList) : String(failedCount),
-              );
-            }
-            // Surface a seed-load problem (reported under `seedApplied`, never
-            // thrown) so "Published!" can't hide silently empty tables.
-            //
-            // The toast says the pack's sentence, the one the chat's
-            // publish-health line says for the same failure (objectstack#32984:
-            // user-facing text is the customer sentence). The loader's `error`
-            // (engine text) and `errors[]` (structured rows) are for whoever
-            // repairs the seed: they go to the console whole, never the toast,
-            // and stay in the health line's technical details.
-            const seedApplied = payload?.seedApplied;
-            if (seedApplied && seedApplied.success === false) {
-              console.warn('[app-shell] Published, but the seed failed to load:', {
-                packageId,
-                error: seedApplied.error,
-                errors: seedApplied.errors,
-              });
-              toast.warning(
-                t('console.ai.seedWarn', { defaultValue: 'Published, but some sample data failed to load.' }),
-                { description: t('chatbot.build.health.seedFailed', { defaultValue: 'Sample data failed to load.' }) },
-              );
-            } else {
-              toast.success(t('console.ai.publishOk', { defaultValue: 'Published — objects are now live.' }));
-            }
-            // The live registry just changed but the chat-card publish path
-            // does not reload the page (unlike DraftPreviewBar). Pulse every
-            // mounted MetadataProvider so open forms/views (incl. the canvas
-            // preview) refetch the new schema instead of showing stale, empty
-            // dropdowns until a manual reload.
-            emitMetadataRefresh();
-            // ADR-0038 L3 — hand the runtime verification (seedApplied +
-            // probes) back to the chat so the Published card grows a
-            // build-health line instead of claiming bare success.
-            return { ok: true, health: publishHealthFromResponse(payload) };
-          } catch (e) {
-            toast.error(t('console.ai.publishFailed', { defaultValue: 'Publish failed' }), {
-              description: e instanceof Error ? e.message : undefined,
-            });
-            return false;
-          }
-        }}
-        // objectstack#34610 — the cards draw no Publish: the screen's one is
-        // the shell's bar (the draft bar or the unpublished-app bar; in
-        // Studio, its top bar), and the drafts line above points to it.
-        // `onPublishDrafts` stays for auto-publish and the Published badge.
-        publishFromShellBar
-        // objectui#12894 — the applied card's two doors (handlers above). With
-        // the review door wired, the card offers 查看变更并发布 in place of its
-        // inline Publish; 撤销 is drawn only while the adapter is up.
-        onReviewDrafts={reviewDrafts}
-        onDiscardDrafts={dataSource ? discardDrafts : undefined}
-        publishDraftsLabel={t('console.ai.publishDrafts', { defaultValue: 'Publish' })}
-        publishedLabel={t('console.ai.published', { defaultValue: 'Published' })}
-        nextStepsLabel={t('console.ai.nextSteps', { defaultValue: "What's next" })}
-        planTitleLabel={t('console.ai.planTitle', { defaultValue: 'Proposed plan' })}
-        resolveAppLabel={resolveAppLabel}
-        resolveObjectLabel={resolveObjectLabel}
-        resolveFieldLabel={resolveFieldLabel}
-        resolveFieldTypeLabel={resolveFieldTypeLabel}
-        planQuestionsLabel={t('console.ai.planQuestions', { defaultValue: 'Confirm before building' })}
-        planAssumptionsLabel={t('console.ai.planAssumptions', { defaultValue: 'Assumptions' })}
-        planDeferredLabel={t('console.ai.planDeferred', { defaultValue: 'Not yet built' })}
-        planApproveHintLabel={t('console.ai.planApproveHint', {
-          defaultValue: 'Reply to approve or adjust this plan.',
-        })}
-        planApproveLabel={t('console.ai.planApprove', { defaultValue: 'Build it' })}
-        planAdjustLabel={t('console.ai.planAdjust', { defaultValue: 'Adjust' })}
-        planBuiltLabel={t('console.ai.planBuilt', { defaultValue: 'Built' })}
-        planBuildingLabel={t('console.ai.planBuilding', { defaultValue: 'Building…' })}
-        planReadyLabel={t('console.ai.planReady', {
-          defaultValue: 'The plan is ready. Build it now, or tell me what to adjust.',
-        })}
-        planApproveMessage={planApproveMessage}
-        planApproveDefaultsMessage={planApproveDefaultsMessage}
-        changesTitleLabel={t('console.ai.changesTitle', { defaultValue: 'Confirm changes' })}
-        changesConfirmedLabel={t('console.ai.changesConfirmed', { defaultValue: 'Confirmed' })}
-        changesConfirmLabel={t('console.ai.changesConfirm', { defaultValue: 'Confirm' })}
-        changesConfirmHintLabel={t('console.ai.changesConfirmHint', {
-          defaultValue: 'Reply to confirm or adjust this change.',
-        })}
-        changesConfirmMessage={changesConfirmMessage}
-        changeVerbLabels={changeVerbLabels}
-        changesApplyingLabel={t('console.ai.changesApplying', { defaultValue: 'Applying…' })}
-        changesAppliedLabel={t('console.ai.changesApplied', { defaultValue: 'Applied' })}
-        changesDraftedLabel={t('console.ai.changesDrafted', { defaultValue: 'Saved as draft' })}
-        changesFailedLabel={t('console.ai.changesFailed', { defaultValue: 'Not applied' })}
         // The page chip (see `surfaceChipLabel` above); the focus row draws it
         // instead while the agent honours a focus (objectstack#36999).
         surfaceContextLabel={focusRow ? undefined : surfaceChipLabel}
         surfaceContextTitle={focusRow ? undefined : surfaceChipTitle}
-        planAnswerMessage={(question, option) =>
-          outboundText('planAnswerMessage', { question, option })
-        }
-        // objectstack#27480 — the two answers of the extend-or-new question an
-        // `iterate_or_new` plan asks: outbound text, so the conversation's
-        // language picks them, like every message above.
-        planExtendExistingMessage={(app) => outboundText('planExtendExistingMessage', { app })}
-        planBuildNewAppMessage={outboundText('planBuildNewAppMessage')}
-        // Self-use "magic moment": when the plan enables it, publish the drafted
-        // app automatically the moment the agent finishes — no manual click; the
-        // user refreshes and sees it live WITH data. Same governed endpoint.
-        autoPublishDrafts={getRuntimeConfig().features.autoPublishAiBuilds}
-        // objectstack#34610 — each drafted artifact refreshes the main area in
-        // place (ADR-0037 Phase 2) and, in a turn this pane streams, moves it
-        // to the app (handlers above).
-        onDraftArtifacts={handleDraftArtifacts}
-        // A draft card's Preview puts the main area on what it drafted: the
-        // app (`onPreviewDraftApp`), or the affected surface — a page, the
-        // object's list on a view, the object's default list — at the path
-        // `draftPreviewPath` builds in the app routed at the package id
-        // (objectui#12968, ADR-0048). With no main area to move (the Studio
-        // copilot, whose canvas shows the drafts) the cards draw no Preview.
-        onPreviewDraftApp={
-          showsMainArea
-            ? (appName, opts) =>
-                showAppInMainArea(opts?.appSegment ?? appName, { materialized: opts?.materialized === true })
-            : undefined
-        }
-        onPreviewDraft={
-          showsMainArea
-            ? (items, { appSegment }) => showAppInMainArea(appSegment, { path: draftPreviewPath(items, appSegment) })
-            : undefined
-        }
-        // ADR-0045: build materialized → the main area shows the real
-        // (unlisted) app, whose own bar publishes it.
-        onBuildMaterialized={handleBuildMaterialized}
-        // objectui#11666 — mirrored onto the assistant bus (effect above).
-        onPlanApprovalPendingChange={onPlanApprovalPendingChange}
-        previewDraftLabel={t('console.ai.previewDraft', { defaultValue: 'Preview' })}
         data-testid="ai-chat-panel"
       />
       </div>
@@ -3460,29 +2128,6 @@ function dataChatSuggestions(t: TranslationFn): string[] {
   ];
 }
 
-function metadataAssistantSuggestions(t: TranslationFn): string[] {
-  // Creation-first starters: the authoring agent's job is to BUILD from a
-  // natural-language description (the magic moment), so the empty-state nudges
-  // toward "describe a system" rather than inspecting existing schema.
-  //
-  // cloud#1984 — these are the PRODUCT's own recommendations, so they may only
-  // ask for what ADR-0112 v1 builds: objects, fields, views (grid / kanban /
-  // calendar / gallery), pages, dashboards and sample data. No wording that
-  // promises autonomous behaviour (alert / remind / notify / automate / status
-  // workflow): v1 has no flows, actions or schedules, and the measured
-  // behaviour is that the model silently DEGRADES such a request into a board
-  // or a filtered view — so the chip promises an alert and delivers a page.
-  // REVERT to the automation wording when ADR-0112 v2 re-adds flows and
-  // actions. The `defaultValue`s below are byte-equal to the `en` pack.
-  return [
-    t('console.ai.suggestions.metadataAssistant.buildCrm', { defaultValue: 'Build a sales CRM — customers, contacts, and deals with a stage field, plus a dashboard that totals deal value by stage.' }),
-    t('console.ai.suggestions.metadataAssistant.buildApp', { defaultValue: 'Create a project tracker — projects, tasks with owners and due dates, a board grouped by status, and a calendar of due dates.' }),
-    t('console.ai.suggestions.metadataAssistant.buildFlow', { defaultValue: 'Design a support desk — tickets with priority and status fields, a board grouped by status, and links to customers.' }),
-    t('console.ai.suggestions.metadataAssistant.buildInventory', { defaultValue: 'Build an inventory app — products, stock levels, suppliers, and a view that filters the items below their reorder point.' }),
-    t('console.ai.suggestions.metadataAssistant.buildRecruiting', { defaultValue: 'Make an applicant tracker — candidates, open roles, an interview-stage field, and a board grouped by stage.' }),
-  ];
-}
-
 function genericSuggestions(t: TranslationFn): string[] {
   return [
     t('console.ai.suggestions.generic.help', { defaultValue: 'What can you help me with?' }),
@@ -3491,58 +2136,16 @@ function genericSuggestions(t: TranslationFn): string[] {
   ];
 }
 
-// ADR-0057 A1.b — edit-mode starters: when the build surface is bound to an
-// existing app (`?package=`), nudge toward INCREMENTAL changes to that app
-// rather than describing a new system from scratch.
-//
-// objectui#7709 — same rule as `metadataAssistantSuggestions()` above: these
-// are the PRODUCT's own recommendations, so they may only ask for what
-// ADR-0112 v1 BUILDS. The fourth chip used to be `addAutomation` ("an
-// approval, a status flow, or a notification") and every capability it named
-// is refused by v1 (cloud#1956 / PR #1970), so it now asks for sample data —
-// `seed` IS on v1's whitelist, and having no data is what an existing app most
-// often lacks. REVERT: when ADR-0112 v2 re-adds flows and actions, THIS chip's
-// automation wording comes back as `addAutomation`. The `defaultValue`s below
-// are byte-equal to the `en` pack.
-function editAppSuggestions(t: TranslationFn): string[] {
-  return [
-    t('console.ai.suggestions.editApp.addField', { defaultValue: 'Add a field to one of the objects.' }),
-    t('console.ai.suggestions.editApp.addObject', { defaultValue: 'Add a new object and relate it to an existing one.' }),
-    t('console.ai.suggestions.editApp.addDashboard', { defaultValue: 'Add a dashboard for the key metrics.' }),
-    t('console.ai.suggestions.editApp.addSampleData', {
-      defaultValue: 'Fill the existing objects with realistic sample records so I can demo the app.',
-    }),
-  ];
-}
-
-/**
- * objectstack#34608 item 4 — the data-question starters the build agent offers
- * beside its edit chips when bound to an app: the maker's composer answers data
- * questions too. Reuses the data agent's own strings.
- */
-export function editAppDataSuggestions(t: TranslationFn): string[] {
-  return [
-    t('console.ai.suggestions.dataChat.recentRecords', { defaultValue: 'List the 5 most recently created records.' }),
-    t('console.ai.suggestions.dataChat.recordCounts', { defaultValue: 'Count records for each object.' }),
-  ];
-}
-
 export function buildAgentSuggestions(
   agentName: string | undefined,
   agentLabel: string,
   t: TranslationFn,
-  // ADR-0057 A1.b — the build surface is editing an existing app, so offer
-  // change-oriented starters instead of the from-scratch authoring ones.
-  editing = false,
 ): string[] {
-  // Alias-aware: `ask`/`data_chat` → data starters, `build`/`metadata_assistant`
-  // → authoring starters (edit-mode variant when bound to an app). Custom agents
-  // fall back to a name/label heuristic.
+  // Alias-aware: `ask`/`data_chat` → data starters. Custom agents fall back to
+  // a name/label heuristic.
   if (isAskAgent(agentName)) return dataChatSuggestions(t);
-  if (isBuildAgent(agentName)) return editing ? editAppSuggestions(t) : metadataAssistantSuggestions(t);
   const lower = (agentName ?? agentLabel).toLowerCase();
   if (lower.includes('data')) return dataChatSuggestions(t);
-  if (lower.includes('metadata')) return metadataAssistantSuggestions(t);
   return genericSuggestions(t);
 }
 

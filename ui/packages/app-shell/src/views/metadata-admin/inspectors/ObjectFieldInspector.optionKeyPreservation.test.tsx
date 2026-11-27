@@ -22,7 +22,7 @@
  * Re-measured here on `@objectstack/spec` 17.2.0, controls lit first:
  *
  *   { value:'alpha', label:'A' }                      -> ACCEPT   (clean control)
- *   { value:'a',     label:'A' }                      -> REJECT too_small@[value]
+ *   { value:'A',     label:'A' }                      -> REJECT invalid_format@[value]
  *   { value:'alpha', label:'A', default:true }        -> ACCEPT
  *   { value:'alpha', label:'A', visibleWhen:'x > 1' } -> ACCEPT, canonicalized to
  *                                                       {dialect:'cel',source:'x > 1'}
@@ -30,8 +30,8 @@
  *   { value:'alpha', label:'A', zzz:1 }               -> REJECT unrecognized_keys@[]
  *
  * Two traps this file inherits rather than re-earning:
- *   • A select option's `value` must be at least 2 characters. A one-character
- *     value poisons every row with `too_small@[value]` and the rows actually
+ *   • A select option's `value` must be a lowercase identifier. An uppercase
+ *     value poisons every row with `invalid_format@[value]` and the rows actually
  *     about `visibleWhen` then say nothing — hence `alpha` / `beta`.
  *   • The BOOLEAN form of `visibleWhen` is refused; it is the STRING form that
  *     is accepted and canonicalized into the expression envelope.
@@ -46,6 +46,9 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
+// Paid at collection, not inside a case's clocked window (check:test-source-alias).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { SelectOptionSchema, FieldSchema } from '@objectstack/spec/data';
 
@@ -273,8 +276,8 @@ describe('ObjectFieldInspector · the option round trip is measured, not assumed
     // Lit controls. Without these, every `toEqual([])` above could be green
     // against a schema that waves everything through.
     expect(rejectionsOf(SelectOptionSchema, { value: 'alpha', label: 'A' })).toEqual([]);
-    expect(rejectionsOf(SelectOptionSchema, { value: 'a', label: 'A' })).toEqual([
-      'too_small@[value]',
+    expect(rejectionsOf(SelectOptionSchema, { value: 'A', label: 'A' })).toEqual([
+      'invalid_format@[value]',
     ]);
     expect(rejectionsOf(SelectOptionSchema, { value: 'alpha', label: 'A', zzz: 1 })).toEqual([
       'unrecognized_keys@[]',

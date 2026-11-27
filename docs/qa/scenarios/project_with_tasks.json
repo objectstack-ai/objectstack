@@ -4,7 +4,7 @@
   "tier": "control",
   "origin": "generic",
   "title": { "zh": "项目管理:项目下行内编辑任务,汇总任务数与工时", "en": "Project management: projects owning inline-edited tasks with roll-ups" },
-  "provenance": "Golden case `project_with_tasks` of packages/cli/src/lint/corpus.ts; `expect` derived mechanically from its fixture (every object; minFieldsPerObject = the smallest object's field count; one selectFields row per select field with minOptions = its option count; one lookups row per lookup or master_detail field).",
+  "provenance": "Golden case `project_with_tasks` of packages/cli/src/lint/corpus.ts; `expect` derived mechanically from its fixture (every object; minFieldsPerObject = the smallest object's field count; one selectFields row per select field with minOptions = its option count; one lookups row per lookup or master_detail field, a master_detail one marked `masterDetail: true`).",
   "prompt": {
     "short": {"zh": "做一个项目管理应用,管理项目和任务。", "en": "Build a project management app with projects and tasks."},
     "detailed": {
@@ -16,7 +16,7 @@
     "objects": ["project", "task"],
     "minFieldsPerObject": 4,
     "selectFields": [{"object": "project", "field": "status", "minOptions": 3}, {"object": "task", "field": "status", "minOptions": 3}],
-    "lookups": [{"object": "task", "field": "project", "to": "project"}]
+    "lookups": [{"object": "task", "field": "project", "to": "project", "masterDetail": true}]
   },
   "capabilities": [
     "records-forms.master-detail-inline-edit",
@@ -140,7 +140,12 @@
         "hidden": {"fields": [{"object": "task", "field": "estimate_hours"}, {"object": "project", "field": "total_estimate"}]},
         "scope": [{"object": "task", "field": "assignee", "value": "u_kim"}]
       },
-      {"id": "client_viewer", "role": "Client stakeholder who may not change tasks", "hidden": {"objects": ["task"]}}
+      {
+        "id": "client_viewer",
+        "role": "Client stakeholder who may not change tasks",
+        "hidden": {"objects": ["task"]},
+        "withheldRollups": [{"object": "project", "field": "task_count"}, {"object": "project", "field": "total_estimate"}]
+      }
     ],
     "operations": [
       {

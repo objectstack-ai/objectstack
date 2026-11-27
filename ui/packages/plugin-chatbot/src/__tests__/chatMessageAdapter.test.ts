@@ -110,45 +110,40 @@ describe('pass-through: the API-mode payload survives the seam', () => {
   // In API mode `useObjectChat` hands the renderer messages carrying keys the
   // authoring contract does not declare. The `as any` casts preserved them by
   // accident; the adapter must preserve them on purpose, or the HITL approval
-  // card, the "Review N changes" affordance and the build panel all vanish from
-  // the SDUI renderers.
+  // card and the inline charts vanish from the SDUI renderers.
   //
   // objectui#4424 — read the ANNOTATION, it is half the test. This fixture used
   // to need `as unknown as AuthoredChatMessage`: the authoring type declares
   // none of these keys, so the only way to hand them to the adapter was to
   // assert past the compiler, which is the same blindness the hook's own
   // `as OuiChatMessage[]` had. `SeamChatMessage` names them, so the fixture is
-  // now type-checked: misspell `buildProgress`, or give `draftReview` the wrong
+  // now type-checked: misspell `charts`, or give `pendingActionId` the wrong
   // shape, and this file goes red at compile time instead of quietly testing a
   // payload the seam was never going to see.
   const apiModeMessage: SeamChatMessage = {
     id: 'm2',
     role: 'assistant',
-    content: 'built it',
+    content: 'here it is',
     metadata: { conversationId: 'c1' },
-    buildProgress: { phase: 'done', items: [], done: 3, total: 3 },
     charts: [{ chartType: 'bar', data: [], series: [] }],
     toolInvocations: [
       {
         toolCallId: 'call_2',
-        toolName: 'apply_blueprint',
+        toolName: 'run_action',
         state: 'output-available',
         pendingActionId: 'pa_1',
-        draftReview: { items: [{ type: 'object', name: 'Loan' }] },
       },
     ],
   };
 
   it('keeps the runtime-only message keys', () => {
     const runtime = authoredToRuntimeMessage(apiModeMessage);
-    expect(runtime.buildProgress).toEqual({ phase: 'done', items: [], done: 3, total: 3 });
     expect(runtime.charts).toHaveLength(1);
   });
 
   it('keeps the runtime-only tool-invocation extensions', () => {
     const [tool] = authoredToRuntimeMessage(apiModeMessage).toolInvocations ?? [];
     expect(tool?.pendingActionId).toBe('pa_1');
-    expect(tool?.draftReview?.items).toEqual([{ type: 'object', name: 'Loan' }]);
   });
 
   it('keeps `metadata`, which the runtime contract does not declare', () => {

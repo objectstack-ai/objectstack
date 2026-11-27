@@ -77,7 +77,7 @@ function deriveExpect(fixture: unknown): ScenarioExpect {
   const lookups = objects.flatMap((o) =>
     fields(o)
       .filter(([, f]) => f.type === 'lookup' || f.type === 'master_detail')
-      .map(([name, f]) => ({ object: o.name, field: name, to: f.reference })),
+      .map(([name, f]) => ({ object: o.name, field: name, to: f.reference, ...(f.type === 'master_detail' ? { masterDetail: true as const } : {}) })),
   );
   return {
     objects: objects.map((o) => o.name),

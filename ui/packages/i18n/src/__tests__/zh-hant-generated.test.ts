@@ -32,7 +32,6 @@ import { describe, expect, it } from 'vitest';
 import * as converter from '../../scripts/zh-hant.mjs';
 import {
   CONVERSION_CASES,
-  GATE_ONLY_KEYS,
   GENERATED_HEADER,
   NAMESPACE_GENERATED_HEADER,
   ZH_HANT_TARGETS,
@@ -100,15 +99,6 @@ describe('every zh-Hant catalogue is generated, and current', () => {
     expect(zhHant.common.save).toBe(s2t(zhHans.common.save));
     // Placeholders are not Han text, so the converter leaves them alone.
     expect(s2t('已选择 {{count}} 条记录')).toContain('{{count}}');
-  });
-
-  it('carries none of the gate-only outbound keys, and drops nothing else', () => {
-    const ai = zhHant.console.ai as Record<string, unknown>;
-    for (const key of GATE_ONLY_KEYS) expect(ai[key], key).toBeUndefined();
-    const hansAi = zhHans.console.ai as Record<string, unknown>;
-    for (const key of GATE_ONLY_KEYS) expect(typeof hansAi[key], key).toBe('string');
-    const dropped = Object.keys(hansAi).filter((key) => !(key in ai));
-    expect(dropped.sort()).toEqual([...GATE_ONLY_KEYS].sort());
   });
 });
 

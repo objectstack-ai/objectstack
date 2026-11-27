@@ -7,13 +7,13 @@
  *
  * Publish-health extraction, dependency-free so `@object-ui/plugin-chatbot/core`
  * can serve it to the console shell without the chat UI (objectui#13410).
- * `ChatbotEnhanced` re-exports all three names unchanged.
+ * The package root re-exports both names unchanged.
  */
 
 /**
  * ADR-0038 L3 — what a publish actually did at runtime. Hosts extract this
- * from the publish-drafts response (`seedApplied` + `probes`) so the chat can
- * render a build-health line: "Published" and "actually works" are two
+ * from the publish-drafts response (`seedApplied` + `probes`) so the publish
+ * report says it: "Published" and "actually works" are two
  * separately-verified statements, and the second one must be visible too.
  */
 export interface PublishHealth {
@@ -56,17 +56,11 @@ export interface PublishHealthIssue {
   userMessage?: string;
 }
 
-/** Structured result of `onPublishDrafts` — richer alternative to a bare boolean. */
-export interface PublishOutcome {
-  ok: boolean;
-  health?: PublishHealth;
-}
-
 /**
  * Extract {@link PublishHealth} from a publish-drafts response body (tolerant
  * of the dispatcher's `{ success, data }` envelope). Shared by the hosts that
- * wire `onPublishDrafts` so they all read `seedApplied` + `probes` the same
- * way; returns undefined when the server reported neither (older runtimes).
+ * publish drafts so they all read `seedApplied` + `probes` the same way;
+ * returns undefined when the server reported neither (older runtimes).
  */
 export function publishHealthFromResponse(payload: unknown): PublishHealth | undefined {
   const root = (payload ?? {}) as Record<string, unknown>;

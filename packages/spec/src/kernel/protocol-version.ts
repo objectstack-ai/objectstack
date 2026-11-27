@@ -21,8 +21,10 @@
  * here while this package was still on its 18.x stable line, beside the v19
  * line's pending `major` (ruling record 7153441862, route A, item 2). In-repo
  * manifests that mean "the current protocol" move to `'^19'` with it; the
- * scaffolder's blank template follows at the version pass, and the published
- * skills' examples in a change of their own.
+ * scaffolder's blank template is stamped from `PROTOCOL_MAJOR` itself
+ * (`scripts/sync-template-versions.mjs`, as `os init` does), so it moves in the
+ * change that moves the constant (create-objectstack's consistency test reds
+ * until it does); the published skills' examples move in a change of their own.
  */
 export const PROTOCOL_VERSION = '19.0.0';
 

@@ -28,7 +28,6 @@ import type { useStudioPackageApps, useStudioPackageFacts, useStudioSurfaceScope
 import type { useStudioSurfaceSave } from './studioSurfaceSave.js';
 import type { useStudioChangesSheet, useStudioDraftLedger } from './studioSurfaceDrafts.js';
 import type { useStudioPublishAction } from './studioSurfacePublish.js';
-import type { useStudioSurfaceRightSlot } from './studioSurfaceRightSlot.js';
 
 export type StudioSurfacePageProps = Pick<
   ReturnType<typeof useStudioSurfaceScope>,
@@ -45,8 +44,7 @@ export type StudioSurfacePageProps = Pick<
     'onDraftSaved' | 'publishRefusalFor' | 'shownPendingCount' | 'renderPublishRefusal'
   > &
   Pick<ReturnType<typeof useStudioPublishAction>, 'doPublish'> &
-  Pick<ReturnType<typeof useStudioPackageApps>, 'packageApp' | 'publishedApps'> &
-  Pick<ReturnType<typeof useStudioSurfaceRightSlot>, 'setSurfaceLabel'> & {
+  Pick<ReturnType<typeof useStudioPackageApps>, 'packageApp' | 'publishedApps'> & {
     locale: SupportedLocale;
     shellNavigate: NavigateFunction;
     /** objectstack#36908 — where the package-not-found state's way out leads. */
@@ -85,7 +83,6 @@ export function StudioSurfacePage({
   doPublish,
   packageApp,
   publishedApps,
-  setSurfaceLabel,
   locale,
   shellNavigate,
   notFoundExit,
@@ -117,7 +114,6 @@ export function StudioSurfacePage({
         publishNonce={publishNonce}
         onDraftSaved={onDraftSaved}
         onHeldEditChange={setHeldEdit}
-        onSurfaceLabelChange={setSurfaceLabel}
       />
     ) : (
       <Navigate to={studioOrgScopePath()} replace />
@@ -154,7 +150,6 @@ export function StudioSurfacePage({
       publishRefusalFor={publishRefusalFor}
       // objectstack#36904, objectstack#36903 — the object and flow designers' reports, as the pillars' are.
       onHeldEditChange={setHeldEdit}
-      onSurfaceLabelChange={setSurfaceLabel}
       onReviewChanges={() => {
         setChangesOpen(true);
       }}

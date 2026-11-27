@@ -322,7 +322,7 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       expect(await tables(client, 'knowledge_blobs%')).toEqual(['knowledge_blobs', 'knowledge_blobs_g1']);
     });
 
-    it('a search whose generation keeps being switched under it stops after three attempts, SERVICE_UNAVAILABLE', async () => {
+    it('a search whose generation keeps being switched under it stops after three attempts, CONCURRENT_MODIFICATION 409, as pgvector answers', async () => {
       const client = store.client();
       const s = source('churn');
       const builder = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() });
@@ -337,7 +337,7 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
         }
       })();
       const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: churning });
-      expect(await refusal(adapter.search('spruce', { source: s, topK: 5 }))).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+      expect(await refusal(adapter.search('spruce', { source: s, topK: 5 }))).toMatchObject({ code: 'CONCURRENT_MODIFICATION', status: 409 });
       expect(n).toBe(3);
     });
 

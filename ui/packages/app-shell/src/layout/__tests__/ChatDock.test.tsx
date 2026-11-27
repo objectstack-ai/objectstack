@@ -13,10 +13,12 @@
  * the screen, so it has no expand button, only History.
  *
  * objectstack#35445 — the title bar is ONE row: History, 「···」 and the
- * drawer's 「×」 close. Usage, Share, filling the window and the Build Doctor
- * are items of the 「···」 menu; the Build Doctor is listed only when the body
- * reports it (a user who may build).
+ * drawer's 「×」 close. Usage, Share and filling the window are items of the
+ * 「···」 menu (the Build Doctor entry left with the build chat, objectstack#37682).
  */
+// AiChatPage reads a dropped spreadsheet through `import('@object-ui/plugin-grid')`; load it
+// here so collection pays that transform, not a clocked case (check-test-source-alias).
+import '@object-ui/plugin-grid';
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, within } from '@testing-library/react';
@@ -64,7 +66,6 @@ vi.mock('../ChatDockConversation', async () => {
       presentation?: string;
       historyOpen?: boolean;
       shareOpen?: boolean;
-      debugOpen?: boolean;
       onActionsChange?: (a: unknown) => void;
     }) => {
       const { onActionsChange } = props;
@@ -77,7 +78,6 @@ vi.mock('../ChatDockConversation', async () => {
           data-presentation={props.presentation}
           data-history-open={String(Boolean(props.historyOpen))}
           data-share-open={String(Boolean(props.shareOpen))}
-          data-debug-open={String(Boolean(props.debugOpen))}
         />
       );
     },
@@ -309,7 +309,7 @@ describe('the drawer title bar is one row: History, 「···」, Close (objects
     expect(screen.getByTestId('chat-dock-collapse').querySelector('svg.lucide-x')).not.toBeNull();
   });
 
-  it('the menu holds usage, Share, Expand and the Build Doctor, and opens the body\'s dialogs', async () => {
+  it('the menu holds usage, Share and Expand, and opens the body\'s Share dialog (no Build Doctor, objectstack#37682)', async () => {
     bodyState.actions = { conversationId: 'c1', showDebug: true };
     usageState.usage = { pool: { fraction: 0.3, unmetered: false, upgrade: false, topUp: false } };
     render(<ChatDockPanel dock={dockState()} />);
@@ -317,24 +317,12 @@ describe('the drawer title bar is one row: History, 「···」, Close (objects
     const menu = openMenu();
     expect(within(menu).getByTestId('chat-dock-usage')).toHaveTextContent('AI usage');
     expect(within(menu).getByTestId('chat-dock-usage')).toHaveTextContent('Plenty left');
-    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
-      'Share',
-      'Expand',
-      'Build Doctor',
-    ]);
-    fireEvent.click(within(menu).getByTestId('chat-dock-share'));
-    expect(screen.getByTestId('default-dock-body')).toHaveAttribute('data-share-open', 'true');
-    fireEvent.click(within(openMenu()).getByTestId('chat-dock-build-doctor'));
-    expect(screen.getByTestId('default-dock-body')).toHaveAttribute('data-debug-open', 'true');
-  });
-
-  it('the Build Doctor is not listed when the body withholds it (a user who may not build)', async () => {
-    bodyState.actions = { conversationId: 'c1', showDebug: false };
-    render(<ChatDockPanel dock={dockState()} />);
-    await screen.findByTestId('default-dock-body');
-    const menu = openMenu();
+    // A body that still reports `showDebug: true` draws no doctor entry: the
+    // drawer it opened left with the build chat.
     expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Share', 'Expand']);
     expect(within(menu).queryByTestId('chat-dock-build-doctor')).toBeNull();
+    fireEvent.click(within(menu).getByTestId('chat-dock-share'));
+    expect(screen.getByTestId('default-dock-body')).toHaveAttribute('data-share-open', 'true');
   });
 
   it('a pool running low marks the 「···」 trigger, so the warning is seen with the menu closed', async () => {

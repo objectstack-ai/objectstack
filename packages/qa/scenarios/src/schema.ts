@@ -56,10 +56,21 @@ export const SelectFieldExpectationSchema = z.strictObject({
   minOptions: z.number().int().min(1),
 });
 
+/**
+ * A relationship field the build must declare: `object.field` referencing
+ * `to`. The exact-name check (`lookup:<object>.<field>-><to>`) reads the
+ * target only, so a `lookup` and a `master_detail` both pass it.
+ * `masterDetail: true` marks the row that is a master-detail (the detail's
+ * rows owned by and entered inline on the master), so the build prompt names
+ * it as one instead of listing it among the lookups: a card carrying
+ * `records-forms.master-detail-inline-edit` credits only a `master_detail`
+ * field, and the loader holds such a card to mark at least one row.
+ */
 export const LookupExpectationSchema = z.strictObject({
   object: MachineNameSchema,
   field: MachineNameSchema,
   to: MachineNameSchema,
+  masterDetail: z.literal(true).optional(),
 });
 
 // ── The datasets a card's build declares (ADR-0149) ──
@@ -144,6 +155,13 @@ export const CapabilityTagSchema = z
  * check by it, so the two can never spell it apart.
  */
 export const ROW_SCOPE_TAG = 'access-security.row-scope';
+
+/**
+ * The tag whose check credits only a `master_detail` field edited inline on
+ * its master. The loader requires a card carrying it to mark a lookup row
+ * `masterDetail`, and the build prompt names that row as a master-detail.
+ */
+export const MASTER_DETAIL_INLINE_EDIT_TAG = 'records-forms.master-detail-inline-edit';
 
 /**
  * A card's business functions — the marketplace taxonomy's business-function
@@ -423,6 +441,17 @@ export const PersonaSchema = z
      */
     allowedRollups: z.array(FieldRefSchema).min(1).optional(),
     /**
+     * The roll-ups (summary fields, `project.task_count`) on objects the
+     * persona reads that summarise the rows or fields its `hidden` withholds,
+     * named so the build prompt can say they are withheld too: a client who
+     * may not see the tasks sees neither their count nor their total hours.
+     * Prompt text only (`personaLine` in `runner/prompts.ts`): the Build
+     * charge (`rollupSourceCharges`) already charges every such roll-up the
+     * persona's set reads, named here or not, and the leak grader does not
+     * read this key.
+     */
+    withheldRollups: z.array(FieldRefSchema).min(1).optional(),
+    /**
      * ROW scope: of each named object the persona sees only the rows whose
      * `field` (a field or relation path) equals `value` — a rep sees their own
      * rows (`owner`), a manager their department's (`owner.department`). The
@@ -452,6 +481,14 @@ export const PersonaSchema = z
     (p.allowedRollups ?? []).forEach((r, i) => {
       const hidden = (p.hidden.objects ?? []).includes(r.object) || (p.hidden.fields ?? []).some((h) => h.object === r.object && h.field === r.field);
       if (hidden) ctx.addIssue({ code: 'custom', path: ['allowedRollups', i], message: `\`${r.object}.${r.field}\` is in the persona's hidden: an allowed roll-up is one the persona reads` });
+    });
+    (p.withheldRollups ?? []).forEach((r, i) => {
+      const at = ['withheldRollups', i];
+      const hidden = (p.hidden.objects ?? []).includes(r.object) || (p.hidden.fields ?? []).some((h) => h.object === r.object && h.field === r.field);
+      if (hidden) ctx.addIssue({ code: 'custom', path: at, message: `\`${r.object}.${r.field}\` is in the persona's hidden already: a withheld roll-up lives on an object the persona reads` });
+      else if ((p.allowedRollups ?? []).some((a) => a.object === r.object && a.field === r.field)) {
+        ctx.addIssue({ code: 'custom', path: at, message: `\`${r.object}.${r.field}\` is in the persona's allowedRollups too: a roll-up is either withheld or allowed` });
+      }
     });
   });
 

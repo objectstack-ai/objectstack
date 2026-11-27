@@ -287,3 +287,26 @@ describe('the translation face — `picklists.<name>`', () => {
     expect(TRANSLATABLE_METADATA_TYPES.has('picklist')).toBe(true);
   });
 });
+
+describe('a one-character option value on a picklist', () => {
+  const GRADE = {
+    name: 'customer_grade',
+    label: 'Customer Grade',
+    options: [{ label: 'A', value: 'a' }, { label: 'B', value: 'b' }, { label: 'C', value: 'c' }],
+  };
+
+  it('a picklist with options `a`, `b`, `c` parses', () => {
+    const r = PicklistSchema.safeParse(GRADE);
+    expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
+  });
+
+  it('the translation key `picklists.<name>.options.a` parses and resolves', () => {
+    const bundle = {
+      'zh-CN': { picklists: { customer_grade: { label: '客户等级', options: { a: '甲', b: '乙', c: '丙' } } } },
+    };
+    expect(TranslationDataSchema.safeParse(bundle['zh-CN']).success).toBe(true);
+    const doc = translatePicklist(GRADE, bundle, { locale: 'zh-CN' });
+    expect(doc.label).toBe('客户等级');
+    expect(doc.options.map((o) => o.label)).toEqual(['甲', '乙', '丙']);
+  });
+});

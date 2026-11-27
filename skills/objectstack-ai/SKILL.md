@@ -105,7 +105,7 @@ export default defineSkill({
 
 Each condition is `{ field, operator, value }`, ANDed with its siblings. The
 shape of `value` is **coupled to `operator`** — a mismatch is a parse error, not
-a coercion (`packages/spec/src/ai/skill.zod.ts:37-51, 139-202`):
+a coercion (`packages/spec/src/ai/skill.zod.ts:38-52, 140-203`):
 
 | Operator | Meaning | `value` must be |
 |:---------|:--------|:----------------|
@@ -361,16 +361,15 @@ live, but listing-only: carried onto the tool, never sent to the model).
 
 ## Model Configuration
 
-Sampling parameters live under an agent's `model` (`AIModelConfigSchema`) —
-there is **no top-level `temperature` / `maxTokens`** on an agent
-(`packages/spec/src/ai/agent.zod.ts:36-40`):
+Sampling lives under an agent's `model` (`AIModelConfigSchema`), **never a
+top-level `temperature` / `maxTokens`** (`packages/spec/src/ai/agent.zod.ts:37-45`):
 
 | Key | Contract |
 |:--|:--|
-| `provider` | Inline enum `openai` \| `azure_openai` \| `anthropic` \| `local` (default `openai`). **Model-registry** entries (`ModelProviderSchema`) accept a wider set: also `google`, `cohere`, `huggingface`, `custom` |
-| `model` | Free string — the provider's own model name |
+| `provider` | Optional, no default (the deployment's choice): inline enum `openai` \| `azure_openai` \| `anthropic` \| `local`. Model-registry entries (`ModelProviderSchema`) add `google`, `cohere`, `huggingface`, `custom` |
+| `model` | Optional free-string model name; absent = the host's default model for the environment |
 | `temperature` | `min(0).max(2)`, default `0.7`. **Outside 0–2 is a parse error** |
-| `maxTokens` / `topP` | Optional numbers, unbounded by the schema |
+| `maxTokens` / `topP` | Optional, schema-unbounded numbers |
 
 ---
 
