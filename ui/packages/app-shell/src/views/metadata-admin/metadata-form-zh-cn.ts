@@ -501,6 +501,7 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       'navigation.width': { label: '宽度', helpText: '[已弃用 → size] 抽屉的像素 / 百分比宽度（如 "600px"）。编写时无法预知客户端视口，因此选不出合适的像素宽度——请使用 `size` 档位。' },
       sharing: { label: '共享', helpText: '视图共享配置：谁锁定了视图配置' },
       'sharing.lockedBy': { label: '锁定者', helpText: '锁定该视图配置的用户' },
+      requiredPermissions: { label: '所需权限', helpText: '谁能看此视图：查看者必须持有的能力，列出的每一项都要具备。能力由权限集授予，岗位通过其权限集获得这些能力。留空则所有能看到该列表的人都能看到此视图。要给多类人看，请选一个能力并授予每类人的权限集。由服务器强制执行：其他人在列表中看不到此视图，直接打开也会被拒绝。这也适用于你自己：列出你未持有或拼错的能力后，你也将无法再打开此视图。' },
     },
   },
   app: {
