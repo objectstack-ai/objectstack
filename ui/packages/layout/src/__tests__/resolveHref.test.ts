@@ -278,3 +278,38 @@ describe('resolveHref — component targets', () => {
     expect(unscoped.href).toBe(`${BASE}/metadata/object`);
   });
 });
+
+// ============================================================================
+// `ai:chat` — the AI inquiry home page reads its params off the navigation
+// entry (`AiChatNavParamsSchema`), so its href carries no querystring.
+// ============================================================================
+
+describe('resolveHref — ai:chat entries carry no querystring', () => {
+  const ask: NavigationItem = {
+    id: 'nav_ask',
+    type: 'component',
+    label: 'Ask AI',
+    componentRef: 'ai:chat',
+    params: { title: 'Ask about our policies', suggestions: ['How many leave days do I get?', 'Who approves travel?'] },
+  };
+  const other: NavigationItem = {
+    id: 'nav_other', type: 'component', label: 'Other', componentRef: 'foo:bar', params: { mode: 'compact' },
+  };
+
+  it('builds /component/ai/chat with no `?`, whatever the params', () => {
+    const { href, external } = resolveHref(ask, BASE);
+    expect(href).toBe(`${BASE}/component/ai/chat`);
+    expect(href).not.toContain('?');
+    expect(external).toBe(false);
+  });
+
+  it('control: another component entry still serialises its params', () => {
+    expect(resolveHref(other, BASE).href).toBe(`${BASE}/component/foo/bar?mode=compact`);
+  });
+
+  it('the entry stays the active item on its own page, with or without a `?c=` conversation', () => {
+    const nav = [other, ask];
+    expect(resolveActiveNavItem(nav, `${BASE}/component/ai/chat`, '', BASE)?.id).toBe('nav_ask');
+    expect(resolveActiveNavItem(nav, `${BASE}/component/ai/chat`, '?c=conv_1', BASE)?.id).toBe('nav_ask');
+  });
+});
