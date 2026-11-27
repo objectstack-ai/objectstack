@@ -329,7 +329,9 @@
   
   The predicate write now makes the by-id decision for each matched row the floor would refuse. Such a row is written when a write of that row by id would be, because the sharing service answers `allow` for it: ownership at the caller's write depth, Modify All, or, for an update only, an `edit` share or the row's queue. A row the service abstains on keeps the floor: on an object with no `owner_id`, and on a delete under `public_read_write` (an update there has no floor to keep, because that OWD opens row updates). A row it denies keeps the floor too. The row-level `check` on each updated row follows the same decision.
   
-  The by-id decision costs one sharing verdict, a few store reads, for each matched row the floor does not already admit. Measured on SQLite in memory:
+  The by-id decision is one sharing verdict for each matched row the floor does not already admit. The bundled sharing service (`@objectstack/plugin-sharing`) answers all of them through its set form, `checkEditMany` / `checkDeleteMany`, in chunks of 1,000 rows: one read of the chunk's rows and, for an update, one read of the caller's write-level shares on them, so the store reads grow per 1,000 rows rather than per row. Measured on SQLite over 10,000 rows owned by another user: a member's predicate update takes 24 store reads and about 0.27 s, the same delete 13 reads, and a Modify All holder's update of all 10,000 rows 14 reads, and it now writes those rows.
+  
+  A sharing service that does not implement the set form is asked `checkEdit` / `checkDelete` once per row, 25 at a time, with the same answers, and then each verdict costs a few store reads. Measured on SQLite in memory with the per-row form:
   
   - A member's predicate update matching 1,000 readable rows owned by other people, every verdict `deny`: 1,000 verdicts and 2,004 store reads, about 1.1 s, against 44 ms and 3 reads before.
   - The same at 10,000 rows: 10,000 verdicts and 20,004 store reads, about 5.3 s, against 47 ms before.
