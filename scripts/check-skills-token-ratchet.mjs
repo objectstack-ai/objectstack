@@ -2781,7 +2781,11 @@ const SELF_TEST_BATTERY_FLOOR = 111;
 function selfTest() {
   const rel = 'skills/objectstack-ui/SKILL.md';
   const over = verdict(rel, 26000, 25154).msg;
-  const under = verdict(rel, 20000, 25154).msg;
+  // Each above-measurement case reads the verdict AND its text, so none of
+  // them can hold on a green message that happens to carry the same numbers.
+  const underVerdict = verdict(rel, 20000, 25154);
+  const under = underVerdict.msg;
+  const underSays = (text) => [underVerdict.ok, under.includes(text)];
   const unpriced = verdict('skills/objectstack-new/SKILL.md', 4000, undefined).msg;
   const discovered = discoverBundleFiles();
   const authored = discovered.filter((p) => !generatorOwning(p) && !isEvalFixture(p));
@@ -2919,14 +2923,15 @@ function selfTest() {
     // the map is edited by a person, in a PR, in one direction.
     ['shrink direction — a shrunk file is red until its row is lowered to the measurement',
       [verdict(rel, 20000, 25154).ok, verdict(rel, 20000, 20000).ok], [false, true]],
-    ['the above-measurement red names the row', under.includes(rel), true],
-    ['the above-measurement red names the measured count', under.includes('20000 tokens'), true],
-    ['the above-measurement red names the ceiling', under.includes('ceiling is 25154'), true],
-    ['the above-measurement red names the gap', under.includes('above the measurement by 5154'), true],
+    ['the above-measurement red names the row', underSays(rel), [false, true]],
+    ['the above-measurement red names the measured count', underSays('20000 tokens'), [false, true]],
+    ['the above-measurement red names the ceiling', underSays('ceiling is 25154'), [false, true]],
+    ['the above-measurement red names the gap', underSays('above the measurement by 5154'), [false, true]],
     ['the above-measurement red tells the author to lower the row to the measurement',
-      under.includes('Lower the row to 20000'), true],
+      underSays('Lower the row to 20000'), [false, true]],
     ['the above-measurement red is not the over-ceiling red',
-      [under.includes('over by'), under === over, under.includes(RATCHET_AUTHORITY_MARKER)], [false, false, false]],
+      [underVerdict.ok, under.includes('over by'), under === over, under.includes(RATCHET_AUTHORITY_MARKER)],
+      [false, false, false, false]],
     ['one token above the measurement is red (the reading that was missed)', verdict(rel, 6273, 6274).ok, false],
     ['the gate declares its registry shrink-only in author-facing text', over.includes('shrink-only'), true],
 
