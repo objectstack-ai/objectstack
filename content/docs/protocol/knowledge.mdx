@@ -109,7 +109,8 @@ any AI consumer.**
 ### 3.1 `KnowledgeSource` (the `knowledge_source` metadata type)
 
 A knowledge source says *which records* to index, *which of their fields*
-become searchable text, and *which adapter* holds the index. It is a governed
+become searchable text, and, when it is not the deployment's store, *which
+adapter* holds the index. It is a governed
 metadata type, `knowledge_source` (ADR-0161 K4): a package ships it as a
 `*.knowledge-source.ts` (or `.yml`) file under the stack's `knowledgeSources`
 collection, and an administrator creates or changes one at run time in Studio
@@ -122,7 +123,7 @@ import type { KnowledgeSource } from '@objectstack/spec/ai';
 export const KbArticles: KnowledgeSource = {
   name: 'kb_articles',                      // snake_case; with its package, the source's identity
   label: 'Knowledge base',
-  adapter: 'pgvector',                      // the adapter id a plugin registered
+  // adapter: 'pgvector',                   // optional; omitted ⇒ the deployment's store
   source: {
     kind: 'object',                         // the one kind
     object: 'kb_article',
@@ -133,7 +134,7 @@ export const KbArticles: KnowledgeSource = {
   },
 };
 
-// objectstack.config.ts
+// objectstack.config.ts — the source mounts the knowledge service: no `requires` entry
 defineStack({ knowledgeSources: [KbArticles], /* … */ });
 ```
 
@@ -161,9 +162,27 @@ write instead, and `os migrate meta --from 18` converts the mechanical ones:
 | `refresh.cron` | removed: nothing scheduled it |
 | `source.kind: 'file'` / `'http'` with `prefix`, `mimeTypes`, `urls`, `userAgent` | removed: a source indexes an object's records |
 
-Every source binds to a named **adapter id** (e.g. `'pgvector'`, `'turso'`,
+A source binds to an **adapter id** (e.g. `'pgvector'`, `'turso'`,
 `'memory'`), resolved at run time to the plugin that registered itself under
-that name.
+that name (ADR-0161 K4):
+
+- **Named** — that adapter. One that is not mounted is refused at index and
+  search, `SERVICE_UNAVAILABLE` (503), naming the adapters that are.
+- **Omitted** — the deployment's adapter: the store the runtime mounted beside
+  the service (`pgvector` on PostgreSQL, `turso` otherwise; the runtime passes
+  `KnowledgeServicePlugin` its `deploymentAdapter` option when it mounts both),
+  else the only adapter registered. An adapter application code registers is
+  never the deployment's by registering. With several registered and none the
+  deployment's, the source is refused at registration and at its save,
+  `VALIDATION_ERROR` (400), naming them. The adapter is placed where it is
+  used, so a source registered before its store started finds it.
+
+**What mounts the service.** A stack that ships a `knowledge_source` — any
+item in its `knowledgeSources`, at the top level or in a package — is served
+the knowledge service and the deployment's store, exactly as
+`requires: ['knowledge']` serves them (the `mountedBy` of the `knowledge` row
+in `PLATFORM_CAPABILITY_PROVIDERS`). A host that mounts
+`KnowledgeServicePlugin` itself keeps its own, and the runtime adds no store.
 
 #### How a source is loaded
 
@@ -181,7 +200,15 @@ starts and follows the type from then on, with no restart:
 
 A deployment that holds a `knowledge_source` item but mounts no knowledge
 service says so once at boot, naming the items: nothing loads, indexes or
-searches them until `KnowledgeServicePlugin` and an adapter are mounted.
+searches them. Such an item is one the stack does not ship — saved at run time
+or installed in a package after the boot — since a shipped one mounts the
+service. **The first one saved at run time** on such a deployment is kept and
+not served: the service is mounted at boot, never while the process runs, and
+the boot composes its services before it reads the metadata store, so a plain
+restart does not mount it either. Its save is said once at `warn`, naming the
+fix — `requires: ['knowledge']` (or, on a host that composes its own kernel,
+`KnowledgeServicePlugin` and a store), then a restart; the next boot loads and
+builds it.
 
 #### Who may author one
 
@@ -606,8 +633,8 @@ Each plugin:
 3. Owns its own dependencies (SDK, fetch client, embedder).
 4. Owns its own lifecycle / health checks.
 
-Multiple adapters can co-exist; sources pick which one to use via the
-`adapter` field.
+Multiple adapters can co-exist; a source picks one with its `adapter` field,
+or leaves it out for the deployment's store (§3.1).
 
 ### 4.1 `knowledge-pgvector` — the open vector store on PostgreSQL
 

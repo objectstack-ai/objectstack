@@ -14,7 +14,7 @@ ObjectStack ships a Knowledge Protocol that lets you retrieve from pluggable bac
 
 ## Turning it on: `requires: ['knowledge']`
 
-Add `knowledge` to your app's `requires`, and `os dev`, `os serve` and `os start` mount the knowledge service and one vector store for you — and in an app's tests, `bootStack` from `@objectstack/verify` mounts the same:
+Ship a knowledge source in your app ([below](#writing-a-source)), or add `knowledge` to its `requires`, and `os dev`, `os serve` and `os start` mount the knowledge service and one vector store for you — and in an app's tests, `bootStack` from `@objectstack/verify` mounts the same. A source in the app's `knowledgeSources` is enough on its own; the token is for an app that ships none and authors its sources at run time:
 
 ```ts
 export default defineStack({
@@ -30,22 +30,25 @@ Which store is mounted depends on the platform database:
 | PostgreSQL | `@objectstack/knowledge-pgvector` | `pgvector` | the platform database, schema `os_knowledge` ([below](#self-hosted-vector-store-postgresql--pgvector)) |
 | anything else (SQLite under `os dev`, libSQL, MySQL, MongoDB) | `@objectstack/knowledge-turso` | `turso` | `knowledge.db` in the directory of the default database and never its file: `.objectstack/data/`, or `<OS_HOME>/data/` when `OS_HOME` is set ([below](#local-vector-store-a-libsql-file)) |
 
-- **Sources are metadata**: list them under `knowledgeSources` ([below](#writing-a-source)), and name the adapter of the store your database gets (`adapter: 'turso'` or `adapter: 'pgvector'`).
+- **Sources are metadata**: list them under `knowledgeSources` ([below](#writing-a-source)). A source needs no `adapter`: one left out is held by the store in this table — the deployment's store — so the same source builds on SQLite under `os dev`, on PostgreSQL and on a hosted environment. Name an adapter only to place a source on another store you mounted.
+- **Two stores and none the deployment's** (a host that mounts the service and two adapters itself): a source that names no adapter is refused when it is registered or saved — `VALIDATION_ERROR` (400), naming the adapters to choose from.
 - **A source naming a store that is not mounted** does not stop the boot: the server logs one error naming the source and the stores that are mounted, and indexing or searching that source answers `SERVICE_UNAVAILABLE` (503) with the same choices; `search_knowledge` lists it in `refused`.
 - **The embedder** comes from Settings → AI & Embedder ([below](#configuring-the-embedder-from-settings)).
 - **Another libSQL store** for the `turso` case: save its URL as `turso_url` (and `turso_auth_token` for a managed `libsql://` database) in Settings → Knowledge, then restart. A `file:` URL saved there must name a file inside that same data directory, and a URL carrying a NUL byte or another control character, written out or percent-encoded (`%00`), is refused, as is a token carrying one (a pasted line break counts); either way the store answers `SERVICE_UNAVAILABLE` saying why, and the boot goes on.
 - **Where the file is**: `os start --home` and `OS_HOME` move it with the default database, so on a container put `OS_HOME` on a volume and the index survives a redeploy. A database named by URL (`OS_DATABASE_URL`) does not move it.
-- **Settings → Knowledge** holds only what the service and its store read: `turso_url` and `turso_auth_token`, which `@objectstack/knowledge-turso` adds to the page where it is the store and reads them (on PostgreSQL the page shows neither), and `chunk_target`, the longest passage the splitter cuts. The page names no adapter: a source's store is the one its own `adapter` names, and `os knowledge status` reports it per source. Every search re-checks each hit as the asking user, and no setting turns that off.
+- **Settings → Knowledge** holds only what the service and its store read: `turso_url` and `turso_auth_token`, which `@objectstack/knowledge-turso` adds to the page where it is the store and reads them (on PostgreSQL the page shows neither), and `chunk_target`, the longest passage the splitter cuts. The page names no adapter: a source's store is the one its own `adapter` names, else the deployment's, and `os knowledge status` reports it per source. Every search re-checks each hit as the asking user, and no setting turns that off.
 - **More than one replica** on MySQL, MongoDB or a remote libSQL database: each replica keeps its own local `knowledge.db` and indexes only the record writes that replica itself handles, so replicas answer from indexes that differ. Give them one store: save a shared `libsql://` URL in `turso_url`, or run on PostgreSQL, where the vectors live in the one database.
 - **An install without the libSQL client**: `@objectstack/knowledge-turso` is an optional dependency of the CLI, because its client is a native module. Where it could not be installed the server warns at boot that the store was not mounted, and sources naming `turso` answer `SERVICE_UNAVAILABLE`.
-- **Without the token** nothing is mounted: no knowledge service, no store and no Knowledge settings page. `knowledge-memory` is never mounted for you.
+- **Without a source or the token** nothing is mounted: no knowledge service, no store and no Knowledge settings page. `knowledge-memory` is never mounted for you.
+- **The first source saved at run time on a deployment with neither** (in Studio, the metadata API or MCP) is kept and not served: the service is mounted when the server starts, never while it runs, and it is the app's own sources that mount it. The save is logged once at `warn`, and every boot after says it again, naming the fix: add `requires: ['knowledge']` and restart — the next boot loads and builds the source.
 - **Mounting it yourself** still works: an app whose `plugins` already hold `KnowledgeServicePlugin` keeps its own, and the runtime adds neither a second service nor a store.
 
 ## Writing a source
 
 A knowledge source is a metadata item: a `*.knowledge-source.ts` file in your
 app, listed under `knowledgeSources`. It says which object's records to
-index, which fields become searchable text, and which adapter holds the index.
+index and which fields become searchable text; the deployment's store holds the
+index unless the source names another.
 
 ```ts
 // src/ai/task-notes.knowledge-source.ts
@@ -54,7 +57,7 @@ import type { KnowledgeSource } from '@objectstack/spec/ai';
 export const TaskNotes: KnowledgeSource = {
   name: 'task_notes',
   label: 'Task notes',
-  adapter: 'turso', // 'pgvector' when the platform database is PostgreSQL
+  // No `adapter`: the deployment's store (turso, or pgvector on PostgreSQL).
   source: { kind: 'object', object: 'task', content: ['title', 'notes'] },
 };
 ```
@@ -65,8 +68,7 @@ import { defineStack } from '@objectstack/spec';
 import { TaskNotes } from './src/ai/task-notes.knowledge-source.js';
 
 export default defineStack({
-  requires: ['knowledge'],
-  knowledgeSources: [TaskNotes],
+  knowledgeSources: [TaskNotes], // mounts the knowledge service: no `requires` entry
   // …
 });
 ```
@@ -76,7 +78,7 @@ and keeps the index in step with the records. There is no registration call
 to write.
 
 - **`content` lists its fields by name.** What is listed is what leaves the row store: the text of those fields is sent to the embedder and kept in the index. `'*'` is refused, and a field added to the object later is not indexed until you add it here.
-- **A source can also be created or changed at run time**, in Studio or through MCP, with no restart: a new source is loaded and built, a changed one is reloaded (and rebuilt when what it indexes changed), and a removed one has its index dropped.
+- **A source can also be created or changed at run time**, in Studio or through MCP, with no restart where the knowledge service is mounted (above): a new source is loaded and built, a changed one is reloaded (and rebuilt when what it indexes changed), and a removed one has its index dropped.
 - **Authoring one needs `manage_knowledge_sources`** beside `manage_metadata` — platform administrators hold it by default — and the author must themselves be allowed to search the object and query every listed field and every field `where` reads, or the save is refused naming what they may not read. A write to a package that holds a source (publish its drafts, roll it back, duplicate, disable or delete it) needs the same capability.
 - **Two packages may each ship a source of the same name.** `search_knowledge` lists a package's source as `NAMESPACE-NAME` and takes that spelling in `sourceIds`.
 - **Registering in code still works**: `new KnowledgeServicePlugin({ sources: [TaskNotes] })` or `knowledge.registerSource(TaskNotes)` takes the same shape. A source registered in code and an item saved under the same name are one name: the second to arrive is refused.
