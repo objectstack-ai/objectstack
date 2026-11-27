@@ -56,6 +56,16 @@ import { RestServer } from '@objectstack/rest';
 // config `createStandaloneStack` / `createDefaultHostConfig` actually return is a
 // config that resolution reads correctly.
 import { appDefaultPermissionSetName, appSecurityPluginOptions } from '@objectstack/plugin-security';
+// [ADR-0161 K8 item 12] The rule `os serve` reads, imported — not reproduced:
+// `@objectstack/core` is a plain `dependencies` entry of this package.
+import {
+  CAPABILITY_PROVIDERS,
+  resolveServedCapabilities,
+  stackDeclaredCapabilities,
+  stackItemCapabilities,
+} from '@objectstack/core';
+import { PLATFORM_CAPABILITY_PROVIDERS } from '@objectstack/spec/kernel';
+import { packageOwnedCollectionKeys } from './artifact-collections.js';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at MODULE
 // LOAD. Each is reached below through a dynamic `import()` inside an `it()` body or a
@@ -234,6 +244,102 @@ describe('createStandaloneStack — surfaces app RBAC from the artifact (ADR-005
     expect(appSecurityPluginOptions(r)).toEqual({ fallbackPermissionSet: 'app_member_default' });
     expect(appDefaultPermissionSetName(r.permissions)).toBe('app_member_default');
     expect(r.positions!.map((x: any) => x.name).sort()).toEqual(['contributor', 'manager']);
+  }, BOOT_TIMEOUT);
+});
+
+// [ADR-0161 K8 item 12] The artifact-serve path (`os serve --artifact-fallback`,
+// no `objectstack.config.ts`) wraps THIS result as its stack config and reads
+// the capabilities the stack's items mount off it (`stackItemCapabilities`,
+// `@objectstack/core`). So the result must carry every collection a
+// `PLATFORM_CAPABILITY_PROVIDERS` row names as its `mountedBy` — today
+// `knowledgeSources` — or an artifact-only stack that ships a
+// `knowledge_source` and lists no `knowledge` token boots with the source
+// inert. Asserted through serve's own chain: the result spread as the config
+// (`mergeBootConfig`'s whole-value keys), `stackDeclaredCapabilities` +
+// `stackItemCapabilities` into `resolveServedCapabilities`, and the provider
+// row that token mounts.
+describe('createStandaloneStack — surfaces the collections whose items mount a capability (ADR-0161 K8 item 12)', () => {
+  let dir: string;
+  const SOURCE = {
+    name: 'notes',
+    label: 'Notes',
+    source: { kind: 'object', object: 'note', content: ['title'] },
+  };
+  const MOUNT_ROWS = Object.entries(PLATFORM_CAPABILITY_PROVIDERS).filter(([, row]) => row.mountedBy !== undefined);
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'os-standalone-item-mount-'));
+  });
+  afterAll(() => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* noop */ } });
+
+  function writeArtifact(name: string, extra: Record<string, unknown>): string {
+    const p = join(dir, name);
+    // No `requires` of its own unless the case adds one: the item alone asks.
+    const { requires: _requires, ...rest } = ARTIFACT;
+    writeFileSync(p, JSON.stringify({ ...rest, ...extra }), 'utf-8');
+    return p;
+  }
+
+  /** The tokens `os serve` mounts providers for, off the config it builds from this result. */
+  function servedTokens(result: Record<string, unknown>): readonly string[] {
+    const config = { ...{}, ...result };
+    return resolveServedCapabilities(stackDeclaredCapabilities(config), {
+      itemTokens: stackItemCapabilities(config),
+    }).tokens;
+  }
+
+  it('the mounting collections are package-owned, so a multi-package artifact resolves them off its package bodies too', () => {
+    expect(MOUNT_ROWS.length).toBeGreaterThan(0);
+    for (const [, row] of MOUNT_ROWS) {
+      expect(packageOwnedCollectionKeys()).toContain(row.mountedBy!.collection);
+    }
+  });
+
+  it('an artifact shipping a knowledge_source and no `knowledge` token: the result carries the source, and serve mounts KnowledgeServicePlugin', async () => {
+    const result = await createStandaloneStack({
+      artifactPath: writeArtifact('with-source.objectstack.json', { knowledgeSources: [SOURCE] }),
+      databaseUrl: ':memory:',
+    });
+    expect(result.requires).toBeUndefined();
+    expect(result.knowledgeSources?.map((s: any) => s.name)).toEqual(['notes']);
+    // Every `mountedBy` row, read off the table, not a hand list.
+    for (const [token, row] of MOUNT_ROWS) {
+      expect((result as Record<string, unknown>)[row.mountedBy!.collection], token).toBeDefined();
+    }
+    expect(servedTokens(result as Record<string, unknown>)).toContain('knowledge');
+    expect(CAPABILITY_PROVIDERS.knowledge?.export).toBe('KnowledgeServicePlugin');
+  }, BOOT_TIMEOUT);
+
+  it('control: an artifact with no such item does not mount the knowledge service', async () => {
+    const result = await createStandaloneStack({
+      artifactPath: writeArtifact('no-source.objectstack.json', {}),
+      databaseUrl: ':memory:',
+    });
+    expect(result.knowledgeSources).toBeUndefined();
+    expect(servedTokens(result as Record<string, unknown>)).not.toContain('knowledge');
+  }, BOOT_TIMEOUT);
+
+  it('a stack already listing `requires: [\'knowledge\']` is served the same set with or without the item', async () => {
+    const withItem = await createStandaloneStack({
+      artifactPath: writeArtifact('requires-with.objectstack.json', { requires: ['knowledge'], knowledgeSources: [SOURCE] }),
+      databaseUrl: ':memory:',
+    });
+    const withoutItem = await createStandaloneStack({
+      artifactPath: writeArtifact('requires-without.objectstack.json', { requires: ['knowledge'] }),
+      databaseUrl: ':memory:',
+    });
+    expect(servedTokens(withItem as Record<string, unknown>)).toEqual(servedTokens(withoutItem as Record<string, unknown>));
+    expect(servedTokens(withItem as Record<string, unknown>)).toContain('knowledge');
+  }, BOOT_TIMEOUT);
+
+  it('createDefaultHostConfig (the actual serve artifact-fallback) carries the same collection', async () => {
+    const r = await createDefaultHostConfig({
+      requireArtifact: true,
+      artifactPath: writeArtifact('fallback.objectstack.json', { knowledgeSources: [SOURCE] }),
+      databaseUrl: ':memory:',
+    });
+    expect(r.knowledgeSources?.map((s: any) => s.name)).toEqual(['notes']);
+    expect(servedTokens(r as Record<string, unknown>)).toContain('knowledge');
   }, BOOT_TIMEOUT);
 });
 
