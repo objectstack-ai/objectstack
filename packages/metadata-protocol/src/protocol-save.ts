@@ -3558,7 +3558,7 @@ export function packagelessHolderRefusal(
     // A package-unbound row at the address leaves the ENABLED holders' answer
     // as it was (the write edits that row); only the disabled-holders
     // judgment below reads past it.
-    if (arms === 'all' && !address.unbound && typeof registry.resolveItem === 'function') {
+    if (arms === 'all' && verb !== 'rollback' && !address.unbound && typeof registry.resolveItem === 'function') {
         try {
             registry.resolveItem(type, name, null, member);
         } catch (error) {

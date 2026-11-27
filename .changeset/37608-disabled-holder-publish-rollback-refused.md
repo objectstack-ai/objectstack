@@ -9,7 +9,7 @@ Clause-②: no (narrowing)
 Metadata-protocol: narrowed
 Skills-docs: none — no page under `skills/**` or `content/docs/**` teaches a per-item publish or rollback naming no package over a name only disabled packages hold; the refusal's own sentence names the fix
 
-<!-- adr-0087: already-registered disabled-holder-package-less-row-bare-write-refused -->
+<!-- adr-0087: not-required (already-registered disabled-holder-package-less-row-bare-write-refused) the entry the four other writes of this narrowing registered now names the per-item publish and rollback too -->
 
 **BREAKING** for a deployment that publishes or rolls back one metadata item, with no package named, at a name whose every holder is disabled while a package-less row or draft is stored for it: the write is now refused where it answered `200`. Fix: enable a package that holds the name (`PATCH /api/v1/packages/:id/enable`; `GET /api/v1/packages` shows which are disabled), then send the same publish or rollback again. Naming the package (`?package=`) is not the fix: it addresses that package's own row and leaves the hidden row where it is.
 
