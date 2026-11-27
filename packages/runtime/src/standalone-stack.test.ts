@@ -73,6 +73,8 @@ import { packageOwnedCollectionKeys } from './artifact-collections.js';
 // `scripts/check-test-source-alias.mjs` (the clocked-window rule) and #10115 / PR #10120,
 // where the same shape cost 30 ejected merge-queue builds in one night.
 import '@objectstack/service-datasource';
+import '@objectstack/objectql';
+import '@objectstack/metadata';
 
 // A minimal `objectstack build` artifact carrying an app-declared default
 // profile with a hierarchy read scope, an add-on permission set, app roles,
