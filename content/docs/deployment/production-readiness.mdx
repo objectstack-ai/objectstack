@@ -209,6 +209,8 @@ and per-class budgets:
       the `lifecycle.retention_overrides` setting **before** go-live if your
       compliance regime needs longer, and register an `archive` datasource
       if audit data must move to cold storage instead of being retained hot.
+      The sealed audit log expires by whole checkpoints under its global
+      window: a tenant-scoped override does not change it.
 
 ## CDN / reverse-proxy caching of `/meta` object schemas
 
@@ -286,5 +288,6 @@ strongly, so a layer that weakens it to `W/` makes those saves fail.
   recipe, not the endpoint, because TLS / auth / path conventions vary.
 - **A built-in audit log immutability layer.** `@objectstack/plugin-audit`
   writes `sys_audit_log` records via ObjectQL afterInsert/afterUpdate/afterDelete
-  hooks; durable storage and tamper-evidence are the host's choice
-  (append-only S3, immudb, etc.).
+  hooks and seals them (ADR-0154), so a change or delete made outside the
+  platform shows in `os audit verify`. Sealing detects; it does not prevent:
+  write-once storage is the host's choice (append-only S3, immudb, etc.).

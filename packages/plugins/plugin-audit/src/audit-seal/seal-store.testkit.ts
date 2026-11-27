@@ -28,10 +28,11 @@ function matches(row: Row, where: Record<string, unknown> = {}): boolean {
       const ops = cond as Record<string, unknown>;
       const isNull = value === null || value === undefined;
       if ('$null' in ops && ops.$null !== isNull) return false;
-      if (isNull && ['$gte', '$gt', '$lt', '$in'].some((op) => op in ops)) return false;
+      if (isNull && ['$gte', '$gt', '$lt', '$lte', '$in'].some((op) => op in ops)) return false;
       if ('$gte' in ops && !((value as number) >= (comparable(ops.$gte) as number))) return false;
       if ('$gt' in ops && !((value as number) > (comparable(ops.$gt) as number))) return false;
       if ('$lt' in ops && !((value as number) < (comparable(ops.$lt) as number))) return false;
+      if ('$lte' in ops && !((value as number) <= (comparable(ops.$lte) as number))) return false;
       if ('$in' in ops && !(ops.$in as unknown[]).some((v) => comparable(v) === value)) return false;
       return true;
     }
@@ -90,7 +91,8 @@ export function memoryEngine(objects: ReadonlyArray<{ name: string; fields?: unk
   const archive = new MemoryStore();
   const inserts: Array<{ object: string; row: Row }> = [];
   const engine: AuditSealerEngine = {
-    registry: { getAllObjects: () => objects },
+    // Each object is a plain registration from code: the registry places it in packaged metadata (`takesSignedExpiry`).
+    registry: { getAllObjects: () => objects, getObjectOwner: (name: string) => (objects.some((o) => o.name === name) ? {} : undefined) },
     getDriverForObject: () => hot,
     datasource: (name: string) => (name === 'archive' ? archive : undefined),
     async insert(object, row) {

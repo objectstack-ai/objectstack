@@ -3309,6 +3309,15 @@ export async function environmentActionPublishSlotRefusal(
 }
 
 /**
+ * The writes naming no package that ask the disabled-holders judgment
+ * ({@link packagelessHolderRefusal}): the save (publish and draft mode), the
+ * delete and the draft discard, and [ADR-0150 D3, the 2026-11-26 note] the
+ * per-item publish and the per-item rollback. Every verb but `delete` writes a
+ * row, so its refusal says nothing was written.
+ */
+export type DisabledHoldersWriteVerb = 'save' | 'delete' | 'publish' | 'rollback';
+
+/**
  * [ADR-0150 D3, ruling A on the disabled-only name] The refusal of a write
  * naming no package of a name every holder of which is disabled. A disabled
  * package holds no name, so the read naming no package answers the missing
@@ -3317,11 +3326,11 @@ export async function environmentActionPublishSlotRefusal(
  * {@link packagelessAddressAmbiguityRefusal}, with no new code.
  */
 export function disabledHoldersOnlyRefusal(
-    verb: 'save' | 'delete',
+    verb: DisabledHoldersWriteVerb,
     type: string,
     name: string,
 ): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
-    const [nothing, single] = verb === 'save'
+    const [nothing, single] = verb !== 'delete'
         ? ['Nothing was written.', 'no row to write']
         : ['Nothing was deleted.', 'no row to remove'];
     const err = new Error(
@@ -3339,10 +3348,11 @@ export function disabledHoldersOnlyRefusal(
  * no package of a name every holder of which is disabled, where a
  * PACKAGE-UNBOUND row or draft is stored for the name. That row is the
  * holder's customization (a package-less row over a held name is never a
- * second item), so it is hidden with its holder, from the reads and from the
- * writes alike: the save edited it unseen, the draft save stored a draft no
- * read reaches, and the delete and the draft discard removed what the next
- * enable would have served.
+ * second item), so it is hidden with its holder: the reads withhold it, and
+ * the writes naming no package that ask {@link packagelessHolderRefusal} leave
+ * it alone. The save edited it unseen, the draft save stored a draft no read
+ * reaches, the delete and the draft discard removed what the next enable
+ * would have served, and the per-item publish and rollback rewrote it.
  *
  * `409 RESOURCE_CONFLICT`, the refusal family of
  * {@link disabledHoldersOnlyRefusal}, with no new code, and naming no package
@@ -3351,11 +3361,11 @@ export function disabledHoldersOnlyRefusal(
  * hidden row where it is and stores a second row beside it.
  */
 export function disabledHoldersCustomizationRefusal(
-    verb: 'save' | 'delete',
+    verb: DisabledHoldersWriteVerb,
     type: string,
     name: string,
 ): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
-    const nothing = verb === 'save' ? 'Nothing was written.' : 'Nothing was deleted.';
+    const nothing = verb !== 'delete' ? 'Nothing was written.' : 'Nothing was deleted.';
     // Kept well under the 500 characters a door's client message is cut at
     // (`truncateClientMessage`), so the remedy's last sentence arrives.
     const err = new Error(
@@ -3521,6 +3531,9 @@ export async function packagelessRowHeldBaseDraftAddress(
  * bare draft discard answer as the bare read does in the two states below,
  * whether or not a row is stored at the address (over none, the delete and
  * the discard are refused too, not answered the no-op receipt).
+ * [ADR-0150 D3, the 2026-11-26 note] The bare per-item publish and the bare
+ * per-item rollback ask the second state only (`arms: 'disabled-holders'`),
+ * after the ADR-0146 D11 close, so they write nothing a disabled holder hides.
  * Asked after {@link servedPackagelessSaveAddress} (a name an enabled and a
  * disabled package both hold) and after the rows' own refusal (two or more
  * bindings), so neither answer moves.
@@ -3558,7 +3571,7 @@ export async function packagelessRowHeldBaseDraftAddress(
  */
 export function packagelessHolderRefusal(
     host: Pick<ProtocolHost, 'engine' | 'shippedArtifactsOf'>,
-    verb: 'save' | 'delete',
+    verb: DisabledHoldersWriteVerb,
     shownType: string,
     type: string,
     name: string,
@@ -3574,6 +3587,13 @@ export function packagelessHolderRefusal(
          */
         readonly customized?: boolean;
     },
+    /**
+     * `'disabled-holders'`: the disabled-holders judgment only, never the
+     * two-enabled-holders refusal. The per-item publish and rollback ask it
+     * so (ADR-0150 D3, the 2026-11-26 note); each has its own refusal of
+     * two holders' rows (`packagelessAddressAmbiguityRefusal`, `historySlotOf`).
+     */
+    arms: 'all' | 'disabled-holders' = 'all',
 ): (Error & { code: 'RESOURCE_CONFLICT'; status: 409 }) | undefined {
     const registry = host.engine?.registry as HolderRegistry | undefined;
     if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(type) !== true) return undefined;
@@ -3583,7 +3603,7 @@ export function packagelessHolderRefusal(
     // A package-unbound row at the address leaves the ENABLED holders' answer
     // as it was (the write edits that row); only the disabled-holders
     // judgment below reads past it.
-    if (!address.unbound && typeof registry.resolveItem === 'function') {
+    if (arms === 'all' && verb !== 'rollback' && !address.unbound && typeof registry.resolveItem === 'function') {
         try {
             registry.resolveItem(type, name, null, member);
         } catch (error) {

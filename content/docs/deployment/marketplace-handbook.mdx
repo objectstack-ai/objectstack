@@ -322,7 +322,10 @@ its data is kept.
 
 - **Data plane.** `/api/v1/data/<object>` and the by-name metadata reads answer
   the module's objects `404 OBJECT_PACKAGE_DISABLED`. Records stay in the
-  database and come back on enable.
+  database and come back on enable. A lookup from an enabled object into the
+  module serves nothing of it either: `$expand` keeps the stored id, and a
+  condition on the related object's fields is refused `404
+  OBJECT_PACKAGE_DISABLED`.
 - **Navigation.** The module's `navigationContributions` leave the app's menu.
 - **Flows.** Record-change flows on the module's objects do not run while it is
   disabled, whoever writes the record.
