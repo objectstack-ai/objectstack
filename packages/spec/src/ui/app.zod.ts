@@ -11,6 +11,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { requiredOneOf } from '../shared/refinement-projection';
+import { checkAiChatNavParams, checkAppSingleAiChatEntry } from './ai-chat-nav-params.zod';
 
 /*
  * ── Unknown-key strictness (#4001 app step, PR B) ───────────────────────────
@@ -33,7 +34,9 @@ import { requiredOneOf } from '../shared/refinement-projection';
  * Deliberately still OPEN: `PageNavItem.params` / `ComponentNavItem.params`
  * (React props passed verbatim to a component) and `ActionNavItem.actionDef.
  * params` (action arguments) — those are per-target payloads whose contract
- * belongs to the page/component/action, not to the nav item.
+ * belongs to the page/component/action, not to the nav item. The one exception
+ * is a component entry whose `componentRef` is `ai:chat`: its `params` are
+ * judged by `AiChatNavParamsSchema` (`ai-chat-nav-params.zod.ts`).
  *
  * PR A (#4142) is the precondition: the seven audit-dead App keys became
  * tombstones there, so strictness now guards the real contract rather than
@@ -739,8 +742,9 @@ export const ComponentNavItemSchema = lazySchema(() => strictObject(navItemSurfa
   ...BaseNavItemSchema.shape,
   type: z.literal('component'),
   componentRef: z.string().describe('Component registry key (e.g. "metadata:directory")'),
-  // OPEN by design: props are the component's own contract.
-  params: z.record(z.string(), z.unknown()).optional().describe('Props passed to the component'),
+  // OPEN by design: props are the component's own contract — except for
+  // `componentRef: 'ai:chat'`, whose params `checkAiChatNavParams` judges.
+  params: z.record(z.string(), z.unknown()).optional().describe("Props passed to the component. For `componentRef: 'ai:chat'` they are the AI inquiry page's copy, judged by `AiChatNavParamsSchema`."),
 }));
 
 /**
@@ -1163,7 +1167,9 @@ export const NavigationItemSchema: z.ZodType<NavigationItem, NavigationItemInput
     // the array is widened for the discriminator-typed overload; runtime
     // discrimination works on all of them (asserted in app.test.ts).
   ] as unknown as readonly [z.ZodObject<z.ZodRawShape>, ...z.ZodObject<z.ZodRawShape>[]])
-    .superRefine(navItemVisibleDataNeedsDataSource) as unknown as z.ZodType<NavigationItem, NavigationItemInput>
+    .superRefine(navItemVisibleDataNeedsDataSource)
+    // `componentRef: 'ai:chat'` entries: params judged by `AiChatNavParamsSchema`.
+    .superRefine(checkAiChatNavParams) as unknown as z.ZodType<NavigationItem, NavigationItemInput>
 );
 
 /**
@@ -2119,7 +2125,7 @@ export const AppSchema = lazySchema(() => strictObject(
   ...MetadataProtectionFields,
   // ADR-0146 D2 — the override declaration (authored; travels with the item).
   ...OverrideDeclarationFields,
-}).superRefine(checkAppLandingItems));
+}).superRefine(checkAppLandingItems).superRefine(checkAppSingleAiChatEntry));
 
 /**
  * App Factory Helper

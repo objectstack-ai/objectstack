@@ -19,6 +19,7 @@ export * from './i18n.zod';
 export * from './i18n-label-resolver';
 export * from './responsive.zod';
 export * from './app.zod';
+export * from './ai-chat-nav-params.zod';
 export * from './bulk-action.zod';
 export * from './view.zod';
 // [#22934] Which object an aggregated `views` container binds to (moved from

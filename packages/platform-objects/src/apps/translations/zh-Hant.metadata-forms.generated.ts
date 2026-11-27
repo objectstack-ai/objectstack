@@ -3291,7 +3291,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       model: {
         label: "模型",
-        helpText: "AI 模型設定（提供方、模型名、溫度等）"
+        helpText: "AI 模型設定（模型名、溫度等）"
       },
       planning: {
         label: "規劃",

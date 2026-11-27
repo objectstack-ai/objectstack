@@ -194,8 +194,10 @@ describe('navItemVisibleDataNeedsDataSource — parity between the export and Na
 // ---------------------------------------------------------------------------
 
 describe('the mount — the union NavigationItemSchema resolves to carries the check', () => {
-  it('carries exactly one `custom` check', () => {
-    expect(unionChecksOf(NavigationItemSchema).map((c) => c._zod.def.check)).toEqual(['custom']);
+  // Two union-level checks: this one first, then `checkAiChatNavParams` (the
+  // `ai:chat` entry's params, pinned in `ai-chat-nav-params.test.ts`).
+  it('carries exactly two `custom` checks, this one first', () => {
+    expect(unionChecksOf(NavigationItemSchema).map((c) => c._zod.def.check)).toEqual(['custom', 'custom']);
   });
 
   it('that check is behaviourally identical to the export over the whole matrix', () => {

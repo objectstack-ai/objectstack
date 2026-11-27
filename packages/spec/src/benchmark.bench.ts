@@ -146,7 +146,6 @@ describe('AI Domain — Schema Parse Performance', () => {
     role: 'assistant',
     instructions: 'You are a helpful assistant.',
     model: {
-      provider: 'openai',
       model: 'gpt-4o',
     },
     tools: [],

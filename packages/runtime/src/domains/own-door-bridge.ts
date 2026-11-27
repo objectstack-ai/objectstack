@@ -100,7 +100,11 @@ export interface OwnDoorBridge {
     readonly member: string;
     /** The package that registers the slot, named in the `501` for an empty slot. */
     readonly producer: string;
-    /** The doors' noun for answers and log lines, e.g. `the personal view door`. */
+    /**
+     * The doors' noun for answers and log lines, e.g. `the personal view door`.
+     * It ends in `door` or `doors`, which is what says it is plural
+     * (`nounPlural`), pinned by `own-door-bridge.test.ts`.
+     */
     readonly noun: string;
     /**
      * [#37273] The operation-message catalog key of {@link noun} (its English
@@ -188,23 +192,11 @@ export async function handleOwnDoorBridgeRequest(
         service = undefined;
     }
     if (!service) {
-        return {
-            handled: true,
-            response: deps.error(
-                notImplementedSentence(bridge, context, 'own_door_service_unregistered', { producer: bridge.producer }),
-                501,
-            ),
-        };
+        return localizedNotImplemented(deps, notImplementedSentence(bridge, context, 'own_door_service_unregistered', { producer: bridge.producer }));
     }
     const member = service[bridge.member];
     if (typeof member !== 'function') {
-        return {
-            handled: true,
-            response: deps.error(
-                notImplementedSentence(bridge, context, 'own_door_member_missing', { member: bridge.member }),
-                501,
-            ),
-        };
+        return localizedNotImplemented(deps, notImplementedSentence(bridge, context, 'own_door_member_missing', { member: bridge.member }));
     }
 
     const request = context.request as Request;
@@ -236,6 +228,32 @@ export async function handleOwnDoorBridgeRequest(
     }
 }
 
+/**
+ * [#37737] The answer for a `501` whose sentence is in the request's language
+ * (read by {@link requestLocaleOf}), with the `Vary: Accept-Language` such a
+ * body owes. A `501` is cacheable by default (RFC 9111 §4.2.2: a shared cache
+ * may store it with no explicit freshness), so without the header a cache in
+ * front of the API could hand one reader's language to the next. Every door
+ * that answers a localized `501` answers through this.
+ */
+export function localizedNotImplemented(deps: DomainHandlerDeps, message: string): HttpDispatcherResult {
+    const response = deps.error(message, 501) as NonNullable<HttpDispatcherResult['response']>;
+    return { handled: true, response: { ...response, headers: { ...(response.headers ?? {}), Vary: 'Accept-Language' } } };
+}
+
+/**
+ * [#37737] {@link localizedNotImplemented} for one sentence of the operation
+ * message catalog, in the request's top `Accept-Language` tag.
+ */
+export function catalogNotImplemented(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    key: string,
+    params?: Record<string, unknown>,
+): HttpDispatcherResult {
+    return localizedNotImplemented(deps, operationUserMessage(key, { locale: requestLocaleOf(context) }, params));
+}
+
 /** A `501` sentence of the catalog, in the request's top `Accept-Language` tag. */
 function notImplementedSentence(
     bridge: OwnDoorBridge,
@@ -251,8 +269,11 @@ function notImplementedSentence(
 
 /**
  * The request's top `Accept-Language` tag, from a fetch `Request` or a plain
- * header record: the language of an own door's `501` (#37610: the comment and
- * webhook redelivery doors read it too).
+ * header record: the language of an own door's `501`. The doors that are not
+ * bridges read it for their own `501`s too: the comment doors (`comments.ts`)
+ * and the webhook redelivery door (`webhooks.ts`, both #37610), the approval
+ * action-page door (`approvals.ts`) and the inbound automation hooks
+ * (`automation-hooks.ts`, both #37662).
  */
 export function requestLocaleOf(context: HttpProtocolContext): string | undefined {
     const headers = (context.request as { headers?: unknown } | undefined)?.headers as

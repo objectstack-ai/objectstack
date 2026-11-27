@@ -2672,10 +2672,12 @@ describe('the prose attached to the baselines (objectui#7046)', () => {
    * re-pinned the constant onto a branch tip of their own and left the same
    * shape. ⛔ Still exact and positional — a back-fill of the
    * squash reds here again, and is re-pinned to two strings the same way.
+   * objectstack#37572's back-fill did exactly that: the branch commit
+   * `003fde60` and the squash `50b4bf82` that landed it.
    */
   it('records what each baseline carries as data, so the pin cannot go vacuous', () => {
-    expect(commitsCarriedBy(BASELINE)).toEqual([BASELINE.commit]);
-    expect(BASELINE.squashMerge).toBeNull();
+    expect(commitsCarriedBy(BASELINE)).toEqual([BASELINE.commit, BASELINE.squashMerge]);
+    expect(BASELINE.squashMerge).toBe('50b4bf82');
     expect(commitsCarriedBy(PER_CHUNK_BASELINE)).toEqual([]);
   });
 
