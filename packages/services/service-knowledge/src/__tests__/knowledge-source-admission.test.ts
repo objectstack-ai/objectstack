@@ -685,6 +685,20 @@ describe('field gate — the earlier title rule: searched only once the index is
       expect(ids(await svc.search('q', { executionContext: SYSTEM }))).toEqual(['s']);
     });
 
+    it('dropped: a hit whose stored docHash differs from the record\'s current build inputs', async () => {
+      const { svc, adapter } = proven();
+      const source = svc.getSource('s')!;
+      const objSource = source.source as ObjectKnowledgeSource;
+      // The index proves current throughout: no complete build ran between the change and the change-back.
+      const whileTitle = { ...ACCOUNT, nameField: 'title' };
+      const synced = recordToDocument(source, objSource, live('account', 'rec_1'), whileTitle);
+      expect(synced.title).toBe('synthetic-earlier-title-2b9c');
+      adapter.searchSpy.mockImplementation(async () => [{ ...hitFor('s'), title: synced.title, docHash: synced.docHash }]);
+      const served = await svc.search('q', { executionContext: MEMBER });
+      expect(served).toEqual([]);
+      expect(JSON.stringify(served)).not.toContain('synthetic-earlier-title-2b9c');
+    });
+
     it('dropped: a record the system read no longer answers (deleted, or outside the source\'s `where`)', async () => {
       const gone = (o: string, id: string) => (id === 'rec_1' ? undefined : live(o, id));
       const { svc, adapter, currentHit } = proven({ system: { row: gone } });
