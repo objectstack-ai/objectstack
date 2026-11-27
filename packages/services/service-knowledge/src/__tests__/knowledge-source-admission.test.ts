@@ -16,11 +16,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
-import type { IDataEngine, IKnowledgeAdapter } from '@objectstack/spec/contracts';
+import type { AdapterContext, AdapterIndexStatus, IDataEngine, IKnowledgeAdapter } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { KnowledgeHit, KnowledgeSource, ObjectKnowledgeSource } from '@objectstack/spec/ai';
 import { KnowledgeService, type KnowledgeLogger } from '../knowledge-service.js';
-import type { KnowledgeFieldSecurity } from '../knowledge-source-admission.js';
+import { mayServeEarlierRuleTitle, type KnowledgeFieldSecurity } from '../knowledge-source-admission.js';
 import { KnowledgeServicePlugin, isServiceNotRegisteredError } from '../knowledge-service-plugin.js';
 
 const MEMBER: ExecutionContext = { userId: 'u_member', positions: ['member'], permissions: [], isSystem: false };
@@ -48,9 +48,45 @@ function hitFor(sourceId: string, recordId = 'rec_1'): KnowledgeHit {
   return { chunkId: `${sourceId}-c`, documentId: `${sourceId}:${recordId}`, sourceId, sourceRecordId: recordId, score: 0.9, snippet: 'passage' };
 }
 
-function makeAdapter(): IKnowledgeAdapter & { searchSpy: ReturnType<typeof vi.fn> } {
+/**
+ * What the adapter's `indexStatus` answers (absent: it has none). `true`: the
+ * fingerprint and recipe hash the call carries — an index built under the
+ * current recipe. `'stateful'`: it holds what its writes and its last
+ * `completeBuild` recorded, the way a generation-keeping adapter does.
+ */
+type IndexHeld = true | 'no-recipe' | 'other-recipe' | 'other-fingerprint' | 'throws' | 'stateful';
+
+function makeAdapter(proven?: IndexHeld): IKnowledgeAdapter & {
+  searchSpy: ReturnType<typeof vi.fn>;
+  indexStatus?: ReturnType<typeof vi.fn>;
+} {
   const searchSpy = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) => [hitFor(opts.source.name)]);
-  return { id: 'memory', upsert: vi.fn(async () => undefined), delete: vi.fn(async () => undefined), search: searchSpy, searchSpy };
+  const adapter = { id: 'memory', upsert: vi.fn(async () => undefined), delete: vi.fn(async () => undefined), search: searchSpy, searchSpy };
+  if (proven === undefined) return adapter;
+  const recorded: AdapterIndexStatus = {};
+  const indexStatus = vi.fn(async (ctx: AdapterContext): Promise<AdapterIndexStatus> => {
+    const index = ctx.index!;
+    switch (proven) {
+      case true: return { fingerprint: index.fingerprint, recipeHash: index.recipeHash };
+      case 'no-recipe': return { fingerprint: index.fingerprint };
+      case 'other-recipe': return { fingerprint: index.fingerprint, recipeHash: 'rh1:earlier' };
+      case 'other-fingerprint': return { fingerprint: 'fp1:earlier', recipeHash: index.recipeHash };
+      case 'throws': throw new Error('store unreachable');
+      // Documents written before any complete build: the active generation, no recipe hash.
+      default: return recorded.recipeHash === undefined ? { fingerprint: index.fingerprint } : { ...recorded };
+    }
+  });
+  if (proven !== 'stateful') return { ...adapter, indexStatus };
+  return {
+    ...adapter,
+    indexStatus,
+    listDocuments: vi.fn(async () => ({ documents: [] })),
+    beginBuild: vi.fn(async () => undefined),
+    completeBuild: vi.fn(async (ctx: AdapterContext) => {
+      recorded.fingerprint = ctx.index!.fingerprint;
+      recorded.recipeHash = ctx.index!.recipeHash;
+    }),
+  };
 }
 
 function objectSource(id: string, object: string, content: string[], metadataFields?: string[]): KnowledgeSource {
@@ -99,8 +135,10 @@ function setup(options: {
   disabled?: string[];
   schemaThrows?: boolean;
   logger?: KnowledgeLogger;
+  /** What the adapter's `indexStatus` answers; absent, it has none. */
+  proven?: IndexHeld;
 }) {
-  const adapter = makeAdapter();
+  const adapter = makeAdapter(options.proven);
   const engine = makeEngine(options.objects ?? [TICKET], { disabled: options.disabled, schemaThrows: options.schemaThrows });
   const svc = new KnowledgeService({
     dataEngine: engine,
@@ -408,21 +446,152 @@ describe('field gate — the title field is the object\'s display field', () => 
     expect(searched()).toEqual([]);
   });
 
-  // A document indexed before the title became the display field carries the
-  // value of the field named `title`, and stays in the index until a complete
-  // reindex writes it again: the gate still asks about a declared `title`.
-  it('refusal: a declared `title` the caller may not query still refuses the source — a stored hit may carry its value', async () => {
-    const hideTitle = makeSecurity(() => ['id', 'name', 'body']);
-    const { svc, adapter, searched } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: hideTitle });
-    adapter.searchSpy.mockImplementation(async () => [{ ...hitFor('s'), title: 'synthetic-old-rule-title-4e1a' }]);
+  it('preservation: a caller who may query the display field gets the hit', async () => {
+    const all = makeSecurity(() => ['id', 'name', 'title', 'body']);
+    const { svc } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: all, proven: true });
+    expect(ids(await svc.search('q', { executionContext: MEMBER }))).toEqual(['s']);
+  });
+});
+
+// The gate's former `title` arm: a document indexed before the title became
+// the display field carries the value of a field named `title`. The gate no
+// longer asks about that field; instead a source over which such a document
+// could be served is searched only once its index is proven built under the
+// current recipe (the adapter's `indexStatus` reports the fingerprint and the
+// recipe hash the service computes now), and is refused
+// KNOWLEDGE_REBUILD_REQUIRED (409) until then — never served through a gate
+// that asks about `title`.
+describe('field gate — the earlier title rule: searched only once the index is proven built under the current recipe', () => {
+  const ACCOUNT: ObjectDef = {
+    name: 'account',
+    fields: { id: { type: 'text' }, name: { type: 'text' }, title: { type: 'text' }, body: { type: 'textarea' } },
+  };
+  const hideTitle = makeSecurity(() => ['id', 'name', 'body']);
+  const queryAll = makeSecurity(() => ['id', 'name', 'title', 'body']);
+
+  it('proven: a caller who may not query `title` is served — the arm is gone for a source built under the current recipe', async () => {
+    const { svc, adapter, searched } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: hideTitle, proven: true });
+    expect(ids(await svc.search('q', { executionContext: MEMBER }))).toEqual(['s']);
+    expect(searched()).toEqual(['s']);
+    expect(adapter.indexStatus).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['an adapter with no indexStatus', undefined],
+    ['an index that records no recipe hash (no complete build completed)', 'no-recipe' as const],
+    ['an index last completed under another recipe', 'other-recipe' as const],
+    ['an index under another fingerprint', 'other-fingerprint' as const],
+    ['an indexStatus that throws', 'throws' as const],
+  ])('unproven (%s): refused KNOWLEDGE_REBUILD_REQUIRED / 409 for every non-system caller, never searched', async (_label, held) => {
+    for (const security of [hideTitle, queryAll]) {
+      const warn = vi.fn();
+      const { svc, searched } = setup({
+        objects: [ACCOUNT],
+        sources: [objectSource('s', 'account', ['body'])],
+        security,
+        ...(held === undefined ? {} : { proven: held }),
+        logger: { warn, error: vi.fn() },
+      });
+      let thrown: unknown;
+      try {
+        await svc.searchWithRefusals('q', { executionContext: MEMBER });
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toMatchObject({ code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409 });
+      expect((thrown as { refused: unknown[] }).refused).toEqual([
+        expect.objectContaining({ sourceId: 's', code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409 }),
+      ]);
+      expect(searched()).toEqual([]);
+      expect(String(warn.mock.calls.at(-1)?.[0])).toContain("source 's' not searched (KNOWLEDGE_REBUILD_REQUIRED)");
+      // Preservation: the system context bypasses every gate, this one too.
+      expect(ids(await svc.search('q', { executionContext: SYSTEM }))).toEqual(['s']);
+    }
+  });
+
+  it('beside a searchable source, the unproven one is named in `refused` and the other still answers', async () => {
+    const { svc, searched } = setup({
+      objects: [ACCOUNT, TICKET],
+      sources: [objectSource('unproven', 'account', ['body']), objectSource('tickets', 'ticket', ['body'])],
+      security: queryAll,
+    });
+    const report = await svc.searchWithRefusals('q', { executionContext: MEMBER });
+    expect(ids(report.hits)).toEqual(['tickets']);
+    expect(report.refused).toEqual([
+      expect.objectContaining({ sourceId: 'unproven', code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409 }),
+    ]);
+    expect(searched()).toEqual(['tickets']);
+  });
+
+  it('a source the earlier rule served nothing extra for is searched without asking for the proof', async () => {
+    // TICKET's display field IS `title`; a source listing `title` serves it; an object with no `title` field.
+    const NOTE: ObjectDef = { name: 'note', fields: { id: { type: 'text' }, name: { type: 'text' }, body: { type: 'textarea' } } };
+    const { svc, adapter, searched } = setup({
+      objects: [ACCOUNT, TICKET, NOTE],
+      sources: [
+        objectSource('tickets', 'ticket', ['body']),
+        objectSource('titled', 'account', ['body', 'title']),
+        objectSource('notes', 'note', ['body']),
+      ],
+      security: makeSecurity((object) => (object === 'note' ? ['id', 'name', 'body'] : ['id', 'name', 'title', 'body'])),
+      proven: 'throws',
+    });
+    expect(ids(await svc.search('q', { executionContext: MEMBER }))).toEqual(['notes', 'tickets', 'titled']);
+    expect(searched().sort()).toEqual(['notes', 'tickets', 'titled']);
+    expect(adapter.indexStatus).not.toHaveBeenCalled();
+  });
+
+  it('rebuilt: a source refused for want of proof is served once a complete build has completed', async () => {
+    const { svc, searched } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: hideTitle, proven: 'stateful' });
+    await expect(svc.search('q', { executionContext: MEMBER })).rejects.toMatchObject({ code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409 });
+    expect(searched()).toEqual([]);
+    const record = await svc.rebuildSource('s', { trigger: 'operator' });
+    expect(record.status).toBe('done');
+    expect((await svc.readIndexState('s')).state).toBe('current');
+    expect(ids(await svc.search('q', { executionContext: MEMBER }))).toEqual(['s']);
+  });
+
+  // Reverse pins: with the proof in hand, no other arm is weakened — a field
+  // the caller may not query still never reaches a hit.
+  it.each([
+    ['the display field', ['id', 'title', 'body'], ['body']],
+    ['a content field', ['id', 'name', 'title'], ['body']],
+    ['a metadata field', ['id', 'name', 'title', 'body'], ['body'], ['status']],
+  ])('reverse pin, proven index: %s the caller may not query still refuses the source', async (_label, queryable, content, metadata?: string[]) => {
+    const withStatus: ObjectDef = { ...ACCOUNT, fields: { ...ACCOUNT.fields, status: { type: 'select' } } };
+    const { svc, adapter, searched } = setup({
+      objects: [withStatus],
+      sources: [objectSource('s', 'account', content, metadata)],
+      security: makeSecurity(() => queryable),
+      proven: true,
+    });
+    adapter.searchSpy.mockImplementation(async () => [{ ...hitFor('s'), title: 'synthetic-hidden-name-7c2d', metadata: { status: 'hidden' } }]);
     expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
     expect(searched()).toEqual([]);
   });
 
-  it('preservation: a caller who may query both the display field and `title` gets the hit', async () => {
-    const all = makeSecurity(() => ['id', 'name', 'title', 'body']);
-    const { svc } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: all });
-    expect(ids(await svc.search('q', { executionContext: MEMBER }))).toEqual(['s']);
+  it('reverse pin, unproven index: a stored hit carrying an earlier-rule `title` never reaches a caller who may not query it', async () => {
+    const { svc, adapter, searched } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: hideTitle, proven: 'no-recipe' });
+    adapter.searchSpy.mockImplementation(async () => [{ ...hitFor('s'), title: 'synthetic-old-rule-title-4e1a' }]);
+    const out = await svc.search('q', { executionContext: MEMBER }).catch((err: unknown) => err);
+    expect(out).toMatchObject({ code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409 });
+    expect(JSON.stringify(out)).not.toContain('synthetic-old-rule-title-4e1a');
+    expect(searched()).toEqual([]);
+  });
+});
+
+describe('mayServeEarlierRuleTitle — whether an earlier-rule index could serve a field the gate does not ask about', () => {
+  const src = (content: string[], metadataFields?: string[]) => objectSource('s', 'x', content, metadataFields).source as ObjectKnowledgeSource;
+  it.each([
+    ['an object declaring `title` beside a `name` display field', { fields: { name: { type: 'text' }, title: { type: 'text' } } }, ['body'], true],
+    ['an object whose display field is `title`', { fields: { title: { type: 'text' }, body: { type: 'textarea' } } }, ['body'], false],
+    ['an object declaring no `title` field', { fields: { name: { type: 'text' }, body: { type: 'textarea' } } }, ['body'], false],
+    ['a source that serves `title` itself', { fields: { name: { type: 'text' }, title: { type: 'text' } } }, ['title'], false],
+    ['an `internal` `title` the index never carries', { fields: { name: { type: 'text' }, title: { type: 'text', internal: true } } }, ['body'], false],
+    ['fields that cannot be enumerated, display field elsewhere', { nameField: 'subject' }, ['body'], true],
+    ['no object definition (the title is read from `title`)', undefined, ['body'], false],
+  ])('%s → %s', (_label, schema, content, expected) => {
+    expect(mayServeEarlierRuleTitle(src(content), schema)).toBe(expected);
   });
 });
 
