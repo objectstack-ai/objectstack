@@ -31,6 +31,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import '@objectstack/lint';
 import React from 'react';
 import { render, screen, waitFor, act } from '@testing-library/react';
+import { createRoot } from 'react-dom/client';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { AI_CHAT_COMPONENT_REF } from '@objectstack/spec/ui';
 import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
@@ -352,26 +353,92 @@ describe('objectstack#37833 — the ai:chat entry is hidden from a member who ca
     });
   });
 
-  describe('a catalog the session already holds (the module cache of useAgents)', () => {
-    it('a member with no AI seat, the catalog read once already: the home is the next entry', async () => {
-      metadataApps = [policyApp()];
+  // The console reads the catalog on every open (the top-bar robot), so a
+  // surface that mounts later is usually answered by `useAgents`' module cache.
+  // That answer arrives in the same render that clears the loading flag, so
+  // these cases mount with React's act environment OFF: under `act` every
+  // queued update is flushed one by one and the loading render is seen, which
+  // a browser never does (the cases pass there on a latch that hangs here).
+  describe('a catalog the session already holds, scheduled as a browser schedules it', () => {
+    async function warmTheCatalog(body: unknown) {
       const { apiFetch, answer } = heldApiFetch();
       const first = renderMenu(policyApp() as never, apiFetch);
-      await answer(AGENTS_URL, 200, NO_SEAT);
+      await answer(AGENTS_URL, 200, body);
       first.unmount();
-      renderConsoleAt('/apps/policy', apiFetch);
-      expect(await screen.findByTestId('object-view', {}, { timeout: 3000 })).toBeInTheDocument();
-      expect(pathnames).toEqual(['/apps/policy', '/apps/policy/crm_case']);
+      return apiFetch;
+    }
+
+    /** Mount the console at `url` outside `act`, as the browser does; returns its unmount. */
+    function mountOutsideAct(url: string, apiFetch: ApiFetch): () => void {
+      const host = document.createElement('div');
+      document.body.appendChild(host);
+      const root = createRoot(host);
+      const actEnv = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+      actEnv.IS_REACT_ACT_ENVIRONMENT = false;
+      root.render(
+        withProviders(
+          apiFetch,
+          <MemoryRouter initialEntries={[url]}>
+            <LocationProbe />
+            <Routes>
+              <Route path="/apps/:appName/*" element={<AppContent />} />
+            </Routes>
+          </MemoryRouter>,
+        ),
+      );
+      return () => {
+        root.unmount();
+        host.remove();
+        actEnv.IS_REACT_ACT_ENVIRONMENT = true;
+      };
+    }
+
+    /** Poll the document, outside `act`, until `testId` is drawn or `ms` passes. */
+    async function drawn(testId: string, ms = 2000): Promise<boolean> {
+      const until = Date.now() + ms;
+      while (Date.now() < until) {
+        if (document.querySelector(`[data-testid="${testId}"]`)) return true;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return false;
+    }
+
+    it('a member with no AI seat: the home is the next entry, not a hold that never ends', async () => {
+      metadataApps = [policyApp()];
+      const apiFetch = await warmTheCatalog(NO_SEAT);
+      pathnames = [];
+      const unmount = mountOutsideAct('/apps/policy', apiFetch);
+      try {
+        expect(await drawn('object-view')).toBe(true);
+        expect(pathnames).toEqual(['/apps/policy', '/apps/policy/crm_case']);
+      } finally {
+        unmount();
+      }
     });
 
-    it('a direct link, the catalog read once already: the page draws its unavailable state', async () => {
+    it('a direct link for a member with no AI seat: the page draws AiUnavailable, not its loading state', async () => {
       metadataApps = [policyApp()];
-      const { apiFetch, answer } = heldApiFetch();
-      const first = renderMenu(policyApp() as never, apiFetch);
-      await answer(AGENTS_URL, 200, NO_SEAT);
-      first.unmount();
-      renderConsoleAt('/apps/policy/component/ai/chat', apiFetch);
-      expect(await screen.findByTestId('ai-unavailable', {}, { timeout: 3000 })).toBeInTheDocument();
+      const apiFetch = await warmTheCatalog(NO_SEAT);
+      const unmount = mountOutsideAct('/apps/policy/component/ai/chat', apiFetch);
+      try {
+        expect(await drawn('ai-unavailable')).toBe(true);
+        expect(document.querySelector('[data-testid="app-ask-page-loading"]')).toBeNull();
+      } finally {
+        unmount();
+      }
+    });
+
+    it('CONTROL: a member the catalog serves an agent lands on the ai:chat page', async () => {
+      metadataApps = [policyApp()];
+      const apiFetch = await warmTheCatalog(SERVED);
+      pathnames = [];
+      const unmount = mountOutsideAct('/apps/policy', apiFetch);
+      try {
+        expect(await drawn('app-ask-home')).toBe(true);
+        expect(pathnames).toEqual(['/apps/policy', '/apps/policy/component/ai/chat']);
+      } finally {
+        unmount();
+      }
     });
   });
 
