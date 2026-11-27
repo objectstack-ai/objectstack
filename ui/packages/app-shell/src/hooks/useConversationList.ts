@@ -38,6 +38,11 @@ export interface ConversationListItem {
   updatedAt?: string;
   /** Preview text derived from the most recent message, if available. */
   preview?: string;
+  /**
+   * `AiConversationSchema.metadata` (`@objectstack/spec/api`) as the list row
+   * carries it; absent when the row carries none or a value that is not a record.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 export interface UseConversationListOptions {
@@ -65,6 +70,11 @@ interface ServerConversation {
   updatedAt?: string;
   preview?: unknown;
   messages?: Array<{ role: string; content: unknown }>;
+  metadata?: unknown;
+}
+
+function readMetadata(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
 const PLACEHOLDER_TITLES = new Set([
@@ -142,6 +152,7 @@ function normalize(row: ServerConversation): ConversationListItem {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     preview,
+    metadata: readMetadata(row.metadata),
   };
 }
 
@@ -279,4 +290,50 @@ export function useConversationList(
   }, [userId, apiBase, limit, internalKey, refreshKey]);
 
   return { conversations, isLoading, error, refetch, remove, rename };
+}
+
+export interface UseConversationLabelOptions {
+  apiBase: string;
+  /** The conversation the drawer shows; absent before the first send creates it. */
+  conversationId: string | undefined;
+  /** Bump to read the label again (a sent turn, the server titling the thread). */
+  refreshKey?: number | string;
+}
+
+export interface ConversationLabelReading {
+  /** The label the history list gives this conversation's row; absent when it has none yet. */
+  label: string | undefined;
+  /** False while the label of the conversation now shown has not been read yet. */
+  settled: boolean;
+}
+
+/**
+ * ui ADR-0057 Amendment A5 — the drawer's header names the conversation it
+ * shows by the label its history row carries: the title the server gave it,
+ * else the latest message the user wrote in it (`normalize`, the list's own
+ * reading of one row). A read that fails settles with no label.
+ */
+export function useConversationLabel({
+  apiBase,
+  conversationId,
+  refreshKey,
+}: UseConversationLabelOptions): ConversationLabelReading {
+  const [reading, setReading] = useState<{ id: string; label: string | undefined } | undefined>(undefined);
+  useEffect(() => {
+    if (!conversationId) return;
+    let cancelled = false;
+    fetchConversationDetail(apiBase, conversationId).then(
+      (row) => {
+        if (!cancelled) setReading({ id: conversationId, label: row?.title || row?.preview || undefined });
+      },
+      () => {
+        if (!cancelled) setReading({ id: conversationId, label: undefined });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase, conversationId, refreshKey]);
+  if (!conversationId) return { label: undefined, settled: true };
+  return reading?.id === conversationId ? { label: reading.label, settled: true } : { label: undefined, settled: false };
 }

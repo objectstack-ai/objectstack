@@ -10,6 +10,7 @@ import { Link } from 'react-router-dom';
 import { ForgotPasswordForm } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { Card } from '@object-ui/components';
+import { passwordDoorRefusalMessages } from '@object-ui/app-shell';
 import { AuthLayout } from './AuthLayout';
 
 function RouterLink(props: { href: string; className?: string; children: React.ReactNode }) {
@@ -29,6 +30,7 @@ export function ForgotPasswordPage() {
       <ForgotPasswordForm
         loginUrl="/login"
         linkComponent={RouterLink}
+        errorMessages={passwordDoorRefusalMessages(t)}
         title={t('auth.forgotPassword.title', { defaultValue: 'Reset your password' })}
         description={t('auth.forgotPassword.description', {
           defaultValue: "Enter your email address and we'll send you a link to reset your password",

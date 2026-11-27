@@ -35,8 +35,12 @@
  * reported everything would bury the finding it exists to surface.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { ApprovalService } from './approval-service.js';
+import { ApprovalsServicePlugin } from './approvals-plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 interface FakeRow { [k: string]: any }
 
@@ -748,5 +752,113 @@ describe('#16709 — a failure to differentiate keeps the row, and stays local t
     const failing = await svc.inspectStrandedRequests();
 
     expect(new Set([...blind.stranded, ...failing.stranded].map(s => s.runState))).toEqual(new Set(['failed']));
+  });
+});
+
+/**
+ * #37808 — the inspection reads the rows that can be stranded, not an arbitrary
+ * page of every decided request.
+ *
+ * It used to read `limit` (500) rows of every `approved` / `rejected` /
+ * `returned` request with no order and no cursor. Past 500 decided requests the
+ * page a store hands back is arbitrary (SQLite: insertion order), so a request
+ * stranded today, behind 500 older decisions, was never inspected on any
+ * sweep. Driven on a real `ObjectQL` over `SqlDriver` (better-sqlite3,
+ * in-memory), so the order and the filters are the store's, not a double's.
+ */
+describe('#37808 — past 500 decided requests, a new strand is still reported', () => {
+  const ORG = 'org_strand_scan';
+  const silent = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} } as any;
+  let engine: ObjectQL;
+  let seq = 0;
+
+  /** A healthy decided request: its run completed. */
+  const decided = (n: number, over: Record<string, any> = {}) => {
+    const at = new Date(Date.parse('2026-01-01T00:00:00.000Z') + n * 60_000).toISOString();
+    return requestRow({
+      id: `areq_${String(n).padStart(5, '0')}`,
+      flow_run_id: `run_${n}`,
+      record_id: `opp_${n}`,
+      organization_id: ORG,
+      created_at: at, updated_at: at, completed_at: at,
+      ...over,
+    });
+  };
+  /** Every run completed, except the ones named stranded (no pause, no history). */
+  const surface = (strandedRuns: string[]) => ({
+    async resume() { return { success: true }; },
+    async hasSuspendedRun() { return false; },
+    async getRun(runId: string) { return strandedRuns.includes(runId) ? null : { status: 'completed' }; },
+  });
+  const freshService = (strandedRuns: string[]) => {
+    const svc = new ApprovalService({ engine: engine as any, logger: silent });
+    svc.attachAutomation(surface(strandedRuns) as any);
+    return svc;
+  };
+  const insertAll = async (rows: FakeRow[]) => {
+    for (const row of rows) await engine.insert('sys_approval_request', row, { context: { isSystem: true } } as any);
+  };
+
+  // A fresh in-memory store per test: each one counts rows from zero.
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    engine.registerDriver(new SqlDriver({
+      client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true,
+    }), true);
+    await engine.init();
+    let manifest: any;
+    await new ApprovalsServicePlugin().init({
+      getService: (name: string) => {
+        if (name === 'manifest') return { register: (m: any) => { manifest = m; } };
+        throw new Error(`no service '${name}'`);
+      },
+      logger: silent,
+    } as any);
+    for (const def of manifest.objects) engine.registry.registerObject(def as any, 'approvals-test', 'approvals-test');
+    await engine.syncSchemas();
+    await installDefaultOrganization(engine);
+    seq = 0;
+  });
+
+  afterEach(async () => {
+    try { await engine?.destroy(); } catch { /* noop */ }
+  });
+
+  it('CONTROL: under 500 decided requests the strand is reported', async () => {
+    await insertAll(Array.from({ length: 50 }, () => decided(++seq)));
+    await insertAll([decided(++seq, { flow_run_id: 'run_new_strand' })]);
+    const out = await freshService(['run_new_strand']).inspectStrandedRequests();
+    expect(out.scanned).toBe(51);
+    expect(out.stranded.map(s => s.runId)).toEqual(['run_new_strand']);
+  });
+
+  it('a request stranded today, behind 600 older decisions, is reported on the first sweep', async () => {
+    await insertAll(Array.from({ length: 600 }, () => decided(++seq)));
+    // The newest decision: its run is gone.
+    await insertAll([decided(++seq, { flow_run_id: 'run_new_strand' })]);
+    const out = await freshService(['run_new_strand']).inspectStrandedRequests();
+    expect(out.stranded.map(s => s.runId)).toEqual(['run_new_strand']);
+  });
+
+  it('an older strand outside the newest window is reached by the cursor within a bounded number of sweeps', async () => {
+    // The strand is the OLDEST decision (last by `updated_at`), stored last.
+    await insertAll(Array.from({ length: 1200 }, () => decided(++seq + 10)));
+    await insertAll([decided(1, { id: 'areq_zz_old_strand', flow_run_id: 'run_old_strand' })]);
+    const svc = freshService(['run_old_strand']);
+    const found: number[] = [];
+    // 1201 rows, 500 per window: the cursor covers the set within ceil(1201 / 500) = 3 sweeps.
+    for (let sweep = 1; sweep <= 3; sweep++) {
+      const out = await svc.inspectStrandedRequests();
+      expect(out.scanned, `sweep ${sweep} reads at most two windows`).toBeLessThanOrEqual(1000);
+      if (out.stranded.some(s => s.runId === 'run_old_strand')) found.push(sweep);
+    }
+    // Its id sorts last, so the walk reaches it on the third sweep: not missed, and not reported by the newest window.
+    expect(found).toEqual([3]);
+    // The walk then starts again from the first id: the next cycle reaches it again.
+    const again: number[] = [];
+    for (let sweep = 4; sweep <= 6; sweep++) {
+      if ((await svc.inspectStrandedRequests()).stranded.some(s => s.runId === 'run_old_strand')) again.push(sweep);
+    }
+    expect(again).toEqual([6]);
   });
 });

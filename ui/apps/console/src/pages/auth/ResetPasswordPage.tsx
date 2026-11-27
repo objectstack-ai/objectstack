@@ -12,6 +12,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
+import { passwordDoorRefusalMessages } from '@object-ui/app-shell';
 import {
   Button,
   Card,
@@ -64,9 +65,13 @@ export function ResetPasswordPage() {
       );
       navigate('/login');
     } catch (err) {
+      // A refusal with a known code shows its localized sentence: a
+      // cloud-managed runtime refuses this door with 409 RESOURCE_CONFLICT
+      // (objectstack#34171). Any other refusal keeps the server's text.
+      const code = (err as Error & { code?: string }).code;
       toast.error(
         t('auth.resetPassword.failed', { defaultValue: 'Reset failed' }),
-        { description: (err as Error).message },
+        { description: (code && passwordDoorRefusalMessages(t)[code]) || (err as Error).message },
       );
     } finally {
       setSubmitting(false);

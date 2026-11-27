@@ -432,10 +432,20 @@ dataset card's verified build is a fixture here, `builds/<id>.json`, byte for by
 `dist/objectstack.json` a passing scratch run built before its iterate turn. Its
 `builds/<id>.provenance.json` records the sha256, the card's sha256, the runner sha, the packages and
 the authoring model and effort. A round installs it with `--modes ask --template
-docs/qa/scenarios/builds/<id>.json` and builds nothing; its record names the file's sha256. A round never
+"$(git rev-parse --show-toplevel)/docs/qa/scenarios/builds/<id>.json"` and builds nothing; its record names the
+file's sha256. The path is absolute because `pnpm --filter @objectstack/scenarios` runs the runner in
+`packages/qa/scenarios/`, where `docs/qa/scenarios/builds/<id>.json` names no file. A round never
 writes it: it changes only by a PR, when the card or the runner changes, or when the platform starts refusing
 it at install. A hand edit of that last kind changes only what the refusal names, and the provenance's `amended`
-entry records it with the sha256 it replaced. Records, recordings and logs stay
+entry records it with the sha256 it replaced. A card edit the build's Build reading does not feel re-pins
+`cardSha256` the same way, its `amended` entry naming the card sha256 it replaced (`cardFrom`); a card edit that
+changes the reading needs a new build. The provenance's `scored` names the runner revision, the date and the Build
+reading of the build's latest re-score (`verified` stays the authoring run's reading). A scorer change that fails a
+verified build re-scores it in the same PR: when the platform moved under the build (the check follows a runtime
+ruling the build predates), a hand edit restores what the card asks for and records an `amended` entry; otherwise
+the build is rebuilt. Either way `scored` moves. `packages/qa/scenarios/test/verified-builds.test.ts` pins both sha256s, a
+build for every dataset card, a protocol range that admits the tree's own, and a build that passes every Build
+check of the tree's scorer with no roll-up charge. Records, recordings and logs stay
 out of the tree. The loader and the packed library read this directory one level deep, so `builds/` is
 neither a card nor shipped.
 

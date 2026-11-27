@@ -33,7 +33,7 @@ import {
   studioMenuScope,
   studioMenuTiers,
 } from './studioMenuModel';
-import { STUDIO_MENU_PLACEMENT } from './studioMenuPlacement';
+import { STUDIO_MENU_NO_ROW_TYPES, STUDIO_MENU_PLACEMENT } from './studioMenuPlacement';
 import { studioMenuGroupLabel } from './studioMenuGroupLabel';
 import { translateMetadataDomain } from '../metadata-admin/i18n';
 // The zh rows of the menu's own names live in `@object-ui/i18n`'s lazily loaded `studio` namespace.
@@ -61,21 +61,22 @@ describe('the menu groups (objectstack#36899, ADR-0084 amended)', () => {
 
   // objectstack#37565 — rewritten on purpose: the fourth entry that is not a type, the cross-package
   // environment directory, left the menu for Setup (ADR-0084, amended 2026-11-26, question 5).
-  it('a package: every type in its domain\'s group, and the three entries that are not a type', () => {
+  // objectstack#37920 — rewritten on purpose: the served `datasource` draws no row, so 平台 Platform
+  // holds diagnostics alone here (ADR-0084, amended 2026-11-26, decision 12). It was `type:datasource`
+  // first, opening Setup's Datasources page.
+  it('a package: every type in its domain\'s group but datasource, and the three entries that are not a type', () => {
     const menu = buildStudioMenu({ scope: studioMenuScope(PKG), types: TYPES, counts: { object: 4 } });
     expect(keysOf(menu)).toEqual({
       data: ['type:object'],
       ui: ['type:view'],
       automation: ['type:flow', 'orgFlows'],
-      system: ['type:datasource', 'diagnostics'],
+      system: ['diagnostics'],
       security: ['type:permission', 'owd'],
       ai: ['type:agent'],
     });
     const entry = (key: string) => menu.flatMap((g) => g.entries).find((e) => e.key === key)!;
     expect(entry('type:object')).toMatchObject({ to: `/studio/${PKG}/metadata/object?package=${PKG}`, count: 4 });
     expect(entry('type:view').count).toBeUndefined();
-    // ADR-0146 D1 — runtime configuration is Setup's.
-    expect(entry('type:datasource').to).toBe('/apps/setup/metadata/datasource');
     expect(entry('orgFlows').to).toBe('/studio/~org/metadata/flow?source=runtime');
     expect(entry('diagnostics').to).toBe(`/studio/${PKG}/metadata/_diagnostics`);
     // objectstack#36905 — the overview's own route.
@@ -127,6 +128,52 @@ describe('the menu groups (objectstack#36899, ADR-0084 amended)', () => {
       ...(setupDirectory === undefined ? {} : { setupDirectory }),
     });
     expect(menu.flatMap((g) => g.entries).find((e) => e.key === 'type:position')!.to).toBe(to);
+  });
+});
+
+// ADR-0084, amended 2026-11-26, decision 12: a connection is managed in Setup → Integrations alone.
+describe('the menu draws no datasource row (objectstack#37920)', () => {
+  const served = [
+    { type: 'api', domain: 'system' },
+    { type: 'datasource', domain: 'system' },
+    { type: 'external_catalog', domain: 'system' },
+  ];
+
+  it('the type stays listable and draws no row: it is in the no-row set and has no placement row', () => {
+    expect(STUDIO_MENU_NO_ROW_TYPES.has('datasource')).toBe(true);
+    expect(STUDIO_MENU_PLACEMENT.map((row) => row.type)).not.toContain('datasource');
+  });
+
+  it.each([PKG, '~org', '~all'])('%s: served, counted and settled, datasource draws no row; its neighbours do', (segment) => {
+    for (const setupDirectory of [true, false]) {
+      const menu = buildStudioMenu({
+        scope: studioMenuScope(segment),
+        types: served,
+        counts: { datasource: 3, api: 1 },
+        settled: true,
+        setupDirectory,
+      });
+      const entries = menu.flatMap((g) => g.entries);
+      expect(entries.map((e) => e.type)).not.toContain('datasource');
+      expect(entries.some((e) => e.to.includes('/apps/setup/metadata/datasource'))).toBe(false);
+      expect(menu.find((g) => g.group === 'system')!.entries.filter((e) => e.kind === 'type').map((e) => e.key)).toEqual([
+        'type:api',
+        'type:external_catalog',
+      ]);
+    }
+  });
+
+  it('a package whose only system type is datasource draws 平台 Platform with diagnostics alone, in the fold', () => {
+    const menu = buildStudioMenu({ scope: studioMenuScope(PKG), types: [{ type: 'datasource', domain: 'system' }], counts: { datasource: 2 } });
+    expect(keysOf(menu).system).toEqual(['diagnostics']);
+    expect(studioMenuTiers(menu).common.map((g) => g.group)).not.toContain('system');
+  });
+
+  it('on ~org and ~all, a datasource alone leaves no 平台 Platform group', () => {
+    for (const segment of ['~org', '~all']) {
+      const menu = buildStudioMenu({ scope: studioMenuScope(segment), types: [{ type: 'datasource', domain: 'system' }], counts: {} });
+      expect(menu.map((g) => g.group), segment).not.toContain('system');
+    }
   });
 });
 
@@ -210,7 +257,7 @@ describe('the menu reads the placement table (objectstack#37201, ADR-0084 amende
   });
 
   it('keeps every address and entry key: only the order and the tier are new', () => {
-    for (const e of entries.filter((x) => x.kind === 'type' && x.type !== 'datasource')) {
+    for (const e of entries.filter((x) => x.kind === 'type')) {
       expect(e.key).toBe(`type:${e.type}`);
       expect(e.to).toBe(`/studio/${PKG}/metadata/${e.type}?package=${PKG}`);
     }

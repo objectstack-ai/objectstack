@@ -121,6 +121,26 @@ export type BookGroup = {
 };
 
 /**
+ * The refusal for an audience that names both gates (ADR-0046 §6.7).
+ *
+ * The two object forms are alternatives, never a conjunction: `audienceAllows`
+ * reads one of them. Before this refusal the older `{ permissionSet }` arm,
+ * a plain object, accepted `{ permissionSet, systemPermission }` and stripped
+ * the capability without a word — the author believed the book was gated on a
+ * capability and it was gated on one set. The refusal is narrow on purpose:
+ * only the second gate key is refused, so no other shape that parsed before is
+ * refused now. Every authoring door meets it at the parse (`defineStack`, the
+ * `/meta` save), which is why it lives here and not in a lint rule: a
+ * `defineStack` config is parsed before any rule runs, so a rule would never
+ * see the key.
+ */
+const BOOK_AUDIENCE_ONE_GATE =
+  'A book audience names ONE gate, and this one names two: `permissionSet` and `systemPermission`. '
+  + 'Keep `systemPermission` when the readers are everyone who holds a capability through any '
+  + 'permission set (the form for an app\'s manual, matching the app\'s `requiredPermissions`); keep '
+  + '`permissionSet` when the readers are the holders of that one set. Delete the other key.';
+
+/**
  * Access audience for a book — a reference into the permission model
  * (ADR-0046 §6.7, vocabulary per ADR-0090). The gate is a capability
  * reference, never a distribution one: books ship in packages, and packages
@@ -137,16 +157,33 @@ export type BookGroup = {
  *    token carries — ADR-0090 D10). This is the form for a
  *    manual that belongs to an app gated on a capability several sets grant
  *    (Setup's `setup.access`): a set name would shut out every other holder.
+ *
+ * An audience names one of the two, never both: the pair is refused at the
+ * parse ({@link BOOK_AUDIENCE_ONE_GATE}).
  */
 export const BookAudienceSchema = lazySchema(() =>
   z.union([
     z.literal('org'), // default — inherits the package grant (§3.6)
     z.literal('public'), // ≡ the built-in `guest` position (ADR-0090 D9): anonymous, indexable
-    z.object({ permissionSet: z.string() }), // capability-gated, e.g. { permissionSet: 'crm_admin' }
-    z
-      .object({ systemPermission: z.string() })
-      .strict()
-      .describe("Readers holding this capability through any permission set, e.g. { systemPermission: 'setup.access' }"),
+    z.object({
+      permissionSet: z.string(), // gated on one named set, e.g. { permissionSet: 'crm_admin' }
+      // Declared only to be refused: see BOOK_AUDIENCE_ONE_GATE. Without it this
+      // plain arm accepted `{ permissionSet, systemPermission }` and stripped the
+      // capability, so the book was gated on the set alone.
+      systemPermission: z
+        .never({ error: () => BOOK_AUDIENCE_ONE_GATE })
+        .optional()
+        .describe('Not accepted beside `permissionSet`: an audience names one gate'),
+    }),
+    strictObject(
+      {
+        surface: 'this book audience',
+        history: 'A `{ permissionSet }` audience that also named `systemPermission` used to parse as the '
+          + 'set form with the capability dropped, so the book was gated on the set alone.',
+        guidance: { permissionSet: BOOK_AUDIENCE_ONE_GATE },
+      },
+      { systemPermission: z.string() },
+    ).describe("Readers holding this capability through any permission set, e.g. { systemPermission: 'setup.access' }"),
   ]),
 );
 export type BookAudience = 'org' | 'public' | { permissionSet: string } | { systemPermission: string };

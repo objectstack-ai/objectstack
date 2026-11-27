@@ -52,6 +52,31 @@ describe('BookSchema (ADR-0046 §6)', () => {
       expect(BookSchema.safeParse({ name: 'b', audience, groups: [] }).success).toBe(false);
     }
   });
+  it('refuses an audience naming both gates, and says which to keep (ADR-0046 §6.7)', () => {
+    // Before the refusal this parsed as the `{ permissionSet }` arm with the
+    // capability stripped: the book was gated on the set alone.
+    const audience = { permissionSet: 'crm_admin', systemPermission: 'setup.access' };
+    const result = BookSchema.safeParse({ name: 'b', audience, groups: [] });
+    expect(result.success).toBe(false);
+    const text = JSON.stringify(result.error?.issues);
+    expect(text).toContain('names ONE gate');
+    expect(text).toContain('Keep `systemPermission`');
+    expect(text).toContain('keep `permissionSet`');
+    // Either order of the keys is the same refusal.
+    expect(BookSchema.safeParse({
+      name: 'b', audience: { systemPermission: 'setup.access', permissionSet: 'crm_admin' }, groups: [],
+    }).success).toBe(false);
+  });
+  it('keeps accepting every shape it accepted before the two-gate refusal', () => {
+    // The refusal is the second gate key only: the set form still strips any
+    // other stray key, exactly as it did.
+    const parsed = BookSchema.parse({ name: 'b', audience: { permissionSet: 'crm_admin', label: 'Admins' }, groups: [] });
+    expect(parsed.audience).toEqual({ permissionSet: 'crm_admin' });
+    // An explicit `undefined` capability is no second gate.
+    expect(BookSchema.parse({
+      name: 'b', audience: { permissionSet: 'crm_admin', systemPermission: undefined }, groups: [],
+    }).audience).toEqual({ permissionSet: 'crm_admin' });
+  });
   it('rejects the removed { profile } audience shape (ADR-0090 D2)', () => {
     expect(() => BookSchema.parse({ name: 'b', audience: { profile: 'admin' }, groups: [] })).toThrow();
   });

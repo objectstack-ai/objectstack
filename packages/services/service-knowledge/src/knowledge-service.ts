@@ -59,6 +59,8 @@ import {
   buildLockKey,
   emptyBuildProgress,
   fencedCall,
+  RECONCILE_MAX_WAIT_MS,
+  RECONCILE_QUIET_MS,
   startBuildFence,
   type KnowledgeBuildFence,
   type KnowledgeBuildLock,
@@ -67,6 +69,9 @@ import {
   type KnowledgeBuildRecord,
   type KnowledgeBuildTrigger,
   type KnowledgeIndexReading,
+  type KnowledgeReconcileEntry,
+  type KnowledgeReconcileReport,
+  type KnowledgeReconcileRequest,
 } from './knowledge-build.js';
 
 /**
@@ -193,8 +198,14 @@ export class KnowledgeService implements IKnowledgeService {
   private readonly freshnessRepairs = new Set<string>();
   /** The last build of each source on this node (`knowledge-build.ts`), by index key. */
   private readonly builds = new Map<string, KnowledgeBuildRecord>();
-  /** Set by {@link stopBuilds}: the boot pass starts no further build. */
+  /** Set by {@link stopBuilds}: the boot pass and the reconcile start no further build. */
   private buildsStopped = false;
+  /** Sources the reconcile has said, once, it cannot walk because their store lists no documents (by index key). */
+  private readonly reconcileUnlistedReported = new Set<string>();
+  /** The reconcile each predicate write asked for, pending its quiet period ({@link requestReconcile}), by index key. */
+  private readonly pendingReconciles = new Map<string, { timer: ReturnType<typeof setTimeout>; firstAt: number }>();
+  /** The tail of the reconcile passes on this node: one pass runs at a time ({@link reconcileSources}). */
+  private reconcileTail: Promise<void> = Promise.resolve();
   /** Told after the set of registered sources changed ({@link onSourcesChanged}). */
   private readonly sourceListeners = new Set<() => void>();
 
@@ -390,6 +401,8 @@ export class KnowledgeService implements IKnowledgeService {
     this.registry.remove(entry.key);
     this.builds.delete(entry.key);
     this.whereUnenforceableReported.delete(entry.key);
+    this.reconcileUnlistedReported.delete(entry.key);
+    this.cancelPendingReconcile(entry.key);
     this.sourcesChanged();
   }
 
@@ -1172,8 +1185,9 @@ export class KnowledgeService implements IKnowledgeService {
    * - The lock held by another node, or not answering, starts nothing
    *   (`not-run`).
    * - A `boot` or `reload` build re-reads the adapter once it holds the lock
-   *   and builds only when a build is still due; an `operator` build always
-   *   walks.
+   *   and builds only when a build is still due; an `operator` or `reconcile`
+   *   build always walks (the reconcile's walk is what keeps a current index
+   *   correct: it skips what is unchanged and purges what is stale).
    * - The walk is {@link reindexSource} with no `limit` and no `dryRun`: a
    *   complete build, with `beginBuild` and `completeBuild`.
    * - The walk runs under the build's fence (`knowledge-build.ts`): a lost
@@ -1263,7 +1277,7 @@ export class KnowledgeService implements IKnowledgeService {
       },
     });
     try {
-      if (opts.trigger !== 'operator') {
+      if (opts.trigger === 'boot' || opts.trigger === 'reload') {
         const reading = await this.readIndexStateOf(entry);
         if (!reading.due) {
           const message = `nothing to build once the lock was held: ${reading.detail}`;
@@ -1296,7 +1310,7 @@ export class KnowledgeService implements IKnowledgeService {
       if ('stop' in raced) {
         logger?.warn(
           `${label} was cancelled: ${raced.stop.message} The adapter keeps what it held; ` +
-            'the next boot or an operator rebuild builds again.',
+            'the next reconcile, boot or operator rebuild builds again.',
         );
         return finish(raced.stop.reason, raced.stop.message);
       }
@@ -1315,7 +1329,7 @@ export class KnowledgeService implements IKnowledgeService {
       if (!result.ok) {
         logger?.warn(
           `${label} did not finish (${totals}): ${result.message ?? 'no reason given'} ` +
-            'The adapter keeps what it held; the next boot or an operator rebuild builds again.',
+            'The adapter keeps what it held; the next reconcile, boot or operator rebuild builds again.',
         );
         return finish(stop?.reason ?? 'failed', result.message, result);
       }
@@ -1323,7 +1337,7 @@ export class KnowledgeService implements IKnowledgeService {
       return finish('done', result.message, result);
     } catch (err) {
       const message = `the build threw: ${operatorText(err)}`;
-      logger?.warn(`${label} did not finish: ${message} The adapter keeps what it held; the next boot or an operator rebuild builds again.`);
+      logger?.warn(`${label} did not finish: ${message} The adapter keeps what it held; the next reconcile, boot or operator rebuild builds again.`);
       return finish('failed', message);
     } finally {
       fence.close();
@@ -1345,7 +1359,9 @@ export class KnowledgeService implements IKnowledgeService {
    * trigger `boot`). A source with `refresh.onRecordChange: false` is left
    * alone — an external indexer owns its index — and so is one whose state
    * builds nothing; a state that cannot be read or seen is logged at `warn`,
-   * once. Resolves when the pass is done; never rejects. Run in the
+   * once. A source whose adapter is not mounted is skipped without a line:
+   * {@link reportUnmountedAdapters} names it at boot, so it is said once.
+   * Resolves when the pass is done; never rejects. Run in the
    * background by `KnowledgeServicePlugin`, so the boot never waits for it.
    */
   async buildSourcesAtBoot(): Promise<void> {
@@ -1383,6 +1399,11 @@ export class KnowledgeService implements IKnowledgeService {
         logger?.debug?.(`[knowledge] source '${entry.face}': refresh.onRecordChange is false, so an external indexer owns its index; it is not built ${when}.`);
         return;
       }
+      // A source whose adapter is not mounted is named once at boot, at
+      // `error`, by the boot's reading (`reportUnmountedAdapters`); the pass
+      // adds no second line for it. On reload no reading runs, so the line
+      // below is the one that names it.
+      if (trigger === 'boot' && !this.adapters.has(entry.handed.adapter)) return;
       const reading = await this.readIndexStateOf(entry);
       if (reading.due) {
         logger?.info?.(`[knowledge] source '${entry.face}' is built now: ${reading.detail}`);
@@ -1403,9 +1424,222 @@ export class KnowledgeService implements IKnowledgeService {
     }
   }
 
-  /** Stop the boot pass from starting another build. A build already walking runs to its end. */
+  /**
+   * Stop the boot pass and the reconcile from starting another build, and
+   * drop every reconcile a predicate write asked for that has not started. A
+   * build already walking runs to its end.
+   */
   stopBuilds(): void {
     this.buildsStopped = true;
+    for (const key of [...this.pendingReconciles.keys()]) this.cancelPendingReconcile(key);
+  }
+
+  // ── The reconcile (ADR-0161 K1, K3 item 3) ───────────────────────
+
+  /**
+   * Reconcile the registered sources: walk each one the reconcile covers,
+   * completely, so its index ends equal to its source (ADR-0161 K1: "Events
+   * keep an index fresh; a reconcile pass keeps it correct").
+   *
+   * The walk is the complete build ({@link rebuildSource}, trigger
+   * `reconcile`): the same cluster lease and fence, the same skip of what the
+   * store holds unchanged, the same purge of what it holds stale and the same
+   * `completeBuild`. Nothing else walks or purges. So a reconcile writes the
+   * documents of rows inserted or changed since the index last saw them (a
+   * lost event, a sync that failed, a row changed while the embedder was
+   * down), and removes those of rows deleted or moved out of `where` (a
+   * predicate write, an insert that rolled back) — and embeds nothing for a
+   * row whose document is unchanged.
+   *
+   * Which sources it walks: an `object` source whose `refresh.onRecordChange`
+   * is not `false` (an external indexer owns that index), with a data engine
+   * bound, on an adapter that has `listDocuments`. An adapter without it can
+   * neither skip nor purge, so a walk would re-embed every document and remove
+   * nothing: the source is left alone, said once per source at `warn`, naming
+   * the operator's rebuild.
+   *
+   * It is the third moment the service reads a source's index state
+   * ({@link readIndexState}), beside the boot and a source reload: a source
+   * whose state reads `nothing`, `new-fingerprint`, `recipe-changed` or
+   * `no-recipe-hash` is built exactly as the boot pass would build it (a new
+   * generation for a new fingerprint), so a split or embedder setting saved
+   * while the server runs is picked up by the next reconcile. The build's
+   * start line says what it costs, as every build's does.
+   *
+   * Sources are walked one after another, and one pass runs at a time on a
+   * node (a second pass waits for the first). A build of the source another
+   * node holds is `not-run` here, as for every build. `sources` names the
+   * sources to consider (faces or bare names, as {@link rebuildSource} takes
+   * them); a name that resolves to no source is skipped. Never rejects; the
+   * report names every walk that did not finish.
+   */
+  reconcileSources(opts: { sources?: string[] } = {}): Promise<KnowledgeReconcileReport> {
+    const names = opts.sources;
+    return this.enqueueReconcile(() =>
+      names === undefined
+        ? this.registry.entries()
+        : names.map((name) => this.registry.resolve(name)).filter((e): e is KnowledgeSourceEntry => e !== undefined),
+    );
+  }
+
+  /** Queue one reconcile pass over the entries `select` answers when its turn comes. */
+  private enqueueReconcile(select: () => KnowledgeSourceEntry[]): Promise<KnowledgeReconcileReport> {
+    const pass = this.reconcileTail.then(() => this.reconcilePass(select));
+    this.reconcileTail = pass.then(() => undefined, () => undefined);
+    return pass;
+  }
+
+  /** One pass of {@link reconcileSources}; runs after the pass before it. */
+  private async reconcilePass(select: () => KnowledgeSourceEntry[]): Promise<KnowledgeReconcileReport> {
+    const startedAt = new Date().toISOString();
+    const report: KnowledgeReconcileReport = { startedAt, finishedAt: startedAt, sources: [], unfinished: [] };
+    let entries: KnowledgeSourceEntry[];
+    try {
+      entries = select();
+    } catch (err) {
+      this.options.logger?.warn(`[knowledge] the reconcile could not list the sources (${operatorText(err)}); none was reconciled.`);
+      report.unfinished.push({ sourceId: '*', status: 'failed', message: `the sources could not be listed (${operatorText(err)})` });
+      report.finishedAt = new Date().toISOString();
+      return report;
+    }
+    for (const entry of entries) {
+      if (this.buildsStopped) break;
+      // A source removed while the pass ran is not walked.
+      if (this.registry.byIndexKey(entry.key) !== entry) continue;
+      const done = await this.reconcileOf(entry);
+      report.sources.push(done);
+      const status = done.record?.status;
+      if (status === 'failed' || status === 'lease-lost' || status === 'timed-out') {
+        report.unfinished.push({ sourceId: entry.face, status, ...(done.record?.message === undefined ? {} : { message: done.record.message }) });
+      }
+    }
+    report.finishedAt = new Date().toISOString();
+    return report;
+  }
+
+  /** One source of a reconcile pass. Never rejects. */
+  private async reconcileOf(entry: KnowledgeSourceEntry): Promise<KnowledgeReconcileEntry> {
+    const logger = this.options.logger;
+    const left = (why: string): KnowledgeReconcileEntry => ({ sourceId: entry.face, left: why });
+    try {
+      const why = this.reconcileExclusion(entry);
+      if (why !== undefined) {
+        if (why.unlisted) {
+          if (!this.reconcileUnlistedReported.has(entry.key)) {
+            this.reconcileUnlistedReported.add(entry.key);
+            logger?.warn(`[knowledge] source '${entry.face}' is not reconciled: ${why.text}`);
+          }
+        } else {
+          logger?.debug?.(`[knowledge] source '${entry.face}' is not reconciled: ${why.text}`);
+        }
+        return left(why.text);
+      }
+      const reading = await this.readIndexStateOf(entry);
+      logger?.info?.(
+        reading.due
+          ? `[knowledge] source '${entry.face}' is built by the reconcile now: ${reading.detail}`
+          : `[knowledge] source '${entry.face}' is reconciled now (${reading.state}): ${reading.detail}`,
+      );
+      return { sourceId: entry.face, record: await this.rebuildOf(entry, { trigger: 'reconcile' }) };
+    } catch (err) {
+      const message = `the reconcile failed for it (${operatorText(err)}).`;
+      logger?.warn(`[knowledge] source '${entry.face}': ${message}`);
+      const now = new Date().toISOString();
+      return {
+        sourceId: entry.face,
+        record: { sourceId: entry.face, trigger: 'reconcile', status: 'failed', startedAt: now, finishedAt: now, progress: emptyBuildProgress(), message },
+      };
+    }
+  }
+
+  /**
+   * Why the reconcile does not walk `entry`, or `undefined` when it does.
+   * `unlisted` marks the one exclusion said at `warn`: a store that lists no
+   * documents. An adapter that is not mounted is walked, so its build fails
+   * and names it.
+   */
+  private reconcileExclusion(entry: KnowledgeSourceEntry): { text: string; unlisted: boolean } | undefined {
+    if ((entry.authored.refresh?.onRecordChange ?? true) === false) {
+      return { text: 'refresh.onRecordChange is false, so an external indexer owns its index.', unlisted: false };
+    }
+    if (!this.options.dataEngine) {
+      return { text: 'no data engine is bound, so the source cannot be walked.', unlisted: false };
+    }
+    const adapter = this.adapters.get(entry.authored.adapter);
+    if (adapter && typeof adapter.listDocuments !== 'function') {
+      return {
+        text:
+          `its adapter '${adapter.id}' does not list its documents (no listDocuments), so a walk could neither skip ` +
+          'an unchanged document nor purge a stale one: it would send every document to the embedding provider again ' +
+          'and remove nothing. Rows deleted or changed without an event stay as they are in its index until an ' +
+          'operator rebuild (os knowledge rebuild).',
+        unlisted: true,
+      };
+    }
+    return undefined;
+  }
+
+  /**
+   * Ask for a reconcile of every source over `object` that the reconcile
+   * covers ({@link reconcileSources}): what a predicate write (`multi: true`)
+   * asks, since its aggregate event names no record. One request per source
+   * however many predicate writes arrive: the reconcile starts once no further
+   * request for the source arrived for {@link RECONCILE_QUIET_MS}, and at the
+   * latest {@link RECONCILE_MAX_WAIT_MS} after the first one it gathers. A
+   * reconcile that comes due while a build of the source is running waits one
+   * more quiet period, so the walk it starts begins after the write. Answers
+   * the sources asked for and those over the object no reconcile can repair
+   * (no `listDocuments`, or no data engine); a source an external indexer
+   * owns is in neither.
+   */
+  requestReconcile(object: string): KnowledgeReconcileRequest {
+    const request: KnowledgeReconcileRequest = { scheduled: [], unreconcilable: [] };
+    if (this.buildsStopped) return request;
+    for (const entry of this.registry.entries()) {
+      if (entry.handed.source.object !== object) continue;
+      const why = this.reconcileExclusion(entry);
+      if (why !== undefined) {
+        // An external indexer's index is not this service's to call stale.
+        if (why.unlisted || !this.options.dataEngine) request.unreconcilable.push(entry.face);
+        continue;
+      }
+      this.armReconcile(entry.key, Date.now());
+      request.scheduled.push(entry.face);
+    }
+    return request;
+  }
+
+  /** (Re)arm the pending reconcile of the source under `key`; `now` is when the request arrived. */
+  private armReconcile(key: string, now: number): void {
+    const pending = this.pendingReconciles.get(key);
+    const firstAt = pending?.firstAt ?? now;
+    if (pending) clearTimeout(pending.timer);
+    const wait = Math.max(0, Math.min(RECONCILE_QUIET_MS, firstAt + RECONCILE_MAX_WAIT_MS - now));
+    const timer = setTimeout(() => {
+      this.pendingReconciles.delete(key);
+      const entry = this.registry.byIndexKey(key);
+      if (!entry || this.buildsStopped) return;
+      // A build of the source running now may have read past the rows the
+      // write changed: wait for it, then walk again.
+      if (this.builds.get(key)?.status === 'running') {
+        this.armReconcile(key, Date.now());
+        return;
+      }
+      void this.enqueueReconcile(() => {
+        const current = this.registry.byIndexKey(key);
+        return current === undefined ? [] : [current];
+      }).catch(() => undefined);
+    }, wait);
+    (timer as { unref?: () => void }).unref?.();
+    this.pendingReconciles.set(key, { timer, firstAt });
+  }
+
+  /** Drop the pending reconcile of the source under `key`, if any. */
+  private cancelPendingReconcile(key: string): void {
+    const pending = this.pendingReconciles.get(key);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingReconciles.delete(key);
   }
 
   // ── The `search_knowledge` AI tool (ADR-0149 D2) ──────────────────
@@ -1808,7 +2042,9 @@ export class KnowledgeService implements IKnowledgeService {
    * in system context, in this process and NOT awaited — the search that found
    * it answers without it. Single-flight per document, and at most once per
    * document until a later search finds its hash matching. Never throws into
-   * the search. Moves to the scheduled reconcile's queue when that lands.
+   * the search. The scheduled reconcile does not take it over: the reconcile
+   * walks whole sources, and this repairs one document now. It moves onto the
+   * queue with the record-change sync, whose path it is.
    *
    * A source with `refresh.onRecordChange: false` is never repaired: it is
    * asked through {@link objectSourcesFor}, the one predicate that keeps the
@@ -2932,8 +3168,8 @@ export interface PurgeDocumentsOutcome {
  * object schema does not say which ids are numeric. Platform-minted ids are
  * text on every driver, so the limit needs a caller-supplied numeric id.
  *
- * The caller decides when a purge may run at all (a complete reindex walk;
- * the scheduled reconcile reuses this function) and computes the candidates.
+ * The caller decides when a purge may run at all (a complete reindex walk,
+ * which is also what the reconcile runs) and computes the candidates.
  */
 export async function purgeDocuments(input: PurgeDocumentsInput): Promise<PurgeDocumentsOutcome> {
   const { source, objSource, adapter, engine } = input;

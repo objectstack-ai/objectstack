@@ -74,6 +74,14 @@ export interface UseAgentsReturn {
   isLoading: boolean;
   error: Error | undefined;
   refetch: () => void;
+  /**
+   * True once a catalog read for the current `apiBase` has answered or failed,
+   * in this mount; false while disabled and before the first answer. Unlike
+   * `isLoading`, it cannot be missed: a read the module cache answers at once
+   * sets `isLoading` true and false in one render, so no render ever sees it
+   * loading, while `settled` turns true in that same render.
+   */
+  settled: boolean;
 }
 
 interface RawAgent {
@@ -357,6 +365,8 @@ export function useAgents(options: UseAgentsOptions = {}): UseAgentsReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | undefined>(undefined);
   const [reloadToken, setReloadToken] = useState(0);
+  // The `apiBase` whose read last answered or failed (`settled`).
+  const [settledFor, setSettledFor] = useState<string | undefined>(undefined);
 
   // Stash latest headers in a ref so consumers can pass inline objects without
   // triggering a refetch on every render.
@@ -389,7 +399,9 @@ export function useAgents(options: UseAgentsOptions = {}): UseAgentsReturn {
           setAgents(fallback);
         })
         .finally(() => {
-          if (!cancelled) setIsLoading(false);
+          if (cancelled) return;
+          setIsLoading(false);
+          setSettledFor(apiBase);
         });
     });
 
@@ -403,5 +415,5 @@ export function useAgents(options: UseAgentsOptions = {}): UseAgentsReturn {
 
   const refetch = useCallback(() => setReloadToken((n) => n + 1), []);
 
-  return { agents, isLoading, error, refetch };
+  return { agents, isLoading, error, refetch, settled: enabled && !!apiBase && settledFor === apiBase };
 }

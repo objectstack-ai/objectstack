@@ -2335,6 +2335,13 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   private automation?: ApprovalResumeSurface;
   private messaging?: ApprovalMessagingSurface;
   private publicBaseUrl: string;
+  /**
+   * [#37808] Where {@link inspectStrandedRequests}'s walk over every decided
+   * request resumes: the last request id the previous sweep read, `null` to
+   * start from the first. Per process, never persisted: a restart starts the
+   * walk again, which costs a repeat, never a miss.
+   */
+  private strandScanCursor: string | null = null;
   private readonly getConsoleUrl?: ConsolePageComposer;
   private tenancyPosture?: () => string | undefined;
   private fieldVisibility?: FieldVisibilitySource;
@@ -6898,9 +6905,10 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * Told nothing:
    *  - a submitter who made the decision themselves — they already know;
    *  - anyone, when the decision ENDS A STEP and not the process: a resume that
-   *    opened a further approval step on the same run (the next approval node
-   *    down the edge this decision took) leaves the outcome to that step's
-   *    decision. Measured after the resume, never read off the graph, because a
+   *    opened a further approval step on the run that carries the request's
+   *    record (the next approval node down the edge this decision took, in the
+   *    same run or, past a `subflow` child, in its parent; #37806) leaves the
+   *    outcome to that step's decision. Measured after the resume, never read off the graph, because a
    *    decision gateway can skip a later step and only the run knows whether it
    *    did. A co-sign vote that leaves the request pending never gets here;
    *  - anyone, for the SLA sweep's auto-decision ({@link ApprovalService.decideAndResume}).
@@ -6919,8 +6927,24 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     if (request.flow_run_id) {
       let nextStepOpened: boolean;
       try {
+        // [#37806] Across the run that carries the record (ADR-0162 Execution
+        // item 7), never the decided request's own run alone: a step decided
+        // in a `subflow` child hands the next step to its parent, which opens
+        // it under the PARENT's run id. The child inherits the parent's record
+        // run, so one probe sees both. A `map` item whose item is a record
+        // carries its own, so its outcome does not wait for the next item: "over"
+        // is judged for each record. The served row does not carry the column,
+        // so it is read off the stored row; a request opened before requests
+        // recorded it falls back to its own run, as before.
+        const own = await this.engine.find('sys_approval_request', {
+          where: { id: request.id }, fields: ['record_run_id'], limit: 1, context: SYSTEM_CTX,
+        });
+        const recordRunId = Array.isArray(own) ? own[0]?.record_run_id : undefined;
+        const where = recordRunId
+          ? { record_run_id: String(recordRunId), status: 'pending' }
+          : { flow_run_id: request.flow_run_id, status: 'pending' };
         const next = await this.engine.find('sys_approval_request', {
-          where: { flow_run_id: request.flow_run_id, status: 'pending' }, limit: 1, context: SYSTEM_CTX,
+          where, fields: ['id'], limit: 1, context: SYSTEM_CTX,
         });
         nextStepOpened = Array.isArray(next) && next.length > 0;
       } catch (err: any) {
@@ -8749,6 +8773,11 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * at which step, and what the mirrored status field on the business record
    * still says. Whether to re-run the downstream actions or re-open the
    * approval is a judgement call this cannot make.
+   *
+   * **Which rows one sweep reads (#37808).** Two ordered windows of at most
+   * `limit` (default 500) each: the newest decisions, and the next page of a
+   * walk over every decided request by id (`strandScanCursor`). `scanned`
+   * counts the distinct rows of both. See the body for why that misses no row.
    */
   async inspectStrandedRequests(options?: { limit?: number }): Promise<{
     scanned: number;
@@ -8772,12 +8801,37 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     if (typeof this.automation?.hasSuspendedRun !== 'function') return empty;
     if (typeof this.automation?.getRun !== 'function') return empty;
 
+    // [#37808] Two windows of at most `limit` rows each, both ordered by the
+    // store, never an unordered page of every decided request (which, past
+    // `limit` rows, is an arbitrary page a new strand may never fall into):
+    //  - the NEWEST decisions, by `updated_at` (the `status, updated_at`
+    //    index): a decision whose run could not advance is reported on the
+    //    next sweep;
+    //  - the next page of a WALK over every decided request by id, resumed
+    //    from where the previous sweep stopped and restarted once it runs
+    //    out. A keyset on the primary key skips no row (an id never changes,
+    //    and a row that leaves the set moves no other), so every decided
+    //    request is read at least once every ceil(decided / limit) sweeps,
+    //    whatever the newest window misses: more than `limit` decisions
+    //    between two sweeps, or a run that failed after its decision.
     const limit = options?.limit ?? 500;
+    const strandable = { $in: [...STRANDABLE_REQUEST_STATUSES] };
     let rows: any[] = [];
     try {
-      rows = await this.engine.find('sys_approval_request', {
-        where: { status: { $in: [...STRANDABLE_REQUEST_STATUSES] } }, limit, context: SYSTEM_CTX,
+      const newest: any[] = await this.engine.find('sys_approval_request', {
+        where: { status: strandable },
+        orderBy: [{ field: 'updated_at', order: 'desc' }, { field: 'id', order: 'desc' }],
+        limit, context: SYSTEM_CTX,
       }) ?? [];
+      const cursor = this.strandScanCursor;
+      const walked: any[] = await this.engine.find('sys_approval_request', {
+        where: cursor ? { status: strandable, id: { $gt: cursor } } : { status: strandable },
+        orderBy: [{ field: 'id', order: 'asc' }],
+        limit, context: SYSTEM_CTX,
+      }) ?? [];
+      this.strandScanCursor = walked.length < limit ? null : String(walked[walked.length - 1].id);
+      const seen = new Set(newest.map((r) => String(r?.id)));
+      rows = [...newest, ...walked.filter((r) => !seen.has(String(r?.id)))];
     } catch (err: any) {
       this.logger?.warn?.('[approvals] stranded-request scan failed to list requests', {
         error: err?.message ?? String(err),

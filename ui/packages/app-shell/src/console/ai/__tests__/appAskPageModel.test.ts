@@ -15,6 +15,8 @@ import {
   conversationBelongsToAskPage,
   findAiChatNavEntry,
   readAiChatPageCopy,
+  recentAskPageConversations,
+  MAX_ASK_RECENT,
 } from '../appAskPageModel';
 import { componentRefToUrlSegments } from '../../../services/componentRegistry';
 import { isAppAskPagePath } from '../../../layout/consoleRoutePaths';
@@ -109,5 +111,34 @@ describe('isAppAskPagePath', () => {
     expect(isAppAskPagePath('/apps/brightrule/component/metadata/resource')).toBe(false);
     expect(isAppAskPagePath('/apps/brightrule/policy')).toBe(false);
     expect(isAppAskPagePath('/ai')).toBe(false);
+  });
+});
+
+describe('recentAskPageConversations (objectstack#37790)', () => {
+  const PKG = 'com.acme.policy';
+  const ours = (id: string) => ({ id, metadata: { activePackageId: PKG } });
+
+  it('keeps only the rows this app\'s page created, in the order given', () => {
+    const rows = [
+      ours('a'),
+      { id: 'other-app', metadata: { activePackageId: 'com.other' } },
+      { id: 'drawer' },
+      { id: 'drawer-meta', metadata: { surface: 'drawer' } },
+      ours('b'),
+    ];
+    expect(recentAskPageConversations(rows, PKG).map((r) => r.id)).toEqual(['a', 'b']);
+  });
+
+  it('lists at most the newest few', () => {
+    const rows = Array.from({ length: MAX_ASK_RECENT + 3 }, (_, i) => ours(`c${i}`));
+    const recent = recentAskPageConversations(rows, PKG);
+    expect(recent).toHaveLength(MAX_ASK_RECENT);
+    expect(recent[0].id).toBe('c0');
+  });
+
+  it('is empty when no row is this app\'s', () => {
+    const drawerOnly: Array<{ id: string; metadata?: Record<string, unknown> }> = [{ id: 'drawer' }];
+    expect(recentAskPageConversations(drawerOnly, PKG)).toEqual([]);
+    expect(recentAskPageConversations([], PKG)).toEqual([]);
   });
 });

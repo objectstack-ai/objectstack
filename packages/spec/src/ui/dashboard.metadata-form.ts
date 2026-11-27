@@ -148,7 +148,8 @@ export const dashboardForm = defineMetadataForm({
     {
       // The audience gate (#34908, ruling 7103739693 letter B): the existing,
       // server-enforced `requiredPermissions`, given an authoring row — the
-      // list view's row in `view.metadata-form.ts`, worded for a dashboard.
+      // list view's row in `view.metadata-form.ts` (the same `ref-multi:capability`
+      // picker and position preview), worded for a dashboard.
       label: 'Access',
       description: 'Who can see this dashboard.',
       collapsible: true,
@@ -156,7 +157,7 @@ export const dashboardForm = defineMetadataForm({
       fields: [
         {
           field: 'requiredPermissions',
-          widget: 'string-tags',
+          widget: 'ref-multi:capability',
           helpText: 'Who sees this dashboard: the capabilities a person must hold, every one listed. Permission sets '
             + 'grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and '
             + 'everyone sees this dashboard. To show it to several groups, pick one capability and grant it to each '

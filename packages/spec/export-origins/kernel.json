@@ -171,7 +171,7 @@
     "ListPackagesResponseParsed": "src/kernel/package-registry.zod.ts#ListPackagesResponseParsed (type)",
     "ListPackagesResponseSchema": "src/kernel/package-registry.zod.ts#ListPackagesResponseSchema (const)",
     "MANIFEST_ID_EXAMPLES": "src/kernel/manifest.zod.ts#MANIFEST_ID_EXAMPLES (const)",
-    "MANIFEST_ID_PATTERN": "src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN (const)",
+    "MANIFEST_ID_PATTERN": "src/kernel/address-grammar.ts#MANIFEST_ID_PATTERN (const)",
     "MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH": "src/kernel/customization-package.ts#MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH (const)",
     "METADATA_READ_DECORATIONS": "src/kernel/metadata-read-decorations.ts#METADATA_READ_DECORATIONS (const)",
     "ManifestPermissions": "src/kernel/manifest.zod.ts#ManifestPermissions (type)",

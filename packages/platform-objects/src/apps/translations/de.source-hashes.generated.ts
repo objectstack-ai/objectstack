@@ -128,7 +128,7 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.view.fields.kanban.label": "dd95c452aa71459e",
   "metadataForms.view.fields.name.label": "5274417ff1ccaf01",
   "metadataForms.view.fields.navigation.label": "51cd9fc784a9643f",
-  "metadataForms.view.fields.requiredPermissions.helpText": "c4599be2ffa06c02",
+  "metadataForms.view.fields.requiredPermissions.helpText": "824ea3479e2e607a",
   "metadataForms.view.fields.requiredPermissions.label": "a47b2168b71f5e68",
   "metadataForms.view.fields.userActions.filter.label": "802895ec427fc6af",
   "metadataForms.view.fields.userFilters.element.label": "e480e4fe57239c98",

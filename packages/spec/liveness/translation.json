@@ -499,6 +499,26 @@
         }
       }
     },
+    "packages": {
+      "status": "live",
+      "verifiedAt": "2026-11-27",
+      "evidence": "ui/packages/i18n/src/useObjectLabel.ts#packageAttr (`packages.<manifest id>.name` / `.description`, read by direct property access across the language chain); ui/packages/app-shell/src/views/metadata-admin/PackagesPage.tsx#PackagesPage (Setup's package list draws each row by `packageName`); ui/packages/app-shell/src/views/studio-design/StudioPackageSwitcher.tsx#studioSwitcherRows (Studio's package switcher names an app-less package by it)",
+      "note": "Seeded LIVE with its readers in the same change (the mappings precedent), objectstack#35513. The served translation document carries the group (`ServedTranslationDataSchema` spreads the per-app shape), and the console reads it client-side: a list row keeps `manifest.name` as authored, so the edit dialog that prefills from the listed manifest never saves a translated name back. Keyed by `manifest.id`, which carries dots, hence direct property access rather than a dot-separated i18next key.",
+      "children": {
+        "name": {
+          "status": "live",
+          "verifiedAt": "2026-11-27",
+          "evidence": "ui/packages/i18n/src/useObjectLabel.ts#packageName (`packages.<manifest id>.name`, else `manifest.name`)",
+          "note": "Overlays the listed package's `manifest.name` where a reader sees the package."
+        },
+        "description": {
+          "status": "live",
+          "verifiedAt": "2026-11-27",
+          "evidence": "ui/packages/i18n/src/useObjectLabel.ts#packageDescription (`packages.<manifest id>.description`, else `manifest.description`)",
+          "note": "Overlays the package's `manifest.description` for a reader."
+        }
+      }
+    },
     "metadataForms": {
       "status": "live",
       "verifiedAt": "2026-08-28",

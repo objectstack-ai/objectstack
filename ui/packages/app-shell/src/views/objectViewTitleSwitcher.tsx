@@ -57,6 +57,7 @@ import type { buildViewTabs } from './objectViewTabs.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
 import { FOOTER_ITEM, ObjectViewSwitcherMenu, type SwitcherCreateOptions } from './objectViewSwitcherMenu.js';
 import { useCreateViewInPlace } from './objectViewViewCrud.js';
+import type { CapabilityAudience } from './capabilityAudience.js';
 
 type TFn = ReturnType<typeof useObjectTranslation>['t'];
 
@@ -301,6 +302,16 @@ export function ObjectViewTitleSwitcher({
     );
 }
 
+/**
+ * objectstack#34908 — the open view's audience gate, the create card's
+ * starting pick: a new shared view starts from the open one, gate included.
+ * Read where a view carries it — its body, or a view item's `config`.
+ */
+function requiredPermissionsOf(view: Record<string, any> | undefined): string[] {
+    const own = view?.requiredPermissions ?? view?.config?.requiredPermissions;
+    return Array.isArray(own) ? own.filter((p: unknown): p is string => typeof p === 'string' && p.trim() !== '') : [];
+}
+
 /** The field names an open view's columns list (a name, or `{ field }`). */
 function shownFieldsOf(view: Record<string, any> | undefined): string[] {
     const columns = Array.isArray(view?.columns) ? view.columns : [];
@@ -380,6 +391,8 @@ export function useObjectViewTitleSwitcher({
         canCreatePersonal: boolean;
         canCreateShared: boolean;
         hasUnsavedConditions: boolean;
+        /** objectstack#34908 — the audience catalog for a shared view's 「Who sees this view」. Absent ⇒ no picker. */
+        loadAudience?: () => Promise<CapabilityAudience>;
     };
     onRenamePersonalView?: (viewId: string) => void;
     onDeletePersonalView?: (viewId: string) => void;
@@ -402,6 +415,8 @@ export function useObjectViewTitleSwitcher({
             hasUnsavedConditions: create.hasUnsavedConditions,
             shownFields: shownFieldsOf(create.activeView),
             onCreate: createInPlace,
+            loadAudience: create.canCreateShared ? create.loadAudience : undefined,
+            initialRequiredPermissions: requiredPermissionsOf(create.activeView),
         }
         : undefined;
     // objectui#12528 — the view's description is shown once. It rides on the
