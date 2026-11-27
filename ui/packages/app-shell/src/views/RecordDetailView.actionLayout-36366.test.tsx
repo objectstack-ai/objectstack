@@ -184,14 +184,14 @@ describe.each([
   ['the synthesized default page, in the side preview', false],
   ['an authored page:header with placedActions: true', true],
 ] as const)('#36366 record header pins: %s', (_face, authored) => {
-  it('CONTROL — no pins: the header draws as before (record_header inline by order, record_more in ⋯)', async () => {
+  it('CONTROL — no pins: the header draws as before (record_page inline by order, folded in ⋯)', async () => {
     mount(undefined, authored);
     const { inline, menu } = await headerFaces();
     expect(inline).toEqual(['Convert', 'Mark Won', 'Share']);
     expect(menu).toEqual(['Log Call']);
   });
 
-  it('the pinned actions are the buttons, in pin order (a record_more one too); the rest are in ⋯', async () => {
+  it('the pinned actions are the buttons, in pin order (a folded one too); the rest are in ⋯', async () => {
     mount({ record: { pinned: ['log_call', 'share'] } }, authored);
     const { inline, menu } = await headerFaces();
     expect(inline).toEqual(['Log Call', 'Share']);

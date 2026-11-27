@@ -91,7 +91,7 @@ describe('PageHeaderRenderer — actions slot', () => {
     expect(screen.getByRole('button', { name: /Convert Lead/i })).toBeTruthy();
   });
 
-  it('skips actions whose locations exclude record_header', () => {
+  it('skips actions whose locations exclude record_page', () => {
     renderHeader({
       type: 'page:header',
       actions: [
@@ -544,14 +544,14 @@ describe('PageHeaderRenderer — maxVisible contract domain (objectui#5006)', ()
   });
 });
 
-// objectui#3391 — record dispatch shape. A `record_header` / `record_more`
+// objectui#3391 — record dispatch shape. A `record` / `record_page`
 // action must reach the runtime in the SAME shape ObjectGrid row actions and
 // DeclaredActionsBar dispatch: the record stashed under `params._rowRecord`
 // (the api handler's `{field}` URL-interpolation + record-id source) and a
 // spec-shaped `params` ARRAY surfaced as `actionParams`. Before this, a
 // `type:'api'` header action targeting `/api/v1/data/:object/{id}` was sent
 // with the literal `{id}` (`%7Bid%7D` on the wire) while the same declaration
-// interpolated fine from `list_item`.
+// interpolated fine from `record_row`.
 describe('PageHeaderRenderer — record dispatch shape (objectui#3391)', () => {
   function renderWithApiHandler(opts: {
     action: any;
@@ -698,8 +698,8 @@ describe('PageHeaderRenderer — record dispatch shape (objectui#3391)', () => {
 // per (action name, predicate) pair via a module-level Set, so every test
 // below uses unique action names/predicates to stay independent.
 describe('PageHeaderRenderer — #2358 action visibility traps', () => {
-  describe('trap 2: record_more routes to the ⋯ overflow menu', () => {
-    it('renders a record_more-only action in the overflow, never inline', () => {
+  describe('trap 2: a folded action (action:menu) routes to the ⋯ overflow menu', () => {
+    it('renders a folded action in the overflow, never inline', () => {
       renderHeader(
         {
           type: 'page:header',
@@ -710,14 +710,14 @@ describe('PageHeaderRenderer — #2358 action visibility traps', () => {
         },
         { record: { id: '1' } },
       );
-      // The plain action stays inline; the record_more action must NOT get
+      // The plain action stays inline; the folded action must NOT get
       // an inline button — it lives inside the ⋯ dropdown (trigger present).
       expect(screen.getByRole('button', { name: /Convert Lead/i })).toBeTruthy();
       expect(screen.queryByRole('button', { name: /Export PDF/i })).toBeNull();
       expect(screen.getByRole('button', { name: /More actions/i })).toBeTruthy();
     });
 
-    it('renders the ⋯ menu even when a record_more action is the ONLY action', () => {
+    it('renders the ⋯ menu even when a folded action is the ONLY action', () => {
       renderHeader(
         {
           type: 'page:header',
@@ -731,7 +731,7 @@ describe('PageHeaderRenderer — #2358 action visibility traps', () => {
       expect(screen.getByRole('button', { name: /More actions/i })).toBeTruthy();
     });
 
-    it('still excludes locations that are neither record_header nor record_more', () => {
+    it('still excludes locations that are neither record nor record_page', () => {
       renderHeader(
         {
           type: 'page:header',

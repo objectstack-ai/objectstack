@@ -279,7 +279,7 @@ const SAMPLE_BY_INPUT: Readonly<Record<string, unknown>> = {
   //     the same record renders differently twice and the stability control
   //     (rightly) refuses to grade the probe. The header is not what this probe
   //     asks about.
-  //   - `record:quick_actions` reads `location || 'record_header'`,
+  //   - `record:quick_actions` reads `location || 'record_page'`,
   //     `align || 'end'`, `variant || 'default'`, `size || 'sm'`; the
   //     probe action is declared at the header location, and the generic
   //     samples (`'x'` for the two strings, the enum's first arm for the

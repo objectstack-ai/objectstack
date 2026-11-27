@@ -131,7 +131,7 @@ describe('resolveManagedByEmptyState', () => {
 
   /**
    * The toolbar half of "the page offers a create action": the same three
-   * questions `action:bar` and `action:button` ask of a `list_toolbar` action.
+   * questions `action:bar` and `action:button` ask of a `list` action.
    */
   describe('listToolbarDrawsAction (objectui#11687)', () => {
     const allowAll = () => true;

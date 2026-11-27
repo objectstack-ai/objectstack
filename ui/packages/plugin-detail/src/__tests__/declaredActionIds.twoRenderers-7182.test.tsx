@@ -23,8 +23,8 @@
  *
  * The population is the intersection the two filter chains treat identically
  * — `locations` (`list_only` renders on neither) and `requiredPermissions`
- * (`gated` is denied on both) — with no `order` and no `record_more`: the
- * header sorts by `order` and routes `record_more` into its overflow menu,
+ * (`gated` is denied on both) — with no `order` and no folded (`component: 'action:menu'`): the
+ * header sorts by `order` and routes folded (`component: 'action:menu'`) into its overflow menu,
  * neither of which the bar does, and those are pre-existing differences of
  * the two surfaces' chains, not of the array's meaning. The cross-surface
  * control (object render vs object render) is what proves the population is

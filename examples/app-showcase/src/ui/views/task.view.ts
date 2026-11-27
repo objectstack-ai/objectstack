@@ -131,12 +131,12 @@ export const TaskViews = defineView({
     // action NAMES rather than defs. Both cases the client has to handle are
     // present here on purpose:
     //
-    //   `showcase_recalc_estimate` — declared on the object at `record_more` /
-    //     `record_section`, i.e. NOT a `list_item` action, so nothing derives a
+    //   `showcase_recalc_estimate` — declared on the object at `record_page` (folded) /
+    //     `record_section`, i.e. NOT a `record_row` action, so nothing derives a
     //     def for it. The client must resolve the name against the object's
     //     actions or the entry is a dead menu item.
     //
-    //   `showcase_quick_view` — already a `list_item` action, so the client
+    //   `showcase_quick_view` — already a `record_row` action, so the client
     //     derives a def for it independently. Naming it here too must NOT
     //     produce a second, dead copy alongside the working one.
     //
@@ -179,7 +179,7 @@ export const TaskViews = defineView({
     //     (its flow runs the per-task recalculation for each). This is the "one zip for N devices"
     //     dispatch shape; results are all-or-nothing, no per-row retry.
     //
-    // None declares `list_toolbar`: a bulk action is not a toolbar action,
+    // None declares `list`: a bulk action is not a toolbar action,
     // it needs a selection. Naming it here is the whole declaration.
     bulk_actions: {
       label: 'Bulk Actions',

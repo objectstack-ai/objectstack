@@ -21,7 +21,7 @@ export const ConvertLeadAction = defineAction({
   // guard as a server-side backstop.
   //
   // The `has()` half guards the SPARSE action face (#8990): this action reaches
-  // `list_item`, where the bound record is the row the view's `$select`
+  // `record_row`, where the bound record is the row the view's `$select`
   // projected. Without it, a lead list that does not project `status` aborts
   // the predicate at key resolution (`No such key: status`) and the button
   // silently vanishes for every row. `has()` alone is the guard because the

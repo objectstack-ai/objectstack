@@ -54,7 +54,7 @@ export type _ActionBarLocationIsTheSpecs = Expect<Equal<ActionBarSchema['locatio
 export const _actionBarAccepted: ActionBarSchema = { type: 'action:bar', location: 'list', actions: [] };
 /** The same literal with the key misspelt is refused, which is what the missing signature buys. */
 // @ts-expect-error -- `locaton` is not a member of `ActionBarSchema`
-export const _actionBarRefused: ActionBarSchema = { type: 'action:bar', locaton: 'list_toolbar', actions: [] };
+export const _actionBarRefused: ActionBarSchema = { type: 'action:bar', locaton: 'list', actions: [] };
 
 /* ── object-chart isAnimationActive ──────────────────────────────────────── */
 

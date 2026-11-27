@@ -32,8 +32,8 @@
  *
  * `action:bar` filters its own set through `useCapabilityGate` before
  * `actionRendersAt` ever runs, and so do the other two surfaces this card names
- * (`page:header` for `record_header` / `record_more`, the grid's row menu for
- * `list_item`) — one shared hook exactly so the three cannot drift apart. An
+ * (`page:header` for `record` / `record_page`, the grid's row menu for
+ * `record_row`) — one shared hook exactly so the three cannot drift apart. An
  * action declaring a capability the viewer does not hold is filtered out, at
  * every location at once, with no error and no 4xx. That is the reported
  * symptom, and it is this gate rather than a dropped key.
@@ -67,7 +67,7 @@
  * ## Reverse verification — direction predicted before running
  *
  * Predicted, then observed (measurements recorded on the PR):
- *   • Deleting the `list_toolbar` gate's `objectDef.actions` read in
+ *   • Deleting the `list` gate's `objectDef.actions` read in
  *     `ObjectView.tsx` turns every presence case RED (A, D, E, G, I) and
  *     leaves every absence case GREEN (B, C, F, H) — an absence case asserts
  *     absence, which a deleted renderer supplies for the wrong reason. That
@@ -275,7 +275,7 @@ describe('objectui#7234 — object-declared actions reach the list toolbar', () 
     expect(toolbarButton()).toBeNull();
   });
 
-  it('C (control): the same action at record_header only is not on this toolbar', async () => {
+  it('C (control): the same action at record_page only is not on this toolbar', async () => {
     renderList(objectsWithActions([{ ...APPLY_TO_PEOPLE, locations: ['record_page'] }]));
     await settle();
     expect(toolbarButton()).toBeNull();

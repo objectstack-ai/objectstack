@@ -13,7 +13,7 @@
  * ## What this file pins, and why here
  *
  * "Only the record's manager sees this button" is the most common thing an
- * author asks a `record_header` action's `visible` to express, and it is
+ * author asks a `record_page` action's `visible` to express, and it is
  * written against a lookup field:
  *
  * ```yaml
@@ -146,7 +146,7 @@ function makeMetadata(objects: any[]) {
   } as any;
 }
 
-/** A declared `record_header` action, gated on `visible`. */
+/** A declared `record_page` action, gated on `visible`. */
 const headerAction = (name: string, visible: unknown) => ({
   name,
   label: name,

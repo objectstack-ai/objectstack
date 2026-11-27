@@ -79,7 +79,7 @@ export const SysMember = ObjectSchema.create({
       // move this page if it did. Looking for the tab order in
       // this directory finds nothing; it lives one directory over (#16270).
       // Declaration order is render order — the related-list toolbar bridge
-      // maps the child object's `list_toolbar` actions in array order
+      // maps the child object's `list` actions in array order
       // (objectui `RelatedRecordActionsBridge.deriveActions` →
       // `RelatedList`), so this sits left of `add_member`.
       //
@@ -302,7 +302,7 @@ export const SysMember = ObjectSchema.create({
       // then the feature gate are AND-composed onto it by the lowerings.
       // Owner only: better-auth refuses to SET the creator role unless the
       // caller holds it, whatever an admin's statements say.
-      // `has()` guards the SPARSE action face (#8990): this is a `list_item`
+      // `has()` guards the SPARSE action face (#8990): this is a `record_row`
       // action, so a member list that does not project `role` would abort the
       // predicate at key resolution and drop the button silently. `has()`
       // alone — the operand is a bare equality against a literal (see

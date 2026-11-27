@@ -21,8 +21,8 @@
  * | surface | where it renders |
  * |---|---|
  * | list toolbar | above the list — no record in scope |
- * | row kebab (`list_item`) | the `⋮` menu on each row |
- * | record header (`record_header` / `record_more`) | the detail page |
+ * | row kebab (`record_row`) | the `⋮` menu on each row |
+ * | record header (`record` / `record_page`) | the detail page |
  * | selection bar | after ticking rows, from the view's `bulkActions` |
  *
  * They have drifted before, in both directions: the selection bar ignored
@@ -96,7 +96,7 @@
  *    all evaluate on the record header and in its `⋯` overflow. Where the same
  *    action is also declared elsewhere it agrees: the row `⋮` menu matches the
  *    header on both specimens, and so does the selection bar for the six
- *    specimens the view names in `bulkActions`. `record_header` / `record_more`
+ *    specimens the view names in `bulkActions`. `record` / `record_page`
  *    hand the predicate to `evalRowPredicate` WHOLE, so the
  *    `{ dialect: 'cel' }` envelope `defineAction` normalizes to is routed to
  *    the canonical engine rather than flattened onto a dialect guess.
@@ -146,8 +146,12 @@ const echo = {
   capabilities: [],
 };
 
-/** The four record-scoped surfaces, so one action can be compared across them. */
-const RECORD_SURFACES = ['list_item', 'record_header', 'record_more'] as const;
+/**
+ * The record-scoped surfaces, so one action can be compared across them:
+ * `record` is the record page's header and each list row's menu
+ * (objectstack#36495 — formerly `record_row` + `record_page` + `record_more`).
+ */
+const RECORD_SURFACES = ['record'] as const;
 
 // ───────────────────────────────────────────────────────────────────────────
 // 1 — Surface parity: ONE predicate over a relation field, on every surface
@@ -251,8 +255,8 @@ export const ZooUserIdentityGateAction = defineAction({
  *
  * | surface | Specimen — Full | Specimen — Minimal |
  * |---|---|---|
- * | record header `⋯` (`record_more`) | OFFERED | absent |
- * | row `⋮` menu (`list_item`)        | OFFERED | absent |
+ * | record header `⋯` (`record`)      | OFFERED | absent |
+ * | row `⋮` menu (`record`)           | OFFERED | absent |
  *
  * ⚠️ The selection bar is deliberately NOT a row of that table: this action is
  * not named in either view's `bulkActions` (`field-zoo.view.ts`), so it never
@@ -298,7 +302,7 @@ export const ZooDialectSplitAction = defineAction({
 });
 
 /**
- * The toolbar twin. A `list_toolbar` action is evaluated with NO record in
+ * The toolbar twin. A `list` action is evaluated with NO record in
  * scope — there is no row it belongs to — so a record-scoped predicate here
  * would be an authoring error, not a demo. This one gates on identity alone,
  * which is the only kind of predicate the toolbar can honestly answer.

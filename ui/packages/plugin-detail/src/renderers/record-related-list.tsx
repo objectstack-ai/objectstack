@@ -352,8 +352,8 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
    * THE COMPOSITION RULE, with the host bridge the handlers above come from:
    *
    *   - ABSENT → the host's actions, untouched (`handlers.toolbarActions` /
-   *     `handlers.rowActions`, the child object's `list_toolbar` actions and
-   *     its `list_item` / `record_related` ones), and no metadata lookup is
+   *     `handlers.rowActions`, the child object's `list` actions and
+   *     its `record_row` / `record_related` ones), and no metadata lookup is
    *     made for this key.
    *   - AUTHORED → the authored list is what renders, in authored order:
    *     each id resolves against the RELATED object's registered `actions`

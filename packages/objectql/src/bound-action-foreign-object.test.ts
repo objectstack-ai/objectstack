@@ -367,7 +367,7 @@ describe('a bound action is served as its ActionSchema parse', () => {
     /** One declaration, carried both by the owner's object and by a binder package. */
     const GATED = {
         label: 'Change slug', type: 'url' as const, target: 'https://example.com/slug',
-        locations: ['record_header' as const], visible: "record.name != ''",
+        locations: ['record_page' as const], visible: "record.name != ''",
         requiresFeature: 'multiOrgEnabled' as const,
     };
     const LOWERED = { dialect: 'cel', source: "(record.name != '') && features.multiOrgEnabled != false" };

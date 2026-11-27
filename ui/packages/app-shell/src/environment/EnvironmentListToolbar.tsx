@@ -1,6 +1,6 @@
 /**
  * EnvironmentListToolbar — the state-aware replacement for the generic
- * `list_toolbar` action bar on the `sys_environment` list.
+ * `list` action bar on the `sys_environment` list.
  *
  * The cloud serves ONE `create_environment` action; born-with-env makes its
  * meaning depend on org state (which the action metadata can't express). This
@@ -150,7 +150,7 @@ export function EnvironmentListToolbar({ actions, entitlements }: Props) {
   // so a create action the caller may not invoke was counted here and dropped
   // there.
   const toolbarActions = (actions || []).filter(
-    (a: any) => actionRendersAt(a, 'list_toolbar') && mayInvoke(a?.requiredPermissions),
+    (a: any) => actionRendersAt(a, 'list') && mayInvoke(a?.requiredPermissions),
   );
   const hasCreateAction = toolbarActions.some((a: any) => a?.name === CREATE_ACTION);
   const ctaKind = entitlements?.ready ? decideEnvironmentCta(entitlements) : null;

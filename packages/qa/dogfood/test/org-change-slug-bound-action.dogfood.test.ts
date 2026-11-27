@@ -21,7 +21,7 @@
  * the declaration the platform object carried — is mounted beside the
  * showcase. Then:
  *  - `GET /meta/object/sys_organization` serves `change_slug` once, with the
- *    orchestrator's target, method, `record_header` location and one `slug`
+ *    orchestrator's target, method, `record_page` location and one `slug`
  *    param, and the `multiOrgEnabled` gate lowered exactly as the platform's
  *    own `requiresFeature` actions are;
  *  - the gate admits it with multi-org on and hides it with multi-org off,
@@ -143,7 +143,7 @@ describe('a cloud-shaped composition binds change_slug to sys_organization, and 
 
   it('sorts after the rename and before leave in the record header, so it sits in the overflow', () => {
     const header = actions
-      .filter((a) => (a.locations ?? []).includes('record_header'))
+      .filter((a) => (a.locations ?? []).includes('record_page'))
       .map((a, i) => ({ a, i }))
       .sort((x, y) => (x.a.order ?? 0) - (y.a.order ?? 0) || x.i - y.i)
       .map(({ a }) => a.name);

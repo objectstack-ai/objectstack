@@ -10,7 +10,7 @@
  * objectui#12772 — `record:quick_actions` (the record-header path) draws a
  * declared `ActionSchema.icon` beside the button's label. The producer that
  * filed it is a control-plane "Open" action declaring `icon: 'external-link'`
- * on `record_header`.
+ * on `record_page`.
  *
  *  (a) a declared, known name draws its glyph AND keeps the label;
  *  (b) CONTROL — no `icon` declared ⇒ the button's markup is the label alone,

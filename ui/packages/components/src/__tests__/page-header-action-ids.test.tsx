@@ -26,8 +26,8 @@
  *
  * Population covers each filter the acceptance criterion names, so one
  * equivalence assertion measures all of them at once:
- *   - `actionRendersAt` placement — `list_only` (list_item) must not render;
- *     `archive` (record_more) must land in the ⋯ menu, not inline
+ *   - `actionRendersAt` placement — `list_only` (record_row) must not render;
+ *     `archive` (folded) must land in the ⋯ menu, not inline
  *   - `requiredPermissions` — `gated` is denied for this user
  *   - `visible` — `closed_only` is a CEL predicate that is false for this record
  *   - `order` — `qualify` (order 1) renders BEFORE `convert` (order 2), which is
@@ -203,18 +203,18 @@ describe('page:header — declared action-id lookup (objectui#6252)', () => {
 
     // `order`: qualify (1) before convert (2), the reverse of the authored order.
     expect(names.indexOf('Qualify')).toBeLessThan(names.indexOf('Convert Lead'));
-    // `actionRendersAt`: list_item-only never renders on this surface.
+    // `actionRendersAt`: record_row-only never renders on this surface.
     expect(screen.queryByRole('button', { name: /List Only/i })).toBeNull();
     // `requiredPermissions`: denied for this user.
     expect(screen.queryByRole('button', { name: /Gated Action/i })).toBeNull();
     // `visible`: the CEL predicate is false for a record with status "open".
     expect(screen.queryByRole('button', { name: /Closed Only/i })).toBeNull();
-    // record_more is routed to the ⋯ overflow menu, never an inline slot.
+    // folded is routed to the ⋯ overflow menu, never an inline slot.
     expect(screen.queryByRole('button', { name: /^Archive$/i })).toBeNull();
   });
 
-  it('routes a record_more id into the overflow menu, never an inline slot', async () => {
-    // Same evidence the sibling `record_more` pins in `page-header-actions.test.tsx`
+  it('routes a folded id into the overflow menu, never an inline slot', async () => {
+    // Same evidence the sibling folded (`component: 'action:menu'`) pins in `page-header-actions.test.tsx`
     // take: the ⋯ trigger exists and the action is NOT among the inline buttons.
     // (The menu's own contents live behind a Radix portal that opens on
     // pointerdown; no test in this repo drives it open, and the routing claim is

@@ -27,7 +27,7 @@
  * spec's `lowerRequiresFeature` / `lowerRequiresMembershipReach` order.
  *
  * API Keys is the page that offers NO create action — `sys_api_key` declares
- * no `list_toolbar` action and leaves `create` at the bucket default (off);
+ * no `list` action and leaves `create` at the bucket default (off);
  * keys are minted elsewhere. So it keeps the identity copy, and it is the
  * negative control for the first defect. The single-org Invitations case is
  * the other control: the same object, its Invite User hidden by its own gate,

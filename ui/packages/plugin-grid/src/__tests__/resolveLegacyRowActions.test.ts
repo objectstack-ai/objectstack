@@ -31,7 +31,7 @@ describe('resolveLegacyRowActions', () => {
     expect(undeclared).toEqual([]);
   });
 
-  it('drops a legacy name that duplicates an existing list_item def', () => {
+  it('drops a legacy name that duplicates an existing record_row def', () => {
     const listItemDef = { ...CONVERT_LEAD, locations: ['record_row'], label: '转换线索' };
     const { defs, undeclared } = resolveLegacyRowActions({
       rowActions: ['convert_lead'],

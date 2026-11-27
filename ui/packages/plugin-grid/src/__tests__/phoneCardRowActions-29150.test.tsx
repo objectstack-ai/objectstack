@@ -58,7 +58,7 @@ const ROWS = [
   { id: 'a2', name: 'Globex', status: 'active' },
 ];
 
-/** The object's `list_item` actions: one gated per row, one ungated, one primary. */
+/** The object's `record_row` actions: one gated per row, one ungated, one primary. */
 const ROW_ACTIONS = [
   { name: 'submit_review', label: 'Submit for review', type: 'api', target: '/api/submit', locations: ['record_row'], visible: "record.status == 'draft'" },
   { name: 'archive', label: 'Archive', type: 'api', target: '/api/archive', locations: ['record_row'] },

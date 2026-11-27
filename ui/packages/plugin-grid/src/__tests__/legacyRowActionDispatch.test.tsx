@@ -149,7 +149,7 @@ describe('legacy string rowActions dispatch (objectui#2960)', () => {
     expect(item).not.toHaveTextContent('Convert Lead');
   });
 
-  it('does not render a dead duplicate of a list_item action', async () => {
+  it('does not render a dead duplicate of a record_row action', async () => {
     const listItemDef = { ...CONVERT_LEAD, locations: ['record_row'], label: 'Convert' };
     await openRowMenu({
       objectActions: [listItemDef],

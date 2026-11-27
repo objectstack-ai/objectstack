@@ -146,7 +146,7 @@ describe('ActionEngine.getActionsForLocation — visibility filter', () => {
       { locations: ['record_section'] }
     );
     expect(engine.getActionsForLocation('record_section').map(a => a.name)).toEqual(['in_section_self']);
-    expect(engine.getActionsForLocation('record_header').map(a => a.name)).toEqual(['in_header_self']);
+    expect(engine.getActionsForLocation('record_page').map(a => a.name)).toEqual(['in_header_self']);
   });
 
   it('respects priority ordering after filtering', () => {

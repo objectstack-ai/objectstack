@@ -7,10 +7,10 @@
  */
 
 /**
- * Regression: a related list's `list_toolbar` header actions must honor each
+ * Regression: a related list's `list` header actions must honor each
  * action's `visible` CEL predicate. The same bridge (`deriveActions`) feeds
- * both the row actions (`list_item`, honored via the data-table's
- * `DataTableRowActionItem`) and these header buttons (`list_toolbar`); the
+ * both the row actions (`record_row`, honored via the data-table's
+ * `DataTableRowActionItem`) and these header buttons (`list`); the
  * toolbar path used to render every action unconditionally, so e.g.
  * `invite_user` (`visible: "features.organization != false"`) showed even when
  * the org feature was disabled.
@@ -30,7 +30,7 @@ function renderButton(action: any, scope: Record<string, any> = {}) {
   );
 }
 
-describe('RelatedList list_toolbar button — visible CEL', () => {
+describe('RelatedList list button — visible CEL', () => {
   it('hides a toolbar action whose `visible` predicate is false', () => {
     renderButton(
       { name: 'invite_user', label: 'Invite User', visible: 'features.organization != false' },
@@ -70,7 +70,7 @@ describe('RelatedList list_toolbar button — visible CEL', () => {
  * restore would turn the OTHER case red (a throw hides): both are here, so
  * either policy has a detector.
  */
-describe('RelatedList list_toolbar button — `${…}` template `visible` (objectui#3871)', () => {
+describe('RelatedList list button — `${…}` template `visible` (objectui#3871)', () => {
   const TEMPLATE = '${features.organization !== false}';
 
   it('hides a toolbar action whose template predicate is false (DETECTOR)', () => {
@@ -99,7 +99,7 @@ describe('RelatedList list_toolbar button — `${…}` template `visible` (objec
  * payload loads (pinned three-state in `app-shell`'s
  * `currentUserCan-failClosed-11212.render.test.tsx`).
  */
-describe('RelatedList list_toolbar button — a faulting `visible` hides (objectui#11212)', () => {
+describe('RelatedList list button — a faulting `visible` hides (objectui#11212)', () => {
   it('hides a toolbar action whose predicate faults, and reports it once, naming the action', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
@@ -125,7 +125,7 @@ describe('RelatedList list_toolbar button — a faulting `visible` hides (object
  * predicate is still no gate (the action shows), and a CEL string is evaluated.
  * The fail-closed leg on a FAULT is the objectui#11212 block above, unchanged.
  */
-describe('RelatedList list_toolbar button — a declared `visible` is asked by declaredness, not truthiness (objectui#11244)', () => {
+describe('RelatedList list button — a declared `visible` is asked by declaredness, not truthiness (objectui#11244)', () => {
   it('hides a toolbar action authored `visible: false` (DETECTOR)', () => {
     renderButton({ name: 'archive_11244', label: 'Archive', visible: false });
     renderButton({ name: 'export', label: 'Export' });

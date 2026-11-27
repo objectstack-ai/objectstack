@@ -70,7 +70,7 @@ const CHILD = 'sys_member';
  * The child object's registered actions. `invite_user` is the list's header
  * action; `change_role` a `record_related` row action — placed only inside a
  * parent record, which the page list is only by its bound parent; `remove` a
- * `list_item` row action.
+ * `record_row` row action.
  */
 const CHILD_ACTIONS = [
   { name: 'invite_user', label: 'Invite user', type: 'api', target: '/api/v1/org/invite', locations: ['list'] },

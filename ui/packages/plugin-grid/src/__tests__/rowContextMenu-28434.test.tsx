@@ -52,7 +52,7 @@ const ROWS = [
   { id: 'a3', name: 'Initech', status: 'draft' },
 ];
 
-/** The object's `list_item` actions: one gated per row, one ungated. */
+/** The object's `record_row` actions: one gated per row, one ungated. */
 const SECONDARY_ACTIONS = [
   { name: 'submit_review', label: 'Submit for review', type: 'api', target: '/api/submit', locations: ['record_row'], visible: "record.status == 'draft'" },
   { name: 'archive', label: 'Archive', type: 'api', target: '/api/archive', locations: ['record_row'] },
@@ -88,7 +88,7 @@ function renderGrid(opts: {
     objectName: OBJECT,
     columns: [{ field: 'name', label: 'Name', link: true }, { field: 'status', label: 'Status' }],
     data: { provider: 'value', items: ROWS },
-    // The host-derived form of the object's `list_item` actions — what
+    // The host-derived form of the object's `record_row` actions — what
     // `ObjectView` hands the grid (`objectDef.actions` filtered by location).
     rowActionDefs: opts.rowActionDefs ?? SECONDARY_ACTIONS,
     ...opts.schema,

@@ -136,7 +136,7 @@ const ACTION = {
 function renderActions(params: unknown[] = PARAMS) {
   return render(
     <MetadataTypeActions
-      location="record_header"
+      location="record_page"
       recordId="ds1"
       entry={{ actions: [{ ...ACTION, params }] as never }}
     />,

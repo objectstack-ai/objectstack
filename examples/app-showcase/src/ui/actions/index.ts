@@ -81,7 +81,7 @@ export const MarkDoneAction = defineAction({
   // the action.
   //
   // #8990 — `has()` guards the SPARSE action face: this action reaches
-  // `list_item`, so its predicate binds a list row carrying only the view's
+  // `record_row`, so its predicate binds a list row carrying only the view's
   // `$select` projection, and CEL aborts with `No such key: done` on any task
   // list that does not project the column (fail-closed, the button silently
   // is not offered). The comparison is `!= true` rather than the older
@@ -118,12 +118,12 @@ export const ReopenTaskAction = defineAction({
   operation: 'update',
   patch: { done: false },
   execution: 'perRecord',
-  // #8990 — `has()` guards the sparse `list_item` face, as on Mark Done.
+  // #8990 — `has()` guards the sparse `record_row` face, as on Mark Done.
   visible: 'has(record.done) && record.done == true',
   // The task list's row menu only. The Task Detail page's header lists its
   // action ids explicitly (`showcase_task_detail`, `kind: 'full'`), and
   // `test/record-action-location-hosts.test.ts` holds that list equal to the
-  // task's `record_header` / `record_more` set, so adding `record_header` here
+  // task's `record` / `record_page` set, so adding `record_page` here
   // means adding the id to that header too.
   locations: ['record_row'],
   refreshAfter: true,
@@ -142,7 +142,7 @@ export const OpenDocsAction = defineAction({
 });
 
 /**
- * flow — launch the Reassign screen-flow wizard. Row-level (`list_item`) so the
+ * flow — launch the Reassign screen-flow wizard. Row-level (`record_row`) so the
  * row's `recordId` flows into the flow, which collects `new_assignee` via a
  * `screen` node and writes it back with `update_record`. The objectui
  * FlowRunner renders the screen and resumes the run.
@@ -191,7 +191,8 @@ export const RecalcEstimateAction = defineAction({
   successMessage: "Estimate recalculated for {{ record.title | default:'the task' }}.",
   // `record_section`: the Task Detail page's `record:quick_actions` bar names
   // it, and the engine location-filters even explicitly-named actions. And
-  // `record_more` (objectstack#36150): the authored page is drawn on the
+  // `record_page` folded into the header's ⋯ (`component: 'action:menu'`,
+  // formerly `record_more`; objectstack#36150): the authored page is drawn on the
   // desktop full page only, and on a phone or in the side drawer the task
   // takes the standard page, which draws no `record_section` action — the
   // ⋯ overflow is where the action is found there. The authored header lists
@@ -230,7 +231,7 @@ export const RecalcEstimateAction = defineAction({
  * warns about (`packages/lint/src/validate-action-locations.ts`), and `[]` is
  * that same nowhere said deliberately (see NewTaskAction).
  *
- * So `record_more` here is an explicit SINGLE-RECORD placement, not a way of
+ * So `record_page` folded into the ⋯ here is an explicit SINGLE-RECORD placement, not a way of
  * dodging an everywhere-default: it puts the action in the record overflow
  * menu, where the dispatch carries exactly one id and the recalc endpoint's
  * flow reads it as a list of one (via `recordIdParam`). Placement being
@@ -365,7 +366,7 @@ export const SubmitForSignoffAction = defineAction({
   successMessage: "{{ record.name | default:'Invoice' }} submitted for finance + legal sign-off.",
   // Only on invoices not yet sent. `record.`-prefixed comparison, per the
   // ActionEngine's fail-closed CEL evaluation (see MarkDoneAction's note).
-  // #8990 — `has()` guards the sparse face this reaches via `list_item`; the
+  // #8990 — `has()` guards the sparse face this reaches via `record_row`; the
   // `!=` against a literal never faults on a projected NULL, so `has()` alone
   // is the whole guard.
   visible: "has(record.status) && record.status != 'sent'",
@@ -394,8 +395,8 @@ export const SubmitForSignoffAction = defineAction({
  * `OS_PRINT_BROWSER_ENDPOINT`, and `OS_PRINT_CONSOLE_URL`), a record they may
  * not edit (attaching needs it), an impersonation session.
  *
- * `list_item` puts it in the invoice list's row menu, where the console draws
- * it. `record_header` is its record-page placement, beside Submit for Sign-off.
+ * `record_row` puts it in the invoice list's row menu, where the console draws
+ * it. `record_page` is its record-page placement, beside Submit for Sign-off.
  * ⚠️ The console draws record-header actions in a page's `page:header`, and a
  * print page may not hold one, so on the invoice's record page (a print page)
  * neither action is drawn until the console gives a print page a header host.

@@ -5,7 +5,7 @@
  * The bug: the action tail is `shrink-0` (correct — buttons must not be
  * squeezed into unreadable slivers), and in a `flex-nowrap` row the title
  * column was the only flexible item, so it absorbed the entire width deficit.
- * With three labelled `record_header` actions plus `⋯` and `⟳`, the h1 was
+ * With three labelled `record_page` actions plus `⋯` and `⟳`, the h1 was
  * driven to ~30px and rendered as a single character + ellipsis, while the
  * breadcrumb above it still showed the full record name.
  *

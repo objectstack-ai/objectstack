@@ -56,16 +56,16 @@ function storedBody(rows: Record<string, unknown>[], type: string, name: string)
 
 const SSO_ONLY = {
     name: 'sso_only', label: 'SSO only', type: 'url' as const, target: 'https://example.com/sso',
-    locations: ['record_header' as const], requiresFeature: 'ssoEnforced' as const,
+    locations: ['record_page' as const], requiresFeature: 'ssoEnforced' as const,
 };
 const OWNER_ONLY = {
     name: 'owner_only', label: 'Owner only', type: 'url' as const, target: 'https://example.com/owner',
-    locations: ['record_header' as const], visible: "record.name != ''",
+    locations: ['record_page' as const], visible: "record.name != ''",
     requiresMembershipReach: 'delete_organization' as const,
 };
 const PLAIN = {
     name: 'plain', label: 'Plain', type: 'url' as const, target: 'https://example.com/plain',
-    locations: ['record_header' as const],
+    locations: ['record_page' as const],
 };
 
 const order = (actions: unknown[]) => ({

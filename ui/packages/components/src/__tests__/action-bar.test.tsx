@@ -407,7 +407,7 @@ describe('ActionBar (action:bar)', () => {
   /**
    * [ADR-0066 D4 / framework#3923] The bar filters its own action list instead
    * of going through `ActionEngine.getActionsForLocation`, so the engine's
-   * capability gate never reached `list_toolbar`: an action declaring a
+   * capability gate never reached `list`: an action declaring a
    * capability nobody holds rendered as a live button, with nothing behind it
    * for a `type: 'api'` action whose `target` is on another origin (the
    * platform action door — the source of the 403 — never sees that request;

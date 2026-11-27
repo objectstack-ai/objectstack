@@ -506,10 +506,10 @@ describe('ActionSchema', () => {
   describe('Action Locations', () => {
     it('should accept valid locations', () => {
       const locations = [
-        'list_toolbar',
-        'list_item',
-        'record_header',
-        'record_more',
+        'list',
+        'record',
+        'record_page',
+        'record_row',
         'record_related',
         'record_section',
       ] as const;
@@ -1244,7 +1244,7 @@ describe('ActionSchema - order', () => {
     })).toThrow();
   });
 
-  it('should combine order with variant and locations (record_header primary hint)', () => {
+  it('should combine order with variant and locations (record_page primary hint)', () => {
     const result = ActionSchema.parse({
       name: 'approve',
       label: 'Approve',
@@ -1255,7 +1255,7 @@ describe('ActionSchema - order', () => {
     });
     expect(result.order).toBe(-10);
     expect(result.variant).toBe('primary');
-    expect(result.locations).toContain('record_header');
+    expect(result.locations).toContain('record_page');
   });
 });
 
@@ -1503,13 +1503,31 @@ describe('ACTION_LOCATIONS — canonical source of truth', () => {
   // of producing a silent runtime mismatch.
   it('exposes the full set of supported locations', () => {
     expect([...ACTION_LOCATIONS]).toEqual([
-      'list_toolbar',
-      'list_item',
-      'record_header',
-      'record_more',
+      'list',
+      'record',
+      'record_page',
+      'record_row',
       'record_related',
       'record_section',
     ]);
+  });
+
+  // ─── objectstack#36495 — the page-part words are retired ────────────────
+  //
+  // Locations say what an action acts on. The four words that named a part of
+  // a page are refused with the word to write instead, and the ADR-0087
+  // conversion `action-locations-acted-on` rewrites stored and pre-19 sources.
+  it.each([
+    ['list_toolbar', '`list`'],
+    ['list_item', '`record_row`'],
+    ['record_header', '`record_page`'],
+    ['record_more', "component: 'action:menu'"],
+  ])('refuses the retired page-part word %s with its prescription', (word, prescription) => {
+    const result = ActionLocationSchema.safeParse(word);
+    expect(result.success).toBe(false);
+    const message = result.success ? '' : result.error.issues.map((i) => i.message).join('\n');
+    expect(message).toContain(`\`${word}\``);
+    expect(message).toContain(prescription);
   });
 
   it('ActionLocationSchema accepts every value in ACTION_LOCATIONS', () => {

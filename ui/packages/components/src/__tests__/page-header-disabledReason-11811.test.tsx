@@ -51,7 +51,7 @@ const ARCHIVE = {
   locations: ['record_page'],
   disabled: DONE_GATE,
 };
-/** A `record_more`-only action: always drawn in the ⋯ overflow. */
+/** A folded (`component: 'action:menu'`) action: always drawn in the ⋯ overflow. */
 const ARCHIVE_MORE = { ...ARCHIVE, name: 'showcase_archive_more', label: 'Archive later', locations: ['record_page'], component: 'action:menu' };
 
 /** The host's chrome, as `RecordDetailView` injects it: a host-computed boolean `disabled`. */

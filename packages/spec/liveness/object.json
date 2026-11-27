@@ -71,14 +71,14 @@
               "status": "live",
               "verifiedAt": "2026-11-23",
               "evidenceScope": "in-repo",
-              "evidence": "ui/packages/types/src/ui-action.ts#arrangedHeaderActions (a pinned action is placed at `record_header` and leads the sort, in pin order); ui/packages/app-shell/src/views/RecordDetailView.tsx#RecordDetailView (the record header, side preview and phone bar draw them as buttons); ui/packages/components/src/renderers/layout/containers.tsx#PageHeaderActions (an authored `placedActions: true` header too)",
+              "evidence": "ui/packages/types/src/ui-action.ts#arrangedHeaderActions (a pinned action is a header button, lifted out of the ⋯ fold, and leads the sort, in pin order); ui/packages/app-shell/src/views/RecordDetailView.tsx#RecordDetailView (the record header, side preview and phone bar draw them as buttons); ui/packages/components/src/renderers/layout/containers.tsx#PageHeaderActions (an authored `placedActions: true` header too)",
               "note": "objectstack#36366: the record header's buttons, at most three, in order."
             },
             "more": {
               "status": "live",
               "verifiedAt": "2026-11-23",
               "evidenceScope": "in-repo",
-              "evidence": "ui/packages/types/src/ui-action.ts#arrangedHeaderActions (an unpinned action is placed at `record_more`, the ones `more` names first in that order); ui/packages/app-shell/src/views/RecordDetailView.tsx#RecordDetailView (the record header's ⋯ draws them)",
+              "evidence": "ui/packages/types/src/ui-action.ts#arrangedHeaderActions (an unpinned action is folded into the ⋯ with `component: 'action:menu'`, the ones `more` names first in that order); ui/packages/app-shell/src/views/RecordDetailView.tsx#RecordDetailView (the record header's ⋯ draws them)",
               "note": "objectstack#36366: the order of the record header's ⋯ menu."
             }
           }

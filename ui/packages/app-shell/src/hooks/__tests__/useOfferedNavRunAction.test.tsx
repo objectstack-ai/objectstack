@@ -59,7 +59,7 @@ const paramNow = () => new URL(window.location.href).searchParams.get(NAV_RUN_AC
 
 /** What `ObjectView` does with the hook's answer, verbatim in shape. */
 function Toolbar({ actions, enabled = true }: { actions: any[]; enabled?: boolean }) {
-  const armed = useOfferedNavRunAction(actions, (a: any) => actionRendersAt(a, 'list_toolbar'), enabled);
+  const armed = useOfferedNavRunAction(actions, (a: any) => actionRendersAt(a, 'list'), enabled);
   const composed = armed === null ? actions : actions.map((a) => (a?.name === armed ? { ...a, autoTrigger: true } : a));
   // Typed as the `action:bar` node it is (objectui#11355), as `ObjectView` types its own.
   const bar: ActionBarSchema = { type: 'action:bar', location: 'list', actions: composed };

@@ -221,7 +221,7 @@ export const SysInvitation = ObjectSchema.create({
       // invite mirrors are, and offered on a pending row only, before its
       // `expires_at`: a row can still read `pending` after it expires, and
       // its link admits no one (the handler refuses it too). `has()` opens
-      // each operand for the sparse `list_item` face (#8990), as on the
+      // each operand for the sparse `record_row` face (#8990), as on the
       // recipient-side actions below; `expires_at` is compared by ordering,
       // so it also needs its `!= null` half (`materializeDeclaredFields`).
       visible: "features.cloudManaged != true && has(record.status) && record.status == 'pending' && has(record.expires_at) && record.expires_at != null && datetime(record.expires_at) > now()",
@@ -249,7 +249,7 @@ export const SysInvitation = ObjectSchema.create({
     // them out of the admin org-management view.
     //
     // Both predicates open each operand with `has()` for the SPARSE action
-    // face (#8990): they reach `list_item`, so the bound record is the row the
+    // face (#8990): they reach `record_row`, so the bound record is the row the
     // inbox view projected, and an unprojected `email` / `status` aborts the
     // whole predicate at key resolution instead of reading null — fail-closed,
     // so the Accept/Decline pair vanishes with no way to tell that from the

@@ -153,7 +153,7 @@ describe('page:header — 1 primary + 2 secondary + ⋯, refresh first in the �
     expect(items).toEqual(['Refresh', 'Archive']);
   });
 
-  it('a record_more-only action folds behind the refresh', async () => {
+  it('a folded action folds behind the refresh', async () => {
     renderHeader({
       refresh: vi.fn(),
       actions: [

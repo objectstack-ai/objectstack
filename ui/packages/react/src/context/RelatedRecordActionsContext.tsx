@@ -98,7 +98,7 @@ export interface RelatedRecordHandlers {
    */
   onDelete?: (recordId: string | number, record?: unknown) => void | Promise<void>;
   /**
-   * Child object row-level actions, localized: its `list_item` actions, and
+   * Child object row-level actions, localized: its `record_row` actions, and
    * its `record_related` ones when the list sits inside a parent record
    * (objectui#11270).
    */

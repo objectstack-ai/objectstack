@@ -10,7 +10,7 @@
  * objectui#12617: the record header draws ONE primary action and the rest as
  * secondary buttons.
  *
- * `@objectstack/spec`'s action contract says "in `record_header` the first
+ * `@objectstack/spec`'s action contract says "in `record_page` the first
  * visible action becomes the primary button" and lets a renderer prefer a
  * `variant: 'primary'` action. `page:header` drew every action without a
  * declared variant with the filled style, so a header with three actions
@@ -98,7 +98,7 @@ async function overflowRows(): Promise<string[]> {
 }
 
 describe('page:header draws one primary action, the rest secondary (objectui#12617)', () => {
-  it('three record_header actions render as one filled primary + two outline buttons, then a labelled outline Edit', () => {
+  it('three record_page actions render as one filled primary + two outline buttons, then a labelled outline Edit', () => {
     renderRecordHeader([
       act('convert_lead', 'Convert Lead'),
       act('schedule_followup', 'Schedule Follow-up'),

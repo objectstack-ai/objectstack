@@ -17,7 +17,7 @@
  * `action:button` and `action:menu` run it through the shared
  * `useAutoTriggerOnce` (`auto-trigger.ts`); `action:icon` did not read it at
  * all. A `?runAction=` deep link that `ObjectView` armed and CONSUMED for a
- * `list_toolbar` action rendered as an icon therefore did nothing: no run, no
+ * `list` action rendered as an icon therefore did nothing: no run, no
  * notice, and no URL left to retry from.
  *
  * The contract the fix routes `action:icon` into is the one `auto-trigger.ts`

@@ -15,7 +15,7 @@
  * objectstack#33219). Either way a click on the row opens nothing, so the grid
  * draws its record-link column as plain text — no anchor, no `role="link"` —
  * and the row's right-click menu offers no Open / Open in new tab; the row's
- * own `list_item` action (Revoke) stays.
+ * own `record_row` action (Revoke) stays.
  *
  * Driven through the real `ObjectView`, the real `ListView` grid and the real
  * `MePermissionsProvider`, one differential per case: the same object and

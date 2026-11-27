@@ -161,9 +161,9 @@ describe('ask_ai — absent without an in-app assistant', () => {
   it('is left out of ActionEngine.getActionsForLocation until the runner has an assistant', () => {
     const engine = new ActionEngine({ objectName: 'account' });
     engine.registerActions([{ ...ASK }, { name: 'edit', type: 'script', target: 'edit', locations: ['record_page'] }]);
-    expect(engine.getActionsForLocation('record_header').map((a) => a.name)).toEqual(['edit']);
+    expect(engine.getActionsForLocation('record_page').map((a) => a.name)).toEqual(['edit']);
     engine.getRunner().setAssistantFocusHandler(() => {});
-    expect(engine.getActionsForLocation('record_header').map((a) => a.name)).toEqual(['ask_about_account', 'edit']);
+    expect(engine.getActionsForLocation('record_page').map((a) => a.name)).toEqual(['ask_about_account', 'edit']);
   });
 
   it('a scoped dispatch keeps the host assistant', async () => {

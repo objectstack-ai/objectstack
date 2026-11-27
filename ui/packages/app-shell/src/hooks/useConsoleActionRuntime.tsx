@@ -634,7 +634,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
       // meaningful when an object context exists (ObjectView); pages without an
       // object resolve their actions through the absolute path above.
       const obj = action.objectName || objApiName;
-      // The row record is stashed under `_rowRecord` for list_item actions —
+      // The row record is stashed under `_rowRecord` for record_row actions —
       // separate it from the field values, and resolve the record id from it
       // (the action's static params carry the field changes, not the id).
       const rowRecord = (params as any)._rowRecord as Record<string, any> | undefined;
@@ -759,7 +759,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
       // The record a launch runs on, by the ONE selection rule the `script`
       // launcher uses (objectui#12331): `@object-ui/core`'s
       // `resolveServerActionRecordId`. An explicit `params.recordId`, then the
-      // list_item row (`_rowRecord`), then — for a list_toolbar launch, which
+      // record_row row (`_rowRecord`), then — for a list launch, which
       // carries no row — the grid's checkbox selection (`selectedRecords`,
       // published into the runner context by ObjectGrid). One row supplies the
       // record. Several rows are refused: a flow takes a single `recordId`

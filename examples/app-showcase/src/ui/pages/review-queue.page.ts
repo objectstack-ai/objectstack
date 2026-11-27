@@ -14,7 +14,7 @@ import { definePage } from '@objectstack/spec/ui';
  * (`has(record.done) && record.done != true`, #8990) has nothing to evaluate
  * against and the button would render
  * regardless of state. `MarkDoneAction.locations` already includes
- * `list_item`, so it correctly appears per-row (with that row's record bound)
+ * `record_row`, so it correctly appears per-row (with that row's record bound)
  * instead. Tabs let the reviewer pivot to urgent or blocked work.
  */
 export const ReviewQueuePage = definePage({
@@ -35,7 +35,7 @@ export const ReviewQueuePage = definePage({
     appearance: { showDescription: true, allowedVisualizations: ['grid'] },
     userActions: { sort: true, search: true, filter: false, rowHeight: false, addRecordForm: false },
     // No `buttons:` entry here — see file header comment: "Mark Done" is a
-    // record-scoped action and belongs per-row (`list_item`), not as an
+    // record-scoped action and belongs per-row (`record_row`), not as an
     // unbound page-toolbar button.
     // Click a row → drawer with the full record to review before deciding.
     recordAction: 'drawer',

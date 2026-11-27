@@ -435,7 +435,7 @@ describe('ActionDefaultInspector reads its words in the designer locale (objectu
     expectNone(seen, ACTION_EN);
     expect(seen.has(zhRow('engine.inspector.action.behavior'))).toBe(true);
     expect(seen.has(zhRow('engine.inspector.action.type.script'))).toBe(true);
-    expect(seen.has(zhRow('engine.inspector.action.location.record_header'))).toBe(true);
+    expect(seen.has(zhRow('engine.inspector.action.location.record_page'))).toBe(true);
     // A slotted sentence keeps its node: the capability list sits inside the zh words.
     const [lead] = zhRow('engine.inspector.action.capabilityGateSelf').split('{capabilities}');
     expect(lead.trim().length, 'the zh self clause opens with words').toBeGreaterThan(0);

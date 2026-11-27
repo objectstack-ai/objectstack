@@ -178,7 +178,7 @@ export const SysOrganization = ObjectSchema.create({
       // OWN actions only (spec `component.zod.ts`, page:header), so the
       // organization record page cannot offer an invite from a mirror on
       // another object. Ruling 6228318638 (B′ on #24034): declared at
-      // `record_header`, primary, first by `order`.
+      // `record_page`, primary, first by `order`.
       //
       // The record IS the organization, so its id rides as `organizationId`
       // instead of better-auth's active-org fallback — an admin on another
@@ -275,8 +275,8 @@ export const SysOrganization = ObjectSchema.create({
       // better-auth's slug-taken check and plugin-auth's
       // `beforeUpdateOrganization` slug guard both run only on a sent slug.
       //
-      // One door per field. A record page reaches no `list_item` action, so
-      // this one is declared at `record_header` too, and nothing on that page
+      // One door per field. A record page reaches no `record_row` action, so
+      // this one is declared at `record_page` too, and nothing on that page
       // sends a slug to better-auth. `update_organization` is the slug door of
       // a composition without the cloud orchestrator. Where the orchestrator
       // governs the slug, the composition that serves its route declares the

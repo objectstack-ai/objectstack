@@ -54,7 +54,7 @@ describe('the header pins under the design mode (objectstack#36366)', () => {
     expect(servedPins({ actionLayout: { record: ['convert'], list: { more: ['x'] } } })).toEqual({});
   });
 
-  it("with no arm set the panel shows the header's own first three: by order, record_header only, never an action:menu", () => {
+  it("with no arm set the panel shows the header's own first three: by order, record_page only, never an action:menu", () => {
     expect(defaultPins(ACTIONS, 'record')).toEqual(['convert', 'mark_won', 'clone']);
     expect(defaultPins(ACTIONS, 'list')).toEqual(['new_task', 'mass_assign']);
     const candidates = pinCandidates(ACTIONS, 'record', []);

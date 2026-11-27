@@ -63,7 +63,7 @@ export const SysOauthApplication = ObjectSchema.create({
   //
   // The two toggle predicates are guarded for the SPARSE action face (#8990),
   // and this pair is where the guard actually changes what a user sees. Both
-  // reach `list_item`, and `disabled` is nullable upstream (better-auth writes
+  // reach `record_row`, and `disabled` is nullable upstream (better-auth writes
   // the column only when it is set), so a list row can carry it PROJECTED AND
   // NULL. Measured against the `@objectstack/formula` CEL engine, the old
   // spellings both broke on exactly that row: `!record.disabled` FAULTED

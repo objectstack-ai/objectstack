@@ -8,7 +8,7 @@
 
 /**
  * objectui#12462 (ruling A-narrow) — the list page's header does not draw a
- * duplicate of a `list_toolbar` action that the ACTIVE view wires to its
+ * duplicate of a `list` action that the ACTIVE view wires to its
  * selection bar AND that is record-scoped.
  *
  * Measured on HotCRM's Leads list: `create_campaign` ("Add to Campaign",
@@ -97,7 +97,7 @@ const CREATE_CAMPAIGN = {
   params: [{ name: 'campaign', type: 'text', label: 'Campaign', required: true }],
 };
 
-/** A plain `list_toolbar` action: object-level, it runs with nothing selected. */
+/** A plain `list` action: object-level, it runs with nothing selected. */
 const REFRESH_SCORES = {
   name: 'refresh_scores',
   label: 'Refresh Scores',
@@ -222,7 +222,7 @@ async function tickRows(n: number): Promise<void> {
 
 const addToCampaignIn = (el: HTMLElement) => within(el).queryByRole('button', { name: /Add to Campaign/ });
 
-describe('objectui#12462 — a bulk-wired, record-scoped list_toolbar action leaves the header for the selection bar', () => {
+describe('objectui#12462 — a bulk-wired, record-scoped list action leaves the header for the selection bar', () => {
   it('the view wires it in `bulkActions`: the plain action stays in the header, Add to Campaign is only in the bar', async () => {
     mountLeads('all_leads');
     const header = await headerWithToolbar();

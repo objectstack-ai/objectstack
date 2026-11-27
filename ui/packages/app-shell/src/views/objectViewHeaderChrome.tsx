@@ -130,7 +130,7 @@ export function useObjectViewHeaderChrome({
     const navigate = useNavigate();
     const { appName, objectName } = useParams();
     const objectSettingsPath = useObjectSettingsGate(useObjectSettingsPath({ appSegment: appName, objectName }));
-    const toolbarRowActions: UIActionSchema[] = listActions?.some((a: { locations?: readonly string[] }) => a.locations?.includes('list_toolbar'))
+    const toolbarRowActions: UIActionSchema[] = listActions?.some((a: { locations?: readonly string[] }) => a.locations?.includes('list'))
         ? toolbarActionsWithDeepLink
         : [];
     const primaryToolbarAction = showCreate ? undefined : declaredPrimaryToolbarAction(toolbarRowActions);
@@ -144,7 +144,7 @@ export function useObjectViewHeaderChrome({
                 label: t('console.nav.objectSettings', { defaultValue: 'Object settings' }),
                 icon: 'settings-2',
                 type: 'script' as const,
-                locations: ['list_toolbar' as const],
+                locations: ['list' as const],
                 onClick: () => confirmUnsavedLeave(() => navigate(objectSettingsPath)),
             }] : []),
             ...(importShown ? [{
@@ -152,7 +152,7 @@ export function useObjectViewHeaderChrome({
                 label: t('console.objectView.import'),
                 icon: 'upload',
                 type: 'script' as const,
-                locations: ['list_toolbar' as const],
+                locations: ['list' as const],
                 disabled: importDisabled,
                 onClick: () => setShowImport(true),
             }] : []),

@@ -12,7 +12,7 @@
  * translatable.
  *
  * Measured on HotCRM's My Leads: "Add to Campaign", a single-record script
- * action with a param, placed in `list_toolbar`. With 0 or 2 rows ticked the
+ * action with a param, placed in `list`. With 0 or 2 rows ticked the
  * param dialog opened and ran to the end (the user picked a campaign, and
  * could even create one), and only after Confirm did the dispatch refuse,
  * in English under zh-CN. The runner ran the param dialog before the handler,

@@ -310,12 +310,12 @@ function asParamFieldType(value: string): ResolvableParamFieldType | undefined {
  * (record → list), deliberately not the spec's declaration order.
  */
 const LOCATION_LABELS: Record<ActionLocation, string> = {
-  record_header: 'engine.inspector.action.location.record_header',
-  record_more: 'engine.inspector.action.location.record_more',
+  record: 'engine.inspector.action.location.record',
+  record_page: 'engine.inspector.action.location.record_page',
+  record_row: 'engine.inspector.action.location.record_row',
   record_section: 'engine.inspector.action.location.record_section',
   record_related: 'engine.inspector.action.location.record_related',
-  list_toolbar: 'engine.inspector.action.location.list_toolbar',
-  list_item: 'engine.inspector.action.location.list_item',
+  list: 'engine.inspector.action.location.list',
 };
 
 const LOCATIONS: Array<{ value: ActionLocation; labelKey: string }> = (
@@ -389,11 +389,11 @@ const UPDATE_OPERATION_REFUSES = [
 ] as const;
 
 /**
- * `list_toolbar` is refused in `locations` beside `operation: 'update'`: the
+ * `list` is refused in `locations` beside `operation: 'update'`: the
  * bar is a MULTI-record surface and this write is single-record by contract.
  * A list view's `bulkActionDefs` is that bar's home for the same intent.
  */
-const UPDATE_OPERATION_REFUSED_LOCATION = 'list_toolbar';
+const UPDATE_OPERATION_REFUSED_LOCATION = 'list';
 
 /**
  * objectstack#26736 — the keys `@objectstack/spec` refuses on an action whose
@@ -1210,7 +1210,7 @@ export function ActionDefaultInspector({
       <div className="border-t pt-3 space-y-2">
         <SectionHeader title={tr('engine.inspector.action.placement')} hint={tr('engine.inspector.action.placementHint')} />
         <div className="grid grid-cols-1 gap-1">
-          {/* `list_toolbar` is not OFFERED on an update action — the spec refuses
+          {/* `list` is not OFFERED on an update action — the spec refuses
               it there, and a placement an author can tick but not save is worse
               than one that is absent. A list view's `bulkActionDefs` is that
               bar's home for the same intent. */}

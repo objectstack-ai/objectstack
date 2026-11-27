@@ -41,7 +41,7 @@ Namespace `action`.
 | `successMessage` | `string` |  | Toast text when the action succeeds; a `${result.*}` token reads the handler's answer (e.g. `${result.id}`) |
 | `errorMessage` | `string` |  | Toast text when the action fails, in place of the raw error |
 | `refreshAfter` | `boolean` |  | Refresh the surrounding data after the action succeeds |
-| `locations` | `array` of `string` |  | The placements the action declares (`list_toolbar`, `list_item`, `record_header`, …). A `script` or `flow` action declared record-scoped (`list_item`, `record_header`, `record_more` or `record_section`) refuses to run when no record or single selection is in scope, instead of running without one |
+| `locations` | `array` of `string` |  | The placements the action declares (`list`, `record_row`, `record_page`, …). A `script` or `flow` action declared record-scoped (`record_row`, `record`, `record_page` or `record_section`) refuses to run when no record or single selection is in scope, instead of running without one |
 | `toast` | `object` |  | Toast behaviour: `{ showOnSuccess?, showOnError?, duration? }` — `false` suppresses that toast, `duration` is handed to the toast |
 | `resultDialog` | `object` |  | One-shot result dialog for a value the response shows exactly once (a 2FA code, a fresh secret); it replaces the success toast |
 | `onSuccess` | `object` |  | Post-success navigation `{ navigate, openIn? }`: `navigate` is a route template that can read `${result.*}`, `openIn` is `self` (the default) or `newTab` |
@@ -59,7 +59,7 @@ Namespace `action`.
 | `icon` | `string` |  | — |
 | `actions` | `array` of `object` |  | The actions in this group, in order. Each member is an action object the group draws and runs itself (`name`, `label`, `icon`, `type`, `target`, `locations`, `visible`, `disabled`, …); a member's executor is its own `type` |
 | `display` | `enum`: `inline`, `dropdown` |  | — |
-| `location` | `enum`: `list_toolbar`, `list_item`, `record_header`, `record_more`, `record_related`, `record_section` |  | Render only the members whose `locations` include this location. Omit to render every member |
+| `location` | `enum`: `list`, `record_row`, `record`, `record_page`, `record_related`, `record_section` |  | Render only the members whose `locations` include this location. Omit to render every member |
 | `variant` | `enum`: `default`, `secondary`, `outline`, `ghost` |  | — |
 | `size` | `enum`: `default`, `sm`, `lg`, `icon` |  | Button size for the dropdown trigger and for every inline member that sets none |
 | `visible` | `boolean` \| `string` \| `object` |  | Visibility predicate for the whole group: `true`/`false`, a bare CEL expression, or the `{ dialect: 'cel', source }` envelope, evaluated against the row the host binds. Omit for always-visible |
@@ -91,7 +91,7 @@ Namespace `action`.
 | `successMessage` | `string` |  | Toast text when the action succeeds; a `${result.*}` token reads the handler's answer (e.g. `${result.id}`) |
 | `errorMessage` | `string` |  | Toast text when the action fails, in place of the raw error |
 | `refreshAfter` | `boolean` |  | Refresh the surrounding data after the action succeeds |
-| `locations` | `array` of `string` |  | The placements the action declares (`list_toolbar`, `list_item`, `record_header`, …). A `script` or `flow` action declared record-scoped (`list_item`, `record_header`, `record_more` or `record_section`) refuses to run when no record or single selection is in scope, instead of running without one |
+| `locations` | `array` of `string` |  | The placements the action declares (`list`, `record_row`, `record_page`, …). A `script` or `flow` action declared record-scoped (`record_row`, `record`, `record_page` or `record_section`) refuses to run when no record or single selection is in scope, instead of running without one |
 | `toast` | `object` |  | Toast behaviour: `{ showOnSuccess?, showOnError?, duration? }` — `false` suppresses that toast, `duration` is handed to the toast |
 | `resultDialog` | `object` |  | One-shot result dialog for a value the response shows exactly once (a 2FA code, a fresh secret); it replaces the success toast |
 | `onSuccess` | `object` |  | Post-success navigation `{ navigate, openIn? }`: `navigate` is a route template that can read `${result.*}`, `openIn` is `self` (the default) or `newTab` |

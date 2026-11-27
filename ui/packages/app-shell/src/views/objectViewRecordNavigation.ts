@@ -40,7 +40,7 @@
  * leave `get` out (`servesRecordRead`), a list-only object — has no record
  * surface at all: its rows resolve to the `none` mode on every viewport, a
  * modifier click opens no tab, its link column draws plain values, and a
- * `?recordId=` link opens nothing. Its row menu (`list_item` actions) is
+ * `?recordId=` link opens nothing. Its row menu (`record_row` actions) is
  * untouched: it acts on the row the list already holds.
  */
 

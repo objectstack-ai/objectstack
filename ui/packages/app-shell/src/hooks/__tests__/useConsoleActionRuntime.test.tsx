@@ -627,8 +627,8 @@ describe('modalActionHandler — a modal action is CLIENT-SIDE ONLY (objectstack
   });
 });
 
-describe('flowHandler — list_toolbar selection fallback', () => {
-  // Toolbar-invoked flow actions carry no `_rowRecord` (that's a list_item /
+describe('flowHandler — list selection fallback', () => {
+  // Toolbar-invoked flow actions carry no `_rowRecord` (that's a record_row /
   // row-menu concept). The grid publishes its checkbox selection into the
   // shared ActionRunner context as `selectedRecords`; with exactly one row
   // selected the flow must receive that row's id as recordId, otherwise a
@@ -673,7 +673,7 @@ describe('flowHandler — list_toolbar selection fallback', () => {
     expect(authFetchSpy).not.toHaveBeenCalled();
   });
 
-  it('blocks a record-scoped flow (locations include list_item) launched with zero rows selected (#2210)', async () => {
+  it('blocks a record-scoped flow (locations include record_row) launched with zero rows selected (#2210)', async () => {
     // BulkReassignAction shape: mounts on rows AND the toolbar. From the
     // toolbar with nothing selected there is no record to run on — pre-fix
     // the wizard opened anyway and died at the first record-bound node
@@ -717,7 +717,7 @@ describe('flowHandler — list_toolbar selection fallback', () => {
     expect(body.recordId ?? null).toBeNull();
   });
 
-  it('an explicit _rowRecord (list_item invocation) still wins over the selection', async () => {
+  it('an explicit _rowRecord (record_row invocation) still wins over the selection', async () => {
     authFetchSpy.mockResolvedValue({ ok: true, json: async () => ({ success: true, data: {} }) });
     const { result } = renderHook(() =>
       useConsoleActionRuntime({ dataSource: {}, objects: [] }),
@@ -1077,7 +1077,7 @@ describe('apiHandler — recordIdParam seeding refuses instead of under-specifyi
   });
 });
 
-describe('serverActionHandler — list_toolbar selection fallback', () => {
+describe('serverActionHandler — list selection fallback', () => {
   it('uses the single selected row from the runner context as recordId', async () => {
     authFetchSpy.mockResolvedValue({ ok: true, json: async () => ({ success: true, data: {} }) });
     const { result } = renderHook(() =>

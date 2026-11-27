@@ -1,6 +1,6 @@
 /**
  * The page header's toolbar on the Console `ObjectView` (`./ObjectView.tsx`):
- * the `list_toolbar` actions the header draws (less the record-scoped ones the
+ * the `list` actions the header draws (less the record-scoped ones the
  * selection bar already carries), the nav `runAction` deep link armed on them,
  * and the `action:bar` node that renders them, moved out of `ObjectViewInner`
  * verbatim (objectstack#25992, slice 8). Every input is passed in; the
@@ -25,7 +25,7 @@ export function useObjectViewHeaderToolbar({
 }) {
     // objectui#12462 (ruling A-narrow) — the header does not draw a duplicate of
     // the selection bar. The bar is the list toolbar in its selection mode: a
-    // `list_toolbar` action the ACTIVE view wires to it (`bulkActions`, or a
+    // `list` action the ACTIVE view wires to it (`bulkActions`, or a
     // `bulkActionDefs` entry) is still drawn at its declared placement, on the
     // rows it acts on, so the header's permanent copy is the duplicate. Only a
     // RECORD-SCOPED action leaves (`isRecordScopedAction`: it also mounts on
@@ -55,8 +55,8 @@ export function useObjectViewHeaderToolbar({
     // `resolveHref`) to this list's href carrying `?runAction=`; landing here
     // runs that action once, through the ordinary execute path.
     //
-    // Arm only on an action THIS toolbar actually renders — `list_toolbar` is
-    // the slot's surface, so a name that only exists at `record_header` cannot
+    // Arm only on an action THIS toolbar actually renders — `list` is
+    // the slot's surface, so a name that only exists at `record_page` cannot
     // be triggered from here and must not spend the one-shot intent (#4123).
     // That is also why it reads `headerToolbarActions`: an action that left the
     // header for the selection bar (objectui#12462) is not armed either, and the
@@ -72,7 +72,7 @@ export function useObjectViewHeaderToolbar({
     // predicate `action:button` does.
     const navRunAction = useOfferedNavRunAction(
         headerToolbarActions,
-        (a: any) => actionRendersAt(a, 'list_toolbar'),
+        (a: any) => actionRendersAt(a, 'list'),
         !isEnvironmentList,
     );
     // Mark exactly the requested action `autoTrigger`, leaving every other

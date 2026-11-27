@@ -1156,7 +1156,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
         record &&
         typeof record === 'object' &&
         record.type === 'action:bar' &&
-        (!record.location || record.location === 'record_header')
+        (!record.location || record.location === 'record_page')
       ) {
         injected = true;
         const existingSystem = Array.isArray(record.systemActions)

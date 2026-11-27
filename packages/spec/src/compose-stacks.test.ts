@@ -530,7 +530,7 @@ describe('composeStacks + defineStack integration', () => {
 
 // ─── Action `order` sorting (mergeActionsIntoObjects) ───────────────
 // Regression coverage for #2670: the record-header primary button is the first
-// visible `record_header` action, so `order` must control which action lands
+// visible `record_page` action, so `order` must control which action lands
 // first — instead of fragile cross-file registration order.
 
 describe('Action order sorting', () => {

@@ -33,8 +33,8 @@ describe('ActionEngine', () => {
         { name: 'delete', type: 'api' },
         { locations: ['record'] }
       );
-      expect(engine.getActionsForLocation('record_header')).toHaveLength(1);
-      expect(engine.getActionsForLocation('list_toolbar')).toHaveLength(0);
+      expect(engine.getActionsForLocation('record_page')).toHaveLength(1);
+      expect(engine.getActionsForLocation('list')).toHaveLength(0);
     });
 
     it('auto-registers keyboard shortcuts', () => {
@@ -88,7 +88,7 @@ describe('ActionEngine', () => {
       engine.registerAction({ name: 'create', type: 'modal' }, { locations: ['list'], priority: 10 });
       engine.registerAction({ name: 'export', type: 'api' }, { locations: ['list'], priority: 100 });
 
-      const actions = engine.getActionsForLocation('list_toolbar');
+      const actions = engine.getActionsForLocation('list');
       expect(actions).toHaveLength(3);
       expect(actions[0].name).toBe('create');
       expect(actions[1].name).toBe('export');

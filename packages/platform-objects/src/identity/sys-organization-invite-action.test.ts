@@ -40,10 +40,10 @@ function action(name: string): HeaderAction {
   return found as HeaderAction;
 }
 
-/** The object's `record_header` actions, in the order the stable `order` sort gives them. */
+/** The object's `record_page` actions, in the order the stable `order` sort gives them. */
 function headerOrder(): string[] {
   return actions()
-    .filter((a) => (a.locations ?? []).includes('record_header'))
+    .filter((a) => (a.locations ?? []).includes('record_page'))
     .map((a, i) => ({ a, i }))
     .sort((x, y) => (x.a.order ?? 0) - (y.a.order ?? 0) || x.i - y.i)
     .map(({ a }) => a.name as string);
@@ -53,9 +53,9 @@ function headerOrder(): string[] {
 const MAX_VISIBLE = 3;
 
 describe('sys_organization.invite_user — the record header (#24016)', () => {
-  it('is a record_header api action on the invite endpoint, bound to THIS organization', () => {
+  it('is a record_page api action on the invite endpoint, bound to THIS organization', () => {
     const invite = action('invite_user');
-    expect(invite.locations).toContain('record_header');
+    expect(invite.locations).toContain('record_page');
     expect(invite.type).toBe('api');
     expect(invite.target).toBe('/api/v1/auth/organization/invite-member');
     // The row id rides as `organizationId`: without it better-auth falls back
@@ -66,7 +66,7 @@ describe('sys_organization.invite_user — the record header (#24016)', () => {
 
   it('is the one primary action in the header', () => {
     const primaries = actions()
-      .filter((a) => (a.locations ?? []).includes('record_header'))
+      .filter((a) => (a.locations ?? []).includes('record_page'))
       .filter((a) => a.variant === 'primary')
       .map((a) => a.name);
     expect(primaries).toEqual(['invite_user']);

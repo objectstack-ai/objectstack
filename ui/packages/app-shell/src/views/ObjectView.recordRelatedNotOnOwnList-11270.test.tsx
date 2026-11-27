@@ -6,10 +6,10 @@
  *
  * `record_related` places an action on the rows of a related list inside a
  * parent record, and nowhere else (objectstack-ai/objectstack#20937, triage
- * `5919625056`). `list_item` is the location that places an action on the
+ * `5919625056`). `record_row` is the location that places an action on the
  * object's rows everywhere it is listed. So the object list page's row menu
- * reads `list_item` and must keep ignoring `record_related`, while a
- * `list_item` action still reaches it — the control, over the SAME render, so
+ * reads `record_row` and must keep ignoring `record_related`, while a
+ * `record_row` action still reaches it — the control, over the SAME render, so
  * the absence cannot be a dead relay's.
  *
  * The positive half (the related-list rows inside a record show it) is
@@ -128,7 +128,7 @@ afterEach(() => {
 });
 
 describe('objectui#11270 — the child object’s own list view does not place `record_related`', () => {
-  it('its row actions carry the `list_item` actions and not the `record_related`-only one', async () => {
+  it('its row actions carry the `record_row` actions and not the `record_related`-only one', async () => {
     render(
       <ExpressionProvider user={{ id: 'u1', name: 'Ada', profile: 'admin' }}>
         <MemoryRouter initialEntries={[`/apps/demo/${OBJECT_NAME}/view/all`]}>
@@ -144,7 +144,7 @@ describe('objectui#11270 — the child object’s own list view does not place `
     await waitFor(() => expect(listSchema).not.toBeNull());
     const names = (listSchema!.rowActionDefs ?? []).map((a) => a.name);
     // Control: the relay is alive, and `archive` (both locations) reaches the
-    // list through its `list_item` half.
+    // list through its `record_row` half.
     expect(names).toEqual(['send_reminder', 'archive']);
     expect(names).not.toContain('log_time');
   });

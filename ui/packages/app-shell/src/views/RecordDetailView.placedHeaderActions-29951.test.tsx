@@ -7,10 +7,10 @@
  * #27219 rebuilt the platform record pages as `kind: 'full'` pages whose
  * `page:header` named the platform's own action ids, and an authored id list
  * is the whole set (#11592), so a `type: 'url'` action an installed package
- * places on `sys_user` at `record_header` stopped drawing in the 18.3 Console.
+ * places on `sys_user` at `record_page` stopped drawing in the 18.3 Console.
  * Ruling A (record 6624172200) gave the header an opt-in instead,
  * `placedActions: true` (objectstack#30018): every action of the page's object
- * placed at `record_header` / `record_more`, read live. The three platform
+ * placed at `record` / `record_page`, read live. The three platform
  * pages now ship exactly `{ type: 'page:header', properties: { placedActions:
  * true } }` (pinned in platform-objects' `record-page-header-actions.test.ts`
  * and plugin-approvals' `sys-approval-request-page.test.ts`; that package is
@@ -22,7 +22,7 @@
  * object and record handed in).
  *
  *   - The card's pin: on the shipped header node, the packaged url action
- *     draws inline and the packaged `record_more` one in the ⋯ menu, beside
+ *     draws inline and the packaged folded (`component: 'action:menu'`) one in the ⋯ menu, beside
  *     the platform's own; actions placed elsewhere do not draw. On the frozen
  *     #27219 header (an id list, no opt-in) the same object draws neither
  *     packaged action, which is the regression this pin is red on.

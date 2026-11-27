@@ -9,7 +9,7 @@
 /**
  * `page:header` — ADR-0066 D4 `requiredPermissions` gate (framework#3923).
  *
- * `record_header` / `record_more` actions render through THIS component, which
+ * `record` / `record_page` actions render through THIS component, which
  * filters its own action list rather than calling
  * `ActionEngine.getActionsForLocation`. So the engine's capability gate never
  * ran on the one surface those locations exist on: an action declaring a

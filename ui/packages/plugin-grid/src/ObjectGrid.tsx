@@ -1370,7 +1370,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
    *
    *   - The PRODUCER derives it. `app-shell/src/views/ObjectView.tsx:1968`
    *     builds this key from `objectDef.actions` filtered by
-   *     `locations.includes('list_item')`, then localizes each def — see its
+   *     `actionRendersAt(action, 'record_row')`, then localizes each def — see its
    *     own docblock there. Twenty lines below it, `bulkActionDefs` is passed
    *     STRAIGHT THROUGH from the view author. The two keys are asymmetric by
    *     construction: one is computed for the grid, the other is authored.
@@ -1394,7 +1394,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // Legacy `rowActions` carry a bare action NAME, which the runner cannot
   // execute on its own — resolve each against the object's declared actions so
   // it dispatches as a real def (and so a name that duplicates an existing
-  // `list_item` def stops rendering a dead twin of it). A name the object does
+  // `record_row` def stops rendering a dead twin of it). A name the object does
   // not declare draws nothing and is reported below, in development. See
   // `resolveLegacyRowActions` for the full rationale (objectui#2960).
   const { defs: foldedRowActionDefs, undeclared: undeclaredRowActions } = resolveLegacyRowActions({
@@ -1825,7 +1825,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   // Publish the checkbox selection into the shared ActionRunner context so
   // actions rendered OUTSIDE the grid but inside the same <ActionProvider>
-  // (e.g. `list_toolbar` flow buttons in the ObjectView header) can resolve a
+  // (e.g. `list` flow buttons in the ObjectView header) can resolve a
   // recordId from the selected rows. Cleared on unmount / selection change so
   // a stale selection never leaks into later invocations.
   React.useEffect(() => {
@@ -2951,7 +2951,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // would stack N dialogs on that panel; one shared notice would name one.
     const res = await actionRunner.execute({
       ...rest,
-      // `_rowRecord` is the same row-context key the list_item path attaches,
+      // `_rowRecord` is the same row-context key the record_row path attaches,
       // so `recordIdParam` / `recordIdField` injection behaves identically.
       params: { ...params, _rowRecord: row },
       toast: { showOnSuccess: false, showOnError: false },

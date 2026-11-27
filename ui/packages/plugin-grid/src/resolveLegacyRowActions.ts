@@ -13,7 +13,7 @@
  * Two vocabularies reach the row menu:
  *
  *  1. `rowActionDefs` — full `ActionDef` records the view already derived from
- *     `objectDef.actions` filtered by `locations.includes('list_item')`. These
+ *     `objectDef.actions` filtered by `actionRendersAt(action, 'record_row')`. These
  *     dispatch through the action runner with their own type/target/params, so
  *     they actually run.
  *
@@ -88,7 +88,7 @@ export function resolveLegacyRowActions(opts: {
 
   for (const name of names) {
     if (typeof name !== 'string' || name === '') continue;
-    // Already rendered as a def (either a `list_item` action of the same name,
+    // Already rendered as a def (either a `record_row` action of the same name,
     // or an earlier promotion of a repeated legacy entry) — drop the duplicate.
     if (claimed.has(name)) continue;
     const match = objectActions.find(a => a?.name === name);

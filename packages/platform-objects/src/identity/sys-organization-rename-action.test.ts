@@ -3,7 +3,7 @@
 // sys_organization's rename door: a name/logo-only action a record page can
 // offer.
 //
-// `update_organization` renames too, but it is declared at `list_item` only (a
+// `update_organization` renames too, but it is declared at `record_row` only (a
 // record page's header never offers it) and it bundles `slug`, which the cloud
 // orchestrator's slug action governs where it exists — an action the
 // composition serving that route declares itself, never this object. So the
@@ -11,12 +11,12 @@
 //
 // What this file pins, from source:
 //  - the new action's declaration: its params are exactly `name` and `logo`,
-//    it sits at `record_header` and `list_item`, it targets better-auth's
+//    it sits at `record_page` and `record_row`, it targets better-auth's
 //    `organization/update` exactly as `update_organization` does, and it is
 //    gated on the grades that reach `organization/update` (owner, admin) like
 //    it, but on the organization capability rather than `multiOrgEnabled`, so
 //    a `single` deployment can rename its one organization (#25347);
-//  - one door per field on the record header: no `record_header` action that
+//  - one door per field on the record header: no `record_page` action that
 //    targets `organization/update` carries a `slug` param;
 //  - the header order: the rename takes an inline slot and leave folds into
 //    the overflow (the ordering model is described in
@@ -69,10 +69,10 @@ function action(name: string): DeclaredAction {
 
 const paramKeys = (a: DeclaredAction): string[] => (a.params ?? []).map((p) => (p.field ?? p.name) as string);
 
-/** The object's `record_header` actions, in the order the stable `order` sort gives them. */
+/** The object's `record_page` actions, in the order the stable `order` sort gives them. */
 function headerOrder(): string[] {
   return actions()
-    .filter((a) => (a.locations ?? []).includes('record_header'))
+    .filter((a) => (a.locations ?? []).includes('record_page'))
     .map((a, i) => ({ a, i }))
     .sort((x, y) => (x.a.order ?? 0) - (y.a.order ?? 0) || x.i - y.i)
     .map(({ a }) => a.name as string);
@@ -89,7 +89,7 @@ describe('sys_organization.rename_organization: the declaration', () => {
   });
 
   it('is offered at the record header and on the list row', () => {
-    expect(action('rename_organization').locations).toEqual(['record_header', 'list_item']);
+    expect(action('rename_organization').locations).toEqual(['record_page', 'record_row']);
   });
 
   it("targets better-auth's organization/update exactly as update_organization does", () => {
@@ -112,9 +112,9 @@ describe('sys_organization.rename_organization: the declaration', () => {
 });
 
 describe('sys_organization: one door per field on the record header', () => {
-  it('no record_header action that writes through organization/update collects a slug', () => {
+  it('no record_page action that writes through organization/update collects a slug', () => {
     const headerWriters = actions()
-      .filter((a) => (a.locations ?? []).includes('record_header'))
+      .filter((a) => (a.locations ?? []).includes('record_page'))
       .filter((a) => a.target === UPDATE_TARGET);
     expect(headerWriters.map((a) => a.name)).toEqual(['rename_organization']);
     for (const a of headerWriters) {
@@ -147,9 +147,9 @@ describe('sys_organization: every door it declares is one an open-source composi
 });
 
 describe('sys_organization: the open-source slug door is unchanged (control)', () => {
-  it('update_organization keeps name / slug / logo, its target and list_item alone', () => {
+  it('update_organization keeps name / slug / logo, its target and record_row alone', () => {
     const update = action('update_organization');
-    expect(update.locations).toEqual(['list_item']);
+    expect(update.locations).toEqual(['record_row']);
     expect(update.target).toBe(UPDATE_TARGET);
     expect(paramKeys(update)).toEqual(['name', 'slug', 'logo']);
   });

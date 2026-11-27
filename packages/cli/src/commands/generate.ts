@@ -503,7 +503,7 @@ export default ${toCamelCase(name)}Views;
      *
      * `locations` places it (#21325): an action with none, that no view
      * places by name, renders on no surface, and `os validate` says so
-     * (`action-no-placement`). `record_header` is the button on the record it
+     * (`action-no-placement`). `record_page` is the button on the record it
      * acts on; the emitted comment names the rest of the vocabulary and the
      * explicit headless `[]`.
      *
@@ -519,7 +519,7 @@ export default ${toCamelCase(name)}Views;
      * field the object declares, so the click opens a dialog for that value and
      * writes it to the record as the signed-in user. `type` is left at its
      * default (`'script'`, the route the write is posted to; any other type is
-     * refused beside the operation), and `locations` leaves out `list_toolbar`,
+     * refused beside the operation), and `locations` leaves out `list`,
      * which `ActionSchema` refuses for an update (no current record there).
      */
     namesObject: true,
@@ -556,8 +556,8 @@ export default ${toCamelCase(name)}Action;
   // runs it.
   operation: 'update',
   params: [{ field: ${tsString(field)} }],
-  // Where the button is drawn: the record's header. Others: 'record_more',
-  // 'record_section', 'list_item' (not 'list_toolbar': an update needs the
+  // Where the button is drawn: the record's header. Others: 'record' (the
+  // header and each list row), 'record_section', 'record_row' (not 'list': an update needs the
   // record it writes). An action meant only for REST / MCP / AI callers says
   // so with an empty list.
   locations: ['record_page'],
@@ -567,8 +567,8 @@ ${footer}`;
   // Runs the flow named in \`target\` against the record it is invoked on.
   type: 'flow',
   target: ${tsString(bindings.flow)},
-  // Where the button is drawn: the record's header. Others: 'record_more',
-  // 'record_section', 'list_item', 'list_toolbar'. An action meant only for
+  // Where the button is drawn: the record's header. Others: 'record' (the
+  // header and each list row), 'record_section', 'record_row', 'list'. An action meant only for
   // REST / MCP / AI callers says so with an empty list.
   locations: ['record_page'],
 ${footer}`;

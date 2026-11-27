@@ -211,7 +211,7 @@ export const SysUser = ObjectSchema.create({
     // `pending-sso-users.test.ts` (the declared targets, driven live).
     //
     // UI surfaces them under the row menu AND the
-    // record-detail header (`record_header`, overflowing into the ⋯
+    // record-detail header (`record_page`, overflowing into the ⋯
     // "More" menu) so platform admins can manage an account from either
     // the Users list or an open user record — without dropping to SQL or
     // a custom Setup wizard.

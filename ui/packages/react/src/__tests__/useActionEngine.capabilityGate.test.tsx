@@ -58,7 +58,7 @@ const renderInProvider = (user: unknown) =>
   );
 
 const names = (r: ReturnType<typeof renderInProvider>) =>
-  r.result.current.getActionsForLocation('record_header' as any).map((a: any) => a.name);
+  r.result.current.getActionsForLocation('record_page' as any).map((a: any) => a.name);
 
 describe('useActionEngine + ActionProvider — ADR-0066 D4 capability gate (#3923)', () => {
   it('hides a gated action when the seeded user lacks the capability', () => {

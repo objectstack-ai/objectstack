@@ -543,7 +543,7 @@ describe('buildDefaultPageSchema', () => {
     it('buildDefaultActions returns a quick_actions node when actions are provided', () => {
       const node = buildDefaultActions(leadDef, [{ id: 'edit', label: 'Edit' }]);
       expect(node?.type).toBe('record:quick_actions');
-      expect(props(node).location).toBe('record_header');
+      expect(props(node).location).toBe('record_page');
       expect(props(node).actions).toHaveLength(1);
     });
 

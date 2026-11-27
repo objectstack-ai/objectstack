@@ -60,7 +60,7 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *     nothing. The components' `lib/utils` imports it for its slot helpers,
  *     which the drawer does not call.
  *   - The overlay's content is a stand-in for `RecordDetailView`: the record
- *     title and two `record_header` actions in its first row, then filler.
+ *     title and two `record_page` actions in its first row, then filler.
  *     Every control in it logs its clicks, so a click that falls through a toast
  *     onto the record is caught.
  *   - Toasts are raised by calling sonner's `toast.success` with an `Undo`
@@ -139,7 +139,7 @@ let openOverlay = () => {};
 const button = (label, what) =>
   h('button', { type: 'button', className: 'h-9 px-4 rounded-md border', onClick: record(what) }, label);
 
-/** RecordDetailView's first row (title, record_header actions), then filler. */
+/** RecordDetailView's first row (title, record_page actions), then filler. */
 function RecordContent() {
   return h('div', { onClick: record('record') },
     h('div', { className: 'flex items-center justify-between gap-4 px-6 py-4 border-b' },

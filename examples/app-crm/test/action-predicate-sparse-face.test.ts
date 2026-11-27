@@ -3,7 +3,7 @@
 /**
  * #8990 — the CRM example's row action survives the SPARSE action face.
  *
- * `crm_convert_lead` reaches `list_item`, so its `visible` predicate binds a
+ * `crm_convert_lead` reaches `record_row`, so its `visible` predicate binds a
  * LIST ROW carrying only the view's `$select` projection — not a total record.
  * Unguarded, `record.status != "converted"` aborts at key resolution on any
  * lead list that does not project `status`, and CEL's fault is fail-closed: the
@@ -39,8 +39,8 @@ const source =
 
 describe('#8990 — crm_convert_lead visible on a sparse list row', () => {
 
-  it('reaches list_item, so the sparse binding is the real one', () => {
-    expect(ConvertLeadAction.locations).toContain('list_item');
+  it('reaches record_row, so the sparse binding is the real one', () => {
+    expect(ConvertLeadAction.locations).toContain('record_row');
   });
 
   it('is has()-guarded on the column it reads', () => {
