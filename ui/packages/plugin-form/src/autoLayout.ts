@@ -67,7 +67,6 @@ const WIDE_FIELD_TYPES = new Set([
   'html',
   'grid',
   'richtext',
-  'repeater',
 ]);
 
 /**
@@ -126,8 +125,11 @@ const MULTI_FILE_FIELD_TYPES = new Set(['file', 'image', 'field:file', 'field:im
  * full row through the wide `field:grid` widget it mapped to, and lost it when
  * the alias moved, while the spec `span` docblock still lists it as wide.
  *
- * The bare name is also on {@link WIDE_FIELD_TYPES}, for the caller that
- * passes a raw object-field type (app-shell's `ObjectFormDesigner`).
+ * The bare name is matched on `FormField.type` as well, for the caller that
+ * passes a raw object-field type (app-shell's `ObjectFormDesigner`). It is kept
+ * OFF {@link WIDE_FIELD_TYPES} on purpose: {@link isWideFieldType} is the
+ * type-only answer app-shell's `richtextSurfaceParity` test holds equal to
+ * plugin-detail's, and the detail view's width is not this rule's to change.
  */
 const WIDE_DECLARED_FIELD_TYPES = new Set(['repeater']);
 
@@ -153,6 +155,7 @@ const WIDE_DECLARED_FIELD_TYPES = new Set(['repeater']);
 function isWideFormField(field: FormField): boolean {
   if (!field.type) return false;
   if (isWideFieldType(field.type)) return true;
+  if (WIDE_DECLARED_FIELD_TYPES.has(field.type)) return true;
   if (WIDE_DECLARED_FIELD_TYPES.has(field.field?.type)) return true;
   return MULTI_FILE_FIELD_TYPES.has(field.type) && field.field?.multiple === true;
 }

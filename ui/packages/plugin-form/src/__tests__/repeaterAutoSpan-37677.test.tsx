@@ -93,8 +93,10 @@ describe("objectstack#37677 — a repeater on span 'auto' takes the whole row", 
   });
 
   it('a raw object-field type (the form designer passes one) is wide on its name', () => {
-    expect(isWideFieldType('repeater')).toBe(true);
     expect(resolveColSpan({ name: 'lines', type: 'repeater' } as FormField, 2)).toBe(2);
+    // …through the declaration rule, not the type-only answer app-shell's
+    // `richtextSurfaceParity` holds equal to plugin-detail's.
+    expect(isWideFieldType('repeater')).toBe(false);
   });
 
   it('CONTROL — an authored colSpan still wins over the repeater default', () => {
