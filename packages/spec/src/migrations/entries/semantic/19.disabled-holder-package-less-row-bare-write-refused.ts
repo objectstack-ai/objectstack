@@ -43,11 +43,15 @@ export const entry: SemanticMigration = {
     + 'package still reached the row: the save edited it unseen, the draft save stored a draft the draft read then '
     + 'answered 404 for, the draft discard removed it, the delete removed the row, the publish promoted a draft '
     + 'into it and the rollback rewrote it, so enabling the package again served its item without the '
-    + 'customization, or with a body nobody saw land. They now judge the name\'s holders past a stored '
-    + 'package-less row, as they already did with none stored. A name no package holds, a package-less row at a '
-    + 'name an enabled package holds, and a name only disabled packages hold with no package-less row stored (its '
-    + 'refusal keeps the ?package= remedy) answer as before. There is no mechanical rewrite: whether the disabled '
-    + 'package should be enabled again is a judgement about the deployment.',
+    + 'customization, or with a body nobody saw land. The save, the draft save, the delete and the draft discard '
+    + 'now judge the name\'s holders past a stored package-less row, as they already did with none stored. The '
+    + 'publish and the rollback judge them only where they promote the package-less draft or restore the '
+    + 'package-less row while one is stored; with none stored they judge no holder, as before, so a publish of '
+    + 'the disabled package\'s own draft and a rollback that stores the package-less row again are not refused '
+    + 'by this entry. A name no package holds, a package-less row at a name an enabled package holds, and, for '
+    + 'the save, the draft save, the delete and the draft discard, a name only disabled packages hold with no '
+    + 'package-less row stored (its refusal keeps the ?package= remedy) answer as before. There is no mechanical '
+    + 'rewrite: whether the disabled package should be enabled again is a judgement about the deployment.',
   acceptanceCriteria:
     'For every name whose holders are all disabled and for which a package-less row or draft is stored, where the '
     + 'ADR-0146 D11 close leaves the package-less write open: PUT /api/v1/meta/TYPE/NAME (publish mode and '
