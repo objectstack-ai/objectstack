@@ -70,8 +70,9 @@ describe('useAgents reports a settled read (objectstack#37833)', () => {
     fetchMock = answering(200, []);
     vi.stubGlobal('fetch', fetchMock);
     const cold = mount();
-    expect(cold.renders[0]).toEqual({ isLoading: false, settled: false, error: false });
     await sleep(200);
+    expect(cold.renders[0]).toEqual({ isLoading: false, settled: false, error: false });
+    expect(cold.renders.some((r) => r.isLoading && !r.settled)).toBe(true);
     expect(cold.renders[cold.renders.length - 1]).toEqual({ isLoading: false, settled: true, error: false });
     cold.unmount();
   });
