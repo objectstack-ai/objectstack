@@ -194,14 +194,23 @@ and the MCP draft door:
    `manage_metadata`. Platform administrators hold it by default; nobody else
    does until it is granted. A grant on the indexed object's records does not
    imply it. Over MCP it is the human's own grant that is read, never the
-   agent's.
+   agent's. The package doors ask it too: every write to an existing package
+   that holds a knowledge source (enable, disable, publish, publish-drafts,
+   discard-drafts, the commit revert, rollback, revert, adopt-orphans,
+   duplicate, ensure-customization, the manifest update and delete) needs the
+   capability, and is refused `403` naming it otherwise. A package that holds
+   none is written as before. Installing a package is not asked: a packaged
+   source arrives by the install door's own admission.
 2. **Source admission at save.** A source is saved only when its author may
    themselves search what it would index. The save asks the same gates a
    search asks ([Source admission](#source-admission-exposure-and-field-level-rules))
    as the author: an object of a disabled package, an object the API does not
    serve for `search`, a system object without `enable.aiReadable`, or a field
    the author may not query refuses the save `403`, naming the object or the
-   field. A verdict that cannot be reached refuses `503`; nothing is written.
+   field. The fields judged are the ones the source serves (`content`,
+   `metadataFields`, the title field) and the ones its `where` reads. A
+   verdict that cannot be reached, or a knowledge service that is registered
+   and cannot be resolved, refuses `503`; nothing is written.
 
 #### One name, one source
 
@@ -870,9 +879,11 @@ searched for a non-system caller, the service asks, once per object per search:
 The answer is per **source**, not per field: when one served field is hidden
 from the caller, that source is not searched for them at all — its passages
 mix the hidden field's text into one unit that cannot be partially withheld.
-To keep a source searchable for restricted callers, declare its
-`content` / `metadataFields` from fields every intended reader may query,
-and put sensitive fields in a separate source. Every gate fails closed: a
+The fields a source's `where` reads are judged by the same rule: the source
+selects its records by them, so a caller who may not query one of them is not
+served that source. To keep a source searchable for restricted callers,
+declare its `content` / `metadataFields` / `where` from fields every intended
+reader may query, and put sensitive fields in a separate source. Every gate fails closed: a
 lookup that throws — the `security` service lookup included, unless the kernel
 answers that no `security` service is registered — or a `security` service
 that answers neither field question, keeps the source out of that caller's

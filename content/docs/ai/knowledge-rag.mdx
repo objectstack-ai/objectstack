@@ -76,7 +76,7 @@ to write.
 
 - **`content` lists its fields by name.** What is listed is what leaves the row store: the text of those fields is sent to the embedder and kept in the index. `'*'` is refused, and a field added to the object later is not indexed until you add it here.
 - **A source can also be created or changed at run time**, in Studio or through MCP, with no restart: a new source is loaded and built, a changed one is reloaded (and rebuilt when what it indexes changed), and a removed one has its index dropped.
-- **Authoring one needs `manage_knowledge_sources`** beside `manage_metadata` — platform administrators hold it by default — and the author must themselves be allowed to search the object and query every listed field, or the save is refused naming what they may not read.
+- **Authoring one needs `manage_knowledge_sources`** beside `manage_metadata` — platform administrators hold it by default — and the author must themselves be allowed to search the object and query every listed field and every field `where` reads, or the save is refused naming what they may not read. A write to a package that holds a source (publish its drafts, roll it back, duplicate, disable or delete it) needs the same capability.
 - **Two packages may each ship a source of the same name.** `search_knowledge` lists a package's source as `NAMESPACE-NAME` and takes that spelling in `sourceIds`.
 - **Registering in code still works**: `new KnowledgeServicePlugin({ sources: [TaskNotes] })` or `knowledge.registerSource(TaskNotes)` takes the same shape. A source registered in code and an item saved under the same name are one name: the second to arrive is refused.
 

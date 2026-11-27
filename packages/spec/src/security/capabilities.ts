@@ -116,8 +116,10 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
   // every record it selects, to the embedding provider, and the first build is
   // billed — an act of another weight than editing a layout. So every door
   // that creates, changes or removes an item of that type (Studio and REST
-  // `/meta`, the dispatcher, the MCP draft door) asks this capability BESIDE
-  // `manage_metadata`, never instead of it. Held by default by platform
+  // `/meta`, the dispatcher, the MCP draft door), and every write door of an
+  // existing package that holds one (`/packages/:id/…`), asks this capability
+  // BESIDE `manage_metadata`, never instead of it. The install door is not
+  // asked: a packaged source arrives by that door's own admission. Held by default by platform
   // administrators only (`ADMIN_FULL_ACCESS_CAPABILITIES`); every other
   // position, organization administrators included, only by explicit grant.
   // A grant on the indexed object's records does not imply it. `platform`:

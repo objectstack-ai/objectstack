@@ -197,6 +197,8 @@ async function serve(
     automation?: unknown;
     /** [ADR-0161 K4] The knowledge service the save asks to admit a source for its author. */
     knowledge?: unknown;
+    /** The rejection the classified lookup raises for `knowledge`: registered, and not resolvable. */
+    knowledgeFault?: Error;
   } = {},
 ): Promise<Served> {
   const { ql, reads } = userQl(opts.systemPermissions ?? ADMIN);
@@ -221,10 +223,18 @@ async function serve(
         automationAsks.push(scopeId);
         return opts.automation;
       }
-      if (name === 'knowledge') return opts.knowledge;
       return name === 'mcp' ? mcp : name === 'protocol' ? protocol : name === 'security' ? security : undefined;
     },
-    resolveServiceOrLoud: async (_ctx: unknown, name: string) => (name === 'tenancy' ? opts.tenancy : undefined),
+    // The classified lookup: `tenancy`, and the knowledge service the draft
+    // save asks. A `knowledgeFault` is a registered service that cannot be
+    // resolved, which this lookup re-raises and the quiet probe would absorb.
+    resolveServiceOrLoud: async (_ctx: unknown, name: string) => {
+      if (name === 'knowledge') {
+        if (opts.knowledgeFault) throw opts.knowledgeFault;
+        return opts.knowledge;
+      }
+      return name === 'tenancy' ? opts.tenancy : undefined;
+    },
     getObjectQL: async () => {
       if (opts.qlThrows) throw new Error('engine lookup failed');
       return ql;
@@ -1024,6 +1034,17 @@ describe('[ADR-0161 K4] save_metadata_draft asks the knowledge service to admit 
     const { authoring, served } = await authorThroughDomain({ systemPermissions: BOTH, knowledge });
     const refused = await save(authoring);
     expect(refused.body.error).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
+  });
+
+  it('fails closed: a knowledge service that is registered and cannot be resolved is 503 SERVICE_UNAVAILABLE, and nothing is written', async () => {
+    const { authoring, served } = await authorThroughDomain({
+      systemPermissions: BOTH,
+      knowledgeFault: new Error('knowledge factory: datasource unreachable'),
+    });
+    const refused = await save(authoring);
+    expect(refused.body.error).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    expect(refused.body.error.message).toContain('the knowledge service could not be resolved');
     expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
   });
 

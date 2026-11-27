@@ -1993,8 +1993,13 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     type,
                     item,
                     executionContext: _context.executionContext,
+                    // The classified lookup, not the `resolveService` probe:
+                    // a name nothing registered answers `undefined` (no
+                    // knowledge service, nothing to ask), and a service that
+                    // is registered and cannot be resolved rejects, which the
+                    // predicate answers `503`.
                     resolveKnowledgeService: () =>
-                        deps.resolveService(_context, KNOWLEDGE_SOURCE_ADMISSION_SERVICE, _context.environmentId),
+                        deps.resolveServiceOrLoud(_context, KNOWLEDGE_SOURCE_ADMISSION_SERVICE, _context.environmentId),
                 });
                 if (refused) {
                     return { handled: true, response: deps.error(refused.message, refused.status) };

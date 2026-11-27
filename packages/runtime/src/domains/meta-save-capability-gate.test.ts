@@ -40,6 +40,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { ObjectKernel } from '@objectstack/core';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 // Paid at collection, not inside a case's clock (check:test-source-alias).
@@ -314,6 +315,39 @@ describe('ADR-0161 K4 — dispatcher PUT asks the knowledge service to admit the
         expect(res.response?.status).toBe(503);
         expect(res.response?.body?.error?.code).toBe('SERVICE_UNAVAILABLE');
         expect(stack.saveMetaItem).not.toHaveBeenCalled();
+    });
+
+    /**
+     * A real kernel, so the two classes are the plugin loader's own: a name
+     * nothing registered rejects with the registry's branded miss, and a
+     * registered factory that throws rejects unbranded.
+     */
+    function bootOnKernel(wiring: 'never-registered' | 'throwing-factory') {
+        const saveMetaItem = vi.fn(async ({ name }: any) => ({ success: true, name }));
+        const kernel = new ObjectKernel({ gracefulShutdown: false, skipSystemValidation: true });
+        kernel.registerService('protocol', { saveMetaItem });
+        if (wiring === 'throwing-factory') {
+            kernel.registerServiceFactory('knowledge', () => {
+                throw new Error('knowledge factory: datasource unreachable');
+            });
+        }
+        return { dispatcher: new HttpDispatcher(kernel as any), saveMetaItem };
+    }
+
+    it('fails closed: a knowledge service that is registered and cannot be resolved is 503 SERVICE_UNAVAILABLE, and nothing is saved', async () => {
+        const stack = bootOnKernel('throwing-factory');
+        const res = await stack.dispatcher.handleMetadata('/knowledge_source/faq', ctx(AUTHOR), 'PUT', copy(SOURCE));
+        expect(res.response?.status).toBe(503);
+        expect(res.response?.body?.error?.code).toBe('SERVICE_UNAVAILABLE');
+        expect(res.response?.body?.error?.message).toContain('the knowledge service could not be resolved');
+        expect(stack.saveMetaItem).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL: on the same kernel with no knowledge service registered, the save goes on', async () => {
+        const stack = bootOnKernel('never-registered');
+        const res = await stack.dispatcher.handleMetadata('/knowledge_source/faq', ctx(AUTHOR), 'PUT', copy(SOURCE));
+        expect(res.response?.status).toBe(200);
+        expect(stack.saveMetaItem).toHaveBeenCalledTimes(1);
     });
 
     it('CONTROL: an admitted source is saved; with no knowledge service the save goes on', async () => {

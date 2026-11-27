@@ -606,7 +606,10 @@ function openWriter(
                 item,
                 // The human the door admitted: their grants, never the envelope's.
                 executionContext: reader,
-                resolveKnowledgeService: () => deps.resolveService(context, KNOWLEDGE_SOURCE_ADMISSION_SERVICE, context.environmentId),
+                // The classified lookup (`resolveServiceOrLoud`): an absent
+                // service answers `undefined`, a registered one that cannot be
+                // resolved rejects and the predicate answers `503`.
+                resolveKnowledgeService: () => deps.resolveServiceOrLoud(context, KNOWLEDGE_SOURCE_ADMISSION_SERVICE, context.environmentId),
             });
             if (!refused) return undefined;
             return {
