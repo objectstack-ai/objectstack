@@ -171,10 +171,20 @@ describe('[#26572] the default RestServerConfig on a booted showcase: crud, batc
     const served = Object.keys(fieldsOf(liaisonDoc));
     for (const f of WITHHELD) expect(served).not.toContain(f);
     // Absent, not blanked: the name appears nowhere in the served document —
-    // as a key, a list member or an expression's `record.budget`. Matched as a
-    // whole word: the object's `budget_schedule` field group is a heading the
-    // liaison is served, and the next assertion holds its members.
-    expect(liaisonDoc.text).not.toMatch(/\bbudget\b|"spent"/);
+    // as a key, a list member, an expression's `record.budget` or a lookalike
+    // such as `budget_amount`. The one served string that legitimately says
+    // "budget" is the `budget_schedule` field group's heading; only its exact
+    // JSON tokens are taken out before the scan, so `"budget_schedule_x"` and
+    // every other spelling stay in.
+    const LEAK = /budget|"spent"/;
+    const HEADING_TOKENS = ['"budget_schedule"', '"Budget & Schedule"'];
+    expect(liaisonDoc.text, 'the budget_schedule heading is served').toContain('"budget_schedule"');
+    const haystack = HEADING_TOKENS.reduce((t, tok) => t.split(tok).join('""'), liaisonDoc.text);
+    expect(haystack).not.toMatch(LEAK);
+    // The scan still sees each withheld name, and lookalikes, once the heading is out.
+    for (const leak of [...WITHHELD.map((f) => `"${f}":{}`), '"budget_amount"', 'record.budget > 1', '"budget_schedule_x"']) {
+      expect(haystack + leak, leak).toMatch(LEAK);
+    }
     // The field groups keep their headings and drop the withheld members.
     const groups = ((liaisonDoc.json.item ?? liaisonDoc.json).fieldGroups ?? []) as Array<{ fields?: string[] }>;
     expect(groups.length, 'showcase_project declares fieldGroups').toBeGreaterThan(0);
