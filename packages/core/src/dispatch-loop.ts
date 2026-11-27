@@ -32,6 +32,17 @@
  *    request, then waits out the running tick; a `wake()` after it is a no-op.
  *    The timer is `unref()`ed, so the loop never keeps a process alive by
  *    itself.
+ *  - **Every tick runs in the loop's own async context** (#37705), the one it
+ *    was constructed in, never the context of whoever called `start()`,
+ *    `wake()` or `wakeAt()`. A wake is a request, not a hand-over: the caller
+ *    is typically a write that just enqueued work, often inside a unit of work
+ *    (the triggering write's, or a flow's), and a tick started in its context
+ *    carried that unit's ambient handle into the store it drains. The unit
+ *    then committed under the tick, which failed with "Transaction query
+ *    already complete", and so did the audit writes the tick's updates fired;
+ *    the timer a tick sets inherited the same context, so every later tick did
+ *    too. The same holds for any other ambient store (a request's identity, a
+ *    grants memo): a tick is the loop's work, not the waker's.
  *
  * The price of the backoff is paid in latency by work nobody wakes the loop
  * for — a deferred row coming due, a row another process wrote, a crashed
@@ -59,6 +70,8 @@
  * `intervalMs` ramp. Before #29919 every boot re-ran that ramp against empty
  * stores: five ticks in the first minute per loop, every one of them idle.
  */
+
+import { AsyncResource } from 'node:async_hooks';
 
 /** Default ceiling of the idle backoff, in ms — see {@link DispatchLoopOptions.maxIdleIntervalMs}. */
 export const DEFAULT_MAX_IDLE_INTERVAL_MS = 30_000;
@@ -102,6 +115,8 @@ export interface DispatchLoopOptions {
 }
 
 export class DispatchLoop {
+    /** The async context every tick runs in: the one this loop was constructed in. */
+    private readonly home = new AsyncResource('DispatchLoop');
     private readonly intervalMs: number;
     private readonly maxIdleIntervalMs: number;
     private readonly runTick: () => Promise<number>;
@@ -144,7 +159,7 @@ export class DispatchLoop {
         this.idleTicks = 0;
         this.knownDueAt = null;
         this.dueReadOwed = true;
-        this.loopTick();
+        this.loopTickAtHome();
     }
 
     /** Stop the loop and drain the in-flight tick. */
@@ -166,7 +181,7 @@ export class DispatchLoop {
         if (!this.running) return;
         this.idleTicks = 0;
         this.dueReadOwed = true;
-        this.loopTick();
+        this.loopTickAtHome();
     }
 
     /**
@@ -186,10 +201,21 @@ export class DispatchLoop {
         const delayMs = dueAtMs - Date.now();
         if (delayMs <= 0) {
             this.dueReadOwed = true;
-            this.loopTick();
+            this.loopTickAtHome();
             return;
         }
-        this.schedule(delayMs, true);
+        // Set from the loop's own context, so the timer's tick runs there.
+        this.home.runInAsyncScope(() => this.schedule(delayMs, true));
+    }
+
+    /**
+     * [#37705] {@link loopTick}, entered from the loop's own async context
+     * ({@link home}) rather than the caller's: the tick, the due-time read and
+     * the timer for the next tick are all set up there, so none of them carries
+     * a store the caller had entered (a unit of work's handle, above all).
+     */
+    private loopTickAtHome(): void {
+        this.home.runInAsyncScope(() => this.loopTick());
     }
 
     /**

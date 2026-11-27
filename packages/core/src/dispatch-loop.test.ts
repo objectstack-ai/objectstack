@@ -15,6 +15,7 @@
  * exact reading rather than a sleep-and-hope.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { DispatchLoop, type DispatchLoopOptions } from './dispatch-loop.js';
 
@@ -290,5 +291,59 @@ describe('#29919 DispatchLoop — nothing it reads can make it spin', () => {
         await vi.advanceTimersByTimeAsync(MINUTE);
 
         expect(h.tickStarts).toEqual([0]);
+    });
+});
+
+/**
+ * #37705 — every tick runs in the loop's own async context, never the waker's.
+ * The waker is typically a write that just enqueued work inside a unit of work;
+ * a tick started in its context carried the unit's ambient handle into the
+ * store it drains, and failed with "Transaction query already complete" once
+ * the unit committed. The store here stands in for any ambient one (the
+ * engine's unit entry, a request's identity): a tick and the due-time read it
+ * makes must not see the waker's, and nor must the ticks its timer sets.
+ */
+describe('#37705 DispatchLoop — a tick runs in the loop\'s own context, not the waker\'s', () => {
+    const ambient = new AsyncLocalStorage<string>();
+
+    function seeing() {
+        const seen: Array<[string, string | undefined]> = [];
+        const h = harness({
+            runTick: async () => { seen.push(['tick', ambient.getStore()]); return 0; },
+            nextDueAt: async () => { seen.push(['due', ambient.getStore()]); return null; },
+        });
+        return { ...h, seen };
+    }
+
+    it('a wake() made inside a caller\'s store: the tick, its due read and the next timer tick see none of it', async () => {
+        useClockAtZero();
+        const h = seeing();
+        h.loop.start();
+        await vi.advanceTimersByTimeAsync(0);
+        h.seen.length = 0;
+        ambient.run('unit-of-the-waker', () => h.loop.wake());
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(BASE * 4);
+        await h.loop.stop();
+        expect(h.seen.length, 'the wake ticked, and so did its timer').toBeGreaterThan(2);
+        expect(h.seen.filter(([, store]) => store !== undefined)).toEqual([]);
+    });
+
+    it('a start() and a wakeAt() made inside a caller\'s store: no tick sees it', async () => {
+        useClockAtZero();
+        const h = seeing();
+        ambient.run('unit-of-the-starter', () => h.loop.start());
+        await vi.advanceTimersByTimeAsync(0);
+        ambient.run('unit-of-the-hinter', () => h.loop.wakeAt(BASE / 2));
+        await vi.advanceTimersByTimeAsync(BASE);
+        ambient.run('unit-of-the-hinter', () => h.loop.wakeAt(0));
+        await vi.advanceTimersByTimeAsync(0);
+        await h.loop.stop();
+        expect(h.seen.filter(([what]) => what === 'tick').length, 'start, the hinted due time and the past hint each ticked').toBeGreaterThanOrEqual(3);
+        expect(h.seen.filter(([, store]) => store !== undefined)).toEqual([]);
+    });
+
+    it('CONTROL: the store the waker is in is real — a body run inside it sees it', () => {
+        expect(ambient.run('unit-of-the-waker', () => ambient.getStore())).toBe('unit-of-the-waker');
     });
 });

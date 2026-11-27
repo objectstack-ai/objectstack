@@ -671,3 +671,79 @@ describe('#33760 — an async after-hook fired inside a unit runs on its commit,
     expect(driver.begun).toHaveLength(0);
   });
 });
+
+/**
+ * [#37705] Work a unit's body starts and does not await takes the unit's handle
+ * when the call STARTS, while the unit is still open, and uses it when the
+ * statement runs, which can be after the commit. Measured on a booted app
+ * (SQLite through knex): a record-change flow finished inside the unit the
+ * write door opened for the triggering write's after-hooks, its unawaited
+ * run-history write's first read enrolled in that unit, the unit committed,
+ * and the read failed with "Transaction query already complete".
+ *
+ * The driver below holds a `note` read until `open()`, after the unit has
+ * committed, so "after the commit" is so by construction, not by a timer.
+ * CONTROL: the same read started bare inside the unit fails exactly as knex
+ * fails. `runOutsideOpenUnits` is how the caller says the work is not the
+ * unit's: the read runs unenrolled and answers.
+ */
+describe('#37705 — work started inside a unit and not awaited runs outside it through runOutsideOpenUnits', () => {
+  async function heldReads() {
+    const { engine, driver } = await makeEngine();
+    let open!: () => void;
+    const gate = new Promise<void>((r) => { open = r; });
+    const seen: unknown[] = [];
+    const realFind = driver.find.bind(driver);
+    driver.find = async (o: string, ast: any, options: any) => {
+      if (o === 'note') { seen.push(options?.transaction); await gate; }
+      return realFind(o, ast, options);
+    };
+    return { engine, driver, open, seen };
+  }
+  const read = (engine: ObjectQL) => engine.find('note', { context: { isSystem: true } } as any);
+  /**
+   * The unit's body stays open until the read has reached the driver, as the
+   * after-hooks that follow a finished flow keep the door's unit open: the
+   * read takes its handle while the unit is still open.
+   */
+  const untilReached = async (seen: unknown[]) => {
+    for (let i = 0; seen.length === 0 && i < 1000; i++) await new Promise((r) => setImmediate(r));
+    expect(seen, 'the read reached the driver inside the unit').toHaveLength(1);
+  };
+
+  it('CONTROL: the read started bare inside the unit took its handle and fails once the unit has committed', async () => {
+    const { engine, driver, open, seen } = await heldReads();
+    let late!: Promise<unknown>;
+    await engine.transaction(async () => { late = read(engine); late.catch(() => {}); await untilReached(seen); });
+    expect(driver.begun, 'a unit really opened').toHaveLength(1);
+    expect(seen).toEqual([driver.begun[0]]);
+    open();
+    await expect(late).rejects.toThrow('Transaction query already complete');
+  });
+
+  it('the same read started through runOutsideOpenUnits runs unenrolled and answers', async () => {
+    const { engine, driver, open, seen } = await heldReads();
+    let late!: Promise<unknown>;
+    await engine.transaction(async () => { late = engine.runOutsideOpenUnits(() => read(engine)); await untilReached(seen); });
+    expect(driver.begun, 'a unit really opened').toHaveLength(1);
+    expect(seen).toEqual([undefined]);
+    open();
+    await expect(late).resolves.toEqual([]);
+  });
+
+  it('a unit the detached body opens itself is its own, and the caller\'s unit is untouched by it', async () => {
+    const { engine, driver, open } = await heldReads();
+    open();
+    let inner!: Promise<unknown>;
+    await engine.transaction(async (trx: any) => {
+      await engine.insert('rec', { name: 'r1' }, { context: trx } as any);
+      inner = engine.runOutsideOpenUnits(() => engine.transaction(async (own: any) => {
+        await engine.insert('note', { name: 'n1' }, { context: own } as any);
+      }));
+    });
+    await inner;
+    expect(driver.begun, 'the detached body opened a unit of its own').toHaveLength(2);
+    const [outer, own] = driver.begun;
+    expect(driver.creates.map((c: any) => [c.object, c.transaction])).toEqual([['rec', outer], ['note', own]]);
+  });
+});
