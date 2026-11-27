@@ -170,8 +170,15 @@ describe('[#26572] the default RestServerConfig on a booted showcase: crud, batc
     expect(liaisonDoc.status, liaisonDoc.text).toBe(200);
     const served = Object.keys(fieldsOf(liaisonDoc));
     for (const f of WITHHELD) expect(served).not.toContain(f);
-    // Absent, not blanked: the name appears nowhere in the served document.
-    expect(liaisonDoc.text).not.toMatch(/budget|"spent"/);
+    // Absent, not blanked: the name appears nowhere in the served document —
+    // as a key, a list member or an expression's `record.budget`. Matched as a
+    // whole word: the object's `budget_schedule` field group is a heading the
+    // liaison is served, and the next assertion holds its members.
+    expect(liaisonDoc.text).not.toMatch(/\bbudget\b|"spent"/);
+    // The field groups keep their headings and drop the withheld members.
+    const groups = ((liaisonDoc.json.item ?? liaisonDoc.json).fieldGroups ?? []) as Array<{ fields?: string[] }>;
+    expect(groups.length, 'showcase_project declares fieldGroups').toBeGreaterThan(0);
+    for (const g of groups) for (const f of WITHHELD) expect(g.fields ?? []).not.toContain(f);
     // Every other field is served unchanged in kind.
     expect(served).toEqual(Object.keys(fieldsOf(adminDoc)).filter((f) => !WITHHELD.includes(f)));
   });
