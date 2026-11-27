@@ -368,6 +368,18 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    */
   suggestions?: string[];
   /**
+   * objectstack#37862 — the host's own empty conversation, drawn in place of
+   * the built-in one (the icon, {@link ChatbotLabels.emptyTitle},
+   * {@link ChatbotLabels.emptyDescription} and {@link suggestions}) while the
+   * conversation has no message. It gets the two things a suggestion can do:
+   * `send` sends the text as a message, as a built-in chip does; `fill` puts
+   * the text in the composer and focuses it, sending nothing.
+   */
+  renderEmptyState?: (actions: {
+    send: (text: string) => void;
+    fill: (text: string) => void;
+  }) => React.ReactNode;
+  /**
    * Optional UI string overrides for localization. Each field falls back
    * to its English default, so existing callers keep working unchanged.
    */

@@ -2374,7 +2374,29 @@ const ko = {
           availableObjects: "사용 가능한 데이터 객체를 나열해 주세요.",
           recentActivity: "내 최근 활동을 요약해 주세요.",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: '이 레코드 요약',
+            related: '이 레코드와 관련된 항목은?',
+          },
+          list: {
+            summarize: '이 목록의 레코드 요약',
+            recent: '이번 주에 추가된 레코드는?',
+          },
+          dashboard: {
+            explain: '이 대시보드는 무엇을 보여 주나요?',
+            standOut: '이 대시보드에서 눈에 띄는 점은?',
+          },
+          report: {
+            summarize: '이 보고서 요약',
+            takeaways: '이 보고서의 핵심 내용은?',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: '추천 질문',
       discussing: "보는 중: {{target}}",
       focus: {
         pin: "이 레코드에 대해 계속 질문",

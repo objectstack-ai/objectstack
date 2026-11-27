@@ -2376,7 +2376,29 @@ const ja = {
           availableObjects: "利用できるデータオブジェクトを一覧にしてください。",
           recentActivity: "最近の自分の活動を要約してください。",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'このレコードを要約',
+            related: 'このレコードに関連するものは？',
+          },
+          list: {
+            summarize: 'この一覧のレコードを要約',
+            recent: '今週追加されたレコードは？',
+          },
+          dashboard: {
+            explain: 'このダッシュボードは何を示していますか？',
+            standOut: 'このダッシュボードで目立つ点は？',
+          },
+          report: {
+            summarize: 'このレポートを要約',
+            takeaways: 'このレポートの要点は？',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'おすすめの質問',
       discussing: "表示中: {{target}}",
       focus: {
         pin: "このレコードについて質問し続ける",
