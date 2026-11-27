@@ -78,11 +78,10 @@
  */
 
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
-import { operationUserMessage } from '@objectstack/core';
 import type { IWebhookService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
-import { requestLocaleOf } from './own-door-bridge.js';
+import { catalogNotImplemented } from './own-door-bridge.js';
 
 /**
  * The one path this domain claims — exactly, with no sub-paths: the redeliver
@@ -118,22 +117,10 @@ export async function handleWebhooksRedeliverRequest(
     // [#37610] The `501` is the operation-message catalog's, in the request's
     // top `Accept-Language` tag, as the own-door bridge answers its own.
     if (!service) {
-        return {
-            handled: true,
-            response: deps.error(
-                operationUserMessage('webhook_redeliver_service_unregistered', { locale: requestLocaleOf(context) }),
-                501,
-            ),
-        };
+        return catalogNotImplemented(deps, context, 'webhook_redeliver_service_unregistered');
     }
     if (typeof service.handleRedeliver !== 'function') {
-        return {
-            handled: true,
-            response: deps.error(
-                operationUserMessage('webhook_redeliver_member_missing', { locale: requestLocaleOf(context) }),
-                501,
-            ),
-        };
+        return catalogNotImplemented(deps, context, 'webhook_redeliver_member_missing');
     }
 
     const request = context.request as Request;

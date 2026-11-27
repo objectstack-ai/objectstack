@@ -936,13 +936,13 @@ describe('[#37662] the inbound hook route\'s 501 follows the request\'s language
         unregistered: {
             en: 'Inbound automation hooks are not available: no trigger-api service is registered. The inbound-hook trigger (@objectstack/trigger-api) serves this route through that service; compose it on the environment that owns the flow.',
             'zh-CN': '入站自动化钩子不可用：未注册 trigger-api 服务。入站钩子触发器（@objectstack/trigger-api）通过该服务提供此路由；请在拥有该流程的环境上组合它。',
-            'ja-JP': '受信オートメーションフックは利用できません。trigger-api サービスが登録されていません。受信フックトリガー（@objectstack/trigger-api）がこのサービスを通じてこのルートを提供します。フローを所有する環境に組み込んでください。',
+            'ja-JP': '受信自動化フックは利用できません。trigger-api サービスが登録されていません。受信フックトリガー（@objectstack/trigger-api）がこのサービスを通じてこのルートを提供します。フローを所有する環境に組み込んでください。',
             'es-ES': 'Los ganchos de automatización entrantes no están disponibles: no hay ningún servicio trigger-api registrado. El disparador de ganchos entrantes (@objectstack/trigger-api) sirve esta ruta a través de ese servicio; compóngalo en el entorno al que pertenece el flujo.',
         },
         memberMissing: {
             en: 'Inbound automation hooks are not available: the registered trigger-api service does not implement handleInboundHook.',
             'zh-CN': '入站自动化钩子不可用：已注册的 trigger-api 服务未实现 handleInboundHook。',
-            'ja-JP': '受信オートメーションフックは利用できません。登録されている trigger-api サービスは handleInboundHook を実装していません。',
+            'ja-JP': '受信自動化フックは利用できません。登録されている trigger-api サービスは handleInboundHook を実装していません。',
             'es-ES': 'Los ganchos de automatización entrantes no están disponibles: el servicio trigger-api registrado no implementa handleInboundHook.',
         },
     };
@@ -969,6 +969,8 @@ describe('[#37662] the inbound hook route\'s 501 follows the request\'s language
                     const label = JSON.stringify(headers);
                     const result = await dispatcher.dispatch('POST', ROUTE, {}, {}, ctx(request));
                     expect(envelope(result), label).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
+                    // [#37737] The body is in the request's language, so the answer says it varies by it.
+                    expect(result.response?.headers?.Vary, label).toBe('Accept-Language');
                     expect(result.response?.body?.error?.message, label).toBe(site.sentences[locale]);
                     expect(result.response?.body?.error?.userMessage, label).toBeUndefined();
                 }
