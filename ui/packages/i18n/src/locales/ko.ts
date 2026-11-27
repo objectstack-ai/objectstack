@@ -5491,6 +5491,7 @@ const ko = {
       toggleFailed: "앱 상태 전환 실패: {{reason}}",
       setDefaultDone: "{{name}}을(를) 기본값으로 설정했습니다",
       setDefaultFailed: "기본 앱 설정 실패: {{reason}}",
+      restoreDefaultFailed: "{{name}}을(를) 기본 앱으로 복원하지 못해 더 이상 기본 앱이 아닙니다: {{reason}}",
       appDeleted: "{{name}}을(를) 삭제했습니다",
       deleteFailed: "앱 삭제 실패: {{reason}}",
       nothingToDelete: "{{name}}에 삭제할 항목이 없습니다: {{reason}}",

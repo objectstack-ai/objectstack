@@ -5643,6 +5643,7 @@ const es = {
       toggleFailed: "Error al cambiar el estado de la aplicación: {{reason}}",
       setDefaultDone: "{{name}} establecida como predeterminada",
       setDefaultFailed: "Error al establecer la aplicación predeterminada: {{reason}}",
+      restoreDefaultFailed: "No se pudo restaurar {{name}} como aplicación predeterminada, por lo que ya no es la predeterminada: {{reason}}",
       appDeleted: "{{name}} eliminada",
       deleteFailed: "Error al eliminar la aplicación: {{reason}}",
       nothingToDelete: "Nada que eliminar para {{name}}: {{reason}}",

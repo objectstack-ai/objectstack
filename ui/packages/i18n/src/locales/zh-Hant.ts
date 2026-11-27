@@ -5538,6 +5538,7 @@ const zhHant = {
       toggleFailed: '切換應用狀態失敗：{{reason}}',
       setDefaultDone: '{{name}} 已設為預設',
       setDefaultFailed: '設定預設應用失敗：{{reason}}',
+      restoreDefaultFailed: '無法將 {{name}} 恢復為預設應用，因此它已不再是預設應用：{{reason}}',
       appDeleted: '{{name}} 已刪除',
       deleteFailed: '刪除應用失敗：{{reason}}',
       nothingToDelete: '{{name}} 無可刪除：{{reason}}',

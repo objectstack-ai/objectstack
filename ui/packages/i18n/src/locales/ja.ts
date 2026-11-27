@@ -5494,6 +5494,7 @@ const ja = {
       toggleFailed: "アプリの状態の切り替えに失敗しました：{{reason}}",
       setDefaultDone: "{{name}} をデフォルトに設定しました",
       setDefaultFailed: "デフォルトアプリの設定に失敗しました：{{reason}}",
+      restoreDefaultFailed: "{{name}} をデフォルトアプリに戻せなかったため、デフォルトではなくなりました：{{reason}}",
       appDeleted: "{{name}} を削除しました",
       deleteFailed: "アプリの削除に失敗しました：{{reason}}",
       nothingToDelete: "{{name}} に削除するものはありません：{{reason}}",

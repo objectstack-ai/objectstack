@@ -5803,6 +5803,7 @@ const ru = {
       toggleFailed: "Не удалось изменить состояние приложения: {{reason}}",
       setDefaultDone: "{{name}} установлено по умолчанию",
       setDefaultFailed: "Не удалось установить приложение по умолчанию: {{reason}}",
+      restoreDefaultFailed: "Не удалось восстановить {{name}} как приложение по умолчанию, поэтому оно больше не используется по умолчанию: {{reason}}",
       appDeleted: "{{name}} удалено",
       deleteFailed: "Не удалось удалить приложение: {{reason}}",
       nothingToDelete: "Нечего удалять для {{name}}: {{reason}}",

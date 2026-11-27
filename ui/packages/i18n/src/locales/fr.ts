@@ -5639,6 +5639,7 @@ const fr = {
       toggleFailed: "Échec du changement d'état de l'application : {{reason}}",
       setDefaultDone: "{{name}} définie par défaut",
       setDefaultFailed: "Échec de la définition de l'application par défaut : {{reason}}",
+      restoreDefaultFailed: "Impossible de rétablir {{name}} comme application par défaut ; elle n'est donc plus l'application par défaut : {{reason}}",
       appDeleted: "{{name}} supprimée",
       deleteFailed: "Échec de la suppression de l'application : {{reason}}",
       nothingToDelete: "Rien à supprimer pour {{name}} : {{reason}}",
