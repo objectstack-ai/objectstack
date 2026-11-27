@@ -110,3 +110,34 @@ describe('SetPasswordPage — a cloud-managed refusal is localized (objectstack#
     );
   });
 });
+
+// The same code has two self-hosted producers on these doors (plugin-auth
+// `sso-only-local-password.ts`, `pending-sso-marker.ts`). The sentence is true
+// for their reader too, so the mapping stands for them: an SSO-only refusal of
+// an IdP-provisioned account shows the same localized sentence.
+describe('Reset and set-password pages — a self-hosted SSO-only refusal shows the same sentence (objectstack#34171)', () => {
+  const SSO_ONLY_RESET =
+    'This environment is in SSO-only mode and your account is provisioned by your identity provider, so you sign in '
+    + 'through single sign-on and your local password cannot be reset here. Sign in with SSO. No password was set.';
+  const SSO_ONLY_SET =
+    'This environment is in SSO-only mode and your account is provisioned by your identity provider, so you sign in '
+    + 'through single sign-on and a local password cannot be set for you here. Sign in with SSO. No password was set.';
+
+  it('reset-password: the SSO-only 409 RESOURCE_CONFLICT shows the localized reset sentence', async () => {
+    authState = { resetPassword: vi.fn().mockRejectedValue(coded('RESOURCE_CONFLICT', SSO_ONLY_RESET)) };
+    renderAt('/reset-password?token=tok', <ResetPasswordPage />);
+    await fillAndSubmit(zh.resetPassword);
+    expect(await toastDescription()).toBe(zh.login.errors.managedPasswordReset);
+  });
+
+  it('set-password: the SSO-only 409 RESOURCE_CONFLICT shows the localized reset sentence', async () => {
+    authState = {
+      user: { id: 'u1', name: 'Dana', email: 'dana@example.com' },
+      isLoading: false,
+      setInitialPassword: vi.fn().mockRejectedValue(coded('RESOURCE_CONFLICT', SSO_ONLY_SET)),
+    };
+    renderAt('/set-password', <SetPasswordPage />);
+    await fillAndSubmit(zh.setPassword);
+    expect(await toastDescription()).toBe(zh.login.errors.managedPasswordReset);
+  });
+});

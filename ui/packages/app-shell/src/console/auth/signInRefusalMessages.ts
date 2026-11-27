@@ -94,10 +94,20 @@ export function signInRefusalMessages(
  * password: the forgot-password form's `errorMessages`, the reset-password
  * page and the set-password page (objectstack#34171).
  *
- * A cloud-managed runtime refuses each of those doors with 409
- * `RESOURCE_CONFLICT`, because no local password is set or reset there for
- * anyone; the sentence sends the person to the identity provider's button on
- * the sign-in page. It is kept apart from `signInRefusalMessages` on purpose:
+ * Three plugin-auth producers answer 409 `RESOURCE_CONFLICT` on these doors,
+ * and the sentence is true for the reader of each: the person signs in through
+ * the identity provider, and no local password is set or reset here for them.
+ *
+ *   - `cloud-managed.ts`: a cloud-managed runtime sets or resets no local
+ *     password for anyone (and the hosted relay in front of it answers the same).
+ *   - `sso-only-local-password.ts`: on a self-hosted deployment in SSO-only
+ *     mode, an account the identity provider provisions has no local password
+ *     set or reset (`reset-password`, `set-initial-password`).
+ *   - `pending-sso-marker.ts`: a pending SSO person, added ahead of a first
+ *     single sign-on, in every mode.
+ *
+ * The sentence sends the person to the identity provider's button on the
+ * sign-in page. It is kept apart from `signInRefusalMessages` on purpose:
  * that map's two-factor sentences (`INVALID_CODE`, …) describe the sign-in step
  * and would be wrong on a reset door. Any other code keeps the server's text.
  */
