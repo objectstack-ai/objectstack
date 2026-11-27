@@ -22,8 +22,9 @@ clause and open questions 2 and 5, and, for building, ADR-0037's split-view
 presentation and its `LiveCanvas` host: the app shows in the main area
 (objectstack#34610).
 Amendment A4 (2026-11-27) — an app may place one AI inquiry page (`ai:chat`
-menu entry); the top-bar robot is hidden on that page and the drawer stays
-the container everywhere else (objectstack#37788).
+menu entry); on that page the drawer is closed and its triggers (the top-bar
+robot, the keyboard toggle) are hidden or inert, and the drawer stays the
+container everywhere else (objectstack#37788).
 **Author**: ObjectUI app-shell / Studio team
 **Consumers**: `@object-ui/app-shell`
 (`console/ai/AiChatPage.tsx`, `layout/ConsoleFloatingChatbot.tsx`,
@@ -483,8 +484,9 @@ It accepted the seat's recommendation as presented:
   right-side drawer is the one place the assistant's conversation is drawn:
   the rail on a desktop, a bottom sheet on a phone. There is no `/ai` page.
   *(Amendment A4: an app may place one AI inquiry page, `ai:chat`, in its
-  navigation; that page draws its own `ask` conversation, and the top-bar
-  robot is hidden while it is the active route.)*
+  navigation; that page draws its own `ask` conversation, and while it is
+  the active route the drawer is closed and its triggers, the top-bar robot
+  and the keyboard toggle, are hidden or inert.)*
   Three surfaces keep their own chrome, as before: Studio's copilot in its
   right slot (objectui#12725), the public `/s/:token` share page (read-only,
   ADR-0013) and the runtime bubble (§4). Studio's maximize, which navigated to
@@ -547,9 +549,10 @@ and objectstack#34610 (building with the app draft in the main area).
 **What it changes.** One exception to A3's "One container" ("In the console
 shell, Home and every app page, the right-side drawer is the one place the
 assistant's conversation is drawn … There is no `/ai` page."): an app may draw
-one `ask` conversation in a page of its own, and on that page A3's "Entry",
-the top-bar robot, is not shown. Everything else in A3 stands, and so does
-A2's key decision: the drawer's `ask` scope is still the product alone.
+one `ask` conversation in a page of its own, and on that page the drawer is
+closed and A3's "Entry", the top-bar robot and the keyboard toggle, is
+hidden or inert. Everything else in A3 stands, and so does A2's key
+decision: the drawer's `ask` scope is still the product alone.
 
 **Why.** A3 left an app no place of its own for questions: the top-bar robot
 was its only AI entry. An app whose users come mainly to ask (a
@@ -577,15 +580,27 @@ its "Filing gate" line), verbatim, not translated:
 - **One page per app.** An app may place one AI inquiry page in its
   navigation: a `type: 'component'` entry whose `componentRef` is `ai:chat`.
   Its copy (welcome title and subtitle, composer placeholder, suggested
-  questions) comes from that entry's declared `params` (objectstack#37787),
+  questions) comes from that entry's declared `params`
+  (`AiChatNavParamsSchema` in `@objectstack/spec/ui`, objectstack#37787),
   never from the URL. The page is platform-generic: it carries no business
-  wording of its own, and a key the entry does not declare falls back to
-  neutral platform copy.
-- **Home.** Placed first in the app's navigation, the page is the app's home.
-- **No robot on the page.** While the page is the active route, the top-bar
-  robot, the drawer's entry, is hidden, so one screen never draws two `ask`
-  conversations. On every other page the robot and the drawer are as A3
-  says.
+  wording of its own, and a key the entry omits falls back to neutral
+  platform copy.
+- **Home.** The page is the app's home by the app's existing landing rule,
+  not by position alone. A declared `AppSchema.landing` outranks position
+  (`resolveLandingRoute`). With none declared, from 768 px up the first entry
+  the member is shown lands, and a `component` entry qualifies, so the page
+  placed first is the home. Below 768 px the app root is the app's menu
+  (`PhoneAppHome`), and the page is one row of it.
+- **No drawer on the page.** objectstack#37788 item 7 hides the drawer's
+  trigger on this page "so one screen never holds two ask conversations";
+  read with the 03:16Z ruling, A4 states that as the rule. While the page
+  is the active route the drawer is closed and its triggers are hidden or
+  inert: the top-bar robot is hidden, and the keyboard toggle
+  (Ctrl/Cmd+Shift+I) does not open the drawer. No address, the `/ai…`
+  addresses included, stacks a second `ask` conversation on the page. A
+  build hand-off from the page still opens the drawer, as today (next
+  bullet). On every other page the robot, the toggle and the drawer are as
+  A3 says.
 - **Agent.** The page runs `ask`; a maker gets `ask` there too. A hand-off
   to build from the page opens the drawer, as a hand-off does today.
 - **Thread.** The page's conversation key is `app:PKG:ask`, bound to that
@@ -599,10 +614,13 @@ its "Filing gate" line), verbatim, not translated:
   every app without such an entry, and on an app's other pages. The `/ai…`
   addresses still open the drawer, and the floating button stays retired.
 
-**Consequences.** The `ai:chat` page is the one place in the console shell,
-outside the drawer, where an assistant conversation is drawn, and it never
-shares a screen with the drawer's entry. This amendment records the page and
-its relation to the drawer only: how an author adds the entry, and who sees
+**Open, outside A4 and objectstack#37788.** Whether a phone's app root
+should open the page.
+
+**Consequences.** The `ai:chat` page is the one app page in the console
+shell that draws an assistant conversation outside the drawer. This
+amendment records the page and its relation to the drawer only: how an
+author adds the entry, and who sees
 it when the assistant is unavailable to them, are not decided here. A reader
 of A3 finds the exception at its "One container" bullet. The text lands
 before the page (seat repo:objectstack#1's routing call,
