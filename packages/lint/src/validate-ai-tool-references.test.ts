@@ -711,6 +711,36 @@ describe('[ADR-0160 D8] a skill\'s context pack reference', () => {
       expect(findings.map((f) => f.rule)).toEqual([AI_SKILL_CONTEXT_UNKNOWN]);
       expect(findings[0].message).toContain('"com.acme.shipper"');
       expect(findings[0].message).toContain('"com.acme.twin"');
+      // The `ambiguous-in-closure` arm itself: with neither package in the
+      // closure the rule answers `outside-closure`, which names both holders too.
+      expect(findings[0].message).toContain('more than one holder in reach');
+      expect(findings[0].message).not.toContain('outside this package');
+      expect(findings[0].hint).not.toContain('Declare a dependency');
+    });
+
+    it('a stack that names no package, two packages shipping the pack: the fix names no package of its own', () => {
+      const twin = { ...shipper, id: 'com.acme.twin', name: 'twin' };
+      const findings = contextFindings({
+        skills: [skill({ context: 'policy_document' })],
+        packages: [shipper, twin].map((manifest) => ({ manifest })),
+      });
+      expect(findings.map((f) => [f.rule, f.path])).toEqual([[AI_SKILL_CONTEXT_UNKNOWN, 'skills[0].context']]);
+      expect(findings[0].message).toContain('"com.acme.shipper"');
+      expect(findings[0].message).toContain('"com.acme.twin"');
+      expect(findings[0].message).toContain('more than one holder in reach');
+      for (const line of [findings[0].message, findings[0].hint]) {
+        expect(line).not.toContain('this package');
+        expect(line).not.toContain('\n');
+        expect(line.length, line).toBeLessThanOrEqual(200);
+      }
+    });
+
+    it('CONTROL — a stack with a package, two holders in its closure: the fix names that package', () => {
+      const twin = { ...shipper, id: 'com.acme.twin', name: 'twin' };
+      const body = reader({ dependencies: { 'com.acme.shipper': '^1.0.0', 'com.acme.twin': '^1.0.0' } });
+      const findings = contextFindings(asPackageStack(body, [shipper, twin]));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].hint).toContain('this package');
     });
 
     it('each refusal verdict and fix is one line of at most 200 characters', () => {
