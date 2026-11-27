@@ -297,7 +297,7 @@ export const supportKb: KnowledgeSource = KnowledgeSourceSchema.parse({
   source: {
     kind: 'object',
     object: 'kb_article',
-    content: ['title', 'body'],             // concatenated into document content
+    content: ['title', 'body'],             // joined into document content
     metadataFields: ['category', 'owner_id'], // projected for search-time filtering
     where: { published: true },             // index published articles only
   },
