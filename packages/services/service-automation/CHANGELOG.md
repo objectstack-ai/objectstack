@@ -1,5 +1,145 @@
 # @objectstack/service-automation
 
+## 19.0.0-next.1
+
+### Patch Changes
+
+- eb683b8: feat(security)!: View All and Modify All stop opening fields; `viewAllFields` is the one "every field" bit
+  
+  **BREAKING** (19.0.0): View All (`viewAllRecords`) and Modify All (`modifyAllRecords`) widen records only. They no longer cast a field vote, so a field that a permission set hides (`readable: false`) or locks (`editable: false`) stays hidden or locked for their holders. Reading every field of an object is `viewAllFields: true` on that object's entry; it votes read, never edit.
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: registered permission-view-all-fields-beside-record-bypass -->
+  
+  FROM → TO:
+  
+  - `objects.<name>: { viewAllRecords: true }` read every field of the object another set hides → it reads none of them. TO keep that read: `{ viewAllRecords: true, viewAllFields: true }`.
+  - `objects.<name>: { modifyAllRecords: true }` read and edited every field, the set's own rows included → it reads and edits only what the field rows allow. TO keep the read: `{ modifyAllRecords: true, viewAllFields: true }`, except a field the set's own `readable: false` row hides: that row now hides the field from the set's holders even with the bit, so delete it where they should still read the field. The edit is not restored by any bit, for a field another set locks or a field the set's own field row names without `editable: true` (an omitted `editable` is `false`): grant it with an explicit `editable: true` row in the set that should edit it.
+  - The same holds on a `'*'` entry.
+  
+  **Check your permission sets in one step.** A permission set is affected when one of its `objects` entries, the `'*'` entry included, has `viewAllRecords: true` or `modifyAllRecords: true` and does not have `viewAllFields: true`. For each such entry, add `viewAllFields: true` to it if the set should still read every field of that object. Beside View All that is all the read needs: with the bit, the set reads what View All read before. Beside Modify All it is not: the set's own `readable: false` rows now bind (before, Modify All overrode them), so a field such a row hides stays hidden from the set's holders until you delete the row. For the edit, Modify All no longer grants one: where its holders must still edit a field another set locks, or a field the set's own field row names without `editable: true`, add an explicit `editable: true` row in the set that should edit it.
+  
+  - Sets in your source: `os migrate meta --from 18 --write` adds `viewAllFields: true` beside every such bit (ADR-0087 conversion `permission-view-all-fields-beside-record-bypass`).
+  - Sets saved in a running deployment (Studio-saved, stored in `sys_metadata`): they are **not** rewritten on upgrade, and from 19 they are read with the new meaning. Studio's permission matrix has no control for `viewAllFields` today (it keeps the key when it saves a set that already carries it), so add it to the set's entry through the metadata API. No command lists the affected stored sets yet; a review list is follow-up #37375.
+  
+  The protocol-19 upgrade guide carries the same check as the semantic entry `permission-view-all-modify-all-cast-no-field-vote`.
+  
+  The error direction is safe: an unconverted set sees **fewer** fields after the upgrade, never more. No field that was hidden opens. A set whose object has no field row in any set changes nothing at all, because a field no set names already follows the object grant.
+  
+  Also in this change:
+  
+  - The built-in admin sets (`admin_full_access`, `organization_admin`) already carry `viewAllFields: true` on their `'*'` entry, so they still read every field. They no longer edit a field that another set they hold locks.
+  - Explain no longer reports a row-conditioned field lock as "superseded by the Modify All Data field vote": the lock binds per row for every caller.
+  - `@objectstack/lint`: the warning `security-superuser-field-mask-inert` is retired, since a set's own field rows now bind beside its own View All or Modify All. `security-cross-set-field-reopen` now reports only a field one set hides that another set's `viewAllFields` re-opens. `security-controlled-by-parent-master-reference-hidden` and the roll-up source-visibility rules now judge a mask beside Modify All like any other mask.
+  - `@objectstack/spec` and `@objectstack/metadata-core`: the conversion is a default flip, retired from the load path from day one. Only `os migrate meta --from 18` replays it: the authoring funnel skips it (it is retired from the load path), and the artifact-ingestion door (`DEFAULT_FLIPS_NOT_REPLAYED_HERE`) and every stored-row read (`applyConversionsToStoredItem`, `os migrate meta --stored` included) refuse it by id, so an artifact or stored set is read with the 19 meaning and never handed a field read its author did not write.
+  - `@objectstack/core`: `superuserFieldVote` is replaced by `viewAllFieldsReadVote(sets, object, field)`, which answers whether a set's `viewAllFields` reads the field. `holdsSuperuserBypass` is unchanged and answers the record bypass only.
+  - `@objectstack/scenarios`: the persona-grant scoring no longer treats Modify All as overriding a field lock.
+  - `@objectstack/cli` and `@objectstack/service-automation`: test comments only, restated for the 19 meaning.
+- 712df42: fix(automation): a screen flow refuses a required field holding only spaces at the field, and an engine screen refusal reaches the user in their language, at the field it names
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A required text field on a flow screen that held only spaces passed the screen dialog's check. The server trims, so it refused the submission, and the dialog showed the server's sentence as it was: English in every language, listing the screen's API field names (`Invalid screen input: Screen field "resolution" is required — declared fields: 'resolution', 'resolved_by_article'`).
+  
+  Now the dialog counts a value of only spaces as no answer, as the server does, and refuses it under the field with the same message an empty field gets, in the user's language. Nothing is sent.
+  
+  When the server still refuses a screen's values, `400 INVALID_SCREEN_INPUT` now carries its findings in `error.details.fields`: one `{ field, code, message }` entry per violated field, with an ADR-0114 field code, the same entries a `VALIDATION_FAILED` carries. `AutomationResult` gains the optional `fields` the engine fills them from, mirrored on `TriggerFlowResponseSchema`. `error.message` is unchanged. The Console's flow runner marks each field it names, by its label and in the user's language, moves focus to the first, and its banner reads "Some values on this step weren't accepted. Check them and try again." instead of the server's sentence, also against a server that sends no findings. Nothing to migrate: a client that reads only `error.code` and `error.message` sees what it saw before.
+- 8071f35: fix(automation): a record-change flow's run history and its notification deliveries land again when the triggering write runs in a unit of work
+  
+  Clause-②: yes (widening) — `ObjectQL` is exported from the `@objectstack/objectql` entry, and it gains two public methods, `runOutsideOpenUnits(body)` and `runAfterOpenUnitsCommit(body)`; `@objectstack/core` gains the root export `wakeAfterOpenUnitsCommit(engine, wake)`; the `@objectstack/service-automation` interface `SuspendedRunStoreEngine` gains the matching optional member `runOutsideOpenUnits`, so an engine that does not supply it still satisfies the interface. No existing signature or accepted input narrows. `DispatchLoop`'s change is to the async context its ticks run in, and the dispatchers' change is to when a wake is sent, not to any API. The level stays `patch` because nothing a metadata author can write changes (`Metadata-protocol: none`).
+  Metadata-protocol: none
+  
+  On 19.0.0-next.0 a record-change flow fired by a write whose object carries a metadata `before*` hook, or a blocking `after*` hook that can abort, finished inside the unit of work the write door opens for that write. Two pieces of work the run starts and does not await then ran on that unit's transaction after it had committed, and the database answered "Transaction query already complete":
+  
+  - the run's terminal history row (`sys_automation_run`) never landed, so the run was missing from the Runs surfaces and from every read of its history, with an `error` line naming the persist;
+  - a `notify` node's outbox wake started the notification dispatcher's tick in the same unit, so the tick's delivery updates failed, and with them the audit rows (`sys_activity`) those updates write.
+  
+  Both now run outside the unit:
+  
+  - `ObjectQL.runOutsideOpenUnits(body)` is new: it runs work its caller starts and does not await outside every unit of work open at the call, the same exit an `async: true` hook's run takes. Its calls run on their own connection, and a rollback of the unit open at the call does not undo them.
+  - The durable run-history store writes a finished run's row through it.
+  - `DispatchLoop` (the notification, HTTP-delivery, database-queue and audit-seal loops) runs every tick in the async context it was constructed in, never in the context of the caller of `start()`, `wake()` or `wakeAt()`.
+  - A wake for a row the open unit just wrote is sent at that unit's commit, and not at all when it rolls back: `ObjectQL.runAfterOpenUnitsCommit(body)` is new, and the notification and HTTP outboxes' wake and the database queue's `publish` and `replay` wake go through it (`wakeAfterOpenUnitsCommit` in `@objectstack/core`). A tick woken inside the unit runs outside it, and on a pooled driver (Postgres, MySQL) it could not see the row yet, so the row would have waited for a later, backed-off tick. A unit opened by `ScopedContext`'s `beginTransaction` trio holds the wake back while an engine call carrying its handle runs; a wake made outside such a call, by code that holds the trio handle only explicitly, goes at once, and on a pooled driver waits one backed-off tick.
+  - A loop's home is the context it is constructed in, so a loop is constructed at boot; `DbQueueAdapter`'s first `subscribe()` under `autoStart` starts it too and belongs at boot.
+  
+  What a reader sees change: a run's history row is written beside the run, not inside the triggering write's unit, so it is not rolled back with that write, and it can land a moment after the write has returned. Read it the way you read any history row written by a run that is not awaited: wait for it to land rather than reading it once straight after the write.
+- f19ae3a: feat(automation): every run of a tree is handed its root run and the run that carries its record, and each approval request records both in columns of its own
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  ADR-0162 Execution item 7, "The root run". A `subflow` body or a `map` item knew only its immediate parent (`$parentRunId`), so nothing could tell which runs, and which requests, belong to one whole approval.
+  
+  - **`@objectstack/service-automation`.** The engine stamps every run's context with its root run, `$rootRun`: `{ runId, flowName, object, startedAt }`, the run the tree was started on, its flow's key, the object it was started on (its context's `object`, with or without a record; `null` when it names none, never a `map` item's own object) and when it started. A run with no parent is its own root, also on each retry attempt; a child carries its parent's over, at any depth, and the stamp rides every suspension. Beside it, `$recordRun`: `{ runId, object, recordId }`, the highest run from this one up over which the record does not change, which is the root run or a `map` item run whose item is a record (a `subflow` child, and an item that is not a record, inherit their parent's). New: `AutomationEngine.rootRunOf(context)` and `recordRunOf(context)`, which answer them, and the `RootRun` and `RecordRun` types. A run parked before this release carries neither and gets both when it is resumed, derived in one walk of its links to its parents, before the suspension is consumed: a parent the store cannot read refuses that resume with `STORE_UNAVAILABLE` (nothing consumed, retry verbatim), and a parent that is no longer parked stamps the run `null` on both, said once at `warn`, while the run goes on; a child such a run starts inherits the `null`, and a `null` stamp is not walked again.
+  - **`@objectstack/plugin-approvals`.** The approval node hands both to `openNodeRequest` (new optional `rootRun` and `recordRun` inputs, types `ApprovalRootRun` and `ApprovalRecordRun`), and each request records `root_run_id`, `root_run_started_at` and `record_run_id` as it opens, three new read-only columns on `sys_approval_request` (in its free-text search set beside `flow_run_id`) with indexes on `(root_run_id, object_name, record_id)` and `(record_run_id)`. A run the engine could not place (the derivation above could not read its tree whole), and any run on an automation service without `rootRunOf`, opens its approval step as before, with the three columns empty. `ApprovalRootRun` and `ApprovalRecordRun` are exported from the plugin's index.
+  
+  Nothing to migrate. The columns are added by schema sync; requests opened before this release keep them empty.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [0196476]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [031a19d]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [6679160]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [92b4167]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e69fa46]
+- Updated dependencies [b620c4b]
+- Updated dependencies [f7f9345]
+- Updated dependencies [babd660]
+  - @objectstack/objectql@19.0.0-next.1
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/platform-objects@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+  - @objectstack/formula@19.0.0-next.1
+  - @objectstack/metadata-protocol@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+  - @objectstack/plugin-auth@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

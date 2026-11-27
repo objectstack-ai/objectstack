@@ -2,6 +2,8 @@
 '@objectstack/lint': patch
 ---
 
+**Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+
 fix(lint): `field-no-consumers` credits a related list's columns to the child object it lists
 
 Clause-②: no

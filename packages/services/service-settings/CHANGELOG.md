@@ -1,5 +1,134 @@
 # @objectstack/service-settings
 
+## 19.0.0-next.1
+
+### Minor Changes
+
+- 5d37374: feat(service-settings): Setup → AI takes several providers at once, a model list per provider, one default model and one structured-output model
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The `ai` settings page chose one provider. It now lets several be on at once. `provider` keeps its key and its stored values and becomes the default provider, always on; every other provider is turned on with its new `<provider>_enabled` toggle, and its section shows while it is on. Each provider keeps its one encrypted key field, never echoed by a read, and gains `<provider>_models`, further model ids one per line beside its existing `<provider>_model`, and its own "Test connection" (`ai/test_<provider>`, a form check until the AI runtime registers the live one). `default_model` picks the default model among the default provider's models, and `structured_output_provider` / `structured_output_model` pick the model strict structured-output calls use, a knob separate from the default model; a blank value means the provider's first model.
+  
+  A save is refused (`SETTINGS_VALIDATION`, `invalid_value` at the key it changes, `constraint.rule` naming the rule) when the default model is not among the default provider's models, when the structured-output provider is off, or when the structured-output model is not among its provider's models. The refusal is written in the caller's language.
+  
+  Values stored before these keys existed read unchanged and need no rewrite: a stored `provider` with its `<provider>_model` and none of the new keys is that provider on, that model its only model and the default. `resolveAiModelConfiguration(values)`, exported with `parseAiModelList`, `aiModelRuleBreaches` and `registerAiModelRules`, reads the configuration that way for the AI runtime: the providers that are on with their models, the default model and the structured-output model.
+
+### Patch Changes
+
+- 87af66e: feat(core): `requires: ['knowledge']` mounts the knowledge service and one vector store
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: follow-up #37310
+  
+  ADR-0161, #37102.
+  
+  - **New capability token `knowledge`** (`PLATFORM_CAPABILITY_TOKENS`, provider `@objectstack/service-knowledge`, edition `open`). `os serve` and `@objectstack/verify` mount `KnowledgeServicePlugin` plus exactly one store, picked from the primary database: PostgreSQL gets `KnowledgePgvectorPlugin` (adapter `pgvector`, on the same database URL); any other database gets `KnowledgeTursoPlugin` (adapter `turso`) on a local libSQL file, `knowledge.db` in the directory of the default database: `.objectstack/data/`, or `<OS_HOME>/data/` when `OS_HOME` is set (`os start --home` sets it). An in-memory database gets an in-memory turso store. The in-memory adapter (`knowledge-memory`) is never mounted by the token.
+  - No token: no knowledge service and no knowledge settings page, as before. A host that mounts `KnowledgeServicePlugin` itself keeps its own and gets no store from the runtime; a host that mounts only the store the token would choose keeps that store and gets the service.
+  - New core exports: `resolveCapabilityExtras`, `resolveKnowledgeStore`, `KNOWLEDGE_STORE_PROVIDERS` and the `CapabilityDatabase` / `CapabilityExtra` / `KnowledgeStoreSpec` types. `constructServedProviders` (`@objectstack/verify`) takes an optional `database` (default: in-memory SQLite).
+  - `os serve` now warns when a capability's extra plugin cannot be imported or constructed, instead of skipping it silently.
+  - **A source whose adapter is not mounted** no longer fails silently. The service still mounts and boot does not fail; after boot the service logs one `error` per such source naming the mounted adapters, and indexing or searching that source answers `SERVICE_UNAVAILABLE` (503) with the same message. A search across several sources names the refused one beside the hits of the others. Before, indexing threw an uncoded error and search skipped the source with a warning.
+  - **The turso store reads its URL from settings under the token.** `KnowledgeTursoPlugin` gains `urlFromSettings`: with no `url` option it reads the saved `knowledge.turso_url` / `turso_auth_token`. It reads them when the boot completes (`kernel:bootstrapped`), the first moment the settings service answers a saved value; the adapter is mounted from `start()` and answers `SERVICE_UNAVAILABLE` until the store has opened. A saved `file:` URL must resolve, after symlinks, inside that data directory; a URL that leaves it, names the platform database, or carries a NUL byte or another control character, written out or percent-encoded (`%00`, `%0a`), is refused before the libSQL client sees it (the client decodes the path, and a NUL byte in it kills the process inside the native library). New option `stateDir` (the token passes `OS_HOME`); new exports: `resolveSettingsStoreUrl`, `dataDirectoryOf`. `resolveStoreUrl` refuses control characters too, in both spellings. An auth token carrying a control character (a pasted line break, a NUL byte), saved or given as the `authToken` option, is refused the same way, read as written: the store answers `SERVICE_UNAVAILABLE` with a reason that never quotes the token.
+  - **`@objectstack/knowledge-turso` is an optional dependency of `@objectstack/cli` and `@objectstack/verify`**, not a hard one: its libSQL client is a native module with an `os` / `cpu` list, and a hard dependency would refuse the whole install outside that list. Where it is absent `os serve` warns that the store was not mounted and boots on, `@objectstack/verify` does the same, and a source naming `turso` answers `SERVICE_UNAVAILABLE`. `KNOWLEDGE_STORE_PROVIDERS.turso` and the extra `resolveCapabilityExtras` answers for it carry `optional: true`.
+  - The `turso_url` setting's example path now reads `file:./.objectstack/data/knowledge.db` in every locale.
+- 9f9db81: fix(settings)!: the Knowledge settings page keeps only keys something reads — `adapter`, `over_fetch` and `enforce_rls` are retired
+  
+  Clause-②: no (narrowing) — narrowed: `PUT /api/settings/knowledge` refuses a body naming `adapter`, `over_fetch` or `enforce_rls` (`400 UNKNOWN_KEY`) whole, where it stored them: no other key in that body is saved; `GET /api/settings/knowledge` no longer serves them; `POST /api/settings/knowledge/test` no longer answers from `adapter` (a stored or sent `ragflow` was "Unknown adapter", `memory` an in-memory warning) and answers every call from `turso_url` and `turso_auth_token` alone
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the three retired keys; `skills/objectstack-ai/SKILL.md` teaches `knowledge.chunk_target`, which stays. `content/docs/ai/knowledge-rag.mdx` says what the page holds.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: a settings manifest is a runtime registration, not authorable metadata. The narrowed answers are doors of one settings namespace, nothing that `objectstack migrate meta` reads names these keys, and stored rows are untouched. -->
+  
+  **BREAKING** for a script or client that writes `adapter`, `over_fetch` or `enforce_rls` to the `knowledge` settings namespace: the write is now refused as an undeclared key, and refused whole — no other key in that body is saved, so a body that also changes `chunk_target` saves nothing. Drop the retired key from the body. Nothing in this repository ever read any of the three, so no deployment behaves differently.
+  
+  On the Knowledge settings page (`knowledge` namespace, manifest `version` 4), every key left has a reader:
+  
+  - `turso_url` and `turso_auth_token` are read by `@objectstack/knowledge-turso` at startup, where the knowledge store is libSQL — a platform database other than PostgreSQL. On PostgreSQL the store is pgvector, in the platform database, and neither is read.
+  - `chunk_target` is read by the knowledge service's splitter.
+  
+  What leaves, and why:
+  
+  - **Adapter** (and its "Existing indices are not migrated" banner). It chose nothing: a knowledge source uses the store its own `adapter` names, among those mounted, and `requires: ['knowledge']` mounts one store chosen by the platform database. `os knowledge status` reports each source's store.
+  - **Over-fetch multiplier**. Search refills from fixed factors, never from this setting.
+  - **Enforce RLS on search** (and its "Leave RLS on in production" banner). Every search re-checks each hit as the asking user, and nothing ever read this switch, so turning it off never turned the check off. A switch that appears to do so is not offered.
+  
+  An environment that saved any of them keeps those `sys_platform_setting` rows; the settings service never deletes a stored row. The page loads as before without them: the values are not served, not shown, and not read by "Test connection". A stored `enforce_rls = false` shows no toggle and changes nothing, as it changed nothing before. To tidy up, delete the `knowledge` rows named `adapter`, `over_fetch` and `enforce_rls` from `sys_platform_setting`; nothing requires it.
+  
+  "Test connection" checks the Turso fields only — a managed `libsql://` URL needs an auth token — and still opens no connection. The strings for the retired keys, the `Backend` and `Permissions` groups and both banners are gone from all eleven bundled locales.
+- ff63b02: fix(knowledge-turso)!: the Knowledge page's Turso fields are contributed by the store that reads them — a deployment whose store is pgvector shows none
+  
+  Clause-②: no (narrowing) — narrowed: where `@objectstack/knowledge-turso` is not mounted (the store is `@objectstack/knowledge-pgvector`, on PostgreSQL), or is mounted with a `url` or `client` of its own, `PUT /api/settings/knowledge` refuses a body naming `turso_url` or `turso_auth_token` (`400 UNKNOWN_KEY`, the whole body), where it stored them, and `GET /api/settings/knowledge` no longer serves them; where the store reads its URL from settings (the `requires: ['knowledge']` mount on any other database) both doors answer as before
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches `turso_url` or `turso_auth_token`. `content/docs/ai/knowledge-rag.mdx` says where the page shows them.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: a settings manifest is a runtime registration, not authorable metadata. The narrowed answers are doors of one settings namespace on deployments that do not read the two keys, nothing that `objectstack migrate meta` reads names them, and stored rows are untouched. -->
+  
+  **BREAKING** for a script or client that writes `turso_url` or `turso_auth_token` to the `knowledge` settings namespace of a deployment that does not mount `@objectstack/knowledge-turso` reading its URL from settings: the write is now refused as an undeclared key, and refused whole — no other key in that body is saved. Nothing on such a deployment ever read either key, so no deployment behaves differently. Drop the two keys from the body.
+  
+  The Turso group (`turso_url`, `turso_auth_token`) left `@objectstack/service-settings`' `knowledge` manifest (now `version` 5), whose remaining keys all have a reader on every deployment that mounts the knowledge service. `KnowledgeTursoPlugin` adds the group to that page in `init()` when it reads the two keys (`urlFromSettings` with no `url` or `client`, as the runtime's `knowledge` capability mount sets it), in front of the page as before, so:
+  
+  - on PostgreSQL, where the store is pgvector in the platform database, the Knowledge page shows no Turso fields;
+  - where the store is the libSQL file, the page shows them, and a saved value is read by the store at the end of the boot exactly as before.
+  
+  New exports of `@objectstack/knowledge-turso`: `knowledgeTursoSettingsSpecifiers`, `withKnowledgeTursoSection`, `contributeKnowledgeTursoSettings`, `knowledgeTursoSettingsTranslations` and `KNOWLEDGE_SETTINGS_NAMESPACE`. A host that declares the two keys in its own `knowledge` manifest keeps that manifest as written.
+  
+  Stored values: an environment that saved either key keeps its `sys_platform_setting` row (the auth token's `sys_secret` handle included); the settings service never deletes a stored row. Where the store is not mounted the value is not served and changes nothing, as it changed nothing before; mounted again, the store reads it. To tidy up a PostgreSQL deployment, delete the `knowledge` rows named `turso_url` and `turso_auth_token`; nothing requires it.
+  
+  The group's copy moved with it: `@objectstack/service-settings`' eleven locale bundles no longer carry the Turso group or its two fields, and `KnowledgeTursoPlugin` loads the same strings, in the same eleven locales, into the i18n service at `kernel:ready`.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/platform-objects@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Patch Changes

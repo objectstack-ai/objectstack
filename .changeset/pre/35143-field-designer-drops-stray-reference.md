@@ -2,6 +2,8 @@
 '@object-ui/app-shell': patch
 ---
 
+**Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+
 fix(app-shell): the field designer removes a relationship target from a field whose type reads none, so the object still publishes
 
 Clause-②: no
