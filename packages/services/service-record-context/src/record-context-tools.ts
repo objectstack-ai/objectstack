@@ -69,7 +69,8 @@ import { sentencesFor, type Sentences } from './sentences.js';
  * the caller's served schema shows it (the naming bound). A related child
  * that passes both and that THIS caller is not served is left out: nothing of
  * it is read again, its section is not named, and the notes carry the one
- * not-visible statement. A field the caller's served schema hides is not
+ * not-visible statement, when the stack publishes the object; a child the
+ * published definitions lack is left out stating nothing (D1). A field the caller's served schema hides is not
  * named: the entry, a related section whose link it is, or the body, is left
  * out, and the notes carry the same statement. A field the served
  * schema shows and field-level security withholds keeps its name and label,
@@ -494,7 +495,9 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
   //     to anyone either, so judging exposure after the served definition
   //     would read it as this caller's narrowing). A child that passes both
   //     and that THIS caller is not served is left out: never named, never
-  //     read again, with the one not-visible statement.
+  //     read again, with the one not-visible statement when its published
+  //     definition exists, and with none when it does not (an author defect,
+  //     D1): the one fact asked of the published definition here.
   const childServed = new Map<string, Record<string, unknown>>();
   const leftOut = new Set<string>();
   for (const entry of pack.related ?? []) {
@@ -525,8 +528,20 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
       return refusedOrFailed(err, () => refuseObject(entry.object, false));
     }
     if (!served) {
+      // [ADR-0160 D1/D3] Left out either way, and never read again. Stated
+      // only when the stack publishes the object: a name the published
+      // definitions lack is an author defect (`os validate`), which states
+      // nothing. The published definition is the same for every caller, so
+      // the statement depends on this caller's served schema alone, and the
+      // definition is asked for that one fact: nothing of it is carried.
+      let published: Record<string, unknown> | null;
+      try {
+        published = await door.publishedObjectDefinitionOf(entry.object);
+      } catch (err) {
+        return refusedOrFailed(err, () => refuseObject(entry.object, false));
+      }
       leftOut.add(entry.object);
-      hidden = true;
+      if (published) hidden = true;
       continue;
     }
     childServed.set(entry.object, served);
@@ -536,8 +551,8 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
   // already passed; one that still throws a coded refusal refuses the call
   // unnamed, and one that fails fails it, naming nothing, so no door's own
   // rendering of either can name what the caller is not shown. A child left
-  // out for this caller is never read, its definition included: the plan
-  // reads it as having no published definition.
+  // out for this caller is never read again, its definition included: the
+  // plan reads it as having no published definition.
   const publishedOf = async (name: string): Promise<Record<string, unknown> | null> => {
     if (leftOut.has(name)) return null;
     try {

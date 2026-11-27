@@ -270,10 +270,11 @@ function notImplementedSentence(
 /**
  * The request's top `Accept-Language` tag, from a fetch `Request` or a plain
  * header record: the language of an own door's `501`. The doors that are not
- * bridges read it for their own `501`s too: the comment doors (`comments.ts`)
- * and the webhook redelivery door (`webhooks.ts`, both #37610), the approval
- * action-page door (`approvals.ts`) and the inbound automation hooks
- * (`automation-hooks.ts`, both #37662).
+ * bridges reach it through {@link catalogNotImplemented} for their own `501`s:
+ * the comment doors (`comments.ts`) and the webhook redelivery door
+ * (`webhooks.ts`, both #37610), the approval action-page door (`approvals.ts`)
+ * and the inbound automation hooks (`automation-hooks.ts`, both #37662), and
+ * the other domain modules' `501`s (#37811).
  */
 export function requestLocaleOf(context: HttpProtocolContext): string | undefined {
     const headers = (context.request as { headers?: unknown } | undefined)?.headers as

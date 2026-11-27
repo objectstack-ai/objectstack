@@ -30,6 +30,7 @@
 // was written would still be the leak commit 02b41232d measured, with persistence.
 
 import { describe, it, expect, vi } from 'vitest';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
@@ -461,5 +462,26 @@ describe('the activation write names the caller who asked for it', () => {
         const [, options] = h.setActionActive.mock.calls[0];
         expect(options?.context).toEqual({ ...(ctx.executionContext as object), isSystem: true });
         expect(options?.context?.userId).toBe((ctx.executionContext as { userId: string }).userId);
+    });
+});
+
+// [#37811] This door's 501 sentence is the operation-message catalog's, in the
+// request's top `Accept-Language` tag: byte-identical English with no header,
+// the catalog's Japanese under `ja-JP`, and `Vary: Accept-Language` either way.
+const JA_37811 = { request: { headers: { 'accept-language': 'ja-JP,ja;q=0.9' } } };
+const LANGS_37811 = [['en', {}], ['ja-JP', JA_37811]] as const;
+const sentence37811 = (locale: 'en' | 'ja-JP', key: string, params: Record<string, string> = {}): string =>
+    BUILTIN_OPERATION_MESSAGES[locale][key].replace(/\{\{(\w+)\}\}/g, (_m, name: string) => params[name] ?? '');
+const vary37811 = (response: unknown): unknown => (response as any)?.headers?.Vary;
+
+describe('[#37811] the no-ledger 501 follows the request\'s language', () => {
+    it('action_activation_ledger_unsupported', async () => {
+        for (const [locale, extra] of LANGS_37811) {
+            const h = boot('single', { omitLedger: true });
+            const res = await flip(h, { ...TENANT_ADMIN(), ...extra } as HttpProtocolContext);
+            expect(statusOf(res)).toBe(501);
+            expect(messageOf(res)).toBe(sentence37811(locale, 'action_activation_ledger_unsupported'));
+            expect(vary37811(res.response)).toBe('Accept-Language');
+        }
     });
 });

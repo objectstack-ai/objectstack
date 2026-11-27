@@ -763,3 +763,28 @@ describe('operation message catalog — the print door\'s own 5xx sentences', ()
     }
   });
 });
+
+// [#37811] The dispatcher domains' remaining `501`s: each key is translated in
+// every locale (no English echo outside `en`) and keeps exactly the
+// placeholders the English names, so no locale drops a member, table or name.
+describe('operation message catalog — the domain modules\' 501 sentences (#37811)', () => {
+  const placeholders = (template: string): string[] => [...template.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).sort();
+  const KEYS = Object.keys(BUILTIN_OPERATION_MESSAGES.en).filter((key) =>
+    /^(auth_service_unavailable|i18n_service_unavailable|mcp_server_unavailable|meta_|packages_|automation_(connector|flow|resume|run|screen)|action_activation_|catalog_activation_|permission_set_clone_|security_audience_|share_links_)/.test(key),
+  );
+
+  it('names the thirty-seven keys (thirty-one sentences, six activation nouns)', () => {
+    expect(KEYS).toHaveLength(37);
+  });
+
+  it.each(KEYS)('%s: every locale translates it and keeps the English placeholders', (key) => {
+    const en = BUILTIN_OPERATION_MESSAGES.en[key];
+    for (const locale of ['zh-CN', 'ja-JP', 'es-ES']) {
+      const text = BUILTIN_OPERATION_MESSAGES[locale][key];
+      expect(text, `${locale} ${key}`).toBeTruthy();
+      expect(text, `${locale} ${key}`).not.toBe(en);
+      expect(placeholders(text), `${locale} ${key}`).toEqual(placeholders(en));
+    }
+  });
+});
+

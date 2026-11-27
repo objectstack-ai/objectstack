@@ -227,8 +227,7 @@ child object, the aggregated field, or a field `filter` tests. Decide per set
 from the request: it sees the children → grant the read; the total but not the
 children → keep the column readable and add `rollupSourceUnreadableReason` to
 the set's entry for it (the warning becomes a note quoting the reason; refused
-blank or beside `readable: false`); neither → mask the summary on that set,
-after removing any Modify All it holds on the parent (it overrides the mask).
+blank or beside `readable: false`); neither → mask the summary on that set.
 Never add the reason to silence a total the request withholds: mask it.
 
 A permission set (in TypeScript, the argument of `definePermissionSet(...)`)

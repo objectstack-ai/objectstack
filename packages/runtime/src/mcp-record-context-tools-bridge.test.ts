@@ -453,6 +453,8 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
                 },
                 child('rc_closed', 'Closed', { enable: { apiEnabled: false } }),
                 child('rc_hidden', 'Hidden'),
+                // Served to `usr_member` alone (its `rc_unmasker` grant), not to `usr_plain`.
+                child('rc_partner', 'Partner'),
                 {
                     name: 'rc_vault', label: 'Vault', sharingModel: 'public_read_write', enable: { apiEnabled: false },
                     fields: { label: { name: 'label', type: 'text', label: 'Label' } },
@@ -494,6 +496,15 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
                 },
                 { name: 'rc_exposure_child', label: 'Exposure child', object: 'rc_policy', fields: ['title'], related: [{ object: 'rc_closed', fields: ['version'] }] },
                 { name: 'rc_disabled_child', label: 'Disabled child', object: 'rc_policy', fields: ['title'], related: [{ object: 'rc_off', fields: ['version'] }] },
+                // [ADR-0160 D1] An author defect: `rc_ghost` is an object the stack does not define.
+                {
+                    name: 'rc_misspelt_child', label: 'Misspelt child', object: 'rc_policy', fields: ['title'],
+                    related: [{ object: 'rc_ghost', fields: ['version'] }, { object: 'rc_step', fields: ['label'], orderBy: [{ field: 'rank', order: 'asc' }] }],
+                },
+                {
+                    name: 'rc_role_child', label: 'Role child', object: 'rc_policy', fields: ['title'],
+                    related: [{ object: 'rc_partner', fields: ['version'] }, { object: 'rc_step', fields: ['label'], orderBy: [{ field: 'rank', order: 'asc' }] }],
+                },
             ],
         } as never);
         engine.registerApp({
@@ -516,6 +527,7 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         await engine.insert('rc_revision', { id: 'r1', version: 'v1', policy: 'p1', owner_id: 'usr_member', organization_id: 'org_1' }, sys);
         await engine.insert('rc_revision', { id: 'r2', version: 'v2', policy: 'p1', owner_id: 'usr_other', organization_id: 'org_1' }, sys);
         await engine.insert('rc_hidden', { id: 'h1', version: 'h', policy: 'p1', organization_id: 'org_1' }, sys);
+        await engine.insert('rc_partner', { id: 'pt1', version: 'pt', policy: 'p1', organization_id: 'org_1' }, sys);
         for (const [id, stage, rank, at] of [
             ['s1', 'open', 1, '2026-11-01T00:00:00.000Z'],
             ['s2', 'open', 3, '2026-11-02T00:00:00.000Z'],
@@ -530,12 +542,12 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
 
         const sets = [PermissionSetSchema.parse({
             name: 'rc_member', label: 'Member', isDefault: true,
-            objects: { '*': READ_ALL, rc_hidden: READ_NONE },
+            objects: { '*': READ_ALL, rc_hidden: READ_NONE, rc_partner: READ_NONE },
             fields: { 'rc_policy.secret_note': { readable: false, editable: false } },
             rowLevelSecurity: [{ name: 'rc_own_revisions', object: 'rc_revision', operation: 'select', using: 'owner_id == current_user.id' }],
         }), PermissionSetSchema.parse({
             // Granted to `usr_member` alone (its `sys_user_permission_set` row below).
-            name: 'rc_unmasker', label: 'Unmasker', systemPermissions: ['rc_unmask'], objects: {},
+            name: 'rc_unmasker', label: 'Unmasker', systemPermissions: ['rc_unmask'], objects: { rc_partner: READ_ALL },
         })];
         const services: Record<string, any> = {
             manifest: { register: vi.fn() },
@@ -761,6 +773,38 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         expect(notes.map((n: { kind: string }) => n.kind)).toEqual(['not_visible']);
         expect(answer.text).not.toContain('rc_hidden');
         expect(answer.text).not.toContain('Hidden');
+    });
+
+    it('[ADR-0160 D1/D3] a related entry naming an object the stack does not define leaves its section out and states nothing: the same bytes for both callers, on both doors', async () => {
+        // Precondition: no package and no environment defines it, so it is an author defect (`os validate`).
+        expect(engine.getSchema('rc_ghost')).toBeUndefined();
+        expect(await protocol.getMetaItems({ type: 'object' } as never)).not.toContainEqual(expect.objectContaining({ name: 'rc_ghost' }));
+        const member = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_misspelt_child' });
+        const plain = await bothAsPlain({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_misspelt_child' });
+        for (const answer of [member, plain]) {
+            expect(answer.isError).toBe(false);
+            // The other entry still answers; the undefined one has no section, no name and no statement.
+            expect(answer.payload.data.related.map((l: { object: string }) => l.object)).toEqual(['rc_step']);
+            expect(answer.payload.data.related[0].rows.map((r: { id: string }) => r.id)).toEqual(['s1', 's3', 's2', 's4']);
+            expect(answer.payload.notes).toEqual([]);
+            expect(answer.text).not.toContain('rc_ghost');
+        }
+        // Who asks changes nothing: one answer, byte for byte.
+        expect(plain.text).toBe(member.text);
+    });
+
+    it('[ADR-0160 D3 as amended] a defined child served to one caller and not the other: its section for the one, the not-visible statement for the other, on both doors', async () => {
+        const member = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_role_child' });
+        expect(member.isError).toBe(false);
+        expect(member.payload.data.related.map((l: { object: string }) => l.object)).toEqual(['rc_partner', 'rc_step']);
+        expect(member.payload.data.related[0].rows.map((r: { id: string }) => r.id)).toEqual(['pt1']);
+        expect(member.payload.notes).toEqual([]);
+        const plain = await bothAsPlain({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_role_child' });
+        expect(plain.isError).toBe(false);
+        expect(plain.payload.data.related.map((l: { object: string }) => l.object)).toEqual(['rc_step']);
+        expect(plain.payload.notes.map((n: { kind: string }) => n.kind)).toEqual(['not_visible']);
+        expect(plain.payload.notes[0]).not.toHaveProperty('object');
+        for (const word of ['rc_partner', 'Partner', 'pt1']) expect(plain.text).not.toContain(word);
     });
 
     it('a related child its API exposure refuses refuses the call, named (the caller\'s schema shows it)', async () => {
