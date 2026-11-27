@@ -1096,8 +1096,9 @@ const DISPATCHER_DOMAINS = {
   'analytics.ts': { handBuilt: 0 },
   // [#22576] The `/approvals/act` bridge: the approvals member's own HTML
   // `Response` is handed back as `result` (the `/auth` shape), and every
-  // refusal it makes itself — the two 501s, the sanitised 500s — goes through
-  // `deps.error`.
+  // refusal it makes itself goes through `deps.error`: the sanitised 500s
+  // directly, the two 501s through `own-door-bridge.ts`'s
+  // `catalogNotImplemented` (#37737), which adds their `Vary`.
   'approvals.ts': { handBuilt: 0 },
   // [#36506] The `/attachments` bridge: two lines naming what
   // `own-door-bridge.ts` forwards; it builds no answer of its own.
@@ -1116,8 +1117,8 @@ const DISPATCHER_DOMAINS = {
   // [#22773] The inbound-hook door the `/automation` domain hands its one
   // admitted route to: the trigger-api member's own JSON `Response` is handed
   // back as `result` (the `/webhooks/redeliver` shape), and every refusal it
-  // makes itself — the two 501s, the sanitised 500s — goes through
-  // `deps.error`.
+  // makes itself goes through `deps.error`: the sanitised 500s directly, the
+  // two 501s through `own-door-bridge.ts`'s `catalogNotImplemented` (#37737).
   'automation-hooks.ts': { handBuilt: 0 },
   // The `/security` domain's catalog activation door (ADR-0126 §3 regime C,
   // ADR-0131 D6), split out of `security.ts` beside the gate it calls. Every
@@ -1126,8 +1127,9 @@ const DISPATCHER_DOMAINS = {
   // [#36469] The `/comments` bridge: the comments member's own JSON `Response`
   // is handed back as `result` (the `/webhooks/redeliver` shape), and every
   // answer the domain makes itself — the ordinary miss for a shape it does not
-  // serve, the two 501s, the sanitised 500s — goes through `deps.routeNotFound`
-  // / `deps.error`.
+  // serve, the sanitised 500s — goes through `deps.routeNotFound` /
+  // `deps.error`, and the two 501s through `own-door-bridge.ts`'s
+  // `catalogNotImplemented` (#37737).
   'comments.ts': { handBuilt: 0 },
   'data.ts': { handBuilt: 0 },
   // [#25785] Was 0. Kind 1: the translation bundle is the one `/i18n` face a
@@ -1178,8 +1180,9 @@ const DISPATCHER_DOMAINS = {
   'unavailable.ts': { handBuilt: 0 },
   // [#22755] The `/webhooks/redeliver` bridge: the webhooks member's own JSON
   // `Response` is handed back as `result` (the `/approvals/act` shape), and
-  // every refusal it makes itself — the two 501s, the sanitised 500s — goes
-  // through `deps.error`.
+  // every refusal it makes itself goes through `deps.error`: the sanitised
+  // 500s directly, the two 501s through `own-door-bridge.ts`'s
+  // `catalogNotImplemented` (#37737).
   'webhooks.ts': { handBuilt: 0 },
 
   // Kind 1 — enveloped, hand-built only because the helper cannot say it.

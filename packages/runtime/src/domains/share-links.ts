@@ -82,6 +82,7 @@ import { buildShareLinkResolveAnswer, type ShareLinkLabelI18n, type ShareLinkLab
 
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { catalogNotImplemented } from './own-door-bridge.js';
 
 export function createShareLinksDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
@@ -181,7 +182,7 @@ async function handleShareLinksRequestBody(
     // is not configured" on an environment where it is.
     const svc = await deps.resolveService(context, SHARE_LINK_SERVICE, context.environmentId);
     if (!svc) {
-        return { handled: true, response: deps.error('Sharing is not configured', 501) };
+        return catalogNotImplemented(deps, context, 'share_links_unconfigured');
     }
 
     const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;

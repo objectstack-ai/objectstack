@@ -58,6 +58,9 @@
  * were never bought with a behaviour change.
  */
 import { describe, expect, it } from 'vitest';
+// [#37811] Paid at collection: the dispatcher's reach loads `@objectstack/metadata` (check:test-source-alias).
+import '@objectstack/metadata';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { UiDomainProtocol } from './ui.js';
 import type { MetaDomainProtocol } from './meta.js';
@@ -259,4 +262,29 @@ describe('#15238 · 2 · a PARTIAL protocol host is still answered, never crashe
         expect(result.handled).toBe(true);
         expect(result.response?.status).not.toBe(500);
     });
+});
+
+// [#37811] This door's 501 sentence is the operation-message catalog's, in the
+// request's top `Accept-Language` tag: byte-identical English with no header,
+// the catalog's Japanese under `ja-JP`, and `Vary: Accept-Language` either way.
+const JA_37811 = { request: { headers: { 'accept-language': 'ja-JP,ja;q=0.9' } } };
+const LANGS_37811 = [['en', {}], ['ja-JP', JA_37811]] as const;
+const sentence37811 = (locale: 'en' | 'ja-JP', key: string, params: Record<string, string> = {}): string =>
+    BUILTIN_OPERATION_MESSAGES[locale][key].replace(/\{\{(\w+)\}\}/g, (_m, name: string) => params[name] ?? '');
+const vary37811 = (response: unknown): unknown => (response as any)?.headers?.Vary;
+
+describe('[#37811] the /meta probe 501s follow the request\'s language', () => {
+    for (const [path, method, key] of [
+        ['/_drafts', 'GET', 'meta_draft_listing_unsupported'],
+        ['/_migrate-stored', 'POST', 'meta_stored_migration_unsupported'],
+    ] as const) {
+        it(key, async () => {
+            for (const [locale, extra] of LANGS_37811) {
+                const result = await partialProtocolDoor().handleMetadata(path, { ...META_ADMIN(), ...extra }, method, undefined, {});
+                expect(result.response?.status).toBe(501);
+                expect(result.response?.body?.error?.message).toBe(sentence37811(locale, key));
+                expect(vary37811(result.response)).toBe('Accept-Language');
+            }
+        });
+    }
 });

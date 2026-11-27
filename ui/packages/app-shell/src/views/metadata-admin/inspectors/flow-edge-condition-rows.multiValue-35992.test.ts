@@ -66,8 +66,8 @@ describe('membership on a list writes `V in S`, and the engine answers it as mem
     const contains = group('and', { field: s, operator: 'contains', value: 'u1' });
     const notContains = group('and', { field: s, operator: 'not_contains', value: 'u1' });
 
-    expect(write(contains)).toBe(`${s} != null && 'u1' in ${s}`);
-    expect(write(notContains)).toBe(`${s} == null || !('u1' in ${s})`);
+    expect(write(contains)).toBe(`has(${s}) && ${s} != null && 'u1' in ${s}`);
+    expect(write(notContains)).toBe(`!has(${s}) || ${s} == null || !('u1' in ${s})`);
     expect(celToRows(write(contains), FIELDS)).toEqual(contains);
     expect(celToRows(write(notContains), FIELDS)).toEqual(notContains);
 
@@ -83,7 +83,7 @@ describe('membership on a list writes `V in S`, and the engine answers it as mem
     const cel = write(group('or',
       { field: 'record.labels', operator: 'contains', value: 'frontend' },
       { field: 'record.labels', operator: 'contains', value: 'backend' }));
-    expect(cel).toBe("(record.labels != null && 'frontend' in record.labels) || (record.labels != null && 'backend' in record.labels)");
+    expect(cel).toBe("(has(record.labels) && record.labels != null && 'frontend' in record.labels) || (has(record.labels) && record.labels != null && 'backend' in record.labels)");
     expect(evaluate(cel, { labels: ['backend'] })).toBe(true);
     expect(evaluate(cel, { labels: ['qa'] })).toBe(false);
   });
@@ -102,6 +102,6 @@ describe('a single-value column of the same type keeps its spellings', () => {
   });
 
   it('a membership guard on a single-value column stays in the formula input', () => {
-    expect(celToRows("record.owner != null && 'u1' in record.owner", FIELDS)).toBeNull();
+    expect(celToRows("has(record.owner) && record.owner != null && 'u1' in record.owner", FIELDS)).toBeNull();
   });
 });
