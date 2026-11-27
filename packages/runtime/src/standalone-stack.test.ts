@@ -283,7 +283,7 @@ describe('createStandaloneStack — surfaces the collections whose items mount a
   }
 
   /** The tokens `os serve` mounts providers for, off the config it builds from this result. */
-  function servedTokens(result: Record<string, unknown>): readonly string[] {
+  function servedTokens(result: object): readonly string[] {
     const config = { ...{}, ...result };
     return resolveServedCapabilities(stackDeclaredCapabilities(config), {
       itemTokens: stackItemCapabilities(config),
@@ -306,9 +306,9 @@ describe('createStandaloneStack — surfaces the collections whose items mount a
     expect(result.knowledgeSources?.map((s: any) => s.name)).toEqual(['notes']);
     // Every `mountedBy` row, read off the table, not a hand list.
     for (const [token, row] of MOUNT_ROWS) {
-      expect((result as Record<string, unknown>)[row.mountedBy!.collection], token).toBeDefined();
+      expect(Object.keys(result), token).toContain(row.mountedBy!.collection);
     }
-    expect(servedTokens(result as Record<string, unknown>)).toContain('knowledge');
+    expect(servedTokens(result)).toContain('knowledge');
     expect(CAPABILITY_PROVIDERS.knowledge?.export).toBe('KnowledgeServicePlugin');
   }, BOOT_TIMEOUT);
 
@@ -318,7 +318,7 @@ describe('createStandaloneStack — surfaces the collections whose items mount a
       databaseUrl: ':memory:',
     });
     expect(result.knowledgeSources).toBeUndefined();
-    expect(servedTokens(result as Record<string, unknown>)).not.toContain('knowledge');
+    expect(servedTokens(result)).not.toContain('knowledge');
   }, BOOT_TIMEOUT);
 
   it('a stack already listing `requires: [\'knowledge\']` is served the same set with or without the item', async () => {
@@ -330,8 +330,8 @@ describe('createStandaloneStack — surfaces the collections whose items mount a
       artifactPath: writeArtifact('requires-without.objectstack.json', { requires: ['knowledge'] }),
       databaseUrl: ':memory:',
     });
-    expect(servedTokens(withItem as Record<string, unknown>)).toEqual(servedTokens(withoutItem as Record<string, unknown>));
-    expect(servedTokens(withItem as Record<string, unknown>)).toContain('knowledge');
+    expect(servedTokens(withItem)).toEqual(servedTokens(withoutItem));
+    expect(servedTokens(withItem)).toContain('knowledge');
   }, BOOT_TIMEOUT);
 
   it('createDefaultHostConfig (the actual serve artifact-fallback) carries the same collection', async () => {
@@ -341,7 +341,7 @@ describe('createStandaloneStack — surfaces the collections whose items mount a
       databaseUrl: ':memory:',
     });
     expect(r.knowledgeSources?.map((s: any) => s.name)).toEqual(['notes']);
-    expect(servedTokens(r as Record<string, unknown>)).toContain('knowledge');
+    expect(servedTokens(r)).toContain('knowledge');
   }, BOOT_TIMEOUT);
 });
 
