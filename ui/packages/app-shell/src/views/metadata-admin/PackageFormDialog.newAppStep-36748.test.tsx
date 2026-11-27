@@ -63,7 +63,6 @@ vi.mock('sonner', () => ({
 }));
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('./AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('../studio-design/StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { toast } from 'sonner';

@@ -89,7 +89,6 @@ vi.mock('../metadata-admin/catalog-scope', async (importOriginal) => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 import { t, tFormat, translateMetadataType } from '../metadata-admin/i18n';
 import { StudioPermissionSetPage } from './StudioPermissionSetPage';

@@ -168,11 +168,6 @@ const INVENTORY: Record<string, Entry> = {
     verdict: 'unrelated',
     why: '`fields.find(f => f.name === r.field)` — a join between a field list and a rule\'s field reference, matched only because both keys share a line.',
   },
-  'plugin-chatbot/src/ChatbotEnhanced.tsx': {
-    count: 1,
-    verdict: 'unrelated',
-    why: '`c.object ?? c.name` — a citation label fallback that happens to sit on a line mentioning `c.field`.',
-  },
   'app-shell/src/views/metadata-admin/SchemaForm.tsx': {
     count: 1,
     verdict: 'unrelated',
@@ -266,8 +261,10 @@ describe('column identity dual-read ratchet (#3104)', () => {
     // objectui#10404 mirrored its param-name reader there too; 12 since
     // objectui#10475 deleted `ObjectForm.tsx`'s section-entry join; 11 since
     // objectui#12105 retired plugin-grid's hand-mapped `toBulkParam`, whose
-    // param-name read now comes from the shared resolver's `paramName`.
-    expect(sum(() => true)).toBe(11);
+    // param-name read now comes from the shared resolver's `paramName`; 10
+    // since objectstack#37682 deleted the chat's change card, whose row-name
+    // fallback was the `unrelated` entry in `ChatbotEnhanced.tsx`.
+    expect(sum(() => true)).toBe(10);
   });
 
   it('records a precedence for every read left in the family', () => {

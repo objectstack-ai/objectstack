@@ -300,15 +300,16 @@ export * from './renderer';
 
 // Shared composition layer over the vendored AI Elements (used by both
 // Studio's sidebar panel and Console's floating chatbot).
-export { ChatbotEnhanced, publishHealthFromResponse } from './ChatbotEnhanced';
+export { ChatbotEnhanced } from './ChatbotEnhanced';
+// ADR-0038 L3 — the publish-health parse every publish-drafts host shares.
+export { publishHealthFromResponse } from './publishHealth';
+export type { PublishHealth } from './publishHealth';
 export type {
   ChatbotEnhancedProps,
   ChatbotEnhancedToolInvocation,
   ChatSource as ChatbotEnhancedSource,
   ChatbotLabels,
   ToolDecisionState,
-  PublishHealth,
-  PublishOutcome,
 } from './ChatbotEnhanced';
 
 /**
@@ -330,7 +331,7 @@ export type {
  * Pinned at compile time in `__tests__/chat-message-contract.test.ts`.
  *
  * `<Chatbot>` renders only the core fields; the enhanced surface (tool calls,
- * reasoning, sources, build progress, charts) is `<ChatbotEnhanced>`.
+ * reasoning, sources, charts) is `<ChatbotEnhanced>`.
  */
 export type { ChatbotEnhancedMessage } from './ChatbotEnhanced';
 
@@ -345,20 +346,12 @@ export * as AIElements from './elements';
 export {
   uiMessageToChatMessage,
   uiMessagesToChatMessages,
-  detectDraftResult,
-  detectProposedPlan,
-  detectBuilderHandoff,
   detectRecordHandoff,
   detectRecordWrite,
   detectAnswerSource,
   detectSampleDataCleanup,
   detectPackageRemoval,
-  detectProposedChanges,
-  detectReplayOutcome,
-  detectAuthoringVerdict,
-  detectBuiltAppPackage,
   detectPendingApproval,
-  buildProgressFromDraftReview,
   chartsFromParts,
   chartAnswerParts,
   storedAnswerParts,
@@ -369,16 +362,11 @@ export type {
   ChartAnswerPart,
   StoredAnswerData,
   StoredAnswerPart,
-  DraftReview,
-  ProposedPlan,
-  BuilderHandoff,
   RecordWrite,
   RecordWriteField,
   SampleDataCleanup,
   PackageRemoval,
   PackageRemovalObject,
-  ProposedChanges,
-  ReplayOutcome,
 } from './mapMessages';
 // The answer-source block's type: the union of the two published contracts it
 // is lifted through (an object query's `source`, `query_dataset`'s

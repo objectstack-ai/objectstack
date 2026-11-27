@@ -99,7 +99,6 @@ vi.mock('sonner', () => ({
 vi.mock('./AssignedUsersSection', () => ({ AssignedUsersSection: () => null }));
 vi.mock('./AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
-vi.mock('../studio-design/StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 import { toast } from 'sonner';
 import { StudioPermissionSetPage } from '../studio-design/StudioPermissionSetPage';

@@ -1,5 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+// AiChatPage reads a dropped spreadsheet through `import('@object-ui/plugin-grid')`; load it
+// here so collection pays that transform, not a clocked case (check-test-source-alias).
+import '@object-ui/plugin-grid';
 import { describe, it, expect } from 'vitest';
 import { hydratedMessagesToChatMessages } from '../AiChatPage';
 import {
@@ -50,73 +53,16 @@ describe('AiChatPage hydration — tool invocation states', () => {
     ]);
   });
 
-  it('lifts the pre-build proposed plan so the review card survives a reload on this surface', () => {
-    // propose_blueprint's `blueprint_proposed` result rides the merged tool
-    // output (here the persisted `{type:text,value}` envelope). Without lifting
-    // it on THIS converter the "Proposed plan" card only shows in the floating
-    // chat, never on /ai/build after a refresh.
-    const envelope = JSON.stringify({
-      status: 'blueprint_proposed',
-      blueprint: {
-        summary: 'A reading list',
-        assumptions: ['One shelf for now'],
-        objects: [{ name: 'book', label: 'Book', fields: [{ name: 'title' }, { name: 'author' }] }],
-      },
-      counts: { objects: 1, views: 0, dashboards: 0, seedData: 0 },
-      questions: [],
-    });
-    const [msg] = hydratedMessagesToChatMessages(
-      assistantWith([
-        {
-          type: 'tool-call',
-          toolCallId: 't1',
-          toolName: 'propose_blueprint',
-          output: { type: 'text', value: envelope },
-        },
-      ]),
-    );
-    expect(msg.toolInvocations?.[0]?.proposedPlan).toMatchObject({
-      summary: 'A reading list',
-      objects: [{ name: 'book', label: 'Book', fieldCount: 2 }],
-      assumptions: ['One shelf for now'],
-    });
-  });
-
-  it('lifts the ask-decline builder handoff so the "Open in Builder →" card survives a reload', () => {
-    // The `ask` agent's structured decline (suggest_builder → build_handoff)
-    // rides the merged tool output. Without lifting it on THIS converter the
-    // handoff card only shows in the live floating chat and is LOST when the
-    // conversation is reloaded or restored from the sessionStorage cache.
-    const envelope = JSON.stringify({
-      status: 'build_handoff',
-      handoff: 'build',
-      prompt: 'Build a CRM to track leads',
-      packageId: 'app.crm',
-    });
-    const [msg] = hydratedMessagesToChatMessages(
-      assistantWith([
-        {
-          type: 'tool-call',
-          toolCallId: 't1',
-          toolName: 'suggest_builder',
-          output: { type: 'text', value: envelope },
-        },
-      ]),
-    );
-    expect(msg.toolInvocations?.[0]?.builderHandoff).toEqual({
-      prompt: 'Build a CRM to track leads',
-      packageId: 'app.crm',
-    });
-  });
 });
 
-describe('shared-conversation render — flat ai_messages rows → proposed-plan card', () => {
+describe('shared-conversation render — flat ai_messages rows → one assistant turn', () => {
   // Reproduces the public `/s/:token` share bug: the endpoint returns FLAT
   // `ai_messages` rows, which the read-only page must put through the SAME
   // hydrate pipeline as the live chat. Before the fix it dumped the raw
   // `{"type":"tool-result",…}` envelope as text; this pins that the full
-  // raw-rows → ServerMessage → toUIMessages → map chain yields the card.
-  it('recovers the Proposed plan card from the raw shared rows', () => {
+  // raw-rows → ServerMessage → toUIMessages → map chain yields the tool call
+  // on its assistant turn.
+  it('recovers the tool call from the raw shared rows', () => {
     const envelope = JSON.stringify({
       status: 'blueprint_proposed',
       blueprint: {
@@ -154,10 +100,10 @@ describe('shared-conversation render — flat ai_messages rows → proposed-plan
     expect(chat.map((m) => m.role)).toEqual(['user', 'assistant']);
     const assistant = chat[1];
     expect(assistant.content).toBe('我来帮您开发一个MES。');
-    expect(assistant.toolInvocations?.[0]?.proposedPlan).toMatchObject({
-      summary: 'A simple MES',
-      objects: [{ name: 'work_order', label: '工单', fieldCount: 2 }],
-      assumptions: ['Single production line'],
+    expect(assistant.toolInvocations?.[0]).toMatchObject({
+      toolCallId: 'c1',
+      toolName: 'propose_blueprint',
+      state: 'output-available',
     });
   });
 });

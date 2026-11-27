@@ -954,8 +954,10 @@ export function buildSections(
             span: (override as { span?: 'auto' | 'full' }).span,
             // The wide default reads the OBJECT field's own `multiple`, as the
             // spec and the record form (`sectionFields.ts`) do; a form-level
-            // `multiple` changes the widget above, not the default width.
-            field: { multiple: def.multiple },
+            // `multiple` changes the widget above, not the default width. Its
+            // `type` too: a `repeater` is wide by its declaration, since the
+            // widget id it maps to (`field:object`) is shared (#37677).
+            field: { type: def.type, multiple: def.multiple },
           },
           cols,
         ) as 1 | 2 | 3 | 4,

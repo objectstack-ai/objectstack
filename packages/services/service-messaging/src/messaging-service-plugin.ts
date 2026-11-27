@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Plugin, PluginContext, RequestAuthService, TenancyPostureSource } from '@objectstack/core';
-import { resolveLocalizationContext } from '@objectstack/core';
+import { resolveLocalizationContext, wakeAfterOpenUnitsCommit } from '@objectstack/core';
 import { installEgressGuard, type EgressGuard, type EgressPolicy } from '@objectstack/core/egress';
 import type { IDataEngine, IHttpServer } from '@objectstack/spec/contracts';
 import { PREFERENCE_OPTIONS_ROUTE, registerPreferenceOptionsRoutes } from './preference-options-routes.js';
@@ -736,7 +736,8 @@ export class MessagingServicePlugin implements Plugin {
                 const outbox = new SqlNotificationOutbox(engine, { partitionCount: this.options.partitionCount });
                 // [#17610] Resolved at call time: the dispatcher is constructed
                 // below, and after destroy() the hook is a no-op.
-                service.setOutbox(outbox, { onEnqueued: () => this.dispatcher?.wake() });
+                // [#37705] At the commit of the unit the enqueue wrote in, so the tick can see the row.
+                service.setOutbox(outbox, { onEnqueued: () => wakeAfterOpenUnitsCommit(engine, () => this.dispatcher?.wake()) });
 
                 let cluster: DispatchCluster | undefined;
                 try {
@@ -769,7 +770,7 @@ export class MessagingServicePlugin implements Plugin {
                 const httpOutbox = new SqlHttpOutbox(engine, { partitionCount: this.options.partitionCount });
                 // [#17623] The same seam as `setOutbox` above, resolved at call
                 // time for the same reasons.
-                service.setHttpOutbox(httpOutbox, { onEnqueued: () => this.httpDispatcher?.wake() });
+                service.setHttpOutbox(httpOutbox, { onEnqueued: () => wakeAfterOpenUnitsCommit(engine, () => this.httpDispatcher?.wake()) });
                 this.httpDispatcher = new HttpDispatcher({
                     nodeId: `http-${process.pid}-${randomUUID().slice(0, 8)}`,
                     outbox: httpOutbox,

@@ -4937,8 +4937,10 @@ function builtinSystemFieldLabel(
 }
 
 /**
- * [#8284] Whether one of an object document's three scalars has been
- * EXPLICITLY set — i.e. it no longer carries the value the package shipped.
+ * [#8284] Whether a document scalar has been EXPLICITLY set — i.e. it no
+ * longer carries the value the package shipped. The scalars asked about are an
+ * object's three (`label`, `pluralLabel`, `description`), a validation rule's
+ * `message` and an activity milestone's `summary` (each section below).
  *
  * This is comparison-based provenance, and it is the whole mechanism: no flag
  * is carried through the fold, nothing is stamped on the document, and the
@@ -5004,7 +5006,8 @@ export function scalarOverridesPackagedBase(
 /**
  * [#20680] The ONE comparison behind {@link scalarOverridesPackagedBase},
  * keyed by any attribute name — the exported predicate's key union names the
- * object scalars its two callers ask about, and the dashboard translator
+ * scalars its callers ask about (an object's three, a validation rule's
+ * `message`, an activity milestone's `summary`), and the dashboard translator
  * ({@link translateDashboard}) asks the same question of `title`, which that
  * union does not carry; the view translator ({@link translateView}, #20731)
  * asks it of a bulk-action def's `confirmText`, its params' `help`, a form

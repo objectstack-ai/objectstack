@@ -55,7 +55,7 @@ export type StudioSurfaceFrameProps = Pick<
   Pick<ReturnType<typeof useStudioPackageApps>, 'publishedApps'> &
   Pick<
     ReturnType<typeof useStudioSurfaceRightSlot>,
-    'isMobile' | 'slotHost' | 'slotOpen' | 'slotHasContent' | 'slotHandle' | 'titleRowAssistant' | 'rightSlot'
+    'isMobile' | 'slotHost' | 'slotOpen' | 'slotHasProps' | 'slotHandle' | 'titleRowAssistant' | 'rightSlot'
   > &
   Pick<
     ReturnType<typeof useStudioSurfaceNavigation>,
@@ -98,7 +98,7 @@ export function StudioSurfaceFrame({
   isMobile,
   slotHost,
   slotOpen,
-  slotHasContent,
+  slotHasProps,
   slotHandle,
   titleRowAssistant,
   rightSlot,
@@ -128,7 +128,7 @@ export function StudioSurfaceFrame({
           draws takes the app's theme colour (decision 4 of #37424). */}
       <StudioMenuProvider className={cn(CONSOLE_FULL_HEIGHT.screen, 'min-h-0 overflow-hidden bg-background text-foreground', STUDIO_ACCENT)}>
         {/* The ADR-0080 `aiSlot` seam — a cloud edition may still inject its own
-          * left copilot panel; the built-in copilot is the RIGHT dock below. */}
+          * left copilot panel. */}
         {/* objectstack#32615 — not beside a package that is not there. */}
         {aiSlot && !pkgMissing ? (
           <aside className="w-64 shrink-0 overflow-auto border-r bg-muted/40">{aiSlot}</aside>
@@ -224,7 +224,7 @@ export function StudioSurfaceFrame({
           <div
             className={cn('min-h-0 min-w-0 flex-1', STUDIO_PILLARS_HOST)}
             data-testid="studio-pillars-host"
-            data-studio-slot={slotHost && slotOpen && slotHasContent && !isMobile ? 'open' : 'closed'}
+            data-studio-slot={slotHost && slotOpen && slotHasProps && !isMobile ? 'open' : 'closed'}
           >
             {children}
           </div>
@@ -234,9 +234,7 @@ export function StudioSurfaceFrame({
           </StudioPendingDraftsContext.Provider>
         </div>
 
-        {/* objectui#12725 — the one right slot: properties OR the copilot.
-          * The copilot is the same package-scoped build thread the dock held,
-          * self-gating on the agent catalog as it always has. */}
+        {/* objectui#12725 — the one right slot: the open item's properties. */}
         {rightSlot}
 
         {/* objectui#11553 — the package-less scope reviews exactly what its
