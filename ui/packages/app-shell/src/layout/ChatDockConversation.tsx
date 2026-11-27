@@ -306,7 +306,9 @@ export function ChatDockConversation({
   // The header's ＋ through a ref: the action reaches the chrome through an
   // effect, which must not re-run on a callback's identity (ui AGENTS.md #10).
   const startNewRef = React.useRef(startNewConversation);
-  startNewRef.current = startNewConversation;
+  React.useLayoutEffect(() => {
+    startNewRef.current = startNewConversation;
+  });
   const [startNew] = React.useState(() => () => startNewRef.current());
   const labelReading = useConversationLabel({ apiBase, conversationId: paneConversationId, refreshKey });
   const hint = sentHint && sentHint.id === paneConversationId && sentHint.text ? sentHint.text : undefined;
