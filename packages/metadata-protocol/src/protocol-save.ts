@@ -1665,7 +1665,10 @@ export class ProtocolSaveFacet {
                 // every other body is judged as stored.
                 const parsed = schema.safeParse(flowGateVerdictBody ?? request.item);
                 if (!parsed.success) {
-                    const issues = zodIssuesToMetadataIssues(parsed.error.issues);
+                    // [#36594] The 422 alone carries each issue's registered
+                    // refusal (`params.code` and its siblings); the read path
+                    // and the seed refusal publish a closed entry shape.
+                    const issues = zodIssuesToMetadataIssues(parsed.error.issues, { refusalParams: true });
                     // [#10524 → commit d806081dd] The findings clause is rendered PER
                     // FACE — see {@link specValidationFindings}. #10524's
                     // headline is applied on the faces that carry the same

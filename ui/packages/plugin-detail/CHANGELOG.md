@@ -1,5 +1,105 @@
 # @object-ui/plugin-detail
 
+## 19.0.0-next.1
+
+### Minor Changes
+
+- f722411: feat(kanban): a card footer with each record's open comment threads and attachments (`kanban.cardFooter`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `KanbanConfigSchema` gains one optional key with no default; a view that does not declare it renders as before, and reads nothing more:
+  
+  - `cardFooter: { comments?: boolean, attachments?: boolean }` — the counts each card shows at its foot. `comments: true` shows how many of the record's comment threads are open (top-level and not resolved), the number the record page's comments icon shows with two exceptions: a reply whose parent was deleted is not counted (the record page shows it as a thread of its own), and a comment written before the record pair (`object_name` + `record_id`) existed is not counted until `os migrate comment-parent-pair --apply` has stamped it (the record page reads by `thread_id`). `attachments: true` shows how many files are attached to the record. A count of zero draws nothing. An unknown member is refused by name, so a later foot item is one more member.
+  
+  Each count is read once for the whole board, in one grouped read per counted object over the cards the board has loaded, never one read per card, and under the reader's permissions: `sys_comment` grouped by `record_id`, asked only on an object whose discussion is on (`enable.feeds`), and `sys_attachment` grouped by `parent_id`, asked only on an object that takes files (`enable.files`). A refused read draws no count. A cut answer (the door's default page size, `OS_DATA_DEFAULT_PAGE_SIZE`) is never read as the whole set: the reader asks again, still grouped, over the cards the answer did not name, up to `MAX_COUNT_ROUNDS` (20) reads in all; a card still unnamed after that draws no count. The counts are asked again when the board reloads and when a comment or an attachment is written (the data-invalidation bus), and a card already counted keeps its count while a new set of cards is asked. The record Attachments panel now announces an upload and the uploader's own delete on that bus, since both go through the storage route rather than the data source; the record page announces a thread resolved or reopened (the resolution door) and a member's delete of their own comment (the own-comment door) the same way. The reader is shared in `@object-ui/plugin-detail` (`useRecordCounts`, with `askRecordCounts` and its bound `MAX_COUNT_ROUNDS`, `compileCommentCountQuery`, `compileAttachmentCountQuery` and `readRecordCounts`), so a list row can use it next.
+  
+  On a board, 视图设置 offers 「显示评论数」 and 「显示附件数」 beside the two card toggles, each only where the object has that count; both start off. Both producers of the board node (`ListView` and `ObjectView#generateViewSchema`) and the Console relay the key.
+
+### Patch Changes
+
+- 0a3ea67: fix(ui): long-text fields on the record page read label-on-top across the whole column, and a rich-text body's headings draw one step smaller
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On the record page's field list every field drew its label in a 112 px column to the left of its value, so a long body (a `textarea`, `markdown`, `html` or `richtext` field, or a `file` / `image` field declared `multiple: true`) was set in what that column left over. Those fields, the same set the detail layout already spans across a full row, now draw the label above the value and give the value the whole column. Every other field keeps its label-left row, and a click on the value still edits it.
+  
+  A `markdown`, `html` or `richtext` value drawn in full (the record page, a readonly form field) draws `h1` at 18 px, `h2` at 16 px and `h3` at 14 px instead of 30, 20 and 18 px. The headings are still heading elements, so a link to a cited section still finds them; a value drawn in a grid cell is unchanged. No metadata changes.
+- 1f97fce: fix(plugin-detail): a related list's bulk delete with refused rows says why, not only "2 deleted, 1 failed"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The related list on a record page deletes the selected rows in one batch call, or row by row, and its outcome line gave only the two counts. The count stays, and under it each distinct reason now gets one line, led by the names of the rows it refused, by the same rule as the list page's bulk delete: up to three names, then `+N`, and at most three reasons, then "And N more". The reasons come from the ids a batch delete names, from an error that refuses the whole batch (given for every row), or from each rejected row delete. A batch that names no reason keeps the bare count. `@object-ui/core` exports the rule as `bulkDeleteRefusalLines`, which the list page's summary toast now also builds on.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [4e10d4b]
+- Updated dependencies [4111380]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [c2bfa3e]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [3eb778d]
+- Updated dependencies [91875c7]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [6e8f663]
+- Updated dependencies [6e8f663]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [2980483]
+- Updated dependencies [1028438]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e50ab8f]
+- Updated dependencies [21ad7c5]
+- Updated dependencies [0a3ea67]
+- Updated dependencies [b620c4b]
+- Updated dependencies [1f97fce]
+- Updated dependencies [d1139f9]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @object-ui/i18n@19.0.0-next.1
+  - @object-ui/fields@19.0.0-next.1
+  - @object-ui/core@19.0.0-next.1
+  - @object-ui/react@19.0.0-next.1
+  - @object-ui/components@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+  - @object-ui/permissions@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes
