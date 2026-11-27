@@ -109,7 +109,8 @@ export async function handleApprovalsActRequest(
     context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
     // The request's own kernel serves the door, and only it (`readDoorSlot`).
-    const service = await readDoorSlot<Pick<IApprovalService, 'handleActionPage'>>(deps, context, APPROVALS_SLOT);
+    const service = await readDoorSlot(deps, context, APPROVALS_SLOT) as
+        Pick<IApprovalService, 'handleActionPage'> | undefined;
     // [#37662] The `501` is the operation-message catalog's, in the request's
     // top `Accept-Language` tag, as the own-door bridge answers its own.
     if (!service) {

@@ -78,7 +78,6 @@
  */
 
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
-import type { IWebhookService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { catalogNotImplemented, readDoorSlot } from './own-door-bridge.js';
@@ -113,7 +112,7 @@ export async function handleWebhooksRedeliverRequest(
     context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
     // The request's own kernel serves the door, and only it (`readDoorSlot`).
-    const service = await readDoorSlot<Pick<IWebhookService, 'handleRedeliver'>>(deps, context, WEBHOOKS_SLOT);
+    const service = await readDoorSlot(deps, context, WEBHOOKS_SLOT);
     // [#37610] The `501` is the operation-message catalog's, in the request's
     // top `Accept-Language` tag, as the own-door bridge answers its own.
     if (!service) {

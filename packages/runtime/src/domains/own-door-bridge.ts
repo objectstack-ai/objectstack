@@ -80,6 +80,7 @@
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { operationUserMessage } from '@objectstack/core';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
+import type { ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRequest, DomainRoute } from '../domain-handler-registry.js';
 
@@ -185,7 +186,7 @@ export async function handleOwnDoorBridgeRequest(
         return { handled: true, response: deps.routeNotFound(req.path) };
     }
 
-    const service = await readDoorSlot<Record<string, unknown>>(deps, context, bridge.slot);
+    const service = await readDoorSlot(deps, context, bridge.slot) as Record<string, unknown> | undefined;
     if (!service) {
         return localizedNotImplemented(deps, notImplementedSentence(bridge, context, 'own_door_service_unregistered', { producer: bridge.producer }));
     }
@@ -225,27 +226,36 @@ export async function handleOwnDoorBridgeRequest(
 
 /**
  * The service on a door's slot, read off the REQUEST's own kernel and nowhere
- * else. Every dispatcher door bridge reads the member it forwards to through
- * this, and only through this (pinned by `own-door-bridge.test.ts`): a door is
- * served only by the request's own kernel.
+ * else: a door is served only by the request's own kernel.
  *
  * A door member is closed over the kernel that registered it, so a request
  * kernel without the slot is the door's typed not-available answer (`501`),
- * ⛔ never a member found on another kernel, and a door's slot is ⛔ never
- * read through `deps.resolveService` / `deps.resolveServiceOrLoud`. On a host
- * with one kernel the request's kernel IS that kernel, so the answer there is
- * the one it always was.
+ * ⛔ never a member found on another kernel. On a host with one kernel the
+ * request's kernel IS that kernel, so the answer there is the one it always was.
+ *
+ * Typed as `getRequestKernelService` is: a slot in `ServiceSlotContracts` reads
+ * as its contract, any other name as an untyped value the caller casts.
+ *
+ * What `own-door-bridge.test.ts` holds, exactly: every non-test module under
+ * `src/domains/` that takes the transport's request whole
+ * (`context.request as Request`) or is built on this file's shared bridge body
+ * reads no service through `deps.resolveService`, `deps.resolveServiceOrLoud`,
+ * `deps.getService` or a scoped `deps.getObjectQL(context, …)`, and each such
+ * module that reads a slot reads it through this. A module that hands the
+ * request on some other way is outside that net.
  *
  * A kernel that throws for an unregistered name reads as an empty slot. Read
  * on every request, never recorded (AGENTS.md, "Startup registry reads").
  */
-export async function readDoorSlot<T>(
+export function readDoorSlot<K extends keyof ServiceSlotContracts>(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
-    slot: string,
-): Promise<T | undefined> {
+    slot: K,
+): Promise<ServiceSlotContract<K> | undefined>;
+export function readDoorSlot(deps: DomainHandlerDeps, context: HttpProtocolContext, slot: string): Promise<any>;
+export async function readDoorSlot(deps: DomainHandlerDeps, context: HttpProtocolContext, slot: string): Promise<unknown> {
     try {
-        return ((await deps.getRequestKernelService(context, slot)) ?? undefined) as T | undefined;
+        return (await deps.getRequestKernelService(context, slot)) ?? undefined;
     } catch {
         return undefined;
     }

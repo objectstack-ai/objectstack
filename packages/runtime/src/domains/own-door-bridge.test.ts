@@ -606,6 +606,7 @@ describe('a dispatcher door is served only by the request\'s own kernel', () => 
         { name: 'approvals', slot: 'approvals', member: 'handleActionPage', method: 'GET', path: '/approvals/act', query: { token: 't_1' } },
         { name: 'webhooks', slot: 'webhooks', member: 'handleRedeliver', method: 'POST', path: '/webhooks/redeliver', body: { deliveryId: 'd_1' } },
         { name: 'automation-hooks', slot: 'trigger-api', member: 'handleInboundHook', method: 'POST', path: '/automation/hooks/flow_x/default', body: { event: 'e' } },
+        { name: 'auth', slot: 'auth', member: 'handleRequest', method: 'POST', path: '/auth/sign-in/email', body: { email: 'a@example.com' } },
         ownDoor(PERSONAL_VIEWS_BRIDGE),
         ownDoor(ATTACHMENTS_BRIDGE),
         ownDoor(PRINT_BRIDGE),
@@ -661,38 +662,82 @@ describe('a dispatcher door is served only by the request\'s own kernel', () => 
     }
 
     /**
-     * Found rather than listed: every module of this directory that answers a
-     * door's not-available `501` (a `*_service_unregistered` catalog sentence)
-     * is held to reading the slot that answer guards through `readDoorSlot`,
-     * the request-kernel-only reader. The read nearest before each such answer
-     * must be that reader, so a new bridge that reads its member any other way
-     * fails here the day it lands.
+     * A qualified hook's address is judged by the engine of the kernel whose
+     * member serves the hook: the request's own.
      */
-    it('every door bridge reads the member it forwards to through the request-kernel-only reader', () => {
+    const QUALIFIED_HOOK: Door = {
+        name: 'automation-hooks (qualified)', slot: 'trigger-api', member: 'handleInboundHook',
+        method: 'POST', path: '/automation/hooks/ns_x/flow_x/default', body: { event: 'e' },
+    };
+    const engineSpies = () => ({ packagedFlowOwner: vi.fn(() => undefined), inboundHookSlot: vi.fn(() => undefined) });
+    const triggerDoor = () => ({ handleInboundHook: served(), handleInboundSlotHook: served() });
+
+    it('automation-hooks: a request kernel without the automation engine never consults another kernel\'s engine for a qualified hook\'s address', async () => {
+        const hostEngine = engineSpies();
+        const dispatcher = hostWith(
+            kernelWith({ automation: hostEngine, 'trigger-api': triggerDoor() }),
+            kernelWith({ 'trigger-api': triggerDoor() }, ['automation']),
+        );
+
+        await knock(dispatcher, QUALIFIED_HOOK);
+
+        expect(hostEngine.inboundHookSlot).not.toHaveBeenCalled();
+        expect(hostEngine.packagedFlowOwner).not.toHaveBeenCalled();
+    });
+
+    it('automation-hooks: the request kernel\'s engine judges a qualified hook\'s address', async () => {
+        const hostEngine = engineSpies();
+        const ownEngine = engineSpies();
+        const dispatcher = hostWith(
+            kernelWith({ automation: hostEngine, 'trigger-api': triggerDoor() }),
+            kernelWith({ automation: ownEngine, 'trigger-api': triggerDoor() }),
+        );
+
+        await knock(dispatcher, QUALIFIED_HOOK);
+
+        expect(ownEngine.inboundHookSlot).toHaveBeenCalledTimes(1);
+        expect(hostEngine.inboundHookSlot).not.toHaveBeenCalled();
+        expect(hostEngine.packagedFlowOwner).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The net, stated exactly. A DOOR MODULE is any non-test module under
+     * `src/domains/` (any depth) that takes the transport's request whole
+     * (`context.request as Request`, the spelling every door here hands it on
+     * with) or is built on the shared bridge body (`createOwnDoorBridgeDomain(`
+     * / `handleOwnDoorBridgeRequest(`). A door module reads no service through
+     * `deps.resolveService`, `deps.resolveServiceOrLoud`, `deps.getService` or a
+     * scoped `deps.getObjectQL(context, …)` anywhere in it, and one that reads
+     * a slot itself reads it through `readDoorSlot`. Found, not listed, so a new
+     * door module is held to this the day it lands. NOT covered: a module that
+     * hands the request on some other way (building its own request from
+     * `context.request`), and anything outside `src/domains/`.
+     */
+    it('every door module reads its services through the request-kernel-only reader and no other', () => {
         const here = dirname(fileURLToPath(import.meta.url));
-        const READ = /\b(readDoorSlot|deps\.getRequestKernelService|deps\.resolveServiceOrLoud|deps\.resolveService|deps\.getService|deps\.getObjectQL)\s*(?:<[^(]*>)?\(/g;
-        const ABSENT = /,\s*'([a-z_]+_service_unregistered)'/g;
-        const found: string[] = [];
-        for (const name of readdirSync(here).filter((n) => n.endsWith('.ts') && !n.endsWith('.test.ts'))) {
-            const source = readFileSync(join(here, name), 'utf8');
-            for (const answer of source.matchAll(ABSENT)) {
-                const reads = [...source.slice(0, answer.index).matchAll(READ)];
-                expect(reads.at(-1)?.[1], `${name}: the read its ${answer[1]} answer guards`).toBe('readDoorSlot');
-                found.push(`${name} ${answer[1]}`);
+        const FALLING_BACK = /\bdeps\.(?:resolveServiceOrLoud|resolveService|getService)\s*(?:<[^(]*>)?\(|\bdeps\.getObjectQL\(\s*[\w.]+\s*,/g;
+        const READS = /\b(readDoorSlot|deps\.getRequestKernelService|deps\.resolveServiceOrLoud|deps\.resolveService|deps\.getService|deps\.getObjectQL)\s*(?:<[^(]*>)?\(/g;
+        const modules = (readdirSync(here, { recursive: true }) as string[])
+            .filter((n) => n.endsWith('.ts') && !n.endsWith('.test.ts'))
+            .map((n) => ({ name: n, source: readFileSync(join(here, n), 'utf8') }));
+        const doors = modules.filter(({ source }) => source.includes('context.request as Request')
+            || source.includes('createOwnDoorBridgeDomain(') || source.includes('handleOwnDoorBridgeRequest('));
+
+        for (const { name, source } of doors) {
+            expect([...source.matchAll(FALLING_BACK)].map((m) => m[0]), name).toEqual([]);
+            if (source.includes('context.request as Request')) {
+                expect(source.includes('readDoorSlot('), `${name} reads its member through readDoorSlot`).toBe(true);
             }
         }
-        expect(found).toEqual(expect.arrayContaining([
-            'own-door-bridge.ts own_door_service_unregistered',
-            'comments.ts comment_doors_service_unregistered',
-            'approvals.ts approvals_act_service_unregistered',
-            'webhooks.ts webhook_redeliver_service_unregistered',
-            'automation-hooks.ts automation_hooks_service_unregistered',
+        expect(doors.map(({ name }) => name)).toEqual(expect.arrayContaining([
+            'approvals.ts', 'attachments.ts', 'auth.ts', 'automation-hooks.ts', 'comments.ts',
+            'own-door-bridge.ts', 'personal-views.ts', 'print.ts', 'webhooks.ts',
         ]));
 
         // The reader itself reads the request kernel's slot and nothing else.
         const bridge = readFileSync(join(here, 'own-door-bridge.ts'), 'utf8');
         const body = bridge.slice(bridge.indexOf('export async function readDoorSlot'));
         const reader = body.slice(0, body.indexOf('\n}\n'));
-        expect([...reader.matchAll(READ)].map((m) => m[1])).toEqual(['readDoorSlot', 'deps.getRequestKernelService']);
+        expect([...reader.matchAll(READS)].map((m) => m[1])).toEqual(['readDoorSlot', 'deps.getRequestKernelService']);
     });
 });

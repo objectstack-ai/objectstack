@@ -74,7 +74,6 @@
  */
 
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
-import type { ICommentDoorsService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRequest, DomainRoute } from '../domain-handler-registry.js';
 import { catalogNotImplemented, readDoorSlot } from './own-door-bridge.js';
@@ -158,7 +157,7 @@ export async function handleCommentsRequest(
     if (!matchCommentDoorPath(req.method, req.path)) return { handled: true, response: deps.routeNotFound(req.path) };
 
     // The request's own kernel serves the door, and only it (`readDoorSlot`).
-    const service = await readDoorSlot<Pick<ICommentDoorsService, 'handleCommentDoor'>>(deps, context, COMMENTS_SLOT);
+    const service = await readDoorSlot(deps, context, COMMENTS_SLOT);
     // [#37610] The `501` is the operation-message catalog's, in the request's
     // top `Accept-Language` tag, as the own-door bridge answers its own.
     if (!service) {
