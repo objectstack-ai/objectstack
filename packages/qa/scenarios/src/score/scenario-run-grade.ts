@@ -250,12 +250,16 @@ const EN_NUMBER_WORD = new RegExp(
   'giu',
 );
 /**
- * `one` as a pronoun or in an idiom, not a count: "no one", "the one",
- * "which one", "one of them", "one another", "one by one". Read there, it
- * would meet any figure of 1.
+ * `one` reads as a count only before the word it counts ("One contact
+ * belongs to no account", "**One invoice**"). As a pronoun or in an idiom it
+ * counts nothing and would meet any figure of 1, so it is not read: after a
+ * determiner or "than" ("no one", "the one", "more than one reading"), before
+ * a function word ("one of them", "one is Sent", "pick one for you", "one by
+ * one"), or with no word after it at all ("pick one.").
  */
-const EN_ONE_BEFORE = /\b(?:no|the|this|that|which|each|every|any|some|another|by)[ \t]+$/i;
-const EN_ONE_AFTER = /^[ \t]+(?:of|another|by)\b/i;
+const EN_ONE_BEFORE = /\b(?:no|the|this|that|which|each|every|any|some|another|by|than)[ \t]+$/i;
+const EN_ONE_AFTER =
+  /^[ \t]+[*_`]*(?!(?:of|another|by|is|was|are|were|has|had|have|for|to|or|and|in|on|at|with|that|which|who|from|per|the|a|an|it|but|so|as|than)\b)\p{L}/iu;
 
 /** The Chinese numerals a reply may count with standing alone (`两张`), zero to ten. */
 const ZH_NUMBER_WORDS: Readonly<Record<string, number>> = {
@@ -291,7 +295,7 @@ function numberWordReadingsIn(text: string): Reading[] {
   for (const m of text.matchAll(EN_NUMBER_WORD)) {
     const word = m[1]!.toLowerCase();
     const end = m.index + m[1]!.length;
-    if (word === 'one' && (EN_ONE_BEFORE.test(text.slice(Math.max(0, m.index - 20), m.index)) || EN_ONE_AFTER.test(text.slice(end, end + 20)))) continue;
+    if (word === 'one' && (EN_ONE_BEFORE.test(text.slice(Math.max(0, m.index - 20), m.index)) || !EN_ONE_AFTER.test(text.slice(end, end + 30)))) continue;
     const value = EN_NUMBER_WORDS[word]!;
     out.push({ value, decimals: 0, digits: String(value).length, at: m.index, end });
   }

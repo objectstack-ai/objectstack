@@ -1157,6 +1157,7 @@ describe('cloud agent baseline (2026-11-26): a count the reply spells as a word 
     expect(met(of(12), 'Twelve line items in all.')).toBe(true);
     expect(met(of(20), 'There are twenty invoices.')).toBe(true);
     expect(met(of(1), 'One invoice is still a draft.')).toBe(true);
+    expect(met(of(1), '**One task** on the relaunch is still open.')).toBe(true);
     expect(met(two, '有两张发票已经不是草稿了。')).toBe(true);
     expect(met(of(3), '共有三个客户。')).toBe(true);
     expect(met(of(10), '十张发票都已付款。')).toBe(true);
@@ -1174,6 +1175,10 @@ describe('cloud agent baseline (2026-11-26): a count the reply spells as a word 
       [1, 'One of them is Sent.'],
       [1, 'The one that is Sent was billed in May.'],
       [1, 'They were entered one by one.'],
+      [1, 'Claims match more than one reading.'],
+      [1, "I don't want to pick one for you."],
+      [1, 'Pick one.'],
+      [1, 'One is Sent.'],
       [20, 'There are twenty-one invoices.'],
       [1, 'There are twenty-one invoices.'],
       [2, 'Two-thirds of the invoices are paid.'],
