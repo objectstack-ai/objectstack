@@ -4,7 +4,7 @@
   "keys": [
     "ai/AIModelConfig:maxTokens",
     "ai/AIModelConfig:model",
-    "ai/AIModelConfig:provider",
+    "ai/AIModelConfig:provider [RETIRED]",
     "ai/AIModelConfig:temperature",
     "ai/AIModelConfig:topP",
     "ai/AIUsageRecord:costUsd",
