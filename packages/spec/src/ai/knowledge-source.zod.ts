@@ -28,6 +28,18 @@ const MIGRATE_18 =
   'Run `os migrate meta --from 18` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
+ * What the author of a registration in code does, said in every prescription
+ * below that names the command. Every source written against 18 is such a
+ * registration: no stack could hold `knowledgeSources` before this type, and
+ * `os migrate meta` replays its conversions over a stack's collections, never
+ * over a plugin's options or a `registerSource` call. It stands before the
+ * `os migrate meta` sentence, which stays the last one of its prescription.
+ */
+const CODE_DOOR_18 =
+  'A source registered in code (`KnowledgeServicePlugin({ sources })`, `registerSource`) is in no stack collection, '
+  + 'so `os migrate meta` lists no edit for it: make this edit in the registration itself. ';
+
+/**
  * The prescription for `source.kind: 'file'` and `'http'`, and for the four
  * keys those two arms carried (ADR-0161 K4, point 1): the arms had no reader.
  */
@@ -58,6 +70,7 @@ export const KnowledgeRefreshPolicySchema = lazySchema(() => strictObject(
       + 'it was parsed and reached no engine: nothing ever scheduled a reindex from it. Delete the key. '
       + 'To rebuild on a schedule, call `reindexSource` from a flow or a job; keeping the index correct between '
       + 'events is the service\'s reconcile pass. '
+      + CODE_DOOR_18
       + MIGRATE_18,
     ),
   },
@@ -156,6 +169,7 @@ export const ObjectKnowledgeSourceSchema = lazySchema(() => strictObject(
           + '19.0.0 (ADR-0161 K5) — embedding is egress, and `\'*\'` sent every text field of the record to the '
           + 'embedder, including one added to the object later. List the fields whose text should be indexed, '
           + 'for example `content: [\'title\', \'body\']`. '
+          + CODE_DOOR_18
           + 'Run `os migrate meta --from 18` to list the mechanical edits for the renamed-key case; `--write` applies the ones it can prove, and reports a wildcard member for you to replace by hand.',
       }),
     ).min(1).describe('Fields whose text is indexed, in order; every name is listed (no wildcard)'),
@@ -167,6 +181,7 @@ export const ObjectKnowledgeSourceSchema = lazySchema(() => strictObject(
       + 'the key is spelled `content` now that a source is a metadata item; use `content`. '
       + 'Rename the key; the value (a list of field names) is unchanged, except that a `\'*\'` member is no longer '
       + 'accepted and is replaced by the field names it stood for. '
+      + CODE_DOOR_18
       + MIGRATE_18,
     ),
     /**
@@ -238,6 +253,7 @@ export const KnowledgeSourceSchema = lazySchema(() => strictObject(
       '`knowledge_source.id` was removed in @objectstack/spec 19.0.0 (ADR-0161 K6) — '
       + 'a knowledge source is a metadata item, and an item is identified by `name`; use `name`. '
       + 'Rename the key; the value is unchanged, so the source\'s index is found again and is not rebuilt. '
+      + CODE_DOOR_18
       + MIGRATE_18,
     ),
     /** Human-readable label. */
@@ -262,6 +278,7 @@ export const KnowledgeSourceSchema = lazySchema(() => strictObject(
       '`knowledge_source.adapterConfig` was removed in @objectstack/spec 19.0.0 (ADR-0161 K6) — '
       + 'no adapter read it: its one reader was the retired RAGFlow adapter. Delete the key. '
       + 'An adapter takes its settings as options of the plugin that mounts it. '
+      + CODE_DOOR_18
       + MIGRATE_18,
     ),
     /** What gets indexed. */
@@ -273,6 +290,7 @@ export const KnowledgeSourceSchema = lazySchema(() => strictObject(
       '`knowledge_source.embedding` was removed in @objectstack/spec 19.0.0 (ADR-0161 K6) — '
       + 'it was never read: no service and no adapter chose a model from it. Delete the key. '
       + 'The embedder is configured once for the deployment, and every source is embedded by it. '
+      + CODE_DOOR_18
       + MIGRATE_18,
     ),
     /**
@@ -282,6 +300,7 @@ export const KnowledgeSourceSchema = lazySchema(() => strictObject(
       '`knowledge_source.vectorStore` was removed in @objectstack/spec 19.0.0 (ADR-0161 K6) — '
       + 'it was never read: no service and no adapter chose a store from it. Delete the key. '
       + 'The store is the adapter the deployment installs, named by `adapter`. '
+      + CODE_DOOR_18
       + MIGRATE_18,
     ),
     /**

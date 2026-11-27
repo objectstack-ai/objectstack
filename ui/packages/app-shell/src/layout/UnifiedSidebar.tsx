@@ -98,6 +98,9 @@ import { useWorkspacePreference } from '../utils/workspacePreference.js';
 import { SidebarItemMenu, sidebarItemDesignPath, favoriteDesignPath } from './SidebarItemMenu.js';
 import { SortableFavoriteRows, type FavoriteRowDragProps } from './SortableFavoriteRows.js';
 import { favoriteAppSegment } from './listViewFavorites.js';
+import { useChatDockControl } from './chatDockControl.js';
+import { conversationFavoriteTarget, useUnavailableConversationFavorites } from './conversationFavorites.js';
+import { resolveAiApiBase } from '../hooks/aiApiBase.js';
 import { useDesignModeActive } from './designMode.js';
 import { electSidebarArea, type SidebarAreaRoute } from './sidebarAreaElection.js';
 import type { FavoriteItem } from '../hooks/useFavorites.js';
@@ -336,7 +339,8 @@ export function UnifiedSidebar({
   // A recent entry's text is the item's own, resolved on this render
   // (objectui#11678); the entry stores identity only.
   const recentLabel = useRecentItemLabel();
-  const { favorites, removeFavorite, reorderFavorites } = useFavorites();
+  const { favorites, removeFavorite, reorderFavorites, refreshLabel: refreshFavoriteLabel } = useFavorites();
+  const chatDock = useChatDockControl();
 
   const metadata = useMetadata();
   const { apps: metadataApps } = metadata;
@@ -690,15 +694,48 @@ export function UnifiedSidebar({
     .filter(f => f.type !== 'nav')
     .filter(f => f.type !== 'view' || matchAppBySegment(apps.filter((a: any) => a.active !== false), favoriteAppSegment(f.href)) === activeApp)
     .slice(0, 8);
+  // objectstack#37863 — a favourite conversation's row opens the drawer in
+  // place on it (the target its history row opens), and its address only where
+  // no drawer takes it: no host, the app's AI inquiry page (A4), or a click
+  // that asks for a new tab. A conversation the server answers is gone or not
+  // this user's is drawn unavailable and opens nothing; its ⋯ still removes it.
+  const unavailableConversations = useUnavailableConversationFavorites(
+    contentFavorites,
+    resolveAiApiBase(),
+    refreshFavoriteLabel,
+  );
+  const openConversationFavorite = (item: FavoriteItem, event: React.MouseEvent) => {
+    const target = conversationFavoriteTarget(item);
+    if (!target) return;
+    if (unavailableConversations.has(item.id)) {
+      event.preventDefault();
+      return;
+    }
+    if (!chatDock || chatDock.askPageActive) return;
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    chatDock.open(target);
+    if (isMobile) setOpenMobile(false);
+  };
   const contentFavoriteRow = (item: FavoriteItem, drag?: FavoriteRowDragProps) => {
+    const unavailable = unavailableConversations.has(item.id);
+    const unavailableText = t('sidebar.conversationUnavailable', { defaultValue: 'This conversation is no longer available' });
     return (
       <>
-        <SidebarMenuButton asChild tooltip={item.label}>
-          <Link to={item.href} {...(drag ?? {})}>
+        <SidebarMenuButton asChild tooltip={unavailable ? `${item.label} · ${unavailableText}` : item.label}>
+          <Link
+            to={item.href}
+            {...(drag ?? {})}
+            onClick={item.type === 'conversation' ? (event) => openConversationFavorite(item, event) : undefined}
+            aria-disabled={unavailable || undefined}
+            data-unavailable={unavailable || undefined}
+            className={unavailable ? 'text-muted-foreground line-through decoration-muted-foreground/60' : undefined}
+          >
             {/* objectstack#36141 — the menu's tiles: an object, one of its
                 views or records is that object's tile, the rest neutral. */}
             {contentTile(item.type, favoriteItemObject(item), item.type === 'view' ? item.icon : undefined)}
             <span className="truncate">{item.label}</span>
+            {unavailable ? <span className="sr-only">{`(${unavailableText})`}</span> : null}
           </Link>
         </SidebarMenuButton>
         <SidebarItemMenu

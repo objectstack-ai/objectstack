@@ -3576,6 +3576,7 @@ const fr = {
     recent: "Récent",
     starred: "Étoilés",
     removeFromFavorites: "Retirer {{name}} des favoris",
+    conversationUnavailable: "Cette conversation n’est plus disponible",
     allReports: "Tous les rapports",
     collapse: 'Réduire la barre latérale',
     expand: 'Développer la barre latérale',

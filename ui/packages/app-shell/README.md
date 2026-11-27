@@ -1412,6 +1412,15 @@ adapter syncs both flows. The legacy `objectui-nav-pins` localStorage key is
 migrated on first mount and then removed. Content favorites (20) and nav
 pins (20) each have an independent cap. See the guide below for details.
 
+An AI conversation can be a content favorite too (`type: 'conversation'`, id
+`conversation:ID`, with `conversationId` and `agent`), starred from the
+assistant drawer. Its sidebar row opens the drawer in place
+on that conversation, and follows its `href` (the conversation's `/ai…`
+address) only where no drawer can take it. The sidebar reads each favorite
+conversation once: the label follows the conversation's title, and a
+conversation the server answers is gone or not this user's is drawn
+unavailable, stays removable, and opens nothing.
+
 The sidebar's Pinned section keeps the user's order, stored with the pins:
 `pinnedIds` lists them in it, a new pin joins the end, and
 `reorderPins(orderedIds)` saves a new order. The sidebar passes both to
