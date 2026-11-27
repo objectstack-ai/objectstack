@@ -753,6 +753,7 @@
     "ui/JoinedReportBlock:runtimeFilter",
     "ui/JoinedReportBlock:type",
     "ui/JoinedReportBlock:values",
+    "ui/KanbanConfig:cardFooter",
     "ui/KanbanConfig:columns",
     "ui/KanbanConfig:groupByField",
     "ui/KanbanConfig:hideEmptyFields",
