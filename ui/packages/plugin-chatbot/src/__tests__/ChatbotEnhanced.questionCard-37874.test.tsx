@@ -127,16 +127,19 @@ describe('Q2b — the card takes the composer place', () => {
     expect((screen.getByPlaceholderText('Ask…') as HTMLTextAreaElement).value).toBe('');
   });
 
-  it('a queued message holds the card back', () => {
+  it('a message queued during the turn holds the card back and is sent instead', async () => {
+    const onSendMessage = vi.fn();
     const { rerender } = render(
-      <ChatbotEnhanced messages={ASKED.slice(0, 1)} onSendMessage={vi.fn()} isLoading placeholder="Ask…" />,
+      <ChatbotEnhanced messages={ASKED} onSendMessage={onSendMessage} isLoading placeholder="Ask…" />,
     );
     const textarea = screen.getByPlaceholderText('Ask…') as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: 'actually, show costs' } });
     fireEvent.keyDown(textarea, { key: 'Enter' });
-    rerender(<ChatbotEnhanced messages={ASKED} onSendMessage={vi.fn()} isLoading placeholder="Ask…" />);
-    expect(screen.getByTestId('composer-queued-item')).toBeInTheDocument();
+    await screen.findByTestId('composer-queued-item');
+    // The turn ends on the question while a message waits: no card, the message goes out.
+    rerender(<ChatbotEnhanced messages={ASKED} onSendMessage={onSendMessage} placeholder="Ask…" />);
     expect(screen.queryByTestId('question-card')).not.toBeInTheDocument();
+    await waitFor(() => expect(onSendMessage).toHaveBeenCalledWith('actually, show costs', undefined));
   });
 
   it('no card on a read-only transcript, which draws the question as past', () => {
