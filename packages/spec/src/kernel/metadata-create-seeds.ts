@@ -137,6 +137,17 @@ const BUILTIN_METADATA_CREATE_SEEDS: Partial<Record<MetadataType, unknown>> = {
     // a skill bundles tools; an empty list is a valid starting point.
     tools: [],
   },
+  // [ADR-0161 K4, K5] A source indexes one object and lists its content
+  // fields by name: `content` is non-empty and `'*'` is refused (embedding is
+  // egress), so no empty list can seed it. Both names are placeholders the
+  // author replaces; saved as they stand, save-time admission refuses the
+  // unknown object, which is the prompt to choose one. No `adapter`: omitted,
+  // the source binds to the deployment's store.
+  knowledge_source: {
+    name: 'new_knowledge_source',
+    label: 'New Knowledge Source',
+    source: { kind: 'object', object: PLACEHOLDER_OBJECT, content: ['example_field'] },
+  },
   // [#5488] `api` HAD a create seed here (#5271). It was REMOVED when `api`
   // became code-only (`allowRuntimeCreate: false` + `allowEnvironmentOverlay: false`,
   // maintainer ruling 2026-08-07T16:59Z): a create seed exists to make a

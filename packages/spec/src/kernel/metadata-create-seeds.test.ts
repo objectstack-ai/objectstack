@@ -40,6 +40,16 @@ describe('metadata create seeds validate against their spec schemas', () => {
     }
   });
 
+  it('[ADR-0161 K5] the knowledge_source seed lists its content fields by name and names no adapter', () => {
+    const seed = getMetadataCreateSeed('knowledge_source') as { adapter?: unknown; source: { content: string[] } };
+    expect(seed.source.content.length).toBeGreaterThan(0);
+    expect(seed.source.content).not.toContain('*');
+    expect('adapter' in seed).toBe(false);
+    // The wildcard the seed must never carry is refused by the same schema.
+    const wildcard = { ...seed, source: { ...seed.source, content: ['*'] } };
+    expect(getMetadataTypeSchema('knowledge_source')!.safeParse(wildcard).success).toBe(false);
+  });
+
   it('getMetadataCreateSeed returns a fresh clone (callers may mutate)', () => {
     const a = getMetadataCreateSeed('dashboard') as { widgets: unknown[] };
     const b = getMetadataCreateSeed('dashboard') as { widgets: unknown[] };
@@ -96,12 +106,6 @@ describe('metadata create seeds validate against their spec schemas', () => {
       // from `view` until card ③ (#37087), which brings the designer and its
       // seed. Deferred work, named here so it is not a silent gap.
       'form',
-      // [ADR-0161 K4] `knowledge_source` is runtime-creatable, and its create
-      // seed is deferred work with a name: it lands with the Studio form and
-      // the MCP create seed (rows 5 and 5b of #37000), which are what would
-      // serve one. Until then a source is created by a `/meta` save or shipped
-      // in a package, never from a blank form.
-      'knowledge_source',
     ]);
     const seeded = new Set(listMetadataCreateSeedTypes());
     const missing = listMetadataTypeSchemaTypes().filter((t) => !seeded.has(t) && !KNOWN_UNSEEDED.has(t));
